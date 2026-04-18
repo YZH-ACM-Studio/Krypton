@@ -61,7 +61,48 @@ export function LoginPage() {
 
 export function RegisterPage() {
   const bs = useBootstrap();
+  const tpl = bs.page.templateName;
 
+  // Step 2: user_register_with_code.html — user has a code, show username/password form
+  if (tpl === 'user_register_with_code.html') {
+    const mail = bs.page.data.mail || '';
+    return (
+      <motion.div
+        className="mx-auto max-w-sm space-y-6 pt-8"
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
+      >
+        <div className="text-center">
+          <Swords className="mx-auto size-8 text-primary" />
+          <h1 className="mt-3 text-2xl font-bold">完成注册</h1>
+          {mail ? <p className="mt-1 text-sm text-muted-foreground">{mail}</p> : null}
+        </div>
+
+        <Card>
+          <CardContent className="p-6">
+            <form method="post" className="space-y-4">
+              <div className="space-y-2">
+                <label htmlFor="uname" className="text-sm font-medium">用户名</label>
+                <Input id="uname" name="uname" autoComplete="username" autoFocus required placeholder="设置你的用户名" />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="password" className="text-sm font-medium">密码</label>
+                <Input id="password" name="password" type="password" autoComplete="new-password" required />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="verifyPassword" className="text-sm font-medium">确认密码</label>
+                <Input id="verifyPassword" name="verifyPassword" type="password" autoComplete="new-password" required />
+              </div>
+              <Button type="submit" className="w-full">注册</Button>
+            </form>
+          </CardContent>
+        </Card>
+      </motion.div>
+    );
+  }
+
+  // Step 1: user_register.html — enter email
   return (
     <motion.div
       className="mx-auto max-w-sm space-y-6 pt-8"

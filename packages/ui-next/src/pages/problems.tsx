@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { Search, ChevronRight, CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
+import { Search, CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -136,83 +136,6 @@ export function ProblemsPage() {
       </Card>
 
       <Pagination current={page} total={ppcount} baseUrl={bs.urls.problems} />
-    </motion.div>
-  );
-}
-
-export function ProblemDetailPage() {
-  const bs = useBootstrap();
-  const data = bs.page.data;
-  const pdoc: R = data.pdoc || {};
-  const title = pdoc.title || pdoc.pid || '题目';
-  const content = data.content || pdoc.content || '';
-  const nSubmit = pdoc.nSubmit || 0;
-  const nAccept = pdoc.nAccept || 0;
-  const tags: string[] = pdoc.tag || [];
-  const pid = pdoc.pid || pdoc.docId || '';
-
-  return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <a href={bs.urls.problems} className="hover:text-primary">题库</a>
-            <ChevronRight className="size-3" />
-            <span>{pid}</span>
-          </div>
-          <h1 className="mt-1 text-2xl font-bold">{title}</h1>
-          {tags.length > 0 ? (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {tags.map((t) => <Badge key={t} variant="secondary">{t}</Badge>)}
-            </div>
-          ) : null}
-        </div>
-        <div className="flex gap-2">
-          <Button asChild>
-            <a href={`${replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) })}/submit`}>
-              提交代码
-            </a>
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardContent className="p-4 text-center">
-            <p className="text-2xl font-semibold tabular-nums">{nSubmit}</p>
-            <p className="text-xs text-muted-foreground">提交次数</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <p className="text-2xl font-semibold tabular-nums text-green-600">{nAccept}</p>
-            <p className="text-xs text-muted-foreground">通过次数</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 text-center">
-            <p className="text-2xl font-semibold tabular-nums">
-              {nSubmit > 0 ? Math.round((nAccept / nSubmit) * 100) : 0}%
-            </p>
-            <p className="text-xs text-muted-foreground">通过率</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardContent className="prose prose-sm dark:prose-invert max-w-none p-6">
-          {content ? (
-            <div dangerouslySetInnerHTML={{ __html: content }} />
-          ) : (
-            <p className="text-muted-foreground">题目内容加载中…</p>
-          )}
-        </CardContent>
-      </Card>
     </motion.div>
   );
 }

@@ -1,7 +1,8 @@
 import { useBootstrap } from '@/lib/bootstrap';
 import { GenericPage } from '@/pages/generic';
 import { KryptonHomePage } from '@/pages/home';
-import { ProblemsPage, ProblemDetailPage } from '@/pages/problems';
+import { ProblemsPage } from '@/pages/problems';
+import { ProblemDetailPage } from '@/pages/problem-detail';
 import { ContestsPage, ContestDetailPage, ContestScoreboardPage } from '@/pages/contests';
 import { TrainingPage, TrainingDetailPage } from '@/pages/training';
 import { HomeworkPage, HomeworkDetailPage } from '@/pages/homework';

@@ -149,9 +149,22 @@ export function SettingsPage() {
                       defaultValue={current[setting.key]}
                       className="w-full rounded-md border bg-background px-3 py-2 text-sm"
                     >
-                      {(setting.range || []).map((opt: any) => (
-                        <option key={String(opt)} value={String(opt)}>{String(opt)}</option>
-                      ))}
+                      {(() => {
+                        const range = setting.range;
+                        if (!range) return null;
+                        if (Array.isArray(range)) {
+                          // [[value, label], ...] or [value, ...]
+                          return range.map((opt: any) => {
+                            const val = Array.isArray(opt) ? opt[0] : opt;
+                            const label = Array.isArray(opt) ? (opt[1] || opt[0]) : opt;
+                            return <option key={String(val)} value={String(val)}>{String(label)}</option>;
+                          });
+                        }
+                        // Record<string, string> — { value: label }
+                        return Object.entries(range).map(([val, label]) => (
+                          <option key={val} value={val}>{String(label)}</option>
+                        ));
+                      })()}
                     </select>
                   ) : setting.type === 'textarea' ? (
                     <textarea

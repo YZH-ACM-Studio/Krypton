@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { MarkdownView } from '@/components/markdown-renderer';
 import { type GenericUserDoc, useBootstrap } from '@/lib/bootstrap';
 import {
   formatDateTime,
@@ -205,9 +206,9 @@ export function KryptonHomePage() {
                 </p>
               </div>
               {bs.domain.bulletin ? (
-                <p className="max-w-xl text-sm leading-relaxed text-foreground/80 whitespace-pre-line">
-                  {bs.domain.bulletin}
-                </p>
+                <div className="max-w-xl text-sm leading-relaxed text-foreground/80">
+                  <MarkdownView content={bs.domain.bulletin} />
+                </div>
               ) : null}
               <div className="flex flex-wrap gap-2">
                 <Button asChild>

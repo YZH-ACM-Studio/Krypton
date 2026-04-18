@@ -2,6 +2,7 @@
 /* eslint-disable simple-import-sort/imports */
 import './init';
 import './interface';
+import fs from 'fs';
 import path from 'path';
 import child from 'child_process';
 // eslint-disable-next-line import/no-duplicates
@@ -31,6 +32,10 @@ process.on('unhandledRejection', logger.error);
 process.on('uncaughtException', logger.error);
 
 const HYDROPATH = [];
+const BUILTIN_ADDONS = [
+    path.resolve(__dirname, '..'),
+    path.resolve(__dirname, '..', '..', 'ui-next'),
+].filter((dir) => fs.existsSync(path.join(dir, 'package.json')));
 
 if (process.env.NIX_PROFILES) {
     try {
@@ -187,7 +192,7 @@ async function preload() {
             c.inject({ domain: { required: false } }, resolve);
         });
     });
-    for (const a of [path.resolve(__dirname, '..'), ...getAddons()]) {
+    for (const a of new Set([...BUILTIN_ADDONS, ...getAddons()])) {
         try {
             // Is a npm package
             const packagejson = require.resolve(`${a}/package.json`);

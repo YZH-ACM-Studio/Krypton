@@ -5,6 +5,7 @@
     "repository": "https://github.com/hydro-dev/Hydro",
     "sideEffects": false,
     "dependencies": {
-        "@hydrooj/utils": "workspace:^"
+        "@hydrooj/utils": "workspace:^",
+        "js-yaml": "^4.1.1"
     }
 }

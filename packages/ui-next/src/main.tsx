@@ -1,7 +1,16 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import App from './App';
+import { RouterProvider } from '@tanstack/react-router';
+import { BootstrapProvider, getBootstrapFromWindow } from '@/lib/bootstrap';
+import { router } from '@/router';
+import './styles.css';
 
-createRoot(document.getElementById('root')!).render(<StrictMode>
-  <App />
-</StrictMode>);
+const bootstrap = getBootstrapFromWindow();
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <BootstrapProvider bootstrap={bootstrap}>
+      <RouterProvider router={router} />
+    </BootstrapProvider>
+  </StrictMode>,
+);

@@ -1,3 +1,4 @@
+import os from 'os';
 import { dirname, resolve } from 'path';
 import { PassThrough, Readable } from 'stream';
 import { URL } from 'url';
@@ -61,7 +62,9 @@ const convertPath = (p: string) => {
 };
 
 const defaultPath = process.env.CI ? '/tmp/file'
-    : process.env.DEFAULT_STORE_PATH || '/data/file/hydro';
+    : process.env.DEFAULT_STORE_PATH || (process.env.DEV
+        ? resolve(os.homedir(), '.hydro', 'file')
+        : '/data/file/hydro');
 const FileSetting = Schema.intersect([
     Schema.object({
         type: Schema.union([

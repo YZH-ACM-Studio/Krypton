@@ -12,12 +12,13 @@
         "build": "node build/prepare.js && tsc -b --verbose",
         "build:installer": "esbuild ./install/install.js --minify --format=cjs --bundle --platform=node --external:readline/promises | gzip -9 | base64",
         "build:watch": "node build/prepare.js && tsc -b --watch",
-        "build:ui": "node packages/ui-default/build --iconfont && node packages/ui-default/build",
+        "build:ui": "node packages/ui-default/build --iconfont && node packages/ui-default/build && bun run build:ui:next",
         "build:ui:iconfont": "node packages/ui-default/build --iconfont",
         "build:ui:dev": "node packages/ui-default/build --iconfont && node --trace-deprecation packages/ui-default/build --dev",
         "build:ui:dev:https": "node packages/ui-default/build --iconfont && node --trace-deprecation packages/ui-default/build --dev --https",
-        "build:ui:production": "cross-env-shell NODE_OPTIONS=--max_old_space_size=8192 \"node packages/ui-default/build --iconfont && node packages/ui-default/build --production\"",
-        "build:ui:production:webpack": "cross-env NODE_OPTIONS=--max_old_space_size=8192 node packages/ui-default/build --production",
+        "build:ui:next": "cd packages/ui-next && bun run build",
+        "build:ui:production": "cross-env-shell NODE_OPTIONS=--max_old_space_size=8192 \"node packages/ui-default/build --iconfont && node packages/ui-default/build --production && bun run build:ui:next\"",
+        "build:ui:production:webpack": "cross-env-shell NODE_OPTIONS=--max_old_space_size=8192 \"node packages/ui-default/build --production && bun run build:ui:next\"",
         "test": "node -r @hydrooj/register packages/common/tests/subtask.spec.ts && node test/entry.js",
         "benchmark": "cross-env BENCHMARK=true node test/entry.js",
         "oxlint": "cd framework/eslint-config && node -r @hydrooj/register build.ts && cd ../../ && oxlint --config framework/eslint-config/.oxlintrc.json",
@@ -30,7 +31,11 @@
         "hydrooj": "./node_modules/.bin/hydrooj"
     },
     "version": "1.0.0",
+    "packageManager": "bun@1.3.11",
     "license": "AGPL-3.0-only",
+    "trustedDependencies": [
+        "esbuild"
+    ],
     "devDependencies": {
         "@types/autocannon": "^7.12.7",
         "@types/chai": "^5.2.3",
@@ -63,7 +68,9 @@
         "wtfnode": "^0.10.1"
     },
     "resolutions": {
-        "mongodb": "^7.0.0",
-        "@types/express-serve-static-core": "patch:@types/express-serve-static-core@npm%3A4.19.6#~/.yarn/patches/@types-express-serve-static-core-npm-4.19.6-cc0017aaf4.patch"
+        "mongodb": "^7.0.0"
+    },
+    "patchedDependencies": {
+        "@types/express-serve-static-core@4.19.6": ".yarn/patches/@types-express-serve-static-core-npm-4.19.6-cc0017aaf4.patch"
     }
 }

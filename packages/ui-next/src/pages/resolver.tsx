@@ -12,6 +12,7 @@ import { LoginPage, RegisterPage, LogoutPage, LostPasswordPage } from '@/pages/a
 import { UserDetailPage, SettingsPage, SecurityPage, MessagesPage } from '@/pages/user';
 import { DomainDashboardPage, ManageDashboardPage, StatusPage } from '@/pages/admin';
 import { DomainsPage, FilesPage } from '@/pages/misc';
+import { ErrorPage, BsodPage } from '@/pages/error';
 
 type PageComponent = React.ComponentType;
 
@@ -111,6 +112,10 @@ const PAGE_MAP: Record<string, PageComponent> = {
 
   // Misc
   'status.html': StatusPage,
+
+  // Error pages
+  'error.html': ErrorPage,
+  'bsod.html': BsodPage,
 };
 
 export function PageResolver() {

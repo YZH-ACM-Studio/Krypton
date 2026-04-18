@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import c2k from 'koa2-connect';
 import { Context } from 'hydrooj';
+import { serializer } from '@hydrooj/framework';
 import type { ViteDevServer } from 'vite';
 
 type ManifestChunk = {
@@ -17,8 +18,8 @@ const templateEntryTag = '<script type="module" src="/src/main.tsx"></script>';
 const devEntryTag = '<script type="module" src="/src/main.tsx"></script>';
 const bootstrapPlaceholder = '__KRYPTON_BOOTSTRAP_DATA__';
 
-function escapeForScript(data: unknown) {
-    return JSON.stringify(data)
+function escapeForScript(data: unknown, handler?: any) {
+    return JSON.stringify(data, serializer(false, handler))
         .replace(/</g, '\\u003c')
         .replace(/>/g, '\\u003e')
         .replace(/&/g, '\\u0026')
@@ -187,7 +188,15 @@ function renderMissingBuild(bootstrap: ReturnType<typeof buildBootstrap>) {
 
 async function renderApp(templateName: string, args: Record<string, any>, context: Record<string, any>, vite: ViteDevServer | null) {
     const bootstrap = buildBootstrap(templateName, args, context);
-    const serializedBootstrap = escapeForScript(bootstrap);
+    let serializedBootstrap: string;
+    try {
+        serializedBootstrap = escapeForScript(bootstrap, context.handler);
+    } catch (e) {
+        console.error('[ui-next] Failed to serialize bootstrap for', templateName, e);
+        // Fallback: strip page data to avoid total failure
+        bootstrap.page.data = { _serializationError: String(e) };
+        serializedBootstrap = escapeForScript(bootstrap, context.handler);
+    }
 
     if (vite) {
         const template = applyReplacements(readTemplate(), {

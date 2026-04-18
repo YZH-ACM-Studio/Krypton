@@ -93,7 +93,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
             login: safeUrl(context, 'user_login'),
             register: safeUrl(context, 'user_register'),
             logout: safeUrl(context, 'user_logout'),
-            settings: safeUrl(context, 'home_settings', { category: 'preference' }),
+            settings: safeUrl(context, 'home_settings', { category: 'preference' }).replace(/\/preference$/, ''),
             security: safeUrl(context, 'home_security'),
             files: safeUrl(context, 'home_files'),
             records: safeUrl(context, 'record_main'),

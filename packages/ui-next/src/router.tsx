@@ -1,18 +1,39 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { Menu, Swords } from 'lucide-react';
+import {
+  LogOut,
+  Mail,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings,
+  Swords,
+} from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Sidebar } from '@/components/layout/sidebar';
 import { PageResolver } from '@/pages/resolver';
 import { makeInitials } from '@/lib/format';
 
+const SIDEBAR_KEY = 'krypton:sidebar-collapsed';
+
 function AppShell() {
   const bs = useBootstrap();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_KEY) === '1'; } catch { return false; }
+  });
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try { localStorage.setItem(SIDEBAR_KEY, next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', bs.theme === 'dark');
@@ -20,53 +41,128 @@ function AppShell() {
     document.title = `${bs.domain.name} — Krypton`;
   }, [bs]);
 
+  // Close user menu on outside click
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const handler = () => setUserMenuOpen(false);
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [userMenuOpen]);
+
   return (
     <div className="flex h-screen bg-background">
       {/* Sidebar */}
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} collapsed={collapsed} />
 
       {/* Main area */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Top bar */}
-        <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur supports-backdrop-filter:bg-background/60">
+        {/* Top bar — frosted glass */}
+        <header className="sticky top-0 z-40 flex h-12 shrink-0 items-center gap-2 border-b bg-background/60 px-4 backdrop-blur-xl saturate-150">
           {/* Mobile menu toggle */}
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden"
+            className="size-8 md:hidden"
             onClick={() => setSidebarOpen(true)}
           >
-            <Menu className="size-5" />
+            <Menu className="size-4" />
           </Button>
 
-          {/* Domain name */}
-          <a href={bs.urls.home} className="flex items-center gap-2 text-sm font-semibold md:hidden">
+          {/* Collapse toggle (desktop) */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="hidden size-8 md:inline-flex"
+            onClick={toggleCollapsed}
+            title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+          >
+            {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+          </Button>
+
+          {/* Domain name / breadcrumb */}
+          <a href={bs.urls.home} className="flex items-center gap-1.5 md:hidden">
             <Swords className="size-4 text-primary" />
           </a>
-          <span className="hidden text-sm font-medium text-muted-foreground md:inline-block">
+          <span className="hidden text-sm text-muted-foreground md:inline-block">
             {bs.domain.name}
           </span>
 
           <div className="flex-1" />
 
-          {/* Right section */}
-          <div className="flex items-center gap-2">
+          {/* Right: user section */}
+          <div className="flex items-center gap-1.5">
             {bs.user.signedIn ? (
-              <a href={bs.urls.messages} className="flex items-center gap-2">
-                {bs.user.unreadMessages > 0 ? (
-                  <Badge variant="default" className="text-[10px]">{bs.user.unreadMessages}</Badge>
-                ) : null}
-                <Avatar className="size-8">
-                  <AvatarFallback className="text-xs">{makeInitials(bs.user.name)}</AvatarFallback>
-                </Avatar>
-                <span className="hidden text-sm font-medium sm:inline-block">{bs.user.name}</span>
-              </a>
+              <>
+                {/* Messages icon */}
+                <Button asChild variant="ghost" size="icon" className="relative size-8">
+                  <a href={bs.urls.messages}>
+                    <Mail className="size-4" />
+                    {bs.user.unreadMessages > 0 && (
+                      <span className="absolute -right-0.5 -top-0.5 flex size-4 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground">
+                        {bs.user.unreadMessages > 9 ? '9+' : bs.user.unreadMessages}
+                      </span>
+                    )}
+                  </a>
+                </Button>
+
+                {/* Settings shortcut */}
+                <Button asChild variant="ghost" size="icon" className="size-8">
+                  <a href={`${bs.urls.settings}/preference`}>
+                    <Settings className="size-4" />
+                  </a>
+                </Button>
+
+                {/* User avatar + dropdown */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    className="flex items-center gap-2 rounded-md px-2 py-1 transition-colors hover:bg-accent"
+                    onClick={(e) => { e.stopPropagation(); setUserMenuOpen((p) => !p); }}
+                  >
+                    <Avatar className="size-7">
+                      <AvatarFallback className="text-[10px]">{makeInitials(bs.user.name)}</AvatarFallback>
+                    </Avatar>
+                    <span className="hidden max-w-[120px] truncate text-sm font-medium sm:inline-block">
+                      {bs.user.name}
+                    </span>
+                  </button>
+
+                  {userMenuOpen && (
+                    <div
+                      className="absolute right-0 top-full z-50 mt-1.5 w-48 rounded-lg border bg-popover p-1 shadow-lg"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="px-3 py-2">
+                        <p className="text-sm font-medium">{bs.user.name}</p>
+                        <p className="text-[11px] text-muted-foreground">{bs.user.rp} RP</p>
+                      </div>
+                      <div className="my-1 h-px bg-border" />
+                      <a href={`${bs.urls.settings}/preference`} className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-accent">
+                        <Settings className="size-3.5" />
+                        账号设置
+                      </a>
+                      <a href={bs.urls.messages} className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-accent">
+                        <Mail className="size-3.5" />
+                        消息
+                        {bs.user.unreadMessages > 0 && (
+                          <Badge className="ml-auto h-4 px-1 text-[10px]">{bs.user.unreadMessages}</Badge>
+                        )}
+                      </a>
+                      <div className="my-1 h-px bg-border" />
+                      <a href={bs.urls.logout} className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10">
+                        <LogOut className="size-3.5" />
+                        退出登录
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </>
             ) : (
-              <div className="flex items-center gap-2">
-                <Button asChild variant="ghost" size="sm">
+              <div className="flex items-center gap-1.5">
+                <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
                   <a href={bs.urls.login}>登录</a>
                 </Button>
-                <Button asChild size="sm">
+                <Button asChild size="sm" className="h-7 text-xs">
                   <a href={bs.urls.register}>注册</a>
                 </Button>
               </div>

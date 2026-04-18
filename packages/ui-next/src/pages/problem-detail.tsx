@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
@@ -6,15 +6,19 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
+  Code2,
   Cpu,
   Edit3,
   FileText,
   HardDrive,
+  Maximize2,
   MessageSquare,
+  Minimize2,
   Send,
   Tag,
   Trophy,
   User,
+  X,
   XCircle,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -204,6 +208,64 @@ export function ProblemDetailPage() {
   const rate = nSubmit > 0 ? Math.round((nAccept / nSubmit) * 100) : 0;
 
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
+  const [ideMode, setIdeMode] = useState(false);
+
+  const handleIdeSubmit = useCallback((lang: string, code: string) => {
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = `${problemUrl}/submit`;
+    const addField = (name: string, value: string) => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    };
+    addField('lang', lang);
+    addField('code', code);
+    document.body.appendChild(form);
+    form.submit();
+  }, [problemUrl]);
+
+  /* Fullscreen IDE mode */
+  if (ideMode) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col bg-background">
+        {/* IDE top bar */}
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b bg-muted/50 px-3">
+          <Code2 className="size-4 text-primary" />
+          <span className="text-sm font-medium">{title}</span>
+          <span className="text-xs text-muted-foreground">— {pid}</span>
+          <div className="flex-1" />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1 text-xs"
+            onClick={() => setIdeMode(false)}
+          >
+            <X className="size-3.5" />
+            退出 IDE
+          </Button>
+        </div>
+        {/* Split view: statement + editor */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Left: problem statement */}
+          <div className="w-[45%] shrink-0 overflow-y-auto border-r p-4 sm:p-6">
+            <MarkdownView content={content} preferredLang={bs.locale?.startsWith('zh') ? 'zh' : 'en'} />
+          </div>
+          {/* Right: IDE */}
+          <div className="flex-1">
+            <KryptonIDE
+              langs={config.langs || []}
+              defaultLang={config.langs?.[0]}
+              onSubmit={handleIdeSubmit}
+              className="h-full rounded-none border-0"
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <motion.div
@@ -237,6 +299,10 @@ export function ProblemDetailPage() {
           )}
         </div>
         <div className="flex shrink-0 gap-2">
+          <Button size="sm" variant="default" className="gap-1" onClick={() => setIdeMode(true)}>
+            <Code2 className="size-3.5" />
+            IDE 模式
+          </Button>
           <Button asChild size="sm" variant="outline">
             <a href={`${problemUrl}/submit`}>
               <Send className="mr-1 size-3.5" />
@@ -298,23 +364,7 @@ export function ProblemDetailPage() {
                   <KryptonIDE
                     langs={config.langs || []}
                     defaultLang={config.langs?.[0]}
-                    onSubmit={(lang, code) => {
-                      // Create a hidden form and submit
-                      const form = document.createElement('form');
-                      form.method = 'POST';
-                      form.action = `${problemUrl}/submit`;
-                      const addField = (name: string, value: string) => {
-                        const input = document.createElement('input');
-                        input.type = 'hidden';
-                        input.name = name;
-                        input.value = value;
-                        form.appendChild(input);
-                      };
-                      addField('lang', lang);
-                      addField('code', code);
-                      document.body.appendChild(form);
-                      form.submit();
-                    }}
+                    onSubmit={handleIdeSubmit}
                     minHeight={450}
                   />
                 </CardContent>

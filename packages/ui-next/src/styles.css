@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "katex/dist/katex.min.css";
+@import "highlight.js/styles/github.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -133,3 +134,24 @@
     -moz-osx-font-smoothing: grayscale;
   }
 }
+
+/* Dark mode: override highlight.js code block background */
+.dark .hljs {
+  background: hsl(222 47% 12%);
+  color: hsl(210 40% 87%);
+}
+.dark .hljs-keyword,
+.dark .hljs-selector-tag { color: #ff7b72; }
+.dark .hljs-string,
+.dark .hljs-addition { color: #a5d6ff; }
+.dark .hljs-comment,
+.dark .hljs-quote { color: #8b949e; }
+.dark .hljs-number,
+.dark .hljs-literal { color: #79c0ff; }
+.dark .hljs-title,
+.dark .hljs-section,
+.dark .hljs-built_in { color: #d2a8ff; }
+.dark .hljs-type,
+.dark .hljs-name { color: #7ee787; }
+.dark .hljs-attr,
+.dark .hljs-attribute { color: #79c0ff; }

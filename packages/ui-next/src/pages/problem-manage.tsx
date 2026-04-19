@@ -2,7 +2,7 @@
  * Problem management pages — config, files, solutions, statistics, import.
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
@@ -19,6 +19,14 @@ import {
   Trash2,
   Upload,
   BarChart3,
+  Pencil,
+  Save,
+  Settings,
+  Flag,
+  Send,
+  Lightbulb,
+  Play,
+  RefreshCw,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -31,6 +39,7 @@ import { Pagination } from '@/components/ui/pagination';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatRelativeTime, formatDateTime, makeInitials, replaceRouteTokens } from '@/lib/format';
+import { cn } from '@/lib/cn';
 
 type R = Record<string, any>;
 
@@ -44,6 +53,58 @@ function formatSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
+/* ---------- Shared Problem Sidebar ---------- */
+
+function ProblemSidebar({ problemUrl, active }: { problemUrl: string; active: string }) {
+  const nav = [
+    { key: 'detail', icon: Flag, label: '查看题目', href: problemUrl },
+    { key: 'submit', icon: Send, label: '提交', href: `${problemUrl}/submit` },
+    { key: 'solution', icon: Lightbulb, label: '题解', href: `${problemUrl}/solution` },
+    { key: 'files', icon: FolderOpen, label: '文件', href: `${problemUrl}/files` },
+    { key: 'statistics', icon: BarChart3, label: '统计', href: `${problemUrl}/statistics` },
+  ];
+  const editNav = [
+    { key: 'edit', icon: Pencil, label: '编辑', href: `${problemUrl}/edit` },
+    { key: 'config', icon: Settings, label: '评测配置', href: `${problemUrl}/config` },
+  ];
+
+  return (
+    <nav className="space-y-1">
+      {nav.map((item) => (
+        <a
+          key={item.key}
+          href={item.href}
+          className={cn(
+            'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+            active === item.key
+              ? 'bg-primary/10 text-primary font-medium'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+          )}
+        >
+          <item.icon className="size-4" />
+          {item.label}
+        </a>
+      ))}
+      <div className="my-2 border-t" />
+      {editNav.map((item) => (
+        <a
+          key={item.key}
+          href={item.href}
+          className={cn(
+            'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+            active === item.key
+              ? 'bg-primary/10 text-primary font-medium'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+          )}
+        >
+          <item.icon className="size-4" />
+          {item.label}
+        </a>
+      ))}
+    </nav>
+  );
+}
+
 /* ---------- Problem Config ---------- */
 
 export function ProblemConfigPage() {
@@ -55,77 +116,188 @@ export function ProblemConfigPage() {
   const pid = pdoc.pid || pdoc.docId || '';
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
 
+  const [configText, setConfigText] = useState(config);
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const toggleFile = (name: string) => {
+    const next = new Set(selectedFiles);
+    if (next.has(name)) next.delete(name); else next.add(name);
+    setSelectedFiles(next);
+  };
+
+  const toggleAll = () => {
+    if (selectedFiles.size === testdata.length) {
+      setSelectedFiles(new Set());
+    } else {
+      setSelectedFiles(new Set(testdata.map((f) => f.name)));
+    }
+  };
+
   return (
     <motion.div
-      className="space-y-6"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
     >
-      <div className="flex items-center gap-3">
+      <div className="mb-4 flex items-center gap-3">
         <Button asChild variant="ghost" size="icon">
           <a href={problemUrl}><ArrowLeft className="size-4" /></a>
         </Button>
         <div>
-          <h1 className="text-xl font-semibold">题目配置</h1>
+          <h1 className="text-xl font-semibold">评测配置</h1>
           <p className="text-sm text-muted-foreground">{pdoc.title || pid}</p>
         </div>
       </div>
 
-      {/* Config YAML */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <FileCode className="size-4" />
-            config.yaml
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {config ? (
-            <pre className="max-h-96 overflow-auto rounded-md bg-muted p-4 text-sm font-mono whitespace-pre-wrap">
-              {config}
-            </pre>
-          ) : (
-            <p className="text-sm text-muted-foreground">未找到 config.yaml 文件</p>
-          )}
-        </CardContent>
-      </Card>
+      <div className="flex gap-6">
+        {/* Main content */}
+        <div className="min-w-0 flex-1 space-y-6">
+          {/* Config YAML editor */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileCode className="size-4" />
+                config.yaml
+              </CardTitle>
+              <form method="post" action={`${problemUrl}/files`} encType="multipart/form-data">
+                <input type="hidden" name="type" value="testdata" />
+                <input type="hidden" name="filename" value="config.yaml" />
+                {/* Hidden textarea to carry the config content as a file-like upload */}
+                <Button
+                  type="button"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    // Save config.yaml by creating a Blob and posting via fetch
+                    const formData = new FormData();
+                    formData.append('type', 'testdata');
+                    formData.append('filename', 'config.yaml');
+                    formData.append('file', new Blob([configText], { type: 'text/yaml' }), 'config.yaml');
+                    fetch(`${problemUrl}/files`, {
+                      method: 'POST',
+                      body: formData,
+                      headers: { Accept: 'application/json' },
+                    }).then((r) => {
+                      if (r.ok) window.location.reload();
+                      else r.json().then((d) => alert(d.error || '保存失败'));
+                    });
+                  }}
+                >
+                  <Save className="size-3.5" />
+                  保存配置
+                </Button>
+              </form>
+            </CardHeader>
+            <CardContent>
+              <textarea
+                value={configText}
+                onChange={(e) => setConfigText(e.target.value)}
+                className="w-full resize-y rounded-md border bg-background px-4 py-3 font-mono text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-ring"
+                rows={Math.max(10, configText.split('\n').length + 2)}
+                placeholder="# 在此编辑评测配置&#10;type: default&#10;time: 1s&#10;memory: 256m"
+                spellCheck={false}
+              />
+            </CardContent>
+          </Card>
 
-      {/* Testdata files */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <FolderOpen className="size-4" />
-            测试数据 ({testdata.length})
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {testdata.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>文件名</TableHead>
-                  <TableHead className="w-28 text-right">大小</TableHead>
-                  <TableHead className="w-40 text-right">修改时间</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {testdata.map((f) => (
-                  <TableRow key={f.name}>
-                    <TableCell className="font-mono text-sm">{f.name}</TableCell>
-                    <TableCell className="text-right text-sm text-muted-foreground">{formatSize(f.size || 0)}</TableCell>
-                    <TableCell className="text-right text-sm text-muted-foreground">
-                      {f.lastModified ? formatDateTime(f.lastModified, bs.locale) : '-'}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          ) : (
-            <p className="p-4 text-sm text-muted-foreground">暂无测试数据</p>
-          )}
-        </CardContent>
-      </Card>
+          {/* Testdata files */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FolderOpen className="size-4" />
+                测试数据 ({testdata.length})
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <form method="post" action={`${problemUrl}/files`} encType="multipart/form-data" className="flex items-center gap-2">
+                  <input type="hidden" name="type" value="testdata" />
+                  <input ref={fileInputRef} type="file" name="file" className="hidden" onChange={(e) => {
+                    if (e.target.files?.length) e.target.form?.submit();
+                  }} />
+                  <Button type="button" size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>
+                    <Upload className="mr-1 size-3" />上传
+                  </Button>
+                </form>
+                {selectedFiles.size > 0 && (
+                  <>
+                    {/* Download selected */}
+                    <form method="post" action={`${problemUrl}/files`}>
+                      <input type="hidden" name="operation" value="get_links" />
+                      <input type="hidden" name="type" value="testdata" />
+                      {Array.from(selectedFiles).map((f) => (
+                        <input key={f} type="hidden" name="files" value={f} />
+                      ))}
+                      <Button type="submit" size="sm" variant="outline">
+                        <Download className="mr-1 size-3" />下载 ({selectedFiles.size})
+                      </Button>
+                    </form>
+                    {/* Delete selected */}
+                    <form method="post" action={`${problemUrl}/files`}>
+                      <input type="hidden" name="operation" value="delete_files" />
+                      <input type="hidden" name="type" value="testdata" />
+                      {Array.from(selectedFiles).map((f) => (
+                        <input key={f} type="hidden" name="files" value={f} />
+                      ))}
+                      <Button type="submit" size="sm" variant="destructive">
+                        <Trash2 className="mr-1 size-3" />删除 ({selectedFiles.size})
+                      </Button>
+                    </form>
+                  </>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {testdata.length > 0 ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-8">
+                        <input
+                          type="checkbox"
+                          checked={selectedFiles.size === testdata.length && testdata.length > 0}
+                          onChange={toggleAll}
+                          className="size-4 rounded border"
+                        />
+                      </TableHead>
+                      <TableHead>文件名</TableHead>
+                      <TableHead className="w-28 text-right">大小</TableHead>
+                      <TableHead className="w-40 text-right">修改时间</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {testdata.map((f) => (
+                      <TableRow key={f.name} className={selectedFiles.has(f.name) ? 'bg-muted/50' : ''}>
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            checked={selectedFiles.has(f.name)}
+                            onChange={() => toggleFile(f.name)}
+                            className="size-4 rounded border"
+                          />
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">{f.name}</TableCell>
+                        <TableCell className="text-right text-sm text-muted-foreground">{formatSize(f.size || 0)}</TableCell>
+                        <TableCell className="text-right text-sm text-muted-foreground">
+                          {f.lastModified ? formatDateTime(f.lastModified, bs.locale) : '-'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <p className="p-4 text-sm text-muted-foreground">暂无测试数据</p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Right sidebar */}
+        <div className="hidden w-56 shrink-0 lg:block">
+          <div className="sticky top-20 space-y-6">
+            <ProblemSidebar problemUrl={problemUrl} active="config" />
+          </div>
+        </div>
+      </div>
     </motion.div>
   );
 }
@@ -144,11 +316,26 @@ export function ProblemFilesPage() {
 
   const [selectedTestdata, setSelectedTestdata] = useState<Set<string>>(new Set());
   const [selectedAdditional, setSelectedAdditional] = useState<Set<string>>(new Set());
+  const [renamingFiles, setRenamingFiles] = useState<Record<string, string>>({});
+  const [showGenerate, setShowGenerate] = useState(false);
+  const testdataFileRef = useRef<HTMLInputElement>(null);
+  const additionalFileRef = useRef<HTMLInputElement>(null);
 
   const toggleFile = (set: Set<string>, setFn: (s: Set<string>) => void, name: string) => {
     const next = new Set(set);
     if (next.has(name)) next.delete(name); else next.add(name);
     setFn(next);
+  };
+
+  const toggleAll = (files: R[], selected: Set<string>, setSelected: (s: Set<string>) => void) => {
+    if (selected.size === files.length) setSelected(new Set());
+    else setSelected(new Set(files.map((f) => f.name)));
+  };
+
+  const startRename = (selected: Set<string>) => {
+    const mapping: Record<string, string> = {};
+    for (const name of selected) mapping[name] = name;
+    setRenamingFiles(mapping);
   };
 
   const FileSection = ({
@@ -157,12 +344,14 @@ export function ProblemFilesPage() {
     type,
     selected,
     setSelected,
+    fileRef,
   }: {
     title: string;
     files: R[];
     type: string;
     selected: Set<string>;
     setSelected: (s: Set<string>) => void;
+    fileRef: React.RefObject<HTMLInputElement | null>;
   }) => (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
@@ -170,24 +359,52 @@ export function ProblemFilesPage() {
           <FolderOpen className="size-4" />
           {title} ({files.length})
         </CardTitle>
-        <div className="flex items-center gap-2">
-          <form method="post" encType="multipart/form-data" className="flex items-center gap-2">
-            <input type="hidden" name="type" value={type} />
-            <input type="file" name="file" className="text-xs" />
-            <Button type="submit" name="operation" value="upload_file" size="sm" variant="outline">
-              <Upload className="mr-1 size-3" />上传
-            </Button>
-          </form>
-          {selected.size > 0 && (
-            <form method="post">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Upload */}
+          {!reference && (
+            <form method="post" encType="multipart/form-data" className="flex items-center">
               <input type="hidden" name="type" value={type} />
-              {Array.from(selected).map((f) => (
-                <input key={f} type="hidden" name="files" value={f} />
-              ))}
-              <Button type="submit" name="operation" value="delete_files" size="sm" variant="destructive">
-                <Trash2 className="mr-1 size-3" />删除 ({selected.size})
+              <input ref={fileRef} type="file" name="file" className="hidden" multiple onChange={(e) => {
+                if (e.target.files?.length) e.target.form?.submit();
+              }} />
+              <Button type="button" size="sm" variant="outline" onClick={() => fileRef.current?.click()}>
+                <Upload className="mr-1 size-3" />上传
               </Button>
             </form>
+          )}
+          {selected.size > 0 && (
+            <>
+              {/* Download */}
+              <form method="post">
+                <input type="hidden" name="operation" value="get_links" />
+                <input type="hidden" name="type" value={type} />
+                {Array.from(selected).map((f) => (
+                  <input key={f} type="hidden" name="files" value={f} />
+                ))}
+                <Button type="submit" size="sm" variant="outline">
+                  <Download className="mr-1 size-3" />下载 ({selected.size})
+                </Button>
+              </form>
+              {/* Rename */}
+              {!reference && (
+                <Button size="sm" variant="outline" onClick={() => startRename(selected)}>
+                  <Pencil className="mr-1 size-3" />重命名
+                </Button>
+              )}
+              {/* Delete */}
+              {!reference && (
+                <form method="post">
+                  <input type="hidden" name="operation" value="delete_files" />
+                  <input type="hidden" name="type" value={type} />
+                  {Array.from(selected).map((f) => (
+                    <input key={f} type="hidden" name="files" value={f} />
+                  ))}
+                  <Button type="submit" size="sm" variant="destructive">
+                    <Trash2 className="mr-1 size-3" />删除 ({selected.size})
+                  </Button>
+                </form>
+              )}
+            </>
           )}
         </div>
       </CardHeader>
@@ -196,7 +413,14 @@ export function ProblemFilesPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-8" />
+                <TableHead className="w-8">
+                  <input
+                    type="checkbox"
+                    checked={selected.size === files.length && files.length > 0}
+                    onChange={() => toggleAll(files, selected, setSelected)}
+                    className="size-4 rounded border"
+                  />
+                </TableHead>
                 <TableHead>文件名</TableHead>
                 <TableHead className="w-28 text-right">大小</TableHead>
                 <TableHead className="w-40 text-right">修改时间</TableHead>
@@ -204,7 +428,7 @@ export function ProblemFilesPage() {
             </TableHeader>
             <TableBody>
               {files.map((f) => (
-                <TableRow key={f.name}>
+                <TableRow key={f.name} className={selected.has(f.name) ? 'bg-muted/50' : ''}>
                   <TableCell>
                     <input
                       type="checkbox"
@@ -213,7 +437,14 @@ export function ProblemFilesPage() {
                       className="size-4 rounded border"
                     />
                   </TableCell>
-                  <TableCell className="font-mono text-sm">{f.name}</TableCell>
+                  <TableCell>
+                    <a
+                      href={`${problemUrl}/file/${f.name}?type=${type}`}
+                      className="font-mono text-sm text-primary hover:underline"
+                    >
+                      {f.name}
+                    </a>
+                  </TableCell>
                   <TableCell className="text-right text-sm text-muted-foreground">{formatSize(f.size || 0)}</TableCell>
                   <TableCell className="text-right text-sm text-muted-foreground">
                     {f.lastModified ? formatDateTime(f.lastModified, bs.locale) : '-'}
@@ -229,14 +460,16 @@ export function ProblemFilesPage() {
     </Card>
   );
 
+  // Rename dialog
+  const renameKeys = Object.keys(renamingFiles);
+
   return (
     <motion.div
-      className="space-y-6"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
     >
-      <div className="flex items-center gap-3">
+      <div className="mb-4 flex items-center gap-3">
         <Button asChild variant="ghost" size="icon">
           <a href={problemUrl}><ArrowLeft className="size-4" /></a>
         </Button>
@@ -246,16 +479,108 @@ export function ProblemFilesPage() {
         </div>
       </div>
 
-      {reference && (
-        <Card className="border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20">
-          <CardContent className="p-4 text-sm">
-            <p>此题目引用自其他题目，文件由源题目管理。</p>
+      {/* Rename overlay */}
+      {renameKeys.length > 0 && (
+        <Card className="mb-6 border-primary/30">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">重命名文件</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form method="post" className="space-y-3">
+              <input type="hidden" name="operation" value="rename_files" />
+              <input type="hidden" name="type" value="testdata" />
+              {renameKeys.map((oldName) => (
+                <div key={oldName} className="flex items-center gap-3">
+                  <input type="hidden" name="files" value={oldName} />
+                  <span className="w-40 truncate font-mono text-sm text-muted-foreground">{oldName}</span>
+                  <span className="text-muted-foreground">→</span>
+                  <Input
+                    name="newNames"
+                    value={renamingFiles[oldName]}
+                    onChange={(e) => setRenamingFiles({ ...renamingFiles, [oldName]: e.target.value })}
+                    className="max-w-xs font-mono text-sm"
+                  />
+                </div>
+              ))}
+              <div className="flex gap-2">
+                <Button type="submit" size="sm">确认重命名</Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => setRenamingFiles({})}>取消</Button>
+              </div>
+            </form>
           </CardContent>
         </Card>
       )}
 
-      <FileSection title="测试数据" files={testdata} type="testdata" selected={selectedTestdata} setSelected={setSelectedTestdata} />
-      <FileSection title="附加文件" files={additionalFile} type="additional_file" selected={selectedAdditional} setSelected={setSelectedAdditional} />
+      <div className="flex gap-6">
+        {/* Main content */}
+        <div className="min-w-0 flex-1 space-y-6">
+          {reference && (
+            <Card className="border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20">
+              <CardContent className="p-4 text-sm">
+                <p>此题目引用自其他题目，文件由源题目管理。</p>
+              </CardContent>
+            </Card>
+          )}
+
+          <FileSection title="测试数据" files={testdata} type="testdata" selected={selectedTestdata} setSelected={setSelectedTestdata} fileRef={testdataFileRef} />
+          <FileSection title="附加文件" files={additionalFile} type="additional_file" selected={selectedAdditional} setSelected={setSelectedAdditional} fileRef={additionalFileRef} />
+
+          {/* Generate testdata */}
+          {!reference && testdata.length > 0 && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Play className="size-4" />
+                  生成测试数据 (Beta)
+                </CardTitle>
+                <Button size="sm" variant="ghost" onClick={() => setShowGenerate((v) => !v)}>
+                  {showGenerate ? '收起' : '展开'}
+                </Button>
+              </CardHeader>
+              {showGenerate && (
+                <CardContent>
+                  <form method="post" className="space-y-3">
+                    <input type="hidden" name="operation" value="generate_testdata" />
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium">数据生成器</label>
+                        <select name="gen" className="w-full rounded-md border bg-background px-3 py-2 text-sm" required>
+                          <option value="">选择生成器文件…</option>
+                          {testdata.filter((f) => !f.name.endsWith('.in') && !f.name.endsWith('.out') && !f.name.endsWith('.ans') && f.name !== 'config.yaml').map((f) => (
+                            <option key={f.name} value={f.name}>{f.name}</option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-muted-foreground">输出测试数据到 stdout 的程序</p>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium">标准程序</label>
+                        <select name="std" className="w-full rounded-md border bg-background px-3 py-2 text-sm" required>
+                          <option value="">选择标程文件…</option>
+                          {testdata.filter((f) => !f.name.endsWith('.in') && !f.name.endsWith('.out') && !f.name.endsWith('.ans') && f.name !== 'config.yaml').map((f) => (
+                            <option key={f.name} value={f.name}>{f.name}</option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-muted-foreground">输出答案到 stdout 的程序</p>
+                      </div>
+                    </div>
+                    <Button type="submit" size="sm">
+                      <RefreshCw className="mr-1 size-3.5" />
+                      生成数据
+                    </Button>
+                  </form>
+                </CardContent>
+              )}
+            </Card>
+          )}
+        </div>
+
+        {/* Right sidebar */}
+        <div className="hidden w-56 shrink-0 lg:block">
+          <div className="sticky top-20 space-y-6">
+            <ProblemSidebar problemUrl={problemUrl} active="files" />
+          </div>
+        </div>
+      </div>
     </motion.div>
   );
 }

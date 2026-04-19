@@ -1,12 +1,14 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   LogOut,
   Mail,
   Menu,
+  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
+  Sun,
   Swords,
 } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -18,6 +20,7 @@ import { PageResolver } from '@/pages/resolver';
 import { makeInitials } from '@/lib/format';
 
 const SIDEBAR_KEY = 'krypton:sidebar-collapsed';
+const THEME_KEY = 'krypton:theme';
 
 function AppShell() {
   const bs = useBootstrap();
@@ -26,6 +29,13 @@ function AppShell() {
     try { return localStorage.getItem(SIDEBAR_KEY) === '1'; } catch { return false; }
   });
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [dark, setDark] = useState(() => {
+    try {
+      const stored = localStorage.getItem(THEME_KEY);
+      if (stored === 'dark' || stored === 'light') return stored === 'dark';
+    } catch {}
+    return bs.theme === 'dark';
+  });
 
   const toggleCollapsed = () => {
     setCollapsed((prev) => {
@@ -35,11 +45,20 @@ function AppShell() {
     });
   };
 
+  const toggleTheme = useCallback(() => {
+    setDark((prev) => {
+      const next = !prev;
+      document.documentElement.classList.toggle('dark', next);
+      try { localStorage.setItem(THEME_KEY, next ? 'dark' : 'light'); } catch {}
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', bs.theme === 'dark');
+    document.documentElement.classList.toggle('dark', dark);
     document.documentElement.lang = bs.locale || 'zh-CN';
     document.title = `${bs.domain.name} — Krypton`;
-  }, [bs]);
+  }, [bs, dark]);
 
   // Close user menu on outside click
   useEffect(() => {
@@ -88,6 +107,17 @@ function AppShell() {
           </span>
 
           <div className="flex-1" />
+
+          {/* Theme toggle */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            onClick={toggleTheme}
+            title={dark ? '切换亮色模式' : '切换暗色模式'}
+          >
+            {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+          </Button>
 
           {/* Right: user section */}
           <div className="flex items-center gap-1.5">
@@ -180,6 +210,7 @@ function AppShell() {
     </div>
   );
 }
+
 
 const rootRoute = createRootRoute({
   component: AppShell,

@@ -9,11 +9,27 @@ import { HomeworkPage, HomeworkDetailPage } from '@/pages/homework';
 import { DiscussionsPage, DiscussionDetailPage } from '@/pages/discussions';
 import { RecordsPage, RecordDetailPage } from '@/pages/records';
 import { RankingPage } from '@/pages/ranking';
-import { LoginPage, RegisterPage, LogoutPage, LostPasswordPage } from '@/pages/auth';
+import {
+  LoginPage, RegisterPage, LogoutPage, LostPasswordPage,
+  RegisterMailSentPage, LostPasswordWithCodePage,
+  UserDeletePendingPage, ChangeMailSentPage,
+} from '@/pages/auth';
 import { UserDetailPage } from '@/pages/user';
 import { UserAccountPage } from '@/pages/user-account';
 import { SudoPage, SudoRedirectPage } from '@/pages/sudo';
 import { ProblemEditPage } from '@/pages/problem-edit';
+import {
+  ProblemConfigPage, ProblemFilesPage, ProblemSolutionPage,
+  ProblemStatisticsPage, ProblemImportPage,
+} from '@/pages/problem-manage';
+import {
+  ContestEditPage, ContestManagePage, ContestProblemListPage,
+  ContestUserPage, ContestBalloonPage, ContestClarificationPage,
+  ContestPrintPage,
+} from '@/pages/contest-manage';
+import { HomeworkEditPage, HomeworkFilesPage } from '@/pages/homework-manage';
+import { TrainingEditPage, TrainingFilesPage } from '@/pages/training-manage';
+import { DiscussionCreatePage, DiscussionEditPage } from '@/pages/discussion-manage';
 import { DomainDashboardPage, ManageDashboardPage, StatusPage } from '@/pages/admin';
 import {
   DomainEditPage,
@@ -22,6 +38,10 @@ import {
   DomainRolePage,
   DomainGroupPage,
 } from '@/pages/domain-manage';
+import {
+  DomainCreatePage, DomainJoinPage, DomainJoinApplicationsPage,
+  ContestModePage,
+} from '@/pages/domain-misc';
 import {
   ManageSettingPage,
   ManageConfigPage,
@@ -43,41 +63,41 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'problem_detail.html': ProblemDetailPage,
   'problem_submit.html': ProblemDetailPage,
   'problem_edit.html': ProblemEditPage,
-  'problem_config.html': GenericPage,
-  'problem_files.html': GenericPage,
-  'problem_solution.html': GenericPage,
-  'problem_statistics.html': GenericPage,
-  'problem_import.html': GenericPage,
+  'problem_config.html': ProblemConfigPage,
+  'problem_files.html': ProblemFilesPage,
+  'problem_solution.html': ProblemSolutionPage,
+  'problem_statistics.html': ProblemStatisticsPage,
+  'problem_import.html': ProblemImportPage,
 
   // Contests
   'contest_main.html': ContestsPage,
   'contest_detail.html': ContestDetailPage,
-  'contest_edit.html': GenericPage,
+  'contest_edit.html': ContestEditPage,
   'contest_scoreboard.html': ContestScoreboardPage,
-  'contest_manage.html': GenericPage,
-  'contest_problemlist.html': GenericPage,
-  'contest_user.html': GenericPage,
-  'contest_balloon.html': GenericPage,
-  'contest_clarification.html': GenericPage,
-  'contest_print.html': GenericPage,
+  'contest_manage.html': ContestManagePage,
+  'contest_problemlist.html': ContestProblemListPage,
+  'contest_user.html': ContestUserPage,
+  'contest_balloon.html': ContestBalloonPage,
+  'contest_clarification.html': ContestClarificationPage,
+  'contest_print.html': ContestPrintPage,
 
   // Homework
   'homework_main.html': HomeworkPage,
   'homework_detail.html': HomeworkDetailPage,
-  'homework_edit.html': GenericPage,
-  'homework_files.html': GenericPage,
+  'homework_edit.html': HomeworkEditPage,
+  'homework_files.html': HomeworkFilesPage,
 
   // Training
   'training_main.html': TrainingPage,
   'training_detail.html': TrainingDetailPage,
-  'training_edit.html': GenericPage,
-  'training_files.html': GenericPage,
+  'training_edit.html': TrainingEditPage,
+  'training_files.html': TrainingFilesPage,
 
   // Discussions
   'discussion_main_or_node.html': DiscussionsPage,
   'discussion_detail.html': DiscussionDetailPage,
-  'discussion_create.html': GenericPage,
-  'discussion_edit.html': GenericPage,
+  'discussion_create.html': DiscussionCreatePage,
+  'discussion_edit.html': DiscussionEditPage,
 
   // Records
   'record_main.html': RecordsPage,
@@ -90,15 +110,15 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'user_login.html': LoginPage,
   'user_register.html': RegisterPage,
   'user_register_with_code.html': RegisterPage,
-  'user_register_mail_sent.html': GenericPage,
+  'user_register_mail_sent.html': RegisterMailSentPage,
   'user_logout.html': LogoutPage,
   'user_lostpass.html': LostPasswordPage,
-  'user_lostpass_with_code.html': GenericPage,
+  'user_lostpass_with_code.html': LostPasswordWithCodePage,
   'user_sudo.html': SudoPage,
   'user_sudo_redirect.html': SudoRedirectPage,
-  'user_delete_pending.html': GenericPage,
-  'user_changemail_mail_sent.html': GenericPage,
-  'contest_mode.html': GenericPage,
+  'user_delete_pending.html': UserDeletePendingPage,
+  'user_changemail_mail_sent.html': ChangeMailSentPage,
+  'contest_mode.html': ContestModePage,
 
   // User pages
   'user_detail.html': UserDetailPage,
@@ -109,7 +129,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'home_files.html': UserAccountPage,
 
   // Domain admin
-  'domain_create.html': GenericPage,
+  'domain_create.html': DomainCreatePage,
   'domain_dashboard.html': DomainDashboardPage,
   'domain_edit.html': DomainEditPage,
   'domain_user.html': DomainUserPage,
@@ -117,8 +137,8 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'domain_permission.html': DomainPermissionPage,
   'domain_role.html': DomainRolePage,
   'domain_group.html': DomainGroupPage,
-  'domain_join.html': GenericPage,
-  'domain_join_applications.html': GenericPage,
+  'domain_join.html': DomainJoinPage,
+  'domain_join_applications.html': DomainJoinApplicationsPage,
 
   // System admin
   'manage_dashboard.html': ManageDashboardPage,

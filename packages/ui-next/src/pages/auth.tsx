@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { Swords } from 'lucide-react';
+import { CheckCircle, Clock, Mail as MailIcon, Swords } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -191,6 +191,118 @@ export function LostPasswordPage() {
           <div className="mt-4 text-center text-sm">
             <a href={bs.urls.login} className="text-primary hover:underline">返回登录</a>
           </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+/* ---------- Mail Sent (register) ---------- */
+
+export function RegisterMailSentPage() {
+  const bs = useBootstrap();
+  const mail = bs.page.data.mail || '';
+
+  return (
+    <motion.div
+      className="mx-auto max-w-sm space-y-6 pt-12"
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35 }}
+    >
+      <Card>
+        <CardContent className="p-8 text-center">
+          <MailIcon className="mx-auto size-10 text-primary" />
+          <h1 className="mt-4 text-xl font-semibold">验证邮件已发送</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            我们已向 <strong>{mail}</strong> 发送了一封验证邮件，请查看你的收件箱并点击链接完成注册。
+          </p>
+          <Button asChild variant="outline" className="mt-6">
+            <a href={bs.urls.login}>返回登录</a>
+          </Button>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+/* ---------- Lost Password with Code ---------- */
+
+export function LostPasswordWithCodePage() {
+  const bs = useBootstrap();
+  const uname = bs.page.data.uname || '';
+
+  return (
+    <motion.div
+      className="mx-auto max-w-sm space-y-6 pt-8"
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35 }}
+    >
+      <div className="text-center">
+        <h1 className="text-2xl font-bold">重置密码</h1>
+        {uname && <p className="mt-1 text-sm text-muted-foreground">用户: {uname}</p>}
+      </div>
+
+      <Card>
+        <CardContent className="p-6">
+          <form method="post" className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="password" className="text-sm font-medium">新密码</label>
+              <Input id="password" name="password" type="password" autoComplete="new-password" autoFocus required />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="verifyPassword" className="text-sm font-medium">确认密码</label>
+              <Input id="verifyPassword" name="verifyPassword" type="password" autoComplete="new-password" required />
+            </div>
+            <Button type="submit" className="w-full">重置密码</Button>
+          </form>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+/* ---------- Delete Pending ---------- */
+
+export function UserDeletePendingPage() {
+  return (
+    <motion.div
+      className="mx-auto max-w-sm space-y-6 pt-12"
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35 }}
+    >
+      <Card>
+        <CardContent className="p-8 text-center">
+          <Clock className="mx-auto size-10 text-amber-500" />
+          <h1 className="mt-4 text-xl font-semibold">账号删除已提交</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            你的账号将在 7 天后被永久删除。在此期间，你可以取消删除操作。
+          </p>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
+/* ---------- Change Mail Sent ---------- */
+
+export function ChangeMailSentPage() {
+  return (
+    <motion.div
+      className="mx-auto max-w-sm space-y-6 pt-12"
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35 }}
+    >
+      <Card>
+        <CardContent className="p-8 text-center">
+          <MailIcon className="mx-auto size-10 text-green-500" />
+          <h1 className="mt-4 text-xl font-semibold">验证邮件已发送</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            请查看新邮箱的收件箱，点击链接完成邮箱更换。
+          </p>
         </CardContent>
       </Card>
     </motion.div>

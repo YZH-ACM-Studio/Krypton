@@ -1,7 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import {
-  ArrowLeft,
   BookOpen,
   CheckCircle2,
   ChevronRight,
@@ -11,9 +10,7 @@ import {
   Edit3,
   FileText,
   HardDrive,
-  Maximize2,
   MessageSquare,
-  Minimize2,
   Send,
   Tag,
   Trophy,
@@ -81,6 +78,70 @@ function difficultyBadge(d: number | undefined) {
     <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium ${colors[d] || 'bg-muted'}`}>
       {labels[d] || `Lv.${d}`}
     </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/*  Resizable split pane                                               */
+/* ------------------------------------------------------------------ */
+
+function ResizableSplit({
+  left,
+  right,
+  defaultLeftPercent = 40,
+  minPercent = 20,
+  maxPercent = 80,
+}: {
+  left: ReactNode;
+  right: ReactNode;
+  defaultLeftPercent?: number;
+  minPercent?: number;
+  maxPercent?: number;
+}) {
+  const [leftPct, setLeftPct] = useState(defaultLeftPercent);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!draggingRef.current || !containerRef.current) return;
+      e.preventDefault();
+      const rect = containerRef.current.getBoundingClientRect();
+      const pct = ((e.clientX - rect.left) / rect.width) * 100;
+      setLeftPct(Math.max(minPercent, Math.min(maxPercent, pct)));
+    };
+    const onUp = () => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+  }, [minPercent, maxPercent]);
+
+  return (
+    <div ref={containerRef} className="flex flex-1 overflow-hidden">
+      <div style={{ width: `${leftPct}%` }} className="shrink-0 overflow-hidden">
+        {left}
+      </div>
+      <div
+        className="w-1.5 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
+        onMouseDown={() => {
+          draggingRef.current = true;
+          document.body.style.cursor = 'col-resize';
+          document.body.style.userSelect = 'none';
+        }}
+      />
+      <div className="flex-1 overflow-hidden">
+        {right}
+      </div>
+    </div>
   );
 }
 
@@ -209,23 +270,10 @@ export function ProblemDetailPage() {
 
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const [ideMode, setIdeMode] = useState(false);
-
-  const handleIdeSubmit = useCallback((lang: string, code: string) => {
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.action = `${problemUrl}/submit`;
-    const addField = (name: string, value: string) => {
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = name;
-      input.value = value;
-      form.appendChild(input);
-    };
-    addField('lang', lang);
-    addField('code', code);
-    document.body.appendChild(form);
-    form.submit();
-  }, [problemUrl]);
+  const submitUrl = `${problemUrl}/submit`;
+  const problemCanPretest = config.type === 'default' || config.type === undefined || config.type == null;
+  const ideCacheKey = `${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pid}`;
+  const preferredLang = bs.locale?.startsWith('zh') ? 'zh' : 'en';
 
   /* Fullscreen IDE mode */
   if (ideMode) {
@@ -247,22 +295,56 @@ export function ProblemDetailPage() {
             退出 IDE
           </Button>
         </div>
-        {/* Split view: statement + editor */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Left: problem statement */}
-          <div className="w-[45%] shrink-0 overflow-y-auto border-r p-4 sm:p-6">
-            <MarkdownView content={content} preferredLang={bs.locale?.startsWith('zh') ? 'zh' : 'en'} />
-          </div>
-          {/* Right: IDE */}
-          <div className="flex-1">
+        {/* Resizable split view */}
+        <ResizableSplit
+          left={
+            <div className="h-full overflow-y-auto p-4 sm:p-6 space-y-4">
+              {/* Problem header */}
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-lg font-bold leading-tight">{title}</h1>
+                  {statusBadge(psdoc.status)}
+                  {difficultyBadge(difficulty)}
+                </div>
+                {tags.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {tags.map((t) => (
+                      <Badge key={t} variant="secondary" className="text-[10px] px-1.5 py-0">
+                        <Tag className="mr-0.5 size-2.5" />
+                        {t}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Info chips */}
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border bg-muted/30 px-3 py-2">
+                <InfoChip icon={User} label="出题人" value={udoc.uname || `UID ${udoc._id || '?'}`} />
+                <InfoChip icon={Send} label="提交" value={nSubmit} />
+                <InfoChip icon={CheckCircle2} label="通过" value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>} />
+                <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} />
+              </div>
+
+              {/* Limits */}
+              <LimitsSection config={config} />
+
+              {/* Problem statement */}
+              <MarkdownView content={content} preferredLang={preferredLang} />
+            </div>
+          }
+          right={
             <KryptonIDE
               langs={config.langs || []}
               defaultLang={config.langs?.[0]}
-              onSubmit={handleIdeSubmit}
+              submitUrl={submitUrl}
+              canPretest={problemCanPretest}
+              cacheKey={ideCacheKey}
               className="h-full rounded-none border-0"
             />
-          </div>
-        </div>
+          }
+          defaultLeftPercent={40}
+        />
       </div>
     );
   }
@@ -353,7 +435,7 @@ export function ProblemDetailPage() {
             <TabsContent value="statement" className="mt-3">
               <Card>
                 <CardContent className="p-4 sm:p-6">
-                  <MarkdownView content={content} preferredLang={bs.locale?.startsWith('zh') ? 'zh' : 'en'} />
+                  <MarkdownView content={content} preferredLang={preferredLang} />
                 </CardContent>
               </Card>
             </TabsContent>
@@ -364,7 +446,9 @@ export function ProblemDetailPage() {
                   <KryptonIDE
                     langs={config.langs || []}
                     defaultLang={config.langs?.[0]}
-                    onSubmit={handleIdeSubmit}
+                    submitUrl={submitUrl}
+                    canPretest={problemCanPretest}
+                    cacheKey={ideCacheKey}
                     minHeight={450}
                   />
                 </CardContent>

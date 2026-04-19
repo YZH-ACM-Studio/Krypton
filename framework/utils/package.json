@@ -9,11 +9,12 @@
     "license": "AGPL-3.0-or-later",
     "preferUnplugged": true,
     "optionalPeerDependencies": {
-        "bson": "^7.0.0",
         "moment-timezone": "^0.5.48"
     },
     "dependencies": {
         "@hydrooj/register": "workspace:^",
+        "bson": "^7.0.0",
+        "moment": "^2.30.0",
         "cac": "^7.0.0",
         "fs-extra": "^11.3.4",
         "js-yaml": "^4.1.1",

@@ -40,7 +40,7 @@ function formatSize(bytes: number) {
 }
 
 const DIFFICULTY_OPTIONS = [
-  { value: 0, label: '未评定' },
+  { value: '', label: '未评定' },
   { value: 1, label: '入门' },
   { value: 2, label: '普及−' },
   { value: 3, label: '普及/提高−' },
@@ -234,7 +234,7 @@ export function ProblemEditPage() {
                     <select
                       id="edit-difficulty"
                       name="difficulty"
-                      defaultValue={pdoc.difficulty || 0}
+                      defaultValue={pdoc.difficulty || ''}
                       className="w-full rounded-md border bg-background px-3 py-2 text-sm"
                     >
                       {DIFFICULTY_OPTIONS.map((opt) => (

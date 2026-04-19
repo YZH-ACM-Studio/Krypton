@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ReactNode } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import {
   BookOpen,
@@ -10,6 +10,8 @@ import {
   Edit3,
   FileText,
   HardDrive,
+  History,
+  Loader2,
   MessageSquare,
   Send,
   Tag,
@@ -24,9 +26,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs-compound';
 import { MarkdownView } from '@/components/markdown-renderer';
-import { KryptonIDE } from '@/components/krypton-ide';
+import { KryptonIDE, type RecordEntry, getStatus, getLangEntry } from '@/components/krypton-ide';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
+import { extractSamples, stripSampleBlocks, type SampleCase } from '@/lib/samples';
+import { cn } from '@/lib/cn';
 
 type R = Record<string, any>;
 
@@ -82,6 +86,49 @@ function difficultyBadge(d: number | undefined) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Sample display blocks with copy buttons                            */
+/* ------------------------------------------------------------------ */
+
+function SampleBlocks({ samples }: { samples: SampleCase[] }) {
+  if (samples.length === 0) return null;
+  return (
+    <div className="space-y-3 mt-4">
+      <h3 className="text-sm font-semibold text-foreground">样例</h3>
+      {samples.map((s) => (
+        <div key={s.id} className="grid grid-cols-2 gap-2">
+          <SampleBlock label={`样例输入 #${s.id}`} content={s.input} />
+          <SampleBlock label={`样例输出 #${s.id}`} content={s.output} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SampleBlock({ label, content }: { label: string; content: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <div className="rounded-md border bg-muted/20 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/40">
+        <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {copied ? '已复制' : '复制'}
+        </button>
+      </div>
+      <pre className="p-3 font-mono text-xs whitespace-pre-wrap break-all min-h-[2em]">{content}</pre>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Resizable split pane                                               */
 /* ------------------------------------------------------------------ */
@@ -274,6 +321,72 @@ export function ProblemDetailPage() {
   const problemCanPretest = config.type === 'default' || config.type === undefined || config.type == null;
   const ideCacheKey = `${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pid}`;
   const preferredLang = bs.locale?.startsWith('zh') ? 'zh' : 'en';
+  const samples = useMemo(() => extractSamples(content), [content]);
+  const strippedContent = useMemo(() => {
+    if (samples.length === 0) return content;
+    if (typeof content === 'object' && content !== null) {
+      // content is already Record<string, string>
+      const stripped: Record<string, string> = {};
+      for (const [k, v] of Object.entries(content)) {
+        stripped[k] = typeof v === 'string' ? stripSampleBlocks(v) : (v as string);
+      }
+      return stripped;
+    }
+    if (typeof content === 'string') {
+      const trimmed = content.trim();
+      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            const stripped: Record<string, string> = {};
+            for (const [k, v] of Object.entries(parsed)) {
+              stripped[k] = typeof v === 'string' ? stripSampleBlocks(v) : (v as string);
+            }
+            return stripped;
+          }
+        } catch { /* not JSON, treat as plain markdown */ }
+      }
+      return stripSampleBlocks(trimmed);
+    }
+    return content;
+  }, [content, samples]);
+
+  /* ── Records state for IDE mode ── */
+  const [ideRecords, setIdeRecords] = useState<RecordEntry[]>([]);
+  const [showIdeRecords, setShowIdeRecords] = useState(false);
+  const [ideRecordsPct, setIdeRecordsPct] = useState(70); // top content takes 70%
+  const recordsDragging = useRef(false);
+  const recordsPanelRef = useRef<HTMLDivElement>(null);
+
+  const handleRecordsChange = useCallback((records: RecordEntry[]) => {
+    setIdeRecords(records);
+  }, []);
+  const handleToggleRecords = useCallback(() => {
+    setShowIdeRecords((p) => !p);
+  }, []);
+
+  /* Mouse handler for records panel height drag */
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!recordsDragging.current || !recordsPanelRef.current) return;
+      const rect = recordsPanelRef.current.getBoundingClientRect();
+      const pct = ((e.clientY - rect.top) / rect.height) * 100;
+      setIdeRecordsPct(Math.max(20, Math.min(85, pct)));
+    };
+    const onMouseUp = () => {
+      if (recordsDragging.current) {
+        recordsDragging.current = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
 
   /* Fullscreen IDE mode */
   if (ideMode) {
@@ -298,39 +411,131 @@ export function ProblemDetailPage() {
         {/* Resizable split view */}
         <ResizableSplit
           left={
-            <div className="h-full overflow-y-auto p-4 sm:p-6 space-y-4">
-              {/* Problem header */}
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-lg font-bold leading-tight">{title}</h1>
-                  {statusBadge(psdoc.status)}
-                  {difficultyBadge(difficulty)}
-                </div>
-                {tags.length > 0 && (
-                  <div className="mt-1.5 flex flex-wrap gap-1">
-                    {tags.map((t) => (
-                      <Badge key={t} variant="secondary" className="text-[10px] px-1.5 py-0">
-                        <Tag className="mr-0.5 size-2.5" />
-                        {t}
-                      </Badge>
-                    ))}
+            <div ref={recordsPanelRef} className="flex h-full flex-col">
+              {/* Problem content area */}
+              <div
+                className="overflow-y-auto p-4 sm:p-6 space-y-4"
+                style={{ height: showIdeRecords && ideRecords.length > 0 ? `${ideRecordsPct}%` : '100%' }}
+              >
+                {/* Problem header */}
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-lg font-bold leading-tight">{title}</h1>
+                    {statusBadge(psdoc.status)}
+                    {difficultyBadge(difficulty)}
                   </div>
-                )}
+                  {tags.length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap gap-1">
+                      {tags.map((t) => (
+                        <Badge key={t} variant="secondary" className="text-[10px] px-1.5 py-0">
+                          <Tag className="mr-0.5 size-2.5" />
+                          {t}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Info chips */}
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border bg-muted/30 px-3 py-2">
+                  <InfoChip icon={User} label="出题人" value={udoc.uname || `UID ${udoc._id || '?'}`} />
+                  <InfoChip icon={Send} label="提交" value={nSubmit} />
+                  <InfoChip icon={CheckCircle2} label="通过" value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>} />
+                  <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} />
+                </div>
+
+                {/* Limits */}
+                <LimitsSection config={config} />
+
+                {/* Problem statement */}
+                <MarkdownView content={strippedContent} preferredLang={preferredLang} />
+                <SampleBlocks samples={samples} />
               </div>
 
-              {/* Info chips */}
-              <div className="flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border bg-muted/30 px-3 py-2">
-                <InfoChip icon={User} label="出题人" value={udoc.uname || `UID ${udoc._id || '?'}`} />
-                <InfoChip icon={Send} label="提交" value={nSubmit} />
-                <InfoChip icon={CheckCircle2} label="通过" value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>} />
-                <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} />
-              </div>
-
-              {/* Limits */}
-              <LimitsSection config={config} />
-
-              {/* Problem statement */}
-              <MarkdownView content={content} preferredLang={preferredLang} />
+              {/* Records panel — bottom of left side */}
+              {showIdeRecords && ideRecords.length > 0 && (
+                <>
+                  {/* Drag handle for records height */}
+                  <div
+                    className="h-1.5 shrink-0 cursor-row-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
+                    onMouseDown={() => {
+                      recordsDragging.current = true;
+                      document.body.style.cursor = 'row-resize';
+                      document.body.style.userSelect = 'none';
+                    }}
+                  />
+                  <div className="flex flex-col min-h-0 overflow-hidden" style={{ height: `${100 - ideRecordsPct}%` }}>
+                    <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1.5 shrink-0">
+                      <History className="size-3.5 text-muted-foreground" />
+                      <span className="text-xs font-medium">提交记录</span>
+                      <span className="text-[10px] text-muted-foreground">({ideRecords.length})</span>
+                      <div className="flex-1" />
+                      <button
+                        type="button"
+                        onClick={() => setShowIdeRecords(false)}
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        收起
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b bg-muted/20 text-muted-foreground">
+                            <th className="px-3 py-1.5 text-left font-medium">状态</th>
+                            <th className="px-3 py-1.5 text-left font-medium">语言</th>
+                            <th className="px-3 py-1.5 text-left font-medium">时间</th>
+                            <th className="px-3 py-1.5 text-left font-medium">内存</th>
+                            <th className="px-3 py-1.5 text-left font-medium">提交时间</th>
+                            <th className="px-3 py-1.5 text-left font-medium" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ideRecords.map((r) => {
+                            const st = getStatus(r.status);
+                            return (
+                              <tr key={r.rid} className="border-b last:border-0 hover:bg-muted/20">
+                                <td className={cn('px-3 py-1.5 font-medium', st.className)}>
+                                  {r.status >= 20 ? (
+                                    <span className="inline-flex items-center gap-1">
+                                      <Loader2 className="size-3 animate-spin" />
+                                      {st.label}
+                                    </span>
+                                  ) : (
+                                    st.label
+                                  )}
+                                </td>
+                                <td className="px-3 py-1.5">{getLangEntry(r.lang).label}</td>
+                                <td className="px-3 py-1.5 font-mono">
+                                  {r.time != null ? `${r.time} ms` : '—'}
+                                </td>
+                                <td className="px-3 py-1.5 font-mono">
+                                  {r.memory != null
+                                    ? r.memory >= 1024
+                                      ? `${(r.memory / 1024).toFixed(0)} MB`
+                                      : `${r.memory} KB`
+                                    : '—'}
+                                </td>
+                                <td className="px-3 py-1.5 text-muted-foreground">
+                                  {new Date(r.timestamp).toLocaleTimeString()}
+                                </td>
+                                <td className="px-3 py-1.5">
+                                  <a
+                                    href={r.url}
+                                    className="text-primary hover:underline"
+                                  >
+                                    详情
+                                  </a>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           }
           right={
@@ -340,6 +545,10 @@ export function ProblemDetailPage() {
               submitUrl={submitUrl}
               canPretest={problemCanPretest}
               cacheKey={ideCacheKey}
+              samples={samples}
+              onRecordsChange={handleRecordsChange}
+              onToggleRecords={handleToggleRecords}
+              showRecordsButton
               className="h-full rounded-none border-0"
             />
           }
@@ -435,7 +644,8 @@ export function ProblemDetailPage() {
             <TabsContent value="statement" className="mt-3">
               <Card>
                 <CardContent className="p-4 sm:p-6">
-                  <MarkdownView content={content} preferredLang={preferredLang} />
+                  <MarkdownView content={strippedContent} preferredLang={preferredLang} />
+                  <SampleBlocks samples={samples} />
                 </CardContent>
               </Card>
             </TabsContent>
@@ -449,6 +659,7 @@ export function ProblemDetailPage() {
                     submitUrl={submitUrl}
                     canPretest={problemCanPretest}
                     cacheKey={ideCacheKey}
+                    samples={samples}
                     minHeight={450}
                   />
                 </CardContent>

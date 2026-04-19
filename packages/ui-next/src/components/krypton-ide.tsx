@@ -72,15 +72,22 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Clock,
+  ClipboardCopy,
+  FileUp,
+  History,
   Loader2,
   Maximize2,
   Minimize2,
   Play,
+  Plus,
+  RotateCcw,
   Send,
   Settings2,
   Terminal,
   XCircle,
 } from 'lucide-react';
+import type { SampleCase } from '@/lib/samples';
 
 /* ================================================================== */
 /*  Language registry                                                  */
@@ -112,7 +119,7 @@ const LANGUAGES: Record<string, LangEntry> = {
   kt: { label: 'Kotlin', extension: () => [] },
 };
 
-function getLangEntry(id: string): LangEntry {
+export function getLangEntry(id: string): LangEntry {
   return LANGUAGES[id] || { label: id, extension: () => [] };
 }
 
@@ -213,7 +220,7 @@ const STATUS_MAP: Record<number, StatusDisplay> = {
   30: { label: '格式错误', className: 'text-red-500' },
 };
 
-function getStatus(s: number): StatusDisplay {
+export function getStatus(s: number): StatusDisplay {
   return STATUS_MAP[s] || { label: `Status ${s}`, className: 'text-muted-foreground' };
 }
 
@@ -249,17 +256,6 @@ function SettingRow({ label, children }: { label: string; children: React.ReactN
     <div className="flex items-center justify-between">
       <span className="text-sm">{label}</span>
       {children}
-    </div>
-  );
-}
-
-function OutputBlock({ label, content }: { label: string; content: string }) {
-  return (
-    <div>
-      <p className="mb-1 text-xs font-medium text-muted-foreground">{label}</p>
-      <pre className="max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs font-mono whitespace-pre-wrap break-all">
-        {content || '(空)'}
-      </pre>
     </div>
   );
 }
@@ -410,7 +406,7 @@ function SettingsDialog({
 }
 
 /* ================================================================== */
-/*  Pretest result dialog                                              */
+/*  Pretest result dialog (kept for reference, unused)                 */
 /* ================================================================== */
 
 interface PretestResult {
@@ -430,19 +426,49 @@ interface PretestResult {
   error?: string;
 }
 
-function PretestResultDialog({
-  open,
-  onOpenChange,
-  result,
-  input,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  result: PretestResult | null;
-  input: string;
-}) {
-  if (!result) return null;
+export interface RecordEntry {
+  rid: string;
+  url: string;
+  lang: string;
+  status: number;
+  time?: number;
+  memory?: number;
+  timestamp: number;
+}
 
+/* ================================================================== */
+/*  Inline pretest result (shown inside the pretest panel)             */
+/* ================================================================== */
+
+function diffLines(actual: string, expected: string): { type: 'same' | 'add' | 'del'; text: string }[] {
+  const a = actual.split('\n');
+  const b = expected.split('\n');
+  const maxLen = Math.max(a.length, b.length);
+  const result: { type: 'same' | 'add' | 'del'; text: string }[] = [];
+  for (let i = 0; i < maxLen; i++) {
+    const aLine = a[i] ?? '';
+    const bLine = b[i] ?? '';
+    if (aLine === bLine) {
+      result.push({ type: 'same', text: aLine });
+    } else {
+      if (i < b.length) result.push({ type: 'del', text: bLine });
+      if (i < a.length) result.push({ type: 'add', text: aLine });
+    }
+  }
+  return result;
+}
+
+function PretestResultInline({
+  result,
+  expectedOutput,
+  activeResultTab,
+  onResultTabChange,
+}: {
+  result: PretestResult;
+  expectedOutput: string;
+  activeResultTab: 'output' | 'diff' | 'compiler';
+  onResultTabChange: (t: 'output' | 'diff' | 'compiler') => void;
+}) {
   const status = getStatus(result.status ?? 8);
   const isAccepted = result.status === 1;
   const time = result.time != null ? `${result.time} ms` : '—';
@@ -452,49 +478,105 @@ function PretestResultDialog({
         ? `${(result.memory / 1024).toFixed(1)} MB`
         : `${result.memory} KB`
       : '—';
-  const output =
-    result.testCases?.[0]?.message ||
-    result.stdout ||
-    result.judgeTexts?.join('\n') ||
-    '';
+  const actualOutput =
+    result.testCases?.[0]?.message
+    || result.stdout
+    || result.judgeTexts?.join('\n')
+    || '';
   const compilerOutput = result.compilerTexts?.join('\n') || '';
   const stderr = result.stderr || '';
+  const hasExpected = expectedOutput.trim().length > 0;
+  const outputMatch = hasExpected && actualOutput.trim() === expectedOutput.trim();
+
+  const tabs: { id: 'output' | 'diff' | 'compiler'; label: string; show: boolean }[] = [
+    { id: 'output', label: '输出', show: true },
+    { id: 'diff', label: hasExpected ? (outputMatch ? '✓ 匹配' : '✗ 差异') : '比对', show: hasExpected },
+    { id: 'compiler', label: '编译', show: !!(compilerOutput || stderr) },
+  ];
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-125 max-w-[95vw]" onClose={() => onOpenChange(false)}>
-        <DialogHeader>
-          <DialogTitle>自测结果</DialogTitle>
-        </DialogHeader>
-        <div className="max-h-[60vh] space-y-4 overflow-y-auto p-6 pt-2">
-          {/* Status banner */}
-          <div className="flex items-center gap-3">
-            {isAccepted ? (
-              <CheckCircle2 className="size-8 shrink-0 text-green-500" />
-            ) : (
-              <XCircle className="size-8 shrink-0 text-red-500" />
+    <div className="flex flex-col flex-1 min-h-0">
+      {/* Result header */}
+      <div className="flex items-center gap-2 bg-muted/20 px-3 py-1 border-b shrink-0">
+        {isAccepted ? (
+          <CheckCircle2 className="size-3.5 text-green-500" />
+        ) : (
+          <XCircle className="size-3.5 text-red-500" />
+        )}
+        <span className={cn('text-xs font-medium', status.className)}>{status.label}</span>
+        <span className="text-[10px] text-muted-foreground">{time} · {memory}</span>
+        {hasExpected && (
+          <span className={cn('text-[10px] font-medium ml-auto', outputMatch ? 'text-green-500' : 'text-red-500')}>
+            {outputMatch ? '输出匹配' : '输出不匹配'}
+          </span>
+        )}
+      </div>
+
+      {/* Result sub-tabs */}
+      <div className="flex items-center gap-0 border-b bg-muted/10 px-1 shrink-0">
+        {tabs.filter((t) => t.show).map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onResultTabChange(tab.id)}
+            className={cn(
+              'px-3 py-1 text-[11px] transition-colors border-b -mb-px',
+              activeResultTab === tab.id
+                ? 'border-primary text-foreground font-medium'
+                : 'border-transparent text-muted-foreground hover:text-foreground',
             )}
-            <div>
-              <p className={cn('text-lg font-bold', status.className)}>{status.label}</p>
-              <p className="text-xs text-muted-foreground">
-                用时 {time} · 内存 {memory}
-              </p>
-            </div>
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Result content */}
+      <div className="flex-1 overflow-auto min-h-0">
+        {activeResultTab === 'output' && (
+          <pre className="p-2 font-mono text-xs whitespace-pre-wrap break-all">
+            {actualOutput || '(无输出)'}
+          </pre>
+        )}
+
+        {activeResultTab === 'diff' && hasExpected && (
+          <div className="p-2 font-mono text-xs">
+            {diffLines(actualOutput, expectedOutput).map((line, i) => (
+              <div
+                key={i}
+                className={cn(
+                  'px-1',
+                  line.type === 'add' && 'bg-red-500/10 text-red-600 dark:text-red-400',
+                  line.type === 'del' && 'bg-green-500/10 text-green-600 dark:text-green-400',
+                )}
+              >
+                <span className="inline-block w-4 text-muted-foreground select-none">
+                  {line.type === 'same' ? ' ' : line.type === 'add' ? '+' : '-'}
+                </span>
+                {line.text || ' '}
+              </div>
+            ))}
           </div>
+        )}
 
-          <OutputBlock label="输入" content={input} />
-          {output && <OutputBlock label="输出" content={output} />}
-          {compilerOutput && <OutputBlock label="编译信息" content={compilerOutput} />}
-          {stderr && <OutputBlock label="错误输出" content={stderr} />}
+        {activeResultTab === 'compiler' && (
+          <div className="p-2 space-y-2">
+            {compilerOutput && (
+              <pre className="font-mono text-xs whitespace-pre-wrap break-all">{compilerOutput}</pre>
+            )}
+            {stderr && (
+              <pre className="font-mono text-xs whitespace-pre-wrap break-all text-red-500">{stderr}</pre>
+            )}
+          </div>
+        )}
 
-          {result.error && (
-            <div className="rounded-md bg-red-500/10 p-3 text-sm text-red-500">
-              {result.error}
-            </div>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+        {result.error && (
+          <div className="mx-2 mt-2 rounded-md bg-red-500/10 p-2 text-xs text-red-500">
+            {result.error}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -521,6 +603,14 @@ export interface KryptonIDEProps {
   minHeight?: number;
   /** localStorage key suffix for code caching (e.g. "uid/domain/pid") */
   cacheKey?: string;
+  /** Auto-detected sample test cases from the problem statement */
+  samples?: SampleCase[];
+  /** Called when records list changes (for external rendering) */
+  onRecordsChange?: (records: RecordEntry[]) => void;
+  /** Called when user toggles the records panel */
+  onToggleRecords?: () => void;
+  /** Whether to show the records toggle button */
+  showRecordsButton?: boolean;
 }
 
 export function KryptonIDE({
@@ -533,6 +623,10 @@ export function KryptonIDE({
   className,
   minHeight = 400,
   cacheKey,
+  samples = [],
+  onRecordsChange,
+  onToggleRecords,
+  showRecordsButton = false,
 }: KryptonIDEProps) {
   /* ── refs ── */
   const containerRef = useRef<HTMLDivElement>(null);
@@ -543,6 +637,12 @@ export function KryptonIDE({
   const submitRef = useRef<() => void>(() => {});
   const pretestRef = useRef<() => void>(() => {});
   const pretestDragging = useRef(false);
+  const pretestHDragging = useRef(false);
+  const pretestVDragging = useRef(false);
+  const pretestPanelRef = useRef<HTMLDivElement>(null);
+  const langMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
 
   /* ── state ── */
   const [selectedLang, setSelectedLang] = useState(() => {
@@ -554,15 +654,78 @@ export function KryptonIDE({
   });
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showPretest, setShowPretest] = useState(false);
-  const [pretestInput, setPretestInput] = useState('');
-  const [pretestHeight, setPretestHeight] = useState(150);
+  const [pretestHeight, setPretestHeight] = useState(200);
   const [pretestLoading, setPretestLoading] = useState(false);
   const [pretestResult, setPretestResult] = useState<PretestResult | null>(null);
-  const [showPretestResult, setShowPretestResult] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [config, setConfig] = useState<IdeConfig>(loadConfig);
+  const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
+  const [submitCooldown, setSubmitCooldown] = useState(0);
+  const [pretestCooldown, setPretestCooldown] = useState(0);
+  const [records, setRecords] = useState<RecordEntry[]>([]);
+  const [showRecords, setShowRecords] = useState(false);
+
+  /* ── Notify parent when records change ── */
+  useEffect(() => {
+    onRecordsChange?.(records);
+  }, [records, onRecordsChange]);
+
+  /* ── Pretest tabs: sample cases + custom tab ── */
+  type PretestTab = { id: string; label: string; input: string; expectedOutput: string };
+  const [pretestTabs, setPretestTabs] = useState<PretestTab[]>(() => {
+    const tabs: PretestTab[] = samples.map((s) => ({
+      id: `sample-${s.id}`,
+      label: `样例 ${s.id}`,
+      input: s.input,
+      expectedOutput: s.output,
+    }));
+    tabs.push({ id: 'custom', label: '自定义', input: '', expectedOutput: '' });
+    return tabs;
+  });
+  const [activeTestTab, setActiveTestTab] = useState(pretestTabs[0]?.id || 'custom');
+  const [pretestResultTab, setPretestResultTab] = useState<'output' | 'diff' | 'compiler'>('output');
+  const [pretestLeftPct, setPretestLeftPct] = useState(50); // horizontal split: left(input) vs right(result)
+  const [pretestInputPct, setPretestInputPct] = useState(65); // vertical split within left: input vs expected output
+  const activeTab = pretestTabs.find((t) => t.id === activeTestTab) || pretestTabs[pretestTabs.length - 1];
+  const isSampleTab = activeTab.id.startsWith('sample-');
+
+  /* ── sync samples if they change ── */
+  useEffect(() => {
+    setPretestTabs((prev) => {
+      const custom = prev.filter((t) => t.id === 'custom' || t.id.startsWith('custom-'));
+      const sampleTabs: PretestTab[] = samples.map((s) => ({
+        id: `sample-${s.id}`,
+        label: `样例 ${s.id}`,
+        input: s.input,
+        expectedOutput: s.output,
+      }));
+      const customTabs = custom.length > 0 ? custom : [{ id: 'custom', label: '自定义', input: '', expectedOutput: '' }];
+      return [...sampleTabs, ...customTabs];
+    });
+  }, [samples]);
+
+  const updateTabField = useCallback((tabId: string, field: 'input' | 'expectedOutput', value: string) => {
+    setPretestTabs((prev) =>
+      prev.map((t) => (t.id === tabId ? { ...t, [field]: value } : t)),
+    );
+  }, []);
+
+  const addCustomTab = useCallback(() => {
+    const id = `custom-${Date.now()}`;
+    setPretestTabs((prev) => [...prev, { id, label: `自定义 ${prev.filter((t) => t.id.startsWith('custom')).length + 1}`, input: '', expectedOutput: '' }]);
+    setActiveTestTab(id);
+  }, []);
+
+  const removeTab = useCallback((tabId: string) => {
+    setPretestTabs((prev) => {
+      const next = prev.filter((t) => t.id !== tabId);
+      if (next.length === 0) next.push({ id: 'custom', label: '自定义', input: '', expectedOutput: '' });
+      return next;
+    });
+    setActiveTestTab((cur) => (cur === tabId ? (pretestTabs[0]?.id || 'custom') : cur));
+  }, [pretestTabs]);
 
   /* ── config persistence ── */
   const updateConfig = useCallback((c: IdeConfig) => {
@@ -632,6 +795,14 @@ export function KryptonIDE({
           }, 500);
         }
       }),
+      /* Cursor position tracking */
+      EditorView.updateListener.of((update) => {
+        if (update.selectionSet || update.docChanged) {
+          const pos = update.state.selection.main.head;
+          const line = update.state.doc.lineAt(pos);
+          setCursorPos({ line: line.number, col: pos - line.from + 1 });
+        }
+      }),
     ];
   }, [selectedLang, config, codeCacheKey]);
 
@@ -666,9 +837,34 @@ export function KryptonIDE({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extensions]);
 
+  /* ── Poll a submitted record for final status ── */
+  const pollRecord = useCallback(async (rid: string, url: string) => {
+    for (let i = 0; i < 120; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      if (!mountedRef.current) return;
+      try {
+        const res = await fetch(url, {
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+        });
+        const data = await res.json();
+        const rdoc = data.rdoc || data;
+        const s: number = rdoc.status ?? 0;
+        setRecords((prev) =>
+          prev.map((r) =>
+            r.rid === rid ? { ...r, status: s, time: rdoc.time, memory: rdoc.memory } : r,
+          ),
+        );
+        if (s > 0 && s < 20) return;
+      } catch {
+        break;
+      }
+    }
+  }, []);
+
   /* ── Submit handler ── */
   const handleSubmit = useCallback(async () => {
-    if (submitting) return;
+    if (submitting || submitCooldown > 0) return;
     const code = getCode();
     if (!code.trim()) return;
 
@@ -687,41 +883,52 @@ export function KryptonIDE({
       });
       if (res.ok) {
         const data = await res.json();
+        const rid = data.rid;
+        if (rid) {
+          const url = data.url || `/record/${rid}`;
+          const entry: RecordEntry = {
+            rid,
+            url,
+            lang: selectedLang,
+            status: 20,
+            timestamp: Date.now(),
+          };
+          setRecords((prev) => [entry, ...prev]);
+          setShowRecords(true);
+          setSubmitCooldown(3);
+          pollRecord(rid, url);
+          return;
+        }
         if (data.url) {
           window.location.href = data.url;
           return;
         }
       }
-      // Fallback
       onSubmit?.(selectedLang, code);
     } catch {
       onSubmit?.(selectedLang, code);
     } finally {
       setSubmitting(false);
     }
-  }, [submitUrl, selectedLang, getCode, onSubmit, submitting]);
+  }, [submitUrl, selectedLang, getCode, onSubmit, submitting, submitCooldown, pollRecord]);
 
-  /* ── Pretest handler ── */
-  const handlePretest = useCallback(async () => {
+  /* ── Pretest handler (runs a single test with given input) ── */
+  const runPretest = useCallback(async (input: string) => {
     if (!submitUrl || pretestLoading || !canPretest) return;
-
-    // Auto-show panel if hidden
-    if (!showPretest) {
-      setShowPretest(true);
-      return;
-    }
 
     pretestAbort.current?.abort();
     const abort = new AbortController();
     pretestAbort.current = abort;
     setPretestLoading(true);
+    setPretestCooldown(3);
+    setPretestResult(null);
 
     try {
       const code = getCode();
       const res = await fetch(submitUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ lang: selectedLang, code, pretest: true, input: [pretestInput] }),
+        body: JSON.stringify({ lang: selectedLang, code, pretest: true, input: [input] }),
         signal: abort.signal,
         credentials: 'same-origin',
       });
@@ -750,44 +957,71 @@ export function KryptonIDE({
         // Final status: 1-19
         if (s > 0 && s < 20) {
           setPretestResult(rdoc);
-          setShowPretestResult(true);
+          setPretestResultTab('output');
           return;
         }
       }
 
       setPretestResult({ status: 8, error: '评测超时，请稍后重试' });
-      setShowPretestResult(true);
     } catch (e: any) {
       if (e.name !== 'AbortError') {
         setPretestResult({ status: 8, error: e.message || '请求失败' });
-        setShowPretestResult(true);
       }
     } finally {
       setPretestLoading(false);
     }
-  }, [submitUrl, selectedLang, pretestInput, pretestLoading, canPretest, showPretest, getCode]);
+  }, [submitUrl, selectedLang, pretestLoading, canPretest, getCode]);
+
+  /** Toolbar "运行全部自测" — run current active tab */
+  const handlePretest = useCallback(() => {
+    if (!showPretest) {
+      setShowPretest(true);
+      return;
+    }
+    runPretest(activeTab.input);
+  }, [showPretest, activeTab, runPretest]);
 
   /* ── Ref bridge so keymap closures always call latest handlers ── */
   submitRef.current = handleSubmit;
   pretestRef.current = handlePretest;
 
-  /* ── Pretest panel resize via drag ── */
+  /* ── Pretest panel resize via drag (top edge, horizontal split, vertical split) ── */
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
-      if (!pretestDragging.current) return;
       e.preventDefault();
-      // The parent container is the IDE root; measure from its bottom
-      const parent = containerRef.current?.parentElement;
-      if (!parent) return;
-      const rect = parent.getBoundingClientRect();
-      const newH = rect.bottom - e.clientY;
-      setPretestHeight(Math.max(60, Math.min(rect.height * 0.6, newH)));
+
+      // Top-edge drag (panel height)
+      if (pretestDragging.current) {
+        const parent = containerRef.current?.parentElement;
+        if (!parent) return;
+        const rect = parent.getBoundingClientRect();
+        const newH = rect.bottom - e.clientY;
+        setPretestHeight(Math.max(120, Math.min(rect.height * 0.6, newH)));
+      }
+
+      // Horizontal drag (left/right split)
+      if (pretestHDragging.current && pretestPanelRef.current) {
+        const rect = pretestPanelRef.current.getBoundingClientRect();
+        const pct = ((e.clientX - rect.left) / rect.width) * 100;
+        setPretestLeftPct(Math.max(20, Math.min(80, pct)));
+      }
+
+      // Vertical drag (input / expected output split within left column)
+      if (pretestVDragging.current && pretestPanelRef.current) {
+        const rect = pretestPanelRef.current.getBoundingClientRect();
+        const pct = ((e.clientY - rect.top) / rect.height) * 100;
+        setPretestInputPct(Math.max(20, Math.min(80, pct)));
+      }
     };
     const onUp = () => {
-      if (!pretestDragging.current) return;
+      const wasDragging = pretestDragging.current || pretestHDragging.current || pretestVDragging.current;
       pretestDragging.current = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
+      pretestHDragging.current = false;
+      pretestVDragging.current = false;
+      if (wasDragging) {
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -800,10 +1034,82 @@ export function KryptonIDE({
   /* ── Cleanup ── */
   useEffect(() => {
     return () => {
+      mountedRef.current = false;
       pretestAbort.current?.abort();
       clearTimeout(cacheTimer.current);
     };
   }, []);
+
+  /* ── Click-outside to close language menu ── */
+  useEffect(() => {
+    if (!showLangMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (langMenuRef.current && !langMenuRef.current.contains(e.target as Node)) {
+        setShowLangMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showLangMenu]);
+
+  /* ── Escape to exit fullscreen ── */
+  useEffect(() => {
+    if (!fullscreen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFullscreen(false);
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [fullscreen]);
+
+  /* ── Submit cooldown timer ── */
+  useEffect(() => {
+    if (submitCooldown <= 0) return;
+    const t = setInterval(() => setSubmitCooldown((c) => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [submitCooldown > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ── Pretest cooldown timer ── */
+  useEffect(() => {
+    if (pretestCooldown <= 0) return;
+    const t = setInterval(() => setPretestCooldown((c) => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [pretestCooldown > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ── File upload handler ── */
+  const handleFileUpload = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = reader.result as string;
+        if (viewRef.current) {
+          viewRef.current.dispatch({
+            changes: { from: 0, to: viewRef.current.state.doc.length, insert: text },
+          });
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    },
+    [],
+  );
+
+  /* ── Reset code handler ── */
+  const handleReset = useCallback(() => {
+    if (!confirm('确定要重置代码吗？这将清除所有未保存的更改。')) return;
+    if (viewRef.current) {
+      viewRef.current.dispatch({
+        changes: { from: 0, to: viewRef.current.state.doc.length, insert: defaultCode },
+      });
+    }
+    if (codeCacheKey) {
+      try {
+        localStorage.removeItem(codeCacheKey);
+      } catch { /* empty */ }
+    }
+  }, [defaultCode, codeCacheKey]);
 
   /* ── Derived values ── */
   const availableLangs = langs.length > 0 ? langs : Object.keys(LANGUAGES);
@@ -822,7 +1128,7 @@ export function KryptonIDE({
       {/* ── Toolbar ── */}
       <div className="flex items-center gap-1 border-b bg-muted/50 px-2 py-1">
         {/* Language selector */}
-        <div className="relative">
+        <div className="relative" ref={langMenuRef}>
           <button
             type="button"
             onClick={() => setShowLangMenu((p) => !p)}
@@ -878,15 +1184,17 @@ export function KryptonIDE({
               size="sm"
               variant="outline"
               className="h-7 gap-1 text-xs"
-              disabled={pretestLoading}
+              disabled={pretestLoading || pretestCooldown > 0}
               onClick={handlePretest}
             >
               {pretestLoading ? (
                 <Loader2 className="size-3 animate-spin" />
+              ) : pretestCooldown > 0 ? (
+                <Clock className="size-3" />
               ) : (
                 <Play className="size-3" />
               )}
-              运行
+              {pretestCooldown > 0 ? `${pretestCooldown}s` : '运行全部自测'}
               <kbd className="ml-0.5 rounded border bg-muted px-1 text-[10px] font-normal">F9</kbd>
             </Button>
           </>
@@ -897,22 +1205,56 @@ export function KryptonIDE({
           <Button
             size="sm"
             className="h-7 gap-1 text-xs"
-            disabled={submitting}
+            disabled={submitting || submitCooldown > 0}
             onClick={handleSubmit}
           >
             {submitting ? (
               <Loader2 className="size-3 animate-spin" />
+            ) : submitCooldown > 0 ? (
+              <Clock className="size-3" />
             ) : (
               <Send className="size-3" />
             )}
-            提交
+            {submitCooldown > 0 ? `${submitCooldown}s` : '提交'}
             <kbd className="ml-0.5 rounded bg-primary-foreground/20 px-1 text-[10px] font-normal">
               F10
             </kbd>
           </Button>
         )}
 
+        {/* Records toggle — right next to submit */}
+        {showRecordsButton && (
+          <button
+            type="button"
+            onClick={onToggleRecords}
+            className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            title="提交记录"
+          >
+            <History className="size-3.5" />
+          </button>
+        )}
+
         <div className="flex-1" />
+
+        {/* Upload file */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          title="上传代码文件"
+        >
+          <FileUp className="size-3.5" />
+        </button>
+
+        {/* Reset code */}
+        <button
+          type="button"
+          onClick={handleReset}
+          className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          title="重置代码"
+        >
+          <RotateCcw className="size-3.5" />
+        </button>
 
         {/* Settings */}
         <button
@@ -947,13 +1289,19 @@ export function KryptonIDE({
           minHeight: fullscreen ? undefined : minHeight,
           backgroundColor: themeBg,
         }}
-        onClick={() => setShowLangMenu(false)}
       />
 
-      {/* ── Pretest input panel (collapsible, resizable height) ── */}
+      {/* ── Status bar ── */}
+      <div className="flex items-center border-t bg-muted/40 px-3 py-0.5 text-[11px] text-muted-foreground">
+        <span>Ln {cursorPos.line}, Col {cursorPos.col}</span>
+        <div className="flex-1" />
+        <span>{langLabel}</span>
+      </div>
+
+      {/* ── Pretest panel (multi-tab, inline results) ── */}
       {showPretest && canPretest && (
-        <div className="border-t" style={{ height: pretestHeight, minHeight: 60 }}>
-          {/* Drag handle — top edge */}
+        <div className="border-t flex flex-col" style={{ height: pretestHeight, minHeight: 120 }}>
+          {/* Drag handle — top edge for panel height */}
           <div
             className="h-1.5 shrink-0 cursor-row-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
             onMouseDown={() => {
@@ -962,25 +1310,166 @@ export function KryptonIDE({
               document.body.style.userSelect = 'none';
             }}
           />
-          <div className="flex h-[calc(100%-6px)] flex-col">
-            <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1.5">
-              <Terminal className="size-3.5 text-muted-foreground" />
-              <span className="text-xs font-medium">自测输入</span>
-              <div className="flex-1" />
+
+          {/* Tab bar */}
+          <div className="flex items-center gap-0 border-b bg-muted/30 px-1 shrink-0 overflow-x-auto overflow-y-hidden" style={{ scrollbarWidth: 'none' }}>
+            {pretestTabs.map((tab) => (
               <button
+                key={tab.id}
                 type="button"
-                onClick={() => setShowPretest(false)}
-                className="text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => setActiveTestTab(tab.id)}
+                className={cn(
+                  'flex items-center gap-1 whitespace-nowrap px-3 py-1.5 text-xs transition-colors border-b-2 -mb-px shrink-0',
+                  activeTestTab === tab.id
+                    ? 'border-primary text-primary font-medium'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
               >
-                收起
+                {tab.label}
+                {/* close button for custom tabs (only if more than one custom tab) */}
+                {tab.id.startsWith('custom') && pretestTabs.filter((t) => t.id.startsWith('custom') || t.id === 'custom').length > 1 && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); removeTab(tab.id); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); removeTab(tab.id); } }}
+                    className="ml-1 rounded-full p-0.5 hover:bg-accent"
+                  >
+                    <XCircle className="size-3" />
+                  </span>
+                )}
               </button>
-            </div>
-            <textarea
-              value={pretestInput}
-              onChange={(e) => setPretestInput(e.target.value)}
-              placeholder="在此输入测试数据…"
-              className="block flex-1 w-full resize-none border-0 bg-background p-3 font-mono text-xs focus:outline-none"
+            ))}
+            <button
+              type="button"
+              onClick={addCustomTab}
+              className="flex items-center gap-0.5 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground shrink-0"
+              title="添加自定义测试"
+            >
+              <Plus className="size-3" />
+            </button>
+            <div className="flex-1" />
+            {/* Per-tab run button */}
+            <button
+              type="button"
+              disabled={pretestLoading || pretestCooldown > 0}
+              onClick={() => runPretest(activeTab.input)}
+              className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 shrink-0"
+              title="运行当前测试"
+            >
+              {pretestLoading ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
+              运行
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPretest(false)}
+              className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground shrink-0"
+            >
+              收起
+            </button>
+          </div>
+
+          {/* Tab content: resizable 2-column layout (input left, result right) */}
+          <div ref={pretestPanelRef} className="flex flex-1 min-h-0 overflow-hidden relative">
+            {/* Crosshair at intersection of horizontal and vertical drag handles */}
+            <div
+              className="absolute z-10 cursor-move bg-border transition-colors hover:bg-primary/60 active:bg-primary/80"
+              style={{
+                left: `calc(${pretestLeftPct}% - 3px)`,
+                top: `calc(${pretestInputPct}% - 3px)`,
+                width: 7,
+                height: 7,
+              }}
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                pretestHDragging.current = true;
+                pretestVDragging.current = true;
+                document.body.style.cursor = 'move';
+                document.body.style.userSelect = 'none';
+              }}
             />
+            {/* Left: input + expected output (vertically resizable) */}
+            <div className="flex flex-col min-w-0 min-h-0 overflow-hidden" style={{ width: `${pretestLeftPct}%` }}>
+              {/* Input section */}
+              <div className="flex flex-col min-h-0 overflow-hidden" style={{ height: `${pretestInputPct}%` }}>
+                <div className="flex items-center gap-2 bg-muted/20 px-3 py-1 border-b shrink-0">
+                  <span className="text-[11px] font-medium text-muted-foreground">输入</span>
+                  {isSampleTab && <span className="text-[10px] text-muted-foreground/60">· 样例（只读）</span>}
+                </div>
+                {isSampleTab ? (
+                  <pre className="flex-1 w-full overflow-auto bg-muted/10 p-2 font-mono text-xs whitespace-pre-wrap break-all min-h-0">
+                    {activeTab.input || '(空)'}
+                  </pre>
+                ) : (
+                  <textarea
+                    value={activeTab.input}
+                    onChange={(e) => updateTabField(activeTestTab, 'input', e.target.value)}
+                    placeholder="在此输入测试数据…"
+                    className="flex-1 w-full resize-none border-0 bg-background p-2 font-mono text-xs focus:outline-none min-h-0"
+                  />
+                )}
+              </div>
+
+              {/* Vertical drag handle (between input and expected output) */}
+              <div
+                className="h-1 shrink-0 cursor-row-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
+                onMouseDown={() => {
+                  pretestVDragging.current = true;
+                  document.body.style.cursor = 'row-resize';
+                  document.body.style.userSelect = 'none';
+                }}
+              />
+
+              {/* Expected output section */}
+              <div className="flex flex-col min-h-0 overflow-hidden" style={{ height: `${100 - pretestInputPct}%` }}>
+                <div className="flex items-center gap-2 bg-muted/20 px-3 py-1 border-b shrink-0">
+                  <span className="text-[11px] font-medium text-muted-foreground">期望输出{isSampleTab ? '' : '（可选）'}</span>
+                </div>
+                {isSampleTab ? (
+                  <pre className="flex-1 w-full overflow-auto bg-muted/10 p-2 font-mono text-xs whitespace-pre-wrap break-all min-h-0">
+                    {activeTab.expectedOutput || '(空)'}
+                  </pre>
+                ) : (
+                  <textarea
+                    value={activeTab.expectedOutput}
+                    onChange={(e) => updateTabField(activeTestTab, 'expectedOutput', e.target.value)}
+                    placeholder="输入期望输出以便自动比对…"
+                    className="flex-1 w-full resize-none border-0 bg-background p-2 font-mono text-xs focus:outline-none min-h-0"
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Horizontal drag handle (between left and right) — has special cursor at intersection with vertical handle */}
+            <div
+              className="w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
+              onMouseDown={() => {
+                pretestHDragging.current = true;
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+              }}
+            />
+
+            {/* Right: result panel */}
+            <div className="flex flex-col min-w-0 min-h-0 overflow-hidden" style={{ width: `${100 - pretestLeftPct}%` }}>
+              {pretestLoading ? (
+                <div className="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  评测中…
+                </div>
+              ) : pretestResult ? (
+                <PretestResultInline
+                  result={pretestResult}
+                  expectedOutput={activeTab.expectedOutput}
+                  activeResultTab={pretestResultTab}
+                  onResultTabChange={setPretestResultTab}
+                />
+              ) : (
+                <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
+                  按 F9 或点击"运行"开始自测
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -992,11 +1481,15 @@ export function KryptonIDE({
         config={config}
         onChange={updateConfig}
       />
-      <PretestResultDialog
-        open={showPretestResult}
-        onOpenChange={setShowPretestResult}
-        result={pretestResult}
-        input={pretestInput}
+
+      {/* ── Hidden file input ── */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".c,.cc,.cpp,.cxx,.h,.hpp,.py,.java,.js,.ts,.go,.rs,.rb,.cs,.hs,.php,.kt,.pas,.txt"
+        className="hidden"
+        aria-label="上传代码文件"
+        onChange={handleFileUpload}
       />
     </div>
   );

@@ -24,6 +24,9 @@ globalConfig.json
 .yarn/install-state.gz
 .pnp.*
 
+/ecosystems/
+
+
 # Config Files
 /config.yaml
 /config.json

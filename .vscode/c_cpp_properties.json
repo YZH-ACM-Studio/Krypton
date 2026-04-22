@@ -1,0 +1,23 @@
+{
+    "configurations": [
+        {
+            "name": "Mac",
+            "compileCommands": "${workspaceFolder}/ecosystems/KryptonVigilSystem/Client/build/macos-homebrew-qt/compile_commands.json",
+            "includePath": [
+                "${workspaceFolder}/ecosystems/KryptonVigilSystem/Client",
+                "${workspaceFolder}/ecosystems/KryptonVigilSystem/Client/build/macos-homebrew-qt/KryptonVigilClient_autogen/include",
+                "/opt/homebrew/opt/qt/include",
+                "/opt/homebrew/opt/qt/include/QtCore",
+                "/opt/homebrew/opt/qt/include/QtGui",
+                "/opt/homebrew/opt/qt/include/QtMultimedia",
+                "/opt/homebrew/opt/qt/include/QtNetwork",
+                "/opt/homebrew/opt/qt/include/QtWebSockets",
+                "/opt/homebrew/opt/qt/include/QtWidgets"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/clang",
+            "intelliSenseMode": "macos-clang-arm64"
+        }
+    ],
+    "version": 4
+}

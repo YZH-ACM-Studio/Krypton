@@ -16,5 +16,9 @@
     },
     "files.associations": {
         "*.html": "nunjucks"
-    }
+    },
+    "cmake.sourceDirectory": "${workspaceFolder}/ecosystems/KryptonVigilSystem/Client",
+    "cmake.configurePreset": "macos-homebrew-qt",
+    "cmake.buildPreset": "macos-homebrew-qt",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/ecosystems/KryptonVigilSystem/Client/build/macos-homebrew-qt/compile_commands.json"
 }

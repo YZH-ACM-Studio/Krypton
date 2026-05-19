@@ -96,6 +96,7 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-sidebar-background: var(--sidebar-background);
+  --color-sidebar: var(--sidebar-background);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
@@ -123,6 +124,7 @@
   html {
     min-height: 100%;
     scroll-behavior: smooth;
+    overflow-x: hidden;
   }
 
   body {
@@ -132,6 +134,66 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+}
+
+@layer utilities {
+  .krypton-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(from var(--muted-foreground) h s l / 0.35) transparent;
+  }
+
+  .krypton-table-shell {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .krypton-table {
+    min-width: 100%;
+  }
+
+  .krypton-split {
+    min-width: 0;
+  }
+
+  .krypton-split-pane {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .krypton-table {
+    min-width: max-content;
+  }
+
+  .krypton-markdown-editor {
+    height: min(360px, 62vh) !important;
+    min-height: min(360px, 62vh) !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .krypton-split {
+    flex-direction: column;
+  }
+
+  .krypton-split-pane {
+    width: 100% !important;
+  }
+
+  .krypton-split-pane:first-child {
+    height: 46%;
+  }
+
+  .krypton-split-pane:last-child {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .krypton-split-handle {
+    width: 100% !important;
+    height: 0.375rem;
+    cursor: row-resize;
   }
 }
 

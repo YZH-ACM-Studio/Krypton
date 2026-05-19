@@ -145,9 +145,9 @@ export function ProblemEditPage() {
   const additionalFiles: R[] = data.additional_file || [];
 
   const rawContent = pdoc.content || '';
-  const [content, setContent] = useState(
-    typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent),
-  );
+  const contentValue = typeof rawContent === 'string' || (rawContent && typeof rawContent === 'object' && !Array.isArray(rawContent))
+    ? rawContent
+    : String(rawContent || '');
 
   // Tag input
   const tags: string[] = pdoc.tag || [];
@@ -271,8 +271,7 @@ export function ProblemEditPage() {
               <CardContent className="px-4 pb-4 pt-0">
                 <MarkdownEditor
                   name="content"
-                  value={rawContent}
-                  onChange={setContent}
+                  value={contentValue}
                   minHeight={400}
                 />
               </CardContent>

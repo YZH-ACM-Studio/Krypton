@@ -65,3 +65,15 @@ export function replaceRouteTokens(template: string, replacements: Record<string
   }
   return result;
 }
+
+export function formatPlainTextSummary(value: unknown) {
+  return String(value || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[#*_~>|-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}

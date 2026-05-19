@@ -21,9 +21,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { MarkdownView } from '@/components/markdown-renderer';
 import { type GenericUserDoc, useBootstrap } from '@/lib/bootstrap';
 import {
   formatDateTime,
+  formatPlainTextSummary,
   formatRelativeTime,
   formatShortDate,
   makeInitials,
@@ -44,7 +46,7 @@ function readTuple<A, B>(v: unknown, fb: [A, B]): [A, B] {
   return [v[0] as A, (v[1] as B) ?? fb[1]];
 }
 
-function collectSections(cols: Array<{ sections: Array<[string, unknown]> }>) {
+function collectSections(cols: Array<{ sections: Array<[string, unknown]> }> = []) {
   const map = new Map<string, unknown>();
   const errors: string[] = [];
   for (const col of cols)
@@ -144,7 +146,7 @@ function Empty({ text }: { text: string }) {
 
 export function KryptonHomePage() {
   const bs = useBootstrap();
-  const { sections, errors } = collectSections(bs.contents);
+  const { sections, errors } = collectSections(bs.page.data.contents);
   const locale = bs.locale || 'zh-CN';
 
   // unpack sections
@@ -205,9 +207,9 @@ export function KryptonHomePage() {
                 </p>
               </div>
               {bs.domain.bulletin ? (
-                <p className="max-w-xl text-sm leading-relaxed text-foreground/80 whitespace-pre-line">
-                  {bs.domain.bulletin}
-                </p>
+                <div className="max-w-xl text-sm leading-relaxed text-foreground/80">
+                  <MarkdownView content={bs.domain.bulletin} />
+                </div>
               ) : null}
               <div className="flex flex-wrap gap-2">
                 <Button asChild>
@@ -380,7 +382,7 @@ export function KryptonHomePage() {
                     >
                       <p className="truncate text-sm font-medium">{t.title || '未命名训练'}</p>
                       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                        {t.content || '一组精选题目'}
+                        {formatPlainTextSummary(t.content || t.desc) || '一组精选题目'}
                       </p>
                       <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
                         <span className="flex items-center gap-1"><Users className="size-3" />{t.attend || 0}</span>

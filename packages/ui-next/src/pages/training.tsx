@@ -4,8 +4,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Pagination } from '@/components/ui/pagination';
+import { MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap } from '@/lib/bootstrap';
-import { replaceRouteTokens } from '@/lib/format';
+import { formatPlainTextSummary, replaceRouteTokens } from '@/lib/format';
 
 type R = Record<string, any>;
 
@@ -61,10 +62,10 @@ export function TrainingPage() {
                   <CardHeader className="pb-2">
                     <CardTitle className="line-clamp-2 text-base">{t.title || '未命名训练'}</CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <p className="line-clamp-2 text-sm text-muted-foreground">
-                      {t.content || t.desc || '精选题目训练'}
-                    </p>
+                    <CardContent>
+                      <p className="line-clamp-2 text-sm text-muted-foreground">
+                        {formatPlainTextSummary(t.content || t.desc) || '精选题目训练'}
+                      </p>
                     <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
                       <span className="flex items-center gap-1"><Users className="size-3" />{t.attend || 0} 人参与</span>
                       {enrolled ? (
@@ -115,9 +116,6 @@ export function TrainingDetailPage() {
           <ChevronRight className="size-3" />
         </div>
         <h1 className="mt-1 text-2xl font-bold">{tdoc.title || '训练'}</h1>
-        {tdoc.content ? (
-          <p className="mt-2 text-sm text-muted-foreground">{tdoc.content}</p>
-        ) : null}
         <div className="mt-3 flex gap-2">
           {!tsdoc.enroll ? (
             <form method="post">
@@ -129,6 +127,14 @@ export function TrainingDetailPage() {
           )}
         </div>
       </div>
+
+      {tdoc.content ? (
+        <Card>
+          <CardContent className="p-5">
+            <MarkdownView content={tdoc.content} className="prose prose-sm dark:prose-invert max-w-none" />
+          </CardContent>
+        </Card>
+      ) : null}
 
       {sections.map((section, si) => (
         <Card key={si}>

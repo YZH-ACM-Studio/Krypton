@@ -37,6 +37,7 @@ export interface KryptonUrls {
 export interface KryptonUser {
   id: number;
   name: string;
+  mail: string;
   signedIn: boolean;
   theme: string;
   viewLang: string;
@@ -45,6 +46,9 @@ export interface KryptonUser {
   bio: string;
   priv: number;
   role: string;
+  tfa: boolean;
+  authn: boolean;
+  pinnedDomains: string[];
 }
 
 export interface KryptonDomain {

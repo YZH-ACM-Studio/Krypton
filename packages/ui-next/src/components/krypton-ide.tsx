@@ -253,7 +253,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 
 function SettingRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <span className="text-sm">{label}</span>
       {children}
     </div>
@@ -293,13 +293,13 @@ function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-130" onClose={() => onOpenChange(false)}>
+      <DialogContent className="w-full sm:w-130" onClose={() => onOpenChange(false)}>
         <DialogHeader>
           <DialogTitle>IDE 设置</DialogTitle>
         </DialogHeader>
-        <div className="flex min-h-75">
+        <div className="flex min-h-75 flex-col sm:flex-row">
           {/* Left nav */}
-          <nav className="w-36 shrink-0 border-r bg-muted/30 p-2 space-y-0.5">
+          <nav className="flex shrink-0 gap-1 overflow-x-auto border-b bg-muted/30 p-2 sm:block sm:w-36 sm:space-y-0.5 sm:border-b-0 sm:border-r">
             {categories.map((cat) => (
               <button
                 key={cat.id}
@@ -1126,7 +1126,7 @@ export function KryptonIDE({
       )}
     >
       {/* ── Toolbar ── */}
-      <div className="flex items-center gap-1 border-b bg-muted/50 px-2 py-1">
+      <div className="krypton-scrollbar flex items-center gap-1 overflow-x-auto border-b bg-muted/50 px-2 py-1">
         {/* Language selector */}
         <div className="relative" ref={langMenuRef}>
           <button
@@ -1370,7 +1370,7 @@ export function KryptonIDE({
           </div>
 
           {/* Tab content: resizable 2-column layout (input left, result right) */}
-          <div ref={pretestPanelRef} className="flex flex-1 min-h-0 overflow-hidden relative">
+          <div ref={pretestPanelRef} className="krypton-split flex flex-1 min-h-0 overflow-hidden relative">
             {/* Crosshair at intersection of horizontal and vertical drag handles */}
             <div
               className="absolute z-10 cursor-move bg-border transition-colors hover:bg-primary/60 active:bg-primary/80"
@@ -1389,7 +1389,7 @@ export function KryptonIDE({
               }}
             />
             {/* Left: input + expected output (vertically resizable) */}
-            <div className="flex flex-col min-w-0 min-h-0 overflow-hidden" style={{ width: `${pretestLeftPct}%` }}>
+            <div className="krypton-split-pane flex flex-col min-w-0 min-h-0 overflow-hidden" style={{ width: `${pretestLeftPct}%` }}>
               {/* Input section */}
               <div className="flex flex-col min-h-0 overflow-hidden" style={{ height: `${pretestInputPct}%` }}>
                 <div className="flex items-center gap-2 bg-muted/20 px-3 py-1 border-b shrink-0">
@@ -1442,7 +1442,7 @@ export function KryptonIDE({
 
             {/* Horizontal drag handle (between left and right) — has special cursor at intersection with vertical handle */}
             <div
-              className="w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
+              className="krypton-split-handle w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
               onMouseDown={() => {
                 pretestHDragging.current = true;
                 document.body.style.cursor = 'col-resize';
@@ -1451,7 +1451,7 @@ export function KryptonIDE({
             />
 
             {/* Right: result panel */}
-            <div className="flex flex-col min-w-0 min-h-0 overflow-hidden" style={{ width: `${100 - pretestLeftPct}%` }}>
+            <div className="krypton-split-pane flex flex-col min-w-0 min-h-0 overflow-hidden" style={{ width: `${100 - pretestLeftPct}%` }}>
               {pretestLoading ? (
                 <div className="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" />

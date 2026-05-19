@@ -32,9 +32,23 @@ class DomainRankHandler extends Handler {
         );
         const udict = await user.getList(domainId, dudocs.map((dudoc) => dudoc.uid));
         const udocs = dudocs.map((i) => udict[i.uid]);
+        const rpDefinitions = Object.fromEntries(Object.entries(global.Hydro.model.rp || {})
+            .map(([key, def]: [string, any]) => [key, { hidden: !!def.hidden }]));
+        const self = this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
+            ? {
+                _id: this.user._id,
+                uname: this.user.uname,
+                avatar: this.user.avatar,
+                rp: this.user.rp,
+                rpInfo: this.user.rpInfo,
+                nAccept: this.user.nAccept,
+                rank: this.user.rank,
+                bio: this.user.bio,
+            }
+            : null;
         this.response.template = 'ranking.html';
         this.response.body = {
-            udocs, upcount, ucount, page,
+            udocs, upcount, ucount, page, rpDefinitions, self,
         };
     }
 }

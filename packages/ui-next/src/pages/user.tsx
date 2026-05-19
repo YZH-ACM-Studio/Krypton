@@ -1,13 +1,22 @@
 import { motion } from 'motion/react';
-import { ChevronRight, Mail, Shield, Settings as SettingsIcon, User as UserIcon } from 'lucide-react';
+import {
+  Calendar,
+  Clipboard,
+  Mail,
+  MessageSquare,
+  Shield,
+  Settings as SettingsIcon,
+  Trophy,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
-import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
-import { makeInitials, replaceRouteTokens } from '@/lib/format';
+import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
+import { useBootstrap } from '@/lib/bootstrap';
+import { formatDateTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 
 type R = Record<string, any>;
 
@@ -16,13 +25,30 @@ export function UserDetailPage() {
   const data = bs.page.data;
   const udoc: R = data.udoc || {};
   const sdoc: R = data.sdoc || {};
+  const pdocs: R[] = data.pdocs || [];
+  const tags: Array<[string, number]> = data.tags || [];
   const psdocs: R[] = data.psdocs || [];
   const rdocs: R[] = data.rdocs || [];
+  const isSelfProfile = !!data.isSelfProfile || Number(udoc._id) === Number(bs.user.id);
 
   const name = udoc.uname || 'User';
   const rp = Math.round(Number(udoc.rp || 0));
   const bio = udoc.bio || '';
-  const acCount = psdocs.filter((ps: R) => ps.status === 1).length;
+  const solvedProblems = pdocs.length ? pdocs : psdocs.filter((ps: R) => ps.status === 1);
+  const acCount = Number(udoc.nAccept ?? solvedProblems.length ?? 0);
+  const submitCount = Number(udoc.nSubmit ?? rdocs.length ?? 0);
+  const likedCount = Number(udoc.nLiked ?? udoc.nLike ?? 0);
+  const lastActive = sdoc?.updateAt || udoc.loginat;
+  const contactItems = [
+    ['邮箱', udoc.mail],
+    ['QQ', udoc.qq],
+    ['微信', udoc.wechat],
+  ].filter(([, value]) => value);
+
+  const copyText = async (value: unknown) => {
+    if (!value || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(String(value));
+  };
 
   return (
     <motion.div
@@ -31,77 +57,179 @@ export function UserDetailPage() {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
     >
-      {/* Profile header */}
       <Card>
         <CardContent className="flex flex-col items-center gap-4 p-6 sm:flex-row sm:items-start">
           <Avatar className="size-20">
             <AvatarFallback className="text-2xl">{makeInitials(name)}</AvatarFallback>
           </Avatar>
           <div className="flex-1 text-center sm:text-left">
-            <h1 className="text-2xl font-bold">{name}</h1>
-            {bio ? <p className="mt-1 text-sm text-muted-foreground">{bio}</p> : null}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h1 className="text-2xl font-bold">{name}</h1>
+                {udoc.displayName ? (
+                  <p className="text-sm text-muted-foreground">{udoc.displayName}</p>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap justify-center gap-2 sm:justify-end">
+                {isSelfProfile ? (
+                  <Button asChild variant="outline" size="sm">
+                    <a href="/home/settings/account">
+                      <SettingsIcon className="size-4" />
+                      编辑资料
+                    </a>
+                  </Button>
+                ) : null}
+                {bs.user.signedIn && udoc._id ? (
+                  <Button asChild variant="outline" size="sm">
+                    <a href={`/home/messages?target=${udoc._id}`} target="_blank" rel="noreferrer">
+                      <MessageSquare className="size-4" />
+                      发消息
+                    </a>
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+            {bio ? (
+              <MarkdownView
+                content={bio}
+                className="mt-2 text-sm text-muted-foreground"
+                preferredLang={bs.locale}
+              />
+            ) : null}
             <div className="mt-3 flex flex-wrap justify-center gap-3 sm:justify-start">
               <Badge variant="secondary">{rp} RP</Badge>
               <Badge variant="outline">{acCount} AC</Badge>
-              <Badge variant="outline">{rdocs.length} 提交</Badge>
+              <Badge variant="outline">{submitCount} 提交</Badge>
+              {udoc.rank ? <Badge variant="outline">排名 #{udoc.rank}</Badge> : null}
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Recent submissions */}
+      <div className="grid gap-3 sm:grid-cols-3">
         <Card>
-          <CardHeader><CardTitle className="text-base">最近提交</CardTitle></CardHeader>
-          <CardContent>
-            {rdocs.length === 0 ? (
-              <p className="py-4 text-center text-sm text-muted-foreground">暂无提交</p>
-            ) : (
-              <div className="space-y-2">
-                {rdocs.slice(0, 10).map((r: R) => (
-                  <a
-                    key={String(r._id)}
-                    href={replaceRouteTokens(bs.urls.recordDetail, { RID: String(r._id) })}
-                    className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
-                  >
-                    <span className="truncate">{r.pid}</span>
-                    <span className={r.status === 1 ? 'text-green-600 dark:text-green-400 font-medium' : 'text-muted-foreground'}>
-                      {r.score ?? '—'}
-                    </span>
-                  </a>
-                ))}
-              </div>
-            )}
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">UID</p>
+            <p className="mt-1 font-mono text-lg font-semibold">{udoc._id ?? '—'}</p>
           </CardContent>
         </Card>
-
-        {/* Solved problems */}
         <Card>
-          <CardHeader><CardTitle className="text-base">已通过题目</CardTitle></CardHeader>
-          <CardContent>
-            {acCount === 0 ? (
-              <p className="py-4 text-center text-sm text-muted-foreground">暂无通过</p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {psdocs
-                  .filter((ps: R) => ps.status === 1)
-                  .slice(0, 50)
-                  .map((ps: R) => (
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">注册时间</p>
+            <p className="mt-1 text-sm font-medium">{udoc.regat ? formatDateTime(udoc.regat, bs.locale) : '—'}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">最近活跃</p>
+            <p className="mt-1 text-sm font-medium">{lastActive ? formatDateTime(lastActive, bs.locale) : '离线'}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {contactItems.length ? (
+        <Card>
+          <CardHeader><CardTitle className="text-base">联系方式</CardTitle></CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            {contactItems.map(([label, value]) => (
+              <Button
+                key={String(label)}
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => copyText(value)}
+              >
+                <Clipboard className="size-4" />
+                {label}: {String(value)}
+              </Button>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-6">
+          <Card>
+            <CardHeader><CardTitle className="text-base">最近提交</CardTitle></CardHeader>
+            <CardContent>
+              {rdocs.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">暂无提交</p>
+              ) : (
+                <div className="space-y-2">
+                  {rdocs.slice(0, 10).map((r: R) => (
                     <a
-                      key={String(ps.pid || ps.docId)}
-                      href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(ps.pid || ps.docId) })}
-                      className="rounded border px-1.5 py-0.5 text-xs font-mono text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      key={String(r._id)}
+                      href={replaceRouteTokens(bs.urls.recordDetail, { RID: String(r._id) })}
+                      className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
                     >
-                      {ps.pid || ps.docId}
+                      <span className="truncate">{r.pid}</span>
+                      <span className={r.status === 1 ? 'font-medium text-green-600 dark:text-green-400' : 'text-muted-foreground'}>
+                        {r.score ?? '—'}
+                      </span>
                     </a>
                   ))}
-                {acCount > 50 ? (
-                  <span className="px-1.5 py-0.5 text-xs text-muted-foreground">+{acCount - 50} more</span>
-                ) : null}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle className="text-base">已通过题目</CardTitle></CardHeader>
+            <CardContent>
+              {solvedProblems.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">暂无通过</p>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {solvedProblems.slice(0, 80).map((pdoc: R) => (
+                    <a
+                      key={String(pdoc.pid || pdoc.docId || pdoc._id)}
+                      href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(pdoc.pid || pdoc.docId) })}
+                      className="min-w-0 rounded-md border px-2.5 py-2 text-sm transition-colors hover:bg-accent"
+                    >
+                      <span className="font-mono text-xs text-muted-foreground">{pdoc.pid || pdoc.docId}</span>
+                      <span className="ml-2">{pdoc.title || '已通过题目'}</span>
+                    </a>
+                  ))}
+                  {solvedProblems.length > 80 ? (
+                    <span className="px-2 py-1 text-xs text-muted-foreground">另有 {solvedProblems.length - 80} 道</span>
+                  ) : null}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-6">
+          <Card>
+            <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Trophy className="size-4" />统计</CardTitle></CardHeader>
+            <CardContent className="grid grid-cols-3 gap-2 text-center lg:grid-cols-1">
+              {[
+                ['提交', submitCount],
+                ['通过', acCount],
+                ['题解获赞', likedCount],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="rounded-md border bg-muted/20 px-3 py-2">
+                  <div className="text-lg font-semibold tabular-nums">{value}</div>
+                  <div className="text-[11px] text-muted-foreground">{label}</div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          {tags.length ? (
+            <Card>
+              <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Calendar className="size-4" />通过标签</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                {tags.map(([tag, count]) => (
+                  <div key={tag} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="truncate">{tag}</span>
+                    <Badge variant="outline" className="font-mono text-[10px]">{count}</Badge>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
       </div>
     </motion.div>
   );
@@ -166,6 +294,12 @@ export function SettingsPage() {
                         ));
                       })()}
                     </select>
+                  ) : setting.type === 'markdown' ? (
+                    <MarkdownEditor
+                      name={setting.key}
+                      value={current[setting.key] || ''}
+                      minHeight={260}
+                    />
                   ) : setting.type === 'textarea' ? (
                     <textarea
                       name={setting.key}

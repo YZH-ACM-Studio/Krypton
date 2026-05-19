@@ -2,10 +2,12 @@
  * Homework management pages — edit and files.
  */
 
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
   FolderOpen,
+  Plus,
   Save,
   Trash2,
   Upload,
@@ -15,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { MarkdownEditor } from '@/components/markdown-renderer';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens } from '@/lib/format';
 
@@ -24,6 +27,39 @@ function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+type PenaltyRuleRow = {
+  id: string;
+  hours: string;
+  coefficient: string;
+};
+
+const DEFAULT_PENALTY_RULES: PenaltyRuleRow[] = [
+  { id: 'default-1', hours: '1', coefficient: '0.9' },
+  { id: 'default-3', hours: '3', coefficient: '0.8' },
+  { id: 'default-12', hours: '12', coefficient: '0.75' },
+  { id: 'default-9999', hours: '9999', coefficient: '0.5' },
+];
+
+function parsePenaltyRules(value: string | null | undefined): PenaltyRuleRow[] {
+  if (!value?.trim()) return DEFAULT_PENALTY_RULES;
+  const rows = value
+    .split('\n')
+    .map((line, index) => {
+      const match = line.match(/^\s*([0-9]+(?:\.[0-9]+)?)\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*(?:#.*)?$/);
+      if (!match) return null;
+      return { id: `rule-${index}-${match[1]}`, hours: match[1], coefficient: match[2] };
+    })
+    .filter(Boolean) as PenaltyRuleRow[];
+  return rows.length ? rows : DEFAULT_PENALTY_RULES;
+}
+
+function serializePenaltyRules(rows: PenaltyRuleRow[]) {
+  return rows
+    .filter((row) => row.hours.trim() && row.coefficient.trim())
+    .map((row) => `${row.hours.trim()}: ${row.coefficient.trim()}`)
+    .join('\n');
 }
 
 /* ---------- Homework Edit ---------- */
@@ -36,6 +72,11 @@ export function HomeworkEditPage() {
   const hwUrl = isEdit
     ? replaceRouteTokens(bs.urls.homeworkDetail, { TID: String(tdoc.docId || tdoc._id) })
     : bs.urls.homework;
+  const [penaltyRules, setPenaltyRules] = useState<PenaltyRuleRow[]>(() => parsePenaltyRules(data.penaltyRules));
+
+  const updatePenaltyRule = (id: string, patch: Partial<PenaltyRuleRow>) => {
+    setPenaltyRules((rows) => rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  };
 
   return (
     <motion.div
@@ -54,14 +95,12 @@ export function HomeworkEditPage() {
       <Card>
         <CardContent className="p-6">
           <form method="post" className="space-y-4">
-            <input type="hidden" name="operation" value="update" />
-
             <div className="space-y-1.5">
               <label htmlFor="title" className="text-sm font-medium">作业标题</label>
               <Input id="title" name="title" defaultValue={tdoc.title || ''} required />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <label htmlFor="beginAtDate" className="text-sm font-medium">开始日期</label>
                 <Input id="beginAtDate" name="beginAtDate" type="date" defaultValue={data.dateBeginText || ''} required />
@@ -72,7 +111,7 @@ export function HomeworkEditPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <label htmlFor="penaltySinceDate" className="text-sm font-medium">截止日期</label>
                 <Input id="penaltySinceDate" name="penaltySinceDate" type="date" defaultValue={data.datePenaltyText || ''} required />
@@ -88,32 +127,102 @@ export function HomeworkEditPage() {
               <Input id="extensionDays" name="extensionDays" type="number" step="0.5" min="0" defaultValue={data.extensionDays || 1} />
             </div>
 
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1.5">
+                <label htmlFor="assign" className="text-sm font-medium">分配给</label>
+                <Input
+                  id="assign"
+                  name="assign"
+                  defaultValue={(tdoc.assign || []).join?.(',') || tdoc.assign || ''}
+                  placeholder="用户组 / UID，逗号分隔"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="maintainer" className="text-sm font-medium">作业维护者</label>
+                <Input
+                  id="maintainer"
+                  name="maintainer"
+                  defaultValue={(tdoc.maintainer || []).join?.(',') || tdoc.maintainer || ''}
+                  placeholder="UID，逗号分隔"
+                />
+              </div>
+            </div>
+
             <div className="space-y-1.5">
               <label htmlFor="pids" className="text-sm font-medium">题目列表 (逗号分隔)</label>
               <Input id="pids" name="pids" defaultValue={data.pids || ''} placeholder="P1001,P1002" />
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="content" className="text-sm font-medium">作业说明 (Markdown)</label>
-              <textarea
-                id="content"
-                name="content"
-                rows={6}
-                className="w-full rounded-md border bg-background px-3 py-2 font-mono text-sm"
-                defaultValue={tdoc.content || ''}
+              <label htmlFor="langs" className="text-sm font-medium">提交语言限制</label>
+              <Input
+                id="langs"
+                name="langs"
+                defaultValue={(tdoc.langs || []).join?.(',') || tdoc.langs || ''}
+                placeholder="cc.cc14,gcc,g++"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="penaltyRules" className="text-sm font-medium">罚时规则 (YAML)</label>
-              <textarea
-                id="penaltyRules"
-                name="penaltyRules"
-                rows={4}
-                className="w-full rounded-md border bg-background px-3 py-2 font-mono text-sm"
-                defaultValue={data.penaltyRules || ''}
-                placeholder="3: 50&#10;5: 30"
-              />
+              <label htmlFor="content" className="text-sm font-medium">作业说明 (Markdown)</label>
+              <MarkdownEditor name="content" value={tdoc.content || ''} minHeight={280} preferredLang={bs.locale} />
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <label className="text-sm font-medium">延期扣分规则</label>
+                  <p className="text-xs text-muted-foreground">超过截止时间后，按提交延迟小时数乘以对应分数系数。</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPenaltyRules((rows) => [...rows, { id: `new-${Date.now()}`, hours: '', coefficient: '1' }])}
+                >
+                  <Plus className="mr-1 size-3" />添加规则
+                </Button>
+              </div>
+              <input type="hidden" name="penaltyRules" value={serializePenaltyRules(penaltyRules)} readOnly />
+              <div className="space-y-2">
+                {penaltyRules.map((row) => (
+                  <div key={row.id} className="grid gap-2 rounded-md border bg-muted/20 p-3 md:grid-cols-[1fr_1fr_auto]">
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-muted-foreground">延迟达到 (小时)</label>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        value={row.hours}
+                        required
+                        onChange={(e) => updatePenaltyRule(row.id, { hours: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-muted-foreground">分数系数</label>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={row.coefficient}
+                        required
+                        onChange={(e) => updatePenaltyRule(row.id, { coefficient: e.target.value })}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="self-end text-muted-foreground hover:text-destructive"
+                      onClick={() => setPenaltyRules((rows) => (rows.length > 1 ? rows.filter((item) => item.id !== row.id) : rows))}
+                      aria-label="删除扣分规则"
+                    >
+                      <Trash2 className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <label className="flex items-center gap-2 text-sm">
@@ -124,16 +233,21 @@ export function HomeworkEditPage() {
             <Separator />
 
             <div className="flex items-center gap-3">
-              <Button type="submit">
+              <Button type="submit" name="operation" value="update">
                 <Save className="mr-1 size-4" />{isEdit ? '保存修改' : '创建作业'}
               </Button>
               {isEdit && (
-                <form method="post" className="inline" onSubmit={(e) => { if (!confirm('确定要删除此作业吗？')) e.preventDefault(); }}>
-                  <input type="hidden" name="operation" value="delete" />
-                  <Button type="submit" variant="destructive" size="sm">
-                    <Trash2 className="mr-1 size-3" />删除
-                  </Button>
-                </form>
+                <Button
+                  type="submit"
+                  name="operation"
+                  value="delete"
+                  variant="destructive"
+                  size="sm"
+                  formNoValidate
+                  onClick={(e) => { if (!confirm('确定要删除此作业吗？')) e.preventDefault(); }}
+                >
+                  <Trash2 className="mr-1 size-3" />删除
+                </Button>
               )}
             </div>
           </form>
@@ -171,11 +285,11 @@ export function HomeworkFilesPage() {
       </div>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="flex items-center gap-2 text-base">
             <FolderOpen className="size-4" />文件 ({files.length})
           </CardTitle>
-          <form method="post" encType="multipart/form-data" className="flex items-center gap-2">
+          <form method="post" encType="multipart/form-data" className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             <input type="file" name="file" className="text-xs" />
             <Button type="submit" name="operation" value="upload_file" size="sm" variant="outline">
               <Upload className="mr-1 size-3" />上传

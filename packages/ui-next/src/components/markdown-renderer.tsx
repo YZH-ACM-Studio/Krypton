@@ -244,12 +244,14 @@ export function MarkdownEditor({
   preferredLang,
   minHeight = 400,
 }: MarkdownEditorProps) {
-  const langs = useMemo(() => parseContent(value), [value]);
-  const keys = Object.keys(langs);
+  const initialLangs = useMemo(() => parseContent(value), [value]);
+  const [drafts, setDrafts] = useState(() => initialLangs);
+  const keys = Object.keys(drafts);
+  const isMultiLang = keys.length > 1 || (keys.length === 1 && keys[0] !== 'default');
   const [activeLang, setActiveLang] = useState(() =>
-    pickInitialLang(langs, preferredLang),
+    pickInitialLang(initialLangs, preferredLang),
   );
-  const [source, setSource] = useState(() => langs[activeLang] || '');
+  const [source, setSource] = useState(() => initialLangs[activeLang] || '');
   const [preview, setPreview] = useState('');
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const editorRef = useRef<HTMLTextAreaElement>(null);
@@ -277,9 +279,17 @@ export function MarkdownEditor({
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const v = e.target.value;
       setSource(v);
-      onChange?.(v);
+      if (isMultiLang) {
+        setDrafts((current) => {
+          const next = { ...current, [activeLang]: v };
+          onChange?.(JSON.stringify(next));
+          return next;
+        });
+      } else {
+        onChange?.(v);
+      }
     },
-    [onChange],
+    [activeLang, isMultiLang, onChange],
   );
 
   // Handle tab key in textarea
@@ -293,28 +303,38 @@ export function MarkdownEditor({
         const val = ta.value;
         const newVal = val.substring(0, start) + '  ' + val.substring(end);
         setSource(newVal);
-        onChange?.(newVal);
+        if (isMultiLang) {
+          setDrafts((current) => {
+            const next = { ...current, [activeLang]: newVal };
+            onChange?.(JSON.stringify(next));
+            return next;
+          });
+        } else {
+          onChange?.(newVal);
+        }
         requestAnimationFrame(() => {
           ta.selectionStart = ta.selectionEnd = start + 2;
         });
       }
     },
-    [onChange],
+    [activeLang, isMultiLang, onChange],
   );
 
   return (
     <div className={cn('space-y-2', className)}>
+      {isMultiLang && name ? (
+        <input type="hidden" name={name} value={JSON.stringify(drafts)} readOnly />
+      ) : null}
       {/* Header bar */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <LangTabs
           langs={keys.length > 1 ? keys : []}
           active={activeLang}
           onChange={(lang) => {
             setActiveLang(lang);
-            const text = langs[lang] || '';
+            const text = drafts[lang] || '';
             setSource(text);
             setPreview(text);
-            onChange?.(text);
           }}
         />
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -325,9 +345,9 @@ export function MarkdownEditor({
       </div>
 
       {/* Side-by-side panels */}
-      <div className="grid grid-cols-2 gap-0 overflow-hidden rounded-lg border">
+      <div className="grid gap-0 overflow-hidden rounded-lg border md:grid-cols-2">
         {/* Editor pane */}
-        <div className="relative border-r">
+        <div className="relative border-b md:border-b-0 md:border-r">
           <div className="absolute left-0 top-0 px-2 py-2.5 text-right font-mono text-xs leading-6.5 text-muted-foreground/40 select-none pointer-events-none">
             {source.split('\n').map((_, i) => (
               <div key={i}>{i + 1}</div>
@@ -335,12 +355,12 @@ export function MarkdownEditor({
           </div>
           <textarea
             ref={editorRef}
-            name={name}
+            name={isMultiLang ? undefined : name}
             value={source}
             onChange={handleChange}
             onScroll={handleScroll}
             onKeyDown={handleKeyDown}
-            className="w-full resize-none bg-background py-2 pl-10 pr-3 font-mono text-sm leading-6.5 focus:outline-none"
+            className="krypton-markdown-editor w-full resize-none bg-background py-2 pl-10 pr-3 font-mono text-sm leading-6.5 focus:outline-none"
             style={{ minHeight, height: minHeight }}
             spellCheck={false}
             placeholder={'在此输入 Markdown 内容…\n支持 LaTeX 公式: $x^2$ 或 $$\\sum_{i=1}^n$$\n支持 HTML 标签'}

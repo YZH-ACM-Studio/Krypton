@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { RouterProvider } from '@tanstack/react-router';
 import { BootstrapProvider, getBootstrapFromWindow } from '@/lib/bootstrap';
 import { router } from '@/router';
+// Side-effect: register built-in admin nav sections.
+import '@/lib/admin-nav-builtins';
 import './styles.css';
 
 const bootstrap = getBootstrapFromWindow();

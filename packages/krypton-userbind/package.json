@@ -1,0 +1,7 @@
+{
+    "name": "@hydrooj/krypton-userbind",
+    "version": "0.1.0",
+    "description": "Krypton OJ: student-id binding, school/user groups, with multi-domain support",
+    "main": "./index.ts",
+    "license": "AGPL-3.0-or-later"
+}

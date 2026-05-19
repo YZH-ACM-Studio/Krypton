@@ -36,7 +36,7 @@ import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Pagination } from '@/components/ui/pagination';
-import { MarkdownView } from '@/components/markdown-renderer';
+import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatRelativeTime, formatDateTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
@@ -51,6 +51,26 @@ function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function readYamlScalar(source: string, key: string) {
+  const match = source.match(new RegExp(`^${escapeRegExp(key)}:\\s*(.*)$`, 'm'));
+  if (!match) return '';
+  return match[1].trim().replace(/^['"]|['"]$/g, '');
+}
+
+function writeYamlScalar(source: string, key: string, value: string) {
+  const cleanValue = value.trim();
+  const linePattern = new RegExp(`^${escapeRegExp(key)}:\\s*.*$`, 'm');
+  if (!cleanValue) return source.replace(linePattern, '').replace(/\n{3,}/g, '\n\n').trimStart();
+  const nextLine = `${key}: ${cleanValue}`;
+  if (linePattern.test(source)) return source.replace(linePattern, nextLine);
+  const prefix = source.trimEnd();
+  return `${prefix}${prefix ? '\n' : ''}${nextLine}\n`;
 }
 
 /* ---------- Shared Problem Sidebar ---------- */
@@ -119,6 +139,15 @@ export function ProblemConfigPage() {
   const [configText, setConfigText] = useState(config);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const configType = readYamlScalar(configText, 'type') || 'default';
+  const timeLimit = readYamlScalar(configText, 'time') || '';
+  const memoryLimit = readYamlScalar(configText, 'memory') || '';
+  const checkerType = readYamlScalar(configText, 'checker_type') || '';
+  const scoreMode = readYamlScalar(configText, 'score') || '';
+
+  const updateConfigField = (key: string, value: string) => {
+    setConfigText((text) => writeYamlScalar(text, key, value));
+  };
 
   const toggleFile = (name: string) => {
     const next = new Set(selectedFiles);
@@ -155,7 +184,7 @@ export function ProblemConfigPage() {
         <div className="min-w-0 flex-1 space-y-6">
           {/* Config YAML editor */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <CardTitle className="flex items-center gap-2 text-base">
                 <FileCode className="size-4" />
                 config.yaml
@@ -190,6 +219,61 @@ export function ProblemConfigPage() {
               </form>
             </CardHeader>
             <CardContent>
+              <div className="mb-4 grid gap-3 rounded-md border bg-muted/20 p-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label htmlFor="config-type" className="text-xs text-muted-foreground">题目类型</label>
+                  <select
+                    id="config-type"
+                    value={configType}
+                    onChange={(event) => updateConfigField('type', event.target.value)}
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="default">传统评测</option>
+                    <option value="submit_answer">提交答案</option>
+                    <option value="objective">客观题</option>
+                    <option value="interactive">交互题</option>
+                    <option value="communication">通信题</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="config-score" className="text-xs text-muted-foreground">计分方式</label>
+                  <select
+                    id="config-score"
+                    value={scoreMode}
+                    onChange={(event) => updateConfigField('score', event.target.value)}
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">默认</option>
+                    <option value="sum">求和</option>
+                    <option value="min">最小值</option>
+                    <option value="max">最大值</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="config-time" className="text-xs text-muted-foreground">时间限制</label>
+                  <Input
+                    id="config-time"
+                    value={timeLimit}
+                    onChange={(event) => updateConfigField('time', event.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="config-memory" className="text-xs text-muted-foreground">内存限制</label>
+                  <Input
+                    id="config-memory"
+                    value={memoryLimit}
+                    onChange={(event) => updateConfigField('memory', event.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label htmlFor="config-checker" className="text-xs text-muted-foreground">检查器</label>
+                  <Input
+                    id="config-checker"
+                    value={checkerType}
+                    onChange={(event) => updateConfigField('checker_type', event.target.value)}
+                  />
+                </div>
+              </div>
               <textarea
                 value={configText}
                 onChange={(e) => setConfigText(e.target.value)}
@@ -203,7 +287,7 @@ export function ProblemConfigPage() {
 
           {/* Testdata files */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <CardTitle className="flex items-center gap-2 text-base">
                 <FolderOpen className="size-4" />
                 测试数据 ({testdata.length})
@@ -317,6 +401,7 @@ export function ProblemFilesPage() {
   const [selectedTestdata, setSelectedTestdata] = useState<Set<string>>(new Set());
   const [selectedAdditional, setSelectedAdditional] = useState<Set<string>>(new Set());
   const [renamingFiles, setRenamingFiles] = useState<Record<string, string>>({});
+  const [renamingType, setRenamingType] = useState<'testdata' | 'additional_file'>('testdata');
   const [showGenerate, setShowGenerate] = useState(false);
   const testdataFileRef = useRef<HTMLInputElement>(null);
   const additionalFileRef = useRef<HTMLInputElement>(null);
@@ -332,9 +417,10 @@ export function ProblemFilesPage() {
     else setSelected(new Set(files.map((f) => f.name)));
   };
 
-  const startRename = (selected: Set<string>) => {
+  const startRename = (selected: Set<string>, type: 'testdata' | 'additional_file') => {
     const mapping: Record<string, string> = {};
     for (const name of selected) mapping[name] = name;
+    setRenamingType(type);
     setRenamingFiles(mapping);
   };
 
@@ -354,7 +440,7 @@ export function ProblemFilesPage() {
     fileRef: React.RefObject<HTMLInputElement | null>;
   }) => (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <CardTitle className="flex items-center gap-2 text-base">
           <FolderOpen className="size-4" />
           {title} ({files.length})
@@ -387,7 +473,7 @@ export function ProblemFilesPage() {
               </form>
               {/* Rename */}
               {!reference && (
-                <Button size="sm" variant="outline" onClick={() => startRename(selected)}>
+                <Button size="sm" variant="outline" onClick={() => startRename(selected, type as 'testdata' | 'additional_file')}>
                   <Pencil className="mr-1 size-3" />重命名
                 </Button>
               )}
@@ -488,7 +574,7 @@ export function ProblemFilesPage() {
           <CardContent>
             <form method="post" className="space-y-3">
               <input type="hidden" name="operation" value="rename_files" />
-              <input type="hidden" name="type" value="testdata" />
+              <input type="hidden" name="type" value={renamingType} />
               {renameKeys.map((oldName) => (
                 <div key={oldName} className="flex items-center gap-3">
                   <input type="hidden" name="files" value={oldName} />
@@ -528,7 +614,7 @@ export function ProblemFilesPage() {
           {/* Generate testdata */}
           {!reference && testdata.length > 0 && (
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Play className="size-4" />
                   生成测试数据 (Beta)
@@ -629,13 +715,7 @@ export function ProblemSolutionPage() {
               <input type="hidden" name="operation" value="submit" />
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">题解内容 (Markdown)</label>
-                <textarea
-                  name="content"
-                  rows={8}
-                  className="w-full rounded-md border bg-background px-3 py-2 font-mono text-sm"
-                  placeholder="撰写你的题解..."
-                  required
-                />
+                <MarkdownEditor name="content" value="" minHeight={320} preferredLang={bs.locale} />
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" type="button" onClick={() => setShowForm(false)}>取消</Button>
@@ -718,6 +798,8 @@ export function ProblemStatisticsPage() {
   const pcount = Number(data.pcount) || 1;
   const sort: string = data.sort || 'time';
   const direction: number = Number(data.direction) || 1;
+  const currentLang: string = data.lang || '';
+  const langs: Record<string, R> = data.langs || {};
   const types: string[] = data.types || [];
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
   const pid = pdoc.pid || pdoc.docId || '';
@@ -727,6 +809,14 @@ export function ProblemStatisticsPage() {
     time: '时间',
     memory: '内存',
     length: '代码长度',
+  };
+
+  const statQuery = (nextSort = sort, nextDirection = direction, lang = currentLang) => {
+    const query = new URLSearchParams();
+    if (nextSort) query.set('sort', nextSort);
+    query.set('direction', String(nextDirection));
+    if (lang) query.set('lang', lang);
+    return `?${query.toString()}`;
   };
 
   return (
@@ -746,7 +836,36 @@ export function ProblemStatisticsPage() {
         </div>
       </div>
 
-      {/* Sort controls */}
+      <Card>
+        <CardContent className="p-4">
+          <form method="get" className="grid gap-3 sm:grid-cols-[1fr_140px_180px_auto] sm:items-end">
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">排序字段</label>
+              <select name="sort" defaultValue={sort} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
+                {types.map((type) => <option key={type} value={type}>{SORT_LABELS[type] || type}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">方向</label>
+              <select name="direction" defaultValue={String(direction)} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
+                <option value="1">升序</option>
+                <option value="-1">降序</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">语言</label>
+              <select name="lang" defaultValue={currentLang} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
+                <option value="">全部语言</option>
+                {Object.entries(langs).map(([key, lang]) => (
+                  <option key={key} value={key}>{String(lang.display || key)}</option>
+                ))}
+              </select>
+            </div>
+            <Button type="submit" size="sm">筛选</Button>
+          </form>
+        </CardContent>
+      </Card>
+
       <div className="flex flex-wrap gap-2">
         {types.map((t) => (
           <Button
@@ -755,7 +874,7 @@ export function ProblemStatisticsPage() {
             variant={sort === t ? 'default' : 'outline'}
             size="sm"
           >
-            <a href={`?sort=${t}&direction=${sort === t ? -direction : 1}`}>
+            <a href={statQuery(t, sort === t ? -direction : 1)}>
               {SORT_LABELS[t] || t}
               {sort === t && (direction === 1 ? <ChevronUp className="ml-1 size-3" /> : <ChevronDown className="ml-1 size-3" />)}
             </a>
@@ -803,7 +922,7 @@ export function ProblemStatisticsPage() {
 
       {pcount > 1 && (
         <div className="flex justify-center">
-          <Pagination current={page} total={pcount} baseUrl={`?sort=${sort}&direction=${direction}`} />
+          <Pagination current={page} total={pcount} baseUrl={statQuery()} />
         </div>
       )}
     </motion.div>

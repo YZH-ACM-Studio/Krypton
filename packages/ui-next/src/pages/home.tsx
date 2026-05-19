@@ -24,6 +24,7 @@ import { MarkdownView } from '@/components/markdown-renderer';
 import { type GenericUserDoc, useBootstrap } from '@/lib/bootstrap';
 import {
   formatDateTime,
+  formatPlainTextSummary,
   formatRelativeTime,
   formatShortDate,
   makeInitials,
@@ -381,7 +382,7 @@ export function KryptonHomePage() {
                     >
                       <p className="truncate text-sm font-medium">{t.title || '未命名训练'}</p>
                       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                        {t.content || '一组精选题目'}
+                        {formatPlainTextSummary(t.content || t.desc) || '一组精选题目'}
                       </p>
                       <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
                         <span className="flex items-center gap-1"><Users className="size-3" />{t.attend || 0}</span>

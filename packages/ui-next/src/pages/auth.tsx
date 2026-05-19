@@ -226,6 +226,39 @@ export function RegisterMailSentPage() {
   );
 }
 
+export function LostPasswordMailSentPage() {
+  const bs = useBootstrap();
+  const mail = bs.page.data.mail || '';
+
+  return (
+    <motion.div
+      className="mx-auto max-w-sm space-y-6 pt-12"
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35 }}
+    >
+      <Card>
+        <CardContent className="p-8 text-center">
+          <MailIcon className="mx-auto size-10 text-primary" />
+          <h1 className="mt-4 text-xl font-semibold">重置邮件已发送</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {mail ? (
+              <>
+                我们已向 <strong>{mail}</strong> 发送了一封密码重置邮件，请查看收件箱并按邮件中的链接继续。
+              </>
+            ) : (
+              '如果邮箱匹配已有账号，我们会发送密码重置链接，请稍后查看收件箱。'
+            )}
+          </p>
+          <Button asChild variant="outline" className="mt-6">
+            <a href={bs.urls.login}>返回登录</a>
+          </Button>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+}
+
 /* ---------- Lost Password with Code ---------- */
 
 export function LostPasswordWithCodePage() {

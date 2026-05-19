@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { motion } from 'motion/react';
-import { Search, CheckCircle2, XCircle, MinusCircle } from 'lucide-react';
+import { CheckCircle2, Copy, Eye, EyeOff, MinusCircle, Plus, Search, Trash2, Upload, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -35,6 +36,26 @@ function difficultyBadge(d: number | undefined) {
   );
 }
 
+function buildUrlWithQuery(baseUrl: string, params: Record<string, unknown>) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value == null || value === '' || value === false) return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return query ? `${baseUrl}?${query}` : baseUrl;
+}
+
+function SelectedPids({ pids }: { pids: string[] }) {
+  return (
+    <>
+      {pids.map((pid) => (
+        <input key={pid} type="hidden" name="pids" value={pid} />
+      ))}
+    </>
+  );
+}
+
 export function ProblemsPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
@@ -44,7 +65,26 @@ export function ProblemsPage() {
   const pcount = Number(data.pcount) || pdocs.length;
   const category = data.category || '';
   const psdict: Record<string, R> = data.psdict || {};
-  const query = data.query || data.q || '';
+  const query = data.qs || data.query || data.q || '';
+  const sort = data.sort || 'default';
+  const [selected, setSelected] = useState<string[]>([]);
+  const visibleIds = pdocs.map((p) => String(p.docId || '')).filter(Boolean);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.includes(id));
+  const problemsBaseUrl = buildUrlWithQuery(bs.urls.problems, { q: query, sort: sort === 'default' ? '' : sort });
+
+  const toggleVisible = (checked: boolean) => {
+    setSelected((current) => {
+      if (!checked) return current.filter((id) => !visibleIds.includes(id));
+      return Array.from(new Set([...current, ...visibleIds]));
+    });
+  };
+
+  const toggleOne = (id: string, checked: boolean) => {
+    setSelected((current) => {
+      if (checked) return Array.from(new Set([...current, id]));
+      return current.filter((item) => item !== id);
+    });
+  };
 
   return (
     <motion.div
@@ -53,19 +93,112 @@ export function ProblemsPage() {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
     >
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-xl font-semibold">题库</h1>
           <p className="text-sm text-muted-foreground">共 {pcount} 道题目</p>
         </div>
-        <form className="flex gap-2" method="get" action={bs.urls.problems}>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input name="q" defaultValue={query} placeholder="搜索题目…" className="w-56 pl-8" />
-          </div>
-          <Button type="submit" size="sm">搜索</Button>
-        </form>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Button asChild variant="outline" size="sm">
+            <a href="/problem/import/hydro">
+              <Upload className="size-4" />
+              导入
+            </a>
+          </Button>
+          <Button asChild size="sm">
+            <a href="/problem/create">
+              <Plus className="size-4" />
+              新建题目
+            </a>
+          </Button>
+        </div>
       </div>
+
+      <Card>
+        <CardContent className="p-4">
+          <form className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px_auto] sm:items-end" method="get" action={bs.urls.problems}>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">搜索</label>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input name="q" defaultValue={query} placeholder="题目、标签、难度…" className="pl-8" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">排序</label>
+              <select
+                name="sort"
+                defaultValue={sort}
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              >
+                <option value="default">默认顺序</option>
+                <option value="recent">最近添加</option>
+              </select>
+            </div>
+            <Button type="submit" size="sm">搜索</Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      {selected.length ? (
+        <Card>
+          <CardContent className="flex flex-col gap-3 p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium">已选择 {selected.length} 道题目</p>
+                <p className="text-xs text-muted-foreground">批量隐藏、取消隐藏、删除或复制到其他域</p>
+              </div>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setSelected([])}>
+                清空选择
+              </Button>
+            </div>
+            <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap gap-2">
+                <form method="post">
+                  <input type="hidden" name="operation" value="hide" />
+                  <SelectedPids pids={selected} />
+                  <Button type="submit" variant="outline" size="sm">
+                    <EyeOff className="size-4" />
+                    隐藏
+                  </Button>
+                </form>
+                <form method="post">
+                  <input type="hidden" name="operation" value="unhide" />
+                  <SelectedPids pids={selected} />
+                  <Button type="submit" variant="outline" size="sm">
+                    <Eye className="size-4" />
+                    取消隐藏
+                  </Button>
+                </form>
+                <form method="post" onSubmit={(event) => {
+                  if (!window.confirm(`确定删除选中的 ${selected.length} 道题目？`)) event.preventDefault();
+                }}>
+                  <input type="hidden" name="operation" value="delete" />
+                  <SelectedPids pids={selected} />
+                  <Button type="submit" variant="ghost" size="sm" className="text-destructive">
+                    <Trash2 className="size-4" />
+                    删除
+                  </Button>
+                </form>
+              </div>
+              <form method="post" className="grid gap-2 sm:grid-cols-[180px_auto_auto] sm:items-center">
+                <input type="hidden" name="operation" value="copy" />
+                <input type="hidden" name="redirect" value="true" />
+                <SelectedPids pids={selected} />
+                <Input name="target" placeholder="目标域 ID" className="h-8" />
+                <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" name="hidden" value="true" className="size-3.5 rounded border accent-primary" />
+                  复制后隐藏
+                </label>
+                <Button type="submit" variant="outline" size="sm">
+                  <Copy className="size-4" />
+                  复制
+                </Button>
+              </form>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {category ? (
         <div className="flex items-center gap-2">
@@ -79,6 +212,17 @@ export function ProblemsPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                {bs.user.signedIn ? (
+                  <TableHead className="w-10">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={(event) => toggleVisible(event.currentTarget.checked)}
+                      className="size-4 rounded border accent-primary"
+                      aria-label="选择当前页"
+                    />
+                  </TableHead>
+                ) : null}
                 <TableHead className="w-12">状态</TableHead>
                 <TableHead className="w-24">编号</TableHead>
                 <TableHead>标题</TableHead>
@@ -89,18 +233,30 @@ export function ProblemsPage() {
             <TableBody>
               {pdocs.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={bs.user.signedIn ? 6 : 5} className="py-8 text-center text-sm text-muted-foreground">
                     没有找到题目
                   </TableCell>
                 </TableRow>
               ) : (
                 pdocs.map((p) => {
                   const ps = psdict[String(p.docId)] || psdict[String(p._id)];
+                  const selectableId = String(p.docId || '');
                   const nSubmit = p.nSubmit || 0;
                   const nAccept = p.nAccept || 0;
                   const rate = nSubmit > 0 ? Math.round((nAccept / nSubmit) * 100) : 0;
                   return (
                     <TableRow key={String(p.docId || p._id)}>
+                      {bs.user.signedIn ? (
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            checked={selected.includes(selectableId)}
+                            onChange={(event) => toggleOne(selectableId, event.currentTarget.checked)}
+                            className="size-4 rounded border accent-primary"
+                            aria-label={`选择题目 ${p.pid || p.docId}`}
+                          />
+                        </TableCell>
+                      ) : null}
                       <TableCell>{statusIcon(ps?.status)}</TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">
                         {p.pid || p.docId}
@@ -135,7 +291,7 @@ export function ProblemsPage() {
         </CardContent>
       </Card>
 
-      <Pagination current={page} total={ppcount} baseUrl={bs.urls.problems} />
+      <Pagination current={page} total={ppcount} baseUrl={problemsBaseUrl} />
     </motion.div>
   );
 }

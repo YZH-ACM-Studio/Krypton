@@ -70,7 +70,7 @@ export class ContestListHandler extends Handler {
         const groupsFilter = groups.filter((i) => !Number.isSafeInteger(+i));
         this.response.template = 'contest_main.html';
         this.response.body = {
-            page, tpcount, qs, rule, tdocs, tsdict, groups: groupsFilter, group, q,
+            page, tpcount, qs, rule, rules: Object.fromEntries(rules.map((i) => [i, contest.RULES[i].TEXT])), tdocs, tsdict, groups: groupsFilter, group, q,
         };
     }
 }

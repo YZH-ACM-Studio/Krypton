@@ -3,18 +3,21 @@
  * clarification, print.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
   Calendar,
   Clock,
+  Copy,
+  Download,
   FileText,
   FolderOpen,
   HelpCircle,
   MessageSquare,
   Palette,
   Printer,
+  RefreshCw,
   Save,
   Trash2,
   Upload,
@@ -28,7 +31,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { MarkdownView } from '@/components/markdown-renderer';
+import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 
@@ -38,10 +41,122 @@ function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | u
   return uid != null ? udict[String(uid)] ?? null : null;
 }
 
+function getAlphabeticId(index: number) {
+  if (index < 0) return '?';
+  let n = index + 1;
+  let result = '';
+  while (n > 0) {
+    n -= 1;
+    result = String.fromCharCode(65 + (n % 26)) + result;
+    n = Math.floor(n / 26);
+  }
+  return result;
+}
+
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[char] || char));
+}
+
+function formatObjectIdTime(id: unknown, locale: string) {
+  const value = String(id || '');
+  if (!/^[0-9a-f]{24}$/i.test(value)) return '';
+  const timestamp = Number.parseInt(value.slice(0, 8), 16) * 1000;
+  if (!Number.isFinite(timestamp)) return '';
+  return formatDateTime(timestamp, locale);
+}
+
+function toDate(value: unknown) {
+  if (!value) return null;
+  const date = new Date(value as string);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDateInput(value: unknown) {
+  const date = toDate(value);
+  if (!date) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatTimeInput(value: unknown) {
+  const date = toDate(value);
+  if (!date) return '';
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function formatDateTimeInput(dateText: string, timeText: string, durationHours: string) {
+  const begin = new Date(`${dateText}T${timeText || '00:00'}`);
+  const duration = Number(durationHours);
+  if (Number.isNaN(begin.getTime()) || !Number.isFinite(duration)) return '';
+  begin.setMinutes(begin.getMinutes() + Math.round(duration * 60));
+  return `${formatDateInput(begin)} ${formatTimeInput(begin)}`;
+}
+
+function formatCommaValue(value: unknown) {
+  return Array.isArray(value) ? value.join(',') : String(value || '');
+}
+
+type BalloonColorRow = {
+  pid: string;
+  label: string;
+  title: string;
+  color: string;
+  name: string;
+};
+
+const DEFAULT_BALLOON_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'];
+
+function clarificationSubjectLabel(tdoc: R, pdict: Record<string, R>, subject: unknown) {
+  const pids: Array<string | number> = tdoc.pids || [];
+  const numeric = Number(subject);
+  if (numeric === -1) return '技术问题';
+  if (numeric === 0 || subject == null) return '通用';
+  const byPidIndex = pids.findIndex((pid) => String(pid) === String(subject));
+  const legacyIndex = Number.isInteger(numeric) && numeric >= 0 && numeric < pids.length ? numeric : -1;
+  const index = byPidIndex >= 0 ? byPidIndex : legacyIndex;
+  if (index >= 0) {
+    const pid = pids[index];
+    const problem = pdict[String(pid)] || {};
+    return `${getAlphabeticId(index)} — ${problem.title || `P${pid}`}`;
+  }
+  return String(subject);
+}
+
+function normalizeBalloonRows(tdoc: R, pdict: Record<string, R>): BalloonColorRow[] {
+  const pids: Array<string | number> = tdoc.pids || [];
+  const existing: R = tdoc.balloon || {};
+  return pids.map((pid, index) => {
+    const key = String(pid);
+    const config = existing[key] || existing[Number(pid)] || {};
+    const problem = pdict[key] || {};
+    const isObject = config && typeof config === 'object';
+    return {
+      pid: key,
+      label: getAlphabeticId(index),
+      title: problem.title || `P${key}`,
+      color: isObject ? config.color || DEFAULT_BALLOON_COLORS[index % DEFAULT_BALLOON_COLORS.length] : String(config || DEFAULT_BALLOON_COLORS[index % DEFAULT_BALLOON_COLORS.length]),
+      name: isObject ? config.name || problem.title || '' : problem.title || '',
+    };
+  });
+}
+
+function serializeBalloonRows(rows: BalloonColorRow[]) {
+  return rows.map((row) => [
+    `${row.pid}:`,
+    `  color: ${JSON.stringify(row.color || '#ffffff')}`,
+    `  name: ${JSON.stringify(row.name || '')}`,
+  ].join('\n')).join('\n');
 }
 
 /* ---------- Contest Edit ---------- */
@@ -55,6 +170,20 @@ export function ContestEditPage() {
   const contestUrl = isEdit
     ? replaceRouteTokens(bs.urls.contestDetail, { TID: String(tdoc.docId || tdoc._id) })
     : bs.urls.contests;
+  const initialBeginAt = data.beginAt || tdoc.beginAt || '';
+  const [beginDate, setBeginDate] = useState(formatDateInput(initialBeginAt));
+  const [beginTime, setBeginTime] = useState(formatTimeInput(initialBeginAt));
+  const [duration, setDuration] = useState(String(data.duration || 2));
+  const [permission, setPermission] = useState(() => {
+    if (tdoc.assign?.length) return 'assign';
+    if (tdoc._code || tdoc.code) return 'invite';
+    return 'public';
+  });
+  const endAtDate = toDate(tdoc.endAt);
+  const lockAtDate = toDate(tdoc.lockAt);
+  const lockMinutes = endAtDate && lockAtDate
+    ? Math.max(0, Math.round((endAtDate.getTime() - lockAtDate.getTime()) / 60000))
+    : '';
 
   return (
     <motion.div
@@ -73,8 +202,6 @@ export function ContestEditPage() {
       <Card>
         <CardContent className="p-6">
           <form method="post" className="space-y-4">
-            <input type="hidden" name="operation" value="update" />
-
             <div className="space-y-1.5">
               <label htmlFor="title" className="text-sm font-medium">比赛标题</label>
               <Input id="title" name="title" defaultValue={tdoc.title || ''} required />
@@ -89,20 +216,26 @@ export function ContestEditPage() {
               </select>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <label htmlFor="beginAtDate" className="text-sm font-medium">开始日期</label>
-                <Input id="beginAtDate" name="beginAtDate" type="date" defaultValue={data.beginAt ? String(data.beginAt).split('T')[0] : ''} required />
+                <Input id="beginAtDate" name="beginAtDate" type="date" value={beginDate} onChange={(e) => setBeginDate(e.target.value)} required />
               </div>
               <div className="space-y-1.5">
                 <label htmlFor="beginAtTime" className="text-sm font-medium">开始时间</label>
-                <Input id="beginAtTime" name="beginAtTime" type="time" defaultValue={data.beginAt ? String(data.beginAt).slice(11, 16) : ''} required />
+                <Input id="beginAtTime" name="beginAtTime" type="time" value={beginTime} onChange={(e) => setBeginTime(e.target.value)} required />
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label htmlFor="duration" className="text-sm font-medium">时长 (小时)</label>
-              <Input id="duration" name="duration" type="number" step="0.5" min="0" defaultValue={data.duration || 2} required />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label htmlFor="duration" className="text-sm font-medium">时长 (小时)</label>
+                <Input id="duration" name="duration" type="number" step="0.5" min="0" value={duration} onChange={(e) => setDuration(e.target.value)} required />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">结束时间</label>
+                <Input value={formatDateTimeInput(beginDate, beginTime, duration)} readOnly className="text-muted-foreground" />
+              </div>
             </div>
 
             <div className="space-y-1.5">
@@ -112,23 +245,57 @@ export function ContestEditPage() {
 
             <div className="space-y-1.5">
               <label htmlFor="content" className="text-sm font-medium">比赛说明 (Markdown)</label>
-              <textarea
-                id="content"
-                name="content"
-                rows={6}
-                className="w-full rounded-md border bg-background px-3 py-2 font-mono text-sm"
-                defaultValue={tdoc.content || ''}
-              />
+              <MarkdownEditor name="content" value={tdoc.content || ''} minHeight={320} />
             </div>
 
-            <div className="space-y-1.5">
-              <label htmlFor="code" className="text-sm font-medium">邀请码 (可选)</label>
-              <Input id="code" name="code" defaultValue={tdoc.code || ''} />
+            <div className="space-y-3 rounded-md border bg-muted/20 p-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label htmlFor="maintainer" className="text-sm font-medium">比赛维护者</label>
+                  <Input id="maintainer" name="maintainer" defaultValue={formatCommaValue(tdoc.maintainer)} placeholder="UID，逗号分隔" />
+                </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="permission" className="text-sm font-medium">访问控制</label>
+                  <select
+                    id="permission"
+                    value={permission}
+                    onChange={(e) => setPermission(e.target.value)}
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="public">公开</option>
+                    <option value="invite">需要邀请码</option>
+                    <option value="assign">指定用户 / 用户组</option>
+                  </select>
+                </div>
+              </div>
+              {permission === 'invite' && (
+                <div className="space-y-1.5">
+                  <label htmlFor="code" className="text-sm font-medium">邀请码</label>
+                  <Input id="code" name="code" defaultValue={tdoc._code || tdoc.code || ''} placeholder="留空表示不设置邀请码" />
+                </div>
+              )}
+              {permission === 'assign' && (
+                <div className="space-y-1.5">
+                  <label htmlFor="assign" className="text-sm font-medium">分配给</label>
+                  <Input id="assign" name="assign" defaultValue={formatCommaValue(tdoc.assign)} placeholder="用户组 / UID，逗号分隔" />
+                </div>
+              )}
             </div>
 
             <div className="space-y-1.5">
               <label htmlFor="langs" className="text-sm font-medium">允许语言 (逗号分隔，留空为全部)</label>
               <Input id="langs" name="langs" defaultValue={Array.isArray(tdoc.langs) ? tdoc.langs.join(',') : ''} />
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label htmlFor="lock" className="text-sm font-medium">封榜时间 (剩余分钟)</label>
+                <Input id="lock" name="lock" type="number" min="0" defaultValue={lockMinutes} placeholder="留空表示不封榜" />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="contestDuration" className="text-sm font-medium">弹性时长 (小时)</label>
+                <Input id="contestDuration" name="contestDuration" type="number" min="0" step="0.5" defaultValue={tdoc.duration || ''} placeholder="留空表示不限制" />
+              </div>
             </div>
 
             <Separator />
@@ -157,16 +324,32 @@ export function ContestEditPage() {
             </div>
 
             <div className="flex items-center gap-3">
-              <Button type="submit">
+              <Button type="submit" name="operation" value="update">
                 <Save className="mr-1 size-4" />{isEdit ? '保存修改' : '创建比赛'}
               </Button>
               {isEdit && (
-                <form method="post" className="inline" onSubmit={(e) => { if (!confirm('确定要删除此比赛吗？')) e.preventDefault(); }}>
-                  <input type="hidden" name="operation" value="delete" />
-                  <Button type="submit" variant="destructive" size="sm">
-                    <Trash2 className="mr-1 size-3" />删除比赛
-                  </Button>
-                </form>
+                <Button
+                  type="submit"
+                  name="operation"
+                  value="update"
+                  variant="outline"
+                  formAction={`${bs.urls.contests}/create`}
+                >
+                  <Copy className="mr-1 size-4" />复制为新比赛
+                </Button>
+              )}
+              {isEdit && (
+                <Button
+                  type="submit"
+                  name="operation"
+                  value="delete"
+                  variant="destructive"
+                  size="sm"
+                  formNoValidate
+                  onClick={(e) => { if (!confirm('确定要删除此比赛吗？')) e.preventDefault(); }}
+                >
+                  <Trash2 className="mr-1 size-3" />删除比赛
+                </Button>
               )}
             </div>
           </form>
@@ -187,44 +370,105 @@ export function ContestManagePage() {
   const pdict: Record<string, R> = data.pdict || {};
   const tid = tdoc.docId || tdoc._id;
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
+  const [selectedPublic, setSelectedPublic] = useState<Set<string>>(new Set());
+  const [selectedPrivate, setSelectedPrivate] = useState<Set<string>>(new Set());
 
-  const FileSection = ({ title, fileList, type }: { title: string; fileList: R[]; type: string }) => (
+  const toggleContestFile = (selected: Set<string>, setSelected: (next: Set<string>) => void, name: string) => {
+    const next = new Set(selected);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    setSelected(next);
+  };
+
+  const FileSection = ({
+    title,
+    fileList,
+    type,
+    selected,
+    setSelected,
+  }: {
+    title: string;
+    fileList: R[];
+    type: string;
+    selected: Set<string>;
+    setSelected: (next: Set<string>) => void;
+  }) => (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <CardTitle className="flex items-center gap-2 text-base">
           <FolderOpen className="size-4" />{title} ({fileList.length})
         </CardTitle>
-        <form method="post" encType="multipart/form-data" className="flex items-center gap-2">
-          <input type="hidden" name="type" value={type} />
-          <input type="file" name="file" className="text-xs" />
-          <Button type="submit" name="operation" value="upload_file" size="sm" variant="outline">
-            <Upload className="mr-1 size-3" />上传
-          </Button>
-        </form>
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <form method="post" encType="multipart/form-data" className="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="type" value={type} />
+            <input type="file" name="file" className="text-xs" />
+            <Button type="submit" name="operation" value="upload_file" size="sm" variant="outline">
+              <Upload className="mr-1 size-3" />上传
+            </Button>
+          </form>
+          {selected.size > 0 && (
+            <form
+              method="post"
+              onSubmit={(event) => {
+                if (!window.confirm(`确认删除选中的 ${selected.size} 个文件吗？`)) event.preventDefault();
+              }}
+            >
+              <input type="hidden" name="operation" value="delete_files" />
+              <input type="hidden" name="type" value={type} />
+              {Array.from(selected).map((name) => <input key={name} type="hidden" name="files" value={name} />)}
+              <Button type="submit" size="sm" variant="destructive">
+                <Trash2 className="mr-1 size-3" />删除 ({selected.size})
+              </Button>
+            </form>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         {fileList.length > 0 ? (
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8">
+                  <input
+                    type="checkbox"
+                    checked={selected.size === fileList.length && fileList.length > 0}
+                    onChange={() => setSelected(selected.size === fileList.length ? new Set() : new Set(fileList.map((file) => file.name)))}
+                    className="size-4 rounded border accent-primary"
+                  />
+                </TableHead>
                 <TableHead>文件名</TableHead>
                 <TableHead className="w-28 text-right">大小</TableHead>
-                <TableHead className="w-20 text-center">操作</TableHead>
+                <TableHead className="w-28 text-center">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {fileList.map((f) => (
                 <TableRow key={f.name}>
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(f.name)}
+                      onChange={() => toggleContestFile(selected, setSelected, f.name)}
+                      className="size-4 rounded border accent-primary"
+                    />
+                  </TableCell>
                   <TableCell className="font-mono text-sm">{f.name}</TableCell>
                   <TableCell className="text-right text-sm text-muted-foreground">{formatSize(f.size || 0)}</TableCell>
                   <TableCell className="text-center">
-                    <form method="post" className="inline">
-                      <input type="hidden" name="files" value={f.name} />
-                      <input type="hidden" name="type" value={type} />
-                      <Button type="submit" name="operation" value="delete_files" variant="ghost" size="icon" className="size-7">
-                        <Trash2 className="size-3 text-destructive" />
+                    <div className="flex justify-center gap-1">
+                      <Button asChild variant="ghost" size="icon" className="size-7">
+                        <a href={`${contestUrl}/file/${type}/${encodeURIComponent(f.name)}`}>
+                          <Download className="size-3" />
+                        </a>
                       </Button>
-                    </form>
+                      <form method="post" className="inline">
+                        <input type="hidden" name="files" value={f.name} />
+                        <input type="hidden" name="type" value={type} />
+                        <Button type="submit" name="operation" value="delete_files" variant="ghost" size="icon" className="size-7">
+                          <Trash2 className="size-3 text-destructive" />
+                        </Button>
+                      </form>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -292,8 +536,8 @@ export function ContestManagePage() {
         </Card>
       )}
 
-      <FileSection title="公开文件" fileList={files} type="public" />
-      <FileSection title="私有文件" fileList={privateFiles} type="private" />
+      <FileSection title="公开文件" fileList={files} type="public" selected={selectedPublic} setSelected={setSelectedPublic} />
+      <FileSection title="私有文件" fileList={privateFiles} type="private" selected={selectedPrivate} setSelected={setSelectedPrivate} />
     </motion.div>
   );
 }
@@ -310,8 +554,6 @@ export function ContestProblemListPage() {
   const tid = tdoc.docId || tdoc._id;
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
   const showScore = data.showScore;
-
-  const ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
   return (
     <motion.div
@@ -345,7 +587,7 @@ export function ContestProblemListPage() {
                 const p = pdict[String(pid)] || {};
                 return (
                   <TableRow key={String(pid)}>
-                    <TableCell className="text-center font-mono font-semibold">{ALPHA[idx] || idx + 1}</TableCell>
+                    <TableCell className="text-center font-mono font-semibold">{getAlphabeticId(idx)}</TableCell>
                     <TableCell>
                       <a href={`${contestUrl}/p/${p.pid || pid}`} className="text-sm text-primary hover:underline">
                         {p.title || `P${pid}`}
@@ -374,10 +616,22 @@ export function ContestProblemListPage() {
             {tcdocs.map((tc) => (
               <div key={String(tc._id)} className="rounded-md border p-3">
                 <div className="flex items-center gap-2">
-                  {tc.subject != null && <Badge variant="outline">{ALPHA[tc.subject] || tc.subject}</Badge>}
+                  <Badge variant="outline">{clarificationSubjectLabel(tdoc, pdict, tc.subject)}</Badge>
                   <span className="text-xs text-muted-foreground">{tc.updateAt ? formatRelativeTime(tc.updateAt, bs.locale) : ''}</span>
                 </div>
-                <p className="mt-1 text-sm">{tc.content}</p>
+                <MarkdownView content={tc.content || ''} className="mt-2" preferredLang={bs.locale} />
+                {Array.isArray(tc.reply) && tc.reply.length > 0 ? (
+                  <div className="mt-3 space-y-2 border-l pl-3">
+                    {tc.reply.map((reply: R) => (
+                      <div key={String(reply._id || reply.content)} className="rounded-md bg-muted/30 p-3">
+                        <div className="mb-1 text-xs text-muted-foreground">
+                          Jury{reply._id ? ` · ${formatObjectIdTime(reply._id, bs.locale)}` : ''}
+                        </div>
+                        <MarkdownView content={reply.content || ''} preferredLang={bs.locale} />
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ))}
           </CardContent>
@@ -390,19 +644,22 @@ export function ContestProblemListPage() {
           <CardTitle className="text-base">提交答疑</CardTitle>
         </CardHeader>
         <CardContent>
-          <form method="post" className="flex items-end gap-3">
+          <form method="post" className="space-y-3">
             <input type="hidden" name="operation" value="clarification" />
-            <div className="flex-1 space-y-1.5">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">主题</label>
               <select name="subject" className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                <option value="-1">通用</option>
+                <option value="0">通用</option>
+                <option value="-1">技术问题</option>
                 {pids.map((pid, idx) => {
                   const p = pdict[String(pid)] || {};
-                  return <option key={String(pid)} value={idx}>{ALPHA[idx]} — {p.title || `P${pid}`}</option>;
+                  return <option key={String(pid)} value={pid}>{getAlphabeticId(idx)} — {p.title || `P${pid}`}</option>;
                 })}
               </select>
             </div>
-            <div className="flex-[2] space-y-1.5">
-              <Input name="content" placeholder="输入你的问题..." required />
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">内容 (Markdown)</label>
+              <MarkdownEditor name="content" value="" minHeight={180} preferredLang={bs.locale} />
             </div>
             <Button type="submit">发送</Button>
           </form>
@@ -533,6 +790,11 @@ export function ContestBalloonPage() {
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
   const tid = tdoc.docId || tdoc._id;
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
+  const [balloonRows, setBalloonRows] = useState<BalloonColorRow[]>(() => normalizeBalloonRows(tdoc, pdict));
+
+  const updateBalloonRow = (pid: string, patch: Partial<BalloonColorRow>) => {
+    setBalloonRows((rows) => rows.map((row) => (row.pid === pid ? { ...row, ...patch } : row)));
+  };
 
   return (
     <motion.div
@@ -546,48 +808,114 @@ export function ContestBalloonPage() {
           <a href={contestUrl}><ArrowLeft className="size-4" /></a>
         </Button>
         <div>
-          <h1 className="text-xl font-semibold">🎈 气球分发</h1>
+          <h1 className="text-xl font-semibold">气球分发</h1>
           <p className="text-sm text-muted-foreground">{tdoc.title}</p>
         </div>
-        <div className="ml-auto">
-          <form method="post" className="flex items-center gap-2">
+      </div>
+
+      {balloonRows.length > 0 && (
+        <div className="rounded-lg border bg-card p-4">
+          <form method="post" className="space-y-3">
             <input type="hidden" name="operation" value="set_color" />
-            <Input name="color" placeholder="颜色配置..." className="w-48" />
-            <Button type="submit" size="sm"><Palette className="mr-1 size-3" />设置</Button>
+            <input type="hidden" name="color" value={serializeBalloonRows(balloonRows)} readOnly />
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-medium">题目气球配置</h2>
+                <p className="text-xs text-muted-foreground">为每道题设置发放时显示的颜色和气球名称。</p>
+              </div>
+              <Button type="submit" size="sm">
+                <Palette className="mr-1 size-3" />保存颜色
+              </Button>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {balloonRows.map((row) => (
+                <div key={row.pid} className="grid gap-2 rounded-md border bg-muted/20 p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-xs font-semibold">
+                      {row.label}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{row.title}</p>
+                      <p className="text-xs text-muted-foreground">P{row.pid}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-[2.75rem_1fr] gap-2">
+                    <input
+                      type="color"
+                      value={row.color}
+                      className="h-9 w-11 cursor-pointer rounded-md border bg-background p-1"
+                      onChange={(e) => updateBalloonRow(row.pid, { color: e.target.value })}
+                      aria-label={`${row.label} 题气球颜色`}
+                    />
+                    <Input
+                      value={row.name}
+                      onChange={(e) => updateBalloonRow(row.pid, { name: e.target.value })}
+                      placeholder="气球名称"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
           </form>
         </div>
-      </div>
+      )}
 
       <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>用户</TableHead>
+                <TableHead className="w-24">状态</TableHead>
+                <TableHead className="w-28">编号</TableHead>
                 <TableHead>题目</TableHead>
-                <TableHead className="w-28 text-center">时间</TableHead>
-                <TableHead className="w-20 text-center">状态</TableHead>
+                <TableHead className="w-36">提交者</TableHead>
+                <TableHead className="w-36">送达者</TableHead>
+                <TableHead className="w-28 text-center">奖励</TableHead>
                 <TableHead className="w-20 text-center">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {bdocs.map((b) => {
                 const u = getUser(udict, b.uid);
+                const sentBy = getUser(udict, b.sent);
                 const p = pdict[String(b.pid)] || {};
+                const index = (tdoc.pids || []).map(String).indexOf(String(b.pid));
+                const config = (tdoc.balloon || {})[String(b.pid)] || {};
+                const sent = Boolean(b.sent);
+                const submitTime = formatObjectIdTime(b._id, bs.locale);
                 return (
                   <TableRow key={String(b._id)}>
-                    <TableCell className="text-sm">{u?.uname || `UID ${b.uid}`}</TableCell>
-                    <TableCell className="text-sm">{p.title || `P${b.pid}`}</TableCell>
-                    <TableCell className="text-center text-sm text-muted-foreground">
-                      {b.time ? formatDateTime(b.time, bs.locale) : '-'}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Badge variant={b.done ? 'default' : 'outline'} className="text-xs">
-                        {b.done ? '已送达' : '待处理'}
+                    <TableCell>
+                      <Badge variant={sent ? 'default' : 'outline'} className="text-xs">
+                        {sent ? '已送达' : '待处理'}
                       </Badge>
                     </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{String(b._id || '').slice(0, 8) || '-'}</TableCell>
+                    <TableCell className="text-sm">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="size-3 rounded-full border"
+                          style={{ backgroundColor: typeof config === 'object' ? config.color : undefined }}
+                        />
+                        <span className="font-semibold">{getAlphabeticId(index)}</span>
+                        <span className="min-w-0 truncate">{typeof config === 'object' && config.name ? config.name : p.title || `P${b.pid}`}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      <div>{u?.uname || `UID ${b.uid}`}</div>
+                      {submitTime && <div className="text-xs text-muted-foreground">{submitTime}</div>}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {sentBy ? (
+                        <>
+                          <div>{sentBy.uname || `UID ${b.sent}`}</div>
+                          {b.sentAt && <div className="text-xs text-muted-foreground">{formatDateTime(b.sentAt, bs.locale)}</div>}
+                        </>
+                      ) : '-'}
+                    </TableCell>
+                    <TableCell className="text-center text-xs text-muted-foreground">{b.first ? '首个通过' : '-'}</TableCell>
                     <TableCell className="text-center">
-                      {!b.done && (
+                      {!sent && (
                         <form method="post" className="inline">
                           <input type="hidden" name="operation" value="done" />
                           <input type="hidden" name="balloon" value={String(b._id)} />
@@ -600,7 +928,7 @@ export function ContestBalloonPage() {
               })}
               {bdocs.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">暂无气球任务</TableCell>
+                  <TableCell colSpan={7} className="py-6 text-center text-sm text-muted-foreground">暂无气球任务</TableCell>
                 </TableRow>
               )}
             </TableBody>
@@ -622,7 +950,6 @@ export function ContestClarificationPage() {
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
   const tid = tdoc.docId || tdoc._id;
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
-  const ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   const pids: number[] = tdoc.pids || [];
 
   return (
@@ -650,16 +977,18 @@ export function ContestClarificationPage() {
         <CardContent>
           <form method="post" className="space-y-3">
             <input type="hidden" name="operation" value="clarification" />
-            <div className="grid grid-cols-3 gap-3">
-              <select name="subject" className="rounded-md border bg-background px-3 py-2 text-sm">
-                <option value="-1">通用通知</option>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <select name="subject" className="rounded-md border bg-background px-3 py-2 text-sm sm:col-span-1">
+                <option value="0">通用通知</option>
+                <option value="-1">技术问题</option>
                 {pids.map((pid, idx) => {
                   const p = pdict[String(pid)] || {};
-                  return <option key={String(pid)} value={idx}>{ALPHA[idx]} — {p.title || `P${pid}`}</option>;
+                  return <option key={String(pid)} value={pid}>{getAlphabeticId(idx)} — {p.title || `P${pid}`}</option>;
                 })}
               </select>
-              <div className="col-span-2">
-                <Input name="content" placeholder="输入答疑内容..." required />
+              <div className="hidden sm:col-span-2 sm:block" />
+              <div className="sm:col-span-3">
+                <MarkdownEditor name="content" value="" minHeight={180} preferredLang={bs.locale} />
               </div>
             </div>
             <Button type="submit"><MessageSquare className="mr-1 size-4" />发送</Button>
@@ -680,14 +1009,32 @@ export function ContestClarificationPage() {
                       <AvatarFallback className="text-[9px]">{makeInitials(u?.uname || '?')}</AvatarFallback>
                     </Avatar>
                     <span className="text-sm font-medium">{u?.uname || '管理员'}</span>
-                    {tc.subject != null && tc.subject >= 0 && (
-                      <Badge variant="outline" className="text-xs">{ALPHA[tc.subject] || tc.subject}</Badge>
-                    )}
+                    <Badge variant="outline" className="text-xs">{clarificationSubjectLabel(tdoc, pdict, tc.subject)}</Badge>
                     <span className="ml-auto text-xs text-muted-foreground">
                       {tc.updateAt ? formatRelativeTime(tc.updateAt, bs.locale) : ''}
                     </span>
                   </div>
-                  <p className="mt-2 text-sm">{tc.content}</p>
+                  <MarkdownView content={tc.content || ''} className="mt-3" preferredLang={bs.locale} />
+                  {Array.isArray(tc.reply) && tc.reply.length > 0 ? (
+                    <div className="mt-3 space-y-2 border-l pl-3">
+                      {tc.reply.map((reply: R) => (
+                        <div key={String(reply._id || reply.content)} className="rounded-md bg-muted/30 p-3">
+                          <div className="mb-1 text-xs text-muted-foreground">
+                            Jury{reply._id ? ` · ${formatObjectIdTime(reply._id, bs.locale)}` : ''}
+                          </div>
+                          <MarkdownView content={reply.content || ''} preferredLang={bs.locale} />
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {tc.owner ? (
+                    <form method="post" className="mt-4 space-y-2 border-t pt-3">
+                      <input type="hidden" name="operation" value="clarification" />
+                      <input type="hidden" name="did" value={String(tc._id)} />
+                      <MarkdownEditor name="content" value="" minHeight={140} preferredLang={bs.locale} />
+                      <Button type="submit" size="sm" variant="outline">回复</Button>
+                    </form>
+                  ) : null}
                 </CardContent>
               </Card>
             );
@@ -710,10 +1057,113 @@ export function ContestPrintPage() {
   const tdoc: R = data.tdoc || {};
   const tid = tdoc.docId || tdoc._id;
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
+  const isPrintAdmin = Boolean(data.isAdmin || data.canEdit || String(bs.user.id) === String(tdoc.owner));
+  const [tasks, setTasks] = useState<R[]>([]);
+  const [udict, setUdict] = useState<Record<string, GenericUserDoc>>({});
+  const [loadingTasks, setLoadingTasks] = useState(false);
+  const [kioskEnabled, setKioskEnabled] = useState(false);
+
+  const postPrintOperation = async (payload: Record<string, string>) => {
+    const response = await fetch(window.location.href, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      },
+      body: new URLSearchParams(payload),
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(text || '请求失败');
+    try {
+      return JSON.parse(text);
+    } catch {
+      return {};
+    }
+  };
+
+  const refreshTasks = async () => {
+    setLoadingTasks(true);
+    try {
+      const result = await postPrintOperation({ operation: 'get_print_task' });
+      setTasks(result.tasks || []);
+      setUdict(result.udict || {});
+    } finally {
+      setLoadingTasks(false);
+    }
+  };
+
+  const printTask = (task: R, owner: R) => {
+    const printWindow = window.open('', '_blank', 'width=800,height=600,popup=1');
+    if (!printWindow) return;
+    const lines = String(task.content || '').split('\n');
+    const clipped: string[] = [];
+    let visualLines = 0;
+    for (const line of lines) {
+      visualLines += Math.max(1, Math.ceil(line.length / 100));
+      if (visualLines > 300) break;
+      clipped.push(line);
+    }
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>${escapeHtml(task.title || 'Print')}</title>
+          <style>
+            body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 12px; font-size: 13px; line-height: 1.35; }
+            .header { border-bottom: 1px solid #bbb; margin-bottom: 10px; padding-bottom: 6px; }
+            .meta { display: flex; justify-content: space-between; gap: 16px; }
+            pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="meta">
+              <span>[${escapeHtml(owner.uname || `UID ${task.owner}`)}] ${escapeHtml(owner.school || '')} ${escapeHtml(owner.displayName || '')}</span>
+              <span>${escapeHtml(formatObjectIdTime(task._id, bs.locale))}</span>
+            </div>
+            <div class="meta">
+              <span>Filename: ${escapeHtml(task.title || '')}</span>
+              <span>By Hydro</span>
+            </div>
+          </div>
+          <pre>${escapeHtml(clipped.join('\n'))}</pre>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    window.setTimeout(() => printWindow.print(), 300);
+  };
+
+  useEffect(() => {
+    refreshTasks().catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!kioskEnabled) return undefined;
+    let active = true;
+    const loop = async () => {
+      while (active) {
+        try {
+          const result = await postPrintOperation({ operation: 'allocate_print_task' });
+          if (result.task) {
+            printTask(result.task, result.udoc || {});
+            await postPrintOperation({ operation: 'update_print_task', taskId: String(result.task._id), status: 'printed' });
+            await refreshTasks();
+          } else {
+            await new Promise((resolve) => { window.setTimeout(resolve, 5000); });
+          }
+        } catch {
+          await new Promise((resolve) => { window.setTimeout(resolve, 5000); });
+        }
+      }
+    };
+    loop();
+    return () => { active = false; };
+  }, [kioskEnabled]);
 
   return (
     <motion.div
-      className="mx-auto max-w-lg space-y-6"
+      className="mx-auto max-w-4xl space-y-6"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
@@ -729,10 +1179,18 @@ export function ContestPrintPage() {
       </div>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="flex items-center gap-2 text-base">
             <Printer className="size-4" />提交打印
           </CardTitle>
+          <form method="post" encType="multipart/form-data" className="flex items-center gap-2">
+            <input type="hidden" name="operation" value="print" />
+            <input type="file" name="file" className="text-xs" />
+            <Button type="submit" size="sm" variant="outline">
+              <Upload className="mr-1 size-3.5" />
+              上传文件
+            </Button>
+          </form>
         </CardHeader>
         <CardContent>
           <form method="post" className="space-y-4">
@@ -753,6 +1211,83 @@ export function ContestPrintPage() {
             </div>
             <Button type="submit"><Printer className="mr-1 size-4" />提交打印</Button>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <FileText className="size-4" />打印队列
+          </CardTitle>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={() => refreshTasks().catch((error) => alert(error.message))}>
+              <RefreshCw className="mr-1 size-3.5" />
+              {loadingTasks ? '刷新中' : '刷新'}
+            </Button>
+            {isPrintAdmin && (
+              <Button type="button" size="sm" variant={kioskEnabled ? 'default' : 'outline'} onClick={() => setKioskEnabled((value) => !value)}>
+                <Printer className="mr-1 size-3.5" />
+                {kioskEnabled ? '打印亭已开启' : '开启打印亭'}
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="pl-5">用户</TableHead>
+                <TableHead>标题</TableHead>
+                <TableHead className="w-40">时间</TableHead>
+                <TableHead className="w-24 text-center">状态</TableHead>
+                {isPrintAdmin && <TableHead className="w-24 pr-5 text-right">操作</TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {tasks.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={isPrintAdmin ? 5 : 4} className="py-8 text-center text-sm text-muted-foreground">
+                    暂无打印任务
+                  </TableCell>
+                </TableRow>
+              ) : (
+                tasks.map((task) => {
+                  const owner = udict[String(task.owner)] || {};
+                  return (
+                    <TableRow key={String(task._id)}>
+                      <TableCell className="pl-5 text-sm">
+                        {owner.uname || `UID ${task.owner}`}
+                      </TableCell>
+                      <TableCell className="font-mono text-sm">{task.title || '—'}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {formatObjectIdTime(task._id, bs.locale) || '—'}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant={String(task.status).includes('printed') ? 'secondary' : 'outline'} className="text-xs">
+                          {String(task.status || 'pending')}
+                        </Badge>
+                      </TableCell>
+                      {isPrintAdmin && (
+                        <TableCell className="pr-5 text-right">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 text-xs"
+                            onClick={() => postPrintOperation({ operation: 'update_print_task', taskId: String(task._id), status: 'pending' })
+                              .then(refreshTasks)
+                              .catch((error) => alert(error.message))}
+                          >
+                            重新打印
+                          </Button>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
     </motion.div>

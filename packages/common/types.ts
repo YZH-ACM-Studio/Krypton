@@ -10,6 +10,53 @@ export enum ProblemType {
     Communication = 'communication',
     Objective = 'objective',
     Remote = 'remote_judge',
+    FillFunction = 'fill_function',
+}
+
+/**
+ * Per-question kind metadata for `Objective` problems. The answer-sheet UI
+ * uses this to pick the renderer (radio / checkbox / blank input / code snippet).
+ *
+ * Inference fallback when no explicit kind is set:
+ *  - stdAns is an array            → 'multi'
+ *  - single string, no whitespace  → 'single'
+ *  - single string with whitespace → 'blank'
+ *
+ * 'fill_program' is always explicit (PRD §1.1).
+ */
+export type QuestionKind = 'single' | 'multi' | 'blank' | 'fill_program';
+
+/**
+ * `Objective.config.answers[key]` shape. Backward-compatible with the legacy
+ * `[stdAns, score]` tuple; new code can use the 3-tuple to attach kind + prompt.
+ */
+export type AnswerEntry =
+    | [string | string[], number]
+    | [string | string[], number, { kind?: QuestionKind; prompt?: string }];
+
+/**
+ * Fill-function problem template — see PRD §1.7.
+ *
+ * `source` is the complete compilable program. Regions are the ranges the
+ * student may edit; everything else is rendered read-only but visible in the
+ * student UI. At submission, the server splices each region's content back
+ * into `source` and submits the result as a normal `default` record.
+ */
+export interface FillFunctionTemplate {
+    lang: string;
+    source: string;
+    regions: FillRegion[];
+    /** SHA-256 of `source` at save time. Used for draft staleness detection. */
+    sourceHash: string;
+}
+
+export interface FillRegion {
+    /** Stable identifier chosen by the teacher (e.g. 'r1', 'main_logic'). */
+    id: string;
+    start: { line: number; col: number };
+    end: { line: number; col: number };
+    /** Optional prompt shown above the editable area in the student UI. */
+    prompt?: string;
 }
 
 export interface TestCaseConfig {
@@ -51,7 +98,9 @@ export interface ProblemConfigFile {
     user_extra_files?: string[];
     judge_extra_files?: string[];
     detail?: DetailType | boolean;
-    answers?: Record<string, [string | string[], number]>;
+    answers?: Record<string, AnswerEntry>;
+    /** When `type === 'fill_function'`, the template source and editable regions. */
+    template?: FillFunctionTemplate;
     redirect?: string;
     cases?: TestCaseConfig[];
     subtasks?: SubtaskConfig[];

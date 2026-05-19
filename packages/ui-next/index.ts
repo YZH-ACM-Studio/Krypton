@@ -65,6 +65,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
         user: {
             id: Number(currentUser._id || 0),
             name: currentUser.uname || 'Guest',
+            mail: currentUser.mail || '',
             signedIn: Number(currentUser._id || 0) > 0,
             theme: currentUser.theme || 'light',
             viewLang: currentUser.viewLang || 'zh-CN',
@@ -73,6 +74,9 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
             bio: currentUser.bio || '',
             priv: currentUser.priv || 0,
             role: currentUser.role || 'default',
+            tfa: !!currentUser.tfa,
+            authn: !!currentUser.authn,
+            pinnedDomains: currentUser.pinnedDomains || [],
         },
         domain: {
             id: String(domain._id || 'system'),

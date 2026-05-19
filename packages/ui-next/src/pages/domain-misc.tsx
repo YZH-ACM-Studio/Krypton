@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap } from '@/lib/bootstrap';
 
 type R = Record<string, any>;
@@ -61,13 +62,7 @@ export function DomainCreatePage() {
 
             <div className="space-y-1.5">
               <label htmlFor="bulletin" className="text-sm font-medium">公告 (Markdown)</label>
-              <textarea
-                id="bulletin"
-                name="bulletin"
-                rows={4}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                placeholder="域公告..."
-              />
+              <MarkdownEditor name="bulletin" value="" minHeight={220} />
             </div>
 
             <div className="space-y-1.5">
@@ -119,7 +114,9 @@ export function DomainJoinPage() {
           <CardContent className="p-4">
             <h3 className="font-medium">{domainInfo.name}</h3>
             {domainInfo.bulletin && (
-              <p className="mt-1 text-sm text-muted-foreground">{domainInfo.bulletin}</p>
+              <div className="mt-3 rounded-md border bg-background/60 p-3">
+                <MarkdownView content={domainInfo.bulletin} />
+              </div>
             )}
           </CardContent>
         </Card>

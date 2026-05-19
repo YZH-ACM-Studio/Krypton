@@ -8,7 +8,7 @@ import {
     ProblemNotFoundError, RecordNotFoundError, UserNotFoundError,
 } from '../error';
 import { RecordDoc, Tdoc } from '../interface';
-import { PERM, PRIV, STATUS } from '../model/builtin';
+import { PERM, PRIV, STATUS, STATUS_TEXTS } from '../model/builtin';
 import * as contest from '../model/contest';
 import problem, { ProblemDoc } from '../model/problem';
 import record from '../model/record';
@@ -122,6 +122,8 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             filterLang: lang,
             filterStatus: status,
             notification,
+            langs,
+            statusTexts: STATUS_TEXTS,
         };
         if (this.user.hasPriv(PRIV.PRIV_VIEW_JUDGE_STATISTICS) && stat) {
             this.response.body.statistics = await record.stat(allDomain ? undefined : domainId);

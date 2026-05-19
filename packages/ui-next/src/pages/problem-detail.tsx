@@ -95,7 +95,7 @@ function SampleBlocks({ samples }: { samples: SampleCase[] }) {
     <div className="space-y-3 mt-4">
       <h3 className="text-sm font-semibold text-foreground">样例</h3>
       {samples.map((s) => (
-        <div key={s.id} className="grid grid-cols-2 gap-2">
+        <div key={s.id} className="grid gap-2 sm:grid-cols-2">
           <SampleBlock label={`样例输入 #${s.id}`} content={s.input} />
           <SampleBlock label={`样例输出 #${s.id}`} content={s.output} />
         </div>
@@ -173,19 +173,19 @@ function ResizableSplit({
   }, [minPercent, maxPercent]);
 
   return (
-    <div ref={containerRef} className="flex flex-1 overflow-hidden">
-      <div style={{ width: `${leftPct}%` }} className="shrink-0 overflow-hidden">
+    <div ref={containerRef} className="krypton-split flex flex-1 overflow-hidden">
+      <div style={{ width: `${leftPct}%` }} className="krypton-split-pane shrink-0 overflow-hidden">
         {left}
       </div>
       <div
-        className="w-1.5 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
+        className="krypton-split-handle w-1.5 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
         onMouseDown={() => {
           draggingRef.current = true;
           document.body.style.cursor = 'col-resize';
           document.body.style.userSelect = 'none';
         }}
       />
-      <div className="flex-1 overflow-hidden">
+      <div className="krypton-split-pane flex-1 overflow-hidden">
         {right}
       </div>
     </div>
@@ -251,7 +251,7 @@ function LimitsSection({ config }: { config: R }) {
         <Cpu className="size-3.5" />
         限制
       </h3>
-      <div className="grid grid-cols-2 gap-2 text-sm">
+      <div className="grid gap-2 text-sm sm:grid-cols-2">
         <div className="flex items-center gap-2 rounded-md border px-3 py-2">
           <Clock className="size-3.5 text-muted-foreground" />
           <div>

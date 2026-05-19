@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Pagination } from '@/components/ui/pagination';
+import { MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens, toDate } from '@/lib/format';
 
@@ -145,6 +146,15 @@ export function HomeworkDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {tdoc.content ? (
+        <Card>
+          <CardHeader><CardTitle>作业说明</CardTitle></CardHeader>
+          <CardContent>
+            <MarkdownView content={tdoc.content} className="prose prose-sm dark:prose-invert max-w-none" />
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader><CardTitle>题目列表</CardTitle></CardHeader>

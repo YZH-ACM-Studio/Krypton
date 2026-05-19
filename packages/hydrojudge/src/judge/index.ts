@@ -1,5 +1,6 @@
 import * as communication from './communication';
 import * as def from './default';
+import * as fill_function from './fill_function';
 import * as generate from './generate';
 import * as hack from './hack';
 import * as interactive from './interactive';
@@ -9,5 +10,5 @@ import * as run from './run';
 import * as submit_answer from './submit_answer';
 
 export = {
-    default: def, generate, interactive, communication, run, submit_answer, objective, hack,
+    default: def, generate, interactive, communication, run, submit_answer, objective, hack, fill_function,
 } as Record<string, { judge(ctx: Context): Promise<void> }>;

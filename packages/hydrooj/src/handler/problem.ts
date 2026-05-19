@@ -984,7 +984,7 @@ export class ProblemStatisticsHandler extends ProblemDetailHandler {
         ]);
         this.response.template = 'problem_statistics.html';
         this.response.body = {
-            rsdocs, page, pcount, rscount, sort, direction, pdoc: this.pdoc, udict, types: Object.keys(record.STAT_QUERY), udoc,
+            rsdocs, page, pcount, rscount, sort, direction, lang, langs: setting.langs, pdoc: this.pdoc, udict, types: Object.keys(record.STAT_QUERY), udoc,
         };
     }
 }

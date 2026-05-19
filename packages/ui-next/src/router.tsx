@@ -69,14 +69,14 @@ function AppShell() {
   }, [userMenuOpen]);
 
   return (
-    <div className="flex h-screen bg-background">
+    <div className="flex h-dvh min-w-0 overflow-hidden bg-background">
       {/* Sidebar */}
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} collapsed={collapsed} />
 
       {/* Main area */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Top bar — frosted glass */}
-        <header className="sticky top-0 z-40 flex h-12 shrink-0 items-center gap-2 border-b bg-background/60 px-4 backdrop-blur-xl saturate-150">
+        <header className="sticky top-0 z-40 flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur-xl saturate-150 sm:px-4">
           {/* Mobile menu toggle */}
           <Button
             variant="ghost"
@@ -201,8 +201,8 @@ function AppShell() {
         </header>
 
         {/* Content area */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
-          <div className="mx-auto max-w-6xl">
+        <main className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-6">
+          <div className="mx-auto min-w-0 max-w-6xl">
             <Outlet />
           </div>
         </main>

@@ -11,9 +11,13 @@ import { useState } from 'react';
 import { motion } from 'motion/react';
 import {
   FolderOpen,
+  Fingerprint,
   Globe,
+  Link as LinkIcon,
+  LogOut,
   Lock,
   Mail,
+  Send,
   Settings,
   Shield,
   Trash2,
@@ -26,6 +30,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { MarkdownEditor } from '@/components/markdown-renderer';
 import {
   Table,
   TableBody,
@@ -35,10 +40,82 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
-import { makeInitials, formatRelativeTime, toDate } from '@/lib/format';
+import { makeInitials, formatRelativeTime, formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
 type R = Record<string, any>;
+
+function objectIdDate(id: unknown) {
+  const value = String(id || '');
+  if (!/^[0-9a-f]{24}$/i.test(value)) return null;
+  const timestamp = Number.parseInt(value.slice(0, 8), 16) * 1000;
+  return Number.isFinite(timestamp) ? new Date(timestamp) : null;
+}
+
+function parseSystemMessage(content: unknown) {
+  if (typeof content !== 'string') return null;
+  try {
+    const data = JSON.parse(content);
+    if (!data || typeof data.message !== 'string') return null;
+    return {
+      message: data.message as string,
+      params: Array.isArray(data.params) ? data.params : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getMessagePreview(message: R) {
+  const system = parseSystemMessage(message.content);
+  if (!system) return String(message.content || '');
+  return system.message.replace(/\{([^{}]+)\}/g, (_, key: string) => {
+    const index = Number.parseInt(key.split(':')[0], 10);
+    return String(system.params[index] || '');
+  });
+}
+
+function renderMessageContent(message: R, linkClassName: string) {
+  const system = parseSystemMessage(message.content);
+  if (!system) return String(message.content || '');
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  const regex = /\{([^{}]+)\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(system.message))) {
+    if (match.index > cursor) parts.push(system.message.slice(cursor, match.index));
+    const key = match[1];
+    const index = Number.parseInt(key.split(':')[0], 10);
+    const param = String(system.params[index] || '');
+    if (key.endsWith(':link') && param) {
+      parts.push(
+        <a key={`${match.index}-${key}`} href={param} className={linkClassName} target="_blank" rel="noreferrer">
+          {param}
+        </a>,
+      );
+    } else {
+      parts.push(<span key={`${match.index}-${key}`} className="font-medium">{param}</span>);
+    }
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < system.message.length) parts.push(system.message.slice(cursor));
+  return parts;
+}
+
+function binaryIdToBase64(value: any) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (value.$binary?.base64) return String(value.$binary.base64);
+  if (typeof value.buffer === 'string') return value.buffer;
+  const data = value.buffer?.data || value.data;
+  if (Array.isArray(data)) {
+    const bytes = new Uint8Array(data);
+    let binary = '';
+    bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+    return window.btoa(binary);
+  }
+  return String(value.buffer || value);
+}
 
 /* ------------------------------------------------------------------ */
 /*  Tab definitions                                                    */
@@ -215,6 +292,12 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
           >
             {renderRange(setting.range)}
           </select>
+        ) : setting.type === 'markdown' && !isDisabled ? (
+          <MarkdownEditor
+            name={setting.key}
+            value={value ?? setting.value ?? ''}
+            minHeight={260}
+          />
         ) : setting.type === 'textarea' || setting.type === 'markdown' ? (
           <textarea
             name={setting.key}
@@ -285,6 +368,10 @@ function SecurityPanel() {
   const data = bs.page.data;
   const sessions: R[] = data.sessions || [];
   const authenticators: R[] = data.authenticators || [];
+  const relations: R[] = data.relations || [];
+  const loginMethods: R[] = data.loginMethods || [];
+  const linkedPlatforms = new Set(relations.map((relation) => relation.platform));
+  const methodsToLink = loginMethods.filter((method) => !linkedPlatforms.has(method.id || method.type));
 
   return (
     <div className="space-y-4">
@@ -298,7 +385,7 @@ function SecurityPanel() {
         </CardHeader>
         <CardContent>
           <form method="post" className="space-y-3">
-            <input type="hidden" name="operation" value="password" />
+            <input type="hidden" name="operation" value="change_password" />
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">当前密码</label>
@@ -310,7 +397,7 @@ function SecurityPanel() {
               </div>
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">确认新密码</label>
-                <Input name="verify" type="password" autoComplete="new-password" />
+                <Input name="verifyPassword" type="password" autoComplete="new-password" />
               </div>
             </div>
             <Button type="submit" size="sm">更新密码</Button>
@@ -328,11 +415,11 @@ function SecurityPanel() {
         </CardHeader>
         <CardContent>
           <form method="post" className="space-y-3">
-            <input type="hidden" name="operation" value="mail" />
+            <input type="hidden" name="operation" value="change_mail" />
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">当前密码</label>
-                <Input name="currentPassword" type="password" />
+                <Input name="password" type="password" />
               </div>
               <div className="space-y-1">
                 <label className="text-xs text-muted-foreground">新邮箱</label>
@@ -341,6 +428,94 @@ function SecurityPanel() {
             </div>
             <Button type="submit" size="sm">更换邮箱</Button>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <LinkIcon className="size-4" />
+            关联账号
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {bs.user.mail ? (
+            <div className="flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2 text-sm">
+              <span className="text-muted-foreground">邮箱</span>
+              <span className="font-medium">{bs.user.mail}</span>
+            </div>
+          ) : null}
+          {relations.filter((relation) => relation.platform !== 'mail').map((relation) => (
+            <div key={`${relation.platform}-${relation.id}`} className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2 text-sm">
+              <div className="min-w-0">
+                <p className="font-medium">{relation.name || relation.platform}</p>
+                <p className="truncate text-xs text-muted-foreground">{relation.id}</p>
+              </div>
+              <form method="post">
+                <input type="hidden" name="operation" value="unlink_account" />
+                <Button type="submit" name="platform" value={relation.platform} size="sm" variant="outline">
+                  解绑
+                </Button>
+              </form>
+            </div>
+          ))}
+          {methodsToLink.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {methodsToLink.map((method) => (
+                <form key={method.id || method.type} method="post">
+                  <input type="hidden" name="operation" value="link_account" />
+                  <Button type="submit" name="platform" value={method.id || method.type} size="sm" variant="outline">
+                    关联 {method.name || method.text || method.id || method.type}
+                  </Button>
+                </form>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Fingerprint className="size-4" />
+            认证器
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {bs.user.tfa && (
+            <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2 text-sm">
+              <div>
+                <p className="font-medium">两步验证</p>
+                <p className="text-xs text-muted-foreground">TOTP 动态验证码</p>
+              </div>
+              <form method="post">
+                <input type="hidden" name="operation" value="disable_tfa" />
+                <Button type="submit" size="sm" variant="outline">移除</Button>
+              </form>
+            </div>
+          )}
+          {authenticators.map((authenticator) => {
+            const id = binaryIdToBase64(authenticator.credentialID);
+            return (
+              <div key={id || authenticator.name} className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <p className="font-medium">{authenticator.name || 'Authenticator'}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {[authenticator.credentialDeviceType, authenticator.fmt].filter(Boolean).join(' · ') || 'WebAuthn'}
+                    {authenticator.regat ? ` · ${formatDateTime(authenticator.regat, bs.locale)}` : ''}
+                  </p>
+                </div>
+                <form method="post">
+                  <input type="hidden" name="operation" value="disable_authn" />
+                  <input type="hidden" name="id" value={id} />
+                  <Button type="submit" size="sm" variant="outline">移除</Button>
+                </form>
+              </div>
+            );
+          })}
+          {!bs.user.tfa && authenticators.length === 0 && (
+            <p className="text-sm text-muted-foreground">暂无认证器</p>
+          )}
         </CardContent>
       </Card>
 
@@ -400,6 +575,20 @@ function SecurityPanel() {
               )}
             </TableBody>
           </Table>
+          <div className="flex justify-end border-t p-4">
+            <form
+              method="post"
+              onSubmit={(event) => {
+                if (!window.confirm('确定要注销所有会话吗？当前会话也会退出。')) event.preventDefault();
+              }}
+            >
+              <input type="hidden" name="operation" value="delete_all_tokens" />
+              <Button type="submit" size="sm" variant="outline" className="gap-1.5">
+                <LogOut className="size-3.5" />
+                注销所有会话
+              </Button>
+            </form>
+          </div>
         </CardContent>
       </Card>
 
@@ -480,7 +669,7 @@ function MessagesPanel() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{name}</p>
                       {last && (
-                        <p className="truncate text-[11px] text-muted-foreground">{last.content}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">{getMessagePreview(last)}</p>
                       )}
                     </div>
                   </button>
@@ -500,15 +689,23 @@ function MessagesPanel() {
               <div className="flex-1 space-y-2 overflow-y-auto p-4">
                 {activeConv.messages.map((m, i) => {
                   const fromMe = m.from === bs.user.id;
+                  const time = objectIdDate(m._id);
                   return (
                     <div key={i} className={cn('flex', fromMe ? 'justify-end' : 'justify-start')}>
                       <div
                         className={cn(
-                          'max-w-[75%] rounded-lg px-3 py-2 text-sm',
+                          'max-w-[75%] rounded-lg px-3 py-2 text-sm leading-6',
                           fromMe ? 'bg-primary text-primary-foreground' : 'bg-muted',
                         )}
                       >
-                        {m.content}
+                        <div>
+                          {renderMessageContent(m, fromMe ? 'font-medium underline underline-offset-2' : 'font-medium text-primary underline underline-offset-2')}
+                        </div>
+                        {time && (
+                          <div className={cn('mt-1 text-[10px]', fromMe ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+                            {formatRelativeTime(time, bs.locale)}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -516,9 +713,12 @@ function MessagesPanel() {
               </div>
               <div className="border-t p-3">
                 <form method="post" className="flex gap-2">
+                  <input type="hidden" name="operation" value="send" />
                   <input type="hidden" name="uid" value={activeConv.uid} />
                   <Input name="content" placeholder="输入消息…" className="flex-1" autoComplete="off" />
-                  <Button type="submit" size="sm">发送</Button>
+                  <Button type="submit" size="sm">
+                    <Send className="mr-1 size-3.5" />发送
+                  </Button>
                 </form>
               </div>
             </>
@@ -541,6 +741,18 @@ function FilesPanel() {
   const bs = useBootstrap();
   const data = bs.page.data;
   const files: R[] = data.files || [];
+  const [uploadName, setUploadName] = useState('');
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+
+  const toggleFile = (name: string) => {
+    setSelectedFiles((current) => {
+      const next = new Set(current);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+  const selectedList = Array.from(selectedFiles);
 
   return (
     <div className="space-y-4">
@@ -549,8 +761,31 @@ function FilesPanel() {
           <CardTitle className="text-sm">上传文件</CardTitle>
         </CardHeader>
         <CardContent>
-          <form method="post" encType="multipart/form-data" className="flex items-center gap-3">
-            <input type="file" name="file" className="text-sm" />
+          <form method="post" encType="multipart/form-data" className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+            <div className="space-y-1.5">
+              <label htmlFor="user-file" className="text-xs text-muted-foreground">选择文件</label>
+              <input
+                id="user-file"
+                type="file"
+                name="file"
+                className="block w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground"
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  if (file) setUploadName(file.name);
+                }}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="user-filename" className="text-xs text-muted-foreground">保存为</label>
+              <Input
+                id="user-filename"
+                name="filename"
+                value={uploadName}
+                onChange={(event) => setUploadName(event.target.value)}
+                placeholder="文件名"
+                required
+              />
+            </div>
             <Button type="submit" size="sm" className="gap-1">
               <Upload className="size-3.5" />
               上传
@@ -559,37 +794,86 @@ function FilesPanel() {
         </CardContent>
       </Card>
 
+      {selectedList.length > 0 && (
+        <Card className="border-primary/30">
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">已选择 {selectedList.length} 个文件</p>
+            <form
+              method="post"
+              onSubmit={(event) => {
+                if (!window.confirm('确认删除选中的文件吗？')) event.preventDefault();
+              }}
+            >
+              <input type="hidden" name="operation" value="delete_files" />
+              {selectedList.map((name) => <input key={name} type="hidden" name="files" value={name} />)}
+              <Button type="submit" size="sm" variant="destructive">
+                删除选中
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="pl-5">文件名</TableHead>
+                <TableHead className="pl-5 w-10" />
+                <TableHead>文件名</TableHead>
                 <TableHead className="w-28 text-right">大小</TableHead>
-                <TableHead className="w-20 text-center pr-5">操作</TableHead>
+                <TableHead className="w-32 text-center pr-5">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {files.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
                     暂无文件
                   </TableCell>
                 </TableRow>
               ) : (
-                files.map((f) => (
+                files.map((f) => {
+                  const name = String(f.name || f.filename);
+                  return (
                   <TableRow key={String(f.name || f._id)}>
-                    <TableCell className="pl-5 font-medium text-sm">{f.name || f.filename}</TableCell>
+                    <TableCell className="pl-5">
+                      <input
+                        type="checkbox"
+                        checked={selectedFiles.has(name)}
+                        onChange={() => toggleFile(name)}
+                        className="size-4 rounded border accent-primary"
+                      />
+                    </TableCell>
+                    <TableCell className="font-medium text-sm">{f.name || f.filename}</TableCell>
                     <TableCell className="text-right text-xs text-muted-foreground tabular-nums">
                       {f.size != null ? formatFileSize(f.size) : '—'}
                     </TableCell>
                     <TableCell className="text-center pr-5">
-                      <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
-                        <a href={`/file/${bs.user.id}/${f.name || f.filename}`}>下载</a>
-                      </Button>
+                      <div className="flex justify-center gap-1">
+                        <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
+                          <a href={`/file/${bs.user.id}/${f.name || f.filename}`}>下载</a>
+                        </Button>
+                        <form method="post" className="inline">
+                          <input type="hidden" name="operation" value="delete_files" />
+                          <input type="hidden" name="files" value={f.name || f.filename} />
+                          <Button
+                            type="submit"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-destructive"
+                            onClick={(event) => {
+                              if (!window.confirm(`确认删除 ${f.name || f.filename}？`)) event.preventDefault();
+                            }}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </form>
+                      </div>
                     </TableCell>
                   </TableRow>
-                ))
+                  );
+                })
               )}
             </TableBody>
           </Table>

@@ -25,7 +25,8 @@ globalConfig.json
 .pnp.*
 
 /ecosystems/
-
+dev/
+.DS_Store
 
 # Config Files
 /config.yaml

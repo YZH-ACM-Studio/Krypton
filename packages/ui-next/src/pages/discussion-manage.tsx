@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import { MarkdownEditor } from '@/components/markdown-renderer';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 
@@ -47,13 +48,7 @@ export function DiscussionCreatePage() {
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium">内容 (Markdown)</label>
-              <textarea
-                name="content"
-                rows={10}
-                className="w-full rounded-md border bg-background px-3 py-2 font-mono text-sm"
-                placeholder="撰写讨论内容..."
-                required
-              />
+              <MarkdownEditor name="content" value="" minHeight={320} />
             </div>
 
             <div className="flex items-center gap-4">
@@ -100,8 +95,6 @@ export function DiscussionEditPage() {
       <Card>
         <CardContent className="p-6">
           <form method="post" className="space-y-4">
-            <input type="hidden" name="operation" value="update" />
-
             <div className="space-y-1.5">
               <label htmlFor="title" className="text-sm font-medium">标题</label>
               <Input id="title" name="title" defaultValue={ddoc.title || ''} required />
@@ -109,13 +102,7 @@ export function DiscussionEditPage() {
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium">内容 (Markdown)</label>
-              <textarea
-                name="content"
-                rows={10}
-                className="w-full rounded-md border bg-background px-3 py-2 font-mono text-sm"
-                defaultValue={ddoc.content || ''}
-                required
-              />
+              <MarkdownEditor name="content" value={ddoc.content || ''} minHeight={320} />
             </div>
 
             <div className="flex items-center gap-4">
@@ -132,13 +119,18 @@ export function DiscussionEditPage() {
             <Separator />
 
             <div className="flex items-center gap-3">
-              <Button type="submit"><Save className="mr-1 size-4" />保存</Button>
-              <form method="post" className="inline" onSubmit={(e) => { if (!confirm('确定要删除此讨论吗？')) e.preventDefault(); }}>
-                <input type="hidden" name="operation" value="delete" />
-                <Button type="submit" variant="destructive" size="sm">
-                  <Trash2 className="mr-1 size-3" />删除
-                </Button>
-              </form>
+              <Button type="submit" name="operation" value="update"><Save className="mr-1 size-4" />保存</Button>
+              <Button
+                type="submit"
+                name="operation"
+                value="delete"
+                variant="destructive"
+                size="sm"
+                formNoValidate
+                onClick={(e) => { if (!confirm('确定要删除此讨论吗？')) e.preventDefault(); }}
+              >
+                <Trash2 className="mr-1 size-3" />删除
+              </Button>
             </div>
           </form>
         </CardContent>

@@ -797,8 +797,29 @@ const homework = buildContestRule({
     },
 });
 
+/**
+ * exam — Krypton's paper-style answer sheet (PRD §1).
+ *
+ * Behaves like OI for scoring (sum of per-problem scores, no time component),
+ * but is wired with Vigil anti-cheat hooks and a different submission UI
+ * (the answer sheet at `/exam-mode/:tid` instead of per-problem submit pages).
+ *
+ * Additional tdoc fields used by exam rule (set on contest create):
+ *   - approvalMode       : 'strict' | 'auto'  — Vigil proctor flow
+ *   - lockdownMode       : boolean             — Qt Client locks system hotkeys
+ *   - pauseOnDisconnect  : boolean             — clock pauses on network drop
+ *   - screenshotIntervalMs : number            — Vigil periodic capture cadence
+ *   - participantGroupIds: ObjectId[]          — userbind UserGroup ids
+ *   - exclusive          : boolean             — hide contest picker on entry
+ */
+const exam = buildContestRule({
+    TEXT: 'Exam',
+    features: ['scoreboard'],
+    check: () => { },
+}, oi);
+
 export const RULES: ContestRules = {
-    acm, oi, homework, ioi, ledo, strictioi,
+    acm, oi, homework, ioi, ledo, strictioi, exam,
 };
 
 const collBalloon = db.collection('contest.balloon');

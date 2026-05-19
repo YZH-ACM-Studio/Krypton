@@ -192,6 +192,21 @@ class DiscussionDetailHandler extends DiscussionHandler {
                 discussion.setStatus(domainId, did, this.user._id, { view: true }),
             ]);
         }
+        const replyPermissions = Object.fromEntries(drdocs.map((drdoc) => {
+            const canEdit = this.user.own(drdoc) && this.user.hasPerm(PERM.PERM_EDIT_DISCUSSION_REPLY_SELF);
+            const canDelete = (this.user.own(drdoc) && this.user.hasPerm(PERM.PERM_DELETE_DISCUSSION_REPLY_SELF))
+                || this.user.hasPerm(PERM.PERM_DELETE_DISCUSSION_REPLY)
+                || (this.user.own(this.ddoc) && this.user.hasPerm(PERM.PERM_DELETE_DISCUSSION_REPLY_SELF_DISCUSSION));
+            const tail = Object.fromEntries((drdoc.reply || []).map((drrdoc) => [
+                drrdoc._id.toHexString(),
+                {
+                    canEdit: this.user.own(drrdoc) && this.user.hasPerm(PERM.PERM_EDIT_DISCUSSION_REPLY_SELF),
+                    canDelete: (this.user.own(drrdoc) && this.user.hasPerm(PERM.PERM_DELETE_DISCUSSION_REPLY_SELF))
+                        || this.user.hasPerm(PERM.PERM_DELETE_DISCUSSION_REPLY),
+                },
+            ]));
+            return [drdoc._id.toHexString(), { canEdit, canDelete, tail }];
+        }));
         const path = [
             ['Hydro', 'homepage'],
             ['discussion_main', 'discussion_main'],
@@ -201,6 +216,16 @@ class DiscussionDetailHandler extends DiscussionHandler {
         this.response.template = 'discussion_detail.html';
         this.response.body = {
             path, ddoc: this.ddoc, dsdoc, drdocs, page, pcount, drcount, udict, vnode: this.vnode, reactions,
+            permissions: {
+                canEditDiscussion: this.user.hasPerm(PERM.PERM_EDIT_DISCUSSION)
+                    || (this.user.own(this.ddoc) && this.user.hasPerm(PERM.PERM_EDIT_DISCUSSION_SELF)),
+                canDeleteDiscussion: this.user.hasPerm(PERM.PERM_DELETE_DISCUSSION)
+                    || (this.user.own(this.ddoc) && this.user.hasPerm(PERM.PERM_DELETE_DISCUSSION_SELF)),
+                canLockDiscussion: this.user.own(this.ddoc) || this.user.hasPerm(PERM.PERM_LOCK_DISCUSSION),
+                canReply: this.user.hasPerm(PERM.PERM_REPLY_DISCUSSION),
+                canReact: this.user.hasPerm(PERM.PERM_ADD_REACTION),
+                replies: replyPermissions,
+            },
         };
     }
 

@@ -53,8 +53,8 @@ function SidebarLink({
         'flex items-center rounded-md text-sm font-medium transition-colors',
         collapsed ? 'justify-center px-2 py-2' : 'gap-3 px-3 py-2',
         active
-          ? 'bg-primary/10 text-primary'
-          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+          ? 'bg-sidebar-primary/10 text-sidebar-primary'
+          : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
       )}
     >
       <item.icon className="size-4 shrink-0" />
@@ -91,8 +91,8 @@ export function Sidebar({
     {
       items: [
         { label: '首页', href: bs.urls.home, icon: Home, templates: ['main.html'] },
-        { label: '题库', href: bs.urls.problems, icon: BookOpen, templates: ['problem_main.html', 'problem_detail.html', 'problem_submit.html', 'problem_edit.html', 'problem_config.html', 'problem_files.html', 'problem_solution.html', 'problem_statistics.html', 'problem_import.html'] },
-        { label: '比赛', href: bs.urls.contests, icon: Trophy, templates: ['contest_main.html', 'contest_detail.html', 'contest_edit.html', 'contest_scoreboard.html', 'contest_manage.html', 'contest_problemlist.html', 'contest_user.html', 'contest_balloon.html', 'contest_clarification.html', 'contest_print.html'] },
+        { label: '题库', href: bs.urls.problems, icon: BookOpen, templates: ['problem_main.html', 'problem_detail.html', 'problem_submit.html', 'problem_hack.html', 'problem_edit.html', 'problem_config.html', 'problem_files.html', 'problem_solution.html', 'problem_statistics.html', 'problem_import.html', 'problem_import_fps.html'] },
+        { label: '比赛', href: bs.urls.contests, icon: Trophy, templates: ['contest_main.html', 'contest_detail.html', 'contest_edit.html', 'contest_scoreboard.html', 'xcpcio_board.html', 'contest_manage.html', 'contest_problemlist.html', 'contest_user.html', 'contest_balloon.html', 'contest_clarification.html', 'contest_print.html'] },
         { label: '作业', href: bs.urls.homework, icon: ClipboardList, templates: ['homework_main.html', 'homework_detail.html', 'homework_edit.html', 'homework_files.html'] },
         { label: '训练', href: bs.urls.training, icon: GraduationCap, templates: ['training_main.html', 'training_detail.html', 'training_edit.html', 'training_files.html'] },
         { label: '讨论', href: bs.urls.discussions, icon: MessageSquare, templates: ['discussion_main_or_node.html', 'discussion_detail.html', 'discussion_create.html', 'discussion_edit.html'] },
@@ -166,7 +166,7 @@ export function Sidebar({
       {/* Desktop sidebar */}
       <aside
         className={cn(
-          'hidden shrink-0 border-r bg-sidebar transition-[width] duration-200 md:block',
+          'hidden shrink-0 border-r border-sidebar-border bg-sidebar-background text-sidebar-foreground transition-[width] duration-200 md:block',
           collapsed ? 'w-14' : 'w-56',
         )}
       >
@@ -176,8 +176,8 @@ export function Sidebar({
       {/* Mobile overlay */}
       {open ? (
         <div className="fixed inset-0 z-50 md:hidden">
-          <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-          <aside className="relative h-full w-56 bg-sidebar shadow-xl">
+          <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={onClose} />
+          <aside className="relative h-full w-[min(18rem,82vw)] border-r border-sidebar-border bg-sidebar-background text-sidebar-foreground shadow-2xl">
             {sidebarContent}
           </aside>
         </div>

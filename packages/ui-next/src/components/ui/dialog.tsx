@@ -27,12 +27,12 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
   if (!open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-200 flex items-center justify-center">
+    <div className="fixed inset-0 z-200 flex items-center justify-center p-3 sm:p-6">
       <div
         className="fixed inset-0 bg-black/60 backdrop-blur-sm"
         onClick={() => onOpenChange(false)}
       />
-      <div className="relative" onClick={(e) => e.stopPropagation()}>
+      <div className="relative w-full max-w-[calc(100vw-1.5rem)] sm:w-auto sm:max-w-[calc(100vw-3rem)]" onClick={(e) => e.stopPropagation()}>
         {children}
       </div>
     </div>,
@@ -49,7 +49,7 @@ export function DialogContent({
   return (
     <div
       className={cn(
-        'relative max-h-[85vh] overflow-hidden rounded-xl border bg-background shadow-2xl',
+        'relative max-h-[85vh] w-full overflow-hidden rounded-xl border bg-background shadow-2xl',
         className,
       )}
       {...props}

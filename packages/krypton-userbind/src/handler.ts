@@ -44,11 +44,29 @@ class AdminSchoolsHandler extends UserbindAdminHandler {
     }
 
     @param('name', Types.String)
-    async postCreate({ domainId }: { domainId: string }, name: string) {
+    @param('initialRoster', Types.Content, true)
+    async postCreate(
+        { domainId }: { domainId: string }, name: string, initialRoster?: string,
+    ) {
         const school = await userBindModel.createSchool(domainId, name, this.user._id);
         await OplogModel.log(this, 'userbind.school.create', { schoolId: school._id, name });
-        this.response.body = { school };
-        this.response.redirect = this.url('admin_userbind_schools');
+
+        // Optional initial roster — if rows are present and any are valid, import them.
+        let importReport: any = null;
+        if (initialRoster && initialRoster.trim()) {
+            const parsed = userBindModel.parseRosterText(initialRoster)
+                .filter((r) => r.status === 'ok')
+                .map((r) => ({ studentId: r.studentId, realName: r.realName }));
+            if (parsed.length > 0) {
+                importReport = await userBindModel.importStudents(
+                    domainId, school._id, parsed, this.user._id,
+                );
+            }
+        }
+
+        await OplogModel.log(this, 'userbind.school.create_initial_import',
+            { schoolId: school._id, inserted: importReport?.inserted || 0 });
+        this.response.redirect = this.url('admin_userbind_school_detail', { schoolId: school._id });
     }
 
     @param('schoolId', Types.ObjectId)
@@ -78,7 +96,7 @@ class AdminSchoolDetailHandler extends UserbindAdminHandler {
             userBindModel.listInviteTokens(domainId, { schoolId, kind: 'school' }),
         ]);
         this.response.template = 'admin_userbind_school_detail.html';
-        this.response.body = { school, groups, students, studentTotal: total, schoolTokens };
+        this.response.body = { school, groups, students, studentTotal: total, schoolTokens, importReport: null };
     }
 
     @param('schoolId', Types.ObjectId)
@@ -92,6 +110,37 @@ class AdminSchoolDetailHandler extends UserbindAdminHandler {
         );
         await OplogModel.log(this, 'userbind.token.school.create', { schoolId, tokenId: token._id });
         this.response.redirect = this.url('admin_userbind_school_detail', { schoolId });
+    }
+
+    @param('schoolId', Types.ObjectId)
+    @param('text', Types.Content)
+    async postImportText(
+        { domainId }: { domainId: string }, schoolId: ObjectId, text: string,
+    ) {
+        const parsed = userBindModel.parseRosterText(text);
+        const rows = parsed.filter((r) => r.status === 'ok')
+            .map((r) => ({ studentId: r.studentId, realName: r.realName }));
+        const importReport = await userBindModel.importStudents(
+            domainId, schoolId, rows, this.user._id,
+        );
+        await OplogModel.log(this, 'userbind.student.import_school', {
+            schoolId, attempted: parsed.length, inserted: importReport.inserted,
+        });
+        // Re-render the school detail page with the report inline.
+        const school = await userBindModel.getSchool(domainId, schoolId);
+        const [groups, { docs: students, total }, schoolTokens] = await Promise.all([
+            userBindModel.listUserGroups(domainId, schoolId),
+            userBindModel.listStudents(domainId, { schoolId, limit: 200 }),
+            userBindModel.listInviteTokens(domainId, { schoolId, kind: 'school' }),
+        ]);
+        this.response.template = 'admin_userbind_school_detail.html';
+        this.response.body = {
+            school, groups, students, studentTotal: total, schoolTokens,
+            importReport: {
+                ...importReport,
+                preflightInvalid: parsed.filter((r) => r.status !== 'ok'),
+            },
+        };
     }
 }
 
@@ -108,11 +157,33 @@ class AdminGroupsHandler extends UserbindAdminHandler {
 
     @param('schoolId', Types.ObjectId)
     @param('name', Types.String)
-    async postCreate({ domainId }: { domainId: string }, schoolId: ObjectId, name: string) {
+    @param('initialRoster', Types.Content, true)
+    @param('initialMemberIds', Types.CommaSeperatedArray, true)
+    async postCreate(
+        { domainId }: { domainId: string }, schoolId: ObjectId, name: string,
+        initialRoster?: string, initialMemberIds?: string[],
+    ) {
         const group = await userBindModel.createUserGroup(domainId, schoolId, name, this.user._id);
         await OplogModel.log(this, 'userbind.group.create', { groupId: group._id, name });
-        this.response.body = { group };
-        this.response.redirect = this.url('admin_userbind_groups');
+
+        // Optional initial roster — text import.
+        if (initialRoster && initialRoster.trim()) {
+            const parsed = userBindModel.parseRosterText(initialRoster)
+                .filter((r) => r.status === 'ok')
+                .map((r) => ({ studentId: r.studentId, realName: r.realName }));
+            if (parsed.length > 0) {
+                await userBindModel.importStudentsToGroup(
+                    domainId, group._id, parsed, this.user._id,
+                );
+            }
+        }
+        // Optional initial members — by ObjectId list (from search-pick UI).
+        if (initialMemberIds && initialMemberIds.length > 0) {
+            const ids = initialMemberIds.map((s) => new ObjectId(s));
+            await userBindModel.assignStudentsToGroup(domainId, group._id, ids);
+        }
+
+        this.response.redirect = this.url('admin_userbind_group_detail', { groupId: group._id });
     }
 
     @param('groupId', Types.ObjectId)
@@ -131,7 +202,10 @@ class AdminGroupsHandler extends UserbindAdminHandler {
 
 class AdminGroupDetailHandler extends UserbindAdminHandler {
     @param('groupId', Types.ObjectId)
-    async get({ domainId }: { domainId: string }, groupId: ObjectId) {
+    @param('q', Types.String, true)
+    async get(
+        { domainId }: { domainId: string }, groupId: ObjectId, q?: string,
+    ) {
         const group = await userBindModel.getUserGroup(domainId, groupId);
         if (!group) throw new NotFoundError('Group');
         const [{ docs: members }, groupTokens, school] = await Promise.all([
@@ -139,8 +213,25 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
             userBindModel.listInviteTokens(domainId, { userGroupId: groupId, kind: 'user_group' }),
             userBindModel.getSchool(domainId, group.schoolId),
         ]);
+        // For search-pick: search students in the parent school not already in this group.
+        let searchResults: any[] = [];
+        if (q && q.trim()) {
+            const { docs: found } = await userBindModel.listStudents(domainId, {
+                schoolId: group.schoolId, query: q, limit: 50,
+            });
+            const memberIds = new Set(members.map((m) => m._id.toString()));
+            searchResults = found
+                .filter((r) => !memberIds.has(r._id.toString()))
+                .map((r) => ({
+                    _id: r._id, studentId: r.studentId, realName: r.realName,
+                    boundUserId: r.boundUserId,
+                }));
+        }
         this.response.template = 'admin_userbind_group_detail.html';
-        this.response.body = { group, members, groupTokens, school };
+        this.response.body = {
+            group, members, groupTokens, school,
+            searchResults, q: q || '', importReport: null,
+        };
     }
 
     @param('groupId', Types.ObjectId)
@@ -174,6 +265,63 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
         );
         await OplogModel.log(this, 'userbind.token.user_group.create', { groupId, tokenId: token._id });
         this.response.redirect = this.url('admin_userbind_group_detail', { groupId });
+    }
+
+    /**
+     * Handles both text-roster import AND search-pick import.
+     * If `text` is provided → parse + importStudentsToGroup.
+     * If `studentIds` array is provided → assignStudentsToGroup.
+     */
+    @param('groupId', Types.ObjectId)
+    @param('text', Types.Content, true)
+    @param('studentIds', Types.CommaSeperatedArray, true)
+    async postImportText(
+        { domainId }: { domainId: string }, groupId: ObjectId,
+        text?: string, studentIds?: string[],
+    ) {
+        let importReport: any = null;
+        let preflightInvalid: any[] = [];
+
+        if (text && text.trim()) {
+            const parsed = userBindModel.parseRosterText(text);
+            const rows = parsed.filter((r) => r.status === 'ok')
+                .map((r) => ({ studentId: r.studentId, realName: r.realName }));
+            importReport = await userBindModel.importStudentsToGroup(
+                domainId, groupId, rows, this.user._id,
+            );
+            importReport.kind = 'user_group';
+            preflightInvalid = parsed.filter((r) => r.status !== 'ok');
+            await OplogModel.log(this, 'userbind.student.import_group_text', {
+                groupId, attempted: parsed.length,
+                created: importReport.created, attached: importReport.attached,
+            });
+        } else if (studentIds && studentIds.length > 0) {
+            const ids = studentIds.map((s) => new ObjectId(s));
+            await userBindModel.assignStudentsToGroup(domainId, groupId, ids);
+            importReport = {
+                kind: 'user_group',
+                created: 0, attached: ids.length, alreadyMember: 0, failed: [],
+            };
+            await OplogModel.log(this, 'userbind.student.import_group_pick', {
+                groupId, picked: ids.length,
+            });
+        } else {
+            throw new ValidationError('input', null, '请输入名单或选择学生');
+        }
+
+        // Re-render with report inline.
+        const group = await userBindModel.getUserGroup(domainId, groupId);
+        const [{ docs: members }, groupTokens, school] = await Promise.all([
+            userBindModel.listStudents(domainId, { groupId, limit: 500 }),
+            userBindModel.listInviteTokens(domainId, { userGroupId: groupId, kind: 'user_group' }),
+            userBindModel.getSchool(domainId, group!.schoolId),
+        ]);
+        this.response.template = 'admin_userbind_group_detail.html';
+        this.response.body = {
+            group, members, groupTokens, school,
+            searchResults: [], q: '',
+            importReport: { ...importReport, preflightInvalid },
+        };
     }
 }
 
@@ -214,36 +362,60 @@ class AdminStudentsHandler extends UserbindAdminHandler {
 
 class AdminStudentImportHandler extends UserbindAdminHandler {
     async get({ domainId }: { domainId: string }) {
-        const schools = await userBindModel.listSchools(domainId);
+        const [schools, groups] = await Promise.all([
+            userBindModel.listSchools(domainId),
+            userBindModel.listUserGroups(domainId),
+        ]);
         this.response.template = 'admin_userbind_students_import.html';
-        this.response.body = { schools, report: null };
+        this.response.body = { schools, groups, report: null, preflightInvalid: null, targetKind: 'school' };
     }
 
-    @param('schoolId', Types.ObjectId)
-    @param('text', Types.String)
+    /**
+     * POST /admin/userbind/students/import
+     * Accepts targetKind=school or targetKind=user_group plus a text roster.
+     */
+    @param('targetKind', Types.String)
+    @param('schoolId', Types.ObjectId, true)
+    @param('groupId', Types.ObjectId, true)
+    @param('text', Types.Content)
     async post(
-        { domainId }: { domainId: string }, schoolId: ObjectId, text: string,
+        { domainId }: { domainId: string },
+        targetKind: string, schoolId: ObjectId | undefined, groupId: ObjectId | undefined,
+        text: string,
     ) {
-        const rows = parseStudentImportText(text);
-        const report = await userBindModel.importStudents(domainId, schoolId, rows, this.user._id);
-        await OplogModel.log(this, 'userbind.student.import', {
-            schoolId, attempted: rows.length, inserted: report.inserted,
-        });
-        const schools = await userBindModel.listSchools(domainId);
-        this.response.template = 'admin_userbind_students_import.html';
-        this.response.body = { schools, report };
-    }
-}
+        const parsed = userBindModel.parseRosterText(text);
+        const validRows = parsed.filter((r) => r.status === 'ok')
+            .map((r) => ({ studentId: r.studentId, realName: r.realName }));
+        const invalidRows = parsed.filter((r) => r.status !== 'ok');
 
-function parseStudentImportText(text: string): Array<{ studentId: string; realName: string }> {
-    return (text || '')
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0 && !line.startsWith('#'))
-        .map((line) => {
-            const parts = line.split(/[\s,;\t]+/).filter(Boolean);
-            return { studentId: parts[0] || '', realName: parts.slice(1).join(' ') || '' };
+        let report: any;
+        if (targetKind === 'user_group') {
+            if (!groupId) throw new ValidationError('groupId', null, '请选择用户组');
+            report = await userBindModel.importStudentsToGroup(
+                domainId, groupId, validRows, this.user._id,
+            );
+            report.kind = 'user_group';
+        } else {
+            if (!schoolId) throw new ValidationError('schoolId', null, '请选择学校');
+            report = await userBindModel.importStudents(
+                domainId, schoolId, validRows, this.user._id,
+            );
+            report.kind = 'school';
+        }
+        await OplogModel.log(this, 'userbind.student.import', {
+            targetKind, schoolId, groupId, attempted: validRows.length,
         });
+        const [schools, groups] = await Promise.all([
+            userBindModel.listSchools(domainId),
+            userBindModel.listUserGroups(domainId),
+        ]);
+        this.response.template = 'admin_userbind_students_import.html';
+        this.response.body = {
+            schools, groups, report,
+            preflightInvalid: invalidRows,
+            targetKind,
+        };
+    }
 }
 
 class AdminTokensHandler extends UserbindAdminHandler {

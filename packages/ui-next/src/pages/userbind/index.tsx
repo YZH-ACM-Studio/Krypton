@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
+import { ImportResultPanel, RosterImporter, type ImportResult } from '@/components/userbind/roster-importer';
 
 // Register navigation entries for the admin sidebar — happens once at module load.
 registerAdminNavSection({
@@ -79,26 +80,70 @@ export function AdminUserbindOverviewPage() {
 export function AdminUserbindSchoolsPage() {
   const bs = useBootstrap();
   const schools = (bs.page.data.schools || []) as Array<{ _id: string; name: string; createdAt: string }>;
+  const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
+  const [withRoster, setWithRoster] = useState(false);
+  const [roster, setRoster] = useState('');
 
   return (
     <AdminPage
       title="学校"
       actions={(
-        <form method="post" className="flex items-end gap-2">
-          <input type="hidden" name="operation" value="create" />
-          <Input
-            name="name"
-            placeholder="新学校名称"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            className="max-w-xs"
-          />
-          <Button type="submit" disabled={!newName.trim()}>新建</Button>
-        </form>
+        <Button onClick={() => setCreateOpen((p) => !p)}>
+          {createOpen ? '取消' : '新建学校'}
+        </Button>
       )}
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
     >
+      {createOpen && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">新建学校</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form method="post" className="space-y-4">
+              <input type="hidden" name="operation" value="create" />
+              <FormField label="学校名称" required htmlFor="school-name">
+                <Input
+                  id="school-name"
+                  name="name"
+                  placeholder="如 中国民航大学"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  required
+                />
+              </FormField>
+              <FormField label="同时导入学生名单（可选）">
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={withRoster}
+                      onChange={(e) => setWithRoster(e.target.checked)}
+                    />
+                    创建后立即导入一份学生名单
+                  </label>
+                  {withRoster && (
+                    <textarea
+                      name="initialRoster"
+                      rows={6}
+                      spellCheck={false}
+                      value={roster}
+                      onChange={(e) => setRoster(e.target.value)}
+                      className="w-full rounded-md border bg-background p-3 font-mono text-sm"
+                      placeholder={'每行 学号 姓名，如：\n202301001 张三\n202301002 李四'}
+                    />
+                  )}
+                </div>
+              </FormField>
+              <div className="flex justify-end">
+                <Button type="submit" disabled={!newName.trim()}>创建学校</Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -147,6 +192,7 @@ export function AdminUserbindSchoolDetailPage() {
     students: Array<{ _id: string; studentId: string; realName: string; boundUserId: number | null }>;
     studentTotal: number;
     schoolTokens: Array<{ _id: string; createdAt: string; expiresAt: string | null }>;
+    importReport: ImportResult | null;
   };
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   return (
@@ -212,9 +258,20 @@ export function AdminUserbindSchoolDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Import students into this school */}
+      <RosterImporter
+        title="导入学生到本校"
+        description="把名单粘贴到下方，每行一条「学号 姓名」。系统会自动跳过格式不合规或重复的行。"
+        action={`/admin/userbind/schools/${data.school._id}`}
+        hiddenFields={{ operation: 'importText' }}
+        submitLabel="导入名单"
+      />
+
+      {data.importReport && <ImportResultPanel report={data.importReport} />}
+
       {/* Students */}
       <Card>
-        <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-base">学生 ({data.studentTotal})</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-base">学生 ({data.studentTotal})</CardTitle></CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -238,6 +295,13 @@ export function AdminUserbindSchoolDetailPage() {
                   </TableCell>
                 </TableRow>
               ))}
+              {data.students.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
+                    暂无学生。使用上方的「导入学生到本校」面板添加。
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </CardContent>
@@ -290,20 +354,64 @@ export function AdminUserbindGroupsPage() {
         </CardContent>
       </Card>
       <Card>
-        <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-base">新建用户组</CardTitle></CardHeader>
-        <CardContent className="px-5 pb-5">
-          <form method="post" className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-            <input type="hidden" name="operation" value="create" />
-            <select name="schoolId" className="rounded-md border bg-background px-3 py-2 text-sm" required>
-              <option value="">选择学校</option>
-              {data.schools.map((s) => (<option key={s._id} value={s._id}>{s.name}</option>))}
-            </select>
-            <Input name="name" placeholder="用户组名称" required />
-            <Button type="submit">创建</Button>
-          </form>
+        <CardHeader><CardTitle className="text-base">新建用户组</CardTitle></CardHeader>
+        <CardContent>
+          <CreateGroupForm schools={data.schools} />
         </CardContent>
       </Card>
     </AdminPage>
+  );
+}
+
+function CreateGroupForm({ schools }: { schools: Array<{ _id: string; name: string }> }) {
+  const [withRoster, setWithRoster] = useState(false);
+  const [roster, setRoster] = useState('');
+  return (
+    <form method="post" className="space-y-4">
+      <input type="hidden" name="operation" value="create" />
+      <FormRow columns={2}>
+        <FormField label="所属学校" required htmlFor="group-school">
+          <select
+            id="group-school"
+            name="schoolId"
+            required
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+          >
+            <option value="">选择学校</option>
+            {schools.map((s) => (<option key={s._id} value={s._id}>{s.name}</option>))}
+          </select>
+        </FormField>
+        <FormField label="用户组名称" required htmlFor="group-name">
+          <Input id="group-name" name="name" placeholder="如 计网2025春-1班" required />
+        </FormField>
+      </FormRow>
+      <FormField label="同时导入成员名单（可选）">
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={withRoster}
+              onChange={(e) => setWithRoster(e.target.checked)}
+            />
+            创建后立即导入一份成员名单
+          </label>
+          {withRoster && (
+            <textarea
+              name="initialRoster"
+              rows={6}
+              spellCheck={false}
+              value={roster}
+              onChange={(e) => setRoster(e.target.value)}
+              className="w-full rounded-md border bg-background p-3 font-mono text-sm"
+              placeholder={'每行 学号 姓名，已存在的学生会被加入此组；不存在的会先在所属学校建档。'}
+            />
+          )}
+        </div>
+      </FormField>
+      <div className="flex justify-end">
+        <Button type="submit">创建用户组</Button>
+      </div>
+    </form>
   );
 }
 
@@ -313,6 +421,9 @@ export function AdminUserbindGroupDetailPage() {
     school: { _id: string; name: string } | null;
     members: Array<{ _id: string; studentId: string; realName: string }>;
     groupTokens: Array<{ _id: string; createdAt: string; expiresAt: string | null }>;
+    searchResults: Array<{ _id: string; studentId: string; realName: string; boundUserId: number | null }>;
+    q: string;
+    importReport: ImportResult | null;
   };
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   return (
@@ -359,8 +470,29 @@ export function AdminUserbindGroupDetailPage() {
           )}
         </CardContent>
       </Card>
+      {/* Two-mode importer: text + search */}
+      <RosterImporter
+        title="添加成员"
+        description="名单导入：粘贴学号+姓名，新学生先在所属学校建档再加入此组；搜索导入：从该学校已有学生中勾选。"
+        action={`/admin/userbind/groups/${data.group._id}`}
+        hiddenFields={{ operation: 'importText' }}
+        enableSearch
+        searchScope="school_roster"
+        searchUrl={`/admin/userbind/groups/${data.group._id}`}
+        searchResults={data.searchResults || []}
+        searchQuery={data.q || ''}
+        searchSelectFieldName="studentIds"
+        submitLabel="加入用户组"
+      />
+      {/* Hidden form to handle the search-pick submit — uses postAssign. */}
+      {/* Note: RosterImporter handles its own form; this is for the existing postAssign endpoint */}
+
+      {data.importReport && <ImportResultPanel report={data.importReport} />}
+
       <Card>
-        <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-base">成员 ({data.members.length})</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base">成员 ({data.members.length})</CardTitle>
+        </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -379,7 +511,7 @@ export function AdminUserbindGroupDetailPage() {
               {data.members.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={2} className="py-6 text-center text-sm text-muted-foreground">
-                    该组暂无成员。
+                    该组暂无成员。使用上方的「添加成员」面板批量加入。
                   </TableCell>
                 </TableRow>
               )}
@@ -466,16 +598,29 @@ export function AdminUserbindStudentsPage() {
 export function AdminUserbindStudentsImportPage() {
   const data = useBootstrap().page.data as {
     schools: Array<{ _id: string; name: string }>;
-    report: { inserted: number; duplicates: Array<{ studentId: string; reason: string }> } | null;
+    groups: Array<{ _id: string; name: string; schoolId: string }>;
+    report: ImportResult | null;
+    preflightInvalid: Array<{ line: number; studentId: string; reason: string }> | null;
+    targetKind: 'school' | 'user_group';
   };
+  const [target, setTarget] = useState<'school' | 'user_group'>(data.targetKind || 'school');
+  const [schoolId, setSchoolId] = useState('');
+  const [groupId, setGroupId] = useState('');
+
   return (
     <AdminPage title="批量导入学生" requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
       <Card>
-        <CardHeader className="px-5 pb-3 pt-5">
-          <CardTitle className="text-sm">导入格式</CardTitle>
+        <CardHeader>
+          <CardTitle className="text-sm">导入格式与校验规则</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 px-5 pb-5 text-sm text-muted-foreground">
-          <p>每行一个学生，格式：<code className="rounded bg-muted px-1.5 py-0.5">学号 姓名</code>（用空格、逗号、分号或 Tab 分隔均可）。以 <code className="rounded bg-muted px-1.5 py-0.5">#</code> 开头的行将被忽略。</p>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <ul className="list-disc space-y-1 pl-5">
+            <li>每行一个学生，格式：<code className="rounded bg-muted px-1.5 py-0.5">学号 姓名</code>（空格 / 逗号 / 分号 / Tab 任意分隔）</li>
+            <li>学号：1–64 位字母/数字/<code className="rounded bg-muted px-1.5 py-0.5">._-</code>，<strong>同一学校内不可重复</strong></li>
+            <li>姓名：最多 32 字符，不可为空</li>
+            <li>以 <code className="rounded bg-muted px-1.5 py-0.5">#</code> 开头的行会被忽略</li>
+            <li>所有不合法行在提交前会高亮显示，不会被静默吞掉</li>
+          </ul>
           <pre className="rounded-md border bg-muted/40 p-3 font-mono text-xs">
 {`202301001 张三
 202301002 李四
@@ -484,46 +629,72 @@ export function AdminUserbindStudentsImportPage() {
           </pre>
         </CardContent>
       </Card>
+
       <Card>
-        <CardContent className="p-5">
-          <form method="post" className="space-y-4">
-            <FormField label="目标学校" required htmlFor="schoolId-select">
-              <select id="schoolId-select" name="schoolId" required className="w-full max-w-md rounded-md border bg-background px-3 py-2 text-sm">
+        <CardHeader>
+          <CardTitle className="text-base">选择导入目标</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant={target === 'school' ? 'default' : 'outline'}
+              onClick={() => setTarget('school')}
+              size="sm"
+              className="gap-1"
+            >
+              <Building2 className="size-4" />导入到学校
+            </Button>
+            <Button
+              type="button"
+              variant={target === 'user_group' ? 'default' : 'outline'}
+              onClick={() => setTarget('user_group')}
+              size="sm"
+              className="gap-1"
+            >
+              <Users className="size-4" />导入到用户组
+            </Button>
+          </div>
+          {target === 'school' && (
+            <FormField label="目标学校" required htmlFor="imp-school">
+              <select
+                id="imp-school"
+                value={schoolId}
+                onChange={(e) => setSchoolId(e.target.value)}
+                className="w-full max-w-md rounded-md border bg-background px-3 py-2 text-sm"
+              >
                 <option value="">选择学校</option>
                 {data.schools.map((s) => (<option key={s._id} value={s._id}>{s.name}</option>))}
               </select>
             </FormField>
-            <FormField label="学生名单" required>
-              <textarea
-                name="text"
-                rows={10}
-                required
-                className="w-full rounded-md border bg-background p-3 font-mono text-sm"
-                placeholder="202301001 张三"
-              />
+          )}
+          {target === 'user_group' && (
+            <FormField label="目标用户组" required htmlFor="imp-group" hint="不存在的学生会先在该组所属学校建档，再加入此组">
+              <select
+                id="imp-group"
+                value={groupId}
+                onChange={(e) => setGroupId(e.target.value)}
+                className="w-full max-w-md rounded-md border bg-background px-3 py-2 text-sm"
+              >
+                <option value="">选择用户组</option>
+                {data.groups.map((g) => (<option key={g._id} value={g._id}>{g.name}</option>))}
+              </select>
             </FormField>
-            <Button type="submit">开始导入</Button>
-          </form>
+          )}
         </CardContent>
       </Card>
-      {data.report ? (
-        <Card>
-          <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-base">导入结果</CardTitle></CardHeader>
-          <CardContent className="space-y-2 px-5 pb-5">
-            <p className="text-sm">
-              成功插入 <span className="font-semibold text-green-600">{data.report.inserted}</span> 条；
-              重复或失败 <span className="font-semibold text-amber-600">{data.report.duplicates.length}</span> 条。
-            </p>
-            {data.report.duplicates.length > 0 && (
-              <div className="max-h-48 overflow-y-auto rounded border bg-muted/30 p-3 font-mono text-xs">
-                {data.report.duplicates.map((d, i) => (
-                  <p key={i}>{d.studentId}: {d.reason}</p>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      ) : null}
+
+      <RosterImporter
+        title="名单导入"
+        description="提交前可在下方预览每一行的校验状态。"
+        action="/admin/userbind/students/import"
+        hiddenFields={target === 'school'
+          ? { targetKind: 'school', schoolId }
+          : { targetKind: 'user_group', groupId }}
+        submitLabel="开始导入"
+      />
+
+      {data.report && <ImportResultPanel report={{ ...data.report, preflightInvalid: data.preflightInvalid || [] }} />}
     </AdminPage>
   );
 }

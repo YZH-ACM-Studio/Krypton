@@ -45,6 +45,75 @@ function nowDate(): Date {
     return new Date();
 }
 
+// ─── Roster validation helpers ────────────────────────────────────────────
+
+/** studentId must be 1-64 chars of letters, digits, dash/underscore/dot. */
+const STUDENT_ID_RE = /^[a-zA-Z0-9._-]{1,64}$/;
+/** realName: 1-32 trimmed characters. We accept any non-control unicode. */
+const REAL_NAME_MAX = 32;
+
+export type RosterRowStatus = 'ok' | 'invalid_id' | 'invalid_name' | 'dup_in_batch' | 'dup_in_school' | 'empty';
+
+export interface ParsedRosterRow {
+    line: number;
+    raw: string;
+    studentId: string;
+    realName: string;
+    status: RosterRowStatus;
+    reason?: string;
+}
+
+/** Parse pasted roster text into structured rows + per-row validation status. */
+export function parseRosterText(text: string): ParsedRosterRow[] {
+    const out: ParsedRosterRow[] = [];
+    const seen = new Set<string>();
+    const lines = (text || '').split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+        const raw = lines[i];
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('#')) continue;
+        const parts = trimmed.split(/[\s,;\t]+/).filter(Boolean);
+        const studentId = (parts[0] || '').trim();
+        const realName = parts.slice(1).join(' ').trim();
+        const row: ParsedRosterRow = {
+            line: i + 1, raw,
+            studentId, realName,
+            status: 'ok',
+        };
+        if (!studentId && !realName) {
+            row.status = 'empty';
+            row.reason = '空行（已跳过）';
+        } else if (!STUDENT_ID_RE.test(studentId)) {
+            row.status = 'invalid_id';
+            row.reason = '学号必须为 1-64 位字母/数字/._-';
+        } else if (!realName) {
+            row.status = 'invalid_name';
+            row.reason = '姓名不能为空';
+        } else if (realName.length > REAL_NAME_MAX) {
+            row.status = 'invalid_name';
+            row.reason = `姓名超过 ${REAL_NAME_MAX} 字符`;
+        } else if (seen.has(studentId)) {
+            row.status = 'dup_in_batch';
+            row.reason = '本批次内已出现该学号';
+        } else {
+            seen.add(studentId);
+        }
+        if (row.status === 'empty') continue;
+        out.push(row);
+    }
+    return out;
+}
+
+export function isValidStudentId(id: string): boolean {
+    return STUDENT_ID_RE.test(id);
+}
+
+export function isValidRealName(name: string): boolean {
+    const t = (name || '').trim();
+    return t.length > 0 && t.length <= REAL_NAME_MAX;
+}
+
 // ─── Schools ──────────────────────────────────────────────────────────────
 
 export async function createSchool(domainId: string, name: string, createdBy: number): Promise<School> {
@@ -201,15 +270,23 @@ export async function importStudents(
         const studentId = (row.studentId || '').trim();
         const realName = (row.realName || '').trim();
         if (!studentId || !realName) {
-            report.duplicates.push({ studentId, reason: 'missing studentId or realName' });
+            report.duplicates.push({ studentId, reason: '学号或姓名为空' });
+            continue;
+        }
+        if (!isValidStudentId(studentId)) {
+            report.duplicates.push({ studentId, reason: '学号格式非法（1-64 位字母/数字/._-）' });
+            continue;
+        }
+        if (!isValidRealName(realName)) {
+            report.duplicates.push({ studentId, reason: `姓名为空或超过 ${REAL_NAME_MAX} 字符` });
             continue;
         }
         if (existingIds.has(studentId)) {
-            report.duplicates.push({ studentId, reason: 'already exists in school' });
+            report.duplicates.push({ studentId, reason: '该学校已存在同学号' });
             continue;
         }
         if (seen.has(studentId)) {
-            report.duplicates.push({ studentId, reason: 'duplicate within this batch' });
+            report.duplicates.push({ studentId, reason: '本批次内重复' });
             continue;
         }
         seen.add(studentId);
@@ -230,6 +307,126 @@ export async function importStudents(
     if (docs.length > 0) {
         await studentsColl.insertMany(docs);
         report.inserted = docs.length;
+    }
+    return report;
+}
+
+/**
+ * Import roster rows directly into a user group: creates any missing student
+ * records in the group's parent school AND adds them all (existing + new) to
+ * the group. Returns rich report: how many created, how many attached, how
+ * many were already group members, how many failed validation.
+ */
+export interface ImportGroupReport {
+    /** Newly created student records in the parent school. */
+    created: number;
+    /** Existing students that got added to the group. */
+    attached: number;
+    /** Students that were already members (no-op). */
+    alreadyMember: number;
+    /** Failed validation, per row. */
+    failed: Array<{ studentId: string; reason: string }>;
+}
+
+export async function importStudentsToGroup(
+    domainId: string,
+    groupId: ObjectId,
+    rows: ImportStudentRow[],
+    createdBy: number,
+): Promise<ImportGroupReport> {
+    const group = await userGroupsColl.findOne({ domainId, _id: groupId });
+    if (!group) throw new ValidationError('groupId', null, '用户组不存在');
+    const schoolId = group.schoolId;
+
+    const report: ImportGroupReport = {
+        created: 0, attached: 0, alreadyMember: 0, failed: [],
+    };
+    if (rows.length === 0) return report;
+
+    // Look up existing students by studentId within this school in one shot.
+    const studentIds = rows.map((r) => (r.studentId || '').trim()).filter(Boolean);
+    const existingRecords = await studentsColl.find({
+        domainId, schoolId, studentId: { $in: studentIds },
+    }).toArray();
+    const existingByStudentId = new Map(existingRecords.map((r) => [r.studentId, r]));
+
+    const toCreate: StudentRecord[] = [];
+    const toAttach: ObjectId[] = [];
+    const seen = new Set<string>();
+
+    for (const row of rows) {
+        const studentId = (row.studentId || '').trim();
+        const realName = (row.realName || '').trim();
+        if (!studentId || !realName) {
+            report.failed.push({ studentId, reason: '学号或姓名为空' });
+            continue;
+        }
+        if (!isValidStudentId(studentId)) {
+            report.failed.push({ studentId, reason: '学号格式非法' });
+            continue;
+        }
+        if (!isValidRealName(realName)) {
+            report.failed.push({ studentId, reason: '姓名格式非法' });
+            continue;
+        }
+        if (seen.has(studentId)) {
+            report.failed.push({ studentId, reason: '本批次内重复' });
+            continue;
+        }
+        seen.add(studentId);
+
+        const existing = existingByStudentId.get(studentId);
+        if (existing) {
+            if (existing.realName !== realName) {
+                report.failed.push({
+                    studentId,
+                    reason: `已存在记录但姓名不一致（库内"${existing.realName}"）`,
+                });
+                continue;
+            }
+            if (existing.groupIds.some((g) => g.equals(groupId))) {
+                report.alreadyMember++;
+            } else {
+                toAttach.push(existing._id);
+                report.attached++;
+            }
+        } else {
+            toCreate.push({
+                _id: new ObjectId(),
+                domainId,
+                schoolId,
+                studentId,
+                realName,
+                groupIds: [groupId],
+                boundUserId: null,
+                boundAt: null,
+                createdAt: nowDate(),
+                createdBy,
+            });
+            report.created++;
+        }
+    }
+
+    if (toCreate.length > 0) {
+        await studentsColl.insertMany(toCreate);
+    }
+    if (toAttach.length > 0) {
+        await studentsColl.updateMany(
+            { _id: { $in: toAttach } },
+            { $addToSet: { groupIds: groupId as any } },
+        );
+        // Mirror onto already-bound users so their parentUserGroupId reflects membership.
+        const bound = await studentsColl.find(
+            { _id: { $in: toAttach }, boundUserId: { $ne: null } },
+            { projection: { boundUserId: 1 } },
+        ).toArray();
+        const uids = bound.map((d) => d.boundUserId!).filter(Boolean);
+        if (uids.length > 0) {
+            await UserModel.coll.updateMany(
+                { _id: { $in: uids } },
+                { $addToSet: { parentUserGroupId: groupId as any } },
+            );
+        }
     }
     return report;
 }
@@ -368,12 +565,16 @@ export const userBindModel = {
 
     // Students
     importStudents,
+    importStudentsToGroup,
     listStudents,
     getStudent,
     findStudentByStudentId,
     deleteStudent,
     assignStudentsToGroup,
     removeStudentsFromGroup,
+    parseRosterText,
+    isValidStudentId,
+    isValidRealName,
 
     // Binding paths (defined in binding.ts; re-exported here for unified surface)
     // These will be set at module init by the binding.ts side-effect.

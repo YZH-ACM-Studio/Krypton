@@ -104,6 +104,20 @@ async function shot(page, name, url) {
     // A landing page (invalid token to see error handling)
     await shot(page, '22-bind-landing-invalid', '/bind/this-token-does-not-exist-1234567890');
 
+    // V3 import refactor surfaces
+    await shot(page, '23-userbind-import-refactor', '/admin/userbind/students/import');
+    // School detail (already covered by 08); take a fresh shot with new importer panel.
+    try {
+      await page.goto(`${BASE}/admin/userbind/schools`, { waitUntil: 'networkidle' });
+      const schoolHref = await page.locator('a[href^="/admin/userbind/schools/"]:not([href$="/schools"])').first().getAttribute('href', { timeout: 3000 });
+      if (schoolHref) await shot(page, '24-school-detail-with-importer', schoolHref);
+    } catch {}
+    try {
+      await page.goto(`${BASE}/admin/userbind/groups`, { waitUntil: 'networkidle' });
+      const gHref = await page.locator('a[href^="/admin/userbind/groups/"]:not([href$="/groups"])').first().getAttribute('href', { timeout: 3000 });
+      if (gHref) await shot(page, '25-group-detail-with-importer', gHref);
+    } catch {}
+
     console.log('\nDone. Screenshots saved to:', OUT);
   } catch (e) {
     console.error('error:', e);

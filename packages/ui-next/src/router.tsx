@@ -22,7 +22,25 @@ import { makeInitials } from '@/lib/format';
 const SIDEBAR_KEY = 'krypton:sidebar-collapsed';
 const THEME_KEY = 'krypton:theme';
 
+/**
+ * Templates that render their own SPA shell (no main OJ sidebar/topbar).
+ * For these we skip `AppShell` entirely and let `PageResolver` paint its own.
+ */
+const STANDALONE_TEMPLATES = new Set([
+  'exam_mode_home.html',
+  'exam_paper.html',
+]);
+
 function AppShell() {
+  const bs = useBootstrap();
+  // Exam-mode pages bring their own shell.
+  if (STANDALONE_TEMPLATES.has(bs.page.templateName)) {
+    return <PageResolver />;
+  }
+  return <DefaultAppShell />;
+}
+
+function DefaultAppShell() {
   const bs = useBootstrap();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {

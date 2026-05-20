@@ -4,7 +4,25 @@
  * Token + base URL come from OJ's `/api/admin/vigil/dashboard-token` (see
  * packages/hydrooj/src/handler/vigil-integration.ts:VigilDashboardTokenHandler).
  * We fetch a short-lived token on first use and cache it for the page session.
+ *
+ * Error model:
+ *   - `VigilOfflineError`: server unreachable, misconfigured, or returning
+ *     non-JSON (e.g. OJ SPA fallback HTML when the path is wrong). Pages
+ *     should detect this and render a friendly "service offline" empty state
+ *     INSTEAD of raw error text.
+ *   - Other Error: real business error (4xx with parseable JSON body).
  */
+
+export class VigilOfflineError extends Error {
+  readonly reason: 'not_configured' | 'network' | 'non_json' | 'token_failed' | 'server_5xx';
+  readonly detail?: string;
+  constructor(reason: VigilOfflineError['reason'], detail?: string) {
+    super(`Vigil offline: ${reason}${detail ? ` (${detail})` : ''}`);
+    this.name = 'VigilOfflineError';
+    this.reason = reason;
+    this.detail = detail;
+  }
+}
 
 interface DashboardTokenResponse {
   token: string;
@@ -15,29 +33,80 @@ interface DashboardTokenResponse {
 
 let cached: DashboardTokenResponse | null = null;
 
+function looksLikeUrl(v: string | null | undefined): boolean {
+  if (!v || typeof v !== 'string') return false;
+  return /^https?:\/\//i.test(v.trim());
+}
+
 async function getToken(): Promise<DashboardTokenResponse> {
   if (cached && cached.expiresAt > Date.now() + 60_000) return cached;
-  const res = await fetch('/api/admin/vigil/dashboard-token', { credentials: 'include' });
-  if (!res.ok) throw new Error('Failed to fetch Vigil dashboard token');
-  cached = await res.json();
-  return cached!;
+  let res: Response;
+  try {
+    res = await fetch('/api/admin/vigil/dashboard-token', { credentials: 'include' });
+  } catch (e: any) {
+    throw new VigilOfflineError('token_failed', e?.message);
+  }
+  if (!res.ok) {
+    throw new VigilOfflineError('token_failed', `HTTP ${res.status}`);
+  }
+  let data: DashboardTokenResponse;
+  try {
+    data = await res.json();
+  } catch (e: any) {
+    throw new VigilOfflineError('token_failed', 'non-JSON token response');
+  }
+  if (!looksLikeUrl(data?.vigilBaseUrl)) {
+    throw new VigilOfflineError('not_configured', 'vigilBaseUrl is empty or invalid');
+  }
+  cached = data;
+  return cached;
+}
+
+function stripHtml(s: string): string {
+  return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 
 async function vigilFetch<T = any>(path: string, init: RequestInit = {}): Promise<T> {
   const tk = await getToken();
   const url = `${tk.vigilBaseUrl}${path}`;
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-KVS-Token': tk.token,
-      ...(init.headers || {}),
-    },
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Vigil ${init.method || 'GET'} ${path}: ${res.status} ${text}`);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-KVS-Token': tk.token,
+        ...(init.headers || {}),
+      },
+    });
+  } catch (e: any) {
+    // Reset cached token: maybe baseUrl changed.
+    cached = null;
+    throw new VigilOfflineError('network', e?.message);
   }
+
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    // Likely OJ fallback HTML — treat as offline.
+    cached = null;
+    throw new VigilOfflineError('non_json', `content-type=${contentType.slice(0, 40)}`);
+  }
+
+  if (res.status >= 500) {
+    let body = '';
+    try { body = await res.text(); } catch {}
+    throw new VigilOfflineError('server_5xx', stripHtml(body));
+  }
+
+  if (!res.ok) {
+    let bodyMsg = '';
+    try {
+      const j = await res.json();
+      bodyMsg = j?.detail || j?.message || JSON.stringify(j);
+    } catch {}
+    throw new Error(`Vigil ${init.method || 'GET'} ${path}: ${res.status} ${bodyMsg.slice(0, 200)}`);
+  }
+
   return await res.json();
 }
 

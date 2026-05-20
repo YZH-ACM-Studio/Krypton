@@ -5,8 +5,8 @@
  * Phase 2/3 callers (Vigil integration, exam contest) depend on `lookupStudent`
  * and `claimTemporaryAccount` specifically — those are stable contracts.
  */
-import { Filter, ObjectId } from 'mongodb';
-import { ValidationError, UserModel } from 'hydrooj';
+import type { Filter } from 'mongodb';
+import { ObjectId, ValidationError, UserModel } from 'hydrooj';
 import {
     bindingRequestsColl,
     bindTokensColl,
@@ -17,15 +17,20 @@ import {
 } from './db';
 import type {
     BindToken,
+    BindTokenKind,
     BindingRequest,
     ImportConflictPolicy,
     ImportReport,
     ImportStudentReport,
     ImportStudentRow,
     LookupStudentResult,
+    RosterLookupOutcome,
     School,
+    SchoolBindToken,
+    StudentBindToken,
     StudentRecord,
     UserGroup,
+    UserGroupBindToken,
 } from './types';
 
 export { ensureIndexes };
@@ -372,23 +377,49 @@ export const userBindModel = {
 
     // Binding paths (defined in binding.ts; re-exported here for unified surface)
     // These will be set at module init by the binding.ts side-effect.
+    /** @deprecated kept for legacy callers — alias of generateStudentInviteToken */
     generateInviteToken: null as unknown as (
         domainId: string, studentRecordId: ObjectId, createdBy: number, ttlMs?: number,
-    ) => Promise<BindToken>,
+    ) => Promise<StudentBindToken>,
+    generateStudentInviteToken: null as unknown as (
+        domainId: string, studentRecordId: ObjectId, createdBy: number, ttlMs?: number,
+    ) => Promise<StudentBindToken>,
+    generateSchoolInviteToken: null as unknown as (
+        domainId: string, schoolId: ObjectId, createdBy: number, ttlMs?: number,
+    ) => Promise<SchoolBindToken>,
+    generateUserGroupInviteToken: null as unknown as (
+        domainId: string, userGroupId: ObjectId, createdBy: number, ttlMs?: number,
+    ) => Promise<UserGroupBindToken>,
+    /** @deprecated routes to consumeStudentInviteToken for kind='student' */
     consumeInviteToken: null as unknown as (
         tokenId: string, userId: number,
     ) => Promise<{ studentRecord: StudentRecord; school: School }>,
+    consumeStudentInviteToken: null as unknown as (
+        tokenId: string, userId: number,
+    ) => Promise<{ studentRecord: StudentRecord; school: School }>,
+    bindMatchedStudent: null as unknown as (
+        record: StudentRecord, userId: number, extraGroupId?: ObjectId,
+    ) => Promise<{ studentRecord: StudentRecord; school: School }>,
+    joinUserGroup: null as unknown as (
+        userId: number, studentRecord: StudentRecord, userGroupId: ObjectId,
+    ) => Promise<void>,
+    getInviteToken: null as unknown as (tokenId: string) => Promise<BindToken>,
+    rosterLookup: null as unknown as (
+        domainId: string, schoolId: ObjectId, studentIdInput: string, realNameInput: string, callerUid: number,
+    ) => Promise<RosterLookupOutcome>,
     listInviteTokens: null as unknown as (
-        domainId: string, filter?: { studentRecordId?: ObjectId; usedOnly?: boolean; unusedOnly?: boolean },
+        domainId: string, filter?: { studentRecordId?: ObjectId; schoolId?: ObjectId; userGroupId?: ObjectId; kind?: BindTokenKind; usedOnly?: boolean; unusedOnly?: boolean },
     ) => Promise<BindToken[]>,
     revokeInviteToken: null as unknown as (tokenId: string) => Promise<void>,
 
     submitBindingRequest: null as unknown as (
         domainId: string, userId: number, schoolId: ObjectId, studentIdInput: string, realNameInput: string,
+        opts?: { sourceTokenId?: string; targetUserGroupId?: ObjectId; claimTempUserId?: number },
     ) => Promise<BindingRequest>,
     listBindingRequests: null as unknown as (
-        domainId: string, filter?: { status?: BindingRequest['status']; userId?: number; limit?: number; skip?: number },
+        domainId: string, filter?: { status?: BindingRequest['status']; userId?: number; schoolId?: ObjectId; limit?: number; skip?: number },
     ) => Promise<{ docs: BindingRequest[]; total: number }>,
+    getBindingRequest: null as unknown as (id: ObjectId) => Promise<BindingRequest | null>,
     approveBindingRequest: null as unknown as (
         requestId: ObjectId, reviewerUid: number,
     ) => Promise<void>,
@@ -399,10 +430,16 @@ export const userBindModel = {
     lookupStudent: null as unknown as (
         domainId: string, studentIdInput: string, realNameInput: string,
     ) => Promise<LookupStudentResult>,
+    computeEligibleExamContests: null as unknown as (
+        domainId: string, uid: number,
+    ) => Promise<ObjectId[]>,
 
     claimTemporaryAccount: null as unknown as (
         tempUid: number, realUid: number,
     ) => Promise<{ recordsTransferred: number }>,
+    findClaimCandidates: null as unknown as (
+        domainId: string, studentIdInput: string, realNameInput: string,
+    ) => Promise<Array<{ uid: number; uname: string; createdAt: Date; schoolId: ObjectId | null }>>,
 
     // Cross-domain migration (Issue 1.13)
     exportDomain: null as unknown as (domainId: string) => Promise<unknown>,

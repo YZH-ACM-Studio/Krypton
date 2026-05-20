@@ -35,6 +35,15 @@ export interface PaperDraft {
     lang?: string;
     /** Question kinds the student has clicked "submit this kind" on. */
     lockedKinds: QuestionKind[];
+    /**
+     * Immediate per-question grading results, populated when:
+     *   - contest config `allowSubmitByKind=true` AND lock-kind is invoked → judge that kind's objective
+     *   - finalize is called → grade all objective questions
+     *
+     * Keyed by questionKey for objective; value is 'correct' | 'wrong' | 'partial'.
+     * For programming cells the result lives on the record (status field).
+     */
+    judgeResult?: Record<string, 'correct' | 'wrong' | 'partial'>;
     /** SHA-256 of problem judging fields at draft-create. */
     problemFingerprint: string;
     updatedAt: Date;
@@ -158,6 +167,19 @@ export async function getDraftsForContest(
     return await coll.find({ domainId, tid }).toArray();
 }
 
+/** Save per-question judge results to the draft (merged with existing). */
+export async function setJudgeResults(
+    domainId: string, tid: ObjectId, pid: number, uid: number,
+    results: Record<string, 'correct' | 'wrong' | 'partial'>,
+): Promise<void> {
+    await ensureIndexes();
+    const $set: Record<string, any> = { updatedAt: new Date() };
+    for (const [key, val] of Object.entries(results)) {
+        $set[`judgeResult.${key}`] = val;
+    }
+    await coll.updateOne({ domainId, tid, pid, uid }, { $set });
+}
+
 export default {
     upsertDraft,
     getDraft,
@@ -166,5 +188,6 @@ export default {
     lockKindForUser,
     clearDrafts,
     getDraftsForContest,
+    setJudgeResults,
     coll,
 };

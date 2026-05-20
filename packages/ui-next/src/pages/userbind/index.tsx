@@ -8,7 +8,8 @@
  */
 import { useState } from 'react';
 import {
-  Building2, GraduationCap, Inbox, KeyRound, Users, UserPlus, FileDown,
+  AlertCircle, Building2, Copy, FileDown, GraduationCap, Inbox, KeyRound,
+  LinkIcon, ListChecks, Mail, ShieldCheck, Users, UserPlus,
 } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { PRIV } from '@/lib/perms';
@@ -19,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { FormField, FormRow, FormSection } from '@/components/ui/form';
 
 // Register navigation entries for the admin sidebar — happens once at module load.
 registerAdminNavSection({
@@ -51,11 +53,11 @@ export function AdminUserbindOverviewPage() {
   ];
   return (
     <AdminPage title="用户绑定" description="学校、用户组、学生记录和绑定流程的管理面板。" requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((s) => (
           <a key={s.label} href={s.href}>
             <Card className="transition-colors hover:bg-accent/50">
-              <CardContent className="p-4">
+              <CardContent className="p-5">
                 <div className="flex items-center gap-3">
                   <div className="rounded-md bg-primary/10 p-2"><s.icon className="size-4 text-primary" /></div>
                   <div>
@@ -83,7 +85,7 @@ export function AdminUserbindSchoolsPage() {
     <AdminPage
       title="学校"
       actions={(
-        <form method="post" className="flex items-end gap-2" onSubmit={() => true}>
+        <form method="post" className="flex items-end gap-2">
           <input type="hidden" name="operation" value="create" />
           <Input
             name="name"
@@ -138,17 +140,65 @@ export function AdminUserbindSchoolsPage() {
 }
 
 export function AdminUserbindSchoolDetailPage() {
-  const data = useBootstrap().page.data as {
+  const bs = useBootstrap();
+  const data = bs.page.data as {
     school: { _id: string; name: string };
     groups: Array<{ _id: string; name: string }>;
     students: Array<{ _id: string; studentId: string; realName: string; boundUserId: number | null }>;
     studentTotal: number;
+    schoolTokens: Array<{ _id: string; createdAt: string; expiresAt: string | null }>;
   };
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
   return (
     <AdminPage title={`学校 - ${data.school.name}`} requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
+      {/* Invite links */}
       <Card>
-        <CardHeader><CardTitle className="text-base">用户组 ({data.groups.length})</CardTitle></CardHeader>
-        <CardContent>
+        <CardHeader className="px-5 pb-3 pt-5">
+          <CardTitle className="flex items-center justify-between text-base">
+            <span className="flex items-center gap-2"><LinkIcon className="size-4" />学校邀请链接</span>
+            <form method="post" className="flex items-end gap-2">
+              <input type="hidden" name="operation" value="generateLink" />
+              <Input name="ttlDays" type="number" placeholder="有效天数（留空=永久）" className="max-w-[160px]" />
+              <Button type="submit" size="sm">生成新链接</Button>
+            </form>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-5 pb-5">
+          {(data.schoolTokens || []).length === 0 ? (
+            <p className="text-sm text-muted-foreground">还没有该学校的邀请链接。生成一个，群发给学生 — 他们填学号姓名后会自动匹配并绑定。</p>
+          ) : (
+            <div className="space-y-2">
+              {data.schoolTokens.map((t) => {
+                const url = `${origin}/bind/${t._id}`;
+                return (
+                  <div key={t._id} className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-xs">
+                    <code className="flex-1 break-all font-mono">{url}</code>
+                    <Button
+                      type="button" variant="ghost" size="sm" className="h-7 gap-1"
+                      onClick={() => { navigator.clipboard?.writeText(url).catch(() => {}); }}
+                    >
+                      <Copy className="size-3" />复制
+                    </Button>
+                    <span className="text-muted-foreground">
+                      {t.expiresAt ? `过期 ${new Date(t.expiresAt).toLocaleDateString()}` : '永久'}
+                    </span>
+                    <form method="post" action="/admin/userbind/tokens" className="inline-block">
+                      <input type="hidden" name="operation" value="revoke" />
+                      <input type="hidden" name="tokenId" value={t._id} />
+                      <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">撤销</Button>
+                    </form>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Groups */}
+      <Card>
+        <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-base">用户组 ({data.groups.length})</CardTitle></CardHeader>
+        <CardContent className="px-5 pb-5">
           <div className="flex flex-wrap gap-2">
             {data.groups.map((g) => (
               <a key={g._id} href={`/admin/userbind/groups/${g._id}`}>
@@ -161,8 +211,10 @@ export function AdminUserbindSchoolDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Students */}
       <Card>
-        <CardHeader><CardTitle className="text-base">学生 ({data.studentTotal})</CardTitle></CardHeader>
+        <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-base">学生 ({data.studentTotal})</CardTitle></CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -238,8 +290,8 @@ export function AdminUserbindGroupsPage() {
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle className="text-base">新建用户组</CardTitle></CardHeader>
-        <CardContent>
+        <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-base">新建用户组</CardTitle></CardHeader>
+        <CardContent className="px-5 pb-5">
           <form method="post" className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
             <input type="hidden" name="operation" value="create" />
             <select name="schoolId" className="rounded-md border bg-background px-3 py-2 text-sm" required>
@@ -258,12 +310,57 @@ export function AdminUserbindGroupsPage() {
 export function AdminUserbindGroupDetailPage() {
   const data = useBootstrap().page.data as {
     group: { _id: string; name: string };
+    school: { _id: string; name: string } | null;
     members: Array<{ _id: string; studentId: string; realName: string }>;
+    groupTokens: Array<{ _id: string; createdAt: string; expiresAt: string | null }>;
   };
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
   return (
-    <AdminPage title={`用户组 - ${data.group.name}`} requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
+    <AdminPage title={`用户组 - ${data.group.name}`} description={data.school?.name} requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
       <Card>
-        <CardHeader><CardTitle className="text-base">成员 ({data.members.length})</CardTitle></CardHeader>
+        <CardHeader className="px-5 pb-3 pt-5">
+          <CardTitle className="flex items-center justify-between text-base">
+            <span className="flex items-center gap-2"><LinkIcon className="size-4" />用户组邀请链接</span>
+            <form method="post" className="flex items-end gap-2">
+              <input type="hidden" name="operation" value="generateLink" />
+              <Input name="ttlDays" type="number" placeholder="有效天数（留空=永久）" className="max-w-[160px]" />
+              <Button type="submit" size="sm">生成新链接</Button>
+            </form>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-5 pb-5">
+          {(data.groupTokens || []).length === 0 ? (
+            <p className="text-sm text-muted-foreground">还没有该用户组的邀请链接。点击右上方按钮生成，群发给学生。</p>
+          ) : (
+            <div className="space-y-2">
+              {data.groupTokens.map((t) => {
+                const url = `${origin}/bind/${t._id}`;
+                return (
+                  <div key={t._id} className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-xs">
+                    <code className="flex-1 break-all font-mono">{url}</code>
+                    <Button
+                      type="button" variant="ghost" size="sm" className="h-7 gap-1"
+                      onClick={() => { navigator.clipboard?.writeText(url).catch(() => {}); }}
+                    >
+                      <Copy className="size-3" />复制
+                    </Button>
+                    <span className="text-muted-foreground">
+                      {t.expiresAt ? `过期 ${new Date(t.expiresAt).toLocaleDateString()}` : '永久'}
+                    </span>
+                    <form method="post" action="/admin/userbind/tokens" className="inline-block">
+                      <input type="hidden" name="operation" value="revoke" />
+                      <input type="hidden" name="tokenId" value={t._id} />
+                      <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">撤销</Button>
+                    </form>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-base">成员 ({data.members.length})</CardTitle></CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -307,8 +404,8 @@ export function AdminUserbindStudentsPage() {
   return (
     <AdminPage title="学生记录" description={`共 ${data.total} 条`} requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
       <Card>
-        <CardContent>
-          <form method="get" className="flex flex-wrap gap-2">
+        <CardContent className="p-5">
+          <form method="get" className="flex flex-wrap gap-3">
             <select
               name="schoolId"
               defaultValue={data.filterSchoolId || ''}
@@ -330,6 +427,7 @@ export function AdminUserbindStudentsPage() {
                 <TableHead className="pl-5 w-40">学号</TableHead>
                 <TableHead>姓名</TableHead>
                 <TableHead className="w-40">绑定状态</TableHead>
+                <TableHead className="w-32 pr-5 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -342,6 +440,17 @@ export function AdminUserbindStudentsPage() {
                       <Badge variant="secondary">已绑定 UID {s.boundUserId}</Badge>
                     ) : (
                       <Badge variant="outline">未绑定</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="pr-5 text-right">
+                    {!s.boundUserId && (
+                      <form method="post" className="inline-block">
+                        <input type="hidden" name="operation" value="generateStudentToken" />
+                        <input type="hidden" name="studentRecordId" value={s._id} />
+                        <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs gap-1">
+                          <KeyRound className="size-3" />单人令牌
+                        </Button>
+                      </form>
                     )}
                   </TableCell>
                 </TableRow>
@@ -362,10 +471,10 @@ export function AdminUserbindStudentsImportPage() {
   return (
     <AdminPage title="批量导入学生" requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
       <Card>
-        <CardHeader>
+        <CardHeader className="px-5 pb-3 pt-5">
           <CardTitle className="text-sm">导入格式</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm text-muted-foreground">
+        <CardContent className="space-y-3 px-5 pb-5 text-sm text-muted-foreground">
           <p>每行一个学生，格式：<code className="rounded bg-muted px-1.5 py-0.5">学号 姓名</code>（用空格、逗号、分号或 Tab 分隔均可）。以 <code className="rounded bg-muted px-1.5 py-0.5">#</code> 开头的行将被忽略。</p>
           <pre className="rounded-md border bg-muted/40 p-3 font-mono text-xs">
 {`202301001 张三
@@ -376,17 +485,15 @@ export function AdminUserbindStudentsImportPage() {
         </CardContent>
       </Card>
       <Card>
-        <CardContent>
-          <form method="post" className="space-y-3">
-            <div className="space-y-1">
-              <label className="text-sm font-medium">目标学校</label>
-              <select name="schoolId" required className="w-full max-w-md rounded-md border bg-background px-3 py-2 text-sm">
+        <CardContent className="p-5">
+          <form method="post" className="space-y-4">
+            <FormField label="目标学校" required htmlFor="schoolId-select">
+              <select id="schoolId-select" name="schoolId" required className="w-full max-w-md rounded-md border bg-background px-3 py-2 text-sm">
                 <option value="">选择学校</option>
                 {data.schools.map((s) => (<option key={s._id} value={s._id}>{s.name}</option>))}
               </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">学生名单</label>
+            </FormField>
+            <FormField label="学生名单" required>
               <textarea
                 name="text"
                 rows={10}
@@ -394,15 +501,15 @@ export function AdminUserbindStudentsImportPage() {
                 className="w-full rounded-md border bg-background p-3 font-mono text-sm"
                 placeholder="202301001 张三"
               />
-            </div>
+            </FormField>
             <Button type="submit">开始导入</Button>
           </form>
         </CardContent>
       </Card>
       {data.report ? (
         <Card>
-          <CardHeader><CardTitle className="text-base">导入结果</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
+          <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-base">导入结果</CardTitle></CardHeader>
+          <CardContent className="space-y-2 px-5 pb-5">
             <p className="text-sm">
               成功插入 <span className="font-semibold text-green-600">{data.report.inserted}</span> 条；
               重复或失败 <span className="font-semibold text-amber-600">{data.report.duplicates.length}</span> 条。
@@ -423,18 +530,51 @@ export function AdminUserbindStudentsImportPage() {
 
 // ─── Admin: Tokens ────────────────────────────────────────────────────────
 
+const KIND_LABELS: Record<string, { label: string; color: string }> = {
+  student: { label: '单人', color: 'bg-blue-500/15 text-blue-700 dark:text-blue-300' },
+  school: { label: '学校共享', color: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' },
+  user_group: { label: '用户组共享', color: 'bg-purple-500/15 text-purple-700 dark:text-purple-300' },
+};
+
 export function AdminUserbindTokensPage() {
   const data = useBootstrap().page.data as {
-    tokens: Array<{ _id: string; studentRecordId: string; used: boolean; usedBy: number | null; createdAt: string; expiresAt: string | null }>;
+    tokens: Array<{
+      _id: string; kind: string; createdAt: string; expiresAt: string | null;
+      used: boolean; usedBy: number | null; targetLabel: string;
+    }>;
+    kind?: string;
+    unusedOnly: boolean;
   };
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
   return (
     <AdminPage title="邀请令牌" requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
+      <Card>
+        <CardContent className="p-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-muted-foreground">类型:</span>
+            <Button asChild variant={!data.kind ? 'default' : 'outline'} size="sm" className="h-7 text-xs">
+              <a href="/admin/userbind/tokens">全部</a>
+            </Button>
+            <Button asChild variant={data.kind === 'school' ? 'default' : 'outline'} size="sm" className="h-7 text-xs">
+              <a href="/admin/userbind/tokens?kind=school">学校共享</a>
+            </Button>
+            <Button asChild variant={data.kind === 'user_group' ? 'default' : 'outline'} size="sm" className="h-7 text-xs">
+              <a href="/admin/userbind/tokens?kind=user_group">用户组共享</a>
+            </Button>
+            <Button asChild variant={data.kind === 'student' ? 'default' : 'outline'} size="sm" className="h-7 text-xs">
+              <a href="/admin/userbind/tokens?kind=student">单人</a>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
       <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="pl-5">令牌 (前 16 位)</TableHead>
+                <TableHead className="pl-5">类型</TableHead>
+                <TableHead>目标</TableHead>
+                <TableHead>链接</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>创建时间</TableHead>
                 <TableHead>过期时间</TableHead>
@@ -442,20 +582,37 @@ export function AdminUserbindTokensPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.tokens.map((t) => (
-                <TableRow key={t._id}>
-                  <TableCell className="pl-5 font-mono text-xs">{t._id.slice(0, 16)}…</TableCell>
-                  <TableCell>
-                    {t.used ? (
-                      <Badge variant="secondary">已使用 (UID {t.usedBy})</Badge>
-                    ) : (
-                      <Badge variant="outline">未使用</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-xs">{new Date(t.createdAt).toLocaleString()}</TableCell>
-                  <TableCell className="text-xs">{t.expiresAt ? new Date(t.expiresAt).toLocaleString() : '永久'}</TableCell>
-                  <TableCell className="pr-5 text-right">
-                    {!t.used ? (
+              {data.tokens.map((t) => {
+                const url = `${origin}/bind/${t._id}`;
+                const kindInfo = KIND_LABELS[t.kind] || { label: t.kind, color: 'bg-muted text-muted-foreground' };
+                return (
+                  <TableRow key={t._id}>
+                    <TableCell className="pl-5">
+                      <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${kindInfo.color}`}>
+                        {kindInfo.label}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-sm">{t.targetLabel}</TableCell>
+                    <TableCell className="font-mono text-[10px]">
+                      <button
+                        type="button"
+                        title={url}
+                        onClick={() => { navigator.clipboard?.writeText(url).catch(() => {}); }}
+                        className="rounded px-1 py-0.5 hover:bg-accent"
+                      >
+                        <Copy className="inline size-3" /> 复制
+                      </button>
+                    </TableCell>
+                    <TableCell>
+                      {t.kind === 'student'
+                        ? (t.used
+                          ? <Badge variant="secondary">已使用 (UID {t.usedBy})</Badge>
+                          : <Badge variant="outline">未使用</Badge>)
+                        : <Badge variant="outline">共享中</Badge>}
+                    </TableCell>
+                    <TableCell className="text-xs">{new Date(t.createdAt).toLocaleString()}</TableCell>
+                    <TableCell className="text-xs">{t.expiresAt ? new Date(t.expiresAt).toLocaleString() : '永久'}</TableCell>
+                    <TableCell className="pr-5 text-right">
                       <form method="post" className="inline-block">
                         <input type="hidden" name="operation" value="revoke" />
                         <input type="hidden" name="tokenId" value={t._id} />
@@ -463,14 +620,14 @@ export function AdminUserbindTokensPage() {
                           撤销
                         </Button>
                       </form>
-                    ) : null}
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
               {data.tokens.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
-                    暂无邀请令牌。在学生记录详情页可以为单个学生生成令牌。
+                  <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+                    暂无邀请令牌。前往学校 / 用户组详情页生成共享链接，或在学生列表为单个学生发一次性令牌。
                   </TableCell>
                 </TableRow>
               )}
@@ -488,15 +645,18 @@ export function AdminUserbindRequestsPage() {
   const data = useBootstrap().page.data as {
     requests: Array<{
       _id: string; userId: number; studentIdInput: string; realNameInput: string;
+      schoolId: string;
       status: 'pending' | 'approved' | 'rejected'; createdAt: string;
       claimTempUserId: number | null; rejectReason: string | null;
+      sourceTokenId: string | null; targetUserGroupId: string | null;
     }>;
     total: number; page: number; status?: string;
+    schoolMap: Record<string, string>;
   };
   return (
     <AdminPage title="绑定申请" description={`共 ${data.total} 条`} requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
       <Card>
-        <CardContent className="flex flex-wrap gap-2">
+        <CardContent className="flex flex-wrap gap-2 p-5">
           <Button asChild variant={!data.status ? 'default' : 'outline'} size="sm"><a href="/admin/userbind/requests">全部</a></Button>
           <Button asChild variant={data.status === 'pending' ? 'default' : 'outline'} size="sm"><a href="/admin/userbind/requests?status=pending">待审核</a></Button>
           <Button asChild variant={data.status === 'approved' ? 'default' : 'outline'} size="sm"><a href="/admin/userbind/requests?status=approved">已通过</a></Button>
@@ -509,6 +669,7 @@ export function AdminUserbindRequestsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="pl-5">申请人</TableHead>
+                <TableHead>学校</TableHead>
                 <TableHead>学号</TableHead>
                 <TableHead>姓名</TableHead>
                 <TableHead>类型</TableHead>
@@ -521,13 +682,16 @@ export function AdminUserbindRequestsPage() {
               {data.requests.map((r) => (
                 <TableRow key={r._id}>
                   <TableCell className="pl-5 font-mono text-xs">UID {r.userId}</TableCell>
+                  <TableCell className="text-sm">{data.schoolMap[r.schoolId] || r.schoolId.slice(0, 8)}</TableCell>
                   <TableCell className="font-mono text-sm">{r.studentIdInput}</TableCell>
                   <TableCell>{r.realNameInput}</TableCell>
                   <TableCell>
                     {r.claimTempUserId ? (
                       <Badge variant="outline" className="text-[10px]">认领临时账号 UID {r.claimTempUserId}</Badge>
+                    ) : r.sourceTokenId ? (
+                      <Badge variant="outline" className="text-[10px]">{r.targetUserGroupId ? '用户组链接' : '学校链接'}</Badge>
                     ) : (
-                      <Badge variant="outline" className="text-[10px]">绑定</Badge>
+                      <Badge variant="outline" className="text-[10px]">手动申请</Badge>
                     )}
                   </TableCell>
                   <TableCell>
@@ -547,23 +711,33 @@ export function AdminUserbindRequestsPage() {
                           <Button type="submit" size="sm" className="h-7 text-xs">通过</Button>
                         </form>
                         <form method="post" className="inline-block" onSubmit={(e) => {
-                          const reason = window.prompt('拒绝理由（可选）：') ?? '';
+                          const reason = window.prompt('驳回理由（必填）：') ?? '';
+                          if (!reason.trim()) {
+                            e.preventDefault();
+                            alert('请填写驳回理由');
+                            return;
+                          }
                           const reasonInput = e.currentTarget.querySelector('input[name=reason]') as HTMLInputElement | null;
                           if (reasonInput) reasonInput.value = reason;
                         }}>
                           <input type="hidden" name="operation" value="reject" />
                           <input type="hidden" name="requestId" value={r._id} />
                           <input type="hidden" name="reason" value="" />
-                          <Button type="submit" variant="outline" size="sm" className="h-7 text-xs">拒绝</Button>
+                          <Button type="submit" variant="outline" size="sm" className="h-7 text-xs">驳回</Button>
                         </form>
                       </div>
+                    )}
+                    {r.status === 'rejected' && r.rejectReason && (
+                      <span className="text-xs text-muted-foreground" title={r.rejectReason}>
+                        理由: {r.rejectReason.length > 20 ? r.rejectReason.slice(0, 20) + '…' : r.rejectReason}
+                      </span>
                     )}
                   </TableCell>
                 </TableRow>
               ))}
               {data.requests.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">
                     暂无绑定申请。
                   </TableCell>
                 </TableRow>
@@ -581,18 +755,23 @@ export function AdminUserbindRequestsPage() {
 export function UserBindPage() {
   const data = useBootstrap().page.data as {
     schools: Array<{ _id: string; name: string }>;
-    myRequests: Array<{ _id: string; studentIdInput: string; realNameInput: string; status: string; rejectReason: string | null }>;
     alreadyBound: boolean;
     currentStudentId: string | null;
     currentRealName: string | null;
+    hasPending: boolean;
   };
 
   if (data.alreadyBound) {
     return (
-      <div className="mx-auto max-w-2xl space-y-4 py-8">
+      <div className="mx-auto max-w-2xl space-y-5 py-8">
         <Card>
-          <CardHeader><CardTitle>身份已绑定</CardTitle></CardHeader>
-          <CardContent className="space-y-2 text-sm">
+          <CardHeader className="px-6 pb-3 pt-6">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ShieldCheck className="size-5 text-emerald-600" />
+              身份已绑定
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 px-6 pb-6 text-sm">
             <p>你的账号已经绑定到学号 <span className="font-mono font-semibold">{data.currentStudentId}</span></p>
             <p>姓名：<span className="font-semibold">{data.currentRealName}</span></p>
             <p className="text-muted-foreground">绑定后无法修改。如需变更，请联系管理员。</p>
@@ -610,76 +789,323 @@ export function UserBindPage() {
           提交学号和姓名后，由管理员审核通过后完成绑定。
         </p>
       </div>
+      {data.hasPending && (
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardContent className="flex items-start gap-3 p-5">
+            <AlertCircle className="size-4 shrink-0 text-amber-600" />
+            <div className="flex-1 space-y-1 text-sm">
+              <p className="font-medium">你已有待审核的申请</p>
+              <p className="text-xs text-muted-foreground">
+                请耐心等待管理员审核。你可以前往「<a href="/userbind/applications" className="underline">我的申请</a>」查看进度。
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
       <Card>
-        <CardContent>
-          <form method="post" className="space-y-3">
-            <div className="space-y-1">
-              <label className="text-sm font-medium">学校</label>
-              <select name="schoolId" required className="w-full rounded-md border bg-background px-3 py-2 text-sm">
+        <CardContent className="p-6">
+          <form method="post" className="space-y-4">
+            <FormField label="学校" required htmlFor="bind-school">
+              <select id="bind-school" name="schoolId" required className="w-full rounded-md border bg-background px-3 py-2 text-sm">
                 <option value="">选择学校</option>
                 {data.schools.map((s) => (<option key={s._id} value={s._id}>{s.name}</option>))}
               </select>
+            </FormField>
+            <FormRow columns={2}>
+              <FormField label="学号" required htmlFor="bind-studentId">
+                <Input id="bind-studentId" name="studentId" required />
+              </FormField>
+              <FormField label="姓名" required htmlFor="bind-realName">
+                <Input id="bind-realName" name="realName" required />
+              </FormField>
+            </FormRow>
+            <div className="flex items-center justify-between gap-2">
+              <a
+                href="/userbind/applications"
+                className="text-xs text-muted-foreground hover:underline"
+              >
+                查看我的申请记录 →
+              </a>
+              <Button type="submit">提交申请</Button>
             </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">学号</label>
-              <Input name="studentId" required />
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">姓名</label>
-              <Input name="realName" required />
-            </div>
-            <Button type="submit">提交申请</Button>
           </form>
         </CardContent>
       </Card>
-      {data.myRequests.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle className="text-base">我的申请记录</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            {data.myRequests.map((r) => (
-              <div key={r._id} className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-sm">
-                <div>
-                  <span className="font-mono">{r.studentIdInput}</span>{' '}
-                  <span className="text-muted-foreground">{r.realNameInput}</span>
-                </div>
-                <div>
-                  {r.status === 'pending' && <Badge>待审核</Badge>}
-                  {r.status === 'approved' && <Badge variant="secondary">已通过</Badge>}
-                  {r.status === 'rejected' && (
-                    <Badge variant="destructive" title={r.rejectReason || ''}>已拒绝</Badge>
-                  )}
-                </div>
-              </div>
-            ))}
+    </div>
+  );
+}
+
+/**
+ * /userbind/applications — student's full application history.
+ */
+export function UserBindApplicationsPage() {
+  const data = useBootstrap().page.data as {
+    requests: Array<{
+      _id: string;
+      studentIdInput: string;
+      realNameInput: string;
+      schoolId: string;
+      status: 'pending' | 'approved' | 'rejected';
+      createdAt: string;
+      reviewedAt: string | null;
+      rejectReason: string | null;
+      sourceTokenId: string | null;
+      targetUserGroupId: string | null;
+      claimTempUserId: number | null;
+    }>;
+    schoolMap: Record<string, string>;
+    groupMap: Record<string, string>;
+    alreadyBound: boolean;
+    currentStudentId: string | null;
+    currentRealName: string | null;
+  };
+  return (
+    <div className="mx-auto max-w-3xl space-y-5 py-6">
+      <header className="flex items-start justify-between gap-2">
+        <div className="space-y-1">
+          <h1 className="flex items-center gap-2 text-xl font-semibold">
+            <ListChecks className="size-5 text-primary" />
+            我的申请
+          </h1>
+          <p className="text-sm text-muted-foreground">所有绑定申请的状态、审核结果和驳回理由都在这里。</p>
+        </div>
+        {!data.alreadyBound && (
+          <Button asChild size="sm">
+            <a href="/userbind">提交新申请</a>
+          </Button>
+        )}
+      </header>
+
+      {data.alreadyBound && (
+        <Card className="border-emerald-500/40 bg-emerald-500/5">
+          <CardContent className="flex items-start gap-3 p-5">
+            <ShieldCheck className="size-5 shrink-0 text-emerald-600" />
+            <div className="flex-1 space-y-1 text-sm">
+              <p className="font-medium">当前已绑定</p>
+              <p className="text-muted-foreground">
+                学号 <span className="font-mono">{data.currentStudentId}</span> · {data.currentRealName}
+              </p>
+            </div>
           </CardContent>
         </Card>
+      )}
+
+      {data.requests.length === 0 ? (
+        <Card>
+          <CardContent className="space-y-3 p-10 text-center">
+            <ListChecks className="mx-auto size-8 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">你还没有提交过任何绑定申请。</p>
+            {!data.alreadyBound && (
+              <Button asChild>
+                <a href="/userbind">现在去申请</a>
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {data.requests.map((r) => {
+            const schoolName = data.schoolMap[r.schoolId] || `学校 ID ${r.schoolId.slice(0, 8)}`;
+            const groupName = r.targetUserGroupId ? (data.groupMap[r.targetUserGroupId] || '') : '';
+            return (
+              <Card key={r._id} className={r.status === 'rejected' ? 'border-rose-500/40' : undefined}>
+                <CardContent className="space-y-3 p-5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-sm">{r.studentIdInput}</span>
+                        <span className="text-sm">{r.realNameInput}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {schoolName}
+                        {groupName && ` · 加入用户组「${groupName}」`}
+                        {r.claimTempUserId && ` · 认领临时账号 UID ${r.claimTempUserId}`}
+                      </p>
+                    </div>
+                    <div>
+                      {r.status === 'pending' && <Badge>待审核</Badge>}
+                      {r.status === 'approved' && <Badge variant="secondary">已通过</Badge>}
+                      {r.status === 'rejected' && <Badge variant="destructive">已驳回</Badge>}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span>提交：{new Date(r.createdAt).toLocaleString()}</span>
+                    {r.reviewedAt && <span>审核：{new Date(r.reviewedAt).toLocaleString()}</span>}
+                  </div>
+                  {r.status === 'rejected' && r.rejectReason && (
+                    <div className="rounded-md border border-rose-500/30 bg-rose-500/5 p-3">
+                      <p className="text-xs font-medium text-rose-700 dark:text-rose-300">驳回理由</p>
+                      <p className="mt-0.5 text-sm">{r.rejectReason}</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
       )}
     </div>
   );
 }
 
+/**
+ * /bind/:token — 3-kind landing page.
+ */
 export function UserBindLandingPage() {
-  const data = useBootstrap().page.data as { token: string; signedIn: boolean };
+  const data = useBootstrap().page.data as {
+    token: string;
+    signedIn: boolean;
+    kind: 'student' | 'school' | 'user_group' | null;
+    error?: string;
+    errorMessage?: string;
+    student?: { _id: string; studentId: string; realName: string; boundUserId: number | null } | null;
+    school?: { _id: string; name: string } | null;
+    group?: { _id: string; name: string } | null;
+    groups?: Array<{ _id: string; name: string }>;
+    inviter?: { uid: number; uname: string } | null;
+    tokenInfo?: { createdAt: string; expiresAt: string | null; used?: boolean };
+  };
+
+  // Error cases
+  if (data.error) {
+    return (
+      <div className="mx-auto max-w-md space-y-4 py-10">
+        <Card className="border-rose-500/40 bg-rose-500/5">
+          <CardHeader className="px-6 pb-3 pt-6">
+            <CardTitle className="flex items-center gap-2 text-base text-rose-700 dark:text-rose-300">
+              <AlertCircle className="size-5" />邀请链接不可用
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 px-6 pb-6">
+            <p className="text-sm">{data.errorMessage}</p>
+            <p className="text-xs text-muted-foreground">如有疑问请联系管理员重新发放邀请。</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const expiresLabel = data.tokenInfo?.expiresAt
+    ? new Date(data.tokenInfo.expiresAt).toLocaleString()
+    : '永久';
+  const createdLabel = data.tokenInfo?.createdAt
+    ? new Date(data.tokenInfo.createdAt).toLocaleString()
+    : '';
+
+  // Student kind: one-click bind
+  if (data.kind === 'student' && data.student) {
+    return (
+      <div className="mx-auto max-w-md space-y-5 py-10">
+        <Card>
+          <CardHeader className="px-6 pb-3 pt-6">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <UserPlus className="size-5 text-primary" />学生身份绑定
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5 px-6 pb-6">
+            <FormSection title="学生信息">
+              <div className="space-y-1.5 rounded-md border bg-muted/30 p-4 text-sm">
+                <KeyValueRow k="学号" v={data.student.studentId} mono />
+                <KeyValueRow k="姓名" v={data.student.realName} />
+                <KeyValueRow k="学校" v={data.school?.name || '—'} />
+                {data.groups && data.groups.length > 0 && (
+                  <div className="flex items-start gap-2 pt-1">
+                    <span className="w-16 text-xs text-muted-foreground">用户组</span>
+                    <div className="flex flex-wrap gap-1">
+                      {data.groups.map((g) => (
+                        <Badge key={g._id} variant="outline" className="text-[10px]">{g.name}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </FormSection>
+            <FormSection title="邀请来源">
+              <div className="space-y-1.5 rounded-md border bg-muted/30 p-4 text-sm">
+                <KeyValueRow k="邀请人" v={data.inviter ? `${data.inviter.uname} (UID ${data.inviter.uid})` : '系统'} />
+                <KeyValueRow k="创建时间" v={createdLabel} />
+                <KeyValueRow k="过期时间" v={expiresLabel} />
+              </div>
+            </FormSection>
+            <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+              确认绑定后，你的账号将设置上述学号、姓名、学校和用户组。<strong>绑定后不可修改</strong>。如信息不符请联系管理员。
+            </p>
+            {data.signedIn ? (
+              <form method="post">
+                <Button type="submit" className="w-full">确认绑定</Button>
+              </form>
+            ) : (
+              <Button asChild className="w-full">
+                <a href={`/login?redirect=${encodeURIComponent(`/bind/${data.token}`)}`}>登录后绑定</a>
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // School / user_group: form-based
+  const kindLabel = data.kind === 'school' ? '加入学校' : '加入用户组';
+  const targetName = data.kind === 'school' ? data.school?.name : data.group?.name;
   return (
-    <div className="mx-auto max-w-md space-y-4 py-8">
+    <div className="mx-auto max-w-md space-y-5 py-10">
       <Card>
-        <CardHeader><CardTitle>邀请绑定</CardTitle></CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-sm">
-            点击下方按钮，将你的账号与邀请方提供的学生信息进行绑定。
+        <CardHeader className="px-6 pb-3 pt-6">
+          <CardTitle className="flex items-center gap-2 text-base">
+            {data.kind === 'school' ? <Building2 className="size-5 text-primary" /> : <Users className="size-5 text-primary" />}
+            {kindLabel}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-5 px-6 pb-6">
+          <FormSection title="邀请详情">
+            <div className="space-y-1.5 rounded-md border bg-muted/30 p-4 text-sm">
+              <KeyValueRow k={data.kind === 'school' ? '学校' : '用户组'} v={targetName || '—'} />
+              {data.kind === 'user_group' && (
+                <KeyValueRow k="所属学校" v={data.school?.name || '—'} />
+              )}
+              <KeyValueRow k="邀请人" v={data.inviter ? `${data.inviter.uname} (UID ${data.inviter.uid})` : '系统'} />
+              <KeyValueRow k="创建时间" v={createdLabel} />
+              <KeyValueRow k="过期时间" v={expiresLabel} />
+            </div>
+          </FormSection>
+          <FormSection title="验证你的身份" description="填写你的学号和姓名，系统会自动在该学校的学生名单中查找匹配。">
+            {data.signedIn ? (
+              <form method="post" className="space-y-3">
+                <FormRow columns={2}>
+                  <FormField label="学号" required htmlFor="land-sid">
+                    <Input id="land-sid" name="studentId" required />
+                  </FormField>
+                  <FormField label="姓名" required htmlFor="land-name">
+                    <Input id="land-name" name="realName" required />
+                  </FormField>
+                </FormRow>
+                <Button type="submit" className="w-full">
+                  {data.kind === 'school' ? '验证并加入学校' : '验证并加入用户组'}
+                </Button>
+              </form>
+            ) : (
+              <Button asChild className="w-full">
+                <a href={`/login?redirect=${encodeURIComponent(`/bind/${data.token}`)}`}>登录后继续</a>
+              </Button>
+            )}
+          </FormSection>
+          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+            {data.kind === 'school'
+              ? '若名单中找不到匹配学生，将自动转入"申请学生身份"流程，由管理员审核。'
+              : '若名单中找不到匹配学生，将自动转入申请流程，审核通过后会一并加入此用户组。'}
           </p>
-          <p className="font-mono text-xs text-muted-foreground">token: {data.token.slice(0, 16)}…</p>
-          {data.signedIn ? (
-            <form method="post">
-              <Button type="submit">确认绑定</Button>
-            </form>
-          ) : (
-            <Button asChild>
-              <a href={`/login?redirect=${encodeURIComponent(`/bind/${data.token}`)}`}>登录后绑定</a>
-            </Button>
-          )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function KeyValueRow({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-16 text-xs text-muted-foreground">{k}</span>
+      <span className={mono ? 'font-mono text-sm' : 'text-sm'}>{v}</span>
     </div>
   );
 }
@@ -688,53 +1114,136 @@ export function UserBindSuccessPage() {
   const data = useBootstrap().page.data as {
     studentRecord: { studentId: string; realName: string };
     school: { name: string };
+    joinedGroupId?: string | null;
+    wasAlreadyBound?: boolean;
   };
   return (
-    <div className="mx-auto max-w-md space-y-4 py-8">
-      <Card>
-        <CardHeader><CardTitle>绑定成功</CardTitle></CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          <p>已绑定到 <span className="font-semibold">{data.school.name}</span></p>
+    <div className="mx-auto max-w-md space-y-4 py-10">
+      <Card className="border-emerald-500/40 bg-emerald-500/5">
+        <CardHeader className="px-6 pb-3 pt-6">
+          <CardTitle className="flex items-center gap-2 text-base text-emerald-700 dark:text-emerald-300">
+            <ShieldCheck className="size-5" />
+            {data.wasAlreadyBound ? '已加入' : '绑定成功'}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 px-6 pb-6 text-sm">
+          <p>学校：<span className="font-semibold">{data.school?.name}</span></p>
           <p>学号：<span className="font-mono">{data.studentRecord.studentId}</span></p>
           <p>姓名：<span className="font-semibold">{data.studentRecord.realName}</span></p>
+          {data.joinedGroupId && (
+            <p className="text-xs text-muted-foreground">已加入用户组。</p>
+          )}
+          <div className="pt-3">
+            <Button asChild className="w-full">
+              <a href="/">前往首页</a>
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>
   );
 }
 
+/**
+ * /userbind/claim — 2-step temp account claim.
+ */
 export function UserBindClaimPage() {
-  const data = useBootstrap().page.data as { currentStudentId: string | null };
+  const data = useBootstrap().page.data as {
+    step: 1 | 2;
+    schools: Array<{ _id: string; name: string }>;
+    schoolLocked: boolean;
+    candidates: Array<{ uid: number; uname: string; createdAt: string; schoolId: string | null }> | null;
+    studentIdInput?: string;
+    realNameInput?: string;
+    currentStudentId: string | null;
+    currentRealName: string | null;
+  };
+
   return (
-    <div className="mx-auto max-w-2xl space-y-4 py-6">
-      <h1 className="text-xl font-semibold">认领临时账号</h1>
-      <p className="text-sm text-muted-foreground">
-        如果你之前以临时账号参加过考试，可以在这里申请将那些考试记录归到你当前账号下。
-        提交后由管理员审核。
-      </p>
-      <Card>
-        <CardContent>
-          <form method="post" className="space-y-3">
-            <div className="space-y-1">
-              <label className="text-sm font-medium">临时账号 UID</label>
-              <Input name="tempUserId" type="number" required />
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">学校 ID</label>
-              <Input name="schoolId" required />
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">考试时的学号</label>
-              <Input name="studentId" defaultValue={data.currentStudentId || ''} required />
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">考试时的姓名</label>
-              <Input name="realName" required />
-            </div>
-            <Button type="submit">提交认领申请</Button>
-          </form>
-        </CardContent>
-      </Card>
+    <div className="mx-auto max-w-2xl space-y-5 py-6">
+      <header className="space-y-1">
+        <h1 className="flex items-center gap-2 text-xl font-semibold">
+          <Mail className="size-5 text-primary" />
+          认领临时账号
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          如果你之前用临时账号参加过考试，可以在这里把那些考试记录归到你当前账号下。两步完成 — 不需要手动记 UID。
+        </p>
+      </header>
+
+      {data.step === 1 && (
+        <Card>
+          <CardHeader className="px-6 pb-3 pt-6"><CardTitle className="text-base">第 1 步：填写学号 + 姓名</CardTitle></CardHeader>
+          <CardContent className="px-6 pb-6">
+            <form method="post" className="space-y-4">
+              <input type="hidden" name="action" value="lookup" />
+              <FormRow columns={2}>
+                <FormField label="学号" required htmlFor="claim-sid">
+                  <Input id="claim-sid" name="studentId" defaultValue={data.currentStudentId || ''} required />
+                </FormField>
+                <FormField label="姓名" required htmlFor="claim-name">
+                  <Input id="claim-name" name="realName" defaultValue={data.currentRealName || ''} required />
+                </FormField>
+              </FormRow>
+              <Button type="submit">查找匹配的临时账号</Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {data.step === 2 && (
+        <Card>
+          <CardHeader className="px-6 pb-3 pt-6"><CardTitle className="text-base">第 2 步：选择要认领的临时账号</CardTitle></CardHeader>
+          <CardContent className="px-6 pb-6">
+            {(data.candidates || []).length === 0 ? (
+              <div className="space-y-3">
+                <p className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-300">
+                  没有找到与「{data.studentIdInput} {data.realNameInput}」匹配的临时账号。请联系管理员协助。
+                </p>
+                <form method="post" className="inline-block">
+                  <input type="hidden" name="action" value="lookup" />
+                  <input type="hidden" name="studentId" value="" />
+                  <input type="hidden" name="realName" value="" />
+                  <Button type="submit" variant="outline" size="sm">重新搜索</Button>
+                </form>
+              </div>
+            ) : (
+              <form method="post" className="space-y-4">
+                <input type="hidden" name="action" value="submit" />
+                <input type="hidden" name="studentId" value={data.studentIdInput || ''} />
+                <input type="hidden" name="realName" value={data.realNameInput || ''} />
+                <FormField label="选择临时账号" required htmlFor="claim-temp-select" hint={`找到 ${data.candidates!.length} 个匹配账号`}>
+                  <select id="claim-temp-select" name="tempUserId" required className="w-full rounded-md border bg-background px-3 py-2 text-sm">
+                    <option value="">请选择…</option>
+                    {data.candidates!.map((c) => (
+                      <option key={c.uid} value={c.uid}>
+                        UID {c.uid} · {c.uname} · 创建于 {new Date(c.createdAt).toLocaleDateString()}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+                <FormField label="学校" required htmlFor="claim-school-select" hint={data.schoolLocked ? '已根据你当前的学校锁定' : undefined}>
+                  <select id="claim-school-select" name="schoolId" required disabled={data.schoolLocked} className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-70">
+                    {!data.schoolLocked && <option value="">请选择…</option>}
+                    {data.schools.map((s) => (
+                      <option key={s._id} value={s._id}>{s.name}</option>
+                    ))}
+                  </select>
+                </FormField>
+                <div className="flex gap-2">
+                  <Button type="submit">提交认领申请</Button>
+                  <form method="post" className="inline-block">
+                    <input type="hidden" name="action" value="lookup" />
+                    <input type="hidden" name="studentId" value="" />
+                    <input type="hidden" name="realName" value="" />
+                    <Button type="submit" variant="outline">重新搜索</Button>
+                  </form>
+                </div>
+              </form>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

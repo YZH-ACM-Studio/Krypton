@@ -2,8 +2,7 @@
  * /exam-mode index — card grid of exam contests eligible for the current user.
  *
  * Rendered inside the Qt Client's QWebEngineView (Phase 3 wiring) or, during
- * development, in a normal browser. The page is intentionally minimal — no
- * navigation chrome, just the exam cards.
+ * development, in a normal browser. Uses ExamHomeShell — no main OJ sidebar.
  */
 import { motion } from 'motion/react';
 import { Calendar, ChevronRight, Clock, Lock, Swords } from 'lucide-react';
@@ -11,6 +10,7 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ExamHomeShell } from '@/components/layout/exam-shell';
 
 interface ExamCardData {
   _id: string;
@@ -43,34 +43,36 @@ export function ExamModeHomePage() {
   const past = exams.filter((e) => !e.inWindow && new Date(e.endAt) < new Date());
 
   return (
-    <div className="mx-auto max-w-5xl space-y-8 p-6">
-      <motion.header
-        initial={{ opacity: 0, y: -6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25 }}
-        className="flex items-center justify-between rounded-xl border bg-card p-5 shadow-sm"
-      >
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Swords className="size-5 text-primary" />
-            <h1 className="text-xl font-semibold">考试入口</h1>
+    <ExamHomeShell>
+      <div className="mx-auto max-w-5xl space-y-8 p-6">
+        <motion.header
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+          className="flex items-center justify-between rounded-xl border bg-card p-6 shadow-sm"
+        >
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Swords className="size-5 text-primary" />
+              <h1 className="text-xl font-semibold">考试入口</h1>
+            </div>
+            <p className="text-sm text-muted-foreground">选择一场考试进入答题</p>
           </div>
-          <p className="text-sm text-muted-foreground">选择一场考试进入答题</p>
-        </div>
-        {data.user.realName && (
-          <div className="text-right text-sm">
-            <p className="font-semibold">{data.user.realName}</p>
-            <p className="text-xs text-muted-foreground">{data.user.studentId}</p>
-          </div>
-        )}
-      </motion.header>
+          {data.user.realName && (
+            <div className="text-right text-sm">
+              <p className="font-semibold">{data.user.realName}</p>
+              <p className="text-xs text-muted-foreground">{data.user.studentId}</p>
+            </div>
+          )}
+        </motion.header>
 
-      <ExamSection title="进行中" exams={live} emptyHint="当前没有正在进行的考试" highlight />
-      <ExamSection title="即将开始" exams={upcoming} emptyHint="暂无即将开始的考试" />
-      {past.length > 0 && (
-        <ExamSection title="历史考试" exams={past} emptyHint="" muted />
-      )}
-    </div>
+        <ExamSection title="进行中" exams={live} emptyHint="当前没有正在进行的考试" highlight />
+        <ExamSection title="即将开始" exams={upcoming} emptyHint="暂无即将开始的考试" />
+        {past.length > 0 && (
+          <ExamSection title="历史考试" exams={past} emptyHint="" muted />
+        )}
+      </div>
+    </ExamHomeShell>
   );
 }
 
@@ -85,7 +87,7 @@ function ExamSection({
       {exams.length === 0 ? (
         emptyHint ? <p className="text-sm text-muted-foreground">{emptyHint}</p> : null
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {exams.map((e) => (
             <ExamCard key={e._id} exam={e} disabled={muted || !e.inWindow} />
           ))}
@@ -98,7 +100,7 @@ function ExamSection({
 function ExamCard({ exam, disabled }: { exam: ExamCardData; disabled?: boolean }) {
   return (
     <Card className={disabled ? 'opacity-70' : 'transition-shadow hover:shadow-md'}>
-      <CardContent className="space-y-3 p-4">
+      <CardContent className="space-y-3 p-5">
         <div className="space-y-1">
           <h3 className="line-clamp-2 font-semibold">{exam.title}</h3>
           <div className="flex flex-wrap gap-1.5">

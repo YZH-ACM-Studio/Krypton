@@ -2,15 +2,16 @@
  * HTTP handlers + route registration for krypton-userbind.
  *
  * Templates set on `this.response.template` are consumed by ui-next's PAGE_MAP
- * (see packages/ui-next/src/pages/resolver.tsx). The actual page UIs are
- * implemented in Issue 1.9 / 1.10 under packages/ui-next/src/pages/userbind/.
+ * (see packages/ui-next/src/pages/resolver.tsx).
  */
-import { ObjectId } from 'mongodb';
 import {
-    Context, Handler, NotFoundError, OplogModel, param, PRIV, Types,
-    ValidationError, system,
+    Context, Handler, NotFoundError, ObjectId, OplogModel, param, PRIV,
+    Types, ValidationError,
 } from 'hydrooj';
 import { userBindModel } from './model';
+import {
+    bindTokensColl, schoolsColl, studentsColl, userGroupsColl, bindingRequestsColl,
+} from './db';
 
 // ─── Admin handlers ───────────────────────────────────────────────────────
 
@@ -71,12 +72,26 @@ class AdminSchoolDetailHandler extends UserbindAdminHandler {
     async get({ domainId }: { domainId: string }, schoolId: ObjectId) {
         const school = await userBindModel.getSchool(domainId, schoolId);
         if (!school) throw new NotFoundError('School');
-        const [groups, { docs: students, total }] = await Promise.all([
+        const [groups, { docs: students, total }, schoolTokens] = await Promise.all([
             userBindModel.listUserGroups(domainId, schoolId),
             userBindModel.listStudents(domainId, { schoolId, limit: 200 }),
+            userBindModel.listInviteTokens(domainId, { schoolId, kind: 'school' }),
         ]);
         this.response.template = 'admin_userbind_school_detail.html';
-        this.response.body = { school, groups, students, studentTotal: total };
+        this.response.body = { school, groups, students, studentTotal: total, schoolTokens };
+    }
+
+    @param('schoolId', Types.ObjectId)
+    @param('ttlDays', Types.UnsignedInt, true)
+    async postGenerateLink(
+        { domainId }: { domainId: string }, schoolId: ObjectId, ttlDays = 0,
+    ) {
+        const ttlMs = ttlDays > 0 ? ttlDays * 86400 * 1000 : undefined;
+        const token = await userBindModel.generateSchoolInviteToken(
+            domainId, schoolId, this.user._id, ttlMs,
+        );
+        await OplogModel.log(this, 'userbind.token.school.create', { schoolId, tokenId: token._id });
+        this.response.redirect = this.url('admin_userbind_school_detail', { schoolId });
     }
 }
 
@@ -119,9 +134,13 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
     async get({ domainId }: { domainId: string }, groupId: ObjectId) {
         const group = await userBindModel.getUserGroup(domainId, groupId);
         if (!group) throw new NotFoundError('Group');
-        const { docs: members } = await userBindModel.listStudents(domainId, { groupId, limit: 500 });
+        const [{ docs: members }, groupTokens, school] = await Promise.all([
+            userBindModel.listStudents(domainId, { groupId, limit: 500 }),
+            userBindModel.listInviteTokens(domainId, { userGroupId: groupId, kind: 'user_group' }),
+            userBindModel.getSchool(domainId, group.schoolId),
+        ]);
         this.response.template = 'admin_userbind_group_detail.html';
-        this.response.body = { group, members };
+        this.response.body = { group, members, groupTokens, school };
     }
 
     @param('groupId', Types.ObjectId)
@@ -141,6 +160,19 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
     ) {
         const ids = studentIds.map((s) => new ObjectId(s));
         await userBindModel.removeStudentsFromGroup(domainId, groupId, ids);
+        this.response.redirect = this.url('admin_userbind_group_detail', { groupId });
+    }
+
+    @param('groupId', Types.ObjectId)
+    @param('ttlDays', Types.UnsignedInt, true)
+    async postGenerateLink(
+        { domainId }: { domainId: string }, groupId: ObjectId, ttlDays = 0,
+    ) {
+        const ttlMs = ttlDays > 0 ? ttlDays * 86400 * 1000 : undefined;
+        const token = await userBindModel.generateUserGroupInviteToken(
+            domainId, groupId, this.user._id, ttlMs,
+        );
+        await OplogModel.log(this, 'userbind.token.user_group.create', { groupId, tokenId: token._id });
         this.response.redirect = this.url('admin_userbind_group_detail', { groupId });
     }
 }
@@ -164,6 +196,19 @@ class AdminStudentsHandler extends UserbindAdminHandler {
             students, total, page, pageSize: limit,
             schools, filterSchoolId: schoolId, filterGroupId: groupId, q,
         };
+    }
+
+    @param('studentRecordId', Types.ObjectId)
+    @param('ttlDays', Types.UnsignedInt, true)
+    async postGenerateStudentToken(
+        { domainId }: { domainId: string }, studentRecordId: ObjectId, ttlDays = 0,
+    ) {
+        const ttlMs = ttlDays > 0 ? ttlDays * 86400 * 1000 : undefined;
+        const token = await userBindModel.generateStudentInviteToken(
+            domainId, studentRecordId, this.user._id, ttlMs,
+        );
+        await OplogModel.log(this, 'userbind.token.student.create', { studentRecordId, tokenId: token._id });
+        this.response.redirect = this.url('admin_userbind_tokens');
     }
 }
 
@@ -202,27 +247,31 @@ function parseStudentImportText(text: string): Array<{ studentId: string; realNa
 }
 
 class AdminTokensHandler extends UserbindAdminHandler {
-    @param('schoolId', Types.ObjectId, true)
+    @param('kind', Types.String, true)
     @param('unusedOnly', Types.Boolean, true)
     async get(
-        { domainId }: { domainId: string }, schoolId?: ObjectId, unusedOnly = false,
+        { domainId }: { domainId: string }, kind?: string, unusedOnly = false,
     ) {
-        const tokens = await userBindModel.listInviteTokens(domainId, { unusedOnly });
+        const validKind = (kind === 'student' || kind === 'school' || kind === 'user_group') ? kind : undefined;
+        const tokens = await userBindModel.listInviteTokens(domainId, { kind: validKind, unusedOnly });
+        // Resolve target names for display.
+        const tokenInfos: any[] = [];
+        for (const t of tokens) {
+            let targetLabel = '';
+            if (t.kind === 'student' && t.studentRecordId) {
+                const s = await studentsColl.findOne({ _id: t.studentRecordId });
+                targetLabel = s ? `${s.studentId} ${s.realName}` : '(已删除)';
+            } else if (t.kind === 'school' && t.schoolId) {
+                const s = await schoolsColl.findOne({ _id: t.schoolId });
+                targetLabel = s ? s.name : '(已删除)';
+            } else if (t.kind === 'user_group' && t.userGroupId) {
+                const g = await userGroupsColl.findOne({ _id: t.userGroupId });
+                targetLabel = g ? g.name : '(已删除)';
+            }
+            tokenInfos.push({ ...t, targetLabel });
+        }
         this.response.template = 'admin_userbind_tokens.html';
-        this.response.body = { tokens, filterSchoolId: schoolId, unusedOnly };
-    }
-
-    @param('studentRecordId', Types.ObjectId)
-    @param('ttlDays', Types.UnsignedInt, true)
-    async postGenerate(
-        { domainId }: { domainId: string }, studentRecordId: ObjectId, ttlDays = 0,
-    ) {
-        const ttlMs = ttlDays > 0 ? ttlDays * 86400 * 1000 : undefined;
-        const token = await userBindModel.generateInviteToken(
-            domainId, studentRecordId, this.user._id, ttlMs,
-        );
-        this.response.body = { token };
-        this.response.redirect = this.url('admin_userbind_tokens');
+        this.response.body = { tokens: tokenInfos, kind: validKind, unusedOnly };
     }
 
     @param('tokenId', Types.String)
@@ -245,9 +294,18 @@ class AdminRequestsHandler extends UserbindAdminHandler {
         const { docs, total } = await userBindModel.listBindingRequests(domainId, {
             status: validStatus, limit, skip: (page - 1) * limit,
         });
+        // Resolve school names for each request.
+        const schoolIds = Array.from(new Set(docs.map((d) => d.schoolId.toString())));
+        const schools = await schoolsColl.find({
+            _id: { $in: schoolIds.map((id) => new ObjectId(id)) },
+        }).toArray();
+        const schoolMap: Record<string, string> = {};
+        for (const s of schools) schoolMap[s._id.toString()] = s.name;
+
         this.response.template = 'admin_userbind_requests.html';
         this.response.body = {
             requests: docs, total, page, pageSize: limit, status: validStatus,
+            schoolMap,
         };
     }
 
@@ -259,8 +317,12 @@ class AdminRequestsHandler extends UserbindAdminHandler {
     }
 
     @param('requestId', Types.ObjectId)
-    @param('reason', Types.String, true)
-    async postReject({ }, requestId: ObjectId, reason = '') {
+    @param('reason', Types.String)
+    async postReject({ }, requestId: ObjectId, reason: string) {
+        // Reason required — model enforces too, but check here for early feedback.
+        if (!reason || !reason.trim()) {
+            throw new ValidationError('reason', null, '驳回理由必填');
+        }
         await userBindModel.rejectBindingRequest(requestId, this.user._id, reason);
         await OplogModel.log(this, 'userbind.request.reject', { requestId, reason });
         this.response.redirect = this.url('admin_userbind_requests');
@@ -269,6 +331,10 @@ class AdminRequestsHandler extends UserbindAdminHandler {
 
 // ─── Student-facing handlers ──────────────────────────────────────────────
 
+/**
+ * /user/bind — apply form (manual application, e.g. no token in hand).
+ * After submitting a request, redirects to /user/bind/applications.
+ */
 class UserBindHandler extends Handler {
     async prepare() {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
@@ -276,13 +342,16 @@ class UserBindHandler extends Handler {
 
     async get({ domainId }: { domainId: string }) {
         const schools = await userBindModel.listSchools(domainId);
-        const myRequests = await userBindModel.listBindingRequests(domainId, { userId: this.user._id, limit: 10 });
         const alreadyBound = !!(this.user as any).studentId;
+        const pendingApplication = await bindingRequestsColl.findOne({
+            domainId, userId: this.user._id, status: 'pending',
+        });
         this.response.template = 'user_bind.html';
         this.response.body = {
-            schools, myRequests: myRequests.docs, alreadyBound,
+            schools, alreadyBound,
             currentStudentId: (this.user as any).studentId || null,
             currentRealName: (this.user as any).realName || null,
+            hasPending: !!pendingApplication,
         };
     }
 
@@ -296,72 +365,366 @@ class UserBindHandler extends Handler {
         await userBindModel.submitBindingRequest(
             domainId, this.user._id, schoolId, studentId, realName,
         );
-        this.response.redirect = this.url('user_bind');
+        await OplogModel.log(this, 'userbind.request.create', { schoolId, studentId });
+        this.response.redirect = this.url('user_bind_applications');
     }
 }
 
+/**
+ * /user/bind/applications — "我的申请" — student's full application history.
+ * Includes reject reasons and links back to bind paths.
+ */
+class UserBindApplicationsHandler extends Handler {
+    async prepare() {
+        this.checkPriv(PRIV.PRIV_USER_PROFILE);
+    }
+
+    async get({ domainId }: { domainId: string }) {
+        const { docs: requests } = await userBindModel.listBindingRequests(domainId, {
+            userId: this.user._id, limit: 50,
+        });
+        const schoolIds = Array.from(new Set(requests.map((r) => r.schoolId.toString())));
+        const groupIds = Array.from(new Set(
+            requests.filter((r) => r.targetUserGroupId).map((r) => r.targetUserGroupId!.toString()),
+        ));
+        const [schools, groups] = await Promise.all([
+            schoolsColl.find({ _id: { $in: schoolIds.map((s) => new ObjectId(s)) } }).toArray(),
+            groupIds.length > 0
+                ? userGroupsColl.find({ _id: { $in: groupIds.map((s) => new ObjectId(s)) } }).toArray()
+                : Promise.resolve([]),
+        ]);
+        const schoolMap: Record<string, string> = {};
+        for (const s of schools) schoolMap[s._id.toString()] = s.name;
+        const groupMap: Record<string, string> = {};
+        for (const g of groups) groupMap[g._id.toString()] = g.name;
+
+        this.response.template = 'user_bind_applications.html';
+        this.response.body = {
+            requests, schoolMap, groupMap,
+            alreadyBound: !!(this.user as any).studentId,
+            currentStudentId: (this.user as any).studentId || null,
+            currentRealName: (this.user as any).realName || null,
+        };
+    }
+}
+
+/**
+ * /bind/:token — invite landing.
+ * Branches on token kind:
+ *   - student     → show student info card + confirm-bind button
+ *   - school      → show school name + form to collect studentId/realName
+ *   - user_group  → show group + school + form
+ *
+ * Anonymous viewers are allowed to SEE the basic info (no roster), but
+ * actions require sign-in.
+ */
 class BindLandingHandler extends Handler {
     async prepare() {
-        // Allow unauthenticated landing — show "please log in to bind" prompt.
+        // Anonymous OK on GET; POST checks below.
     }
 
     @param('token', Types.String)
     async get({ }, token: string) {
+        const tokenDoc = await bindTokensColl.findOne({ _id: token });
+        if (!tokenDoc) {
+            this.response.template = 'user_bind_landing.html';
+            this.response.body = {
+                token, signedIn: this.user._id !== 0,
+                error: 'invalid_token', errorMessage: '邀请链接无效或已过期。',
+                kind: null,
+            };
+            return;
+        }
+        if (tokenDoc.expiresAt && tokenDoc.expiresAt < new Date()) {
+            this.response.template = 'user_bind_landing.html';
+            this.response.body = {
+                token, signedIn: this.user._id !== 0,
+                error: 'expired', errorMessage: '邀请链接已过期。',
+                kind: tokenDoc.kind,
+            };
+            return;
+        }
+        if (tokenDoc.kind === 'student') {
+            if (tokenDoc.used) {
+                this.response.template = 'user_bind_landing.html';
+                this.response.body = {
+                    token, signedIn: this.user._id !== 0,
+                    error: 'used', errorMessage: '邀请链接已被使用。',
+                    kind: 'student',
+                };
+                return;
+            }
+            const student = await studentsColl.findOne({ _id: tokenDoc.studentRecordId });
+            const school = student ? await schoolsColl.findOne({ _id: student.schoolId }) : null;
+            const groups = student && student.groupIds.length > 0
+                ? await userGroupsColl.find({ _id: { $in: student.groupIds } }).toArray()
+                : [];
+            const inviterUser = await (await import('hydrooj')).UserModel.getById(
+                this.domain?._id || 'system', tokenDoc.createdBy,
+            ).catch(() => null);
+            this.response.template = 'user_bind_landing.html';
+            this.response.body = {
+                token, signedIn: this.user._id !== 0,
+                kind: 'student',
+                student: student ? {
+                    _id: student._id, studentId: student.studentId, realName: student.realName,
+                    boundUserId: student.boundUserId,
+                } : null,
+                school: school ? { _id: school._id, name: school.name } : null,
+                groups: groups.map((g) => ({ _id: g._id, name: g.name })),
+                inviter: inviterUser ? { uid: inviterUser._id, uname: inviterUser.uname } : null,
+                tokenInfo: {
+                    createdAt: tokenDoc.createdAt, expiresAt: tokenDoc.expiresAt,
+                    used: tokenDoc.used,
+                },
+            };
+            return;
+        }
+        if (tokenDoc.kind === 'school') {
+            const school = await schoolsColl.findOne({ _id: tokenDoc.schoolId });
+            const inviterUser = await (await import('hydrooj')).UserModel.getById(
+                this.domain?._id || 'system', tokenDoc.createdBy,
+            ).catch(() => null);
+            this.response.template = 'user_bind_landing.html';
+            this.response.body = {
+                token, signedIn: this.user._id !== 0,
+                kind: 'school',
+                school: school ? { _id: school._id, name: school.name } : null,
+                inviter: inviterUser ? { uid: inviterUser._id, uname: inviterUser.uname } : null,
+                tokenInfo: { createdAt: tokenDoc.createdAt, expiresAt: tokenDoc.expiresAt },
+            };
+            return;
+        }
+        if (tokenDoc.kind === 'user_group') {
+            const group = await userGroupsColl.findOne({ _id: tokenDoc.userGroupId });
+            const school = group ? await schoolsColl.findOne({ _id: group.schoolId }) : null;
+            const inviterUser = await (await import('hydrooj')).UserModel.getById(
+                this.domain?._id || 'system', tokenDoc.createdBy,
+            ).catch(() => null);
+            this.response.template = 'user_bind_landing.html';
+            this.response.body = {
+                token, signedIn: this.user._id !== 0,
+                kind: 'user_group',
+                group: group ? { _id: group._id, name: group.name, schoolId: group.schoolId } : null,
+                school: school ? { _id: school._id, name: school.name } : null,
+                inviter: inviterUser ? { uid: inviterUser._id, uname: inviterUser.uname } : null,
+                tokenInfo: { createdAt: tokenDoc.createdAt, expiresAt: tokenDoc.expiresAt },
+            };
+            return;
+        }
+        // Unknown kind
         this.response.template = 'user_bind_landing.html';
-        // Don't expose student info to anonymous viewers — defer to JSON probe.
-        this.response.body = { token, signedIn: this.user._id !== 0 };
+        this.response.body = {
+            token, signedIn: this.user._id !== 0,
+            error: 'unknown_kind', errorMessage: '邀请链接类型未知。',
+            kind: null,
+        };
     }
 
+    /**
+     * POST behavior by kind:
+     *   - student    → direct consume (legacy "one-click bind")
+     *   - school     → expect studentId/realName in body; do roster lookup, branch:
+     *                    matched_unbound → bind
+     *                    matched_self    → already bound (no-op + show success)
+     *                    matched_other   → error
+     *                    no_match        → redirect to /user/bind/apply with prefill
+     *   - user_group → same as school + add user to group
+     */
     @param('token', Types.String)
-    async post({ }, token: string) {
+    @param('studentId', Types.String, true)
+    @param('realName', Types.String, true)
+    async post(
+        { domainId }: { domainId: string },
+        token: string, studentIdInput?: string, realNameInput?: string,
+    ) {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
-        const { studentRecord, school } = await userBindModel.consumeInviteToken(token, this.user._id);
-        await OplogModel.log(this, 'userbind.bind.invite', {
-            token, studentRecordId: studentRecord._id, schoolId: school._id,
+        const tokenDoc = await bindTokensColl.findOne({ _id: token });
+        if (!tokenDoc) throw new NotFoundError('Bind token');
+        if (tokenDoc.expiresAt && tokenDoc.expiresAt < new Date()) {
+            throw new ValidationError('token', null, 'Token expired');
+        }
+
+        if (tokenDoc.kind === 'student') {
+            const { studentRecord, school } = await userBindModel.consumeStudentInviteToken(
+                token, this.user._id,
+            );
+            await OplogModel.log(this, 'userbind.bind.student_invite', {
+                token, studentRecordId: studentRecord._id, schoolId: school._id,
+            });
+            this.response.template = 'user_bind_success.html';
+            this.response.body = { studentRecord, school };
+            return;
+        }
+
+        if (!studentIdInput || !realNameInput) {
+            throw new ValidationError('input', null, '请填写学号和姓名');
+        }
+
+        let targetSchoolId: ObjectId;
+        let targetGroupId: ObjectId | undefined;
+        if (tokenDoc.kind === 'school') {
+            targetSchoolId = tokenDoc.schoolId;
+        } else if (tokenDoc.kind === 'user_group') {
+            const group = await userGroupsColl.findOne({ _id: tokenDoc.userGroupId });
+            if (!group) throw new NotFoundError('UserGroup');
+            targetSchoolId = group.schoolId;
+            targetGroupId = group._id;
+        } else {
+            throw new ValidationError('token', null, 'Unknown token kind');
+        }
+
+        const outcome = await userBindModel.rosterLookup(
+            domainId, targetSchoolId, studentIdInput, realNameInput, this.user._id,
+        );
+
+        if (outcome.kind === 'matched_unbound') {
+            const { studentRecord, school } = await userBindModel.bindMatchedStudent(
+                outcome.studentRecord, this.user._id, targetGroupId,
+            );
+            await OplogModel.log(this, 'userbind.bind.shared_link', {
+                token, kind: tokenDoc.kind,
+                studentRecordId: studentRecord._id, schoolId: school._id, groupId: targetGroupId,
+            });
+            this.response.template = 'user_bind_success.html';
+            this.response.body = {
+                studentRecord, school,
+                joinedGroupId: targetGroupId || null,
+            };
+            return;
+        }
+        if (outcome.kind === 'matched_self') {
+            // Same user, possibly just joining group now.
+            if (targetGroupId) {
+                await userBindModel.joinUserGroup(this.user._id, outcome.studentRecord, targetGroupId);
+                await OplogModel.log(this, 'userbind.join.user_group', {
+                    token, groupId: targetGroupId,
+                });
+            }
+            const school = await schoolsColl.findOne({ _id: outcome.studentRecord.schoolId });
+            this.response.template = 'user_bind_success.html';
+            this.response.body = {
+                studentRecord: outcome.studentRecord, school,
+                joinedGroupId: targetGroupId || null,
+                wasAlreadyBound: true,
+            };
+            return;
+        }
+        if (outcome.kind === 'matched_other') {
+            this.response.template = 'user_bind_landing.html';
+            this.response.body = {
+                token, signedIn: true, kind: tokenDoc.kind,
+                school: tokenDoc.kind === 'school'
+                    ? await schoolsColl.findOne({ _id: tokenDoc.schoolId })
+                    : (await userGroupsColl.findOne({ _id: tokenDoc.userGroupId }))
+                        && await schoolsColl.findOne({ _id: targetSchoolId }),
+                group: tokenDoc.kind === 'user_group'
+                    ? await userGroupsColl.findOne({ _id: tokenDoc.userGroupId })
+                    : undefined,
+                error: 'matched_other',
+                errorMessage: `该学生身份已被其他账号绑定（UID ${outcome.boundToUid}）。如有错误请联系管理员。`,
+            };
+            return;
+        }
+        // no_match → submit a binding request automatically
+        const req = await userBindModel.submitBindingRequest(
+            domainId, this.user._id, targetSchoolId, studentIdInput, realNameInput,
+            { sourceTokenId: token, targetUserGroupId: targetGroupId },
+        );
+        await OplogModel.log(this, 'userbind.request.from_token', {
+            token, requestId: req._id, kind: tokenDoc.kind,
         });
-        this.response.template = 'user_bind_success.html';
-        this.response.body = { studentRecord, school };
+        this.response.redirect = this.url('user_bind_applications');
     }
 }
 
+/**
+ * /user/bind/claim — temp account claim, 2-step.
+ *
+ * Step 1 (GET / POST with action=lookup):
+ *   - User enters studentId + realName
+ *   - Server returns list of matching temp accounts + school candidates
+ * Step 2 (POST with action=submit):
+ *   - User picks one temp UID + school from dropdowns
+ *   - Server creates a BindingRequest with claimTempUserId
+ */
 class UserBindClaimHandler extends Handler {
     async prepare() {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
     }
 
-    async get() {
-        // List of temp users whose studentId+realName matches the requesting user's
-        // — these are candidates to claim. Caller-side filtering happens in the UI.
+    async get({ domainId }: { domainId: string }) {
+        // Show step 1 form (no candidates yet).
+        const userSchoolId = (this.user as any).parentSchoolId?.[0] || null;
+        const schools = userSchoolId
+            ? await schoolsColl.find({ _id: userSchoolId }).toArray()
+            : await userBindModel.listSchools(domainId);
         this.response.template = 'user_bind_claim.html';
         this.response.body = {
+            step: 1,
+            schools,
+            schoolLocked: !!userSchoolId,
+            candidates: null,
             currentStudentId: (this.user as any).studentId || null,
+            currentRealName: (this.user as any).realName || null,
         };
     }
 
-    @param('tempUserId', Types.Int)
-    @param('schoolId', Types.ObjectId)
-    @param('studentId', Types.String)
-    @param('realName', Types.String)
+    @param('action', Types.String)
+    @param('studentId', Types.String, true)
+    @param('realName', Types.String, true)
+    @param('tempUserId', Types.Int, true)
+    @param('schoolId', Types.ObjectId, true)
     async post(
         { domainId }: { domainId: string },
-        tempUserId: number, schoolId: ObjectId, studentId: string, realName: string,
+        action: string,
+        studentIdInput?: string, realNameInput?: string,
+        tempUserId?: number, schoolId?: ObjectId,
     ) {
-        const req = await userBindModel.submitBindingRequest(
-            domainId, this.user._id, schoolId, studentId, realName,
-        );
-        // Attach the temp user reference for the reviewer.
-        const { bindingRequestsColl } = await import('./db');
-        await bindingRequestsColl.updateOne(
-            { _id: req._id }, { $set: { claimTempUserId: tempUserId } },
-        );
-        this.response.redirect = this.url('user_bind');
+        if (action === 'lookup') {
+            const sid = (studentIdInput || '').trim();
+            const name = (realNameInput || '').trim();
+            if (!sid || !name) throw new ValidationError('input', null, '请填写学号和姓名');
+            const candidates = await userBindModel.findClaimCandidates(domainId, sid, name);
+            const userSchoolId = (this.user as any).parentSchoolId?.[0] || null;
+            const schools = userSchoolId
+                ? await schoolsColl.find({ _id: userSchoolId }).toArray()
+                : await userBindModel.listSchools(domainId);
+            this.response.template = 'user_bind_claim.html';
+            this.response.body = {
+                step: 2,
+                schools,
+                schoolLocked: !!userSchoolId,
+                candidates,
+                studentIdInput: sid,
+                realNameInput: name,
+                currentStudentId: (this.user as any).studentId || null,
+                currentRealName: (this.user as any).realName || null,
+            };
+            return;
+        }
+        if (action === 'submit') {
+            if (!tempUserId || !schoolId || !studentIdInput || !realNameInput) {
+                throw new ValidationError('input', null, '请补全所有字段');
+            }
+            const req = await userBindModel.submitBindingRequest(
+                domainId, this.user._id, schoolId, studentIdInput, realNameInput,
+                { claimTempUserId: tempUserId },
+            );
+            await OplogModel.log(this, 'userbind.claim.submit', {
+                requestId: req._id, tempUserId, schoolId,
+            });
+            this.response.redirect = this.url('user_bind_applications');
+            return;
+        }
+        throw new ValidationError('action');
     }
 }
 
 // ─── Force-bind middleware (before-prepare hook) ──────────────────────────
 
 const FORCE_BIND_BYPASS_PREFIX = [
-    '/user_bind', '/bind', '/login', '/logout', '/register',
+    '/userbind', '/bind', '/login', '/logout', '/register',
     '/lostpass', '/sudo', '/api', '/manifest.json', '/favicon',
     '/_spike-webview',
 ];
@@ -389,22 +752,21 @@ export function applyHandlers(ctx: Context) {
     ctx.Route('admin_userbind_tokens', '/admin/userbind/tokens', AdminTokensHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('admin_userbind_requests', '/admin/userbind/requests', AdminRequestsHandler, PRIV.PRIV_EDIT_SYSTEM);
 
-    // Student-facing
-    ctx.Route('user_bind', '/user/bind', UserBindHandler, PRIV.PRIV_USER_PROFILE);
-    ctx.Route('user_bind_claim', '/user/bind/claim', UserBindClaimHandler, PRIV.PRIV_USER_PROFILE);
+    // Student-facing — paths under /userbind/* to avoid clashing with /user/:uid (hydrooj core).
+    ctx.Route('user_bind', '/userbind', UserBindHandler, PRIV.PRIV_USER_PROFILE);
+    ctx.Route('user_bind_applications', '/userbind/applications', UserBindApplicationsHandler, PRIV.PRIV_USER_PROFILE);
+    ctx.Route('user_bind_claim', '/userbind/claim', UserBindClaimHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('user_bind_landing', '/bind/:token', BindLandingHandler);
 
     // Force-bind enforcement hook (PRD §3.2 — "保留，但条件化")
     ctx.on('handler/before-prepare', async (h) => {
-        const enforced = system.get('userbind.forceBind');
+        const enforced = global.Hydro.model.system.get('userbind.forceBind');
         if (!enforced) return;
         if (!shouldEnforceBindFor(h as Handler)) return;
-        // Soft redirect: only on GET requests for HTML; let API calls proceed and fail elsewhere.
         const accept = h.request?.headers?.accept || '';
         if (h.request?.method !== 'GET') return;
         if (!accept.includes('text/html')) return;
         (h.response as any).redirect = (h as Handler).url('user_bind');
-        // Throwing here would abort the chain; instead the redirect terminates the flow.
         return true;
     });
 }

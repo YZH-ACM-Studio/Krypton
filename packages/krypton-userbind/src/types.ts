@@ -47,24 +47,70 @@ export interface StudentRecord {
 }
 
 /**
- * BindToken / 邀请绑定令牌. Path ① — admin generates a token for a specific
- * student record, sends the corresponding `/bind/:token` URL to the student.
+ * BindToken / 邀请绑定令牌. Three kinds:
+ *
+ * - `student`     — points at a specific StudentRecord; one-shot (used=true → never again).
+ *                   Landing page: shows student info + inviter, single "确认绑定" button.
+ *
+ * - `school`      — points at a School; **shared, reusable**. Multiple students can
+ *                   click the same link. Landing page collects studentId + realName
+ *                   and matches against the school's StudentRecord roster. Four outcomes:
+ *                     ① matched + unbound → bind & set studentId/realName/school/groups
+ *                     ② matched + bound to self → no-op
+ *                     ③ matched + bound to other user → reject
+ *                     ④ no match → redirect to /user/bind/apply with school pre-selected
+ *
+ * - `user_group`  — points at a UserGroup (and implicitly its school via the group).
+ *                   Same flow as `school` but also adds the user to that UserGroup
+ *                   on success. The "申请" fallback (case ④) records `targetUserGroupId`
+ *                   so the admin approval can auto-join the group.
  */
-export interface BindToken {
+export type BindTokenKind = 'student' | 'school' | 'user_group';
+
+interface BindTokenBase {
     _id: string;
     domainId: string;
-    studentRecordId: ObjectId;
+    kind: BindTokenKind;
     createdAt: Date;
     createdBy: number;
     expiresAt: Date | null;
+    /** For `student` kind: flipped to true once consumed. For `school` / `user_group`: ALWAYS false (shared link). */
     used: boolean;
+    /** For `student` kind only — the uid that consumed it. */
     usedBy: number | null;
     usedAt: Date | null;
 }
 
+export interface StudentBindToken extends BindTokenBase {
+    kind: 'student';
+    studentRecordId: ObjectId;
+    schoolId?: undefined;
+    userGroupId?: undefined;
+}
+
+export interface SchoolBindToken extends BindTokenBase {
+    kind: 'school';
+    schoolId: ObjectId;
+    studentRecordId?: undefined;
+    userGroupId?: undefined;
+}
+
+export interface UserGroupBindToken extends BindTokenBase {
+    kind: 'user_group';
+    userGroupId: ObjectId;
+    studentRecordId?: undefined;
+    schoolId?: undefined;
+}
+
+export type BindToken = StudentBindToken | SchoolBindToken | UserGroupBindToken;
+
 /**
- * BindingRequest / 绑定申请. Path ② — student submits a request, admin reviews.
- * Also used by the temporary-account claim flow (`claimTempUserId !== null`).
+ * BindingRequest / 绑定申请. Used by:
+ *   - the apply flow (when school/user_group token finds no roster match)
+ *   - the temporary-account claim flow (`claimTempUserId !== null`)
+ *
+ * If `sourceTokenId` is set, the approval flow knows to auto-join `targetUserGroupId`
+ * (when set) after creating + binding the student record.
  */
 export interface BindingRequest {
     _id: ObjectId;
@@ -78,6 +124,10 @@ export interface BindingRequest {
     reviewedBy: number | null;
     reviewedAt: Date | null;
     rejectReason: string | null;
+    /** Set when the request came from a school/user_group invite link. */
+    sourceTokenId: string | null;
+    /** If sourceTokenId points to a user_group token, this is that group. */
+    targetUserGroupId: ObjectId | null;
     /** Set when the request is a claim of a temporary OJ user's records. */
     claimTempUserId: number | null;
 }
@@ -128,6 +178,13 @@ export interface ImportReport {
         action: 'skipped' | 'overwritten' | 'errored';
     }>;
 }
+
+/** Outcome of resolving a school/user_group token against a (studentId, realName) input. */
+export type RosterLookupOutcome =
+    | { kind: 'matched_unbound'; studentRecord: StudentRecord }
+    | { kind: 'matched_self';    studentRecord: StudentRecord }
+    | { kind: 'matched_other';   boundToUid: number }
+    | { kind: 'no_match' };
 
 // Module augmentation: extend hydrooj's UserDocument and Collections interfaces.
 declare module 'hydrooj' {

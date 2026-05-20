@@ -66,6 +66,7 @@ import {
   AdminUserbindTokensPage,
   AdminUserbindRequestsPage,
   UserBindPage,
+  UserBindApplicationsPage,
   UserBindLandingPage,
   UserBindSuccessPage,
   UserBindClaimPage,
@@ -208,6 +209,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
 
   // krypton-userbind student
   'user_bind.html': UserBindPage,
+  'user_bind_applications.html': UserBindApplicationsPage,
   'user_bind_landing.html': UserBindLandingPage,
   'user_bind_success.html': UserBindSuccessPage,
   'user_bind_claim.html': UserBindClaimPage,

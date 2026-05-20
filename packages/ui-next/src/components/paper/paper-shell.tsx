@@ -1,16 +1,13 @@
 /**
- * Paper components: tab bar, cell navigator, per-kind question renderers,
+ * Paper components: question kind tabs, status cells, per-kind renderers,
  * countdown, save/lock/submit bars. Composed in pages/exam-mode/paper.tsx.
  *
- * The paper UI is fully controlled by parent state: the parent holds the
- * draft store (per problem × per question key) and passes setters down.
+ * The paper UI is fully controlled by parent state.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Clock, Lock, AlertCircle, ChevronRight } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Check, Clock, Lock, Minus, X as XIcon, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 
 export type QuestionKind = 'single' | 'multi' | 'blank' | 'fill_program' | 'fill_function' | 'default' | 'submit_answer';
@@ -24,7 +21,9 @@ export interface PaperCell {
   prompt?: string;
 }
 
-const KIND_LABELS: Record<QuestionKind, string> = {
+export type CellStatus = 'unanswered' | 'answered' | 'correct' | 'wrong' | 'partial';
+
+export const KIND_LABELS: Record<QuestionKind, string> = {
   single: '单选',
   multi: '多选',
   blank: '填空',
@@ -32,6 +31,16 @@ const KIND_LABELS: Record<QuestionKind, string> = {
   fill_function: '函数题',
   default: '编程',
   submit_answer: '提交答案',
+};
+
+const KIND_SHORT: Record<QuestionKind, string> = {
+  single: '单',
+  multi: '多',
+  blank: '填',
+  fill_program: '程',
+  fill_function: '函',
+  default: '编',
+  submit_answer: '答',
 };
 
 /** Group cells by kind, preserving cell order within each group. */
@@ -46,9 +55,9 @@ export function groupCellsByKind(cells: PaperCell[]): Map<QuestionKind, PaperCel
 
 const KIND_ORDER: QuestionKind[] = ['single', 'multi', 'blank', 'fill_program', 'fill_function', 'default', 'submit_answer'];
 
-// ─── Tab Bar ──────────────────────────────────────────────────────────────
+// ─── Mini Tab Bar (horizontal, lives at top of sub-sidebar) ──────────────
 
-export function TabBar({
+export function MiniTabBar({
   groups, current, onChange, lockedKinds,
 }: {
   groups: Map<QuestionKind, PaperCell[]>;
@@ -58,7 +67,7 @@ export function TabBar({
 }) {
   const ordered = KIND_ORDER.filter((k) => groups.has(k));
   return (
-    <div className="flex flex-wrap gap-2 border-b py-2">
+    <div className="flex flex-wrap gap-1 border-b bg-card/50 p-2">
       {ordered.map((kind) => {
         const count = groups.get(kind)!.length;
         const active = current === kind;
@@ -66,18 +75,18 @@ export function TabBar({
         return (
           <button
             key={kind}
+            type="button"
             onClick={() => onChange(kind)}
             className={cn(
-              'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors',
+              'flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
               active
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted/40 text-foreground/80 hover:bg-muted',
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground',
             )}
+            title={KIND_LABELS[kind]}
           >
-            <span>{KIND_LABELS[kind]}</span>
-            <Badge variant={active ? 'secondary' : 'outline'} className="h-4 px-1 text-[10px]">
-              {count}
-            </Badge>
+            <span className="font-semibold">{KIND_SHORT[kind]}</span>
+            <span className={cn('rounded px-1 text-[10px]', active ? 'bg-primary-foreground/20' : 'bg-muted/60')}>{count}</span>
             {locked && <Lock className="size-3" />}
           </button>
         );
@@ -86,41 +95,69 @@ export function TabBar({
   );
 }
 
-// ─── Cell Navigator (numeric grid) ───────────────────────────────────────
+// ─── Cell Navigator (grid of numbered squares with status) ───────────────
 
 export function CellNavigator({
-  cells, activeIndex, onJump, answeredIndices, lockedKindForCell,
+  cells, activeIndex, statuses, onJump,
 }: {
   cells: PaperCell[];
   activeIndex: number;
+  statuses: CellStatus[];
   onJump: (index: number) => void;
-  answeredIndices: Set<number>;
-  lockedKindForCell: boolean;
 }) {
   return (
-    <div className="grid grid-cols-5 gap-1.5">
+    <div className="grid grid-cols-5 gap-2 p-2.5">
       {cells.map((_cell, i) => {
-        const answered = answeredIndices.has(i);
+        const status = statuses[i] || 'unanswered';
         const active = i === activeIndex;
         return (
-          <button
+          <StatusButton
             key={i}
+            index={i + 1}
+            status={status}
+            active={active}
             onClick={() => onJump(i)}
-            className={cn(
-              'flex h-9 w-9 items-center justify-center rounded-md text-xs font-medium transition-colors',
-              active && 'bg-primary text-primary-foreground',
-              !active && answered && 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400',
-              !active && !answered && 'bg-muted/40 text-muted-foreground hover:bg-muted',
-              lockedKindForCell && 'opacity-60',
-            )}
-            title={lockedKindForCell ? '该类型已锁定' : undefined}
-          >
-            {i + 1}
-          </button>
+          />
         );
       })}
     </div>
   );
+}
+
+export function StatusButton({
+  index, status, active, onClick,
+}: {
+  index: number; status: CellStatus; active: boolean; onClick: () => void;
+}) {
+  const base = 'relative flex aspect-square w-full items-center justify-center rounded-md text-xs font-semibold transition-colors';
+  const palette: Record<CellStatus, string> = {
+    unanswered: 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
+    answered:   'bg-sky-500/15 text-sky-700 hover:bg-sky-500/25 dark:text-sky-300',
+    correct:    'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25 dark:text-emerald-300',
+    wrong:      'bg-rose-500/15 text-rose-700 hover:bg-rose-500/25 dark:text-rose-300',
+    partial:    'bg-amber-500/15 text-amber-700 hover:bg-amber-500/25 dark:text-amber-300',
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        base,
+        palette[status],
+        active && 'ring-2 ring-sky-500 ring-offset-2 ring-offset-background',
+      )}
+    >
+      <CellStatusIcon status={status} fallback={String(index)} />
+    </button>
+  );
+}
+
+function CellStatusIcon({ status, fallback }: { status: CellStatus; fallback: string }) {
+  if (status === 'correct') return <Check className="size-4" strokeWidth={3} />;
+  if (status === 'wrong') return <XIcon className="size-4" strokeWidth={3} />;
+  if (status === 'partial') return <Minus className="size-4" strokeWidth={3} />;
+  if (status === 'answered') return <Minus className="size-4 opacity-60" strokeWidth={3} />;
+  return <span>{fallback}</span>;
 }
 
 // ─── Single / Multi / Blank renderers ────────────────────────────────────
@@ -265,7 +302,7 @@ export function Countdown({ endAt, onExpire }: { endAt: number; onExpire?: () =>
 
   return (
     <div className={cn(
-      'flex items-center gap-2 rounded-md border px-3 py-1.5 font-mono text-sm tabular-nums',
+      'flex items-center gap-1.5 rounded-md border px-3 py-1 font-mono text-sm tabular-nums',
       expired && 'border-destructive/30 bg-destructive/10 text-destructive',
       danger && 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
     )}>
@@ -283,40 +320,68 @@ export function Countdown({ endAt, onExpire }: { endAt: number; onExpire?: () =>
 
 // ─── Status pill ─────────────────────────────────────────────────────────
 
-export function PaperStatusPill({ saved, dirty }: { saved: boolean; dirty: boolean }) {
-  if (dirty) {
-    return <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400"><AlertCircle className="size-3.5" />未保存</span>;
+export function PaperStatusPill({ dirtyCount, saving }: { dirtyCount: number; saving?: boolean }) {
+  if (saving) {
+    return <span className="flex items-center gap-1 text-xs text-muted-foreground"><AlertCircle className="size-3.5" />保存中…</span>;
   }
-  if (saved) {
-    return <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400"><ChevronRight className="size-3.5" />已保存</span>;
+  if (dirtyCount > 0) {
+    return <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400"><AlertCircle className="size-3.5" />{dirtyCount} 道未保存</span>;
   }
-  return null;
+  return <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400"><Check className="size-3.5" />已保存</span>;
 }
 
 // ─── Section card wrapper ────────────────────────────────────────────────
 
 export function CellCard({
-  title, score, prompt, children, locked,
+  title, score, prompt, children, locked, status, id,
 }: {
   title: string;
   score: number;
   prompt?: string;
   locked: boolean;
+  status?: CellStatus;
+  id?: string;
   children: ReactNode;
 }) {
+  const accent = {
+    unanswered: '',
+    answered: 'border-l-4 border-l-sky-500',
+    correct: 'border-l-4 border-l-emerald-500',
+    wrong: 'border-l-4 border-l-rose-500',
+    partial: 'border-l-4 border-l-amber-500',
+  }[status || 'unanswered'];
   return (
-    <Card className={cn(locked && 'border-amber-500/30 bg-amber-500/5')}>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center justify-between text-base">
-          <div className="flex items-center gap-2">
-            <span>{title}</span>
-            <Badge variant="secondary" className="text-[10px]">{score} 分</Badge>
-            {locked && <Badge variant="outline" className="gap-1 text-[10px]"><Lock className="size-3" />已锁定</Badge>}
-          </div>
-        </CardTitle>
-        {prompt && <p className="pt-2 text-sm text-muted-foreground">{prompt}</p>}
-      </CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
+    <article
+      id={id}
+      className={cn(
+        'overflow-hidden rounded-lg border bg-card shadow-sm scroll-mt-20',
+        accent,
+        locked && 'border-amber-500/30 bg-amber-500/5',
+      )}
+    >
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-5 py-3">
+        <div className="flex items-center gap-2">
+          <h3 className="text-base font-semibold">{title}</h3>
+          <Badge variant="secondary" className="text-[10px]">{score} 分</Badge>
+          {locked && <Badge variant="outline" className="gap-1 text-[10px]"><Lock className="size-3" />已锁定</Badge>}
+        </div>
+        {status && status !== 'unanswered' && (
+          <span className={cn(
+            'rounded-full px-2 py-0.5 text-[10px] font-semibold',
+            status === 'answered' && 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
+            status === 'correct' && 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+            status === 'wrong' && 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
+            status === 'partial' && 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
+          )}>
+            {status === 'answered' && '已作答'}
+            {status === 'correct' && '正确'}
+            {status === 'wrong' && '错误'}
+            {status === 'partial' && '部分'}
+          </span>
+        )}
+      </header>
+      {prompt && <p className="border-b bg-card px-5 py-3 text-sm text-muted-foreground">{prompt}</p>}
+      <div className="space-y-4 p-5">{children}</div>
+    </article>
   );
 }

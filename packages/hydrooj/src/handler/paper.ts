@@ -11,7 +11,7 @@ import { ObjectId } from 'mongodb';
 import yaml from 'js-yaml';
 import {
     Context, Handler, NotFoundError, OplogModel, param, PERM,
-    PRIV, Types, ValidationError,
+    PRIV, Types, UserModel, ValidationError,
 } from 'hydrooj';
 import {
     PaperDraftModel, ProblemModel, problemFingerprint, spliceFillFunction,
@@ -39,7 +39,7 @@ class PaperBaseHandler extends Handler {
     async getProblemDict(): Promise<Record<number, any>> {
         const pdict: Record<number, any> = {};
         await Promise.all((this.tdoc.pids as number[]).map(async (pid) => {
-            const pdoc = await ProblemModel.get(this.tdoc.domainId, pid);
+            const pdoc = await ProblemModel.get(this.tdoc.domainId, pid, undefined, true);
             if (pdoc) pdict[pid] = pdoc;
         }));
         return pdict;
@@ -49,6 +49,56 @@ class PaperBaseHandler extends Handler {
         const now = Date.now();
         return now >= this.tdoc.beginAt.getTime() && now <= this.tdoc.endAt.getTime();
     }
+}
+
+// ─── Cell + grading helpers ──────────────────────────────────────────────
+
+/** Compute correctness for a single objective question. */
+function gradeObjective(
+    answerSpec: any, studentAnswer: any,
+): 'correct' | 'wrong' | 'partial' {
+    if (!Array.isArray(answerSpec)) return 'wrong';
+    const expected = answerSpec[0];
+    if (Array.isArray(expected)) {
+        // Multi-select.
+        const exp = [...expected].sort();
+        const got = Array.isArray(studentAnswer)
+            ? [...studentAnswer].sort()
+            : (typeof studentAnswer === 'string' ? [studentAnswer] : []);
+        if (exp.length === got.length && exp.every((v, i) => v === got[i])) return 'correct';
+        // Partial credit if some expected match but not all
+        const setExp = new Set(exp);
+        const setGot = new Set(got);
+        const inter = [...setExp].filter((v) => setGot.has(v));
+        const wrong = [...setGot].filter((v) => !setExp.has(v));
+        if (inter.length > 0 && wrong.length === 0) return 'partial';
+        return 'wrong';
+    }
+    // Single-select or blank
+    const got = Array.isArray(studentAnswer) ? studentAnswer[0] : studentAnswer;
+    if (String(expected).trim() === String(got || '').trim()) return 'correct';
+    return 'wrong';
+}
+
+async function gradeObjectiveDraft(
+    domainId: string, tid: ObjectId, uid: number, pid: number,
+    pdoc: any, kindFilter?: string,
+): Promise<Record<string, 'correct' | 'wrong' | 'partial'>> {
+    const draft = await PaperDraftModel.getDraft(domainId, tid, pid, uid);
+    if (!draft) return {};
+    const config = typeof pdoc.config === 'object' ? pdoc.config : null;
+    const answers = config?.answers || {};
+    const kinds = questionKindMap(answers);
+    const results: Record<string, 'correct' | 'wrong' | 'partial'> = {};
+    for (const [key, kind] of Object.entries(kinds)) {
+        if (kindFilter && kind !== kindFilter) continue;
+        const studentAnswer = draft.answers?.[key];
+        results[key] = gradeObjective(answers[key], studentAnswer);
+    }
+    if (Object.keys(results).length > 0) {
+        await PaperDraftModel.setJudgeResults(domainId, tid, pid, uid, results);
+    }
+    return results;
 }
 
 // ─── GET /api/contests/:tid/paper ─────────────────────────────────────────
@@ -84,10 +134,59 @@ class PaperLayoutHandler extends PaperBaseHandler {
             } else if (type === 'fill_function') {
                 cells.push({ pid, questionKey: null, kind: 'fill_function', score: pdoc.score || 100 });
             } else {
-                // default / submit_answer / interactive — treat as "编程" cell
                 cells.push({ pid, questionKey: null, kind: type === 'submit_answer' ? 'submit_answer' : 'default', score: pdoc.score || 100 });
             }
         }
+
+        // Owner display name.
+        let ownerInfo: any = null;
+        try {
+            const owner = await UserModel.getById(domainId, this.tdoc.owner);
+            ownerInfo = owner ? { uid: owner._id, uname: owner.uname } : null;
+        } catch {}
+
+        // Broadcasts — clarification entries with owner=0 = admin broadcast.
+        let broadcasts: any[] = [];
+        try {
+            const tcdocs = await (contest as any).getMultiClarification(domainId, this.tid);
+            broadcasts = (tcdocs || [])
+                .filter((c: any) => c.owner === 0)
+                .map((c: any) => ({
+                    _id: c._id,
+                    content: c.content,
+                    createdAt: c._id?.getTimestamp?.() || new Date(),
+                    subject: c.subject,
+                }))
+                .sort((a: any, b: any) => (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0));
+        } catch {
+            broadcasts = [];
+        }
+
+        // Scoreboard (best-effort).
+        const allowRealtime = !!this.tdoc.realtimeScoreboard;
+        const showScoreboard = !this.isInWindow() || allowRealtime;
+        let scoreboard: Array<{ rank: number; uid: number; uname: string; realName?: string; studentId?: string; score: number }> = [];
+        if (showScoreboard) {
+            try {
+                const tsdocs = await (contest as any).getMultiStatus(domainId, { docId: this.tid })
+                    .sort({ score: -1 }).limit(100).toArray();
+                const uids = tsdocs.map((t: any) => t.uid);
+                const udict = uids.length > 0
+                    ? await UserModel.getListForRender(domainId, uids, false).catch(() => ({}))
+                    : {};
+                scoreboard = tsdocs.map((t: any, i: number) => {
+                    const u = (udict as any)[t.uid] || {};
+                    return {
+                        rank: i + 1, uid: t.uid, uname: u.uname || `UID ${t.uid}`,
+                        realName: u.realName, studentId: u.studentId,
+                        score: t.score || 0,
+                    };
+                });
+            } catch {
+                scoreboard = [];
+            }
+        }
+
         this.response.template = 'exam_paper.html';
         this.response.body = {
             tdoc: this.tdoc,
@@ -95,6 +194,11 @@ class PaperLayoutHandler extends PaperBaseHandler {
             cells,
             now: Date.now(),
             inWindow: this.isInWindow(),
+            owner: ownerInfo,
+            broadcasts,
+            scoreboard,
+            showScoreboard,
+            allowSubmitByKind: !!this.tdoc.allowSubmitByKind,
         };
     }
 }
@@ -106,6 +210,7 @@ class PaperDraftListHandler extends PaperBaseHandler {
         const drafts = await PaperDraftModel.getDraftsForUser(domainId, this.tid, this.user._id);
         const pdict = await this.getProblemDict();
         const staleness: Record<string, boolean> = {};
+        const recordStatus: Record<string, string> = {};
         for (const draft of drafts) {
             const pdoc = pdict[draft.pid];
             if (!pdoc) continue;
@@ -113,7 +218,20 @@ class PaperDraftListHandler extends PaperBaseHandler {
             const currentFp = problemFingerprint(config);
             staleness[draft.pid] = currentFp !== draft.problemFingerprint;
         }
-        this.response.body = { drafts, staleness };
+
+        // Look up most recent record per (tid, uid, pid) for programming-style cells.
+        try {
+            const rdocs = await (record as any).getUserInProblemMulti(domainId, this.user._id, {
+                tid: this.tid, hidden: false,
+            }).sort({ _id: -1 }).limit(200).toArray();
+            for (const r of (rdocs || [])) {
+                if (!recordStatus[String(r.pid)]) {
+                    recordStatus[String(r.pid)] = String(r.status || '');
+                }
+            }
+        } catch {}
+
+        this.response.body = { drafts, staleness, recordStatus };
     }
 }
 
@@ -168,8 +286,27 @@ class PaperLockKindHandler extends PaperBaseHandler {
             throw new ValidationError('kind');
         }
         if (!this.isInWindow()) throw new ValidationError('contest', null, 'Contest not in active window');
+        if (!this.tdoc.allowSubmitByKind) {
+            throw new ValidationError(
+                'allowSubmitByKind', null,
+                'This contest does not allow per-kind submission. Use finalize to submit.',
+            );
+        }
         await PaperDraftModel.lockKindForUser(domainId, this.tid, this.user._id, kind as any);
-        this.response.body = { kind, locked: true };
+
+        // Immediate grading for that kind across all objective problems.
+        const pdict = await this.getProblemDict();
+        const aggregateResults: Record<string, Record<string, 'correct' | 'wrong' | 'partial'>> = {};
+        for (const pid of this.tdoc.pids as number[]) {
+            const pdoc = pdict[pid];
+            if (!pdoc) continue;
+            const cfg = typeof pdoc.config === 'object' ? pdoc.config : null;
+            if (cfg?.type !== 'objective') continue;
+            const results = await gradeObjectiveDraft(domainId, this.tid, this.user._id, pid, pdoc, kind);
+            if (Object.keys(results).length > 0) aggregateResults[pid] = results;
+        }
+        await OplogModel.log(this, 'paper.lock_kind', { tid: this.tid, kind });
+        this.response.body = { kind, locked: true, judgeResults: aggregateResults };
     }
 }
 
@@ -192,12 +329,7 @@ class PaperSubmitCodeHandler extends PaperBaseHandler {
             throw new ValidationError('draft', null, 'No code saved yet — call save first');
         }
         const lang = draft.lang || (config?.langs?.[0]) || 'cpp';
-        const finalCode = type === 'fill_function'
-            // For fill_function, the spliced source is computed at judger side
-            // (it gets the raw `{regionId: content}` JSON). To avoid double-work
-            // here, just submit the JSON-as-code.
-            ? draft.code
-            : draft.code;
+        const finalCode = draft.code;
 
         const rid = await record.add(
             domainId, pid, this.user._id, lang, finalCode, true,
@@ -212,7 +344,6 @@ class PaperSubmitCodeHandler extends PaperBaseHandler {
 
 class PaperFinalizeHandler extends PaperBaseHandler {
     async post({ domainId }: { domainId: string }) {
-        // Allow finalize within window or briefly after endAt (grace period 60s).
         const now = Date.now();
         const grace = 60 * 1000;
         if (now > this.tdoc.endAt.getTime() + grace) {
@@ -230,8 +361,9 @@ class PaperFinalizeHandler extends PaperBaseHandler {
             const type = config?.type || 'default';
 
             if (type === 'objective') {
-                // Assemble YAML compatible with hydrojudge's existing `objective` judger.
-                // Format: { key: answer }
+                // Grade locally too so the UI's judgeResult fills in.
+                await gradeObjectiveDraft(domainId, this.tid, this.user._id, draft.pid, pdoc);
+
                 const yamlBody = yaml.dump(draft.answers || {});
                 const rid = await record.add(
                     domainId, draft.pid, this.user._id, '_', yamlBody, true,
@@ -239,7 +371,6 @@ class PaperFinalizeHandler extends PaperBaseHandler {
                 );
                 rids.push(rid);
             } else if (type === 'fill_function') {
-                // Code field is JSON of {regionId -> content}; pass through.
                 const codeBody = draft.code || JSON.stringify(draft.answers || {});
                 const lang = draft.lang || config?.template?.lang || 'cpp';
                 const rid = await record.add(
@@ -265,12 +396,10 @@ class PaperFinalizeHandler extends PaperBaseHandler {
             }
         }
 
-        // Notify contest model for stat updates.
         for (const rid of rids) {
             await contest.updateStatus(domainId, this.tid, this.user._id, rid, 0);
         }
 
-        // Drafts are kept for audit (PRD §3.4 design note: never cleared automatically).
         await OplogModel.log(this, 'paper.finalize', { tid: this.tid, count: rids.length });
         this.response.body = { rids, count: rids.length };
     }
@@ -284,8 +413,6 @@ class ExamModeHomeHandler extends Handler {
     }
 
     async get({ domainId }: { domainId: string }) {
-        // List all exam-rule contests in this domain that the user can attend.
-        // Reuse the existing contest listing (filtering on rule=exam).
         const cursor = contest.getMulti(domainId, { rule: 'exam' }).sort({ beginAt: -1 }).limit(50);
         const tdocs = await cursor.toArray();
         const now = Date.now();
@@ -313,8 +440,6 @@ class ExamModeHomeHandler extends Handler {
         };
     }
 }
-
-// ─── GET /exam-mode/:tid — redirect to /paper/:tid (single entry point) ──
 
 class ExamModeEntryHandler extends Handler {
     async prepare() {

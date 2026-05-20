@@ -2,13 +2,13 @@
  * Legacy CAUCOJUserBind routes that we redirect or 410-Gone.
  *
  * Two policies, switchable via system setting `userbind.legacyRoutePolicy`:
- *   - 'redirect' (default): 302 to the new equivalent under /admin/userbind or /user/bind
+ *   - 'redirect' (default): 302 to the new equivalent under /admin/userbind or /userbind
  *   - 'gone'              : 410 with a brief message
  *
  * Registered in apply() through `applyLegacyRedirects(ctx)`. Removed after the
  * migration deprecation window (e.g. one semester).
  */
-import { Context, Handler, param, Types, system } from 'hydrooj';
+import { Context, Handler, param, Types } from 'hydrooj';
 
 const REDIRECT_MAP: Record<string, string | ((args: any) => string)> = {
     // Old admin routes
@@ -24,15 +24,15 @@ const REDIRECT_MAP: Record<string, string | ((args: any) => string)> = {
     '/school-group-bypass/manage': '/admin/userbind/schools',
 
     // Old student routes
-    '/binding-request': '/user/bind',
-    '/binding-notice': '/user/bind',
-    '/user-bind': '/user/bind',
-    '/user-bind/check': '/user/bind',
+    '/binding-request': '/userbind',
+    '/binding-notice': '/userbind',
+    '/user-bind': '/userbind',
+    '/user-bind/check': '/userbind',
     '/nickname': '/user',
 };
 
 function policy(): 'redirect' | 'gone' {
-    return system.get('userbind.legacyRoutePolicy') === 'gone' ? 'gone' : 'redirect';
+    return global.Hydro.model.system.get('userbind.legacyRoutePolicy') === 'gone' ? 'gone' : 'redirect';
 }
 
 class LegacyStaticRedirectHandler extends Handler {

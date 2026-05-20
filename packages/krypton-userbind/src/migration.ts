@@ -18,8 +18,7 @@
  */
 import { Logger } from '@hydrooj/utils';
 import type { Context } from 'hydrooj';
-import { db, oncePerSetting, system } from 'hydrooj';
-import { ObjectId } from 'mongodb';
+import { db, ObjectId, oncePerSetting } from 'hydrooj';
 import {
     bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl,
     userGroupsColl,
@@ -252,6 +251,7 @@ async function migrateBindTokens(
         await bindTokensColl.insertOne({
             _id: old._id,
             domainId,
+            kind: 'student',
             studentRecordId: sampleStudent._id,
             createdAt: old.createdAt || new Date(),
             createdBy: old.createdBy || 1,
@@ -259,7 +259,7 @@ async function migrateBindTokens(
             used: false,
             usedBy: null,
             usedAt: null,
-        });
+        } as any);
         count++;
     }
     logger.info('migrated %d bind tokens (heuristically)', count);
@@ -289,6 +289,8 @@ async function migrateBindingRequests(
             reviewedBy: old.reviewedBy || null,
             reviewedAt: old.reviewedAt || null,
             rejectReason: old.reviewComment || null,
+            sourceTokenId: null,
+            targetUserGroupId: null,
             claimTempUserId: null,
         });
         count++;
@@ -311,7 +313,7 @@ async function migrateV1(_ctx: Context): Promise<boolean> {
             return;
         }
 
-        const domainId = system.get('userbind.legacyDomainId') || DEFAULT_DOMAIN;
+        const domainId = global.Hydro.model.system.get('userbind.legacyDomainId') || DEFAULT_DOMAIN;
         logger.info('migrating legacy data into domain "%s"', domainId);
 
         const schoolMap = await migrateSchools(domainId);
@@ -325,13 +327,35 @@ async function migrateV1(_ctx: Context): Promise<boolean> {
                 const escName = `"${g.name.replace(/"/g, '""')}"`;
                 csvLines.push(`${g.legacyId},${escName},${g.studentIds.length},${g.studentIds.join(';')}`);
             }
-            await system.set('userbind.migration_v1_contest_groups_csv', csvLines.join('\n'));
+            await global.Hydro.model.system.set('userbind.migration_v1_contest_groups_csv', csvLines.join('\n'));
             logger.warn(
                 'Found %d contest-only legacy groups (groupType=1). Operator must map each to a real ' +
-                'contest. CSV saved to system.settings key userbind.migration_v1_contest_groups_csv',
+                'contest. CSV saved to global.Hydro.model.system.settings key userbind.migration_v1_contest_groups_csv',
                 contestOnlyGroups.length,
             );
         }
+    });
+}
+
+/**
+ * V2: Backfill `kind: 'student'` on all bind_tokens that predate the kind
+ * discriminator, and `sourceTokenId/targetUserGroupId: null` on binding_requests.
+ */
+async function migrateV2(_ctx: Context): Promise<void> {
+    const V2_FLAG = 'userbind.migration_v2_done';
+    return await oncePerSetting(V2_FLAG, async () => {
+        const tokRes = await bindTokensColl.updateMany(
+            { kind: { $exists: false } } as any,
+            { $set: { kind: 'student' } as any },
+        );
+        const reqRes = await bindingRequestsColl.updateMany(
+            { sourceTokenId: { $exists: false } } as any,
+            { $set: { sourceTokenId: null, targetUserGroupId: null } as any },
+        );
+        logger.info(
+            'v2 backfill: %d tokens tagged kind=student, %d requests got sourceTokenId/targetUserGroupId',
+            tokRes.modifiedCount || 0, reqRes.modifiedCount || 0,
+        );
     });
 }
 
@@ -344,4 +368,6 @@ async function migrateV1(_ctx: Context): Promise<boolean> {
 export const migrationScripts = [
     // Version 0 → 1: initial schema + legacy data import
     migrateV1,
+    // Version 1 → 2: backfill kind/sourceTokenId for the multi-kind token model
+    migrateV2,
 ];

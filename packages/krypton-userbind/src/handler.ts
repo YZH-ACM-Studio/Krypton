@@ -90,13 +90,31 @@ class AdminSchoolDetailHandler extends UserbindAdminHandler {
     async get({ domainId }: { domainId: string }, schoolId: ObjectId) {
         const school = await userBindModel.getSchool(domainId, schoolId);
         if (!school) throw new NotFoundError('School');
-        const [groups, { docs: students, total }, schoolTokens] = await Promise.all([
+        const [groups, { docs: students, total }, schoolTokens, groupCounts] = await Promise.all([
             userBindModel.listUserGroups(domainId, schoolId),
             userBindModel.listStudents(domainId, { schoolId, limit: 200 }),
             userBindModel.listInviteTokens(domainId, { schoolId, kind: 'school' }),
+            // Single aggregation to count students per group within this school.
+            studentsColl.aggregate<{ _id: ObjectId; count: number }>([
+                { $match: { domainId, schoolId } },
+                { $unwind: '$groupIds' },
+                { $group: { _id: '$groupIds', count: { $sum: 1 } } },
+            ]).toArray(),
         ]);
+        // Map group _id → memberCount
+        const groupMemberCount: Record<string, number> = {};
+        for (const r of groupCounts) groupMemberCount[r._id.toString()] = r.count;
+        // Annotate groups with memberCount for the UI.
+        const groupsWithCount = groups.map((g) => ({
+            _id: g._id,
+            name: g.name,
+            memberCount: groupMemberCount[g._id.toString()] || 0,
+        }));
         this.response.template = 'admin_userbind_school_detail.html';
-        this.response.body = { school, groups, students, studentTotal: total, schoolTokens, importReport: null };
+        this.response.body = {
+            school, groups: groupsWithCount, students, studentTotal: total,
+            schoolTokens, importReport: null,
+        };
     }
 
     @param('schoolId', Types.ObjectId)
@@ -128,14 +146,25 @@ class AdminSchoolDetailHandler extends UserbindAdminHandler {
         });
         // Re-render the school detail page with the report inline.
         const school = await userBindModel.getSchool(domainId, schoolId);
-        const [groups, { docs: students, total }, schoolTokens] = await Promise.all([
+        const [groups, { docs: students, total }, schoolTokens, groupCounts] = await Promise.all([
             userBindModel.listUserGroups(domainId, schoolId),
             userBindModel.listStudents(domainId, { schoolId, limit: 200 }),
             userBindModel.listInviteTokens(domainId, { schoolId, kind: 'school' }),
+            studentsColl.aggregate<{ _id: ObjectId; count: number }>([
+                { $match: { domainId, schoolId } },
+                { $unwind: '$groupIds' },
+                { $group: { _id: '$groupIds', count: { $sum: 1 } } },
+            ]).toArray(),
         ]);
+        const groupMemberCount: Record<string, number> = {};
+        for (const r of groupCounts) groupMemberCount[r._id.toString()] = r.count;
+        const groupsWithCount = groups.map((g) => ({
+            _id: g._id, name: g.name,
+            memberCount: groupMemberCount[g._id.toString()] || 0,
+        }));
         this.response.template = 'admin_userbind_school_detail.html';
         this.response.body = {
-            school, groups, students, studentTotal: total, schoolTokens,
+            school, groups: groupsWithCount, students, studentTotal: total, schoolTokens,
             importReport: {
                 ...importReport,
                 preflightInvalid: parsed.filter((r) => r.status !== 'ok'),

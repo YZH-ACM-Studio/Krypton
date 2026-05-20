@@ -8,7 +8,7 @@
  */
 import { useState } from 'react';
 import {
-  AlertCircle, Building2, Copy, FileDown, GraduationCap, Inbox, KeyRound,
+  AlertCircle, Building2, ChevronRight, Copy, FileDown, GraduationCap, Inbox, KeyRound,
   LinkIcon, ListChecks, Mail, ShieldCheck, Users, UserPlus,
 } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -184,11 +184,87 @@ export function AdminUserbindSchoolsPage() {
   );
 }
 
+/**
+ * Scrollable, searchable list of a school's user groups. Replaces the old
+ * flex-wrap of badges so a school with 50+ groups doesn't overflow the page.
+ */
+function SchoolGroupsList({
+  schoolId, groups,
+}: {
+  schoolId: string;
+  groups: Array<{ _id: string; name: string; memberCount: number }>;
+}) {
+  const [q, setQ] = useState('');
+  const filtered = q.trim()
+    ? groups.filter((g) => g.name.toLowerCase().includes(q.toLowerCase()))
+    : groups;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between text-base">
+          <span>用户组 ({groups.length})</span>
+          <Button asChild size="sm" variant="outline" className="gap-1">
+            <a href={`/admin/userbind/groups?schoolId=${schoolId}`}>
+              <Users className="size-3.5" />在用户组页新建
+            </a>
+          </Button>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {groups.length === 0 ? (
+          <div className="rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+            该学校暂无用户组。前往「用户组」页面创建一个。
+          </div>
+        ) : (
+          <>
+            <Input
+              placeholder="搜索用户组名称…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="max-w-sm"
+            />
+            <div className="max-h-80 overflow-y-auto rounded-md border bg-muted/10">
+              {filtered.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  没有匹配「{q}」的用户组
+                </p>
+              ) : (
+                <ul className="divide-y divide-border/60">
+                  {filtered.map((g) => (
+                    <li key={g._id}>
+                      <a
+                        href={`/admin/userbind/groups/${g._id}`}
+                        className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-accent/40"
+                      >
+                        <Users className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="flex-1 truncate text-sm font-medium">{g.name}</span>
+                        <Badge variant="outline" className="shrink-0 text-[10px] font-mono">
+                          {g.memberCount} 人
+                        </Badge>
+                        <ChevronRight className="size-4 shrink-0 text-muted-foreground/60" />
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {q && filtered.length < groups.length && (
+              <p className="text-xs text-muted-foreground">
+                显示 {filtered.length} / {groups.length} 个用户组
+              </p>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function AdminUserbindSchoolDetailPage() {
   const bs = useBootstrap();
   const data = bs.page.data as {
     school: { _id: string; name: string };
-    groups: Array<{ _id: string; name: string }>;
+    groups: Array<{ _id: string; name: string; memberCount: number }>;
     students: Array<{ _id: string; studentId: string; realName: string; boundUserId: number | null }>;
     studentTotal: number;
     schoolTokens: Array<{ _id: string; createdAt: string; expiresAt: string | null }>;
@@ -241,22 +317,9 @@ export function AdminUserbindSchoolDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Groups */}
-      <Card>
-        <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-base">用户组 ({data.groups.length})</CardTitle></CardHeader>
-        <CardContent className="px-5 pb-5">
-          <div className="flex flex-wrap gap-2">
-            {data.groups.map((g) => (
-              <a key={g._id} href={`/admin/userbind/groups/${g._id}`}>
-                <Badge variant="outline" className="cursor-pointer hover:bg-accent">{g.name}</Badge>
-              </a>
-            ))}
-            {data.groups.length === 0 && (
-              <span className="text-sm text-muted-foreground">该学校暂无用户组。</span>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+      {/* Groups — searchable scrollable list (handles many groups gracefully) */}
+      <SchoolGroupsList schoolId={data.school._id} groups={data.groups} />
+
 
       {/* Import students into this school */}
       <RosterImporter

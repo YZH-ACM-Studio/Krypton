@@ -27,6 +27,8 @@ globalConfig.json
 /ecosystems/
 dev/
 .DS_Store
+.playwright-cli/
+docs/
 
 # Config Files
 /config.yaml

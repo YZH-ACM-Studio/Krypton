@@ -11,7 +11,7 @@
  * `boundUserId` / `boundAt`; the operator must rebind in the target domain
  * (e.g. by re-issuing invite tokens or letting students self-request).
  */
-import { ObjectId } from 'mongodb';
+import { ObjectId } from 'hydrooj';
 import {
     bindTokensColl, schoolsColl, studentsColl, userGroupsColl,
 } from './db';

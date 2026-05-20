@@ -19,17 +19,21 @@ import './src/migrate-domain';
 export * from './src/types';
 export { userBindModel } from './src/model';
 
-export async function apply(ctx: Context) {
-    // Ensure all userbind collection indexes are in place before handlers run.
-    await ensureIndexes();
+export function apply(ctx: Context) {
+    // Register routes directly — `ctx.Route` is available on the apply context
+    // (same pattern as packages/blog/index.ts).
+    applyHandlers(ctx);
+    applyLegacyRedirects(ctx);
+
+    // Ensure collection indexes asynchronously; errors logged but non-fatal.
+    ensureIndexes().catch((e) => {
+        console.error('[krypton-userbind] ensureIndexes failed:', e);
+    });
 
     // Register migration channel — independent version number from hydrooj core.
-    // See packages/hydrooj/src/lib/migration-helpers.ts for conventions.
     ctx.inject(['migration'], (c) => {
         c.migration.registerChannel('userbind', migrationScripts);
     });
 
-    applyHandlers(ctx);
-    applyLegacyRedirects(ctx);
     registerCommands(ctx);
 }

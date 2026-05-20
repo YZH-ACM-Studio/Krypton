@@ -1,0 +1,123 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - link "Krypton" [ref=e7] [cursor=pointer]:
+        - /url: /
+        - img [ref=e8]
+        - generic [ref=e17]: Krypton
+      - navigation [ref=e18]:
+        - generic [ref=e20]:
+          - link "首页" [ref=e21] [cursor=pointer]:
+            - /url: /
+            - img [ref=e22]
+            - generic [ref=e25]: 首页
+          - link "题库" [ref=e26] [cursor=pointer]:
+            - /url: /p
+            - img [ref=e27]
+            - generic [ref=e29]: 题库
+          - link "比赛" [ref=e30] [cursor=pointer]:
+            - /url: /contest
+            - img [ref=e31]
+            - generic [ref=e37]: 比赛
+          - link "作业" [ref=e38] [cursor=pointer]:
+            - /url: /homework
+            - img [ref=e39]
+            - generic [ref=e42]: 作业
+          - link "训练" [ref=e43] [cursor=pointer]:
+            - /url: /training
+            - img [ref=e44]
+            - generic [ref=e47]: 训练
+          - link "讨论" [ref=e48] [cursor=pointer]:
+            - /url: /discuss
+            - img [ref=e49]
+            - generic [ref=e51]: 讨论
+          - link "记录" [ref=e52] [cursor=pointer]:
+            - /url: /record
+            - img [ref=e53]
+            - generic [ref=e56]: 记录
+          - link "排名" [ref=e57] [cursor=pointer]:
+            - /url: /ranking
+            - img [ref=e58]
+            - generic [ref=e64]: 排名
+        - generic [ref=e65]:
+          - paragraph [ref=e66]: 管理
+          - generic [ref=e67]:
+            - link "域管理" [ref=e68] [cursor=pointer]:
+              - /url: /domain/dashboard
+              - img [ref=e69]
+              - generic [ref=e74]: 域管理
+            - link "系统" [ref=e75] [cursor=pointer]:
+              - /url: /manage/dashboard
+              - img [ref=e76]
+              - generic [ref=e78]: 系统
+  - generic [ref=e79]:
+    - banner [ref=e80]:
+      - button "收起侧边栏" [ref=e81]:
+        - img
+      - generic [ref=e82]: Hydro
+      - button "切换暗色模式" [ref=e83]:
+        - img
+      - generic [ref=e84]:
+        - link [ref=e85] [cursor=pointer]:
+          - /url: /home/messages
+          - img
+        - link [ref=e86] [cursor=pointer]:
+          - /url: /home/settings/preference
+          - img
+        - button "R root" [ref=e88]:
+          - generic [ref=e90]: R
+          - generic [ref=e91]: root
+    - main [ref=e92]:
+      - generic [ref=e94]:
+        - generic [ref=e95]:
+          - generic [ref=e96]:
+            - heading "Krypton 演示考试 — 计网期中" [level=1] [ref=e97]
+            - paragraph [ref=e98]: root
+          - generic [ref=e99]:
+            - generic [ref=e100]:
+              - img [ref=e101]
+              - generic [ref=e104]: 00:56:40
+            - button "交卷" [ref=e105]:
+              - img
+              - text: 交卷
+        - generic [ref=e106]:
+          - button "单选 1" [ref=e107]:
+            - generic [ref=e108]: 单选
+            - generic [ref=e109]: "1"
+          - button "多选 1" [ref=e110]:
+            - generic [ref=e111]: 多选
+            - generic [ref=e112]: "1"
+          - button "填空 1" [ref=e113]:
+            - generic [ref=e114]: 填空
+            - generic [ref=e115]: "1"
+        - generic [ref=e116]:
+          - complementary [ref=e117]:
+            - button "1" [ref=e119]
+            - button "提交本类" [ref=e120]:
+              - img
+              - text: 提交本类
+          - main [ref=e121]:
+            - generic [ref=e122]:
+              - generic [ref=e125]:
+                - generic [ref=e126]: 第 q1 题
+                - generic [ref=e127]: 5 分
+              - generic [ref=e129]:
+                - generic [ref=e130] [cursor=pointer]:
+                  - radio "A. 选项 A" [ref=e131]
+                  - generic [ref=e132]: A.
+                  - generic [ref=e133]: 选项 A
+                - generic [ref=e134] [cursor=pointer]:
+                  - radio "B. 选项 B" [ref=e135]
+                  - generic [ref=e136]: B.
+                  - generic [ref=e137]: 选项 B
+                - generic [ref=e138] [cursor=pointer]:
+                  - radio "C. 选项 C" [ref=e139]
+                  - generic [ref=e140]: C.
+                  - generic [ref=e141]: 选项 C
+                - generic [ref=e142] [cursor=pointer]:
+                  - radio "D. 选项 D" [ref=e143]
+                  - generic [ref=e144]: D.
+                  - generic [ref=e145]: 选项 D
+            - button "保存" [ref=e148]:
+              - img
+              - text: 保存

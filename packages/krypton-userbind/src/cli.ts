@@ -14,9 +14,16 @@ const logger = new Logger('userbind.cli');
 export function registerCommands(ctx: any): void {
     // The hydrooj entry uses cac; we register via ctx.bus / ctx.command depending
     // on framework version. The pattern below matches existing CLI extensions.
-    if (!ctx.cli) return;
+    // `ctx.cli` is provided only when running CLI commands, not at server startup.
+    let cli: any;
+    try {
+        cli = ctx.get?.('cli') ?? ctx.cli;
+    } catch {
+        cli = undefined;
+    }
+    if (!cli) return;
 
-    ctx.cli.command('userbind:export <domainId>')
+    cli.command('userbind:export <domainId>')
         .option('--out <path>', 'Write JSON to file instead of stdout')
         .action(async (domainId: string, opts: { out?: string }) => {
             const pkg = await userBindModel.exportDomain(domainId);
@@ -30,7 +37,7 @@ export function registerCommands(ctx: any): void {
             }
         });
 
-    ctx.cli.command('userbind:import <targetDomainId>')
+    cli.command('userbind:import <targetDomainId>')
         .option('--conflict <policy>', 'error | skip | overwrite (default: error)')
         .option('--in <path>', 'Read JSON from file instead of stdin')
         .action(async (targetDomainId: string, opts: { conflict?: string; in?: string }) => {

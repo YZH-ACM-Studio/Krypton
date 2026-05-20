@@ -296,6 +296,10 @@
       "name": "@hydrooj/import-qduoj",
       "version": "1.6.0-beta.3",
     },
+    "packages/krypton-userbind": {
+      "name": "@hydrooj/krypton-userbind",
+      "version": "0.1.0",
+    },
     "packages/login-with-github": {
       "name": "@hydrooj/login-with-github",
       "version": "0.3.0-beta.1",
@@ -1141,6 +1145,8 @@
     "@hydrooj/import-hoj": ["@hydrooj/import-hoj@workspace:packages/import-hoj"],
 
     "@hydrooj/import-qduoj": ["@hydrooj/import-qduoj@workspace:packages/import-qduoj"],
+
+    "@hydrooj/krypton-userbind": ["@hydrooj/krypton-userbind@workspace:packages/krypton-userbind"],
 
     "@hydrooj/login-with-github": ["@hydrooj/login-with-github@workspace:packages/login-with-github"],
 

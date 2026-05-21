@@ -63,6 +63,15 @@
       "path": "packages/import-qduoj"
     },
     {
+      "path": "packages/krypton-announcement"
+    },
+    {
+      "path": "packages/krypton-mindmap"
+    },
+    {
+      "path": "packages/krypton-rankboard"
+    },
+    {
       "path": "packages/krypton-tasks"
     },
     {

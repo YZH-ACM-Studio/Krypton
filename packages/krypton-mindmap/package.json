@@ -1,0 +1,7 @@
+{
+    "name": "@hydrooj/krypton-mindmap",
+    "version": "0.1.0",
+    "description": "Krypton OJ: algorithm mindmap — interactive curriculum tree with linked problems",
+    "main": "./index.ts",
+    "license": "AGPL-3.0-or-later"
+}

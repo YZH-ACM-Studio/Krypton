@@ -17,6 +17,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Sidebar } from '@/components/layout/sidebar';
 import { PageResolver } from '@/pages/resolver';
+import { AnnouncementPopover } from '@/components/announcement-popover';
 import { makeInitials } from '@/lib/format';
 
 const SIDEBAR_KEY = 'krypton:sidebar-collapsed';
@@ -141,6 +142,9 @@ function DefaultAppShell() {
           <div className="flex items-center gap-1.5">
             {bs.user.signedIn ? (
               <>
+                {/* Announcement popover */}
+                <AnnouncementPopover signedIn={bs.user.signedIn} />
+
                 {/* Messages icon */}
                 <Button asChild variant="ghost" size="icon" className="relative size-8">
                   <a href={bs.urls.messages}>

@@ -1,0 +1,7 @@
+{
+    "name": "@hydrooj/krypton-announcement",
+    "version": "0.1.0",
+    "description": "Krypton OJ: announcement system with categories, pin, schedule, sort, and homepage integration",
+    "main": "./index.ts",
+    "license": "AGPL-3.0-or-later"
+}

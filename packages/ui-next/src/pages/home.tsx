@@ -21,6 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { MarkdownView } from '@/components/markdown-renderer';
+import { AnnouncementHomeBlock } from '@/components/announcement-home-block';
 import { type GenericUserDoc, useBootstrap } from '@/lib/bootstrap';
 import {
   formatDateTime,
@@ -189,6 +190,9 @@ export function KryptonHomePage() {
 
   return (
     <div className="space-y-6">
+      {/* ── Announcement block ──────────────────── */}
+      <AnnouncementHomeBlock />
+
       {/* ── Hero ────────────────────────────────── */}
       <motion.section
         initial={{ opacity: 0, y: 20 }}

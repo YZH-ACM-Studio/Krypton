@@ -73,5 +73,9 @@
     },
     "patchedDependencies": {
         "@types/express-serve-static-core@4.19.6": ".yarn/patches/@types-express-serve-static-core-npm-4.19.6-cc0017aaf4.patch"
+    },
+    "dependencies": {
+        "@xyflow/react": "^12",
+        "elkjs": "^0.9"
     }
 }

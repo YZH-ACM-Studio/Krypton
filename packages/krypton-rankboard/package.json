@@ -1,0 +1,7 @@
+{
+    "name": "@hydrooj/krypton-rankboard",
+    "version": "0.1.0",
+    "description": "Krypton OJ: ranking honor board — competition awards, OJ stats, leaderboard rendering",
+    "main": "./index.ts",
+    "license": "AGPL-3.0-or-later"
+}

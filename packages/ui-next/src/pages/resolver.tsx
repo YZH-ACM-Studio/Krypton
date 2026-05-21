@@ -89,6 +89,15 @@ import {
   AdminTasksScoresPage,
   AdminTasksSettingsPage,
 } from '@/pages/admin-tasks';
+import {
+  AnnounceListPage, AnnounceDetailPage,
+  AdminAnnounceListPage, AdminAnnounceCategoriesPage,
+} from '@/pages/announcement';
+import { RankBoardMainPage, RankBoardDetailPage } from '@/pages/rankboard';
+import {
+  AdminRankBoardListPage, AdminAwardTypesPage, AdminRankBoardPersonPage,
+} from '@/pages/rankboard/admin';
+import { MindmapPage } from '@/pages/mindmap';
 
 type PageComponent = React.ComponentType;
 
@@ -248,6 +257,22 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'admin_tasks_stats.html': AdminTasksStatsPage,
   'admin_tasks_scores.html': AdminTasksScoresPage,
   'admin_tasks_settings.html': AdminTasksSettingsPage,
+
+  // krypton-announcement
+  'announce_list.html': AnnounceListPage,
+  'announce_detail.html': AnnounceDetailPage,
+  'admin_announce_list.html': AdminAnnounceListPage,
+  'admin_announce_categories.html': AdminAnnounceCategoriesPage,
+
+  // krypton-rankboard
+  'rankboard_main.html': RankBoardMainPage,
+  'rankboard_detail.html': RankBoardDetailPage,
+  'admin_rankboard.html': AdminRankBoardListPage,
+  'admin_rankboard_awards.html': AdminAwardTypesPage,
+  'admin_rankboard_person.html': AdminRankBoardPersonPage,
+
+  // krypton-mindmap
+  'mindmap_main.html': MindmapPage,
 };
 
 export function PageResolver() {

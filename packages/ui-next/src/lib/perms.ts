@@ -82,6 +82,38 @@ export function canSeeAdminAffordance(
  *   - plain decimal string "12345"
  *   - plain number (small values)
  */
+/** Count set bits ("popcount") in a bigint. Used to summarise perm masks. */
+export function bigIntPopcount(value: bigint): number {
+  if (value <= 0n) return 0;
+  let count = 0;
+  let v = value;
+  while (v > 0n) {
+    if (v & 1n) count++;
+    v >>= 1n;
+  }
+  return count;
+}
+
+/**
+ * Integer log2 of a single-bit bigint. The Hydro domain_permission POST
+ * handler reads each form value as a bit *index*, then does `1n << index`
+ * to reconstruct the perm bit. So when we send checkbox values we must
+ * also send indices, not the raw bit value.
+ *
+ * Assumes `value` has exactly one bit set (which is always true for
+ * built-in PERM constants). Returns 0 for non-positive input.
+ */
+export function bigIntLog2(value: bigint): number {
+  if (value <= 0n) return 0;
+  let count = 0;
+  let v = value;
+  while (v > 1n) {
+    v >>= 1n;
+    count++;
+  }
+  return count;
+}
+
 export function parseBigInt(value: unknown): bigint {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'number') {

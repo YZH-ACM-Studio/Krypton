@@ -6,6 +6,7 @@ import { useState } from 'react';
 import {
   FileDown,
   FileUp,
+  Pencil,
   Plus,
   Save,
   Search,
@@ -19,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { AdminPage } from '@/components/admin/admin-page';
 import {
@@ -30,7 +32,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
-import { parseBigInt } from '@/lib/perms';
+import { bigIntLog2, bigIntPopcount, parseBigInt } from '@/lib/perms';
 
 type R = Record<string, any>;
 
@@ -430,79 +432,228 @@ const FAMILY_LABELS: Record<string, string> = {
   perm_ranking: '排名',
 };
 
+type Perm = { key: string; desc: string };
+type PermsByFamily = Record<string, Perm[]>;
+
+/**
+ * Roles-first permission editor. Renders a single table of roles and pops a
+ * dialog when one is clicked — much friendlier than the old N-roles ×
+ * M-permissions matrix once you grow past ~5 custom roles, since column
+ * headers stop being readable at 10+ roles wide.
+ *
+ * Each modal POSTs only its own role to /domain/permission. The backend
+ * `setRoles` merges (not replaces) so untouched roles stay as-is.
+ */
 export function DomainPermissionPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
   const roles: R[] = data.roles || [];
-  const permsByFamily: R = data.PERMS_BY_FAMILY || {};
-
-  // Filter out built-in 'root' role — it always has all permissions
+  const permsByFamily: PermsByFamily = (data.PERMS_BY_FAMILY || {}) as PermsByFamily;
   const editableRoles = roles.filter((r) => r._id !== 'root');
+  const totalPerms = Object.values(permsByFamily).reduce(
+    (sum, list) => sum + (list?.length || 0), 0,
+  );
+  const [editingRole, setEditingRole] = useState<R | null>(null);
 
   return (
     <DomainAdminShell title="权限设置">
-      <form method="post">
-        {Object.entries(permsByFamily).map(([family, perms]) => {
-          const permList = perms as Array<{ key: string; desc: string }>;
-          return (
-            <Card key={family} className="mb-4">
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <Shield className="size-4" />
-                  {FAMILY_LABELS[family] || family}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-0 overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="pl-5 min-w-[200px]">权限</TableHead>
-                      {editableRoles.map((r) => (
-                        <TableHead key={r._id} className="text-center min-w-[80px] text-xs">
-                          {r._id}
-                        </TableHead>
-                      ))}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Shield className="size-4" />
+            角色与权限
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            点击角色右侧的「编辑」按钮，可在弹窗中调整该角色的权限分配。root 角色始终拥有全部权限，不可修改。
+          </p>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="pl-5">角色</TableHead>
+                <TableHead className="w-40">已开通权限</TableHead>
+                <TableHead className="w-32 pr-5 text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {editableRoles.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
+                    暂无可编辑的角色。前往「角色管理」新建角色后再回来设置权限。
+                  </TableCell>
+                </TableRow>
+              ) : (
+                editableRoles.map((r) => {
+                  const rolePerm = parseBigInt(r.perm);
+                  const count = bigIntPopcount(rolePerm);
+                  return (
+                    <TableRow key={r._id}>
+                      <TableCell className="pl-5 text-sm font-medium">{r._id}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="font-mono text-[10px]">
+                          {count} / {totalPerms}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="pr-5 text-right">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 gap-1 text-xs"
+                          onClick={() => setEditingRole(r)}
+                        >
+                          <Pencil className="size-3" />
+                          编辑
+                        </Button>
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {permList.map((p) => {
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {editingRole ? (
+        <RolePermissionDialog
+          key={editingRole._id}
+          role={editingRole}
+          permsByFamily={permsByFamily}
+          onClose={() => setEditingRole(null)}
+        />
+      ) : null}
+    </DomainAdminShell>
+  );
+}
+
+function RolePermissionDialog({
+  role, permsByFamily, onClose,
+}: {
+  role: R;
+  permsByFamily: PermsByFamily;
+  onClose: () => void;
+}) {
+  const rolePerm = parseBigInt(role.perm);
+  // Local state so the user sees their toggle right away (the form still
+  // POSTs natively, no controlled inputs needed — but we want a live count).
+  const initialChecked = new Set<string>();
+  for (const list of Object.values(permsByFamily)) {
+    for (const p of list) {
+      const permKey = parseBigInt(p.key);
+      if ((rolePerm & permKey) !== 0n) initialChecked.add(String(p.key));
+    }
+  }
+  const [checked, setChecked] = useState<Set<string>>(initialChecked);
+  const total = Object.values(permsByFamily).reduce((s, l) => s + l.length, 0);
+
+  const toggle = (key: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleFamily = (family: string, on: boolean) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      for (const p of permsByFamily[family] || []) {
+        if (on) next.add(String(p.key));
+        else next.delete(String(p.key));
+      }
+      return next;
+    });
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        className="w-full sm:w-[680px]"
+        onClose={onClose}
+      >
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <span>编辑角色权限：</span>
+            <code className="rounded bg-muted px-2 py-0.5 font-mono text-xs">{role._id}</code>
+            <Badge variant="outline" className="ml-auto font-mono text-[10px]">
+              {checked.size} / {total}
+            </Badge>
+          </DialogTitle>
+        </DialogHeader>
+
+        <form method="post" className="flex max-h-[70vh] flex-col">
+          {/* Placeholder ensures the backend sees this role key in the body
+              even when all permissions are unchecked, so roles[role] gets
+              reset to 0 instead of being left untouched. The handler skips
+              the literal "1000" sentinel. */}
+          <input type="hidden" name={role._id} value="1000" />
+
+          <div className="krypton-scrollbar flex-1 space-y-5 overflow-y-auto p-5">
+            {Object.entries(permsByFamily).map(([family, perms]) => {
+              const familyKeys = perms.map((p) => String(p.key));
+              const familyAll = familyKeys.every((k) => checked.has(k));
+              const familySome = familyKeys.some((k) => checked.has(k));
+              return (
+                <div key={family} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      {FAMILY_LABELS[family] || family}
+                    </h3>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 text-[11px]"
+                      onClick={() => toggleFamily(family, !familyAll)}
+                    >
+                      {familyAll ? '全不选' : familySome ? '全选' : '全选'}
+                    </Button>
+                  </div>
+                  <div className="grid gap-x-4 gap-y-1.5 sm:grid-cols-2">
+                    {perms.map((p) => {
                       const permKey = parseBigInt(p.key);
-                      const permValue = permKey.toString();
+                      const bitIndex = bigIntLog2(permKey);
+                      const isChecked = checked.has(String(p.key));
                       return (
-                        <TableRow key={permValue}>
-                          <TableCell className="pl-5 text-xs">{p.desc}</TableCell>
-                          {editableRoles.map((r) => {
-                            // BigInt comparison: role.perm & permKey !== 0
-                            // r.perm and p.key may arrive as "BigInt::<digits>" strings.
-                            const rolePerm = parseBigInt(r.perm);
-                            const checked = (rolePerm & permKey) !== 0n;
-                            return (
-                              <TableCell key={r._id} className="text-center">
-                                <input
-                                  type="checkbox"
-                                  name={`${r._id}`}
-                                  value={permValue}
-                                  defaultChecked={checked}
-                                  className="size-3.5 rounded border accent-primary"
-                                />
-                              </TableCell>
-                            );
-                          })}
-                        </TableRow>
+                        <label
+                          key={p.key}
+                          className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1 text-xs hover:bg-muted/40"
+                        >
+                          <input
+                            type="checkbox"
+                            name={role._id}
+                            value={String(bitIndex)}
+                            checked={isChecked}
+                            onChange={() => toggle(String(p.key))}
+                            className="mt-0.5 size-3.5 rounded border accent-primary"
+                          />
+                          <span className="text-foreground">{p.desc}</span>
+                        </label>
                       );
                     })}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          );
-        })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
-        <div className="flex justify-end">
-          <Button type="submit">保存权限</Button>
-        </div>
-      </form>
-    </DomainAdminShell>
+          <div className="flex items-center justify-between gap-2 border-t bg-muted/20 px-5 py-3">
+            <p className="text-xs text-muted-foreground">
+              保存后立即生效，可继续编辑其它角色。
+            </p>
+            <div className="flex gap-2">
+              <Button type="button" variant="ghost" onClick={onClose}>取消</Button>
+              <Button type="submit" className="gap-1">
+                <Save className="size-3.5" />
+                保存
+              </Button>
+            </div>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

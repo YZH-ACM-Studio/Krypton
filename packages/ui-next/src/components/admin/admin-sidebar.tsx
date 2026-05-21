@@ -25,12 +25,13 @@ export function AdminSidebar({ currentTemplate }: { currentTemplate: string }) {
   }
 
   return (
-    <aside className="hidden w-56 shrink-0 lg:block">
-      {/* pt-2 nudges the first section heading down so its baseline lines up
-          with the page title h1 next to it (text-xl has more leading than
-          our text-[11px] section heading). Without this, the sidebar text
-          visually sits above the right-column title. */}
-      <nav className="sticky top-16 space-y-5 pt-2">
+    <aside className="hidden h-full w-56 shrink-0 min-h-0 lg:block">
+      {/* Own overflow-y-auto: scrolls independently from the right column.
+          pt-2 nudges the first heading down so its baseline lines up with
+          the right-column h1 (text-xl has more leading than text-[11px]). */}
+      <nav
+        className="krypton-scrollbar h-full overflow-y-auto pr-1 pt-2 pb-6 space-y-5"
+      >
         {sections.map((section) => {
           const visibleItems = section.items.filter((item) => {
             if (item.requiredPriv && !hasPriv(priv, item.requiredPriv as PrivBit)) return false;

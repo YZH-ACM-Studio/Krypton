@@ -9,7 +9,7 @@
 import { type ReactNode, useState } from 'react';
 import {
   AlertCircle, Building2, ChevronRight, Copy, FileDown, GraduationCap, Inbox, KeyRound,
-  LinkIcon, ListChecks, Mail, ShieldCheck, Users, UserPlus,
+  LinkIcon, ListChecks, Mail, Plus, ShieldCheck, Users, UserPlus,
 } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { PRIV } from '@/lib/perms';
@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { ImportResultPanel, RosterImporter, type ImportResult } from '@/components/userbind/roster-importer';
@@ -27,13 +28,14 @@ import { MiniTabs } from '@/components/ui/mini-tabs';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 
 // Register navigation entries for the admin sidebar — happens once at module load.
+// (overview was dropped; /admin/userbind still resolves server-side but doesn't
+// surface in the nav since the stats card duplicated info reachable elsewhere.)
 registerAdminNavSection({
   key: 'userbind',
   label: '用户绑定',
   order: 30,
   requiredPriv: PRIV.PRIV_EDIT_SYSTEM,
   items: [
-    { key: 'overview', label: '概览', href: '/admin/userbind', icon: Inbox, templateNames: ['admin_userbind_overview.html'] },
     { key: 'schools', label: '学校', href: '/admin/userbind/schools', icon: Building2, templateNames: ['admin_userbind_schools.html', 'admin_userbind_school_detail.html'] },
     { key: 'groups', label: '班级/队伍', href: '/admin/userbind/groups', icon: Users, templateNames: ['admin_userbind_groups.html', 'admin_userbind_group_detail.html'] },
     { key: 'students', label: '学生', href: '/admin/userbind/students', icon: GraduationCap, templateNames: ['admin_userbind_students.html'] },
@@ -84,69 +86,18 @@ export function AdminUserbindSchoolsPage() {
   const bs = useBootstrap();
   const schools = (bs.page.data.schools || []) as Array<{ _id: string; name: string; createdAt: string }>;
   const [createOpen, setCreateOpen] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [withRoster, setWithRoster] = useState(false);
-  const [roster, setRoster] = useState('');
 
   return (
     <AdminPage
       title="学校"
       actions={(
-        <Button onClick={() => setCreateOpen((p) => !p)}>
-          {createOpen ? '取消' : '新建学校'}
+        <Button onClick={() => setCreateOpen(true)} className="gap-1">
+          <Plus className="size-3.5" />
+          新建学校
         </Button>
       )}
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
     >
-      {createOpen && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">新建学校</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form method="post" className="space-y-4">
-              <input type="hidden" name="operation" value="create" />
-              <FormField label="学校名称" required htmlFor="school-name">
-                <Input
-                  id="school-name"
-                  name="name"
-                  placeholder="如 中国民航大学"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  required
-                />
-              </FormField>
-              <FormField label="同时导入学生名单（可选）">
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={withRoster}
-                      onChange={(e) => setWithRoster(e.target.checked)}
-                    />
-                    创建后立即导入一份学生名单
-                  </label>
-                  {withRoster && (
-                    <textarea
-                      name="initialRoster"
-                      rows={6}
-                      spellCheck={false}
-                      value={roster}
-                      onChange={(e) => setRoster(e.target.value)}
-                      className="w-full rounded-md border bg-background p-3 font-mono text-sm"
-                      placeholder={'每行 学号 姓名，如：\n202301001 张三\n202301002 李四'}
-                    />
-                  )}
-                </div>
-              </FormField>
-              <div className="flex justify-end">
-                <Button type="submit" disabled={!newName.trim()}>创建学校</Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -161,7 +112,7 @@ export function AdminUserbindSchoolsPage() {
               {schools.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
-                    暂无学校，使用右上角的输入框新建一个。
+                    暂无学校，点击右上角「新建学校」开始创建。
                   </TableCell>
                 </TableRow>
               ) : (
@@ -183,7 +134,67 @@ export function AdminUserbindSchoolsPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <CreateSchoolDialog open={createOpen} onClose={() => setCreateOpen(false)} />
     </AdminPage>
+  );
+}
+
+function CreateSchoolDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [newName, setNewName] = useState('');
+  const [withRoster, setWithRoster] = useState(false);
+  const [roster, setRoster] = useState('');
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="w-full sm:w-[560px]" onClose={onClose}>
+        <DialogHeader>
+          <DialogTitle>新建学校</DialogTitle>
+        </DialogHeader>
+        <form method="post" className="flex flex-col">
+          <div className="krypton-scrollbar max-h-[60vh] space-y-4 overflow-y-auto p-5">
+            <input type="hidden" name="operation" value="create" />
+            <FormField label="学校名称" required htmlFor="school-name">
+              <Input
+                id="school-name"
+                name="name"
+                placeholder="如 中国民航大学"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                required
+                autoFocus
+              />
+            </FormField>
+            <FormField label="同时导入学生名单（可选）">
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={withRoster}
+                    onChange={(e) => setWithRoster(e.target.checked)}
+                  />
+                  创建后立即导入一份学生名单
+                </label>
+                {withRoster && (
+                  <textarea
+                    name="initialRoster"
+                    rows={6}
+                    spellCheck={false}
+                    value={roster}
+                    onChange={(e) => setRoster(e.target.value)}
+                    className="w-full rounded-md border bg-background p-3 font-mono text-sm"
+                    placeholder={'每行 学号 姓名，如：\n202301001 张三\n202301002 李四'}
+                  />
+                )}
+              </div>
+            </FormField>
+          </div>
+          <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+            <Button type="button" variant="ghost" onClick={onClose}>取消</Button>
+            <Button type="submit" disabled={!newName.trim()}>创建学校</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -384,8 +395,24 @@ export function AdminUserbindGroupsPage() {
     schools: Array<{ _id: string; name: string }>;
   };
   const schoolNameById = new Map(data.schools.map((s) => [s._id, s.name]));
+  const [createOpen, setCreateOpen] = useState(false);
   return (
-    <AdminPage title="班级 / 队伍（用户组）" description="学校下的学生分组 — 课程班级 / 校队 / 训练队等。" requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
+    <AdminPage
+      title="班级 / 队伍（用户组）"
+      description="学校下的学生分组 — 课程班级 / 校队 / 训练队等。"
+      requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
+      actions={(
+        <Button
+          onClick={() => setCreateOpen(true)}
+          disabled={data.schools.length === 0}
+          title={data.schools.length === 0 ? '请先创建学校' : undefined}
+          className="gap-1"
+        >
+          <Plus className="size-3.5" />
+          新建用户组
+        </Button>
+      )}
+    >
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -411,7 +438,9 @@ export function AdminUserbindGroupsPage() {
               {data.groups.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
-                    暂无用户组。先在学校详情页或下方表单新建。
+                    {data.schools.length === 0
+                      ? '请先在「学校」页创建一个学校，再回来创建用户组。'
+                      : '暂无用户组，点击右上角「新建用户组」开始创建。'}
                   </TableCell>
                 </TableRow>
               )}
@@ -419,65 +448,81 @@ export function AdminUserbindGroupsPage() {
           </Table>
         </CardContent>
       </Card>
-      <Card>
-        <CardHeader><CardTitle className="text-base">新建用户组</CardTitle></CardHeader>
-        <CardContent>
-          <CreateGroupForm schools={data.schools} />
-        </CardContent>
-      </Card>
+
+      <CreateGroupDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        schools={data.schools}
+      />
     </AdminPage>
   );
 }
 
-function CreateGroupForm({ schools }: { schools: Array<{ _id: string; name: string }> }) {
+function CreateGroupDialog({
+  open, onClose, schools,
+}: {
+  open: boolean;
+  onClose: () => void;
+  schools: Array<{ _id: string; name: string }>;
+}) {
   const [withRoster, setWithRoster] = useState(false);
   const [roster, setRoster] = useState('');
   return (
-    <form method="post" className="space-y-4">
-      <input type="hidden" name="operation" value="create" />
-      <FormRow columns={2}>
-        <FormField label="所属学校" required htmlFor="group-school">
-          <select
-            id="group-school"
-            name="schoolId"
-            required
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-          >
-            <option value="">选择学校</option>
-            {schools.map((s) => (<option key={s._id} value={s._id}>{s.name}</option>))}
-          </select>
-        </FormField>
-        <FormField label="用户组名称" required htmlFor="group-name">
-          <Input id="group-name" name="name" placeholder="如 计网2025春-1班" required />
-        </FormField>
-      </FormRow>
-      <FormField label="同时导入成员名单（可选）">
-        <div className="space-y-2">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={withRoster}
-              onChange={(e) => setWithRoster(e.target.checked)}
-            />
-            创建后立即导入一份成员名单
-          </label>
-          {withRoster && (
-            <textarea
-              name="initialRoster"
-              rows={6}
-              spellCheck={false}
-              value={roster}
-              onChange={(e) => setRoster(e.target.value)}
-              className="w-full rounded-md border bg-background p-3 font-mono text-sm"
-              placeholder={'每行 学号 姓名，已存在的学生会被加入此组；不存在的会先在所属学校建档。'}
-            />
-          )}
-        </div>
-      </FormField>
-      <div className="flex justify-end">
-        <Button type="submit">创建用户组</Button>
-      </div>
-    </form>
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="w-full sm:w-[560px]" onClose={onClose}>
+        <DialogHeader>
+          <DialogTitle>新建用户组</DialogTitle>
+        </DialogHeader>
+        <form method="post" className="flex flex-col">
+          <div className="krypton-scrollbar max-h-[60vh] space-y-4 overflow-y-auto p-5">
+            <input type="hidden" name="operation" value="create" />
+            <FormRow columns={2}>
+              <FormField label="所属学校" required htmlFor="group-school">
+                <select
+                  id="group-school"
+                  name="schoolId"
+                  required
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">选择学校</option>
+                  {schools.map((s) => (<option key={s._id} value={s._id}>{s.name}</option>))}
+                </select>
+              </FormField>
+              <FormField label="用户组名称" required htmlFor="group-name">
+                <Input id="group-name" name="name" placeholder="如 计网2025春-1班" required autoFocus />
+              </FormField>
+            </FormRow>
+            <FormField label="同时导入成员名单（可选）">
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={withRoster}
+                    onChange={(e) => setWithRoster(e.target.checked)}
+                  />
+                  创建后立即导入一份成员名单
+                </label>
+                {withRoster && (
+                  <textarea
+                    name="initialRoster"
+                    rows={6}
+                    spellCheck={false}
+                    value={roster}
+                    onChange={(e) => setRoster(e.target.value)}
+                    className="w-full rounded-md border bg-background p-3 font-mono text-sm"
+                    placeholder={'每行 学号 姓名，已存在的学生会被加入此组；不存在的会先在所属学校建档。'}
+                  />
+                )}
+              </div>
+            </FormField>
+          </div>
+          <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+            <Button type="button" variant="ghost" onClick={onClose}>取消</Button>
+            <Button type="submit">创建用户组</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

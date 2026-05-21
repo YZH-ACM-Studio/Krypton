@@ -60,12 +60,29 @@ export function AdminPage({
     if (!allowed) return <ForbiddenPanel />;
   }
 
+  // Layout note (round-10 split scroll):
+  // The outer admin frame is pinned to viewport height minus the top bar
+  // (h-12 = 48px) and main's own vertical padding (24-32px depending on
+  // breakpoint). Both panes are flex children with min-h-0 + their own
+  // overflow-y-auto, so they scroll independently — the sidebar never
+  // drifts when the right column scrolls a long page, and a long sidebar
+  // doesn't push the content area down.
   return (
-    <div className="flex w-full items-start gap-6">
+    <div
+      className={cn(
+        'flex w-full items-stretch gap-6 min-h-0',
+        // 6rem = topbar (3rem) + main top padding (1.5rem) + main bottom padding (1.5rem).
+        // sm/xl variants match main's responsive padding in router.tsx.
+        'h-[calc(100dvh-6rem)] sm:h-[calc(100dvh-6rem)] xl:h-[calc(100dvh-7rem)]',
+      )}
+    >
       {!hideSidebar ? <AdminSidebar currentTemplate={bs.page.templateName} /> : null}
 
       <motion.div
-        className={cn('min-w-0 flex-1 space-y-5', contentClassName)}
+        className={cn(
+          'krypton-scrollbar min-w-0 min-h-0 flex-1 space-y-5 overflow-y-auto pr-1',
+          contentClassName,
+        )}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.15 }}

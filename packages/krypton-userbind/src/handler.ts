@@ -22,17 +22,11 @@ class UserbindAdminHandler extends Handler {
 }
 
 class AdminOverviewHandler extends UserbindAdminHandler {
-    async get({ domainId }: { domainId: string }) {
-        const [schoolCount, groupCount, studentCount, pendingRequests] = await Promise.all([
-            userBindModel.listSchools(domainId).then((s) => s.length),
-            userBindModel.listUserGroups(domainId).then((g) => g.length),
-            userBindModel.listStudents(domainId, { limit: 1 }).then((r) => r.total),
-            userBindModel.listBindingRequests(domainId, { status: 'pending', limit: 1 }).then((r) => r.total),
-        ]);
-        this.response.template = 'admin_userbind_overview.html';
-        this.response.body = {
-            schoolCount, groupCount, studentCount, pendingRequests,
-        };
+    // The overview card was redundant with the per-section pages, so /admin/userbind
+    // just redirects to the schools list now. The handler still exists so old
+    // bookmarks don't 404.
+    async get() {
+        this.response.redirect = this.url('admin_userbind_schools');
     }
 }
 

@@ -1,11 +1,16 @@
 /**
- * /exam-mode index — card grid of exam contests eligible for the current user.
+ * /exam-mode index — card grid of exams the current user can join RIGHT NOW.
  *
- * Rendered inside the Qt Client's QWebEngineView (Phase 3 wiring) or, during
- * development, in a normal browser. Uses ExamHomeShell — no main OJ sidebar.
+ * This page is only reachable from the Qt exam client, so it intentionally
+ * surfaces only "live" exams (within their begin/end window). Anything
+ * upcoming or finished would be noise — they can't take action on it from
+ * the client UI.
+ *
+ * When no exam is live, we show a friendly waiting state plus the time of
+ * the next scheduled exam (if any) so the student knows when to come back.
  */
 import { motion } from 'motion/react';
-import { Calendar, ChevronRight, Clock, Lock, Swords } from 'lucide-react';
+import { Calendar, ChevronRight, Clock, Hourglass, Lock, Swords } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -39,8 +44,13 @@ export function ExamModeHomePage() {
   };
   const exams = data.exams || [];
   const live = exams.filter((e) => e.inWindow);
-  const upcoming = exams.filter((e) => !e.inWindow && new Date(e.beginAt) > new Date());
-  const past = exams.filter((e) => !e.inWindow && new Date(e.endAt) < new Date());
+  // We don't render upcoming exams as cards (only live ones are actionable),
+  // but we use the nearest one to populate the empty-state hint so students
+  // know when to come back.
+  const now = Date.now();
+  const nextUpcoming = exams
+    .filter((e) => new Date(e.beginAt).getTime() > now)
+    .sort((a, b) => new Date(a.beginAt).getTime() - new Date(b.beginAt).getTime())[0];
 
   return (
     <ExamHomeShell>
@@ -56,7 +66,11 @@ export function ExamModeHomePage() {
               <Swords className="size-5 text-primary" />
               <h1 className="text-xl font-semibold">考试入口</h1>
             </div>
-            <p className="text-sm text-muted-foreground">选择一场考试进入答题</p>
+            <p className="text-sm text-muted-foreground">
+              {live.length > 0
+                ? `当前有 ${live.length} 场考试可进入`
+                : '当前没有正在进行的考试'}
+            </p>
           </div>
           {data.user.realName && (
             <div className="text-right text-sm">
@@ -66,34 +80,51 @@ export function ExamModeHomePage() {
           )}
         </motion.header>
 
-        <ExamSection title="进行中" exams={live} emptyHint="当前没有正在进行的考试" highlight />
-        <ExamSection title="即将开始" exams={upcoming} emptyHint="暂无即将开始的考试" />
-        {past.length > 0 && (
-          <ExamSection title="历史考试" exams={past} emptyHint="" muted />
+        {live.length > 0 ? (
+          <section className="space-y-3">
+            <h2 className="text-base font-semibold text-primary">
+              进行中 <span className="text-xs font-normal text-muted-foreground">({live.length})</span>
+            </h2>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {live.map((e) => (
+                <ExamCard key={e._id} exam={e} />
+              ))}
+            </div>
+          </section>
+        ) : (
+          <EmptyWaitingState next={nextUpcoming} />
         )}
       </div>
     </ExamHomeShell>
   );
 }
 
-function ExamSection({
-  title, exams, emptyHint, highlight, muted,
-}: { title: string; exams: ExamCardData[]; emptyHint: string; highlight?: boolean; muted?: boolean }) {
+function EmptyWaitingState({ next }: { next: ExamCardData | undefined }) {
   return (
-    <section className="space-y-3">
-      <h2 className={highlight ? 'text-base font-semibold text-primary' : 'text-base font-semibold text-muted-foreground'}>
-        {title} <span className="text-xs font-normal text-muted-foreground">({exams.length})</span>
-      </h2>
-      {exams.length === 0 ? (
-        emptyHint ? <p className="text-sm text-muted-foreground">{emptyHint}</p> : null
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {exams.map((e) => (
-            <ExamCard key={e._id} exam={e} disabled={muted || !e.inWindow} />
-          ))}
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3 }}
+      className="rounded-xl border bg-card p-10 text-center shadow-sm"
+    >
+      <Hourglass className="mx-auto size-12 text-muted-foreground/40" />
+      <h2 className="mt-4 text-lg font-semibold">等待考试开始</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        当前没有可进入的考试。监考服务正常 — 请保持本机器在线，到点会自动可见。
+      </p>
+      {next && (
+        <div className="mx-auto mt-6 inline-flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
+          <Clock className="size-4 text-muted-foreground" />
+          <div className="text-left">
+            <p className="text-xs text-muted-foreground">下一场考试</p>
+            <p className="font-medium">{next.title}</p>
+            <p className="text-xs text-muted-foreground">
+              {new Date(next.beginAt).toLocaleString()}
+            </p>
+          </div>
         </div>
       )}
-    </section>
+    </motion.div>
   );
 }
 

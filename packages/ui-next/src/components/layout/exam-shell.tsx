@@ -108,7 +108,7 @@ export function ExamHomeShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-dvh min-w-0 flex-col bg-background">
       <ExamTopBar />
-      <main className="min-w-0 flex-1 overflow-y-auto">
+      <main className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 xl:p-8 2xl:px-10">
         {children}
       </main>
     </div>

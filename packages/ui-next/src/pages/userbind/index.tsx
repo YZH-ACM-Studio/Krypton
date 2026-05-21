@@ -6,7 +6,7 @@
  *
  * Pages register with the PAGE_MAP at module load (see import in resolver.tsx).
  */
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import {
   AlertCircle, Building2, ChevronRight, Copy, FileDown, GraduationCap, Inbox, KeyRound,
   LinkIcon, ListChecks, Mail, ShieldCheck, Users, UserPlus,
@@ -22,6 +22,8 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { ImportResultPanel, RosterImporter, type ImportResult } from '@/components/userbind/roster-importer';
+import { DateTime } from '@/components/ui/datetime';
+import { MiniTabs } from '@/components/ui/mini-tabs';
 
 // Register navigation entries for the admin sidebar — happens once at module load.
 registerAdminNavSection({
@@ -167,7 +169,7 @@ export function AdminUserbindSchoolsPage() {
                     <TableCell className="pl-5 font-medium">
                       <a href={`/admin/userbind/schools/${s._id}`} className="hover:text-primary">{s.name}</a>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{new Date(s.createdAt).toLocaleString()}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground"><DateTime value={s.createdAt} /></TableCell>
                     <TableCell className="pr-5 text-right">
                       <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
                         <a href={`/admin/userbind/schools/${s._id}`}>查看</a>
@@ -302,7 +304,7 @@ export function AdminUserbindSchoolDetailPage() {
                       <Copy className="size-3" />复制
                     </Button>
                     <span className="text-muted-foreground">
-                      {t.expiresAt ? `过期 ${new Date(t.expiresAt).toLocaleDateString()}` : '永久'}
+                      {t.expiresAt ? <>过期 <DateTime value={t.expiresAt} mode="date" /></> : "永久"}
                     </span>
                     <form method="post" action="/admin/userbind/tokens" className="inline-block">
                       <input type="hidden" name="operation" value="revoke" />
@@ -519,7 +521,7 @@ export function AdminUserbindGroupDetailPage() {
                       <Copy className="size-3" />复制
                     </Button>
                     <span className="text-muted-foreground">
-                      {t.expiresAt ? `过期 ${new Date(t.expiresAt).toLocaleDateString()}` : '永久'}
+                      {t.expiresAt ? <>过期 <DateTime value={t.expiresAt} mode="date" /></> : "永久"}
                     </span>
                     <form method="post" action="/admin/userbind/tokens" className="inline-block">
                       <input type="hidden" name="operation" value="revoke" />
@@ -784,20 +786,17 @@ export function AdminUserbindTokensPage() {
     <AdminPage title="邀请令牌" requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
       <Card>
         <CardContent className="p-5">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-3">
             <span className="text-sm text-muted-foreground">类型:</span>
-            <Button asChild variant={!data.kind ? 'default' : 'outline'} size="sm" className="h-7 text-xs">
-              <a href="/admin/userbind/tokens">全部</a>
-            </Button>
-            <Button asChild variant={data.kind === 'school' ? 'default' : 'outline'} size="sm" className="h-7 text-xs">
-              <a href="/admin/userbind/tokens?kind=school">学校共享</a>
-            </Button>
-            <Button asChild variant={data.kind === 'user_group' ? 'default' : 'outline'} size="sm" className="h-7 text-xs">
-              <a href="/admin/userbind/tokens?kind=user_group">用户组共享</a>
-            </Button>
-            <Button asChild variant={data.kind === 'student' ? 'default' : 'outline'} size="sm" className="h-7 text-xs">
-              <a href="/admin/userbind/tokens?kind=student">单人</a>
-            </Button>
+            <MiniTabs
+              value={data.kind || 'all'}
+              items={[
+                { value: 'all', label: '全部', href: '/admin/userbind/tokens' },
+                { value: 'school', label: '学校共享', href: '/admin/userbind/tokens?kind=school' },
+                { value: 'user_group', label: '用户组共享', href: '/admin/userbind/tokens?kind=user_group' },
+                { value: 'student', label: '单人', href: '/admin/userbind/tokens?kind=student' },
+              ]}
+            />
           </div>
         </CardContent>
       </Card>
@@ -844,8 +843,8 @@ export function AdminUserbindTokensPage() {
                           : <Badge variant="outline">未使用</Badge>)
                         : <Badge variant="outline">共享中</Badge>}
                     </TableCell>
-                    <TableCell className="text-xs">{new Date(t.createdAt).toLocaleString()}</TableCell>
-                    <TableCell className="text-xs">{t.expiresAt ? new Date(t.expiresAt).toLocaleString() : '永久'}</TableCell>
+                    <TableCell className="text-xs"><DateTime value={t.createdAt} /></TableCell>
+                    <TableCell className="text-xs">{t.expiresAt ? <DateTime value={t.expiresAt} /> : "永久"}</TableCell>
                     <TableCell className="pr-5 text-right">
                       <form method="post" className="inline-block">
                         <input type="hidden" name="operation" value="revoke" />
@@ -890,11 +889,17 @@ export function AdminUserbindRequestsPage() {
   return (
     <AdminPage title="绑定申请" description={`共 ${data.total} 条`} requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
       <Card>
-        <CardContent className="flex flex-wrap gap-2 p-5">
-          <Button asChild variant={!data.status ? 'default' : 'outline'} size="sm"><a href="/admin/userbind/requests">全部</a></Button>
-          <Button asChild variant={data.status === 'pending' ? 'default' : 'outline'} size="sm"><a href="/admin/userbind/requests?status=pending">待审核</a></Button>
-          <Button asChild variant={data.status === 'approved' ? 'default' : 'outline'} size="sm"><a href="/admin/userbind/requests?status=approved">已通过</a></Button>
-          <Button asChild variant={data.status === 'rejected' ? 'default' : 'outline'} size="sm"><a href="/admin/userbind/requests?status=rejected">已拒绝</a></Button>
+        <CardContent className="p-5">
+          <MiniTabs
+            size="md"
+            value={data.status || 'all'}
+            items={[
+              { value: 'all', label: '全部', href: '/admin/userbind/requests' },
+              { value: 'pending', label: '待审核', href: '/admin/userbind/requests?status=pending' },
+              { value: 'approved', label: '已通过', href: '/admin/userbind/requests?status=approved' },
+              { value: 'rejected', label: '已拒绝', href: '/admin/userbind/requests?status=rejected' },
+            ]}
+          />
         </CardContent>
       </Card>
       <Card>
@@ -935,7 +940,7 @@ export function AdminUserbindRequestsPage() {
                       <Badge variant="destructive" title={r.rejectReason || ''}>拒绝</Badge>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs">{new Date(r.createdAt).toLocaleString()}</TableCell>
+                  <TableCell className="text-xs"><DateTime value={r.createdAt} /></TableCell>
                   <TableCell className="pr-5 text-right">
                     {r.status === 'pending' && (
                       <div className="inline-flex gap-1">
@@ -1163,8 +1168,8 @@ export function UserBindApplicationsPage() {
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                    <span>提交：{new Date(r.createdAt).toLocaleString()}</span>
-                    {r.reviewedAt && <span>审核：{new Date(r.reviewedAt).toLocaleString()}</span>}
+                    <span>提交：<DateTime value={r.createdAt} /></span>
+                    {r.reviewedAt && <span>审核：<DateTime value={r.reviewedAt} /></span>}
                   </div>
                   {r.status === 'rejected' && r.rejectReason && (
                     <div className="rounded-md border border-rose-500/30 bg-rose-500/5 p-3">
@@ -1219,11 +1224,11 @@ export function UserBindLandingPage() {
     );
   }
 
-  const expiresLabel = data.tokenInfo?.expiresAt
-    ? new Date(data.tokenInfo.expiresAt).toLocaleString()
+  const expiresLabel: ReactNode = data.tokenInfo?.expiresAt
+    ? <DateTime value={data.tokenInfo.expiresAt} />
     : '永久';
-  const createdLabel = data.tokenInfo?.createdAt
-    ? new Date(data.tokenInfo.createdAt).toLocaleString()
+  const createdLabel: ReactNode = data.tokenInfo?.createdAt
+    ? <DateTime value={data.tokenInfo.createdAt} />
     : '';
 
   // Student kind: one-click bind
@@ -1335,7 +1340,7 @@ export function UserBindLandingPage() {
   );
 }
 
-function KeyValueRow({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
+function KeyValueRow({ k, v, mono }: { k: string; v: ReactNode; mono?: boolean }) {
   return (
     <div className="flex items-center gap-2">
       <span className="w-16 text-xs text-muted-foreground">{k}</span>
@@ -1451,7 +1456,7 @@ export function UserBindClaimPage() {
                     <option value="">请选择…</option>
                     {data.candidates!.map((c) => (
                       <option key={c.uid} value={c.uid}>
-                        UID {c.uid} · {c.uname} · 创建于 {new Date(c.createdAt).toLocaleDateString()}
+                        UID {c.uid} · {c.uname} · 创建于 <DateTime value={c.createdAt} mode="date" />
                       </option>
                     ))}
                   </select>

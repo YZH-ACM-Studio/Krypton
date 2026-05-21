@@ -21,6 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { DateTime } from '@/components/ui/datetime';
 import {
   approveRequest, fetchApprovals, fetchClients, fetchEvents, fetchExamSessions,
   rejectRequest, VigilOfflineError, type VigilApproval, type VigilClient,
@@ -231,7 +232,7 @@ function EventTable({ events, offline }: { events: VigilEvent[]; offline?: boole
       <TableBody>
         {events.map((e) => (
           <TableRow key={e.event_id}>
-            <TableCell className="pl-5 text-xs">{new Date(e.last_seen_at).toLocaleString()}</TableCell>
+            <TableCell className="pl-5 text-xs"><DateTime value={e.last_seen_at} mode="both" /></TableCell>
             <TableCell className="font-mono text-xs">{e.client_id.slice(0, 12)}…</TableCell>
             <TableCell><Badge variant="outline" className="text-[10px]">{e.category}</Badge></TableCell>
             <TableCell><SeverityBadge level={e.severity} /></TableCell>
@@ -337,7 +338,7 @@ export function AdminVigilApprovalsPage() {
                       <TableCell className="font-mono text-xs">{a.machine_id.slice(0, 12)}…</TableCell>
                       <TableCell className="text-xs">{a.oj_contest_id || '—'}</TableCell>
                       <TableCell><Badge variant={a.status === 'pending' ? 'default' : 'outline'}>{a.status}</Badge></TableCell>
-                      <TableCell className="text-xs">{new Date(a.created_at).toLocaleString()}</TableCell>
+                      <TableCell className="text-xs"><DateTime value={a.created_at} mode="both" /></TableCell>
                       <TableCell className="pr-5 text-right">
                         {a.status === 'pending' && (
                           <div className="inline-flex gap-1">
@@ -407,8 +408,8 @@ export function AdminVigilSessionsPage() {
                         {s.status === 'transferred' && <Badge variant="outline">已转移</Badge>}
                         {s.status === 'force_closed' && <Badge variant="destructive">强制关闭</Badge>}
                       </TableCell>
-                      <TableCell className="text-xs">{new Date(s.began_at).toLocaleString()}</TableCell>
-                      <TableCell className="text-xs">{s.closed_at ? new Date(s.closed_at).toLocaleString() : '—'}</TableCell>
+                      <TableCell className="text-xs"><DateTime value={s.began_at} /></TableCell>
+                      <TableCell className="text-xs">{s.closed_at ? <DateTime value={s.closed_at} /> : "—"}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

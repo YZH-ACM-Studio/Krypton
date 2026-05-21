@@ -12,9 +12,11 @@
 import { motion } from 'motion/react';
 import { Calendar, ChevronRight, Clock, Hourglass, Lock, Swords } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
+import { formatDuration } from '@hydrooj/common';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { DateTime } from '@/components/ui/datetime';
 import { ExamHomeShell } from '@/components/layout/exam-shell';
 
 interface ExamCardData {
@@ -30,12 +32,7 @@ interface ExamCardData {
   inWindow: boolean;
 }
 
-function formatRange(begin: string, end: string): string {
-  const b = new Date(begin);
-  const e = new Date(end);
-  const dur = Math.round((e.getTime() - b.getTime()) / 60000);
-  return `${b.toLocaleString()} · ${dur} 分钟`;
-}
+// formatRange replaced by inline `<DateTime>` + formatDuration where used.
 
 export function ExamModeHomePage() {
   const data = useBootstrap().page.data as {
@@ -119,7 +116,7 @@ function EmptyWaitingState({ next }: { next: ExamCardData | undefined }) {
             <p className="text-xs text-muted-foreground">下一场考试</p>
             <p className="font-medium">{next.title}</p>
             <p className="text-xs text-muted-foreground">
-              {new Date(next.beginAt).toLocaleString()}
+              <DateTime value={next.beginAt} mode="both" />
             </p>
           </div>
         </div>
@@ -149,7 +146,8 @@ function ExamCard({ exam, disabled }: { exam: ExamCardData; disabled?: boolean }
           </div>
         </div>
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Clock className="size-3" />{formatRange(exam.beginAt, exam.endAt)}
+          <Clock className="size-3" />
+          <DateTime value={exam.beginAt} /> · {formatDuration({ from: exam.beginAt, to: exam.endAt })}
         </p>
         <Button asChild disabled={disabled} className="w-full" variant={exam.inWindow ? 'default' : 'outline'}>
           <a href={`/exam-mode/${exam.docId}`}>

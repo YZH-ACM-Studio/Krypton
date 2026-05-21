@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { MarkdownEditor } from '@/components/markdown-renderer';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens } from '@/lib/format';
 
@@ -293,12 +294,10 @@ export function TrainingEditPage() {
                                 key={candidate._id}
                                 className="inline-flex cursor-pointer items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
                               >
-                                <input
-                                  type="checkbox"
+                                <Checkbox size="sm"
                                   checked={node.requireNids.includes(candidate._id)}
                                   onChange={() => toggleDependency(index, candidate._id)}
-                                  className="size-3.5 rounded border accent-primary"
-                                />
+                                 />
                                 #{candidate._id} {candidate.title}
                               </label>
                             ))}

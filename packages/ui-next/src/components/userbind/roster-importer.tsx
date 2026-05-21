@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FormField } from '@/components/ui/form';
+import { Checkbox } from '@/components/ui/checkbox';
 
 const STUDENT_ID_RE = /^[a-zA-Z0-9._-]{1,64}$/;
 const REAL_NAME_MAX = 32;
@@ -236,11 +237,10 @@ export function RosterImporter({
                       selectedIds.has(s._id) ? 'bg-primary/10' : 'hover:bg-muted/60',
                     )}
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={selectedIds.has(s._id)}
                       onChange={() => toggleSelect(s._id)}
-                    />
+                     />
                     <span className="flex-1 font-mono">{s.studentId}</span>
                     <span className="text-foreground">{s.realName}</span>
                     {s.boundUserId && (

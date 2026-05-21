@@ -3,6 +3,7 @@ import { ArrowLeft, FileUp, Flag, Send, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 
@@ -78,11 +79,9 @@ export function ProblemHackPage() {
               </div>
 
               <label className="flex items-start gap-3 rounded-md border p-4">
-                <input
-                  type="checkbox"
-                  name="autoOrganizeInput"
-                  className="mt-1 size-4 rounded border accent-primary"
-                />
+                <Checkbox
+                  name="autoOrganizeInput" className="mt-1"
+                 />
                 <span>
                   <span className="flex items-center gap-2 text-sm font-medium">
                     <Sparkles className="size-4 text-primary" />

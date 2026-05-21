@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DateTime } from '@/components/ui/datetime';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Checkbox } from '@/components/ui/checkbox';
 
 // ─── Shared types ─────────────────────────────────────────────────────────
 
@@ -213,7 +214,7 @@ export function TaskCenterPage() {
           )}
           {data.canManage && (
             <label className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
-              <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
+              <Checkbox checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)}  />
               显示已停用
             </label>
           )}

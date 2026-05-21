@@ -26,6 +26,7 @@ import { ImportResultPanel, RosterImporter, type ImportResult } from '@/componen
 import { DateTime } from '@/components/ui/datetime';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
+import { Checkbox } from '@/components/ui/checkbox';
 
 // Register navigation entries for the admin sidebar — happens once at module load.
 // (overview was dropped; /admin/userbind still resolves server-side but doesn't
@@ -167,11 +168,10 @@ function CreateSchoolDialog({ open, onClose }: { open: boolean; onClose: () => v
             <FormField label="同时导入学生名单（可选）">
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={withRoster}
                     onChange={(e) => setWithRoster(e.target.checked)}
-                  />
+                   />
                   创建后立即导入一份学生名单
                 </label>
                 {withRoster && (
@@ -495,11 +495,10 @@ function CreateGroupDialog({
             <FormField label="同时导入成员名单（可选）">
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={withRoster}
                     onChange={(e) => setWithRoster(e.target.checked)}
-                  />
+                   />
                   创建后立即导入一份成员名单
                 </label>
                 {withRoster && (

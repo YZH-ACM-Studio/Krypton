@@ -23,6 +23,7 @@ import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { AdminPage } from '@/components/admin/admin-page';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
@@ -72,13 +73,11 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
       <div>
         {setting.type === 'boolean' || setting.type === 'checkbox' ? (
           <label className="inline-flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
+            <Checkbox
               name={setting.key}
               defaultChecked={!!value}
               disabled={isDisabled}
-              className="size-4 rounded border accent-primary"
-            />
+             />
             <span className="text-sm text-muted-foreground">{setting.ui || '启用'}</span>
           </label>
         ) : setting.type === 'select' ? (
@@ -274,7 +273,7 @@ export function DomainUserPage() {
               </select>
             </div>
             <label className="flex items-center gap-2 pb-2 text-sm">
-              <input type="checkbox" name="join" value="true" className="size-4 rounded border accent-primary" />
+              <Checkbox name="join" value="true"  />
               标记已加入
             </label>
             <Button type="submit" size="sm" className="gap-1">
@@ -362,12 +361,10 @@ export function DomainUserPage() {
                       return (
                         <TableRow key={u._id}>
                         <TableCell className="pl-5">
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={selectedUsers.has(uid)}
                             onChange={() => toggleUser(uid)}
-                            className="size-4 rounded border accent-primary"
-                          />
+                           />
                         </TableCell>
                         <TableCell className="font-mono text-xs">{u._id}</TableCell>
                         <TableCell className="text-sm font-medium">{u.uname || u.displayName || '—'}</TableCell>
@@ -621,14 +618,12 @@ function RolePermissionDialog({
                           key={p.key}
                           className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1 text-xs hover:bg-muted/40"
                         >
-                          <input
-                            type="checkbox"
+                          <Checkbox size="sm"
                             name={role._id}
                             value={String(bitIndex)}
                             checked={isChecked}
                             onChange={() => toggle(String(p.key))}
-                            className="mt-0.5 size-3.5 rounded border accent-primary"
-                          />
+                           />
                           <span className="text-foreground">{p.desc}</span>
                         </label>
                       );
@@ -924,12 +919,10 @@ export function DomainGroupPage() {
                 {groups.map((g) => (
                   <TableRow key={g.name}>
                     <TableCell className="pl-5">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={selectedGroups.has(g.name)}
                         onChange={() => toggleGroup(g.name)}
-                        className="size-4 rounded border accent-primary"
-                      />
+                       />
                     </TableCell>
                     <TableCell className="text-sm font-medium">{g.name}</TableCell>
                     <TableCell>

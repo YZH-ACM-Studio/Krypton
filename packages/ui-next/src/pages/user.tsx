@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 
@@ -263,12 +264,10 @@ export function SettingsPage() {
                   {setting.desc ? <p className="text-xs text-muted-foreground">{setting.desc}</p> : null}
                   {setting.type === 'boolean' || setting.type === 'checkbox' ? (
                     <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         name={setting.key}
                         defaultChecked={current[setting.key]}
-                        className="size-4 rounded border"
-                      />
+                       />
                       <span className="text-sm">{setting.ui || '启用'}</span>
                     </div>
                   ) : setting.type === 'select' ? (

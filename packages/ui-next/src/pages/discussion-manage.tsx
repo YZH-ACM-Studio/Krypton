@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { MarkdownEditor } from '@/components/markdown-renderer';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 
@@ -53,11 +54,11 @@ export function DiscussionCreatePage() {
 
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="highlight" value="true" className="size-4 rounded border" />
+                <Checkbox name="highlight" value="true"  />
                 高亮
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="pin" value="true" className="size-4 rounded border" />
+                <Checkbox name="pin" value="true"  />
                 置顶
               </label>
             </div>
@@ -107,11 +108,11 @@ export function DiscussionEditPage() {
 
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="highlight" value="true" defaultChecked={ddoc.highlight} className="size-4 rounded border" />
+                <Checkbox name="highlight" value="true" defaultChecked={ddoc.highlight}  />
                 高亮
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="pin" value="true" defaultChecked={ddoc.pin} className="size-4 rounded border" />
+                <Checkbox name="pin" value="true" defaultChecked={ddoc.pin}  />
                 置顶
               </label>
             </div>

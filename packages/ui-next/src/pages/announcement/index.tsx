@@ -26,6 +26,7 @@ import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { DateTime } from '@/components/ui/datetime';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { AdminPage } from '@/components/admin/admin-page';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { registerAdminNavSection } from '@/lib/admin-nav-registry';
 import { PRIV } from '@/lib/perms';
@@ -474,21 +475,17 @@ function AnnouncementEditorDialog({
             </FormRow>
             <div className="flex items-center gap-6">
               <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox" name="pin" checked={pin}
+                <Checkbox name="pin" checked={pin}
                   onChange={(e) => setPin(e.target.checked)}
                   value="true"
-                  className="size-4 rounded border accent-primary"
-                />
+                 />
                 置顶
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox" name="hidden" checked={hidden}
+                <Checkbox name="hidden" checked={hidden}
                   onChange={(e) => setHidden(e.target.checked)}
                   value="true"
-                  className="size-4 rounded border accent-primary"
-                />
+                 />
                 隐藏（暂不公开）
               </label>
             </div>
@@ -632,9 +629,8 @@ function CategoryEditorDialog({
               </FormField>
             </FormRow>
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" name="hidden" value="true"
-                checked={hidden} onChange={(e) => setHidden(e.target.checked)}
-                className="size-4 rounded border accent-primary" />
+              <Checkbox name="hidden" value="true"
+                checked={hidden} onChange={(e) => setHidden(e.target.checked)}  />
               隐藏（仍可用于已有公告，但不出现在新建下拉里）
             </label>
             <div className="rounded-md border bg-muted/30 p-3">

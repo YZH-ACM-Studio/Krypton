@@ -29,6 +29,7 @@ import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { DateTime } from '@/components/ui/datetime';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
+import { Checkbox } from '@/components/ui/checkbox';
 
 // ─── Register admin nav ───────────────────────────────────────────────────
 
@@ -312,7 +313,7 @@ export function AdminTasksEditPage() {
                 </FormField>
                 <FormField label="状态">
                   <label className="flex items-center gap-2 pt-2 text-sm">
-                    <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+                    <Checkbox checked={isActive} onChange={(e) => setIsActive(e.target.checked)}  />
                     启用（用户可见可认领）
                   </label>
                 </FormField>
@@ -471,8 +472,7 @@ export function AdminTasksEditPage() {
                         <div className="space-y-1">
                           {points.map((p) => (
                             <label key={p.id} className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
+                              <Checkbox
                                 checked={g.points.includes(p.id)}
                                 onChange={(e) => {
                                   const newPoints = e.target.checked
@@ -480,7 +480,7 @@ export function AdminTasksEditPage() {
                                     : g.points.filter((pp) => pp !== p.id);
                                   setGroups(groups.map((gg, j) => (j === i ? { ...gg, points: newPoints } : gg)));
                                 }}
-                              />
+                               />
                               {p.name}
                             </label>
                           ))}

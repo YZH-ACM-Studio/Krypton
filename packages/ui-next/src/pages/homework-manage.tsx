@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { MarkdownEditor } from '@/components/markdown-renderer';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens } from '@/lib/format';
 
@@ -226,7 +227,7 @@ export function HomeworkEditPage() {
             </div>
 
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" name="rated" value="true" defaultChecked={tdoc.rated} className="size-4 rounded border" />
+              <Checkbox name="rated" value="true" defaultChecked={tdoc.rated}  />
               计入 Rating
             </label>
 

@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Pagination } from '@/components/ui/pagination';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 
@@ -187,7 +188,7 @@ export function ProblemsPage() {
                 <SelectedPids pids={selected} />
                 <Input name="target" placeholder="目标域 ID" className="h-8" />
                 <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                  <input type="checkbox" name="hidden" value="true" className="size-3.5 rounded border accent-primary" />
+                  <Checkbox size="sm" name="hidden" value="true"  />
                   复制后隐藏
                 </label>
                 <Button type="submit" variant="outline" size="sm">
@@ -214,13 +215,11 @@ export function ProblemsPage() {
               <TableRow>
                 {bs.user.signedIn ? (
                   <TableHead className="w-10">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={allVisibleSelected}
                       onChange={(event) => toggleVisible(event.currentTarget.checked)}
-                      className="size-4 rounded border accent-primary"
                       aria-label="选择当前页"
-                    />
+                     />
                   </TableHead>
                 ) : null}
                 <TableHead className="w-12">状态</TableHead>
@@ -248,13 +247,11 @@ export function ProblemsPage() {
                     <TableRow key={String(p.docId || p._id)}>
                       {bs.user.signedIn ? (
                         <TableCell>
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={selected.includes(selectableId)}
                             onChange={(event) => toggleOne(selectableId, event.currentTarget.checked)}
-                            className="size-4 rounded border accent-primary"
                             aria-label={`选择题目 ${p.pid || p.docId}`}
-                          />
+                           />
                         </TableCell>
                       ) : null}
                       <TableCell>{statusIcon(ps?.status)}</TableCell>

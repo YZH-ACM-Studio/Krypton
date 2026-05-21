@@ -10,6 +10,7 @@ import { cn } from '@/lib/cn';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Checkbox } from '@/components/ui/checkbox';
 
 export type QuestionKind = 'single' | 'multi' | 'blank' | 'fill_program' | 'fill_function' | 'default' | 'submit_answer';
 
@@ -218,8 +219,7 @@ export function MultiChoiceRenderer({
             !checked && 'hover:bg-accent/50',
             disabled && 'cursor-not-allowed opacity-60',
           )}>
-            <input
-              type="checkbox"
+            <Checkbox
               checked={checked}
               disabled={disabled}
               onChange={(e) => {
@@ -228,8 +228,7 @@ export function MultiChoiceRenderer({
                 else next.delete(letter);
                 onChange(Array.from(next).sort());
               }}
-              className="mt-0.5 accent-primary"
-            />
+             />
             <span className="font-mono text-xs text-muted-foreground">{letter}.</span>
             <span className="flex-1">{opt}</span>
           </label>

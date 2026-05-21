@@ -29,6 +29,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { AdminPage } from '@/components/admin/admin-page';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
@@ -295,12 +296,10 @@ function SchemaField({
   if (node.type === 'boolean') {
     return (
       <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={value === true}
           onChange={(e) => onChange(e.target.checked)}
-          className="size-4 rounded border accent-primary"
-        />
+         />
         <span className="text-muted-foreground">{description || '启用'}</span>
       </label>
     );
@@ -784,12 +783,10 @@ function PrivEditor({
           <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {entries.map((entry) => (
               <label key={entry.key} className="inline-flex cursor-pointer items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
+                <Checkbox size="sm"
                   checked={hasPrivBit(bits, entry.bit)}
                   onChange={(event) => setBits((value) => togglePrivBit(value, entry.bit, event.currentTarget.checked))}
-                  className="size-3.5 rounded border accent-primary"
-                />
+                 />
                 <span className="text-muted-foreground">{entry.label}</span>
               </label>
             ))}
@@ -1014,13 +1011,11 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
       <div>
         {setting.type === 'boolean' || setting.type === 'checkbox' ? (
           <label className="inline-flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
+            <Checkbox
               name={setting.key}
               defaultChecked={!!value}
               disabled={isDisabled}
-              className="size-4 rounded border accent-primary"
-            />
+             />
             <span className="text-sm text-muted-foreground">{setting.ui || '启用'}</span>
           </label>
         ) : setting.type === 'select' ? (

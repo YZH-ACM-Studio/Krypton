@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { MarkdownEditor } from '@/components/markdown-renderer';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
@@ -244,12 +245,10 @@ export function ProblemEditPage() {
                   </div>
                   <div className="flex items-end pb-2">
                     <label className="inline-flex cursor-pointer items-center gap-2">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         name="hidden"
                         defaultChecked={!!pdoc.hidden}
-                        className="size-4 rounded border accent-primary"
-                      />
+                       />
                       <span className="flex items-center gap-1 text-sm">
                         {pdoc.hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
                         隐藏题目

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatRelativeTime, replaceRouteTokens, toDate } from '@/lib/format';
 
@@ -240,15 +241,15 @@ export function RecordsPage() {
             </div>
             <div className="lg:col-span-6 flex flex-wrap gap-4 text-xs text-muted-foreground">
               <label className="inline-flex items-center gap-2">
-                <input type="checkbox" name="all" value="1" defaultChecked={!!data.all} className="size-3.5 rounded border accent-primary" />
+                <Checkbox size="sm" name="all" value="1" defaultChecked={!!data.all}  />
                 包含比赛记录
               </label>
               <label className="inline-flex items-center gap-2">
-                <input type="checkbox" name="allDomain" value="1" defaultChecked={!!data.allDomain} className="size-3.5 rounded border accent-primary" />
+                <Checkbox size="sm" name="allDomain" value="1" defaultChecked={!!data.allDomain}  />
                 全站域记录
               </label>
               <label className="inline-flex items-center gap-2">
-                <input type="checkbox" name="stat" value="1" defaultChecked={!!statistics} className="size-3.5 rounded border accent-primary" />
+                <Checkbox size="sm" name="stat" value="1" defaultChecked={!!statistics}  />
                 显示统计
               </label>
             </div>

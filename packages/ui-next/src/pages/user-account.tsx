@@ -31,6 +31,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { MarkdownEditor } from '@/components/markdown-renderer';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
@@ -274,13 +275,11 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
       <div>
         {setting.type === 'boolean' || setting.type === 'checkbox' ? (
           <label className="inline-flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
+            <Checkbox
               name={setting.key}
               defaultChecked={!!value}
               disabled={isDisabled}
-              className="size-4 rounded border accent-primary"
-            />
+             />
             <span className="text-sm text-muted-foreground">{setting.ui || '启用'}</span>
           </label>
         ) : setting.type === 'select' ? (
@@ -838,12 +837,10 @@ function FilesPanel() {
                   return (
                   <TableRow key={String(f.name || f._id)}>
                     <TableCell className="pl-5">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={selectedFiles.has(name)}
                         onChange={() => toggleFile(name)}
-                        className="size-4 rounded border accent-primary"
-                      />
+                       />
                     </TableCell>
                     <TableCell className="font-medium text-sm">{f.name || f.filename}</TableCell>
                     <TableCell className="text-right text-xs text-muted-foreground tabular-nums">

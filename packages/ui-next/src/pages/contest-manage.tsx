@@ -32,6 +32,7 @@ import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 
@@ -302,23 +303,23 @@ export function ContestEditPage() {
 
             <div className="flex flex-wrap gap-4">
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="rated" value="true" defaultChecked={tdoc.rated} className="size-4 rounded border" />
+                <Checkbox name="rated" value="true" defaultChecked={tdoc.rated}  />
                 计入 Rating
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="autoHide" value="true" defaultChecked={tdoc.autoHide} className="size-4 rounded border" />
+                <Checkbox name="autoHide" value="true" defaultChecked={tdoc.autoHide}  />
                 赛后自动隐藏题目
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="allowViewCode" value="true" defaultChecked={tdoc.allowViewCode} className="size-4 rounded border" />
+                <Checkbox name="allowViewCode" value="true" defaultChecked={tdoc.allowViewCode}  />
                 允许查看代码
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="allowPrint" value="true" defaultChecked={tdoc.allowPrint} className="size-4 rounded border" />
+                <Checkbox name="allowPrint" value="true" defaultChecked={tdoc.allowPrint}  />
                 允许打印
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="keepScoreboardHidden" value="true" defaultChecked={tdoc.keepScoreboardHidden} className="size-4 rounded border" />
+                <Checkbox name="keepScoreboardHidden" value="true" defaultChecked={tdoc.keepScoreboardHidden}  />
                 赛后保持榜单隐藏
               </label>
             </div>
@@ -429,12 +430,10 @@ export function ContestManagePage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-8">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={selected.size === fileList.length && fileList.length > 0}
                     onChange={() => setSelected(selected.size === fileList.length ? new Set() : new Set(fileList.map((file) => file.name)))}
-                    className="size-4 rounded border accent-primary"
-                  />
+                   />
                 </TableHead>
                 <TableHead>文件名</TableHead>
                 <TableHead className="w-28 text-right">大小</TableHead>
@@ -445,12 +444,10 @@ export function ContestManagePage() {
               {fileList.map((f) => (
                 <TableRow key={f.name}>
                   <TableCell>
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={selected.has(f.name)}
                       onChange={() => toggleContestFile(selected, setSelected, f.name)}
-                      className="size-4 rounded border accent-primary"
-                    />
+                     />
                   </TableCell>
                   <TableCell className="font-mono text-sm">{f.name}</TableCell>
                   <TableCell className="text-right text-sm text-muted-foreground">{formatSize(f.size || 0)}</TableCell>
@@ -707,7 +704,7 @@ export function ContestUserPage() {
               <Input name="uids" placeholder="1001,1002" required />
             </div>
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" name="unrank" value="true" className="size-4 rounded border" />不计入排名
+              <Checkbox name="unrank" value="true"  />不计入排名
             </label>
             <Button type="submit"><UserPlus className="mr-1 size-4" />添加</Button>
           </form>

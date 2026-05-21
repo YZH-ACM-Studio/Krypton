@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 
@@ -329,11 +330,9 @@ export function RankBoardMainPage() {
             <div className="mt-2 grid grid-cols-2 gap-1 rounded-md border bg-card p-2 sm:grid-cols-3 lg:grid-cols-4">
               {data.awardTypes.filter((t) => !t.hidden).map((t) => (
                 <label key={t.key} className="flex items-center gap-1.5 rounded px-1.5 py-1 text-[11px] hover:bg-accent/40">
-                  <input
-                    type="checkbox" checked={typeFilter.has(t.key)}
+                  <Checkbox checked={typeFilter.has(t.key)}
                     onChange={() => toggleType(t.key)}
-                    className="size-3 rounded border accent-primary"
-                  />
+                   />
                   {t.name}
                 </label>
               ))}

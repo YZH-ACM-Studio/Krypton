@@ -38,6 +38,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { AdminPage } from '@/components/admin/admin-page';
 import { Pagination } from '@/components/ui/pagination';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatRelativeTime, formatDateTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
@@ -337,12 +338,10 @@ export function ProblemConfigPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-8">
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={selectedFiles.size === testdata.length && testdata.length > 0}
                           onChange={toggleAll}
-                          className="size-4 rounded border"
-                        />
+                         />
                       </TableHead>
                       <TableHead>文件名</TableHead>
                       <TableHead className="w-28 text-right">大小</TableHead>
@@ -353,12 +352,10 @@ export function ProblemConfigPage() {
                     {testdata.map((f) => (
                       <TableRow key={f.name} className={selectedFiles.has(f.name) ? 'bg-muted/50' : ''}>
                         <TableCell>
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={selectedFiles.has(f.name)}
                             onChange={() => toggleFile(f.name)}
-                            className="size-4 rounded border"
-                          />
+                           />
                         </TableCell>
                         <TableCell className="font-mono text-sm">{f.name}</TableCell>
                         <TableCell className="text-right text-sm text-muted-foreground">{formatSize(f.size || 0)}</TableCell>
@@ -501,12 +498,10 @@ export function ProblemFilesPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-8">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={selected.size === files.length && files.length > 0}
                     onChange={() => toggleAll(files, selected, setSelected)}
-                    className="size-4 rounded border"
-                  />
+                   />
                 </TableHead>
                 <TableHead>文件名</TableHead>
                 <TableHead className="w-28 text-right">大小</TableHead>
@@ -517,12 +512,10 @@ export function ProblemFilesPage() {
               {files.map((f) => (
                 <TableRow key={f.name} className={selected.has(f.name) ? 'bg-muted/50' : ''}>
                   <TableCell>
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={selected.has(f.name)}
                       onChange={() => toggleFile(selected, setSelected, f.name)}
-                      className="size-4 rounded border"
-                    />
+                     />
                   </TableCell>
                   <TableCell>
                     <a
@@ -953,11 +946,11 @@ export function ProblemImportPage() {
             </div>
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="hidden" value="true" className="size-4 rounded border" />
+                <Checkbox name="hidden" value="true"  />
                 导入后隐藏
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" name="keepUser" value="true" className="size-4 rounded border" />
+                <Checkbox name="keepUser" value="true"  />
                 保留用户信息
               </label>
             </div>

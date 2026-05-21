@@ -7,18 +7,21 @@
  *   - tasks_my.html          → TaskMyPage
  *   - tasks_detail.html      → TaskDetailPage
  */
-import { useMemo, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   Calendar, CheckCircle2, ChevronRight, Clock, ClipboardList, Flag, Hourglass,
   Loader2, ListChecks, Lock, RefreshCw, Tag, Trophy, XCircle,
 } from 'lucide-react';
+import { daysUntil, isToday } from '@hydrooj/common';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { DateTime } from '@/components/ui/datetime';
+import { MiniTabs } from '@/components/ui/mini-tabs';
 
 // ─── Shared types ─────────────────────────────────────────────────────────
 
@@ -88,18 +91,11 @@ interface PresetSummary {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-function formatDate(s: string | null): string {
-  if (!s) return '—';
-  return new Date(s).toLocaleString();
-}
-
 function deadlineLabel(task: TaskDoc): string | null {
   if (!task.endDate) return null;
-  const now = Date.now();
-  const end = new Date(task.endDate).getTime();
-  if (end < now) return '已过期';
-  const days = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
-  if (days <= 1) return '今日截止';
+  if (isToday(task.endDate)) return '今日截止';
+  const days = daysUntil(task.endDate);
+  if (days < 0) return '已过期';
   if (days <= 7) return `${days} 天后截止`;
   return null;
 }
@@ -263,7 +259,9 @@ export function TaskCenterPage() {
                   </div>
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <Clock className="size-3" />
-                    {task.endDate ? `截止 ${new Date(task.endDate).toLocaleDateString()}` : '不限时间'}
+                    {task.endDate ? (
+                      <>截止 <DateTime value={task.endDate} mode="date" /></>
+                    ) : '不限时间'}
                     {deadline && <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">{deadline}</span>}
                   </div>
                   <Button asChild className="w-full" variant={status === 'completed' ? 'outline' : 'default'} size="sm">
@@ -320,21 +318,16 @@ export function TaskMyPage() {
         <Button asChild variant="outline" size="sm"><a href="/tasks"><ClipboardList className="mr-1 size-4" />任务中心</a></Button>
       </motion.header>
 
-      <div className="flex flex-wrap items-center gap-2">
-        {(['all', 'pending', 'completed', 'cancelled'] as const).map((k) => (
-          <button
-            key={k}
-            onClick={() => setFilter(k)}
-            className={cn(
-              'rounded-md px-3 py-1 text-xs',
-              filter === k ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80',
-            )}
-          >
-            {{ all: '全部', pending: '进行中', completed: '已完成', cancelled: '已取消' }[k]}
-            <span className="ml-1 opacity-60">{counts[k]}</span>
-          </button>
-        ))}
-      </div>
+      <MiniTabs
+        value={filter}
+        onValueChange={setFilter}
+        items={[
+          { value: 'all', label: '全部', count: counts.all },
+          { value: 'pending', label: '进行中', count: counts.pending },
+          { value: 'completed', label: '已完成', count: counts.completed },
+          { value: 'cancelled', label: '已取消', count: counts.cancelled },
+        ]}
+      />
 
       {filtered.length === 0 ? (
         <Card>
@@ -376,8 +369,8 @@ export function TaskMyPage() {
                     <span className="whitespace-nowrap text-xs text-muted-foreground">{completedPoints}/{totalPoints} · {pct}%</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span>认领于 {formatDate(a.assignedAt)}</span>
-                    {a.completedAt && <span>· 完成于 {formatDate(a.completedAt)}</span>}
+                    <span>认领于 <DateTime value={a.assignedAt} /></span>
+                    {a.completedAt && <span>· 完成于 <DateTime value={a.completedAt} /></span>}
                   </div>
                   <div className="flex gap-2">
                     <Button asChild size="sm" variant="outline" className="flex-1">
@@ -441,7 +434,7 @@ export function TaskDetailPage() {
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span>创建者 {data.creatorName}</span>
               <span>· {data.assignmentCount} 人认领</span>
-              {task.endDate && <span>· 截止 {new Date(task.endDate).toLocaleDateString()}</span>}
+              {task.endDate && <span>· 截止 <DateTime value={task.endDate} mode="date" /></span>}
               {task.maxAssignments && <span>· 名额 {task.currentAssignments}/{task.maxAssignments}</span>}
             </div>
           </div>
@@ -523,8 +516,8 @@ export function TaskDetailPage() {
           <Card>
             <CardHeader><CardTitle className="text-sm">任务信息</CardTitle></CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <Row icon={Calendar} label="开始" value={task.startDate ? new Date(task.startDate).toLocaleDateString() : '不限'} />
-              <Row icon={Calendar} label="截止" value={task.endDate ? new Date(task.endDate).toLocaleDateString() : '不限'} />
+              <Row icon={Calendar} label="开始" value={task.startDate ? <DateTime value={task.startDate} mode="date" /> : '不限'} />
+              <Row icon={Calendar} label="截止" value={task.endDate ? <DateTime value={task.endDate} mode="date" /> : '不限'} />
               <Row icon={Trophy} label="完成条件" value={task.condition.type === 'all' ? '满足全部任务点' : '满足分组条件'} />
               <Row icon={Lock} label="可见范围" value={
                 task.access.type === 'public' ? '所有人' : task.access.type === 'school' ? '限定学校' : '限定用户组'
@@ -574,7 +567,7 @@ export function TaskDetailPage() {
   );
 }
 
-function Row({ icon: Icon, label, value }: { icon: any; label: string; value: string }) {
+function Row({ icon: Icon, label, value }: { icon: any; label: string; value: ReactNode }) {
   return (
     <div className="flex items-center justify-between">
       <span className="flex items-center gap-1.5 text-muted-foreground"><Icon className="size-3.5" />{label}</span>

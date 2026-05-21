@@ -2,11 +2,13 @@
  * Exam SPA section components: Overview / Announcements / Ranking.
  * Used by pages/exam-mode/paper.tsx when section is non-`problems`.
  */
+import type { ReactNode } from 'react';
 import { Calendar, Clock, Lock, MegaphoneIcon, Trophy, User } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { DateTime } from '@/components/ui/datetime';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { Countdown, KIND_LABELS, type PaperCell, type QuestionKind } from '@/components/paper/paper-shell';
 
@@ -72,7 +74,7 @@ export function OverviewSection({ data, onEnterProblems }: { data: OverviewData;
                   <Countdown endAt={beginAt} />
                 </>
               ) : (
-                <p className="text-xs text-muted-foreground">已结束 {new Date(endAt).toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground">已结束 <DateTime value={endAt} /></p>
               )}
               {inWindow && (
                 <button
@@ -93,8 +95,8 @@ export function OverviewSection({ data, onEnterProblems }: { data: OverviewData;
         <Card>
           <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-sm">考试时间</CardTitle></CardHeader>
           <CardContent className="space-y-2 px-5 pb-5 text-sm">
-            <InfoRow icon={Calendar} label="开始" value={new Date(beginAt).toLocaleString()} />
-            <InfoRow icon={Calendar} label="结束" value={new Date(endAt).toLocaleString()} />
+            <InfoRow icon={Calendar} label="开始" value={<DateTime value={beginAt} />} />
+            <InfoRow icon={Calendar} label="结束" value={<DateTime value={endAt} />} />
             <InfoRow icon={Clock} label="时长" value={`${durationMin} 分钟`} />
           </CardContent>
         </Card>
@@ -152,7 +154,7 @@ export function OverviewSection({ data, onEnterProblems }: { data: OverviewData;
   );
 }
 
-function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value: string }) {
+function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value: ReactNode }) {
   return (
     <div className="flex items-center gap-2">
       <Icon className="size-4 shrink-0 text-muted-foreground" />
@@ -189,7 +191,7 @@ export function AnnouncementsSection({ broadcasts }: { broadcasts: Array<{ _id: 
               <Card key={b._id}>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 px-5 pb-2 pt-4">
                   <CardTitle className="text-xs font-normal text-muted-foreground">
-                    管理员 · {ts.toLocaleString()}
+                    管理员 · <DateTime value={ts} />
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="px-5 pb-5">

@@ -26,6 +26,8 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
+import { DateTime } from '@/components/ui/datetime';
+import { MiniTabs } from '@/components/ui/mini-tabs';
 
 // ─── Register admin nav ───────────────────────────────────────────────────
 
@@ -330,21 +332,16 @@ export function AdminTasksEditPage() {
         <Card>
           <CardHeader><CardTitle className="text-sm">可见范围</CardTitle></CardHeader>
           <CardContent>
-            <div className="flex flex-wrap gap-2">
-              {(['public', 'user_group', 'school'] as const).map((t) => (
-                <button
-                  type="button"
-                  key={t}
-                  onClick={() => { setAccessType(t); if (t === 'public') setAccessTargetId(''); }}
-                  className={cn(
-                    'rounded-md border px-3 py-1.5 text-sm',
-                    accessType === t ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted',
-                  )}
-                >
-                  {t === 'public' ? '所有人' : t === 'school' ? '限定学校' : '限定用户组'}
-                </button>
-              ))}
-            </div>
+            <MiniTabs
+              size="md"
+              value={accessType}
+              onValueChange={(t) => { setAccessType(t); if (t === 'public') setAccessTargetId(''); }}
+              items={[
+                { value: 'public', label: '所有人' },
+                { value: 'user_group', label: '限定用户组' },
+                { value: 'school', label: '限定学校' },
+              ]}
+            />
             {accessType === 'school' && (
               <FormField label="选择学校" className="mt-3">
                 <select
@@ -436,24 +433,15 @@ export function AdminTasksEditPage() {
         <Card>
           <CardHeader><CardTitle className="text-sm">完成条件</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setConditionType('all')}
-                className={cn(
-                  'rounded-md border px-3 py-1.5 text-sm',
-                  conditionType === 'all' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted',
-                )}
-              >满足全部任务点</button>
-              <button
-                type="button"
-                onClick={() => setConditionType('groups')}
-                className={cn(
-                  'rounded-md border px-3 py-1.5 text-sm',
-                  conditionType === 'groups' ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted',
-                )}
-              >分组条件</button>
-            </div>
+            <MiniTabs
+              size="md"
+              value={conditionType}
+              onValueChange={setConditionType}
+              items={[
+                { value: 'all', label: '满足全部任务点' },
+                { value: 'groups', label: '分组条件' },
+              ]}
+            />
             {conditionType === 'groups' && (
               <div className="space-y-3">
                 {groups.map((g, i) => (
@@ -608,18 +596,16 @@ export function AdminTasksAssignPage() {
           <form method="post" className="space-y-3">
             <input type="hidden" name="operation" value="batch" />
             <input type="hidden" name="scope" value={scope} />
-            <div className="flex gap-2">
-              {(['uid', 'user_group', 'school'] as const).map((s) => (
-                <button
-                  type="button"
-                  key={s}
-                  onClick={() => setScope(s)}
-                  className={cn('rounded-md border px-3 py-1.5 text-sm', scope === s ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted')}
-                >
-                  {s === 'uid' ? '单个用户' : s === 'user_group' ? '整个用户组' : '整个学校'}
-                </button>
-              ))}
-            </div>
+            <MiniTabs
+              size="md"
+              value={scope}
+              onValueChange={setScope}
+              items={[
+                { value: 'uid', label: '单个用户' },
+                { value: 'user_group', label: '整个用户组' },
+                { value: 'school', label: '整个学校' },
+              ]}
+            />
             {scope === 'uid' && (
               <FormField label="用户 UID" required>
                 <Input name="uid" type="number" min={1} value={uid} onChange={(e) => setUid(e.target.value)} required />
@@ -682,7 +668,7 @@ export function AdminTasksAssignPage() {
                           : a.status === 'cancelled' ? <Badge variant="outline">已取消</Badge>
                           : <Badge className="bg-sky-500 text-white">进行中</Badge>}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{new Date(a.assignedAt).toLocaleString()}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground"><DateTime value={a.assignedAt} /></TableCell>
                       <TableCell className="text-xs">{a.note || '—'}</TableCell>
                     </TableRow>
                   );
@@ -775,7 +761,7 @@ export function AdminTasksStatsPage() {
                           : a.status === 'cancelled' ? <Badge variant="outline">取消</Badge>
                           : <Badge className="bg-sky-500 text-white">进行中</Badge>}
                       </TableCell>
-                      <TableCell className="text-xs">{(a as any).completedAt ? new Date((a as any).completedAt).toLocaleDateString() : '—'}</TableCell>
+                      <TableCell className="text-xs">{(a as any).completedAt ? <DateTime value={(a as any).completedAt} mode="date" /> : "—"}</TableCell>
                     </TableRow>
                   );
                 })}
@@ -794,7 +780,7 @@ export function AdminTasksStatsPage() {
                 <div className="flex items-center gap-2">
                   <Badge variant="outline" className="text-[10px]">{row.pointId}</Badge>
                   <span>{row.after?.completed ? '判定完成' : '撤销完成'}</span>
-                  <span className="ml-auto text-muted-foreground">{new Date(row.createdAt).toLocaleString()}</span>
+                  <span className="ml-auto text-muted-foreground"><DateTime value={row.createdAt} /></span>
                 </div>
                 {row.reason && <p className="mt-1 text-muted-foreground">原因：{row.reason}</p>}
               </div>
@@ -836,18 +822,11 @@ export function AdminTasksScoresPage() {
       title="比赛分数管理"
       description="录入 PAT / GPLT / CSP 等外部比赛成绩 — 这些分数会被任务点用作完成判定的输入。"
     >
-      <div className="flex gap-2">
-        {tabs.map((t) => (
-          <a
-            key={t.key}
-            href={`/admin/tasks/scores?tab=${t.key}`}
-            className={cn(
-              'rounded-md border px-4 py-1.5 text-sm transition-colors',
-              data.tab === t.key ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted',
-            )}
-          >{t.label}</a>
-        ))}
-      </div>
+      <MiniTabs
+        size="md"
+        value={data.tab}
+        items={tabs.map((t) => ({ value: t.key as any, label: t.label, href: `/admin/tasks/scores?tab=${t.key}` }))}
+      />
 
       {data.tab === 'pat' && <PatScoreTab scores={data.scores} udict={data.udict} settings={data.settings} />}
       {data.tab === 'gplt' && <GpltScoreTab scores={data.scores} udict={data.udict} settings={data.settings} />}
@@ -914,7 +893,7 @@ function PatScoreTab({ scores, udict, settings }: { scores: PatScore[]; udict: a
                     <TableCell>{s.year}</TableCell>
                     <TableCell>{{ spring: '春', summer: '夏', autumn: '秋', winter: '冬' }[s.season] || s.season}</TableCell>
                     <TableCell className="font-medium">{s.score}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{new Date(s.createdAt).toLocaleDateString()}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground"><DateTime value={s.createdAt} mode="date" /></TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -969,7 +948,7 @@ function GpltScoreTab({ scores, udict, settings }: { scores: GpltScore[]; udict:
                     <TableCell>{s.year}</TableCell>
                     <TableCell className="font-medium">{s.score}</TableCell>
                     <TableCell>{s.rank || '—'}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{new Date(s.createdAt).toLocaleDateString()}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground"><DateTime value={s.createdAt} mode="date" /></TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -1014,7 +993,7 @@ function CspScoreTab({ scores, udict, settings }: { scores: CspScore[]; udict: a
                     <TableCell>{udict[s.userId]?.uname || `uid:${s.userId}`}</TableCell>
                     <TableCell>第 {s.round} 次</TableCell>
                     <TableCell className="font-medium">{s.score}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{new Date(s.createdAt).toLocaleDateString()}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground"><DateTime value={s.createdAt} mode="date" /></TableCell>
                   </TableRow>
                 ))}
               </TableBody>

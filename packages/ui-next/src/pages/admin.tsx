@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { AdminPage } from '@/components/admin/admin-page';
 import { useBootstrap } from '@/lib/bootstrap';
-import { PERM, PRIV } from '@/lib/perms';
 import { formatDateTime } from '@/lib/format';
 
 type R = Record<string, any>;

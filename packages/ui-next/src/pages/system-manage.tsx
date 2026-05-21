@@ -2,11 +2,12 @@
  * System management pages — settings, config, scripts, user import, user privileges.
  */
 
-import { useState } from 'react';
-import { motion } from 'motion/react';
+import { useMemo, useState } from 'react';
+import * as YAML from 'yaml';
 import {
-  ArrowLeft,
   Check,
+  ChevronDown,
+  ChevronRight,
   FileCode,
   Key,
   Play,
@@ -19,6 +20,8 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { MiniTabs } from '@/components/ui/mini-tabs';
+import { cn } from '@/lib/cn';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,7 +38,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
-import { cn } from '@/lib/cn';
 
 type R = Record<string, any>;
 
@@ -57,14 +59,8 @@ function ManageShell({
       bypassPrivGate
       title={(
         <div className="flex items-center gap-2">
-          <a
-            href="/manage"
-            className="text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="size-4" />
-          </a>
           <Icon className="size-5 text-primary" />
-          <h1 className="text-lg font-semibold">{title}</h1>
+          <h1 className="text-xl font-semibold">{title}</h1>
         </div>
       )}
     >
@@ -142,30 +138,348 @@ export function ManageSettingPage() {
 /*  System Config (manage_config.html)                                 */
 /* ================================================================== */
 
+/* ────────────────────────────────────────────────────────────────────── */
+/*  System Config — visual schema-driven editor + YAML fallback           */
+/* ────────────────────────────────────────────────────────────────────── */
+
+interface SchemaNode {
+  type?: string;
+  dict?: Record<string, SchemaNode>;
+  list?: SchemaNode[];
+  inner?: SchemaNode;
+  meta?: {
+    description?: string;
+    default?: unknown;
+    hidden?: boolean;
+    role?: string;
+    secret?: boolean;
+    [k: string]: unknown;
+  };
+  value?: unknown;
+  [k: string]: unknown;
+}
+
+/** Walk an object along a path, returning the value or undefined. */
+function getPath(obj: any, path: string[]): unknown {
+  let cur: any = obj;
+  for (const seg of path) {
+    if (cur == null || typeof cur !== 'object') return undefined;
+    cur = cur[seg];
+  }
+  return cur;
+}
+
+/** Immutably set a value at a nested path; creates intermediate objects. */
+function setPath(obj: any, path: string[], value: unknown): any {
+  if (path.length === 0) return value;
+  const [head, ...rest] = path;
+  const next = obj && typeof obj === 'object' && !Array.isArray(obj) ? { ...obj } : {};
+  next[head] = setPath(next[head], rest, value);
+  return next;
+}
+
+/** Strip undefined nested entries so we don't emit empty `key:` lines. */
+function compact(value: any): any {
+  if (value == null) return value;
+  if (Array.isArray(value)) return value.map(compact);
+  if (typeof value !== 'object') return value;
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (v === undefined) continue;
+    const compacted = compact(v);
+    if (compacted === undefined) continue;
+    if (typeof compacted === 'object' && compacted !== null && !Array.isArray(compacted) && Object.keys(compacted).length === 0) {
+      continue;
+    }
+    out[k] = compacted;
+  }
+  return out;
+}
+
+/** Flatten intersect / union into a single dict where possible. */
+function resolveSchema(node: SchemaNode | undefined): SchemaNode {
+  if (!node) return { type: 'unknown' };
+  if (node.type === 'intersect' && Array.isArray(node.list)) {
+    const merged: SchemaNode = { type: 'object', dict: {}, meta: node.meta };
+    for (const child of node.list) {
+      const resolved = resolveSchema(child);
+      if (resolved.type === 'object' && resolved.dict) {
+        Object.assign(merged.dict!, resolved.dict);
+      }
+    }
+    return merged;
+  }
+  if (node.type === 'union' && Array.isArray(node.list) && node.list.length > 0) {
+    // Pick the first non-null branch as the form representation.
+    return resolveSchema(node.list.find((n) => n.type !== 'const' || (n as any).value !== null) || node.list[0]);
+  }
+  return node;
+}
+
+function SchemaField({
+  node, path, value, onChange,
+}: {
+  node: SchemaNode;
+  path: string[];
+  value: unknown;
+  onChange: (next: unknown) => void;
+}) {
+  const meta = node.meta || {};
+  const isSecret = meta.secret === true || meta.role === 'secret';
+  const description = meta.description as string | undefined;
+  const display = isSecret && value === '[hidden]' ? '' : (value ?? '');
+
+  if (node.type === 'string') {
+    return (
+      <div className="space-y-1">
+        {description ? <p className="text-[11px] text-muted-foreground">{description}</p> : null}
+        <Input
+          value={typeof display === 'string' || typeof display === 'number' ? String(display) : ''}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={isSecret ? (value === '[hidden]' ? '（已设置，留空保持不变）' : '') : (meta.default as string) || ''}
+          type={isSecret ? 'password' : 'text'}
+          autoComplete="off"
+          className="max-w-md"
+        />
+      </div>
+    );
+  }
+  if (node.type === 'number') {
+    return (
+      <div className="space-y-1">
+        {description ? <p className="text-[11px] text-muted-foreground">{description}</p> : null}
+        <Input
+          type="number"
+          value={typeof value === 'number' ? value : (value as any) ?? ''}
+          onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
+          placeholder={meta.default != null ? String(meta.default) : ''}
+          className="max-w-[200px]"
+        />
+      </div>
+    );
+  }
+  if (node.type === 'boolean') {
+    return (
+      <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={value === true}
+          onChange={(e) => onChange(e.target.checked)}
+          className="size-4 rounded border accent-primary"
+        />
+        <span className="text-muted-foreground">{description || '启用'}</span>
+      </label>
+    );
+  }
+  if (node.type === 'const') {
+    return (
+      <div className="text-xs text-muted-foreground">
+        固定值：<code className="rounded bg-muted px-1.5 py-0.5 font-mono">{String((node as any).value)}</code>
+      </div>
+    );
+  }
+  // Array / object / complex types fall back to a JSON-shaped textarea editor.
+  return (
+    <div className="space-y-1">
+      {description ? <p className="text-[11px] text-muted-foreground">{description}</p> : null}
+      <textarea
+        value={(() => {
+          if (value === undefined || value === null) return '';
+          if (typeof value === 'string') return value;
+          try { return YAML.stringify(value).trimEnd(); } catch { return String(value); }
+        })()}
+        onChange={(e) => {
+          const text = e.target.value;
+          if (!text.trim()) { onChange(undefined); return; }
+          try {
+            const parsed = YAML.parse(text);
+            onChange(parsed);
+          } catch {
+            // Still update with raw text so user can keep typing; revert later if invalid.
+            onChange(text);
+          }
+        }}
+        rows={Math.min(8, Math.max(2, String(value || '').split('\n').length + 1))}
+        className="w-full max-w-2xl resize-y rounded-md border bg-background p-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+        placeholder={node.type ? `（${node.type} — YAML）` : ''}
+        spellCheck={false}
+      />
+    </div>
+  );
+}
+
+function SchemaSection({
+  node, path, value, onChange, defaultOpen = true,
+}: {
+  node: SchemaNode;
+  path: string[];
+  value: unknown;
+  onChange: (path: string[], next: unknown) => void;
+  defaultOpen?: boolean;
+}) {
+  const resolved = resolveSchema(node);
+  const [open, setOpen] = useState(defaultOpen);
+
+  if (resolved.type !== 'object' || !resolved.dict) {
+    return (
+      <SchemaField
+        node={resolved}
+        path={path}
+        value={value}
+        onChange={(next) => onChange(path, next)}
+      />
+    );
+  }
+
+  const sectionLabel = path.length === 0 ? '系统配置' : path[path.length - 1];
+
+  return (
+    <div className={cn(
+      'rounded-md border bg-card/40',
+      path.length === 0 ? 'border-transparent bg-transparent' : '',
+    )}>
+      {path.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium hover:bg-muted/40"
+        >
+          {open ? <ChevronDown className="size-3.5 text-muted-foreground" /> : <ChevronRight className="size-3.5 text-muted-foreground" />}
+          <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">{sectionLabel}</span>
+          {resolved.meta?.description ? (
+            <span className="ml-2 truncate text-[11px] font-normal text-muted-foreground/80">
+              {resolved.meta.description as string}
+            </span>
+          ) : null}
+        </button>
+      ) : null}
+      {open ? (
+        <div className={cn('space-y-4', path.length > 0 ? 'border-t bg-background/40 p-4' : 'p-0')}>
+          {Object.entries(resolved.dict).map(([key, child]) => {
+            const childPath = [...path, key];
+            const childValue = getPath(value as any, [key]);
+            const childResolved = resolveSchema(child);
+            const isLeaf = childResolved.type !== 'object';
+
+            return (
+              <div key={key} className={isLeaf ? 'grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start' : ''}>
+                {isLeaf ? (
+                  <label className="text-sm font-medium">
+                    <code className="font-mono text-xs text-muted-foreground">{key}</code>
+                  </label>
+                ) : null}
+                <div className="min-w-0">
+                  {isLeaf ? (
+                    <SchemaField
+                      node={childResolved}
+                      path={childPath}
+                      value={childValue}
+                      onChange={(next) => onChange(childPath, next)}
+                    />
+                  ) : (
+                    <SchemaSection
+                      node={childResolved}
+                      path={childPath}
+                      value={childValue}
+                      onChange={onChange}
+                      defaultOpen={path.length < 1}
+                    />
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function ManageConfigPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const value: string = typeof data.value === 'string' ? data.value : '';
+  const initialYaml: string = typeof data.value === 'string' ? data.value : '';
+  const schema: SchemaNode | undefined = data.schema as SchemaNode | undefined;
+  const hasSchema = !!(schema && (schema.dict || schema.list));
+
+  // Mode: visual or yaml. Visual is preferred; fall back if no schema or parse fails.
+  const [mode, setMode] = useState<'visual' | 'yaml'>(hasSchema ? 'visual' : 'yaml');
+
+  // Parsed object state for visual editor — re-derived from yaml string.
+  const [yamlText, setYamlText] = useState(initialYaml);
+  const parsed = useMemo(() => {
+    try { return YAML.parse(yamlText) || {}; } catch { return null; }
+  }, [yamlText]);
+  const parseError = parsed === null;
+
+  const handleChange = (path: string[], next: unknown) => {
+    if (parsed === null) return;
+    const updated = setPath(parsed, path, next);
+    try {
+      setYamlText(YAML.stringify(compact(updated)));
+    } catch {
+      // Should never happen with sane values, but degrade gracefully.
+    }
+  };
 
   return (
     <ManageShell title="系统配置" icon={FileCode}>
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">配置文件（YAML）</CardTitle>
-          <p className="text-xs text-muted-foreground">
-            直接编辑系统配置，修改后点击保存生效。标记为 [hidden] 的值为敏感信息，不会显示。
-          </p>
+        <CardHeader className="flex flex-col gap-2 pb-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle className="text-sm">高级配置</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              修改后点击保存生效。标记为 [hidden] 的值为敏感信息，不会显示。
+            </p>
+          </div>
+          {hasSchema ? (
+            <MiniTabs
+              size="sm"
+              value={mode}
+              onValueChange={(v) => setMode(v as 'visual' | 'yaml')}
+              items={[
+                { value: 'visual', label: '可视化' },
+                { value: 'yaml', label: 'YAML' },
+              ]}
+            />
+          ) : null}
         </CardHeader>
         <CardContent>
           <form method="post" className="space-y-4">
-            <textarea
-              name="value"
-              defaultValue={value}
-              rows={24}
-              className="w-full resize-y rounded-md border bg-background p-4 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              spellCheck={false}
-            />
-            <div className="flex justify-end">
+            <input type="hidden" name="value" value={yamlText} />
+
+            {mode === 'visual' && hasSchema ? (
+              parseError ? (
+                <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                  YAML 解析失败，请先切换到 YAML 模式修复后再使用可视化编辑。
+                </div>
+              ) : (
+                <SchemaSection
+                  node={schema!}
+                  path={[]}
+                  value={parsed}
+                  onChange={handleChange}
+                />
+              )
+            ) : (
+              <textarea
+                value={yamlText}
+                onChange={(e) => setYamlText(e.target.value)}
+                rows={24}
+                className="w-full resize-y rounded-md border bg-background p-4 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                spellCheck={false}
+              />
+            )}
+
+            <div className="flex items-center justify-end gap-2">
+              {mode === 'visual' && hasSchema ? (
+                <details className="mr-auto text-xs text-muted-foreground">
+                  <summary className="cursor-pointer">查看生成的 YAML</summary>
+                  <pre className="mt-2 max-h-64 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-[11px]">
+                    {yamlText || '（空）'}
+                  </pre>
+                </details>
+              ) : null}
               <Button type="submit" className="gap-1">
                 <Save className="size-3.5" />
                 保存配置

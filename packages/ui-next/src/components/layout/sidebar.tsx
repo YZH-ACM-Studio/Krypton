@@ -18,6 +18,7 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/cn';
+import { canSeeAdminAffordance } from '@/lib/perms';
 import {
   Tooltip,
   TooltipContent,
@@ -102,14 +103,33 @@ export function Sidebar({
         { label: '排名', href: bs.urls.ranking, icon: Medal, templates: ['ranking.html'] },
       ],
     },
-    {
-      label: '管理',
-      show: bs.user.priv > 0 || bs.user.role === 'root',
-      items: [
-        { label: '域管理', href: bs.urls.domainDashboard, icon: LayoutDashboard, templates: ['domain_dashboard.html', 'domain_edit.html', 'domain_user.html', 'domain_user_raw.html', 'domain_permission.html', 'domain_role.html', 'domain_group.html', 'domain_join_applications.html'] },
-        { label: '系统', href: bs.urls.manage, icon: Wrench, templates: ['manage_dashboard.html', 'manage_script.html', 'manage_setting.html', 'manage_config.html', 'manage_user_import.html', 'manage_user_priv.html'] },
-      ],
-    },
+    // Admin entries: gate per-item. Default users + guests see nothing here;
+    // the group itself disappears when neither child is visible.
+    (() => {
+      const userCtx = { priv: bs.user.priv ?? 0, role: bs.user.role, signedIn: bs.user.signedIn };
+      const adminItems: NavItem[] = [];
+      if (canSeeAdminAffordance(userCtx, 'domainAdmin')) {
+        adminItems.push({
+          label: '域管理',
+          href: bs.urls.domainDashboard,
+          icon: LayoutDashboard,
+          templates: ['domain_dashboard.html', 'domain_edit.html', 'domain_user.html', 'domain_user_raw.html', 'domain_permission.html', 'domain_role.html', 'domain_group.html', 'domain_join_applications.html'],
+        });
+      }
+      if (canSeeAdminAffordance(userCtx, 'systemAdmin')) {
+        adminItems.push({
+          label: '系统',
+          href: bs.urls.manage,
+          icon: Wrench,
+          templates: ['manage_dashboard.html', 'manage_script.html', 'manage_setting.html', 'manage_config.html', 'manage_user_import.html', 'manage_user_priv.html'],
+        });
+      }
+      return {
+        label: '管理',
+        show: adminItems.length > 0,
+        items: adminItems,
+      } satisfies NavGroup;
+    })(),
   ];
 
   const sidebarContent = (

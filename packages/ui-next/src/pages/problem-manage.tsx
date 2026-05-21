@@ -933,26 +933,15 @@ export function ProblemStatisticsPage() {
 /* ---------- Problem Import ---------- */
 
 export function ProblemImportPage() {
-  const bs = useBootstrap();
-
   return (
     <AdminPage
       bypassPrivGate
-      title={(
-        <div className="flex items-center gap-3">
-          <Button asChild variant="ghost" size="icon">
-            <a href={bs.urls.problems}><ArrowLeft className="size-4" /></a>
-          </Button>
-          <div>
-            <h1 className="text-xl font-semibold">导入题目</h1>
-            <p className="text-sm text-muted-foreground">从 Hydro 格式压缩包导入</p>
-          </div>
-        </div>
-      )}
+      title="导入题目"
+      description="从 Hydro 格式压缩包批量导入题目"
     >
       <Card>
         <CardContent className="p-6">
-          <form method="post" encType="multipart/form-data" className="space-y-4">
+          <form method="post" encType="multipart/form-data" className="grid gap-4 sm:max-w-xl">
             <div className="space-y-1.5">
               <label className="text-sm font-medium">题目文件</label>
               <input type="file" name="file" accept=".zip,.tar,.gz" required className="w-full text-sm" />
@@ -972,9 +961,11 @@ export function ProblemImportPage() {
                 保留用户信息
               </label>
             </div>
-            <Button type="submit" className="w-full">
-              <Import className="mr-1 size-4" />导入
-            </Button>
+            <div className="flex justify-end">
+              <Button type="submit">
+                <Import className="mr-1 size-4" />导入
+              </Button>
+            </div>
           </form>
         </CardContent>
       </Card>

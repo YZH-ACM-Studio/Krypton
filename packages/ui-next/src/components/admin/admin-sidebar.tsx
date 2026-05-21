@@ -1,20 +1,24 @@
 import { useMemo } from 'react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
-import { hasPriv, type PrivBit } from '@/lib/perms';
+import { canSeeAdminAffordance, hasPriv, type PrivBit } from '@/lib/perms';
 import { getAdminNavSections } from '@/lib/admin-nav-registry';
 import { Badge } from '@/components/ui/badge';
 
 export function AdminSidebar({ currentTemplate }: { currentTemplate: string }) {
   const bs = useBootstrap();
   const priv = bs.user.priv ?? 0;
+  const role = bs.user.role;
+  const userCtx = { priv, role, signedIn: bs.user.signedIn };
 
   const sections = useMemo(() => {
     return getAdminNavSections().filter((section) => {
-      if (!section.requiredPriv) return true;
-      return hasPriv(priv, section.requiredPriv as PrivBit);
+      if (section.requiredPriv && !hasPriv(priv, section.requiredPriv as PrivBit)) return false;
+      if (section.requiredAccess && !canSeeAdminAffordance(userCtx, section.requiredAccess)) return false;
+      return true;
     });
-  }, [priv]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priv, role, bs.user.signedIn]);
 
   if (sections.length === 0) {
     return null;
@@ -22,11 +26,16 @@ export function AdminSidebar({ currentTemplate }: { currentTemplate: string }) {
 
   return (
     <aside className="hidden w-56 shrink-0 lg:block">
-      <nav className="sticky top-16 space-y-5">
+      {/* pt-2 nudges the first section heading down so its baseline lines up
+          with the page title h1 next to it (text-xl has more leading than
+          our text-[11px] section heading). Without this, the sidebar text
+          visually sits above the right-column title. */}
+      <nav className="sticky top-16 space-y-5 pt-2">
         {sections.map((section) => {
           const visibleItems = section.items.filter((item) => {
-            if (!item.requiredPriv) return true;
-            return hasPriv(priv, item.requiredPriv as PrivBit);
+            if (item.requiredPriv && !hasPriv(priv, item.requiredPriv as PrivBit)) return false;
+            if (item.requiredAccess && !canSeeAdminAffordance(userCtx, item.requiredAccess)) return false;
+            return true;
           });
           if (visibleItems.length === 0) return null;
 

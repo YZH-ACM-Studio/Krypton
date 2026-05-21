@@ -61,7 +61,7 @@ export function AdminPage({
   }
 
   return (
-    <div className="flex w-full gap-6">
+    <div className="flex w-full items-start gap-6">
       {!hideSidebar ? <AdminSidebar currentTemplate={bs.page.templateName} /> : null}
 
       <motion.div

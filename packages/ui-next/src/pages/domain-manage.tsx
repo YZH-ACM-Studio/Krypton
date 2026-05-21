@@ -3,9 +3,7 @@
  */
 
 import { useState } from 'react';
-import { motion } from 'motion/react';
 import {
-  ArrowLeft,
   FileDown,
   FileUp,
   Plus,
@@ -32,7 +30,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
-import { cn } from '@/lib/cn';
+import { parseBigInt } from '@/lib/perms';
 
 type R = Record<string, any>;
 
@@ -48,20 +46,7 @@ function DomainAdminShell({
   children: React.ReactNode;
 }) {
   return (
-    <AdminPage
-      bypassPrivGate
-      title={(
-        <div className="flex items-center gap-2">
-          <a
-            href="/domain"
-            className="text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="size-4" />
-          </a>
-          <h1 className="text-lg font-semibold">{title}</h1>
-        </div>
-      )}
-    >
+    <AdminPage bypassPrivGate title={title}>
       {children}
     </AdminPage>
   );
@@ -480,28 +465,32 @@ export function DomainPermissionPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {permList.map((p) => (
-                      <TableRow key={String(p.key)}>
-                        <TableCell className="pl-5 text-xs">{p.desc}</TableCell>
-                        {editableRoles.map((r) => {
-                          // BigInt comparison: role.perm & permKey !== 0
-                          const rolePerm = BigInt(r.perm || 0);
-                          const permKey = BigInt(p.key);
-                          const checked = (rolePerm & permKey) !== 0n;
-                          return (
-                            <TableCell key={r._id} className="text-center">
-                              <input
-                                type="checkbox"
-                                name={`${r._id}`}
-                                value={String(p.key)}
-                                defaultChecked={checked}
-                                className="size-3.5 rounded border accent-primary"
-                              />
-                            </TableCell>
-                          );
-                        })}
-                      </TableRow>
-                    ))}
+                    {permList.map((p) => {
+                      const permKey = parseBigInt(p.key);
+                      const permValue = permKey.toString();
+                      return (
+                        <TableRow key={permValue}>
+                          <TableCell className="pl-5 text-xs">{p.desc}</TableCell>
+                          {editableRoles.map((r) => {
+                            // BigInt comparison: role.perm & permKey !== 0
+                            // r.perm and p.key may arrive as "BigInt::<digits>" strings.
+                            const rolePerm = parseBigInt(r.perm);
+                            const checked = (rolePerm & permKey) !== 0n;
+                            return (
+                              <TableCell key={r._id} className="text-center">
+                                <input
+                                  type="checkbox"
+                                  name={`${r._id}`}
+                                  value={permValue}
+                                  defaultChecked={checked}
+                                  className="size-3.5 rounded border accent-primary"
+                                />
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </CardContent>

@@ -4,13 +4,35 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useBootstrap } from '@/lib/bootstrap';
 
+/**
+ * Substitute Hydro-style `{0}`, `{1}` placeholders in an error template with
+ * the matching entries from `params`. Falls back to leaving the literal token
+ * in place if the index is missing — that's strictly better than emitting raw
+ * "{1}" to end users.
+ */
+function substituteErrorParams(template: string, params: unknown[] | undefined): string {
+  if (!template) return '';
+  const safeParams = Array.isArray(params) ? params : [];
+  return template.replace(/\{(\d+)\}/g, (token, idx) => {
+    const i = Number(idx);
+    if (!Number.isFinite(i) || i < 0 || i >= safeParams.length) return token;
+    const value = safeParams[i];
+    if (value == null) return token;
+    return String(value);
+  });
+}
+
 export function ErrorPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
   const error = data.error;
-  const message = typeof error === 'string'
+  const rawMessage = typeof error === 'string'
     ? error
     : error?.message || error?.msg || '发生了一个错误';
+  const params = typeof error === 'object' && error !== null
+    ? (error.params as unknown[] | undefined)
+    : undefined;
+  const message = substituteErrorParams(String(rawMessage), params);
   const code = data.code || data.status || '';
 
   return (

@@ -160,14 +160,10 @@ function LangTabs({
 /*  Core Markdown renderer (shared by view and editor preview)         */
 /* ------------------------------------------------------------------ */
 
-const PROSE_CLASS =
-  'prose prose-sm dark:prose-invert max-w-none ' +
-  'prose-headings:scroll-mt-20 ' +
-  'prose-pre:bg-muted prose-pre:text-sm ' +
-  'prose-code:before:content-none prose-code:after:content-none ' +
-  'prose-img:rounded-md prose-img:shadow-sm ' +
-  'prose-table:text-sm ' +
-  'prose-a:text-primary prose-a:no-underline hover:prose-a:underline';
+// Markdown styling lives in styles.css under `.krypton-prose`. We don't pull
+// in @tailwindcss/typography, so `prose` classes are no-ops; the manual rules
+// keep headings / lists / code blocks legible in both light and dark themes.
+const PROSE_CLASS = 'krypton-prose';
 
 function MarkdownContent({ source }: { source: string }) {
   return (
@@ -344,11 +340,17 @@ export function MarkdownEditor({
         </div>
       </div>
 
-      {/* Side-by-side panels */}
-      <div className="grid gap-0 overflow-hidden rounded-lg border md:grid-cols-2">
+      {/* Side-by-side panels. Both panes share the same height + scroll
+          behavior so the editor doesn't look stunted next to a tall preview.
+          Height is driven by the `--md-shell-h` variable, which the CSS file
+          flips to `auto` on mobile so the panes stack with a sensible floor. */}
+      <div
+        className="krypton-md-shell grid grid-cols-1 gap-0 overflow-hidden rounded-lg border md:grid-cols-2"
+        style={{ ['--md-shell-h' as any]: `${minHeight}px` }}
+      >
         {/* Editor pane */}
-        <div className="relative border-b md:border-b-0 md:border-r">
-          <div className="absolute left-0 top-0 px-2 py-2.5 text-right font-mono text-xs leading-6.5 text-muted-foreground/40 select-none pointer-events-none">
+        <div className="relative h-full min-h-0 border-b md:border-b-0 md:border-r">
+          <div className="pointer-events-none absolute left-0 top-0 select-none px-2 py-2.5 text-right font-mono text-xs leading-[1.625rem] text-muted-foreground/40">
             {source.split('\n').map((_, i) => (
               <div key={i}>{i + 1}</div>
             ))}
@@ -360,8 +362,7 @@ export function MarkdownEditor({
             onChange={handleChange}
             onScroll={handleScroll}
             onKeyDown={handleKeyDown}
-            className="krypton-markdown-editor w-full resize-none bg-background py-2 pl-10 pr-3 font-mono text-sm leading-6.5 focus:outline-none"
-            style={{ minHeight, height: minHeight }}
+            className="krypton-markdown-editor h-full w-full resize-none bg-background py-2 pl-10 pr-3 font-mono text-sm leading-[1.625rem] focus:outline-none"
             spellCheck={false}
             placeholder={'在此输入 Markdown 内容…\n支持 LaTeX 公式: $x^2$ 或 $$\\sum_{i=1}^n$$\n支持 HTML 标签'}
           />
@@ -370,13 +371,12 @@ export function MarkdownEditor({
         {/* Preview pane */}
         <div
           ref={previewRef}
-          className="overflow-auto bg-card p-4"
-          style={{ minHeight, maxHeight: Math.max(minHeight, 600) }}
+          className="h-full min-h-0 overflow-auto bg-card p-4"
         >
           {preview ? (
             <MarkdownContent source={preview} />
           ) : (
-            <p className="text-sm text-muted-foreground italic">预览区域</p>
+            <p className="text-sm italic text-muted-foreground">预览区域</p>
           )}
         </div>
       </div>

@@ -46,3 +46,57 @@ export function isSystemAdmin(userPriv: number): boolean {
 export function canAccessDomainAdmin(userPriv: number): boolean {
   return hasAnyPriv(userPriv, PRIV.PRIV_EDIT_SYSTEM, PRIV.PRIV_MANAGE_ALL_DOMAIN);
 }
+
+/**
+ * Best-effort gate for admin-ish UI affordances against the current user.
+ * - `systemAdmin`: must hold PRIV_EDIT_SYSTEM.
+ * - `domainAdmin`: holds PRIV_EDIT_SYSTEM, PRIV_MANAGE_ALL_DOMAIN, or the
+ *   bootstrap-side `role === 'root'`. Custom roles with PERM_EDIT_DOMAIN are
+ *   not represented in the bootstrap; users with those roles still see admin
+ *   pages directly but won't get the entry chip — acceptable for now.
+ * - omitted: visible to anyone (signed in or not).
+ */
+export type AdminAccessLevel = 'systemAdmin' | 'domainAdmin';
+
+export function canSeeAdminAffordance(
+  user: { priv: number; role?: string; signedIn?: boolean },
+  required?: AdminAccessLevel,
+): boolean {
+  if (!required) return true;
+  if (required === 'systemAdmin') return isSystemAdmin(user.priv);
+  if (required === 'domainAdmin') {
+    return canAccessDomainAdmin(user.priv) || user.role === 'root';
+  }
+  return false;
+}
+
+/**
+ * Robust BigInt parser. Handles the Hydro "BigInt::<digits>" string
+ * serialization (see packages/ui-default/backendlib/template.ts) as well as
+ * plain bigints, numbers, and decimal strings. Falls back to 0n on garbage.
+ *
+ * Permission bits (domain PERM, BigInt) and similar large values arrive over
+ * the bootstrap payload as either:
+ *   - native bigint (rare, only if templates emit raw JSON)
+ *   - "BigInt::3579258398816786743425" string (typical)
+ *   - plain decimal string "12345"
+ *   - plain number (small values)
+ */
+export function parseBigInt(value: unknown): bigint {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return 0n;
+    return BigInt(Math.trunc(value));
+  }
+  if (value == null) return 0n;
+  const raw = String(value).trim();
+  if (!raw) return 0n;
+  const stripped = raw.startsWith('BigInt::') ? raw.slice('BigInt::'.length) : raw;
+  // Allow optional sign + digits only — BigInt() throws on anything else.
+  if (!/^-?\d+$/.test(stripped)) return 0n;
+  try {
+    return BigInt(stripped);
+  } catch {
+    return 0n;
+  }
+}

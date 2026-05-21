@@ -19,19 +19,22 @@ registerAdminNavSection({
   key: 'overview',
   label: '总览',
   order: 10,
+  requiredAccess: 'domainAdmin',
   items: [
     {
       key: 'manage_dashboard', label: '系统总览', href: '/manage',
       icon: LayoutDashboard, templateNames: ['manage_dashboard.html'],
-      requiredPriv: PRIV.PRIV_EDIT_SYSTEM,
+      requiredAccess: 'systemAdmin',
     },
     {
       key: 'domain_dashboard', label: '域总览', href: '/domain/dashboard',
       icon: Building, templateNames: ['domain_dashboard.html'],
+      requiredAccess: 'domainAdmin',
     },
     {
       key: 'status', label: '评测机状态', href: '/status',
       icon: Server, templateNames: ['status.html'],
+      requiredAccess: 'systemAdmin',
     },
   ],
 });
@@ -40,26 +43,32 @@ registerAdminNavSection({
   key: 'domain',
   label: '域管理',
   order: 20,
+  requiredAccess: 'domainAdmin',
   items: [
     {
       key: 'domain_edit', label: '基本设置', href: '/domain/edit',
       icon: Settings, templateNames: ['domain_edit.html'],
+      requiredAccess: 'domainAdmin',
     },
     {
       key: 'domain_user', label: '域用户', href: '/domain/user',
       icon: Users, templateNames: ['domain_user.html', 'domain_user_raw.html'],
+      requiredAccess: 'domainAdmin',
     },
     {
       key: 'domain_role', label: '角色', href: '/domain/role',
       icon: KeySquare, templateNames: ['domain_role.html'],
+      requiredAccess: 'domainAdmin',
     },
     {
       key: 'domain_permission', label: '权限', href: '/domain/permission',
       icon: ShieldAlert, templateNames: ['domain_permission.html'],
+      requiredAccess: 'domainAdmin',
     },
     {
       key: 'domain_join_applications', label: '入域申请', href: '/domain/join_applications',
       icon: UserPlus, templateNames: ['domain_join_applications.html'],
+      requiredAccess: 'domainAdmin',
     },
   ],
 });
@@ -86,12 +95,12 @@ registerAdminNavSection({
       requiredPriv: PRIV.PRIV_EDIT_SYSTEM,
     },
     {
-      key: 'manage_user_import', label: '批量导入', href: '/manage/user/import',
+      key: 'manage_user_import', label: '批量导入', href: '/manage/userimport',
       icon: UserPlus, templateNames: ['manage_user_import.html'],
       requiredPriv: PRIV.PRIV_EDIT_SYSTEM,
     },
     {
-      key: 'manage_user_priv', label: '用户权限', href: '/manage/user/priv',
+      key: 'manage_user_priv', label: '用户权限', href: '/manage/userpriv',
       icon: UserCheck, templateNames: ['manage_user_priv.html'],
       requiredPriv: PRIV.PRIV_EDIT_SYSTEM,
     },
@@ -102,10 +111,12 @@ registerAdminNavSection({
   key: 'content',
   label: '内容管理',
   order: 25,
+  requiredAccess: 'domainAdmin',
   items: [
     {
-      key: 'problem_import', label: '题目导入', href: '/p/import',
+      key: 'problem_import', label: '题目导入', href: '/problem/import/hydro',
       icon: FileBox, templateNames: ['problem_import.html'],
+      requiredAccess: 'domainAdmin',
     },
   ],
 });

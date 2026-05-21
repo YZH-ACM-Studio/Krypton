@@ -17,9 +17,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
+import { AdminPage } from '@/components/admin/admin-page';
 import { useBootstrap } from '@/lib/bootstrap';
 
 type R = Record<string, any>;
@@ -162,22 +162,16 @@ export function DomainJoinApplicationsPage() {
   };
 
   return (
-    <motion.div
-      className="mx-auto max-w-2xl space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
-          <ArrowLeft className="size-4" />
-        </Button>
+    <AdminPage
+      bypassPrivGate
+      title={(
         <div className="flex items-center gap-2">
           <Shield className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">加入设置</h1>
+          <h1 className="text-xl font-semibold">入域申请</h1>
         </div>
-      </div>
-
+      )}
+      description="管理加入域的方式与默认角色"
+    >
       {joinSettings && (
         <Card className="border-primary/20 bg-primary/5">
           <CardContent className="p-4">
@@ -206,7 +200,7 @@ export function DomainJoinApplicationsPage() {
           <CardTitle className="text-base">修改加入设置</CardTitle>
         </CardHeader>
         <CardContent>
-          <form method="post" className="space-y-4">
+          <form method="post" className="grid gap-4 sm:max-w-xl">
             <div className="space-y-1.5">
               <label htmlFor="method" className="text-sm font-medium">加入方式</label>
               <select id="method" name="method" defaultValue={joinSettings?.method ?? 0} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
@@ -244,11 +238,13 @@ export function DomainJoinApplicationsPage() {
               <Input id="group" name="group" placeholder="组名" />
             </div>
 
-            <Button type="submit"><Save className="mr-1 size-4" />保存</Button>
+            <div className="flex justify-end">
+              <Button type="submit"><Save className="mr-1 size-4" />保存</Button>
+            </div>
           </form>
         </CardContent>
       </Card>
-    </motion.div>
+    </AdminPage>
   );
 }
 

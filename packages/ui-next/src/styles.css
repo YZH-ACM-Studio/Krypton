@@ -165,10 +165,21 @@
   .krypton-table {
     min-width: max-content;
   }
+}
 
-  .krypton-markdown-editor {
-    height: min(360px, 62vh) !important;
-    min-height: min(360px, 62vh) !important;
+/* MarkdownEditor responsive height. Desktop: fixed height set by JS via the
+   CSS variable `--md-shell-h`. Mobile: drop the fixed height and let each
+   pane breathe with a sensible floor. */
+.krypton-md-shell {
+  height: var(--md-shell-h, 400px);
+}
+@media (max-width: 767px) {
+  .krypton-md-shell {
+    height: auto;
+  }
+  .krypton-md-shell > * {
+    min-height: 220px;
+    max-height: 60vh;
   }
 }
 
@@ -196,6 +207,117 @@
     cursor: row-resize;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/*  Markdown prose — manual replacement for @tailwindcss/typography.   */
+/*  Applied via `.krypton-prose` so MarkdownContent renders nicely      */
+/*  even though we don't ship the typography plugin.                   */
+/* ------------------------------------------------------------------ */
+.krypton-prose {
+  color: var(--foreground);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  word-wrap: break-word;
+}
+.krypton-prose > * + * { margin-top: 0.875em; }
+.krypton-prose h1, .krypton-prose h2, .krypton-prose h3,
+.krypton-prose h4, .krypton-prose h5, .krypton-prose h6 {
+  font-weight: 600;
+  color: var(--foreground);
+  line-height: 1.25;
+  margin-top: 1.4em;
+  margin-bottom: 0.5em;
+  scroll-margin-top: 5rem;
+}
+.krypton-prose h1 { font-size: 1.6em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+.krypton-prose h2 { font-size: 1.35em; border-bottom: 1px solid var(--border); padding-bottom: 0.25em; }
+.krypton-prose h3 { font-size: 1.15em; }
+.krypton-prose h4 { font-size: 1em; }
+.krypton-prose h5 { font-size: 0.9em; }
+.krypton-prose h6 { font-size: 0.85em; color: var(--muted-foreground); }
+.krypton-prose p { margin: 0.8em 0; }
+.krypton-prose a { color: var(--primary); text-decoration: none; }
+.krypton-prose a:hover { text-decoration: underline; }
+.krypton-prose strong { font-weight: 600; color: var(--foreground); }
+.krypton-prose em { font-style: italic; }
+.krypton-prose del { text-decoration: line-through; color: var(--muted-foreground); }
+.krypton-prose ul, .krypton-prose ol { padding-left: 1.5em; margin: 0.8em 0; }
+.krypton-prose ul { list-style-type: disc; }
+.krypton-prose ol { list-style-type: decimal; }
+.krypton-prose li { margin: 0.25em 0; }
+.krypton-prose li > p { margin: 0.25em 0; }
+.krypton-prose ul ul, .krypton-prose ul ol,
+.krypton-prose ol ul, .krypton-prose ol ol { margin: 0.25em 0; }
+.krypton-prose blockquote {
+  border-left: 3px solid var(--border);
+  padding: 0.2em 1em;
+  margin: 1em 0;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.krypton-prose blockquote p { margin: 0.4em 0; }
+.krypton-prose code:not(pre code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  padding: 0.15em 0.4em;
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+  color: var(--foreground);
+}
+.krypton-prose pre {
+  background: var(--muted);
+  color: var(--foreground);
+  padding: 0.9em 1em;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  font-size: 0.85em;
+  line-height: 1.55;
+  margin: 1em 0;
+}
+.krypton-prose pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+.krypton-prose hr { border: 0; border-top: 1px solid var(--border); margin: 1.5em 0; }
+.krypton-prose img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+}
+.krypton-prose table {
+  border-collapse: collapse;
+  width: max-content;
+  max-width: 100%;
+  margin: 1em 0;
+  font-size: 0.85em;
+}
+.krypton-prose th, .krypton-prose td {
+  border: 1px solid var(--border);
+  padding: 0.4em 0.75em;
+  text-align: left;
+}
+.krypton-prose th {
+  background: color-mix(in srgb, var(--muted) 50%, transparent);
+  font-weight: 600;
+}
+.krypton-prose tr:nth-child(2n) td {
+  background: color-mix(in srgb, var(--muted) 30%, transparent);
+}
+.krypton-prose details { margin: 0.8em 0; }
+.krypton-prose summary { cursor: pointer; font-weight: 500; }
+.krypton-prose kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78em;
+  padding: 0.15em 0.45em;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 0.3em;
+  background: var(--card);
+}
+.krypton-prose input[type="checkbox"] { margin-right: 0.4em; }
 
 /* Dark mode: override highlight.js code block background */
 .dark .hljs {

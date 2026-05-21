@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import type { PrivBit } from '@/lib/perms';
+import type { AdminAccessLevel, PrivBit } from '@/lib/perms';
 
 export interface AdminNavItem {
   /** Unique key within a section. */
@@ -12,8 +12,14 @@ export interface AdminNavItem {
   icon?: ComponentType<{ className?: string }>;
   /** Template names that activate this item (used to highlight current). */
   templateNames?: string[];
-  /** Required priv bit (any-of). If omitted, item is shown to anyone who can see the section. */
+  /** Required priv bit. If omitted, item is shown to anyone who can see the section. */
   requiredPriv?: PrivBit;
+  /**
+   * Higher-level access gate (matches the bootstrap user's priv + role). Used
+   * for entries whose backend gate is per-domain permission rather than a
+   * single PRIV bit. Evaluated together with requiredPriv (both must pass).
+   */
+  requiredAccess?: AdminAccessLevel;
   /** Optional badge text (e.g., "新", count). */
   badge?: string | number;
 }
@@ -27,6 +33,8 @@ export interface AdminNavSection {
   order: number;
   /** Required priv to see this section at all. If omitted, anyone with any admin priv sees it. */
   requiredPriv?: PrivBit;
+  /** Higher-level access gate (see AdminNavItem.requiredAccess). */
+  requiredAccess?: AdminAccessLevel;
   items: AdminNavItem[];
 }
 

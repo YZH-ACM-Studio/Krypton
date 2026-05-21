@@ -9,6 +9,7 @@ import { Check, Clock, Lock, Minus, X as XIcon, AlertCircle } from 'lucide-react
 import { cn } from '@/lib/cn';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { MiniTabs } from '@/components/ui/mini-tabs';
 
 export type QuestionKind = 'single' | 'multi' | 'blank' | 'fill_program' | 'fill_function' | 'default' | 'submit_answer';
 
@@ -56,6 +57,10 @@ export function groupCellsByKind(cells: PaperCell[]): Map<QuestionKind, PaperCel
 const KIND_ORDER: QuestionKind[] = ['single', 'multi', 'blank', 'fill_program', 'fill_function', 'default', 'submit_answer'];
 
 // ─── Mini Tab Bar (horizontal, lives at top of sub-sidebar) ──────────────
+//
+// Wraps the shared <MiniTabs> primitive — adds a lock icon for kinds whose
+// "submit by kind" gate has been triggered. Renders in a thin card-tinted
+// strip across the sub-sidebar so it visually anchors the cell grid below.
 
 export function MiniTabBar({
   groups, current, onChange, lockedKinds,
@@ -66,31 +71,24 @@ export function MiniTabBar({
   lockedKinds: Set<QuestionKind>;
 }) {
   const ordered = KIND_ORDER.filter((k) => groups.has(k));
+  if (!ordered.length || !current) return null;
   return (
-    <div className="flex flex-wrap gap-1 border-b bg-card/50 p-2">
-      {ordered.map((kind) => {
-        const count = groups.get(kind)!.length;
-        const active = current === kind;
-        const locked = lockedKinds.has(kind);
-        return (
-          <button
-            key={kind}
-            type="button"
-            onClick={() => onChange(kind)}
-            className={cn(
-              'flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors',
-              active
-                ? 'bg-primary text-primary-foreground shadow-sm'
-                : 'text-muted-foreground hover:bg-accent hover:text-foreground',
-            )}
-            title={KIND_LABELS[kind]}
-          >
-            <span className="font-semibold">{KIND_SHORT[kind]}</span>
-            <span className={cn('rounded px-1 text-[10px]', active ? 'bg-primary-foreground/20' : 'bg-muted/60')}>{count}</span>
-            {locked && <Lock className="size-3" />}
-          </button>
-        );
-      })}
+    <div className="border-b bg-card/50 p-2">
+      <MiniTabs
+        size="sm"
+        value={current}
+        onValueChange={(k) => onChange(k as QuestionKind)}
+        items={ordered.map((kind) => ({
+          value: kind,
+          label: (
+            <span className="inline-flex items-center gap-1">
+              <span className="font-semibold">{KIND_SHORT[kind]}</span>
+              {lockedKinds.has(kind) && <Lock className="size-3" />}
+            </span>
+          ),
+          count: groups.get(kind)!.length,
+        }))}
+      />
     </div>
   );
 }

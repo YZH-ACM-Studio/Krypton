@@ -28,6 +28,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { DateTime } from '@/components/ui/datetime';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { TableAction, TableActions } from '@/components/ui/table-actions';
 
 // ─── Register admin nav ───────────────────────────────────────────────────
 
@@ -153,7 +154,7 @@ export function AdminTasksListPage() {
                 <TableHead>任务点</TableHead>
                 <TableHead>认领</TableHead>
                 <TableHead>状态</TableHead>
-                <TableHead className="text-right">操作</TableHead>
+                <TableHead className="w-72">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -189,24 +190,26 @@ export function AdminTasksListPage() {
                       <Badge className="bg-emerald-500 text-white hover:bg-emerald-500/90">启用</Badge>
                     ) : <Badge variant="outline">停用</Badge>}
                   </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <Button asChild size="sm" variant="ghost"><a href={`/admin/tasks/${task._id}/stats`}>统计</a></Button>
-                      <Button asChild size="sm" variant="ghost"><a href={`/admin/tasks/${task._id}/assign`}>分配</a></Button>
-                      <Button asChild size="sm" variant="ghost"><a href={`/admin/tasks/${task._id}/edit`}>编辑</a></Button>
-                      <form method="post" action="/admin/tasks" className="inline-block">
-                        <input type="hidden" name="operation" value="clone" />
-                        <input type="hidden" name="tid" value={task._id} />
-                        <Button type="submit" size="sm" variant="ghost" title="复制"><Copy className="size-4" /></Button>
-                      </form>
-                      <form method="post" action="/admin/tasks" className="inline-block"
-                        onSubmit={(e) => { if (!confirm(`确定删除任务"${task.title}"？这将一并删除所有用户的分配记录。`)) e.preventDefault(); }}
-                      >
-                        <input type="hidden" name="operation" value="delete" />
-                        <input type="hidden" name="tid" value={task._id} />
-                        <Button type="submit" size="sm" variant="ghost" className="text-destructive"><Trash2 className="size-4" /></Button>
-                      </form>
-                    </div>
+                  <TableCell>
+                    <TableActions>
+                      <TableAction href={`/admin/tasks/${task._id}/stats`}>统计</TableAction>
+                      <TableAction href={`/admin/tasks/${task._id}/assign`}>分配</TableAction>
+                      <TableAction href={`/admin/tasks/${task._id}/edit`}>编辑</TableAction>
+                      <TableAction
+                        formAction="/admin/tasks"
+                        hidden={{ operation: 'clone', tid: task._id }}
+                        icon={Copy}
+                        hint="复制"
+                      />
+                      <TableAction
+                        formAction="/admin/tasks"
+                        hidden={{ operation: 'delete', tid: task._id }}
+                        icon={Trash2}
+                        variant="destructive"
+                        hint="删除"
+                        confirm={`确定删除任务"${task.title}"？这将一并删除所有用户的分配记录。`}
+                      />
+                    </TableActions>
                   </TableCell>
                 </TableRow>
               ))}

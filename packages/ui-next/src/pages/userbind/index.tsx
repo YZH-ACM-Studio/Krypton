@@ -24,6 +24,7 @@ import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { ImportResultPanel, RosterImporter, type ImportResult } from '@/components/userbind/roster-importer';
 import { DateTime } from '@/components/ui/datetime';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { TableAction, TableActions } from '@/components/ui/table-actions';
 
 // Register navigation entries for the admin sidebar — happens once at module load.
 registerAdminNavSection({
@@ -153,7 +154,7 @@ export function AdminUserbindSchoolsPage() {
               <TableRow>
                 <TableHead className="pl-5">名称</TableHead>
                 <TableHead className="w-48">创建时间</TableHead>
-                <TableHead className="w-32 pr-5 text-right">操作</TableHead>
+                <TableHead className="w-32">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -170,10 +171,10 @@ export function AdminUserbindSchoolsPage() {
                       <a href={`/admin/userbind/schools/${s._id}`} className="hover:text-primary">{s.name}</a>
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground"><DateTime value={s.createdAt} /></TableCell>
-                    <TableCell className="pr-5 text-right">
-                      <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
-                        <a href={`/admin/userbind/schools/${s._id}`}>查看</a>
-                      </Button>
+                    <TableCell>
+                      <TableActions>
+                        <TableAction href={`/admin/userbind/schools/${s._id}`}>查看</TableAction>
+                      </TableActions>
                     </TableCell>
                   </TableRow>
                 ))
@@ -392,7 +393,7 @@ export function AdminUserbindGroupsPage() {
               <TableRow>
                 <TableHead className="pl-5">名称</TableHead>
                 <TableHead>所属学校</TableHead>
-                <TableHead className="w-32 pr-5 text-right">操作</TableHead>
+                <TableHead className="w-32">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -400,10 +401,10 @@ export function AdminUserbindGroupsPage() {
                 <TableRow key={g._id}>
                   <TableCell className="pl-5 font-medium">{g.name}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{schoolNameById.get(g.schoolId) || g.schoolId}</TableCell>
-                  <TableCell className="pr-5 text-right">
-                    <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
-                      <a href={`/admin/userbind/groups/${g._id}`}>查看</a>
-                    </Button>
+                  <TableCell>
+                    <TableActions>
+                      <TableAction href={`/admin/userbind/groups/${g._id}`}>查看</TableAction>
+                    </TableActions>
                   </TableCell>
                 </TableRow>
               ))}
@@ -624,7 +625,7 @@ export function AdminUserbindStudentsPage() {
                 <TableHead className="pl-5 w-40">学号</TableHead>
                 <TableHead>姓名</TableHead>
                 <TableHead className="w-40">绑定状态</TableHead>
-                <TableHead className="w-32 pr-5 text-right">操作</TableHead>
+                <TableHead className="w-32">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -639,15 +640,15 @@ export function AdminUserbindStudentsPage() {
                       <Badge variant="outline">未绑定</Badge>
                     )}
                   </TableCell>
-                  <TableCell className="pr-5 text-right">
+                  <TableCell>
                     {!s.boundUserId && (
-                      <form method="post" className="inline-block">
-                        <input type="hidden" name="operation" value="generateStudentToken" />
-                        <input type="hidden" name="studentRecordId" value={s._id} />
-                        <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs gap-1">
-                          <KeyRound className="size-3" />单人令牌
-                        </Button>
-                      </form>
+                      <TableActions>
+                        <TableAction
+                          formAction=""
+                          hidden={{ operation: 'generateStudentToken', studentRecordId: s._id }}
+                          icon={KeyRound}
+                        >单人令牌</TableAction>
+                      </TableActions>
                     )}
                   </TableCell>
                 </TableRow>
@@ -811,7 +812,7 @@ export function AdminUserbindTokensPage() {
                 <TableHead>状态</TableHead>
                 <TableHead>创建时间</TableHead>
                 <TableHead>过期时间</TableHead>
-                <TableHead className="pr-5 text-right">操作</TableHead>
+                <TableHead className="w-24">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -845,14 +846,14 @@ export function AdminUserbindTokensPage() {
                     </TableCell>
                     <TableCell className="text-xs"><DateTime value={t.createdAt} /></TableCell>
                     <TableCell className="text-xs">{t.expiresAt ? <DateTime value={t.expiresAt} /> : "永久"}</TableCell>
-                    <TableCell className="pr-5 text-right">
-                      <form method="post" className="inline-block">
-                        <input type="hidden" name="operation" value="revoke" />
-                        <input type="hidden" name="tokenId" value={t._id} />
-                        <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">
-                          撤销
-                        </Button>
-                      </form>
+                    <TableCell>
+                      <TableActions>
+                        <TableAction
+                          formAction=""
+                          hidden={{ operation: 'revoke', tokenId: t._id }}
+                          variant="destructive"
+                        >撤销</TableAction>
+                      </TableActions>
                     </TableCell>
                   </TableRow>
                 );
@@ -914,7 +915,7 @@ export function AdminUserbindRequestsPage() {
                 <TableHead>类型</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead>提交时间</TableHead>
-                <TableHead className="pr-5 text-right">操作</TableHead>
+                <TableHead className="w-44">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -941,14 +942,14 @@ export function AdminUserbindRequestsPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-xs"><DateTime value={r.createdAt} /></TableCell>
-                  <TableCell className="pr-5 text-right">
+                  <TableCell>
                     {r.status === 'pending' && (
-                      <div className="inline-flex gap-1">
-                        <form method="post" className="inline-block">
-                          <input type="hidden" name="operation" value="approve" />
-                          <input type="hidden" name="requestId" value={r._id} />
-                          <Button type="submit" size="sm" className="h-7 text-xs">通过</Button>
-                        </form>
+                      <TableActions>
+                        <TableAction
+                          formAction=""
+                          hidden={{ operation: 'approve', requestId: r._id }}
+                          variant="primary"
+                        >通过</TableAction>
                         <form method="post" className="inline-block" onSubmit={(e) => {
                           const reason = window.prompt('驳回理由（必填）：') ?? '';
                           if (!reason.trim()) {
@@ -962,9 +963,12 @@ export function AdminUserbindRequestsPage() {
                           <input type="hidden" name="operation" value="reject" />
                           <input type="hidden" name="requestId" value={r._id} />
                           <input type="hidden" name="reason" value="" />
-                          <Button type="submit" variant="outline" size="sm" className="h-7 text-xs">驳回</Button>
+                          <button
+                            type="submit"
+                            className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-destructive/40 px-2.5 text-xs font-medium text-destructive transition-colors hover:border-destructive hover:bg-destructive/10"
+                          >驳回</button>
                         </form>
-                      </div>
+                      </TableActions>
                     )}
                     {r.status === 'rejected' && r.rejectReason && (
                       <span className="text-xs text-muted-foreground" title={r.rejectReason}>

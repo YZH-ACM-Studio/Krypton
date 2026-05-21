@@ -51,7 +51,7 @@ export function ExamModeHomePage() {
 
   return (
     <ExamHomeShell>
-      <div className="mx-auto max-w-5xl space-y-8 p-6">
+      <div className="space-y-8">
         <motion.header
           initial={{ opacity: 0, y: -6 }}
           animate={{ opacity: 1, y: 0 }}

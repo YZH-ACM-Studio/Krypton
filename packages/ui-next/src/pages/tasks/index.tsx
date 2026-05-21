@@ -163,7 +163,7 @@ export function TaskCenterPage() {
   }, [tasks, query, activeTag, showInactive]);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-6">
+    <div className="space-y-6">
       <motion.header
         initial={{ opacity: 0, y: -6 }}
         animate={{ opacity: 1, y: 0 }}
@@ -301,7 +301,7 @@ export function TaskMyPage() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-6">
+    <div className="space-y-6">
       <motion.header
         initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
         className="flex items-center justify-between rounded-xl border bg-card p-6 shadow-sm"
@@ -419,7 +419,7 @@ export function TaskDetailPage() {
   const overallPct = totalPoints > 0 ? Math.round((completedPoints / totalPoints) * 100) : 0;
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-6">
+    <div className="space-y-6">
       <motion.header
         initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
         className="rounded-xl border bg-card p-6 shadow-sm"

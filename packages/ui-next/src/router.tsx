@@ -218,9 +218,10 @@ function DefaultAppShell() {
           </div>
         </header>
 
-        {/* Content area */}
-        <main className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-6">
-          <div className="mx-auto min-w-0 max-w-6xl">
+        {/* Content area — full-bleed; pages decide their own max width.
+            Outer padding scales: 12 / 24 / 32 / 40 px on mobile→ultrawide. */}
+        <main className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-6 xl:p-8 2xl:px-10">
+          <div className="min-w-0">
             <Outlet />
           </div>
         </main>

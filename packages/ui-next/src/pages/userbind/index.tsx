@@ -1006,7 +1006,7 @@ export function UserBindPage() {
 
   if (data.alreadyBound) {
     return (
-      <div className="mx-auto max-w-2xl space-y-5 py-8">
+      <div className="space-y-5">
         <Card>
           <CardHeader className="px-6 pb-3 pt-6">
             <CardTitle className="flex items-center gap-2 text-base">
@@ -1025,7 +1025,7 @@ export function UserBindPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5 py-6">
+    <div className="space-y-5">
       <div className="space-y-1">
         <h1 className="text-xl font-semibold">绑定学生身份</h1>
         <p className="text-sm text-muted-foreground">
@@ -1212,7 +1212,7 @@ export function UserBindLandingPage() {
   // Error cases
   if (data.error) {
     return (
-      <div className="mx-auto max-w-md space-y-4 py-10">
+      <div className="space-y-4">
         <Card className="border-rose-500/40 bg-rose-500/5">
           <CardHeader className="px-6 pb-3 pt-6">
             <CardTitle className="flex items-center gap-2 text-base text-rose-700 dark:text-rose-300">
@@ -1238,7 +1238,7 @@ export function UserBindLandingPage() {
   // Student kind: one-click bind
   if (data.kind === 'student' && data.student) {
     return (
-      <div className="mx-auto max-w-md space-y-5 py-10">
+      <div className="space-y-5">
         <Card>
           <CardHeader className="px-6 pb-3 pt-6">
             <CardTitle className="flex items-center gap-2 text-base">
@@ -1292,7 +1292,7 @@ export function UserBindLandingPage() {
   const kindLabel = data.kind === 'school' ? '加入学校' : '加入用户组';
   const targetName = data.kind === 'school' ? data.school?.name : data.group?.name;
   return (
-    <div className="mx-auto max-w-md space-y-5 py-10">
+    <div className="space-y-5">
       <Card>
         <CardHeader className="px-6 pb-3 pt-6">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -1361,7 +1361,7 @@ export function UserBindSuccessPage() {
     wasAlreadyBound?: boolean;
   };
   return (
-    <div className="mx-auto max-w-md space-y-4 py-10">
+    <div className="space-y-4">
       <Card className="border-emerald-500/40 bg-emerald-500/5">
         <CardHeader className="px-6 pb-3 pt-6">
           <CardTitle className="flex items-center gap-2 text-base text-emerald-700 dark:text-emerald-300">
@@ -1403,7 +1403,7 @@ export function UserBindClaimPage() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5 py-6">
+    <div className="space-y-5">
       <header className="space-y-1">
         <h1 className="flex items-center gap-2 text-xl font-semibold">
           <Mail className="size-5 text-primary" />

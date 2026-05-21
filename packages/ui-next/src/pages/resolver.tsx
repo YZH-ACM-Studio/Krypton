@@ -80,6 +80,15 @@ import {
   AdminVigilSessionsPage,
   AdminVigilEventsPage,
 } from '@/pages/vigil';
+import { TaskCenterPage, TaskMyPage, TaskDetailPage } from '@/pages/tasks';
+import {
+  AdminTasksListPage,
+  AdminTasksEditPage,
+  AdminTasksAssignPage,
+  AdminTasksStatsPage,
+  AdminTasksScoresPage,
+  AdminTasksSettingsPage,
+} from '@/pages/admin-tasks';
 
 type PageComponent = React.ComponentType;
 
@@ -226,6 +235,19 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'admin_vigil_approvals.html': AdminVigilApprovalsPage,
   'admin_vigil_sessions.html': AdminVigilSessionsPage,
   'admin_vigil_events.html': AdminVigilEventsPage,
+
+  // krypton-tasks (user-facing)
+  'tasks_center.html': TaskCenterPage,
+  'tasks_my.html': TaskMyPage,
+  'tasks_detail.html': TaskDetailPage,
+
+  // krypton-tasks (admin-facing)
+  'admin_tasks.html': AdminTasksListPage,
+  'admin_tasks_edit.html': AdminTasksEditPage,
+  'admin_tasks_assign.html': AdminTasksAssignPage,
+  'admin_tasks_stats.html': AdminTasksStatsPage,
+  'admin_tasks_scores.html': AdminTasksScoresPage,
+  'admin_tasks_settings.html': AdminTasksSettingsPage,
 };
 
 export function PageResolver() {

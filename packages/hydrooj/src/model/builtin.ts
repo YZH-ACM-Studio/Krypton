@@ -75,6 +75,9 @@ export const PERMS = [
     Permission('perm_training', PERM.PERM_PIN_TRAINING, 'Pin training plans'),
     Permission('perm_training', PERM.PERM_EDIT_TRAINING_SELF, 'Edit own training plans'),
     Permission('perm_ranking', PERM.PERM_VIEW_RANKING, 'View ranking'),
+    Permission('perm_tasks', PERM.PERM_VIEW_TASKS, 'View tasks'),
+    Permission('perm_tasks', PERM.PERM_CREATE_TASK, 'Create tasks'),
+    Permission('perm_tasks', PERM.PERM_MANAGE_TASKS, 'Manage all tasks in this domain'),
 ];
 
 export const PERMS_BY_FAMILY = {};

@@ -36,6 +36,7 @@ const BUILTIN_ADDONS = [
     path.resolve(__dirname, '..'),
     path.resolve(__dirname, '..', '..', 'ui-next'),
     path.resolve(__dirname, '..', '..', 'krypton-userbind'),
+    path.resolve(__dirname, '..', '..', 'krypton-tasks'),
 ].filter((dir) => fs.existsSync(path.join(dir, 'package.json')));
 
 if (process.env.NIX_PROFILES) {

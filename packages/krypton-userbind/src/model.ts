@@ -478,6 +478,18 @@ export async function findStudentByStudentId(
     return await studentsColl.findOne({ domainId, schoolId, studentId });
 }
 
+/**
+ * Find the student record bound to a given OJ user. Returns null if the user
+ * has no binding in this domain. Used by sibling plugins (e.g. krypton-tasks)
+ * to resolve a user's school / group membership without reaching into our
+ * collections directly.
+ */
+export async function findStudentByUserId(
+    domainId: string, userId: number,
+): Promise<StudentRecord | null> {
+    return await studentsColl.findOne({ domainId, boundUserId: userId });
+}
+
 export async function deleteStudent(domainId: string, id: ObjectId): Promise<void> {
     const doc = await studentsColl.findOne({ domainId, _id: id });
     if (!doc) return;
@@ -569,6 +581,7 @@ export const userBindModel = {
     listStudents,
     getStudent,
     findStudentByStudentId,
+    findStudentByUserId,
     deleteStudent,
     assignStudentsToGroup,
     removeStudentsFromGroup,

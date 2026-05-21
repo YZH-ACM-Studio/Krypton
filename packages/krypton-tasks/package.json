@@ -1,0 +1,7 @@
+{
+    "name": "@hydrooj/krypton-tasks",
+    "version": "0.1.0",
+    "description": "Krypton OJ: pluggable training-task system for contest eligibility (ICPC / CCPC / GPLT)",
+    "main": "./index.ts",
+    "license": "AGPL-3.0-or-later"
+}

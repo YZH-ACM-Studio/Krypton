@@ -1,0 +1,82 @@
+/**
+ * i18n strings for krypton-tasks. Loaded via ctx.i18n.load.
+ */
+export const i18n_zh = {
+    tasks_center: '任务中心',
+    tasks_my: '我的任务',
+    admin_tasks: '任务管理',
+    admin_tasks_scores: '比赛分数',
+
+    'Tasks': '任务',
+    'Task Center': '任务中心',
+    'My Tasks': '我的任务',
+    'Task Detail': '任务详情',
+    'Create Task': '创建任务',
+    'Edit Task': '编辑任务',
+    'Delete Task': '删除任务',
+    'Clone Task': '复制任务',
+    'Assign Task': '分配任务',
+    'Task Statistics': '任务统计',
+    'Task Settings': '任务设置',
+
+    'Claim': '认领',
+    'Cancel Claim': '取消认领',
+    'Recheck': '立即检查',
+    'Active': '启用',
+    'Inactive': '停用',
+    'Pending': '进行中',
+    'Completed': '已完成',
+    'Cancelled': '已取消',
+    'Self-Claimed': '自主认领',
+    'Admin-Assigned': '管理员分配',
+
+    'Add Task Point': '添加任务点',
+    'Remove Task Point': '移除任务点',
+    'Condition: All': '满足全部任务点',
+    'Condition: Groups': '满足分组条件',
+    'Add Group': '添加分组',
+    'Group': '分组',
+    'Require N': '至少完成 N 个',
+
+    'Access: Public': '所有人可见',
+    'Access: User Group': '限定用户组',
+    'Access: School': '限定学校',
+    'Visibility': '可见范围',
+    'Tags': '标签',
+    'Start Date': '开始日期',
+    'End Date': '结束日期',
+    'Max Assignments': '最大认领数',
+    'Assignments': '认领人数',
+
+    'PAT': 'PAT 认证',
+    'GPLT': '天梯赛',
+    'CSP': 'CSP 认证',
+    'PAT Advanced': '甲级',
+    'PAT Basic': '乙级',
+    'School Contest': '校赛',
+    'National Contest': '国赛',
+    'Year': '年份',
+    'Season': '季节',
+    'Round': '次数',
+    'Score': '分数',
+    'Spring': '春季',
+    'Summer': '夏季',
+    'Autumn': '秋季',
+    'Winter': '冬季',
+
+    'Add Score': '添加分数',
+    'Import Scores': '批量导入分数',
+    'Max Score Cap': '分数上限',
+
+    'Audit Log': '审计日志',
+    'Override Completion': '管理员判定完成',
+    'Override Reason': '判定原因',
+    'Manual Override': '管理员手动判定',
+};
+
+export const i18n_en = {
+    tasks_center: 'Task Center',
+    tasks_my: 'My Tasks',
+    admin_tasks: 'Tasks',
+    admin_tasks_scores: 'Contest Scores',
+};

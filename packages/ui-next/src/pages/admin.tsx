@@ -4,7 +4,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { AdminPage } from '@/components/admin/admin-page';
 import { useBootstrap } from '@/lib/bootstrap';
+import { PERM, PRIV } from '@/lib/perms';
 import { formatDateTime } from '@/lib/format';
 
 type R = Record<string, any>;
@@ -26,16 +28,15 @@ export function DomainDashboardPage() {
   const isOwner = String(bs.user.id) === String(ownerId ?? '');
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
+    <AdminPage
+      title={(
+        <div className="flex items-center gap-2">
+          <LayoutDashboard className="size-5 text-primary" />
+          <h1 className="text-xl font-semibold">域管理</h1>
+        </div>
+      )}
+      bypassPrivGate
     >
-      <div className="flex items-center gap-2">
-        <LayoutDashboard className="size-5 text-primary" />
-        <h1 className="text-xl font-semibold">域管理</h1>
-      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
@@ -61,17 +62,25 @@ export function DomainDashboardPage() {
           <CardContent className="space-y-2">
             {[
               { label: '编辑域信息', href: '/domain/edit' },
-              { label: '用户管理', href: '/domain/user' },
+              { label: '域用户管理', href: '/domain/user' },
               { label: '权限设置', href: '/domain/permission' },
               { label: '角色管理', href: '/domain/role' },
-              { label: '用户组', href: '/domain/group' },
+              { label: '域权限用户组', href: '/domain/group', hint: 'Hydro 自带，按 UID 分组授权' },
+              { label: '学生 / 班级 / 学校（用户绑定）', href: '/admin/userbind', hint: 'Krypton 扩展' },
+              { label: '反作弊后台', href: '/admin/vigil' },
+              { label: '任务系统', href: '/admin/tasks' },
             ].map((link) => (
               <a
                 key={link.href}
                 href={link.href}
                 className="flex items-center justify-between rounded-md px-3 py-2 text-sm transition-colors hover:bg-accent"
               >
-                <span>{link.label}</span>
+                <span>
+                  {link.label}
+                  {(link as any).hint && (
+                    <span className="ml-2 text-xs text-muted-foreground">({(link as any).hint})</span>
+                  )}
+                </span>
                 <span className="text-muted-foreground">→</span>
               </a>
             ))}
@@ -127,7 +136,7 @@ export function DomainDashboardPage() {
           )}
         </CardContent>
       </Card>
-    </motion.div>
+    </AdminPage>
   );
 }
 
@@ -136,16 +145,15 @@ export function ManageDashboardPage() {
   const data = bs.page.data;
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
+    <AdminPage
+      title={(
+        <div className="flex items-center gap-2">
+          <Wrench className="size-5 text-primary" />
+          <h1 className="text-xl font-semibold">系统管理</h1>
+        </div>
+      )}
+      bypassPrivGate
     >
-      <div className="flex items-center gap-2">
-        <Wrench className="size-5 text-primary" />
-        <h1 className="text-xl font-semibold">系统管理</h1>
-      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {[
@@ -192,7 +200,7 @@ export function ManageDashboardPage() {
           </form>
         </CardContent>
       </Card>
-    </motion.div>
+    </AdminPage>
   );
 }
 
@@ -207,16 +215,15 @@ export function StatusPage() {
   const usedMemory = stats.reduce((sum, s) => sum + Number(s.memory?.used || 0), 0);
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
+    <AdminPage
+      title={(
+        <div className="flex items-center gap-2">
+          <Server className="size-5 text-primary" />
+          <h1 className="text-xl font-semibold">系统状态</h1>
+        </div>
+      )}
+      bypassPrivGate
     >
-      <div className="flex items-center gap-2">
-        <Server className="size-5 text-primary" />
-        <h1 className="text-xl font-semibold">系统状态</h1>
-      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
@@ -346,6 +353,6 @@ export function StatusPage() {
           )}
         </CardContent>
       </Card>
-    </motion.div>
+    </AdminPage>
   );
 }

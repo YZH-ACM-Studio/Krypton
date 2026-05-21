@@ -35,7 +35,7 @@ registerAdminNavSection({
   items: [
     { key: 'overview', label: '概览', href: '/admin/userbind', icon: Inbox, templateNames: ['admin_userbind_overview.html'] },
     { key: 'schools', label: '学校', href: '/admin/userbind/schools', icon: Building2, templateNames: ['admin_userbind_schools.html', 'admin_userbind_school_detail.html'] },
-    { key: 'groups', label: '用户组', href: '/admin/userbind/groups', icon: Users, templateNames: ['admin_userbind_groups.html', 'admin_userbind_group_detail.html'] },
+    { key: 'groups', label: '班级/队伍', href: '/admin/userbind/groups', icon: Users, templateNames: ['admin_userbind_groups.html', 'admin_userbind_group_detail.html'] },
     { key: 'students', label: '学生', href: '/admin/userbind/students', icon: GraduationCap, templateNames: ['admin_userbind_students.html'] },
     { key: 'import', label: '批量导入', href: '/admin/userbind/students/import', icon: UserPlus, templateNames: ['admin_userbind_students_import.html'] },
     { key: 'tokens', label: '邀请令牌', href: '/admin/userbind/tokens', icon: KeyRound, templateNames: ['admin_userbind_tokens.html'] },
@@ -385,7 +385,7 @@ export function AdminUserbindGroupsPage() {
   };
   const schoolNameById = new Map(data.schools.map((s) => [s._id, s.name]));
   return (
-    <AdminPage title="用户组" requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
+    <AdminPage title="班级 / 队伍（用户组）" description="学校下的学生分组 — 课程班级 / 校队 / 训练队等。" requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
       <Card>
         <CardContent className="p-0">
           <Table>

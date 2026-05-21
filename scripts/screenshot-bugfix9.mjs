@@ -26,10 +26,29 @@ async function login(page) {
   if (!sigCheck) throw new Error('Login did not stick');
 }
 
+/** If the page is currently showing the sudo "身份验证" gate, fill the password
+ * and submit. Tolerates the new UI's password input that has no name. */
+async function ensureNotInSudo(page) {
+  const isSudo = await page.evaluate(() => {
+    const tpl = window.__KRYPTON_BOOTSTRAP__?.page?.templateName;
+    return tpl === 'user_sudo.html';
+  });
+  if (!isSudo) return;
+  console.log('  (sudo gate detected — re-authenticating)');
+  await page.waitForSelector('input[type="password"]', { timeout: 5000 });
+  await page.fill('input[type="password"]', PASS);
+  const btn = await page.locator('button[type="submit"]').first();
+  await btn.click();
+  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+  await page.waitForTimeout(500);
+}
+
 async function shot(page, name, url) {
   console.log(`> ${name}: ${url}`);
   await page.goto(`${BASE}${url}`, { waitUntil: 'networkidle' }).catch(() => {});
-  await page.waitForTimeout(900);
+  await page.waitForTimeout(800);
+  await ensureNotInSudo(page);
+  await page.waitForTimeout(400);
   await page.screenshot({ path: join(OUT, `${name}.png`), fullPage: true });
 }
 
@@ -61,8 +80,10 @@ async function shot(page, name, url) {
     // Bug 6+7: problem import URL fix — page should render, not error
     await shot(page, '07-problem-import-via-admin', '/problem/import/hydro');
 
-    // Bug 6: error placeholder substitution — visit a nonexistent problem
-    await shot(page, '08-error-placeholder-fixed', '/p/totally_missing_problem');
+    // Bug 6: error placeholder substitution — visit a nonexistent problem.
+    // Use a valid-looking alphanumeric pid so the validator passes and we
+    // actually hit ProblemNotFoundError (which is the one with {1}).
+    await shot(page, '08-error-placeholder-fixed', '/p/P9999');
 
     // Bug 8: markdown editor height alignment + preview rendering
     // domain edit has a MarkdownEditor with a bulletin

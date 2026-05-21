@@ -142,21 +142,52 @@ export function ManageSettingPage() {
 /*  System Config — visual schema-driven editor + YAML fallback           */
 /* ────────────────────────────────────────────────────────────────────── */
 
+/**
+ * Cosmokind Schema toJSON shape. The top-level envelope is
+ *   { uid: number, refs: { [id: number]: SchemaNode } }
+ * where children inside `dict` / `list` are numeric ids pointing back into
+ * `refs`. We resolve those lazily via `lookupRef`.
+ */
+interface SchemaEnvelope {
+  uid: number;
+  refs: Record<string, SchemaNode>;
+}
+
+type DescOrLang = string | Record<string, string>;
+
 interface SchemaNode {
   type?: string;
-  dict?: Record<string, SchemaNode>;
-  list?: SchemaNode[];
-  inner?: SchemaNode;
+  dict?: Record<string, number | SchemaNode>;
+  list?: Array<number | SchemaNode>;
+  inner?: number | SchemaNode;
   meta?: {
-    description?: string;
+    description?: DescOrLang;
     default?: unknown;
     hidden?: boolean;
     role?: string;
     secret?: boolean;
+    required?: boolean;
     [k: string]: unknown;
   };
   value?: unknown;
   [k: string]: unknown;
+}
+
+/** Pick a localised description if present; else the raw string. */
+function describeMeta(meta: SchemaNode['meta'], locale = 'zh-CN'): string | undefined {
+  const desc = meta?.description;
+  if (!desc) return undefined;
+  if (typeof desc === 'string') return desc;
+  const langKey = locale.startsWith('zh') ? 'zh' : 'en';
+  return (desc as Record<string, string>)[langKey] || (desc as Record<string, string>).en
+    || (desc as Record<string, string>).zh
+    || Object.values(desc as Record<string, string>)[0];
+}
+
+function lookupRef(env: SchemaEnvelope | undefined, ref: number | SchemaNode | undefined): SchemaNode | undefined {
+  if (!ref) return undefined;
+  if (typeof ref === 'object') return ref;
+  return env?.refs?.[String(ref)];
 }
 
 /** Walk an object along a path, returning the value or undefined. */
@@ -197,23 +228,26 @@ function compact(value: any): any {
 }
 
 /** Flatten intersect / union into a single dict where possible. */
-function resolveSchema(node: SchemaNode | undefined): SchemaNode {
-  if (!node) return { type: 'unknown' };
-  if (node.type === 'intersect' && Array.isArray(node.list)) {
-    const merged: SchemaNode = { type: 'object', dict: {}, meta: node.meta };
-    for (const child of node.list) {
-      const resolved = resolveSchema(child);
-      if (resolved.type === 'object' && resolved.dict) {
-        Object.assign(merged.dict!, resolved.dict);
+function resolveSchema(env: SchemaEnvelope | undefined, node: SchemaNode | number | undefined): SchemaNode {
+  const resolved = typeof node === 'number' ? lookupRef(env, node) : node;
+  if (!resolved) return { type: 'unknown' };
+  if (resolved.type === 'intersect' && Array.isArray(resolved.list)) {
+    const merged: SchemaNode = { type: 'object', dict: {}, meta: resolved.meta };
+    for (const child of resolved.list) {
+      const sub = resolveSchema(env, child);
+      if (sub.type === 'object' && sub.dict) {
+        Object.assign(merged.dict!, sub.dict);
       }
     }
     return merged;
   }
-  if (node.type === 'union' && Array.isArray(node.list) && node.list.length > 0) {
+  if (resolved.type === 'union' && Array.isArray(resolved.list) && resolved.list.length > 0) {
     // Pick the first non-null branch as the form representation.
-    return resolveSchema(node.list.find((n) => n.type !== 'const' || (n as any).value !== null) || node.list[0]);
+    const branches = resolved.list.map((c) => resolveSchema(env, c));
+    const pick = branches.find((b) => b.type !== 'const' || (b.value !== null && b.value !== undefined)) || branches[0];
+    return pick;
   }
-  return node;
+  return resolved;
 }
 
 function SchemaField({
@@ -226,7 +260,7 @@ function SchemaField({
 }) {
   const meta = node.meta || {};
   const isSecret = meta.secret === true || meta.role === 'secret';
-  const description = meta.description as string | undefined;
+  const description = describeMeta(meta);
   const display = isSecret && value === '[hidden]' ? '' : (value ?? '');
 
   if (node.type === 'string') {
@@ -309,15 +343,16 @@ function SchemaField({
 }
 
 function SchemaSection({
-  node, path, value, onChange, defaultOpen = true,
+  env, node, path, value, onChange, defaultOpen = true,
 }: {
-  node: SchemaNode;
+  env: SchemaEnvelope | undefined;
+  node: SchemaNode | number;
   path: string[];
   value: unknown;
   onChange: (path: string[], next: unknown) => void;
   defaultOpen?: boolean;
 }) {
-  const resolved = resolveSchema(node);
+  const resolved = resolveSchema(env, node);
   const [open, setOpen] = useState(defaultOpen);
 
   if (resolved.type !== 'object' || !resolved.dict) {
@@ -332,6 +367,7 @@ function SchemaSection({
   }
 
   const sectionLabel = path.length === 0 ? '系统配置' : path[path.length - 1];
+  const sectionDesc = describeMeta(resolved.meta);
 
   return (
     <div className={cn(
@@ -346,9 +382,9 @@ function SchemaSection({
         >
           {open ? <ChevronDown className="size-3.5 text-muted-foreground" /> : <ChevronRight className="size-3.5 text-muted-foreground" />}
           <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">{sectionLabel}</span>
-          {resolved.meta?.description ? (
+          {sectionDesc ? (
             <span className="ml-2 truncate text-[11px] font-normal text-muted-foreground/80">
-              {resolved.meta.description as string}
+              {sectionDesc}
             </span>
           ) : null}
         </button>
@@ -358,7 +394,7 @@ function SchemaSection({
           {Object.entries(resolved.dict).map(([key, child]) => {
             const childPath = [...path, key];
             const childValue = getPath(value as any, [key]);
-            const childResolved = resolveSchema(child);
+            const childResolved = resolveSchema(env, child);
             const isLeaf = childResolved.type !== 'object';
 
             return (
@@ -378,6 +414,7 @@ function SchemaSection({
                     />
                   ) : (
                     <SchemaSection
+                      env={env}
                       node={childResolved}
                       path={childPath}
                       value={childValue}
@@ -399,8 +436,10 @@ export function ManageConfigPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
   const initialYaml: string = typeof data.value === 'string' ? data.value : '';
-  const schema: SchemaNode | undefined = data.schema as SchemaNode | undefined;
-  const hasSchema = !!(schema && (schema.dict || schema.list));
+  const env: SchemaEnvelope | undefined = data.schema && typeof data.schema === 'object' && 'uid' in data.schema
+    ? (data.schema as SchemaEnvelope) : undefined;
+  const rootSchema = env ? lookupRef(env, env.uid) : (data.schema as SchemaNode | undefined);
+  const hasSchema = !!(rootSchema && (rootSchema.dict || rootSchema.list || rootSchema.type === 'intersect' || rootSchema.type === 'object'));
 
   // Mode: visual or yaml. Visual is preferred; fall back if no schema or parse fails.
   const [mode, setMode] = useState<'visual' | 'yaml'>(hasSchema ? 'visual' : 'yaml');
@@ -455,7 +494,8 @@ export function ManageConfigPage() {
                 </div>
               ) : (
                 <SchemaSection
-                  node={schema!}
+                  env={env}
+                  node={rootSchema!}
                   path={[]}
                   value={parsed}
                   onChange={handleChange}

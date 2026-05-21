@@ -25,6 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { MarkdownEditor } from '@/components/markdown-renderer';
+import { AdminPage } from '@/components/admin/admin-page';
 import {
   Table,
   TableBody,
@@ -52,24 +53,23 @@ function ManageShell({
   children: React.ReactNode;
 }) {
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
+    <AdminPage
+      bypassPrivGate
+      title={(
+        <div className="flex items-center gap-2">
+          <a
+            href="/manage"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" />
+          </a>
+          <Icon className="size-5 text-primary" />
+          <h1 className="text-lg font-semibold">{title}</h1>
+        </div>
+      )}
     >
-      <div className="flex items-center gap-2">
-        <a
-          href="/manage"
-          className="text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="size-4" />
-        </a>
-        <Icon className="size-5 text-primary" />
-        <h1 className="text-lg font-semibold">{title}</h1>
-      </div>
       {children}
-    </motion.div>
+    </AdminPage>
   );
 }
 

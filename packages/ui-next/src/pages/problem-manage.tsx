@@ -35,6 +35,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { AdminPage } from '@/components/admin/admin-page';
 import { Pagination } from '@/components/ui/pagination';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
@@ -935,22 +936,20 @@ export function ProblemImportPage() {
   const bs = useBootstrap();
 
   return (
-    <motion.div
-      className="mx-auto max-w-lg space-y-6 pt-4"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      <div className="flex items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
-          <a href={bs.urls.problems}><ArrowLeft className="size-4" /></a>
-        </Button>
-        <div>
-          <h1 className="text-xl font-semibold">导入题目</h1>
-          <p className="text-sm text-muted-foreground">从 Hydro 格式压缩包导入</p>
+    <AdminPage
+      bypassPrivGate
+      title={(
+        <div className="flex items-center gap-3">
+          <Button asChild variant="ghost" size="icon">
+            <a href={bs.urls.problems}><ArrowLeft className="size-4" /></a>
+          </Button>
+          <div>
+            <h1 className="text-xl font-semibold">导入题目</h1>
+            <p className="text-sm text-muted-foreground">从 Hydro 格式压缩包导入</p>
+          </div>
         </div>
-      </div>
-
+      )}
+    >
       <Card>
         <CardContent className="p-6">
           <form method="post" encType="multipart/form-data" className="space-y-4">
@@ -979,6 +978,6 @@ export function ProblemImportPage() {
           </form>
         </CardContent>
       </Card>
-    </motion.div>
+    </AdminPage>
   );
 }

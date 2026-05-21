@@ -66,9 +66,9 @@ export function AdminPage({
 
       <motion.div
         className={cn('min-w-0 flex-1 space-y-5', contentClassName)}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2 }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.15 }}
       >
         {(title || actions || description) && (
           <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">

@@ -229,6 +229,38 @@ function groupByExam(
 
 /* ─── Overview ─────────────────────────────────────────────────────── */
 
+/**
+ * Resolve Hydro contest ids → human titles via /api/admin/vigil/resolve-contests.
+ * Returns a Map; missing ids stay missing and the caller can fall back to
+ * displaying the raw id.
+ */
+function useContestNames(ids: string[]): Map<string, string> {
+  const [names, setNames] = useState<Map<string, string>>(new Map());
+  // Stable key so the effect only re-runs when the set of ids actually changes.
+  const key = ids.slice().sort().join(',');
+  useEffect(() => {
+    if (!ids.length) { setNames(new Map()); return; }
+    // Hydro's @param('ids', Types.CommaSeperatedArray) reads only the first
+    // value of repeated form keys, so we must send the ids comma-joined.
+    const form = new URLSearchParams();
+    form.set('ids', ids.join(','));
+    fetch('/api/admin/vigil/resolve-contests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+      body: form,
+    })
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((map) => setNames(new Map(Object.entries(map))))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return names;
+}
+
+function displayExam(id: string, names: Map<string, string>): string {
+  return names.get(id) || id;
+}
+
 export function AdminVigilOverviewPage() {
   const clientsQ = useVigilData<VigilClient[]>(() => fetchClients());
   const sessionsQ = useVigilData<VigilExamSession[]>(() => fetchExamSessions());
@@ -243,6 +275,8 @@ export function AdminVigilOverviewPage() {
     () => groupByExam(sessionsQ.data, approvalsQ.data, eventsQ.data),
     [sessionsQ.data, approvalsQ.data, eventsQ.data],
   );
+  const examIds = useMemo(() => groups.map((g) => g.examId), [groups]);
+  const names = useContestNames(examIds);
   const active = groups.filter((g) => g.isActive);
   const ended = groups.filter((g) => !g.isActive);
 
@@ -291,7 +325,7 @@ export function AdminVigilOverviewPage() {
               <p className="py-6 text-center text-sm text-muted-foreground">没有进行中的考试。</p>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {active.map((g) => <ExamCard key={g.examId} group={g} active />)}
+                {active.map((g) => <ExamCard key={g.examId} group={g} active name={displayExam(g.examId, names)} />)}
               </div>
             )
           )}
@@ -310,7 +344,7 @@ export function AdminVigilOverviewPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="pl-5">考试 ID</TableHead>
+                  <TableHead className="pl-5">考试</TableHead>
                   <TableHead className="w-24 text-right">会话数</TableHead>
                   <TableHead className="w-24 text-right">审批数</TableHead>
                   <TableHead className="w-24 text-right">事件数</TableHead>
@@ -320,13 +354,19 @@ export function AdminVigilOverviewPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {ended.map((g) => (
+                {ended.map((g) => {
+                  const name = displayExam(g.examId, names);
+                  const hasName = name !== g.examId;
+                  return (
                   <TableRow
                     key={g.examId}
                     className="cursor-pointer hover:bg-accent/40"
                     onClick={() => { window.location.href = `/admin/vigil/exams/${encodeURIComponent(g.examId)}`; }}
                   >
-                    <TableCell className="pl-5 font-mono text-xs">{g.examId}</TableCell>
+                    <TableCell className="pl-5">
+                      <p className={cn('text-sm', hasName && 'font-medium')}>{name}</p>
+                      {hasName && <p className="font-mono text-[10px] text-muted-foreground">{g.examId}</p>}
+                    </TableCell>
                     <TableCell className="text-right text-sm">{g.sessions.length}</TableCell>
                     <TableCell className="text-right text-sm">{g.approvals.length}</TableCell>
                     <TableCell className="text-right text-sm">{g.events.length}</TableCell>
@@ -340,7 +380,8 @@ export function AdminVigilOverviewPage() {
                       <ChevronRight className="size-3.5 text-muted-foreground" />
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           )}
@@ -350,9 +391,10 @@ export function AdminVigilOverviewPage() {
   );
 }
 
-function ExamCard({ group, active }: { group: ExamGroup; active?: boolean }) {
+function ExamCard({ group, active, name }: { group: ExamGroup; active?: boolean; name: string }) {
   const pending = group.approvals.filter((a) => a.status === 'pending').length;
   const recentEvents = group.events.length;
+  const hasName = name !== group.examId;
   return (
     <a
       href={`/admin/vigil/exams/${encodeURIComponent(group.examId)}`}
@@ -361,10 +403,13 @@ function ExamCard({ group, active }: { group: ExamGroup; active?: boolean }) {
         active && 'border-emerald-500/40 bg-emerald-500/5',
       )}
     >
-      <div className="flex items-center justify-between">
-        <p className="truncate font-mono text-xs text-muted-foreground">{group.examId}</p>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className={cn('truncate text-sm', hasName && 'font-semibold')}>{name}</p>
+          {hasName && <p className="truncate font-mono text-[10px] text-muted-foreground">{group.examId}</p>}
+        </div>
         {active && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
             <span className="inline-block size-1.5 animate-pulse rounded-full bg-emerald-500" />
             进行中
           </span>
@@ -400,6 +445,7 @@ type TabKey = 'overview' | 'sessions' | 'approvals' | 'events';
 export function AdminVigilExamDetailPage() {
   const bs = useBootstrap();
   const examId = String(bs.page.data.examId || '');
+  const examTitle = bs.page.data.examTitle as string | null | undefined;
   const [tab, setTab] = useState<TabKey>('overview');
 
   const sessionsQ = useVigilData<VigilExamSession[]>(() => fetchExamSessions());
@@ -434,11 +480,12 @@ export function AdminVigilExamDetailPage() {
       title={(
         <div className="flex items-center gap-2">
           <ShieldAlert className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">反作弊 · {examId}</h1>
+          <h1 className="text-xl font-semibold">反作弊 · {examTitle || examId}</h1>
         </div>
       )}
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       hideSidebar
+      description={examTitle ? <span className="font-mono text-[11px]">{examId}</span> : undefined}
       actions={(
         <Button variant="ghost" asChild>
           <a href="/admin/vigil">返回总览</a>

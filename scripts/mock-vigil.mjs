@@ -51,18 +51,18 @@ const EVENTS = [
 ];
 
 const APPROVALS = [
-  { id: 'a1', machine_id: 'lab-04', oj_contest_id: '6a0ed7b216fece62079c1a5a', student_id_input: '202301010', real_name_input: '王五', matched_oj_user_id: null, is_unknown: true,  status: 'pending', created_at: iso(120) },
-  { id: 'a2', machine_id: 'lab-07', oj_contest_id: '6a0ed7b216fece62079c1a5a', student_id_input: '202301011', real_name_input: '赵六', matched_oj_user_id: 102,  is_unknown: false, status: 'pending', created_at: iso(45) },
-  { id: 'a3', machine_id: 'lab-02', oj_contest_id: '6a0ed7b216fece62079c1a5a', student_id_input: '202301002', real_name_input: '李四', matched_oj_user_id: 100,  is_unknown: false, status: 'approved', created_at: iso(800) },
+  { id: 'a1', machine_id: 'lab-04', oj_contest_id: '6a0d8d4b778ff4a7dc9452ac', student_id_input: '202301010', real_name_input: '王五', matched_oj_user_id: null, is_unknown: true,  status: 'pending', created_at: iso(120) },
+  { id: 'a2', machine_id: 'lab-07', oj_contest_id: '6a0d8d4b778ff4a7dc9452ac', student_id_input: '202301011', real_name_input: '赵六', matched_oj_user_id: 102,  is_unknown: false, status: 'pending', created_at: iso(45) },
+  { id: 'a3', machine_id: 'lab-02', oj_contest_id: '6a0d8d4b778ff4a7dc9452ac', student_id_input: '202301002', real_name_input: '李四', matched_oj_user_id: 100,  is_unknown: false, status: 'approved', created_at: iso(800) },
 ];
 
 const SESSIONS = [
-  { id: 'sess-1', machine_id: 'lab-01', oj_user_id: 100, oj_contest_id: '6a0ed7b216fece62079c1a5a', status: 'active', began_at: iso(1800), closed_at: null,         is_temporary_user: false },
-  { id: 'sess-2', machine_id: 'lab-02', oj_user_id: 101, oj_contest_id: '6a0ed7b216fece62079c1a5a', status: 'active', began_at: iso(1800), closed_at: null,         is_temporary_user: false },
-  { id: 'sess-3', machine_id: 'lab-03', oj_user_id: 102, oj_contest_id: '6a0ed7b216fece62079c1a5a', status: 'active', began_at: iso(1700), closed_at: null,         is_temporary_user: false },
-  { id: 'sess-4', machine_id: 'lab-05', oj_user_id: 104, oj_contest_id: '6a0ed7b216fece62079c1a5a', status: 'flagged', began_at: iso(1600), closed_at: null,        is_temporary_user: true },
-  { id: 'sess-5', machine_id: 'lab-06', oj_user_id: 103, oj_contest_id: '6a0ed7b216fece62079c1a5a', status: 'active', began_at: iso(1500), closed_at: null,         is_temporary_user: false },
-  { id: 'sess-0', machine_id: 'lab-01', oj_user_id: 100, oj_contest_id: '6a0ed7b216fece62079c1a4f', status: 'closed', began_at: iso(8400), closed_at: iso(2400),    is_temporary_user: false },
+  { id: 'sess-1', machine_id: 'lab-01', oj_user_id: 100, oj_contest_id: '6a0d8d4b778ff4a7dc9452ac', status: 'active', began_at: iso(1800), closed_at: null,         is_temporary_user: false },
+  { id: 'sess-2', machine_id: 'lab-02', oj_user_id: 101, oj_contest_id: '6a0d8d4b778ff4a7dc9452ac', status: 'active', began_at: iso(1800), closed_at: null,         is_temporary_user: false },
+  { id: 'sess-3', machine_id: 'lab-03', oj_user_id: 102, oj_contest_id: '6a0d8d4b778ff4a7dc9452ac', status: 'active', began_at: iso(1700), closed_at: null,         is_temporary_user: false },
+  { id: 'sess-4', machine_id: 'lab-05', oj_user_id: 104, oj_contest_id: '6a0d8d4b778ff4a7dc9452ac', status: 'flagged', began_at: iso(1600), closed_at: null,        is_temporary_user: true },
+  { id: 'sess-5', machine_id: 'lab-06', oj_user_id: 103, oj_contest_id: '6a0d8d4b778ff4a7dc9452ac', status: 'active', began_at: iso(1500), closed_at: null,         is_temporary_user: false },
+  { id: 'sess-0', machine_id: 'lab-01', oj_user_id: 100, oj_contest_id: '6a0e6af09e257f9787c4985d', status: 'closed', began_at: iso(8400), closed_at: iso(2400),    is_temporary_user: false },
 ];
 
 function json(res, status, body) {

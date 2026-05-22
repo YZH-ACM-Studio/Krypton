@@ -17,6 +17,8 @@ import {
     Context, Handler, NotFoundError, OplogModel, param, PRIV, Types,
     ValidationError, UserModel, requireServiceToken,
 } from 'hydrooj';
+import * as contestModel from '../model/contest';
+import * as document from '../model/document';
 import system from '../model/system';
 
 class VigilApiHandler extends Handler {
@@ -315,9 +317,55 @@ class VigilAdminOverviewHandler extends Handler {
 // filters client-side.
 class VigilAdminExamDetailHandler extends Handler {
     async prepare() { this.checkPriv(PRIV.PRIV_EDIT_SYSTEM); }
-    async get({ examId }: { examId: string }) {
+    async get({ domainId, examId }: { domainId: string; examId: string }) {
+        let examTitle: string | null = null;
+        if (ObjectId.isValid(examId)) {
+            try {
+                const tdoc = await contestModel.get(domainId, new ObjectId(examId));
+                if (tdoc?.title) examTitle = tdoc.title;
+            } catch { /* not found → leave null, React falls back to id */ }
+        }
         this.response.template = 'admin_vigil_exam_detail.html';
-        this.response.body = { examId };
+        this.response.body = { examId, examTitle };
+    }
+}
+
+/**
+ * Bulk resolve Hydro contest titles for a list of contest ids. Used by the
+ * vigil overview React page to render readable names on the exam cards /
+ * ended table instead of bare ObjectId hex strings.
+ *
+ *   POST /api/admin/vigil/resolve-contests { ids: ["507f1f...", ...] }
+ *   →   { "507f1f...": "期末考试 A", "608a2b...": "周赛 #12", ... }
+ *
+ * Unknown / malformed ids are silently dropped from the response so the
+ * caller can treat the map as "best effort" and fall back to the id.
+ */
+class VigilResolveContestsHandler extends Handler {
+    async prepare() { this.checkPriv(PRIV.PRIV_EDIT_SYSTEM); }
+
+    @param('ids', Types.CommaSeperatedArray, true)
+    async post({ domainId }: { domainId: string }, ids: string[] = []) {
+        const validIds = (ids || [])
+            .map((s) => String(s).trim())
+            .filter((s) => ObjectId.isValid(s))
+            .map((s) => new ObjectId(s));
+        const map: Record<string, string> = {};
+        if (validIds.length) {
+            // Hydro contests are stored in the `document` collection with the
+            // contest's tid living in `docId`, not `_id`. We don't filter
+            // by `domainId` here on purpose — the vigil dashboard is a
+            // system-wide admin view and the proctored exam may live in any
+            // domain. Caller already gated to PRIV_EDIT_SYSTEM.
+            const tdocs = await document.coll.find({
+                docType: document.TYPE_CONTEST,
+                docId: { $in: validIds },
+            }).project({ docId: 1, title: 1 }).toArray();
+            for (const tdoc of tdocs) {
+                if (tdoc.docId && tdoc.title) map[String(tdoc.docId)] = tdoc.title;
+            }
+        }
+        this.response.body = map;
     }
 }
 
@@ -326,6 +374,7 @@ class VigilAdminExamDetailHandler extends Handler {
 export async function apply(ctx: Context) {
     ctx.Route('admin_vigil_overview', '/admin/vigil', VigilAdminOverviewHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('admin_vigil_exam_detail', '/admin/vigil/exams/:examId', VigilAdminExamDetailHandler, PRIV.PRIV_EDIT_SYSTEM);
+    ctx.Route('admin_vigil_resolve_contests', '/api/admin/vigil/resolve-contests', VigilResolveContestsHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('vigil_lookup_student', '/api/vigil/lookup-student', VigilLookupStudentHandler);
     ctx.Route('vigil_notify_session_opened', '/api/vigil/notify-session-opened', VigilNotifySessionOpenedHandler);
     ctx.Route('vigil_notify_session_closed', '/api/vigil/notify-session-closed', VigilNotifySessionClosedHandler);

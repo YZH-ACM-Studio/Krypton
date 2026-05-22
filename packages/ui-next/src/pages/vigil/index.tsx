@@ -260,6 +260,7 @@ export function AdminVigilOverviewPage() {
       )}
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       description="按考试聚合的会话 / 审批 / 事件。点击具体考试查看详情。"
+      hideSidebar
     >
       {offline && <OfflineBanner err={offline} onRetry={retryAll} />}
 
@@ -437,6 +438,7 @@ export function AdminVigilExamDetailPage() {
         </div>
       )}
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
+      hideSidebar
       actions={(
         <Button variant="ghost" asChild>
           <a href="/admin/vigil">返回总览</a>

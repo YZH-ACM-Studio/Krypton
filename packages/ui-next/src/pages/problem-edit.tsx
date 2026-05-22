@@ -3,7 +3,7 @@
  * difficulty, visibility, PID, with sidebar navigation and delete.
  */
 
-import { useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'motion/react';
 import {
   ChevronRight,
@@ -31,6 +31,11 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
+import {
+  buildConfigYaml, CommunicationEditor, FillFunctionEditor, InteractiveEditor,
+  ObjectiveEditor, parseConfigYaml, type ProblemType, type ProblemTypeState,
+  SubmitAnswerEditor, TypePicker,
+} from '@/pages/problem-type-editor';
 
 type R = Record<string, any>;
 
@@ -157,6 +162,65 @@ export function ProblemEditPage() {
   // Delete confirmation
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  // Problem-type state — loaded from config.yaml on mount, persisted on save.
+  // For /p/create the pdoc has no docId so we can't read config; default state.
+  const [typeState, setTypeState] = useState<ProblemTypeState>({
+    type: 'default', objective: [],
+    template: '', expectedAnswer: '', interactor: '', manager: '',
+  });
+  const [configYamlRaw, setConfigYamlRaw] = useState<string>('');
+  const isCreate = !pdoc.docId;
+  const problemId = pdoc.docId ? String(pdoc.docId) : '';
+  // ProblemDetailUrl-style API for the file endpoints.
+  const filesBase = pdoc.docId ? `${problemUrl}/files` : '';
+
+  useEffect(() => {
+    if (!problemId || !pid) return;
+    // Pull existing config.yaml so the type-specific editor reflects what's on testdata.
+    fetch(`${problemUrl}/file/config.yaml?type=testdata`, { method: 'GET' })
+      .then((r) => (r.ok ? r.text() : ''))
+      .then((text) => {
+        if (!text) return;
+        setConfigYamlRaw(text);
+        setTypeState((prev) => ({ ...prev, ...parseConfigYaml(text) }));
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [problemId, pid]);
+
+  const setType = useCallback((next: ProblemType) => {
+    setTypeState((prev) => ({ ...prev, type: next }));
+  }, []);
+
+  const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
+    // For brand-new problems we have no pid yet — let the form submit
+    // natively so Hydro creates it. The user can come back and edit the
+    // type after the initial create lands.
+    if (isCreate) return; // submit natively
+    e.preventDefault();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    // 1) Regular edit POST.
+    const editRes = await fetch(form.action || window.location.pathname, {
+      method: 'POST',
+      body: new URLSearchParams(fd as any),
+    });
+    // 2) Write the type-specific config.yaml as a testdata file.
+    if (filesBase) {
+      const yamlText = buildConfigYaml(typeState, configYamlRaw);
+      const cfgForm = new FormData();
+      cfgForm.append('type', 'testdata');
+      cfgForm.append('filename', 'config.yaml');
+      cfgForm.append('file', new Blob([yamlText], { type: 'text/yaml' }), 'config.yaml');
+      await fetch(filesBase, { method: 'POST', body: cfgForm }).catch(() => {});
+    }
+    if (editRes.ok || editRes.redirected) {
+      window.location.assign(problemUrl);
+    } else {
+      alert('保存失败：' + editRes.statusText);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -179,7 +243,7 @@ export function ProblemEditPage() {
             <h1 className="text-lg font-semibold">编辑题目</h1>
           </div>
 
-          <form method="post" className="space-y-4">
+          <form method="post" onSubmit={handleSave} className="space-y-4">
             {/* Title + PID row */}
             <Card>
               <CardContent className="p-4 space-y-4">
@@ -275,6 +339,48 @@ export function ProblemEditPage() {
                 />
               </CardContent>
             </Card>
+
+            {/* Type picker (visible in both create + edit) */}
+            <TypePicker value={typeState.type} onChange={setType} />
+
+            {/* Type-specific editor — only when we have a pid to attach config.yaml to */}
+            {!isCreate && typeState.type === 'objective' && (
+              <ObjectiveEditor
+                questions={typeState.objective}
+                onChange={(next) => setTypeState((prev) => ({ ...prev, objective: next }))}
+              />
+            )}
+            {!isCreate && typeState.type === 'fill_function' && (
+              <FillFunctionEditor
+                template={typeState.template}
+                onChange={(t) => setTypeState((prev) => ({ ...prev, template: t }))}
+              />
+            )}
+            {!isCreate && typeState.type === 'submit_answer' && (
+              <SubmitAnswerEditor
+                expectedAnswer={typeState.expectedAnswer}
+                onChange={(t) => setTypeState((prev) => ({ ...prev, expectedAnswer: t }))}
+              />
+            )}
+            {!isCreate && typeState.type === 'interactive' && (
+              <InteractiveEditor
+                interactor={typeState.interactor}
+                onChange={(t) => setTypeState((prev) => ({ ...prev, interactor: t }))}
+              />
+            )}
+            {!isCreate && typeState.type === 'communication' && (
+              <CommunicationEditor
+                manager={typeState.manager}
+                onChange={(t) => setTypeState((prev) => ({ ...prev, manager: t }))}
+              />
+            )}
+            {isCreate && typeState.type !== 'default' && (
+              <Card className="border-amber-500/40 bg-amber-500/5">
+                <CardContent className="p-3 text-xs text-amber-700 dark:text-amber-300">
+                  题目类型的可视化字段（选项、答案、模板代码）将在创建后于编辑页填写。
+                </CardContent>
+              </Card>
+            )}
 
             {/* Submit / Delete */}
             <div className="flex items-center justify-between">

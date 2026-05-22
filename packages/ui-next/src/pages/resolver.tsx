@@ -76,9 +76,7 @@ import { ExamModeHomePage } from '@/pages/exam-mode/index';
 import { ExamPaperPage } from '@/pages/exam-mode/paper';
 import {
   AdminVigilOverviewPage,
-  AdminVigilApprovalsPage,
-  AdminVigilSessionsPage,
-  AdminVigilEventsPage,
+  AdminVigilExamDetailPage,
 } from '@/pages/vigil';
 import { TaskCenterPage, TaskMyPage, TaskDetailPage } from '@/pages/tasks';
 import {
@@ -92,6 +90,7 @@ import {
 import {
   AnnounceListPage, AnnounceDetailPage,
   AdminAnnounceListPage, AdminAnnounceCategoriesPage,
+  AdminAnnounceEditorPage,
 } from '@/pages/announcement';
 import { RankBoardMainPage, RankBoardDetailPage } from '@/pages/rankboard';
 import {
@@ -241,9 +240,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
 
   // Phase 3: vigil admin (S2 absorption)
   'admin_vigil_overview.html': AdminVigilOverviewPage,
-  'admin_vigil_approvals.html': AdminVigilApprovalsPage,
-  'admin_vigil_sessions.html': AdminVigilSessionsPage,
-  'admin_vigil_events.html': AdminVigilEventsPage,
+  'admin_vigil_exam_detail.html': AdminVigilExamDetailPage,
 
   // krypton-tasks (user-facing)
   'tasks_center.html': TaskCenterPage,
@@ -262,6 +259,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'announce_list.html': AnnounceListPage,
   'announce_detail.html': AnnounceDetailPage,
   'admin_announce_list.html': AdminAnnounceListPage,
+  'admin_announce_edit.html': AdminAnnounceEditorPage,
   'admin_announce_categories.html': AdminAnnounceCategoriesPage,
 
   // krypton-rankboard

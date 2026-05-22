@@ -11,6 +11,7 @@ import {
   Megaphone,
   MessageSquare,
   Network,
+  ShieldAlert,
   Swords,
   Trophy,
   Wrench,
@@ -123,6 +124,16 @@ export function Sidebar({
         });
       }
       if (canSeeAdminAffordance(userCtx, 'systemAdmin')) {
+        adminItems.push({
+          label: '反作弊',
+          href: '/admin/vigil',
+          icon: ShieldAlert,
+          templates: [
+            'admin_vigil_overview.html', 'admin_vigil_approvals.html',
+            'admin_vigil_sessions.html', 'admin_vigil_events.html',
+            'admin_vigil_exam_detail.html',
+          ],
+        });
         adminItems.push({
           label: '系统',
           href: bs.urls.manage,

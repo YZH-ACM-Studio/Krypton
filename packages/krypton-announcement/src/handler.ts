@@ -121,6 +121,43 @@ class AdminAnnounceListHandler extends Handler {
             canEditGlobal: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
         };
     }
+}
+
+class AdminAnnounceCreateHandler extends Handler {
+    async prepare() {
+        if (!this.user.hasPerm(PERM.PERM_EDIT_DOMAIN) && !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
+            throw new PermissionError(PERM.PERM_EDIT_DOMAIN);
+        }
+    }
+    async get() {
+        const categories = await listCategories();
+        this.response.template = 'admin_announce_edit.html';
+        this.response.body = {
+            doc: null,
+            categories,
+            canEditGlobal: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+        };
+    }
+}
+
+class AdminAnnounceEditHandler extends Handler {
+    async prepare() {
+        if (!this.user.hasPerm(PERM.PERM_EDIT_DOMAIN) && !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
+            throw new PermissionError(PERM.PERM_EDIT_DOMAIN);
+        }
+    }
+    @param('aid', Types.ObjectId)
+    async get(_ctx: any, aid: ObjectId) {
+        const doc = await getAnnouncement(aid);
+        if (!doc) throw new NotFoundError('announcement', String(aid));
+        const categories = await listCategories({ includeHidden: true });
+        this.response.template = 'admin_announce_edit.html';
+        this.response.body = {
+            doc: { ...doc, _id: String(doc._id) },
+            categories,
+            canEditGlobal: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+        };
+    }
 
     @param('operation', Types.String)
     @param('title', Types.String, true)
@@ -306,6 +343,8 @@ export function applyHandlers(ctx: Context) {
     ctx.Route('announce_main', '/announce', AnnounceListHandler);
     ctx.Route('announce_detail', '/announce/:aid', AnnounceDetailHandler);
     ctx.Route('admin_announce', '/admin/announce', AdminAnnounceListHandler);
+    ctx.Route('admin_announce_create', '/admin/announce/new', AdminAnnounceCreateHandler);
+    ctx.Route('admin_announce_edit', '/admin/announce/:aid/edit', AdminAnnounceEditHandler);
     ctx.Route('admin_announce_categories', '/admin/announce/categories', AdminCategoriesHandler);
     ctx.Route('announce_api_unread', '/api/announce/unread', UnreadApiHandler);
     ctx.Route('announce_api_homepage', '/api/announce/homepage', HomepageApiHandler);

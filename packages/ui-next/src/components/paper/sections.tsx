@@ -42,7 +42,7 @@ export function OverviewSection({ data, onEnterProblems }: { data: OverviewData;
   };
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5 p-6">
+    <div className="space-y-5 p-6">
       {/* Hero */}
       <Card>
         <CardContent className="p-6">
@@ -168,7 +168,7 @@ function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value
 
 export function AnnouncementsSection({ broadcasts }: { broadcasts: Array<{ _id: string; content: string; createdAt: string | Date }> }) {
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-6">
+    <div className="space-y-4 p-6">
       <header className="space-y-1">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           <MegaphoneIcon className="size-5 text-primary" />
@@ -218,7 +218,7 @@ export function RankingSection({
   signedInUid: number;
 }) {
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-6">
+    <div className="space-y-4 p-6">
       <header className="space-y-1">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           <Trophy className="size-5 text-primary" />

@@ -309,25 +309,15 @@ class VigilAdminOverviewHandler extends Handler {
         this.response.body = {};
     }
 }
-class VigilAdminApprovalsHandler extends Handler {
+
+// Exam-scoped detail handler — all sub-views (sessions / approvals / events
+// / overview) for one Hydro contest. The React page reads :examId and
+// filters client-side.
+class VigilAdminExamDetailHandler extends Handler {
     async prepare() { this.checkPriv(PRIV.PRIV_EDIT_SYSTEM); }
-    async get() {
-        this.response.template = 'admin_vigil_approvals.html';
-        this.response.body = {};
-    }
-}
-class VigilAdminSessionsHandler extends Handler {
-    async prepare() { this.checkPriv(PRIV.PRIV_EDIT_SYSTEM); }
-    async get() {
-        this.response.template = 'admin_vigil_sessions.html';
-        this.response.body = {};
-    }
-}
-class VigilAdminEventsHandler extends Handler {
-    async prepare() { this.checkPriv(PRIV.PRIV_EDIT_SYSTEM); }
-    async get() {
-        this.response.template = 'admin_vigil_events.html';
-        this.response.body = {};
+    async get({ examId }: { examId: string }) {
+        this.response.template = 'admin_vigil_exam_detail.html';
+        this.response.body = { examId };
     }
 }
 
@@ -335,9 +325,7 @@ class VigilAdminEventsHandler extends Handler {
 
 export async function apply(ctx: Context) {
     ctx.Route('admin_vigil_overview', '/admin/vigil', VigilAdminOverviewHandler, PRIV.PRIV_EDIT_SYSTEM);
-    ctx.Route('admin_vigil_approvals', '/admin/vigil/approvals', VigilAdminApprovalsHandler, PRIV.PRIV_EDIT_SYSTEM);
-    ctx.Route('admin_vigil_sessions', '/admin/vigil/sessions', VigilAdminSessionsHandler, PRIV.PRIV_EDIT_SYSTEM);
-    ctx.Route('admin_vigil_events', '/admin/vigil/events', VigilAdminEventsHandler, PRIV.PRIV_EDIT_SYSTEM);
+    ctx.Route('admin_vigil_exam_detail', '/admin/vigil/exams/:examId', VigilAdminExamDetailHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('vigil_lookup_student', '/api/vigil/lookup-student', VigilLookupStudentHandler);
     ctx.Route('vigil_notify_session_opened', '/api/vigil/notify-session-opened', VigilNotifySessionOpenedHandler);
     ctx.Route('vigil_notify_session_closed', '/api/vigil/notify-session-closed', VigilNotifySessionClosedHandler);

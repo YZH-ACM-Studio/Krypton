@@ -188,7 +188,7 @@ export function ContestEditPage() {
 
   return (
     <motion.div
-      className="mx-auto max-w-2xl space-y-6"
+      className="space-y-6"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
@@ -1160,7 +1160,7 @@ export function ContestPrintPage() {
 
   return (
     <motion.div
-      className="mx-auto max-w-4xl space-y-6"
+      className="space-y-6"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}

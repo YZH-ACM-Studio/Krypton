@@ -479,7 +479,7 @@ function ProblemsSection({
           ref={mainRef}
           className="min-w-0 flex-1 overflow-y-auto"
         >
-          <div className="mx-auto max-w-4xl space-y-5 p-6">
+          <div className="space-y-5 p-6">
             {tabCells.map((cell, i) => (
               <div key={`${cell.pid}-${cell.questionKey ?? 'P'}-${i}`}>
                 <CellEditor

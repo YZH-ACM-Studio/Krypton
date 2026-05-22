@@ -225,8 +225,6 @@ interface AdminListBody {
 export function AdminAnnounceListPage() {
   const data = useBootstrap().page.data as AdminListBody;
   const catMap = new Map(data.categories.map((c) => [c.key, c]));
-  const [editing, setEditing] = useState<AnnouncementDoc | null>(null);
-  const [creating, setCreating] = useState(false);
 
   // Drag-and-drop reorder state — held locally; flushed on save.
   const [orderedIds, setOrderedIds] = useState<string[]>(() => data.docs.map((d) => d._id));
@@ -267,9 +265,11 @@ export function AdminAnnounceListPage() {
             <Save className="size-3.5" />
             保存顺序
           </Button>
-          <Button onClick={() => setCreating(true)} className="gap-1">
-            <Plus className="size-3.5" />
-            新建公告
+          <Button asChild className="gap-1">
+            <a href="/admin/announce/new">
+              <Plus className="size-3.5" />
+              新建公告
+            </a>
           </Button>
         </div>
       )}
@@ -353,7 +353,7 @@ export function AdminAnnounceListPage() {
                     </TableCell>
                     <TableCell className="pr-5">
                       <TableActions>
-                        <TableAction onClick={() => setEditing(doc)} icon={Pencil}>编辑</TableAction>
+                        <TableAction href={`/admin/announce/${doc._id}/edit`} icon={Pencil}>编辑</TableAction>
                         <TableAction
                           formAction="/admin/announce"
                           hidden={{ operation: 'update', aid: doc._id, pin: doc.pin ? 'false' : 'true' }}
@@ -387,122 +387,124 @@ export function AdminAnnounceListPage() {
         </CardContent>
       </Card>
 
-      {(creating || editing) && (
-        <AnnouncementEditorDialog
-          doc={editing}
-          categories={data.categories}
-          canEditGlobal={data.canEditGlobal}
-          onClose={() => { setEditing(null); setCreating(false); }}
-        />
-      )}
     </AdminPage>
   );
 }
 
-function AnnouncementEditorDialog({
-  doc, categories, canEditGlobal, onClose,
-}: {
+/* ─────────────────────────── Admin: editor (full page) ─────────────────────────── */
+
+interface EditorBody {
   doc: AnnouncementDoc | null;
   categories: Category[];
   canEditGlobal: boolean;
-  onClose: () => void;
-}) {
-  const isNew = !doc;
-  const [title, setTitle] = useState(doc?.title || '');
-  const [content, setContent] = useState(doc?.content || '');
-  const [category, setCategory] = useState(doc?.category || categories[0]?.key || 'announcement');
-  const [scope, setScope] = useState<'global' | 'domain'>(doc?.scope || 'domain');
-  const [pin, setPin] = useState(!!doc?.pin);
-  const [hidden, setHidden] = useState(!!doc?.hidden);
-  const [publishAt, setPublishAt] = useState(doc?.publishAt
-    ? new Date(doc.publishAt).toISOString().slice(0, 16)
+}
+
+export function AdminAnnounceEditorPage() {
+  const data = useBootstrap().page.data as EditorBody;
+  const isNew = !data.doc;
+  const [title, setTitle] = useState(data.doc?.title || '');
+  const [content, setContent] = useState(data.doc?.content || '');
+  const [category, setCategory] = useState(data.doc?.category || data.categories[0]?.key || 'announcement');
+  const [scope, setScope] = useState<'global' | 'domain'>(data.doc?.scope || 'domain');
+  const [pin, setPin] = useState(!!data.doc?.pin);
+  const [hidden, setHidden] = useState(!!data.doc?.hidden);
+  const [publishAt, setPublishAt] = useState(data.doc?.publishAt
+    ? new Date(data.doc.publishAt).toISOString().slice(0, 16)
     : new Date().toISOString().slice(0, 16));
-  const [unpublishAt, setUnpublishAt] = useState(doc?.unpublishAt
-    ? new Date(doc.unpublishAt).toISOString().slice(0, 16)
+  const [unpublishAt, setUnpublishAt] = useState(data.doc?.unpublishAt
+    ? new Date(data.doc.unpublishAt).toISOString().slice(0, 16)
     : '');
 
   return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="w-full sm:w-[760px]" onClose={onClose}>
-        <DialogHeader>
-          <DialogTitle>{isNew ? '新建公告' : '编辑公告'}</DialogTitle>
-        </DialogHeader>
-        <form method="post" action="/admin/announce" className="flex max-h-[80vh] flex-col">
-          <input type="hidden" name="operation" value={isNew ? 'create' : 'update'} />
-          {!isNew && <input type="hidden" name="aid" value={doc!._id} />}
-          <input type="hidden" name="content" value={content} />
-          <div className="krypton-scrollbar flex-1 space-y-4 overflow-y-auto p-5">
+    <AdminPage
+      title={(
+        <div className="flex items-center gap-2">
+          <Megaphone className="size-5 text-primary" />
+          <h1 className="text-xl font-semibold">{isNew ? '新建公告' : '编辑公告'}</h1>
+        </div>
+      )}
+      bypassPrivGate
+      actions={(
+        <div className="flex gap-2">
+          <Button asChild variant="ghost">
+            <a href="/admin/announce">返回列表</a>
+          </Button>
+        </div>
+      )}
+    >
+      <Card>
+        <CardContent className="p-6">
+          <form method="post" action="/admin/announce" className="space-y-5">
+            <input type="hidden" name="operation" value={isNew ? 'create' : 'update'} />
+            {!isNew && <input type="hidden" name="aid" value={data.doc!._id} />}
+            <input type="hidden" name="content" value={content} />
+
             <FormField label="标题" required htmlFor="ann-title">
-              <Input id="ann-title" name="title" value={title} onChange={(e) => setTitle(e.target.value)} required />
+              <Input id="ann-title" name="title" value={title} onChange={(e) => setTitle(e.target.value)} required className="max-w-2xl" />
             </FormField>
+
             <FormRow columns={2}>
               <FormField label="分类" required htmlFor="ann-cat">
-                <select
-                  id="ann-cat" name="category" value={category}
+                <select id="ann-cat" name="category" value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                >
-                  {categories.map((c) => (
+                  className="w-full max-w-md rounded-md border bg-background px-3 py-2 text-sm">
+                  {data.categories.map((c) => (
                     <option key={c.key} value={c.key}>{c.name}</option>
                   ))}
                 </select>
               </FormField>
               <FormField label="范围" htmlFor="ann-scope">
-                <select
-                  id="ann-scope" name="scope" value={scope}
+                <select id="ann-scope" name="scope" value={scope}
                   onChange={(e) => setScope(e.target.value as 'global' | 'domain')}
                   disabled={!isNew}
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-60"
-                >
+                  className="w-full max-w-md rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-60">
                   <option value="domain">当前域</option>
-                  {canEditGlobal && <option value="global">全局（全 OJ）</option>}
+                  {data.canEditGlobal && <option value="global">全局（全 OJ）</option>}
                 </select>
               </FormField>
             </FormRow>
+
             <FormRow columns={2}>
               <FormField label="发布时间" htmlFor="ann-pub">
-                <Input
-                  id="ann-pub" name="publishAt" type="datetime-local"
+                <Input id="ann-pub" name="publishAt" type="datetime-local"
                   value={publishAt} onChange={(e) => setPublishAt(e.target.value)}
-                />
+                  className="max-w-md" />
               </FormField>
               <FormField label="下线时间（可选）" htmlFor="ann-unpub">
-                <Input
-                  id="ann-unpub" name="unpublishAt" type="datetime-local"
+                <Input id="ann-unpub" name="unpublishAt" type="datetime-local"
                   value={unpublishAt} onChange={(e) => setUnpublishAt(e.target.value)}
-                />
+                  className="max-w-md" />
               </FormField>
             </FormRow>
+
             <div className="flex items-center gap-6">
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="pin" checked={pin}
-                  onChange={(e) => setPin(e.target.checked)}
-                  value="true"
-                 />
+                <Checkbox name="pin" checked={pin} onChange={(e) => setPin(e.target.checked)} value="true" />
                 置顶
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="hidden" checked={hidden}
-                  onChange={(e) => setHidden(e.target.checked)}
-                  value="true"
-                 />
+                <Checkbox name="hidden" checked={hidden} onChange={(e) => setHidden(e.target.checked)} value="true" />
                 隐藏（暂不公开）
               </label>
             </div>
+
             <FormField label="正文（Markdown）">
-              <MarkdownEditor value={content} onChange={setContent} minHeight={320} />
+              <MarkdownEditor value={content} onChange={setContent} minHeight={480} />
             </FormField>
-          </div>
-          <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
-            <Button type="button" variant="ghost" onClick={onClose}>取消</Button>
-            <Button type="submit" className="gap-1">
-              <Save className="size-3.5" />
-              {isNew ? '创建' : '保存'}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+
+            <div className="flex justify-end gap-2 border-t pt-4">
+              <Button type="button" variant="ghost" asChild>
+                <a href="/admin/announce">取消</a>
+              </Button>
+              <Button type="submit" className="gap-1">
+                <Save className="size-3.5" />
+                {isNew ? '创建' : '保存'}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+    </AdminPage>
   );
 }
 

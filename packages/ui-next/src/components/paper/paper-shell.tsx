@@ -74,20 +74,18 @@ export function MiniTabBar({
   const ordered = KIND_ORDER.filter((k) => groups.has(k));
   if (!ordered.length || !current) return null;
   return (
-    <div className="border-b bg-card/50 p-2">
+    <div className="flex justify-center border-b bg-card/50 p-2">
       <MiniTabs
         size="sm"
         value={current}
         onValueChange={(k) => onChange(k as QuestionKind)}
         items={ordered.map((kind) => ({
           value: kind,
-          label: (
-            <span className="inline-flex items-center gap-1">
-              <span className="font-semibold">{KIND_SHORT[kind]}</span>
-              {lockedKinds.has(kind) && <Lock className="size-3" />}
-            </span>
-          ),
+          // Plain string so MiniTabs handles weight + colour uniformly; the
+          // lock indicator rides on `icon` to keep the segmented look intact.
+          label: KIND_SHORT[kind],
           count: groups.get(kind)!.length,
+          icon: lockedKinds.has(kind) ? Lock : undefined,
         }))}
       />
     </div>

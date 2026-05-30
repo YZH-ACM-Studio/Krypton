@@ -6,7 +6,7 @@
  */
 import {
     Context, Handler, NotFoundError, ObjectId, OplogModel, param, PRIV,
-    Types, ValidationError,
+    Types, UserModel, ValidationError,
 } from 'hydrooj';
 import { userBindModel } from './model';
 import {
@@ -19,6 +19,84 @@ class UserbindAdminHandler extends Handler {
     async prepare() {
         this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
     }
+}
+
+async function buildSchoolDetailData(
+    domainId: string,
+    schoolId: ObjectId,
+    options: {
+        tab?: string;
+        studentQuery?: string;
+        studentPage?: number;
+        groupQuery?: string;
+        groupPage?: number;
+        importQuery?: string;
+        importReport?: any;
+    } = {},
+) {
+    const school = await userBindModel.getSchool(domainId, schoolId);
+    if (!school) throw new NotFoundError('School');
+
+    const studentLimit = 50;
+    const groupLimit = 20;
+    const studentPage = Math.max(1, options.studentPage || 1);
+    const groupPage = Math.max(1, options.groupPage || 1);
+    const studentQuery = (options.studentQuery || '').trim();
+    const groupQuery = (options.groupQuery || '').trim();
+    const importQuery = (options.importQuery || '').trim();
+    const tab = ['students', 'import', 'groups', 'links'].includes(options.tab || '')
+        ? options.tab
+        : 'students';
+
+    const [allGroups, { docs: students, total: studentTotal }, schoolTokens, groupCounts, importSearchResults] = await Promise.all([
+        userBindModel.listUserGroups(domainId, schoolId),
+        userBindModel.listStudents(domainId, {
+            schoolId,
+            query: studentQuery,
+            limit: studentLimit,
+            skip: (studentPage - 1) * studentLimit,
+        }),
+        userBindModel.listInviteTokens(domainId, { schoolId, kind: 'school' }),
+        studentsColl.aggregate<{ _id: ObjectId; count: number }>([
+            { $match: { domainId, schoolId } },
+            { $unwind: '$groupIds' },
+            { $group: { _id: '$groupIds', count: { $sum: 1 } } },
+        ]).toArray(),
+        importQuery
+            ? userBindModel.searchBindableUsers(domainId, schoolId, importQuery, 50)
+            : Promise.resolve([]),
+    ]);
+
+    const groupMemberCount: Record<string, number> = {};
+    for (const r of groupCounts) groupMemberCount[r._id.toString()] = r.count;
+    const groupsWithCount = allGroups.map((g) => ({
+        _id: g._id,
+        name: g.name,
+        memberCount: groupMemberCount[g._id.toString()] || 0,
+    }));
+    const filteredGroups = groupQuery
+        ? groupsWithCount.filter((g) => g.name.toLowerCase().includes(groupQuery.toLowerCase()))
+        : groupsWithCount;
+    const groups = filteredGroups.slice((groupPage - 1) * groupLimit, groupPage * groupLimit);
+
+    return {
+        school,
+        tab,
+        groups,
+        groupTotal: filteredGroups.length,
+        groupPage,
+        groupLimit,
+        groupQuery,
+        students,
+        studentTotal,
+        studentPage,
+        studentLimit,
+        studentQuery,
+        schoolTokens,
+        importSearchResults,
+        importQ: importQuery,
+        importReport: options.importReport || null,
+    };
 }
 
 class AdminOverviewHandler extends UserbindAdminHandler {
@@ -81,34 +159,31 @@ class AdminSchoolsHandler extends UserbindAdminHandler {
 
 class AdminSchoolDetailHandler extends UserbindAdminHandler {
     @param('schoolId', Types.ObjectId)
-    async get({ domainId }: { domainId: string }, schoolId: ObjectId) {
-        const school = await userBindModel.getSchool(domainId, schoolId);
-        if (!school) throw new NotFoundError('School');
-        const [groups, { docs: students, total }, schoolTokens, groupCounts] = await Promise.all([
-            userBindModel.listUserGroups(domainId, schoolId),
-            userBindModel.listStudents(domainId, { schoolId, limit: 200 }),
-            userBindModel.listInviteTokens(domainId, { schoolId, kind: 'school' }),
-            // Single aggregation to count students per group within this school.
-            studentsColl.aggregate<{ _id: ObjectId; count: number }>([
-                { $match: { domainId, schoolId } },
-                { $unwind: '$groupIds' },
-                { $group: { _id: '$groupIds', count: { $sum: 1 } } },
-            ]).toArray(),
-        ]);
-        // Map group _id → memberCount
-        const groupMemberCount: Record<string, number> = {};
-        for (const r of groupCounts) groupMemberCount[r._id.toString()] = r.count;
-        // Annotate groups with memberCount for the UI.
-        const groupsWithCount = groups.map((g) => ({
-            _id: g._id,
-            name: g.name,
-            memberCount: groupMemberCount[g._id.toString()] || 0,
-        }));
+    @param('tab', Types.String, true)
+    @param('q', Types.String, true)
+    @param('page', Types.PositiveInt, true)
+    @param('groupQ', Types.String, true)
+    @param('groupPage', Types.PositiveInt, true)
+    @param('importQ', Types.String, true)
+    async get(
+        { domainId }: { domainId: string },
+        schoolId: ObjectId,
+        tab?: string,
+        q?: string,
+        page = 1,
+        groupQ?: string,
+        groupPage = 1,
+        importQ?: string,
+    ) {
         this.response.template = 'admin_userbind_school_detail.html';
-        this.response.body = {
-            school, groups: groupsWithCount, students, studentTotal: total,
-            schoolTokens, importReport: null,
-        };
+        this.response.body = await buildSchoolDetailData(domainId, schoolId, {
+            tab,
+            studentQuery: q,
+            studentPage: page,
+            groupQuery: groupQ,
+            groupPage,
+            importQuery: importQ,
+        });
     }
 
     @param('schoolId', Types.ObjectId)
@@ -125,45 +200,44 @@ class AdminSchoolDetailHandler extends UserbindAdminHandler {
     }
 
     @param('schoolId', Types.ObjectId)
-    @param('text', Types.Content)
+    @param('text', Types.Content, true)
+    @param('userIds', Types.CommaSeperatedArray, true)
     async postImportText(
-        { domainId }: { domainId: string }, schoolId: ObjectId, text: string,
+        { domainId }: { domainId: string }, schoolId: ObjectId, text?: string, userIds?: string[],
     ) {
-        const parsed = userBindModel.parseRosterText(text);
-        const rows = parsed.filter((r) => r.status === 'ok')
-            .map((r) => ({ studentId: r.studentId, realName: r.realName }));
-        const importReport = await userBindModel.importStudents(
-            domainId, schoolId, rows, this.user._id,
-        );
-        await OplogModel.log(this, 'userbind.student.import_school', {
-            schoolId, attempted: parsed.length, inserted: importReport.inserted,
-        });
-        // Re-render the school detail page with the report inline.
-        const school = await userBindModel.getSchool(domainId, schoolId);
-        const [groups, { docs: students, total }, schoolTokens, groupCounts] = await Promise.all([
-            userBindModel.listUserGroups(domainId, schoolId),
-            userBindModel.listStudents(domainId, { schoolId, limit: 200 }),
-            userBindModel.listInviteTokens(domainId, { schoolId, kind: 'school' }),
-            studentsColl.aggregate<{ _id: ObjectId; count: number }>([
-                { $match: { domainId, schoolId } },
-                { $unwind: '$groupIds' },
-                { $group: { _id: '$groupIds', count: { $sum: 1 } } },
-            ]).toArray(),
-        ]);
-        const groupMemberCount: Record<string, number> = {};
-        for (const r of groupCounts) groupMemberCount[r._id.toString()] = r.count;
-        const groupsWithCount = groups.map((g) => ({
-            _id: g._id, name: g.name,
-            memberCount: groupMemberCount[g._id.toString()] || 0,
-        }));
+        let importReport: any = null;
+        let preflightInvalid: any[] = [];
+        if (text && text.trim()) {
+            const parsed = userBindModel.parseRosterText(text);
+            const rows = parsed.filter((r) => r.status === 'ok')
+                .map((r) => ({ studentId: r.studentId, realName: r.realName }));
+            importReport = await userBindModel.importStudents(
+                domainId, schoolId, rows, this.user._id,
+            );
+            preflightInvalid = parsed.filter((r) => r.status !== 'ok');
+            await OplogModel.log(this, 'userbind.student.import_school', {
+                schoolId, attempted: parsed.length, inserted: importReport.inserted,
+                autoBound: importReport.autoBound || 0,
+            });
+        } else if (userIds && userIds.length > 0) {
+            const ids = userIds
+                .map((s) => Number(s))
+                .filter((id) => Number.isSafeInteger(id) && id > 0);
+            importReport = await userBindModel.importUsersToSchool(
+                domainId, schoolId, ids, this.user._id,
+            );
+            await OplogModel.log(this, 'userbind.student.import_school_pick', {
+                schoolId, picked: ids.length, inserted: importReport.inserted,
+                autoBound: importReport.autoBound || 0,
+            });
+        } else {
+            throw new ValidationError('input', null, '请输入名单或选择用户');
+        }
         this.response.template = 'admin_userbind_school_detail.html';
-        this.response.body = {
-            school, groups: groupsWithCount, students, studentTotal: total, schoolTokens,
-            importReport: {
-                ...importReport,
-                preflightInvalid: parsed.filter((r) => r.status !== 'ok'),
-            },
-        };
+        this.response.body = await buildSchoolDetailData(domainId, schoolId, {
+            tab: 'import',
+            importReport: { ...importReport, preflightInvalid },
+        });
     }
 }
 
@@ -223,38 +297,96 @@ class AdminGroupsHandler extends UserbindAdminHandler {
     }
 }
 
+type GroupDetailTab = 'overview' | 'members' | 'add';
+
+function normalizeGroupDetailTab(tab?: string): GroupDetailTab {
+    return tab === 'members' || tab === 'add' ? tab : 'overview';
+}
+
+async function buildGroupDetailData(
+    domainId: string,
+    groupId: ObjectId,
+    options: {
+        tab?: string;
+        query?: string;
+        memberPage?: number;
+        importReport?: any;
+    } = {},
+) {
+    const group = await userBindModel.getUserGroup(domainId, groupId);
+    if (!group) throw new NotFoundError('Group');
+
+    const tab = normalizeGroupDetailTab(options.tab);
+    const membersLimit = 50;
+    const page = Math.max(1, options.memberPage || 1);
+    const membersSkip = (page - 1) * membersLimit;
+    const [{ docs: rawMembers, total: memberTotal }, groupTokens, school, unboundMemberCount] = await Promise.all([
+        userBindModel.listStudents(domainId, {
+            groupId, skip: membersSkip, limit: membersLimit,
+        }),
+        userBindModel.listInviteTokens(domainId, { userGroupId: groupId, kind: 'user_group' }),
+        userBindModel.getSchool(domainId, group.schoolId),
+        studentsColl.countDocuments({
+            domainId,
+            groupIds: groupId,
+            $or: [{ boundUserId: null }, { boundUserId: { $exists: false } }],
+        } as any),
+    ]);
+
+    const boundUids = Array.from(new Set(
+        rawMembers.map((m) => m.boundUserId).filter((uid): uid is number => typeof uid === 'number'),
+    ));
+    const boundUsers = boundUids.length
+        ? await UserModel.coll.find(
+            { _id: { $in: boundUids } },
+            { projection: { _id: 1, uname: 1, studentId: 1, realName: 1 } },
+        ).toArray()
+        : [];
+    const userByUid = new Map(boundUsers.map((u: any) => [u._id, u]));
+    const members = rawMembers.map((m) => ({
+        ...m,
+        boundUser: m.boundUserId ? userByUid.get(m.boundUserId) || null : null,
+    }));
+
+    // For search-pick: search students in the parent school not already in this group.
+    let searchResults: any[] = [];
+    const q = (options.query || '').trim();
+    if (q) {
+        const { docs: found } = await userBindModel.listStudents(domainId, {
+            schoolId: group.schoolId, query: q, limit: 50,
+        });
+        searchResults = found
+            .filter((r) => !r.groupIds.some((g) => g.equals(groupId)))
+            .map((r) => ({
+                _id: r._id, studentId: r.studentId, realName: r.realName,
+                boundUserId: r.boundUserId,
+            }));
+    }
+
+    return {
+        group, members, groupTokens, school,
+        memberTotal, page, membersLimit,
+        searchResults, q,
+        tab,
+        unboundMemberCount,
+        importReport: options.importReport || null,
+    };
+}
+
 class AdminGroupDetailHandler extends UserbindAdminHandler {
     @param('groupId', Types.ObjectId)
+    @param('tab', Types.String, true)
     @param('q', Types.String, true)
+    @param('page', Types.PositiveInt, true)
     async get(
-        { domainId }: { domainId: string }, groupId: ObjectId, q?: string,
+        { domainId }: { domainId: string }, groupId: ObjectId, tab?: string, q?: string, page = 1,
     ) {
-        const group = await userBindModel.getUserGroup(domainId, groupId);
-        if (!group) throw new NotFoundError('Group');
-        const [{ docs: members }, groupTokens, school] = await Promise.all([
-            userBindModel.listStudents(domainId, { groupId, limit: 500 }),
-            userBindModel.listInviteTokens(domainId, { userGroupId: groupId, kind: 'user_group' }),
-            userBindModel.getSchool(domainId, group.schoolId),
-        ]);
-        // For search-pick: search students in the parent school not already in this group.
-        let searchResults: any[] = [];
-        if (q && q.trim()) {
-            const { docs: found } = await userBindModel.listStudents(domainId, {
-                schoolId: group.schoolId, query: q, limit: 50,
-            });
-            const memberIds = new Set(members.map((m) => m._id.toString()));
-            searchResults = found
-                .filter((r) => !memberIds.has(r._id.toString()))
-                .map((r) => ({
-                    _id: r._id, studentId: r.studentId, realName: r.realName,
-                    boundUserId: r.boundUserId,
-                }));
-        }
         this.response.template = 'admin_userbind_group_detail.html';
-        this.response.body = {
-            group, members, groupTokens, school,
-            searchResults, q: q || '', importReport: null,
-        };
+        this.response.body = await buildGroupDetailData(domainId, groupId, {
+            tab,
+            query: q,
+            memberPage: page,
+        });
     }
 
     @param('groupId', Types.ObjectId)
@@ -264,7 +396,7 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
     ) {
         const ids = studentIds.map((s) => new ObjectId(s));
         await userBindModel.assignStudentsToGroup(domainId, groupId, ids);
-        this.response.redirect = this.url('admin_userbind_group_detail', { groupId });
+        this.response.redirect = `${this.url('admin_userbind_group_detail', { groupId })}?tab=members`;
     }
 
     @param('groupId', Types.ObjectId)
@@ -274,7 +406,7 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
     ) {
         const ids = studentIds.map((s) => new ObjectId(s));
         await userBindModel.removeStudentsFromGroup(domainId, groupId, ids);
-        this.response.redirect = this.url('admin_userbind_group_detail', { groupId });
+        this.response.redirect = `${this.url('admin_userbind_group_detail', { groupId })}?tab=members`;
     }
 
     @param('groupId', Types.ObjectId)
@@ -287,7 +419,30 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
             domainId, groupId, this.user._id, ttlMs,
         );
         await OplogModel.log(this, 'userbind.token.user_group.create', { groupId, tokenId: token._id });
-        this.response.redirect = this.url('admin_userbind_group_detail', { groupId });
+        this.response.redirect = `${this.url('admin_userbind_group_detail', { groupId })}?tab=overview`;
+    }
+
+    @param('groupId', Types.ObjectId)
+    async postRetryBind(
+        { domainId }: { domainId: string }, groupId: ObjectId,
+    ) {
+        const report = await userBindModel.retryAutoBindStudentsInGroup(domainId, groupId);
+        await OplogModel.log(this, 'userbind.student.retry_group_auto_bind', {
+            groupId, scanned: report.unboundScanned, autoBound: report.autoBound,
+        });
+        this.response.template = 'admin_userbind_group_detail.html';
+        this.response.body = await buildGroupDetailData(domainId, groupId, {
+            tab: 'members',
+            importReport: {
+                kind: 'user_group',
+                retry: true,
+                created: 0,
+                attached: 0,
+                alreadyMember: 0,
+                failed: [],
+                ...report,
+            },
+        });
     }
 
     /**
@@ -320,10 +475,16 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
             });
         } else if (studentIds && studentIds.length > 0) {
             const ids = studentIds.map((s) => new ObjectId(s));
+            const picked = await studentsColl.find(
+                { domainId, _id: { $in: ids } },
+                { projection: { boundUserId: 1 } },
+            ).toArray();
             await userBindModel.assignStudentsToGroup(domainId, groupId, ids);
             importReport = {
-                kind: 'user_group',
-                created: 0, attached: ids.length, alreadyMember: 0, failed: [],
+                kind: 'user_group', created: 0, attached: ids.length,
+                alreadyMember: 0, failed: [],
+                alreadyBound: picked.filter((p: any) => !!p.boundUserId).length,
+                autoBound: 0, autoBindSkipped: [],
             };
             await OplogModel.log(this, 'userbind.student.import_group_pick', {
                 groupId, picked: ids.length,
@@ -332,19 +493,11 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
             throw new ValidationError('input', null, '请输入名单或选择学生');
         }
 
-        // Re-render with report inline.
-        const group = await userBindModel.getUserGroup(domainId, groupId);
-        const [{ docs: members }, groupTokens, school] = await Promise.all([
-            userBindModel.listStudents(domainId, { groupId, limit: 500 }),
-            userBindModel.listInviteTokens(domainId, { userGroupId: groupId, kind: 'user_group' }),
-            userBindModel.getSchool(domainId, group!.schoolId),
-        ]);
         this.response.template = 'admin_userbind_group_detail.html';
-        this.response.body = {
-            group, members, groupTokens, school,
-            searchResults: [], q: '',
+        this.response.body = await buildGroupDetailData(domainId, groupId, {
+            tab: 'add',
             importReport: { ...importReport, preflightInvalid },
-        };
+        });
     }
 }
 
@@ -380,6 +533,34 @@ class AdminStudentsHandler extends UserbindAdminHandler {
         );
         await OplogModel.log(this, 'userbind.token.student.create', { studentRecordId, tokenId: token._id });
         this.response.redirect = this.url('admin_userbind_tokens');
+    }
+
+    /**
+     * Inline edit a student record's mutable fields. Currently used for
+     * `enrollmentYear` override — empty string clears it (sets to null).
+     * Future: also expose realName here when needed.
+     */
+    @param('studentRecordId', Types.ObjectId)
+    @param('enrollmentYear', Types.String, true)
+    @param('realName', Types.String, true)
+    async postUpdateStudent(
+        { domainId }: { domainId: string },
+        studentRecordId: ObjectId, enrollmentYear: string, realName: string,
+    ) {
+        const patch: {
+            enrollmentYear?: number | null;
+            realName?: string;
+        } = {};
+        if (enrollmentYear !== undefined) {
+            const trimmed = (enrollmentYear || '').trim();
+            patch.enrollmentYear = trimmed === '' ? null : parseInt(trimmed, 10);
+        }
+        if (realName) patch.realName = realName;
+        await userBindModel.updateStudent(domainId, studentRecordId, patch);
+        await OplogModel.log(this, 'userbind.student.update', {
+            studentRecordId, fields: Object.keys(patch),
+        });
+        this.response.body = { success: true };
     }
 }
 
@@ -470,7 +651,7 @@ class AdminTokensHandler extends UserbindAdminHandler {
     }
 
     @param('tokenId', Types.String)
-    async postRevoke({ }, tokenId: string) {
+    async postRevoke(_: any, tokenId: string) {
         await userBindModel.revokeInviteToken(tokenId);
         this.response.redirect = this.url('admin_userbind_tokens');
     }
@@ -505,7 +686,7 @@ class AdminRequestsHandler extends UserbindAdminHandler {
     }
 
     @param('requestId', Types.ObjectId)
-    async postApprove({ }, requestId: ObjectId) {
+    async postApprove(_: any, requestId: ObjectId) {
         await userBindModel.approveBindingRequest(requestId, this.user._id);
         await OplogModel.log(this, 'userbind.request.approve', { requestId });
         this.response.redirect = this.url('admin_userbind_requests');
@@ -513,7 +694,7 @@ class AdminRequestsHandler extends UserbindAdminHandler {
 
     @param('requestId', Types.ObjectId)
     @param('reason', Types.String)
-    async postReject({ }, requestId: ObjectId, reason: string) {
+    async postReject(_: any, requestId: ObjectId, reason: string) {
         // Reason required — model enforces too, but check here for early feedback.
         if (!reason || !reason.trim()) {
             throw new ValidationError('reason', null, '驳回理由必填');
@@ -619,7 +800,7 @@ class BindLandingHandler extends Handler {
     }
 
     @param('token', Types.String)
-    async get({ }, token: string) {
+    async get(_: any, token: string) {
         const tokenDoc = await bindTokensColl.findOne({ _id: token });
         if (!tokenDoc) {
             this.response.template = 'user_bind_landing.html';
@@ -654,7 +835,7 @@ class BindLandingHandler extends Handler {
             const groups = student && student.groupIds.length > 0
                 ? await userGroupsColl.find({ _id: { $in: student.groupIds } }).toArray()
                 : [];
-            const inviterUser = await (await import('hydrooj')).UserModel.getById(
+            const inviterUser = await UserModel.getById(
                 this.domain?._id || 'system', tokenDoc.createdBy,
             ).catch(() => null);
             this.response.template = 'user_bind_landing.html';
@@ -677,7 +858,7 @@ class BindLandingHandler extends Handler {
         }
         if (tokenDoc.kind === 'school') {
             const school = await schoolsColl.findOne({ _id: tokenDoc.schoolId });
-            const inviterUser = await (await import('hydrooj')).UserModel.getById(
+            const inviterUser = await UserModel.getById(
                 this.domain?._id || 'system', tokenDoc.createdBy,
             ).catch(() => null);
             this.response.template = 'user_bind_landing.html';
@@ -693,7 +874,7 @@ class BindLandingHandler extends Handler {
         if (tokenDoc.kind === 'user_group') {
             const group = await userGroupsColl.findOne({ _id: tokenDoc.userGroupId });
             const school = group ? await schoolsColl.findOne({ _id: group.schoolId }) : null;
-            const inviterUser = await (await import('hydrooj')).UserModel.getById(
+            const inviterUser = await UserModel.getById(
                 this.domain?._id || 'system', tokenDoc.createdBy,
             ).catch(() => null);
             this.response.template = 'user_bind_landing.html';

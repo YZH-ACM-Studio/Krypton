@@ -462,8 +462,13 @@ class HomeAvatarHandler extends Handler {
             const ext = path.extname(file.originalFilename).toLowerCase();
             if (!['.jpg', '.jpeg', '.png'].includes(ext)) throw new ValidationError('file');
             await storage.put(`user/${this.user._id}/.avatar${ext}`, file.filepath, this.user._id);
-            // TODO: cached avatar
-            await user.setById(this.user._id, { avatar: `url:/file/${this.user._id}/.avatar${ext}` });
+            // Append a cache-busting `?t=<ms>` so the browser actually
+            // re-fetches when the user re-uploads — the file URL itself
+            // is stable but the bytes change, and without this every
+            // re-upload looks like nothing happened.
+            await user.setById(this.user._id, {
+                avatar: `url:/file/${this.user._id}/.avatar${ext}?t=${Date.now()}`,
+            });
         } else throw new ValidationError('avatar');
         this.back();
     }

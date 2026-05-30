@@ -47,6 +47,14 @@ export async function listAnnouncements(
         skip?: number;
         /** When set, returns only the rows visible to this user. */
         forUser?: boolean;
+        /**
+         * Sort direction for non-pinned rows by `publishAt`.
+         *   'desc' (default) — newest first
+         *   'asc'  — oldest first
+         * Pinned rows always come first; within each pin bucket the
+         * admin-controlled `sortOrder` still wins, then publishAt.
+         */
+        sort?: 'asc' | 'desc';
     } = {},
 ): Promise<{ docs: AnnouncementDoc[]; total: number }> {
     const now = new Date();
@@ -54,9 +62,10 @@ export async function listAnnouncements(
     if (opts.forUser !== false && !opts.includeHidden) Object.assign(filter, visibilityClause(now));
     if (opts.category) filter.category = opts.category;
     const total = await docsColl.countDocuments(filter);
+    const publishDir = opts.sort === 'asc' ? 1 : -1;
     const cursor = docsColl
         .find(filter)
-        .sort({ pin: -1, sortOrder: 1, publishAt: -1 })
+        .sort({ pin: -1, sortOrder: 1, publishAt: publishDir })
         .skip(opts.skip || 0)
         .limit(opts.limit || 50);
     const docs = await cursor.toArray();

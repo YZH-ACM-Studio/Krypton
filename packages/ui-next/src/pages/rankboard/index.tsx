@@ -13,12 +13,17 @@
  */
 import { useMemo, useState } from 'react';
 import {
-  Award as AwardIcon, ChevronRight, Crown, Medal, Search, Trophy, X, ZoomIn,
+  Award as AwardIcon, Calendar, ChevronRight, Crown, Medal, Search, Trophy,
+  Users, X, ZoomIn,
 } from 'lucide-react';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { makeInitials } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -69,6 +74,26 @@ const CATEGORY_GROUPS: Array<{ label: string; matchers: Array<string | RegExp> }
   { label: '其它', matchers: [] }, // catch-all
 ];
 
+/**
+ * Field visibility per award category — kept in sync with the admin form.
+ *   ICPC / CCPC: dual rank (现场 + 学校), teammates
+ *   天梯赛-团队: team + 排名
+ *   天梯赛-个人: 排名
+ *   PAT: 排名 + 实际考试得分
+ *   others: 排名
+ */
+function awardFields(typeKey: string) {
+  const isICPC = /^icpc/i.test(typeKey);
+  const isCCPC = /^ccpc/i.test(typeKey);
+  const isPAT = /^pat/i.test(typeKey);
+  const hasDualRank = isICPC || isCCPC;
+  return {
+    hasDualRank,
+    hasSingleRank: !hasDualRank,
+    hasExamScore: isPAT,
+  };
+}
+
 function categorise(typeName: string): string {
   for (const g of CATEGORY_GROUPS) {
     if (!g.matchers.length) continue;
@@ -117,12 +142,15 @@ function PodiumCard({ row, rank }: { row: LeaderboardRow; rank: number }) {
         </span>
         <span className="rounded-full bg-background/80 px-2 py-0.5 font-mono text-xs">#{rank}</span>
       </div>
-      <div>
-        <p className="truncate text-lg font-semibold">{row.student.realName}</p>
-        <p className="truncate text-xs text-muted-foreground">
-          {row.student.schoolName}
-          {row.student.groupNames[0] ? ` · ${row.student.groupNames[0]}` : ''}
-        </p>
+      <div className="flex items-center gap-3">
+        <Avatar className="size-10 shrink-0">
+          {row.user?.avatarUrl ? <AvatarImage src={row.user.avatarUrl} alt={row.student.realName} /> : null}
+          <AvatarFallback className="text-xs">{makeInitials(row.user?.uname || row.student.realName)}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0">
+          <p className="truncate text-lg font-semibold">{row.student.realName}</p>
+          <p className="truncate text-xs text-muted-foreground">{row.student.schoolName}</p>
+        </div>
       </div>
       <div className="mt-1 flex items-baseline gap-2">
         <span className="text-3xl font-bold tabular-nums">
@@ -150,14 +178,13 @@ function AwardsDrawer({
             <h2 className="text-xl font-semibold">{row.student.realName}</h2>
             <p className="text-xs text-muted-foreground">
               {row.student.studentId} · {row.student.schoolName}
-              {row.student.groupNames[0] ? ` · ${row.student.groupNames[0]}` : ''}
             </p>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose}>
             <X className="size-4" />
           </Button>
         </header>
-        <div className="krypton-scrollbar flex-1 space-y-3 overflow-y-auto p-5">
+        <ScrollArea className="flex-1" viewportClassName="space-y-3 p-5">
           {row.person.awards.length === 0 ? (
             <p className="text-center text-sm text-muted-foreground">尚无奖项</p>
           ) : (
@@ -166,6 +193,7 @@ function AwardsDrawer({
               const score = row.awardScores[idx] || 0;
               const cover = award.imageUrls?.[award.coverIndex ?? 0];
               const thumbs = (award.imageUrls || []).filter((_, i) => i !== (award.coverIndex ?? 0));
+              const fields = awardFields(award.type);
               return (
                 <Card key={idx} className="overflow-hidden">
                   {cover && (
@@ -192,10 +220,14 @@ function AwardsDrawer({
                       </Badge>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                      {award.date && <span>📅 {award.date}</span>}
-                      {award.team && <span>🤝 {award.team}</span>}
-                      {award.liveRank != null && <span>现场 #{award.liveRank}</span>}
-                      {award.schoolRank != null && <span>校内 #{award.schoolRank}</span>}
+                      {award.date && <span className="inline-flex items-center gap-1"><Calendar className="size-3" />{award.date}</span>}
+                      {award.team && <span className="inline-flex items-center gap-1"><Users className="size-3" />{award.team}</span>}
+                      {award.liveRank != null && fields.hasDualRank && <span>现场 #{award.liveRank}</span>}
+                      {award.schoolRank != null && fields.hasDualRank && <span>校内 #{award.schoolRank}</span>}
+                      {award.liveRank != null && fields.hasSingleRank && <span>排名 #{award.liveRank}</span>}
+                      {award.score != null && fields.hasExamScore && (
+                        <span className="font-semibold text-foreground">考试 {award.score} 分</span>
+                      )}
                     </div>
                     {award.teammates && award.teammates.length > 0 && (
                       <p className="mt-1.5 text-[11px] text-muted-foreground">
@@ -216,7 +248,7 @@ function AwardsDrawer({
               );
             })
           )}
-        </div>
+        </ScrollArea>
       </aside>
       {lightbox && (
         <div
@@ -316,13 +348,15 @@ export function RankBoardMainPage() {
               value={search} onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <select
-            value={schoolFilter} onChange={(e) => setSchoolFilter(e.target.value)}
-            className="rounded-md border bg-background px-3 py-2 text-sm"
-          >
-            <option value="all">全部学校</option>
-            {schools.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
+          <SimpleSelect
+            value={schoolFilter}
+            onValueChange={setSchoolFilter}
+            className="w-auto min-w-[10rem]"
+            options={[
+              { value: 'all', label: '全部学校' },
+              ...schools.map((s) => ({ value: s, label: s })),
+            ]}
+          />
           <details className="flex-1">
             <summary className="cursor-pointer rounded-md border bg-background px-3 py-2 text-sm">
               奖项类型筛选 {typeFilter.size > 0 && <Badge variant="secondary" className="ml-1 text-[10px]">{typeFilter.size}</Badge>}
@@ -344,14 +378,13 @@ export function RankBoardMainPage() {
       {/* Table */}
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
+          <div>
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-14 pl-5">排名</TableHead>
                   <TableHead>姓名</TableHead>
-                  <TableHead>学校 / 班级</TableHead>
-                  <TableHead className="w-20 text-right">总分</TableHead>
+                  <TableHead className="w-32">就业去向</TableHead>
                   <TableHead className="w-12 text-center">ICPC 金</TableHead>
                   <TableHead className="w-12 text-center">ICPC 银</TableHead>
                   <TableHead className="w-12 text-center">ICPC 铜</TableHead>
@@ -361,7 +394,8 @@ export function RankBoardMainPage() {
                   <TableHead className="w-12 text-center">PAT</TableHead>
                   <TableHead className="w-14 text-center">天梯赛</TableHead>
                   <TableHead className="w-12 text-center">其它</TableHead>
-                  <TableHead className="w-16 pr-5 text-right">OJ AC</TableHead>
+                  <TableHead className="w-16 text-right">OJ AC</TableHead>
+                  <TableHead className="w-20 pr-5 text-right">总分</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -389,11 +423,9 @@ export function RankBoardMainPage() {
                             <p className="font-mono text-[11px] text-muted-foreground">{r.student.studentId}</p>
                           </div>
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {r.student.schoolName}
-                          {r.student.groupNames[0] && <span className="ml-1 opacity-70">· {r.student.groupNames[0]}</span>}
+                        <TableCell className="truncate text-xs text-muted-foreground">
+                          {r.person.employmentStatus || <span className="opacity-40">—</span>}
                         </TableCell>
-                        <TableCell className="text-right font-mono text-sm">{r.totalScore.toFixed(1)}</TableCell>
                         <TableCell className="text-center text-xs">{counts['ICPC 金'] || ''}</TableCell>
                         <TableCell className="text-center text-xs">{counts['ICPC 银'] || ''}</TableCell>
                         <TableCell className="text-center text-xs">{counts['ICPC 铜'] || ''}</TableCell>
@@ -403,8 +435,11 @@ export function RankBoardMainPage() {
                         <TableCell className="text-center text-xs">{counts['PAT'] || ''}</TableCell>
                         <TableCell className="text-center text-xs">{counts['天梯赛'] || ''}</TableCell>
                         <TableCell className="text-center text-xs">{counts['其它'] || ''}</TableCell>
-                        <TableCell className="pr-5 text-right font-mono text-sm">
+                        <TableCell className="text-right font-mono text-sm">
                           {r.user ? r.user.nAccept : '—'}
+                        </TableCell>
+                        <TableCell className="pr-5 text-right font-mono text-sm font-semibold">
+                          {r.totalScore.toFixed(1)}
                         </TableCell>
                       </TableRow>
                     );
@@ -430,7 +465,7 @@ export function RankBoardDetailPage() {
   };
   const typeMap = new Map(data.awardTypes.map((t) => [t.key, t]));
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
+    <div className="space-y-5">
       <Button variant="ghost" size="sm" asChild>
         <a href="/rankboard" className="gap-1.5">
           <ChevronRight className="size-3.5 rotate-180" />
@@ -445,24 +480,24 @@ export function RankBoardDetailPage() {
           <h1 className="text-3xl font-bold">{data.row.student.realName}</h1>
           <p className="text-sm text-muted-foreground">
             {data.row.student.studentId} · {data.row.student.schoolName}
-            {data.row.student.groupNames[0] ? ` · ${data.row.student.groupNames[0]}` : ''}
           </p>
-          {data.row.user && (
+          {data.row.user && data.row.student.boundUserId ? (
             <p className="text-xs text-muted-foreground">
-              OJ：<a href={`/user/${data.row.user.uname}`} className="text-primary hover:underline">{data.row.user.uname}</a> · 通过 {data.row.user.nAccept} 题
+              OJ：<a href={`/user/${data.row.student.boundUserId}`} className="text-primary hover:underline">{data.row.user.uname}</a> · 通过 {data.row.user.nAccept} 题
             </p>
-          )}
+          ) : null}
           {data.row.person.employmentStatus && (
             <p className="text-xs text-muted-foreground">就业去向：{data.row.person.employmentStatus}</p>
           )}
         </CardContent>
       </Card>
       <h2 className="text-base font-semibold">奖项（{data.row.awardCount}）</h2>
-      <div className="space-y-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {data.row.person.awards.map((award, idx) => {
           const type = typeMap.get(award.type);
           const score = data.row.awardScores[idx] || 0;
           const cover = award.imageUrls?.[award.coverIndex ?? 0];
+          const fields = awardFields(award.type);
           return (
             <Card key={idx}>
               {cover && (
@@ -481,8 +516,12 @@ export function RankBoardDetailPage() {
                 <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   {award.date && <span>📅 {award.date}</span>}
                   {award.team && <span>🤝 {award.team}</span>}
-                  {award.liveRank != null && <span>现场 #{award.liveRank}</span>}
-                  {award.schoolRank != null && <span>校内 #{award.schoolRank}</span>}
+                  {award.liveRank != null && fields.hasDualRank && <span>现场 #{award.liveRank}</span>}
+                  {award.schoolRank != null && fields.hasDualRank && <span>校内 #{award.schoolRank}</span>}
+                  {award.liveRank != null && fields.hasSingleRank && <span>排名 #{award.liveRank}</span>}
+                  {award.score != null && fields.hasExamScore && (
+                    <span className="font-semibold text-foreground">考试 {award.score} 分</span>
+                  )}
                 </div>
                 {award.teammates && award.teammates.length > 0 && (
                   <p className="text-xs text-muted-foreground">队友：{award.teammates.join(' · ')}</p>

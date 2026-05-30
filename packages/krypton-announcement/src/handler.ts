@@ -43,16 +43,32 @@ function parseDateOrNull(input: unknown): Date | null {
     return Number.isNaN(d.getTime()) ? null : d;
 }
 
+function ensureCanEditScope(user: any, scope: 'global' | 'domain') {
+    if (scope === 'global') {
+        if (!user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
+            throw new PrivilegeError(PRIV.PRIV_EDIT_SYSTEM);
+        }
+    } else if (!user.hasPerm(PERM.PERM_EDIT_DOMAIN)) {
+        throw new PermissionError(PERM.PERM_EDIT_DOMAIN);
+    }
+}
+
+function ensureCanEditAnnouncement(user: any, doc: AnnouncementDoc) {
+    ensureCanEditScope(user, doc.scope);
+}
+
 class AnnounceListHandler extends Handler {
     noCheckPermView = true;
 
     @param('category', Types.String, true)
     @param('page', Types.PositiveInt, true)
-    async get({ domainId }: { domainId: string }, category?: string, page = 1) {
+    @param('sort', Types.String, true)
+    async get({ domainId }: { domainId: string }, category?: string, page = 1, sort?: string) {
         const limit = 20;
         const skip = (page - 1) * limit;
+        const sortDir = sort === 'asc' ? 'asc' : 'desc';
         const { docs, total } = await listAnnouncements(domainId, {
-            forUser: true, category, skip, limit,
+            forUser: true, category, skip, limit, sort: sortDir,
         });
         const categories = await listCategories();
         this.response.template = 'announce_list.html';
@@ -60,6 +76,7 @@ class AnnounceListHandler extends Handler {
             docs, total, page, limit,
             category: category || '',
             categories,
+            sort: sortDir,
         };
     }
 }
@@ -91,20 +108,6 @@ class AnnounceDetailHandler extends Handler {
 }
 
 class AdminAnnounceListHandler extends Handler {
-    async _checkScope(scope: 'global' | 'domain') {
-        if (scope === 'global') {
-            if (!this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
-                throw new PrivilegeError(PRIV.PRIV_EDIT_SYSTEM);
-            }
-        } else if (!this.user.hasPerm(PERM.PERM_EDIT_DOMAIN)) {
-            throw new PermissionError(PERM.PERM_EDIT_DOMAIN);
-        }
-    }
-
-    async _ensureCanEdit(doc: AnnouncementDoc) {
-        await this._checkScope(doc.scope);
-    }
-
     async prepare() {
         // Either domain admin or system admin may *view* the admin list.
         if (!this.user.hasPerm(PERM.PERM_EDIT_DOMAIN) && !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
@@ -120,6 +123,53 @@ class AdminAnnounceListHandler extends Handler {
             docs, categories,
             canEditGlobal: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
         };
+    }
+
+    @param('title', Types.String)
+    @param('content', Types.Content, true)
+    @param('category', Types.String, true)
+    @param('scope', Types.String, true)
+    @param('pin', Types.Boolean, true)
+    @param('hidden', Types.Boolean, true)
+    @param('publishAt', Types.String, true)
+    @param('unpublishAt', Types.String, true)
+    async postCreate(
+        { domainId }: { domainId: string },
+        title: string,
+        content?: string,
+        category?: string,
+        scope?: string,
+        pin?: boolean,
+        hidden?: boolean,
+        publishAt?: string,
+        unpublishAt?: string,
+    ) {
+        const finalScope = (scope === 'global') ? 'global' : 'domain';
+        ensureCanEditScope(this.user, finalScope);
+        await createAnnouncement({
+            title,
+            content: content || '',
+            category: category || 'announcement',
+            scope: finalScope,
+            domainId,
+            owner: this.user._id,
+            pin,
+            hidden,
+            publishAt: parseDateOrNull(publishAt) || new Date(),
+            unpublishAt: parseDateOrNull(unpublishAt),
+        });
+        this.response.redirect = this.url('admin_announce');
+    }
+
+    @param('orderedIds', Types.CommaSeperatedArray, true)
+    async postReorder(_ctx: any, orderedIds?: string[]) {
+        if (!this.user.hasPerm(PERM.PERM_EDIT_DOMAIN) && !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
+            throw new PermissionError(PERM.PERM_EDIT_DOMAIN);
+        }
+        if (orderedIds && orderedIds.length) {
+            await reorderAnnouncements(orderedIds);
+        }
+        this.response.redirect = this.url('admin_announce');
     }
 }
 
@@ -159,87 +209,48 @@ class AdminAnnounceEditHandler extends Handler {
         };
     }
 
-    @param('operation', Types.String)
     @param('title', Types.String, true)
     @param('content', Types.Content, true)
     @param('category', Types.String, true)
-    @param('scope', Types.String, true)
     @param('pin', Types.Boolean, true)
     @param('hidden', Types.Boolean, true)
     @param('publishAt', Types.String, true)
     @param('unpublishAt', Types.String, true)
     @param('aid', Types.ObjectId, true)
-    @param('orderedIds', Types.CommaSeperatedArray, true)
-    async post(
-        { domainId }: { domainId: string },
-        operation: string,
+    async postUpdate(
+        _ctx: { domainId: string },
         title?: string,
         content?: string,
         category?: string,
-        scope?: string,
         pin?: boolean,
         hidden?: boolean,
         publishAt?: string,
         unpublishAt?: string,
         aid?: ObjectId,
-        orderedIds?: string[],
     ) {
-        switch (operation) {
-            case 'create': {
-                const finalScope = (scope === 'global') ? 'global' : 'domain';
-                await this._checkScope(finalScope);
-                if (!title) throw new Error('title required');
-                await createAnnouncement({
-                    title,
-                    content: content || '',
-                    category: category || 'announcement',
-                    scope: finalScope,
-                    domainId,
-                    owner: this.user._id,
-                    pin,
-                    hidden,
-                    publishAt: parseDateOrNull(publishAt) || new Date(),
-                    unpublishAt: parseDateOrNull(unpublishAt),
-                });
-                break;
-            }
-            case 'update': {
-                if (!aid) throw new Error('aid required');
-                const doc = await getAnnouncement(aid);
-                if (!doc) throw new NotFoundError('announcement', String(aid));
-                await this._ensureCanEdit(doc);
-                const patch: any = {};
-                if (title !== undefined) patch.title = title;
-                if (content !== undefined) patch.content = content;
-                if (category !== undefined) patch.category = category;
-                if (pin !== undefined) patch.pin = !!pin;
-                if (hidden !== undefined) patch.hidden = !!hidden;
-                if (publishAt !== undefined) patch.publishAt = parseDateOrNull(publishAt) || new Date();
-                if (unpublishAt !== undefined) patch.unpublishAt = parseDateOrNull(unpublishAt);
-                await updateAnnouncement(aid, patch);
-                break;
-            }
-            case 'delete': {
-                if (!aid) throw new Error('aid required');
-                const doc = await getAnnouncement(aid);
-                if (!doc) throw new NotFoundError('announcement', String(aid));
-                await this._ensureCanEdit(doc);
-                await deleteAnnouncement(aid);
-                break;
-            }
-            case 'reorder': {
-                if (!orderedIds || !orderedIds.length) break;
-                // Reordering requires PERM_EDIT_DOMAIN — anyone managing the
-                // current domain's list can reorder visible items.
-                if (!this.user.hasPerm(PERM.PERM_EDIT_DOMAIN) && !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
-                    throw new PermissionError(PERM.PERM_EDIT_DOMAIN);
-                }
-                await reorderAnnouncements(orderedIds);
-                break;
-            }
-            default:
-                throw new Error(`unknown operation: ${operation}`);
-        }
+        if (!aid) throw new Error('aid required');
+        const doc = await getAnnouncement(aid);
+        if (!doc) throw new NotFoundError('announcement', String(aid));
+        ensureCanEditAnnouncement(this.user, doc);
+        const patch: any = {};
+        if (title !== undefined) patch.title = title;
+        if (content !== undefined) patch.content = content;
+        if (category !== undefined) patch.category = category;
+        if (pin !== undefined) patch.pin = !!pin;
+        if (hidden !== undefined) patch.hidden = !!hidden;
+        if (publishAt !== undefined) patch.publishAt = parseDateOrNull(publishAt) || new Date();
+        if (unpublishAt !== undefined) patch.unpublishAt = parseDateOrNull(unpublishAt);
+        await updateAnnouncement(aid, patch);
+        this.response.redirect = this.url('admin_announce');
+    }
+
+    @param('aid', Types.ObjectId, true)
+    async postDelete(_ctx: any, aid?: ObjectId) {
+        if (!aid) throw new Error('aid required');
+        const doc = await getAnnouncement(aid);
+        if (!doc) throw new NotFoundError('announcement', String(aid));
+        ensureCanEditAnnouncement(this.user, doc);
+        await deleteAnnouncement(aid);
         this.response.redirect = this.url('admin_announce');
     }
 }
@@ -257,34 +268,33 @@ class AdminCategoriesHandler extends Handler {
         this.response.body = { categories };
     }
 
-    @param('operation', Types.String)
     @param('key', Types.String, true)
     @param('name', Types.String, true)
     @param('color', Types.String, true)
     @param('order', Types.Int, true)
     @param('hidden', Types.Boolean, true)
-    async post(
+    async postUpsert(
         _ctx: any,
-        operation: string,
         key?: string,
         name?: string,
         color?: string,
         order?: number,
         hidden?: boolean,
     ) {
-        if (operation === 'upsert') {
-            if (!key || !name || !color) throw new Error('key/name/color required');
-            await upsertCategory({
-                key,
-                name,
-                color,
-                order: order || 100,
-                hidden,
-            });
-        } else if (operation === 'delete') {
-            if (!key) throw new Error('key required');
-            await deleteCategory(key);
-        }
+        if (!key || !name || !color) throw new Error('key/name/color required');
+        await upsertCategory({
+            key,
+            name,
+            color,
+            order: order || 100,
+            hidden,
+        });
+        this.response.redirect = this.url('admin_announce_categories');
+    }
+
+    @param('key', Types.String)
+    async postDelete(_ctx: any, key: string) {
+        await deleteCategory(key);
         this.response.redirect = this.url('admin_announce_categories');
     }
 }

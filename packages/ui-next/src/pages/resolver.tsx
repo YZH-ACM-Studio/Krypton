@@ -4,6 +4,7 @@ import { AboutPage, WikiHelpPage } from '@/pages/wiki';
 import { KryptonHomePage } from '@/pages/home';
 import { ProblemsPage } from '@/pages/problems';
 import { ProblemDetailPage } from '@/pages/problem-detail';
+import { ProblemSubmitPage } from '@/pages/problem-submit';
 import { ProblemHackPage } from '@/pages/problem-hack';
 import { ContestsPage, ContestDetailPage, ContestScoreboardPage } from '@/pages/contests';
 import { TrainingPage, TrainingDetailPage } from '@/pages/training';
@@ -73,17 +74,22 @@ import {
 } from '@/pages/userbind';
 import { SpikeWebViewProbePage } from '@/pages/spike-webview';
 import { ExamModeHomePage } from '@/pages/exam-mode/index';
+import { ExamContestPage } from '@/pages/exam-mode/contest';
 import { ExamPaperPage } from '@/pages/exam-mode/paper';
+import { ContestWorkspacePage } from '@/pages/exam-mode/workspace';
+import { ClientRequiredNoticePage } from '@/pages/client-required-notice';
 import {
   AdminVigilOverviewPage,
   AdminVigilExamDetailPage,
 } from '@/pages/vigil';
 import { TaskCenterPage, TaskMyPage, TaskDetailPage } from '@/pages/tasks';
+import { MyVerifyInboxPage } from '@/pages/permits/inbox';
 import {
   AdminTasksListPage,
   AdminTasksEditPage,
   AdminTasksAssignPage,
   AdminTasksStatsPage,
+  AdminTasksCandidatesPage,
   AdminTasksScoresPage,
   AdminTasksSettingsPage,
 } from '@/pages/admin-tasks';
@@ -109,7 +115,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   // Problems
   'problem_main.html': ProblemsPage,
   'problem_detail.html': ProblemDetailPage,
-  'problem_submit.html': ProblemDetailPage,
+  'problem_submit.html': ProblemSubmitPage,
   'problem_hack.html': ProblemHackPage,
   'problem_edit.html': ProblemEditPage,
   'problem_config.html': ProblemConfigPage,
@@ -236,7 +242,11 @@ const PAGE_MAP: Record<string, PageComponent> = {
 
   // Phase 2: exam-mode (paper workflow)
   'exam_mode_home.html': ExamModeHomePage,
+  'exam_contest.html': ExamContestPage,
   'exam_paper.html': ExamPaperPage,
+  // Phase 4: client-required workspace (all-rule contest entry)
+  'contest_workspace.html': ContestWorkspacePage,
+  'client_required_notice.html': ClientRequiredNoticePage,
 
   // Phase 3: vigil admin (S2 absorption)
   'admin_vigil_overview.html': AdminVigilOverviewPage,
@@ -247,11 +257,15 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'tasks_my.html': TaskMyPage,
   'tasks_detail.html': TaskDetailPage,
 
+  // krypton-permits (per-problem verifier ACL)
+  'my_verify_inbox.html': MyVerifyInboxPage,
+
   // krypton-tasks (admin-facing)
   'admin_tasks.html': AdminTasksListPage,
   'admin_tasks_edit.html': AdminTasksEditPage,
   'admin_tasks_assign.html': AdminTasksAssignPage,
   'admin_tasks_stats.html': AdminTasksStatsPage,
+  'admin_tasks_candidates.html': AdminTasksCandidatesPage,
   'admin_tasks_scores.html': AdminTasksScoresPage,
   'admin_tasks_settings.html': AdminTasksSettingsPage,
 

@@ -477,7 +477,7 @@ export function FileUploader({
   // Lazy-create the Uppy instance once
   if (!uppyRef.current && typeof window !== 'undefined') {
     const uppy = new Uppy({
-      autoProceed: true,
+      autoProceed: false,
       restrictions: {
         maxFileSize,
         maxNumberOfFiles: maxFiles,
@@ -489,6 +489,8 @@ export function FileUploader({
       method: 'POST',
       formData: true,
       withCredentials: true,
+      allowedMetaFields: true,
+      getResponseData: () => ({}),
     });
     uppy.on('file-added', (file) => {
       setItems((prev) => [...prev, {
@@ -516,11 +518,26 @@ export function FileUploader({
     if (!uppy) return;
     Array.from(files).forEach((f) => {
       try {
-        uppy.addFile({
-          name: f.name, type: f.type, data: f, meta: meta || {},
+        const id = uppy.addFile({
+          name: f.name,
+          type: f.type,
+          data: f,
+          meta: {
+            operation: 'upload_file',
+            filename: f.name,
+          },
+        });
+        // Uppy reserves meta.type for the file MIME and rewrites it during
+        // addFile(). Hydro also needs a POST field named "type", so apply
+        // caller metadata after addFile() and before upload starts.
+        uppy.setFileMeta(id, {
+          operation: 'upload_file',
+          filename: f.name,
+          ...(meta || {}),
         });
       } catch { /* ignore (e.g. dup id, type restriction) */ }
     });
+    void uppy.upload().catch(() => { /* upload-error updates per-file state */ });
   }, [meta]);
 
   const onDrop = (e: React.DragEvent) => {

@@ -3,6 +3,7 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { canSeeAdminAffordance, hasPriv, type PrivBit } from '@/lib/perms';
 import { getAdminNavSections } from '@/lib/admin-nav-registry';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 
 export function AdminSidebar({ currentTemplate }: { currentTemplate: string }) {
@@ -26,12 +27,9 @@ export function AdminSidebar({ currentTemplate }: { currentTemplate: string }) {
 
   return (
     <aside className="hidden h-full w-56 shrink-0 min-h-0 lg:block">
-      {/* Own overflow-y-auto: scrolls independently from the right column.
-          pt-2 nudges the first heading down so its baseline lines up with
-          the right-column h1 (text-xl has more leading than text-[11px]). */}
-      <nav
-        className="krypton-scrollbar h-full overflow-y-auto pr-1 pt-2 pb-6 space-y-5"
-      >
+      {/* Own scroll area: scrolls independently from the right column. */}
+      <ScrollArea className="h-full" viewportClassName="pr-1 pt-2 pb-6">
+        <nav className="space-y-5">
         {sections.map((section) => {
           const visibleItems = section.items.filter((item) => {
             if (item.requiredPriv && !hasPriv(priv, item.requiredPriv as PrivBit)) return false;
@@ -75,7 +73,8 @@ export function AdminSidebar({ currentTemplate }: { currentTemplate: string }) {
             </div>
           );
         })}
-      </nav>
+        </nav>
+      </ScrollArea>
     </aside>
   );
 }

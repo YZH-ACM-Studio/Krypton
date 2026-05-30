@@ -36,6 +36,7 @@ const BUILTIN_ADDONS = [
     path.resolve(__dirname, '..'),
     path.resolve(__dirname, '..', '..', 'ui-next'),
     path.resolve(__dirname, '..', '..', 'krypton-userbind'),
+    path.resolve(__dirname, '..', '..', 'krypton-vigilguard'),
     path.resolve(__dirname, '..', '..', 'krypton-tasks'),
     path.resolve(__dirname, '..', '..', 'krypton-announcement'),
     path.resolve(__dirname, '..', '..', 'krypton-rankboard'),

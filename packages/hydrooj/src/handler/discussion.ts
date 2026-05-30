@@ -160,7 +160,7 @@ class DiscussionCreateHandler extends DiscussionHandler {
     }
 }
 
-class DiscussionDetailHandler extends DiscussionHandler {
+export class DiscussionDetailHandler extends DiscussionHandler {
     @param('did', Types.ObjectId)
     @param('page', Types.PositiveInt, true)
     async get(domainId: string, did: ObjectId, page = 1) {

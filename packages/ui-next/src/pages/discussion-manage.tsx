@@ -21,6 +21,7 @@ export function DiscussionCreatePage() {
   const bs = useBootstrap();
   const data = bs.page.data;
   const vnode: R = data.vnode || {};
+  const backUrl = data.examMode?.urls?.discussion || null;
 
   return (
     <motion.div
@@ -30,9 +31,15 @@ export function DiscussionCreatePage() {
       transition={{ duration: 0.3 }}
     >
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
-          <ArrowLeft className="size-4" />
-        </Button>
+        {backUrl ? (
+          <Button asChild variant="ghost" size="icon">
+            <a href={backUrl}><ArrowLeft className="size-4" /></a>
+          </Button>
+        ) : (
+          <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
+            <ArrowLeft className="size-4" />
+          </Button>
+        )}
         <div>
           <h1 className="text-xl font-semibold">发起讨论</h1>
           {vnode.title && <p className="text-sm text-muted-foreground">{vnode.title}</p>}

@@ -71,3 +71,7 @@ __*
 
 packages/*/public/assets
 node_modules.*
+
+# Local ops handbook — contains sudo passwords for oj / oj-vigil
+# DO NOT commit. See `docs/KRYPTON-PLAN.md` for non-sensitive deployment notes.
+/CLAUDE.md

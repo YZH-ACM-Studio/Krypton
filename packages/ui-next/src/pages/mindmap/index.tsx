@@ -18,7 +18,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import ELK from 'elkjs/lib/elk.bundled.js';
 import {
-  ChevronDown, ChevronUp, Edit3, Network, Plus, RefreshCw, Save, Search,
+  ChevronDown, ChevronRight, ChevronUp, Edit3, Network, Plus, RefreshCw, Save, Search,
   Sparkles, Trash2, X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -26,9 +26,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
 import { PRIV } from '@/lib/perms';
 import { cn } from '@/lib/cn';
+import { useColorMode } from '@/lib/use-color-mode';
 
 interface MindmapNode {
   _id: string;
@@ -78,15 +81,31 @@ interface NodeData {
   selected?: boolean;
   hasChildren?: boolean;
   collapsed?: boolean;
+  /** Which half of the mindmap this node lives in. Drives handle wiring. */
+  side?: 'left' | 'right' | 'root';
   [key: string]: unknown;
 }
 
+/**
+ * Each node renders 4 invisible handles so edges can wire onto whichever
+ * side they need:
+ *   - target handles ("tgt-left", "tgt-right") on both sides for incoming
+ *     edges from the parent
+ *   - source handles ("src-left", "src-right") on both sides for outgoing
+ *     edges to children
+ *
+ * The actual edge then specifies `sourceHandle` + `targetHandle` ids based
+ * on its child's side: a left-side child wants its parent's left source
+ * and its own right target (so the edge enters from the right of the
+ * child) — see edge construction in `computeLayout`.
+ */
 function MindmapNodeComponent({ data }: { data: NodeData }) {
   const color = COLOR_BG[data.color || 'gray'] || COLOR_BG.gray;
+  const toggle = data.onToggleCollapse as (() => void) | undefined;
   return (
     <>
-      {/* Edge handles — invisible but required for react-flow edge wiring. */}
-      <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
+      <Handle type="target" id="tgt-left" position={Position.Left} style={{ opacity: 0 }} />
+      <Handle type="target" id="tgt-right" position={Position.Right} style={{ opacity: 0 }} />
       <div
         className={cn(
           'flex h-full w-full items-center justify-center rounded-lg border px-3 py-2 text-sm transition-colors',
@@ -96,8 +115,24 @@ function MindmapNodeComponent({ data }: { data: NodeData }) {
         )}
       >
         <span className="truncate">{data.topic}</span>
+        {data.hasChildren && toggle ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); toggle(); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="ml-1.5 inline-flex size-4 shrink-0 items-center justify-center rounded hover:bg-accent"
+            title={data.collapsed ? '展开子节点' : '收起子节点'}
+            aria-label={data.collapsed ? '展开' : '收起'}
+          >
+            {data.collapsed
+              ? <ChevronRight className="size-3" />
+              : <ChevronDown className="size-3" />}
+          </button>
+        ) : null}
       </div>
-      <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
+      <Handle type="source" id="src-left" position={Position.Left} style={{ opacity: 0 }} />
+      <Handle type="source" id="src-right" position={Position.Right} style={{ opacity: 0 }} />
     </>
   );
 }
@@ -107,14 +142,15 @@ const NODE_TYPES = { mindmap: MindmapNodeComponent };
 interface LayoutResult { nodes: RFNode<NodeData>[]; edges: Edge[] }
 
 /**
- * Run ELK layered layout. Honors per-node `position` overrides — those nodes
- * are pinned (have their x/y locked) and ELK routes around them.
+ * Compute a subset of `raw` nodes to actually render — anything whose
+ * parent chain crosses a collapsed node is hidden. Returns both the
+ * visible subset and the per-node `children` adjacency (used for the
+ * `hasChildren` flag on the visible nodes' UI badges).
  */
-async function computeLayout(
-  raw: MindmapNode[], rootId: string | null, direction: 'RIGHT' | 'DOWN',
-): Promise<LayoutResult> {
-  if (!raw.length) return { nodes: [], edges: [] };
-
+function visibleSubset(
+  raw: MindmapNode[],
+  collapsed: ReadonlySet<string>,
+): { visible: MindmapNode[]; children: Record<string, string[]> } {
   const children: Record<string, string[]> = {};
   for (const n of raw) {
     if (n.parentId) {
@@ -122,44 +158,139 @@ async function computeLayout(
       children[n.parentId].push(n._id);
     }
   }
+  // Hide any node whose parent (or ancestor) is in `collapsed`.
+  const hidden = new Set<string>();
+  const sweep = (id: string) => {
+    for (const c of children[id] || []) {
+      hidden.add(c);
+      sweep(c);
+    }
+  };
+  for (const id of collapsed) sweep(id);
+  const visible = raw.filter((n) => !hidden.has(n._id));
+  return { visible, children };
+}
 
+/**
+ * Bidirectional mindmap layout: split the root's direct children in half,
+ * lay the left half out with `elk.direction=LEFT` and the right half with
+ * `elk.direction=RIGHT`, then merge so the root sits at (0,0). Pure ELK
+ * doesn't ship a "bidirectional tree" algorithm so we run it twice.
+ *
+ * Each subtree contains the root + half of categories + their descendants.
+ * (The root is shared; we anchor it to (0,0) using the right-side layout's
+ * coordinates and shift the left-side layout to match.)
+ */
+const SHARED_LAYOUT_OPTS = {
+  'elk.algorithm': 'layered',
+  'elk.spacing.nodeNode': '20',
+  'elk.layered.spacing.nodeNodeBetweenLayers': '100',
+  'elk.layered.spacing.edgeNodeBetweenLayers': '40',
+  'elk.spacing.edgeNode': '20',
+  'elk.padding': '[top=40,left=40,bottom=40,right=40]',
+  'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+  'elk.edgeRouting': 'ORTHOGONAL',
+};
+
+async function layoutHalf(
+  rootId: string,
+  ids: Set<string>,
+  visible: MindmapNode[],
+  direction: 'LEFT' | 'RIGHT',
+) {
+  // Sort nodes by their `order` field so ELK's layered crossing
+  // minimization gets stable input, keeping siblings in the same relative
+  // position across expand/collapse cycles.
+  const nodes = visible
+    .filter((n) => ids.has(n._id))
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  if (nodes.length <= 1) return null;
   const elkGraph = {
     id: 'root',
     layoutOptions: {
-      'elk.algorithm': 'layered',
+      ...SHARED_LAYOUT_OPTS,
       'elk.direction': direction,
-      // Generous spacing — 49-node default tree benefits from breathing room
-      // so the user can actually read leaf labels at default zoom.
-      'elk.spacing.nodeNode': '20',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '120',
-      'elk.layered.spacing.edgeNodeBetweenLayers': '40',
-      'elk.spacing.edgeNode': '20',
-      'elk.padding': '[top=40,left=40,bottom=40,right=40]',
-      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-      'elk.edgeRouting': 'ORTHOGONAL',
+      // Honor input order — siblings stay in their declared sequence so
+      // expanding one node doesn't reshuffle the others to a different row.
+      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+      'elk.layered.crossingMinimization.semiInteractive': 'true',
     },
-    children: raw.map((n) => ({
-      id: n._id,
-      width: NODE_WIDTH,
-      height: NODE_HEIGHT,
-    })),
-    edges: raw.filter((n) => n.parentId).map((n) => ({
-      id: `e-${n.parentId}-${n._id}`,
-      sources: [n.parentId as string],
-      targets: [n._id],
-    })),
+    children: nodes.map((n) => ({ id: n._id, width: NODE_WIDTH, height: NODE_HEIGHT })),
+    edges: nodes
+      .filter((n) => n.parentId && ids.has(n.parentId))
+      .map((n) => ({
+        id: `e-${n.parentId}-${n._id}`,
+        sources: [n.parentId as string],
+        targets: [n._id],
+      })),
   };
+  return elk.layout(elkGraph as any);
+}
 
-  const layouted = await elk.layout(elkGraph as any);
+async function computeLayout(
+  raw: MindmapNode[], rootId: string | null, _direction: 'RIGHT' | 'DOWN',
+  collapsed: ReadonlySet<string> = new Set(),
+): Promise<LayoutResult> {
+  if (!raw.length || !rootId) return { nodes: [], edges: [] };
 
-  const positions = new Map<string, { x: number; y: number }>();
-  for (const c of layouted.children || []) {
-    positions.set(c.id, { x: c.x || 0, y: c.y || 0 });
+  const { visible, children: allChildren } = visibleSubset(raw, collapsed);
+  const visibleIds = new Set(visible.map((n) => n._id));
+
+  // Split root's visible direct children into two halves.
+  const rootChildren = (allChildren[rootId] || []).filter((id) => visibleIds.has(id));
+  const mid = Math.ceil(rootChildren.length / 2);
+  const leftCats = rootChildren.slice(0, mid);
+  const rightCats = rootChildren.slice(mid);
+
+  // Collect each side's descendant id set (including root).
+  function collectDescendants(catId: string, into: Set<string>) {
+    into.add(catId);
+    for (const c of allChildren[catId] || []) {
+      if (visibleIds.has(c)) collectDescendants(c, into);
+    }
   }
+  const leftIds = new Set<string>([rootId]);
+  const rightIds = new Set<string>([rootId]);
+  for (const id of leftCats) collectDescendants(id, leftIds);
+  for (const id of rightCats) collectDescendants(id, rightIds);
 
-  const nodes: RFNode<NodeData>[] = raw.map((n) => {
+  const [leftLayouted, rightLayouted] = await Promise.all([
+    layoutHalf(rootId, leftIds, visible, 'LEFT'),
+    layoutHalf(rootId, rightIds, visible, 'RIGHT'),
+  ]);
+
+  // Anchor root at (0,0). For each subtree, find the laid-out root position
+  // and translate all of that subtree's nodes by (-rootX, -rootY).
+  const positions = new Map<string, { x: number; y: number }>();
+  positions.set(rootId, { x: 0, y: 0 });
+  function ingest(layouted: any, ids: Set<string>) {
+    if (!layouted?.children) return;
+    const rootEntry = layouted.children.find((c: any) => c.id === rootId);
+    const dx = rootEntry?.x || 0;
+    const dy = rootEntry?.y || 0;
+    for (const c of layouted.children) {
+      if (c.id === rootId) continue;
+      if (!ids.has(c.id)) continue;
+      positions.set(c.id, { x: (c.x || 0) - dx, y: (c.y || 0) - dy });
+    }
+  }
+  ingest(leftLayouted, leftIds);
+  ingest(rightLayouted, rightIds);
+
+  // Per-node "side" — which half of the mindmap each node lives in.
+  // Drives handle wiring so left-side nodes connect via their right edge
+  // back to the root's left edge (and vice versa for the right half).
+  const sideOf = new Map<string, 'left' | 'right' | 'root'>();
+  sideOf.set(rootId, 'root');
+  for (const id of leftIds) if (id !== rootId) sideOf.set(id, 'left');
+  for (const id of rightIds) if (id !== rootId) sideOf.set(id, 'right');
+
+  const nodes: RFNode<NodeData>[] = visible.map((n) => {
     const elkPos = positions.get(n._id) || { x: 0, y: 0 };
     const pos = n.position || elkPos;
+    const childCount = allChildren[n._id]?.length || 0;
+    const side = sideOf.get(n._id) || 'right';
     return {
       id: n._id,
       type: 'mindmap',
@@ -168,7 +299,9 @@ async function computeLayout(
         topic: n.topic,
         color: n.color,
         isRoot: n._id === rootId,
-        hasChildren: !!children[n._id]?.length,
+        hasChildren: childCount > 0,
+        collapsed: collapsed.has(n._id),
+        side,
       },
       // react-flow looks at `style` for explicit dimensions; without these
       // the custom node falls back to the library default (~150x36) and our
@@ -176,13 +309,23 @@ async function computeLayout(
       style: { width: NODE_WIDTH, height: NODE_HEIGHT },
     };
   });
-  const edges: Edge[] = raw.filter((n) => n.parentId).map((n) => ({
-    id: `e-${n.parentId}-${n._id}`,
-    source: n.parentId as string,
-    target: n._id,
-    type: 'default',
-    style: { stroke: 'var(--muted-foreground)', strokeWidth: 1.5, opacity: 0.6 },
-  }));
+  // Edge wiring: a child on the left half connects its *right* edge back
+  // to its parent's *left* edge; right-half children do the mirror.
+  const edges: Edge[] = visible
+    .filter((n) => n.parentId && visibleIds.has(n.parentId))
+    .map((n) => {
+      const childSide = sideOf.get(n._id) || 'right';
+      const useLeft = childSide === 'left';
+      return {
+        id: `e-${n.parentId}-${n._id}`,
+        source: n.parentId as string,
+        target: n._id,
+        sourceHandle: useLeft ? 'src-left' : 'src-right',
+        targetHandle: useLeft ? 'tgt-right' : 'tgt-left',
+        type: 'default',
+        style: { stroke: 'var(--muted-foreground)', strokeWidth: 1.5, opacity: 0.6 },
+      };
+    });
   return { nodes, edges };
 }
 
@@ -212,6 +355,8 @@ function MindmapInner() {
     config: MindmapConfig;
   };
   const canEdit = (bs.user.priv & PRIV.PRIV_EDIT_SYSTEM) !== 0;
+  // Re-render xyflow Controls/Background/MiniMap when the user flips theme.
+  const colorMode = useColorMode();
 
   const [editMode, setEditMode] = useState(false);
   const [rawNodes, setRawNodes] = useState<MindmapNode[]>(initialData.nodes);
@@ -223,18 +368,52 @@ function MindmapInner() {
   const [problemSearch, setProblemSearch] = useState('');
   const [problemSort, setProblemSort] = useState<'pid' | 'difficulty' | 'accept'>('pid');
 
-  // Initial layout.
+  // Collapsed = the user can only see the root and its direct children by
+  // default. Every level-1 (root's direct children, i.e. the "categories")
+  // starts collapsed so its level-2 leaves are hidden until the user
+  // expands. Deeper levels are also collapsed by inheritance because once
+  // their parent (a level-1 category) is collapsed the whole subtree is
+  // invisible anyway.
+  const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(() => {
+    const rootId = initialData.config.rootNodeId;
+    if (!rootId) return new Set();
+    const level1 = initialData.nodes
+      .filter((n) => n.parentId === rootId)
+      .map((n) => n._id);
+    return new Set(level1);
+  });
+
+  const toggleCollapse = useCallback((id: string) => {
+    setCollapsedNodes((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Layout — re-runs whenever the tree shape OR the collapsed set changes.
   useEffect(() => {
     let cancelled = false;
-    computeLayout(rawNodes, initialData.config.rootNodeId, initialData.config.layoutDirection)
-      .then(({ nodes, edges }) => {
-        if (cancelled) return;
-        setRfNodes(nodes);
-        setRfEdges(edges);
-      });
+    computeLayout(
+      rawNodes,
+      initialData.config.rootNodeId,
+      initialData.config.layoutDirection,
+      collapsedNodes,
+    ).then(({ nodes, edges }) => {
+      if (cancelled) return;
+      // Inject the per-node toggle callback so the in-node ▾/▸ button
+      // can call back into this component.
+      const withCallbacks = nodes.map((n) => ({
+        ...n,
+        data: { ...n.data, onToggleCollapse: () => toggleCollapse(n.id) },
+      }));
+      setRfNodes(withCallbacks);
+      setRfEdges(edges);
+    });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawNodes.length, initialData.config.layoutDirection]);
+  }, [rawNodes.length, initialData.config.layoutDirection, collapsedNodes]);
 
   // Selection sync.
   useEffect(() => {
@@ -320,6 +499,7 @@ function MindmapInner() {
           nodes={rfNodes}
           edges={rfEdges}
           nodeTypes={NODE_TYPES}
+          colorMode={colorMode}
           onNodesChange={onNodesChange}
           onConnect={onConnect}
           onNodeClick={onNodeClick}
@@ -383,7 +563,7 @@ function MindmapInner() {
                   ]}
                 />
               </div>
-              <div className="flex-1 overflow-y-auto">
+              <ScrollArea className="flex-1">
                 {problemsLoading ? (
                   <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>
                 ) : filteredProblems.length === 0 ? (
@@ -415,7 +595,7 @@ function MindmapInner() {
                     ))}
                   </ul>
                 )}
-              </div>
+              </ScrollArea>
             </>
           )}
         </Card>
@@ -508,14 +688,14 @@ function NodeEditorDrawer({
   };
 
   return (
-    <aside className="absolute right-[372px] top-12 z-30 w-80 rounded-lg border bg-card shadow-2xl">
+    <aside className="absolute right-[372px] top-12 z-30 w-80 overflow-hidden rounded-lg border bg-card shadow-2xl">
       <header className="flex items-center justify-between border-b px-4 py-2.5">
         <span className="text-sm font-medium">编辑节点</span>
         <Button variant="ghost" size="icon" className="size-7" onClick={onClose}>
           <X className="size-3.5" />
         </Button>
       </header>
-      <div className="krypton-scrollbar max-h-[70vh] space-y-3 overflow-y-auto p-4">
+      <ScrollArea className="h-[70vh]" viewportClassName="space-y-3 p-4">
         <div>
           <label className="mb-1 block text-xs font-medium">名称</label>
           <Input value={topic} onChange={(e) => setTopic(e.target.value)} />
@@ -530,10 +710,11 @@ function NodeEditorDrawer({
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium">配色</label>
-          <select value={color} onChange={(e) => setColor(e.target.value)}
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-            {Object.keys(COLOR_BG).map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          <SimpleSelect
+            value={color}
+            onValueChange={setColor}
+            options={Object.keys(COLOR_BG).map((c) => ({ value: c, label: c }))}
+          />
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium">Tags（逗号分隔，匹配 Hydro 题目 tag）</label>
@@ -543,7 +724,7 @@ function NodeEditorDrawer({
           <label className="mb-1 block text-xs font-medium">手动 Problem IDs（逗号分隔）</label>
           <Input value={problemIdsCsv} onChange={(e) => setProblemIdsCsv(e.target.value)} placeholder="P1001, P1002" />
         </div>
-      </div>
+      </ScrollArea>
       <div className="flex items-center justify-between gap-2 border-t bg-muted/20 px-4 py-2.5">
         <Button variant="outline" size="sm" onClick={remove} className="gap-1 text-destructive">
           <Trash2 className="size-3.5" />

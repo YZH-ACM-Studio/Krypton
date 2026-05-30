@@ -67,7 +67,21 @@ export interface PersonRecord {
 export interface RankBoardConfig {
     _id: 'global';
     baseScore: number;
+    /**
+     * Multiplier applied to each *subsequent* occurrence of the same
+     * award type for a given person. The most recent award keeps full
+     * weight; the second-most-recent gets `weight * decayFactor`, the
+     * third `weight * decayFactor^2`, and so on — floored at `minRate`.
+     *
+     * Recommended: ~0.7 (each repeat keeps 70% of the previous).
+     */
     decayFactor: number;
+    /**
+     * Floor multiplier — `decayFactor^N` is clamped to at least this
+     * value so that repeat awards never decay to zero. Default 0.3
+     * (every repeat is worth at least 30% of the full weight).
+     */
+    minRate?: number;
     updatedAt: Date;
 }
 
@@ -86,6 +100,7 @@ export interface LeaderboardRow {
     user: {
         uname: string;
         nAccept: number;
+        avatarUrl?: string;
     } | null;
     totalScore: number;
     awardCount: number;

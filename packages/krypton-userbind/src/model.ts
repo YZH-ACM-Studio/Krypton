@@ -8,7 +8,6 @@
 import type { Filter } from 'mongodb';
 import { ObjectId, ValidationError, UserModel } from 'hydrooj';
 import {
-    bindingRequestsColl,
     bindTokensColl,
     ensureIndexes,
     schoolsColl,
@@ -35,14 +34,27 @@ import type {
 
 export { ensureIndexes };
 
-import { randomBytes } from 'node:crypto';
-
-function randomTokenId(): string {
-    return randomBytes(32).toString('hex');
-}
-
 function nowDate(): Date {
     return new Date();
+}
+
+function escapeRegexLiteral(input: string): string {
+    return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Derive enrollment year from a studentId. Convention: first two digits are
+ * the last two digits of the enrollment year (e.g. `240340179` → 2024).
+ *
+ * Returns null if the first two chars aren't both digits — admin can then
+ * override in the student detail page. We map yy→20yy unconditionally
+ * because Krypton serves universities and the OJ won't outlive year 2099.
+ */
+export function deriveEnrollmentYear(studentId: string): number | null {
+    if (!studentId || studentId.length < 2) return null;
+    const yy = studentId.slice(0, 2);
+    if (!/^\d{2}$/.test(yy)) return null;
+    return 2000 + parseInt(yy, 10);
 }
 
 // ─── Roster validation helpers ────────────────────────────────────────────
@@ -112,6 +124,108 @@ export function isValidStudentId(id: string): boolean {
 export function isValidRealName(name: string): boolean {
     const t = (name || '').trim();
     return t.length > 0 && t.length <= REAL_NAME_MAX;
+}
+
+export interface AutoBindResult {
+    alreadyBound: number;
+    autoBound: number;
+    autoBindSkipped: Array<{ studentId: string; reason: string }>;
+}
+
+function studentMatchKey(studentId: string, realName: string): string {
+    return `${studentId}\u0000${realName}`;
+}
+
+async function autoBindStudentRecords(
+    domainId: string,
+    records: StudentRecord[],
+    extraGroupIds: ObjectId[] = [],
+    options: { includeNoMatch?: boolean } = {},
+): Promise<AutoBindResult> {
+    const report: AutoBindResult = {
+        alreadyBound: records.filter((r) => !!r.boundUserId).length,
+        autoBound: 0,
+        autoBindSkipped: [],
+    };
+    const candidates = records.filter((r) => !r.boundUserId);
+    if (candidates.length === 0) return report;
+
+    const studentIds = Array.from(new Set(candidates.map((r) => r.studentId)));
+    const users = await UserModel.coll.find(
+        {
+            studentId: { $in: studentIds },
+        } as any,
+        { projection: { _id: 1, studentId: 1, realName: 1 } },
+    ).toArray();
+
+    const usersByKey = new Map<string, Array<{ _id: number; studentId?: string; realName?: string }>>();
+    for (const user of users) {
+        const studentId = String(user.studentId || '').trim();
+        const realName = String(user.realName || '').trim();
+        if (!studentId || !realName) continue;
+        const key = studentMatchKey(studentId, realName);
+        const bucket = usersByKey.get(key) || [];
+        bucket.push({ _id: user._id, studentId, realName });
+        usersByKey.set(key, bucket);
+    }
+
+    for (const record of candidates) {
+        const matches = usersByKey.get(studentMatchKey(record.studentId, record.realName)) || [];
+        if (matches.length === 0) {
+            if (options.includeNoMatch) {
+                report.autoBindSkipped.push({ studentId: record.studentId, reason: '未找到同学号同姓名的 OJ 用户' });
+            }
+            continue;
+        }
+        if (matches.length > 1) {
+            report.autoBindSkipped.push({ studentId: record.studentId, reason: '匹配到多个同学号同姓名的 OJ 用户' });
+            continue;
+        }
+        const uid = matches[0]._id;
+        const conflict = await studentsColl.findOne(
+            {
+                domainId,
+                boundUserId: uid,
+                _id: { $ne: record._id },
+            } as any,
+            { projection: { studentId: 1, realName: 1 } },
+        );
+        if (conflict) {
+            report.autoBindSkipped.push({
+                studentId: record.studentId,
+                reason: `UID ${uid} 已绑定到 ${conflict.studentId} ${conflict.realName}`,
+            });
+            continue;
+        }
+
+        const studentUpdate: any = {
+            $set: { boundUserId: uid, boundAt: nowDate() },
+        };
+        if (extraGroupIds.length > 0) {
+            studentUpdate.$addToSet = { groupIds: { $each: extraGroupIds } };
+        }
+        const groupIds = Array.from(new Set([
+            ...record.groupIds.map((g) => g.toString()),
+            ...extraGroupIds.map((g) => g.toString()),
+        ])).map((s) => new ObjectId(s));
+        const userAddToSet: Record<string, any> = { parentSchoolId: record.schoolId as any };
+        if (groupIds.length > 0) userAddToSet.parentUserGroupId = { $each: groupIds as any[] };
+        await Promise.all([
+            studentsColl.updateOne({ domainId, _id: record._id }, studentUpdate),
+            UserModel.coll.updateOne(
+                { _id: uid },
+                {
+                    $set: {
+                        studentId: record.studentId,
+                        realName: record.realName,
+                    } as any,
+                    $addToSet: userAddToSet as any,
+                },
+            ),
+        ]);
+        report.autoBound++;
+    }
+    return report;
 }
 
 // ─── Schools ──────────────────────────────────────────────────────────────
@@ -253,18 +367,19 @@ export async function importStudents(
     const school = await schoolsColl.findOne({ domainId, _id: schoolId });
     if (!school) throw new ValidationError('schoolId', null, 'School not found');
 
-    const report: ImportStudentReport = { inserted: 0, duplicates: [] };
+    const report: ImportStudentReport = {
+        inserted: 0, duplicates: [], alreadyBound: 0, autoBound: 0, autoBindSkipped: [],
+    };
     if (rows.length === 0) return report;
 
     // Pre-check existing studentIds within this school.
-    const existingIds = new Set(
-        (await studentsColl.find(
+    const existingRecords = await studentsColl.find(
             { domainId, schoolId, studentId: { $in: rows.map((r) => r.studentId) } },
-            { projection: { studentId: 1 } },
-        ).toArray()).map((d) => d.studentId),
-    );
+        ).toArray();
+    const existingByStudentId = new Map(existingRecords.map((d) => [d.studentId, d]));
 
     const docs: StudentRecord[] = [];
+    const autoBindCandidates: StudentRecord[] = [];
     const seen = new Set<string>();
     for (const row of rows) {
         const studentId = (row.studentId || '').trim();
@@ -281,15 +396,22 @@ export async function importStudents(
             report.duplicates.push({ studentId, reason: `姓名为空或超过 ${REAL_NAME_MAX} 字符` });
             continue;
         }
-        if (existingIds.has(studentId)) {
-            report.duplicates.push({ studentId, reason: '该学校已存在同学号' });
-            continue;
-        }
         if (seen.has(studentId)) {
             report.duplicates.push({ studentId, reason: '本批次内重复' });
             continue;
         }
         seen.add(studentId);
+        const existing = existingByStudentId.get(studentId);
+        if (existing) {
+            if (existing.realName === realName) autoBindCandidates.push(existing);
+            report.duplicates.push({
+                studentId,
+                reason: existing.realName === realName
+                    ? '该学校已存在同学号'
+                    : `该学校已存在同学号（库内"${existing.realName}"）`,
+            });
+            continue;
+        }
         docs.push({
             _id: new ObjectId(),
             domainId,
@@ -299,6 +421,127 @@ export async function importStudents(
             groupIds: [],
             boundUserId: null,
             boundAt: null,
+            enrollmentYear: deriveEnrollmentYear(studentId),
+            createdAt: nowDate(),
+            createdBy,
+        });
+    }
+
+    if (docs.length > 0) {
+        await studentsColl.insertMany(docs);
+        autoBindCandidates.push(...docs);
+        report.inserted = docs.length;
+    }
+    const autoBindReport = await autoBindStudentRecords(domainId, autoBindCandidates);
+    report.alreadyBound = autoBindReport.alreadyBound;
+    report.autoBound = autoBindReport.autoBound;
+    report.autoBindSkipped = autoBindReport.autoBindSkipped;
+    return report;
+}
+
+export interface SearchBindableUserResult {
+    _id: number;
+    uname?: string;
+    studentId: string;
+    realName: string;
+    boundUserId: number;
+}
+
+export async function searchBindableUsers(
+    domainId: string,
+    schoolId: ObjectId,
+    query: string,
+    limit = 50,
+): Promise<SearchBindableUserResult[]> {
+    const school = await schoolsColl.findOne({ domainId, _id: schoolId });
+    if (!school) throw new ValidationError('schoolId', null, 'School not found');
+    const q = (query || '').trim();
+    if (!q) return [];
+    const regex = new RegExp(escapeRegexLiteral(q), 'i');
+    const users = await UserModel.coll.find(
+        {
+            studentId: { $exists: true, $ne: '' },
+            realName: { $exists: true, $ne: '' },
+            $or: [
+                { studentId: { $regex: regex } },
+                { realName: { $regex: regex } },
+                { uname: { $regex: regex } },
+            ],
+        } as any,
+        { projection: { _id: 1, uname: 1, studentId: 1, realName: 1 } },
+    ).limit(limit).toArray();
+    return users.map((u: any) => ({
+        _id: u._id,
+        uname: u.uname,
+        studentId: u.studentId,
+        realName: u.realName,
+        boundUserId: u._id,
+    }));
+}
+
+export async function importUsersToSchool(
+    domainId: string,
+    schoolId: ObjectId,
+    userIds: number[],
+    createdBy: number,
+): Promise<ImportStudentReport> {
+    const school = await schoolsColl.findOne({ domainId, _id: schoolId });
+    if (!school) throw new ValidationError('schoolId', null, 'School not found');
+    const report: ImportStudentReport = {
+        inserted: 0, duplicates: [], alreadyBound: 0, autoBound: 0, autoBindSkipped: [],
+    };
+    const uniqueUserIds = Array.from(new Set(userIds.filter((id) => Number.isSafeInteger(id) && id > 0)));
+    if (uniqueUserIds.length === 0) return report;
+
+    const users = await UserModel.coll.find(
+        { _id: { $in: uniqueUserIds } },
+        { projection: { _id: 1, studentId: 1, realName: 1 } },
+    ).toArray();
+    const docs: StudentRecord[] = [];
+    const autoBindCandidates: StudentRecord[] = [];
+    const seenStudentIds = new Set<string>();
+
+    for (const user of users as any[]) {
+        const studentId = String(user.studentId || '').trim();
+        const realName = String(user.realName || '').trim();
+        if (!studentId || !realName) {
+            report.duplicates.push({ studentId: studentId || `UID ${user._id}`, reason: '该用户缺少学号或姓名' });
+            continue;
+        }
+        if (!isValidStudentId(studentId) || !isValidRealName(realName)) {
+            report.duplicates.push({ studentId, reason: '该用户的学号或姓名格式非法' });
+            continue;
+        }
+        if (seenStudentIds.has(studentId)) {
+            report.duplicates.push({ studentId, reason: '本次选择中学号重复' });
+            continue;
+        }
+        seenStudentIds.add(studentId);
+
+        const existing = await studentsColl.findOne({ domainId, schoolId, studentId });
+        if (existing) {
+            if (existing.realName !== realName) {
+                report.duplicates.push({
+                    studentId,
+                    reason: `已存在记录但姓名不一致（库内"${existing.realName}"）`,
+                });
+                continue;
+            }
+            autoBindCandidates.push(existing);
+            report.duplicates.push({ studentId, reason: '该学校已存在同学号' });
+            continue;
+        }
+
+        docs.push({
+            _id: new ObjectId(),
+            domainId,
+            schoolId,
+            studentId,
+            realName,
+            groupIds: [],
+            boundUserId: null,
+            boundAt: null,
+            enrollmentYear: deriveEnrollmentYear(studentId),
             createdAt: nowDate(),
             createdBy,
         });
@@ -307,7 +550,12 @@ export async function importStudents(
     if (docs.length > 0) {
         await studentsColl.insertMany(docs);
         report.inserted = docs.length;
+        autoBindCandidates.push(...docs);
     }
+    const autoBindReport = await autoBindStudentRecords(domainId, autoBindCandidates);
+    report.alreadyBound = autoBindReport.alreadyBound;
+    report.autoBound = autoBindReport.autoBound;
+    report.autoBindSkipped = autoBindReport.autoBindSkipped;
     return report;
 }
 
@@ -326,6 +574,12 @@ export interface ImportGroupReport {
     alreadyMember: number;
     /** Failed validation, per row. */
     failed: Array<{ studentId: string; reason: string }>;
+    /** Existing OJ accounts that were matched exactly and bound while importing. */
+    autoBound: number;
+    /** Student records that were already bound before this import. */
+    alreadyBound: number;
+    /** Exact-match OJ accounts that could not be auto-bound. */
+    autoBindSkipped: Array<{ studentId: string; reason: string }>;
 }
 
 export async function importStudentsToGroup(
@@ -339,7 +593,7 @@ export async function importStudentsToGroup(
     const schoolId = group.schoolId;
 
     const report: ImportGroupReport = {
-        created: 0, attached: 0, alreadyMember: 0, failed: [],
+        created: 0, attached: 0, alreadyMember: 0, failed: [], autoBound: 0, alreadyBound: 0, autoBindSkipped: [],
     };
     if (rows.length === 0) return report;
 
@@ -352,6 +606,7 @@ export async function importStudentsToGroup(
 
     const toCreate: StudentRecord[] = [];
     const toAttach: ObjectId[] = [];
+    const autoBindCandidates: StudentRecord[] = [];
     const seen = new Set<string>();
 
     for (const row of rows) {
@@ -390,6 +645,7 @@ export async function importStudentsToGroup(
                 toAttach.push(existing._id);
                 report.attached++;
             }
+            autoBindCandidates.push(existing);
         } else {
             toCreate.push({
                 _id: new ObjectId(),
@@ -400,6 +656,7 @@ export async function importStudentsToGroup(
                 groupIds: [groupId],
                 boundUserId: null,
                 boundAt: null,
+                enrollmentYear: deriveEnrollmentYear(studentId),
                 createdAt: nowDate(),
                 createdBy,
             });
@@ -409,6 +666,7 @@ export async function importStudentsToGroup(
 
     if (toCreate.length > 0) {
         await studentsColl.insertMany(toCreate);
+        autoBindCandidates.push(...toCreate);
     }
     if (toAttach.length > 0) {
         await studentsColl.updateMany(
@@ -428,7 +686,44 @@ export async function importStudentsToGroup(
             );
         }
     }
+    const autoBindReport = await autoBindStudentRecords(domainId, autoBindCandidates, [groupId]);
+    report.autoBound = autoBindReport.autoBound;
+    report.alreadyBound = autoBindReport.alreadyBound;
+    report.autoBindSkipped = autoBindReport.autoBindSkipped;
     return report;
+}
+
+export interface RetryGroupAutoBindReport {
+    unboundScanned: number;
+    alreadyBound: number;
+    autoBound: number;
+    autoBindSkipped: Array<{ studentId: string; reason: string }>;
+}
+
+export async function retryAutoBindStudentsInGroup(
+    domainId: string,
+    groupId: ObjectId,
+): Promise<RetryGroupAutoBindReport> {
+    const group = await userGroupsColl.findOne({ domainId, _id: groupId });
+    if (!group) throw new ValidationError('groupId', null, '用户组不存在');
+    const records = await studentsColl.find({
+        domainId,
+        schoolId: group.schoolId,
+        groupIds: groupId,
+        $or: [{ boundUserId: null }, { boundUserId: { $exists: false } }],
+    } as any).toArray();
+    const autoBindReport = await autoBindStudentRecords(
+        domainId,
+        records,
+        [],
+        { includeNoMatch: true },
+    );
+    return {
+        unboundScanned: records.length,
+        alreadyBound: autoBindReport.alreadyBound,
+        autoBound: autoBindReport.autoBound,
+        autoBindSkipped: autoBindReport.autoBindSkipped,
+    };
 }
 
 export interface ListStudentsFilter {
@@ -488,6 +783,64 @@ export async function findStudentByUserId(
     domainId: string, userId: number,
 ): Promise<StudentRecord | null> {
     return await studentsColl.findOne({ domainId, boundUserId: userId });
+}
+
+/**
+ * Batch lookup students for a set of bound user ids — returns a dict keyed
+ * by uid (string) for cheap O(1) frontend access. Used by /record + /ranking
+ * to show "学号 / 姓名" in the admin-only column without per-row roundtrips.
+ */
+export async function findStudentsByUserIds(
+    domainId: string, userIds: number[],
+): Promise<Record<string, StudentRecord>> {
+    if (!userIds.length) return {};
+    const docs = await studentsColl
+        .find({ domainId, boundUserId: { $in: userIds } })
+        .toArray();
+    const out: Record<string, StudentRecord> = {};
+    for (const d of docs) {
+        if (d.boundUserId != null) out[String(d.boundUserId)] = d;
+    }
+    return out;
+}
+
+/**
+ * Update mutable student fields. Admin-only. Pass `enrollmentYear: null`
+ * explicitly to clear it; `undefined` leaves it unchanged. `realName` and
+ * `groupIds` patches are also accepted — useful for typo fixes and class
+ * reassignments.
+ */
+export async function updateStudent(
+    domainId: string,
+    id: ObjectId,
+    patch: {
+        realName?: string;
+        enrollmentYear?: number | null;
+        groupIds?: ObjectId[];
+    },
+): Promise<void> {
+    const $set: Partial<StudentRecord> = {};
+    if (typeof patch.realName === 'string') {
+        const trimmed = patch.realName.trim();
+        if (!isValidRealName(trimmed)) {
+            throw new ValidationError('realName', null, '姓名格式非法');
+        }
+        $set.realName = trimmed;
+    }
+    if (patch.enrollmentYear !== undefined) {
+        if (patch.enrollmentYear !== null
+            && (!Number.isInteger(patch.enrollmentYear)
+                || patch.enrollmentYear < 1900
+                || patch.enrollmentYear > 2099)) {
+            throw new ValidationError('enrollmentYear', null, '年份范围必须在 1900–2099');
+        }
+        $set.enrollmentYear = patch.enrollmentYear;
+    }
+    if (patch.groupIds) {
+        $set.groupIds = patch.groupIds;
+    }
+    if (Object.keys($set).length === 0) return;
+    await studentsColl.updateOne({ domainId, _id: id }, { $set });
 }
 
 export async function deleteStudent(domainId: string, id: ObjectId): Promise<void> {
@@ -578,16 +931,22 @@ export const userBindModel = {
     // Students
     importStudents,
     importStudentsToGroup,
+    importUsersToSchool,
+    retryAutoBindStudentsInGroup,
+    searchBindableUsers,
     listStudents,
     getStudent,
     findStudentByStudentId,
     findStudentByUserId,
+    findStudentsByUserIds,
+    updateStudent,
     deleteStudent,
     assignStudentsToGroup,
     removeStudentsFromGroup,
     parseRosterText,
     isValidStudentId,
     isValidRealName,
+    deriveEnrollmentYear,
 
     // Binding paths (defined in binding.ts; re-exported here for unified surface)
     // These will be set at module init by the binding.ts side-effect.
@@ -643,8 +1002,13 @@ export const userBindModel = {
 
     lookupStudent: null as unknown as (
         domainId: string, studentIdInput: string, realNameInput: string,
+        options?: { contestId?: string },
     ) => Promise<LookupStudentResult>,
+    /** @deprecated use computeEligibleContests */
     computeEligibleExamContests: null as unknown as (
+        domainId: string, uid: number,
+    ) => Promise<ObjectId[]>,
+    computeEligibleContests: null as unknown as (
         domainId: string, uid: number,
     ) => Promise<ObjectId[]>,
 

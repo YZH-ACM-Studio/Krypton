@@ -11,6 +11,7 @@ import type {
     DomainSettingsDoc,
     GpltScoreDoc,
     PatScoreDoc,
+    StayEventDoc,
     TaskAssignmentDoc,
     TaskDoc,
 } from './types';
@@ -22,6 +23,7 @@ export const settingsColl = db.collection<DomainSettingsDoc>('tasks.settings');
 export const patScoreColl = db.collection<PatScoreDoc>('tasks.score_pat');
 export const gpltScoreColl = db.collection<GpltScoreDoc>('tasks.score_gplt');
 export const cspScoreColl = db.collection<CspScoreDoc>('tasks.score_csp');
+export const stayEventsColl = db.collection<StayEventDoc>('tasks.stay_events');
 
 let indexesEnsured = false;
 
@@ -40,8 +42,15 @@ export async function ensureIndexes(): Promise<void> {
         assignmentsColl.createIndex(
             { domainId: 1, taskId: 1, userId: 1 },
             // MongoDB partial indexes don't allow $ne / $not; list the allowed
-            // statuses explicitly via $in instead.
-            { partialFilterExpression: { status: { $in: ['pending', 'completed'] } } },
+            // statuses explicitly via $in instead. All "active" statuses
+            // (everything except cancelled) participate in uniqueness so a
+            // user cannot accumulate two parallel claims of the same task
+            // — they must explicitly cancel first.
+            {
+                partialFilterExpression: {
+                    status: { $in: ['pending', 'qualified', 'admitted', 'completed'] },
+                },
+            },
         ),
 
         auditColl.createIndex({ domainId: 1, assignmentId: 1, createdAt: -1 }),
@@ -66,5 +75,15 @@ export async function ensureIndexes(): Promise<void> {
             { unique: true },
         ),
         cspScoreColl.createIndex({ domainId: 1, round: 1 }),
+
+        // Stay events: unique on source makes the auto-trigger idempotent —
+        // re-evaluating a completed task with countsAsStay=true tries to
+        // re-insert, mongo rejects with duplicate-key, model silently swallows.
+        stayEventsColl.createIndex(
+            { domainId: 1, userId: 1, source: 1 },
+            { unique: true },
+        ),
+        stayEventsColl.createIndex({ domainId: 1, userId: 1 }),
+        stayEventsColl.createIndex({ domainId: 1, year: 1 }),
     ]);
 }

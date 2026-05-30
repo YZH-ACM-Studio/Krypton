@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { CheckCircle2, Copy, Eye, EyeOff, MinusCircle, Plus, Search, Trash2, Upload, XCircle } from 'lucide-react';
+import { CheckCircle2, Copy, Eye, EyeOff, Lock, MinusCircle, Plus, Search, Trash2, Upload, XCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Pagination } from '@/components/ui/pagination';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -127,14 +128,15 @@ export function ProblemsPage() {
             </div>
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">排序</label>
-              <select
+              <SimpleSelect
                 name="sort"
                 defaultValue={sort}
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-              >
-                <option value="default">默认顺序</option>
-                <option value="recent">最近添加</option>
-              </select>
+                className="h-9"
+                options={[
+                  { value: 'default', label: '默认顺序' },
+                  { value: 'recent', label: '最近添加' },
+                ]}
+              />
             </div>
             <Button type="submit" size="sm">搜索</Button>
           </form>
@@ -259,12 +261,34 @@ export function ProblemsPage() {
                         {p.pid || p.docId}
                       </TableCell>
                       <TableCell>
-                        <a
-                          href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(p.pid || p.docId) })}
-                          className="font-medium hover:text-primary hover:underline"
-                        >
-                          {p.title || '未命名'}
-                        </a>
+                        <div className="flex items-center gap-1.5">
+                          <a
+                            href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(p.pid || p.docId) })}
+                            className="font-medium hover:text-primary hover:underline"
+                          >
+                            {p.title || '未命名'}
+                          </a>
+                          {p.hidden ? (
+                            <Badge
+                              variant="outline"
+                              className="gap-0.5 border-amber-500/40 bg-amber-50 px-1 py-0 text-[10px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                              title="该题目已隐藏，只有有权限的用户可见"
+                            >
+                              <EyeOff className="size-2.5" />
+                              隐藏
+                            </Badge>
+                          ) : null}
+                          {p.lockHidden ? (
+                            <Badge
+                              variant="outline"
+                              className="gap-0.5 border-rose-500/40 bg-rose-50 px-1 py-0 text-[10px] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+                              title="该题目设为「锁定隐藏」，比赛结束后不会自动公开"
+                            >
+                              <Lock className="size-2.5" />
+                              锁定
+                            </Badge>
+                          ) : null}
+                        </div>
                         {p.tag?.length ? (
                           <div className="mt-1 flex flex-wrap gap-1">
                             {(p.tag as string[]).slice(0, 4).map((t: string) => (

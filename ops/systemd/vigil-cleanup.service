@@ -1,0 +1,10 @@
+[Unit]
+Description=Krypton Vigil cleanup (purge expired screenshots/recordings)
+After=krypton-vigil.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/krypton-vigil
+ExecStart=/opt/krypton-vigil/.venv/bin/python -m app.scripts.cleanup
+User=root
+Group=root

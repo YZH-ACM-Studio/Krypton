@@ -66,14 +66,35 @@ export function replaceRouteTokens(template: string, replacements: Record<string
   return result;
 }
 
+/**
+ * Build a single-line preview of a markdown blob — strip syntax noise
+ * (code fences, link wrappers, raw HTML) but keep the visible text,
+ * including emoji and CJK punctuation. Used by list cells where a full
+ * Markdown render would be too tall.
+ *
+ * Compared to the old version, we no longer wipe `# * _ ~ > | -` blindly,
+ * because that nuked emoji-like patterns and decorative punctuation. We
+ * only remove them when they appear as line-leading markdown markers.
+ */
 export function formatPlainTextSummary(value: unknown) {
   return String(value || '')
+    // 1. Drop fenced code blocks entirely
     .replace(/```[\s\S]*?```/g, ' ')
+    // 2. Unwrap inline code
     .replace(/`([^`]+)`/g, '$1')
+    // 3. Drop image references
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+    // 4. Unwrap links to just the label
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    // 5. Drop raw HTML tags but keep their text
     .replace(/<[^>]+>/g, ' ')
-    .replace(/[#*_~>|-]+/g, ' ')
+    // 6. Remove leading list / heading / quote markers at the *start of a line*
+    .replace(/(^|\n)\s*(?:[#>|*\-+]\s+|\d+\.\s+)/g, '$1')
+    // 7. Drop pure emphasis markers but leave their content
+    .replace(/(\*\*|__)(.*?)\1/g, '$2')
+    .replace(/(\*|_)(.*?)\1/g, '$2')
+    .replace(/~~(.*?)~~/g, '$1')
+    // 8. Collapse runs of whitespace
     .replace(/\s+/g, ' ')
     .trim();
 }

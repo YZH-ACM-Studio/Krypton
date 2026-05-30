@@ -42,7 +42,27 @@ export default class MigrationService extends Service {
             const isFresh = !dbVer;
             const expected = scripts.length;
             if (isFresh) {
-                await scripts[0]?.(this.ctx);
+                if (channel === 'hydrooj') {
+                    // Core hydrooj fresh install: run only scripts[0] (original behavior).
+                    // Core scripts are not all idempotent against fresh empty databases.
+                    await scripts[0]?.(this.ctx);
+                } else {
+                    // Plugin channels (Krypton): run every script in sequence so that
+                    // first-time installs against pre-existing legacy data still apply
+                    // *all* migrations, not just scripts[0]. Plugin scripts are expected
+                    // to be idempotent (typically via `oncePerSetting`); on a truly empty
+                    // database they no-op via their legacy-detection guards.
+                    //
+                    // Background: the original fresh-shortcut silently skipped
+                    // rankboard/userbind v2 when those plugins were first registered
+                    // against a database that already held legacy CAUCOJ* collections.
+                    // See CLAUDE.md §3 (deployment pitfall #12).
+                    for (const script of scripts) {
+                        if (typeof script !== 'function') continue;
+                        const result = await script(this.ctx);
+                        if (result === false) break;
+                    }
+                }
                 await system.set(name, expected);
                 continue;
             }

@@ -1,0 +1,30 @@
+[Unit]
+Description=SRS (Simple Realtime Server) for Krypton Vigil
+Documentation=https://github.com/ossrs/srs
+After=network.target krypton-vigil.service
+Requires=krypton-vigil.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/srs
+ExecStart=/opt/srs/objs/srs -c /opt/srs/conf/krypton.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+User=srs
+Group=srs
+
+# CPU isolation: leave 4 cores free for vigil-server / FastAPI / SQLite.
+# 400% = up to 4 cores total. Monitor with `systemd-cgtop -c srs.service`.
+CPUQuota=400%
+MemoryMax=4G
+
+# Hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+ReadWritePaths=/data/vigil/recordings /var/log /var/run /opt/srs/objs/nginx/html
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+# Caddyfile snippet — append to existing oj site block on oj host.
+#
+# Deployment: append into /root/.hydro/Caddyfile inside the existing
+# `oj-domain {…}` block (after the hydrooj reverse_proxy).
+#
+# Purpose: proxy HLS playback for proctors. The auth check is forwarded to
+# hydrooj so the OJ session cookie is the source of truth (no separate
+# Vigil token leak risk).
+
+# HLS reverse proxy for vigil live + recordings.
+# URL: http://<oj-host>/vigil-hls/<live-record|live-nodvr>/{contestId}_{machineId}_{screen|camera}.m3u8
+# URL: http://<oj-host>/vigil-hls/recordings/{filename}.mp4
+route /vigil-hls/* {
+    forward_auth http://127.0.0.1:8888 {
+        uri /api/admin/vigil/check-hls-access?path={path}
+        copy_headers Cookie
+        # hydrooj returns 200 = allow, 403 = deny.
+    }
+    uri strip_prefix /vigil-hls
+    reverse_proxy 10.1.235.155:8080 {
+        header_up Host {upstream_hostport}
+        # SRS HLS chunks: m3u8 + ts. Long timeouts for low-latency streaming.
+        transport http {
+            response_header_timeout 30s
+            read_timeout 60s
+        }
+    }
+}

@@ -2,23 +2,41 @@
  * Training management pages — edit and files.
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
   FolderOpen,
+  GripVertical,
   Plus,
   Save,
   Trash2,
   Upload,
 } from 'lucide-react';
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ProblemPicker } from '@/components/problem-picker';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens } from '@/lib/format';
 
@@ -203,14 +221,8 @@ export function TrainingEditPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="description" className="text-sm font-medium">简介</label>
-              <textarea
-                id="description"
-                name="description"
-                rows={3}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                defaultValue={tdoc.description || ''}
-              />
+              <label htmlFor="description" className="text-sm font-medium">简介 (Markdown)</label>
+              <MarkdownEditor name="description" value={tdoc.description || ''} minHeight={280} preferredLang={bs.locale} />
             </div>
 
             <div className="space-y-1.5">
@@ -218,106 +230,28 @@ export function TrainingEditPage() {
               <MarkdownEditor name="content" value={tdoc.content || ''} minHeight={280} preferredLang={bs.locale} />
             </div>
 
-            <div className="space-y-1.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <label className="text-sm font-medium">训练计划</label>
-                <Button type="button" variant="outline" size="sm" onClick={addNode}>
-                  <Plus className="size-3.5" />
-                  添加阶段
-                </Button>
-              </div>
-              <input type="hidden" name="dag" value={serializePlan(planNodes)} readOnly />
-              <div className="space-y-3">
-                {planNodes.map((node, index) => {
-                  const otherNodes = planNodes.filter((candidate) => candidate._id !== node._id);
-                  return (
-                    <div key={`${node._id}-${index}`} className="rounded-md border bg-muted/20 p-4">
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold">阶段 {index + 1}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {node.pids.length} 题 · {node.requireNids.length ? `依赖 ${node.requireNids.join(', ')}` : '无前置'}
-                          </p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-8 text-destructive"
-                          onClick={() => removeNode(index)}
-                          disabled={planNodes.length <= 1}
-                          title="删除阶段"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
-
-                      <div className="grid gap-3 sm:grid-cols-[96px_1fr]">
-                        <div className="space-y-1.5">
-                          <label className="text-xs text-muted-foreground" htmlFor={`plan-id-${index}`}>ID</label>
-                          <Input
-                            id={`plan-id-${index}`}
-                            type="number"
-                            min={1}
-                            required
-                            value={node._id}
-                            onChange={(event) => updateNodeId(index, Number(event.target.value))}
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs text-muted-foreground" htmlFor={`plan-title-${index}`}>标题</label>
-                          <Input
-                            id={`plan-title-${index}`}
-                            required
-                            value={node.title}
-                            onChange={(event) => updateNode(index, { title: event.target.value })}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="mt-3 space-y-1.5">
-                        <label className="text-xs text-muted-foreground" htmlFor={`plan-pids-${index}`}>题目</label>
-                        <Input
-                          id={`plan-pids-${index}`}
-                          required
-                          value={node.pids.join(', ')}
-                          onChange={(event) => updateNode(index, { pids: uniqueValues(parseTokenList(event.target.value)) })}
-                        />
-                      </div>
-
-                      <div className="mt-3 space-y-2">
-                        <label className="text-xs text-muted-foreground">前置阶段</label>
-                        {otherNodes.length ? (
-                          <div className="flex flex-wrap gap-2">
-                            {otherNodes.map((candidate) => (
-                              <label
-                                key={candidate._id}
-                                className="inline-flex cursor-pointer items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
-                              >
-                                <Checkbox size="sm"
-                                  checked={node.requireNids.includes(candidate._id)}
-                                  onChange={() => toggleDependency(index, candidate._id)}
-                                 />
-                                #{candidate._id} {candidate.title}
-                              </label>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">无可选阶段</p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <StagePlanEditor
+              planNodes={planNodes}
+              setPlanNodes={setPlanNodes}
+              addNode={addNode}
+              removeNode={removeNode}
+              updateNode={updateNode}
+              updateNodeId={updateNodeId}
+              toggleDependency={toggleDependency}
+            />
+            <input type="hidden" name="dag" value={serializePlan(planNodes)} readOnly />
 
             <div className="space-y-1.5">
               <label htmlFor="pin" className="text-sm font-medium">置顶</label>
-              <select id="pin" name="pin" defaultValue={tdoc.pin || 0} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                <option value="0">不置顶</option>
-                <option value="1">置顶</option>
-              </select>
+              <SimpleSelect
+                id="pin"
+                name="pin"
+                defaultValue={String(tdoc.pin || 0)}
+                options={[
+                  { value: '0', label: '不置顶' },
+                  { value: '1', label: '置顶' },
+                ]}
+              />
             </div>
 
             <Separator />
@@ -331,6 +265,277 @@ export function TrainingEditPage() {
         </CardContent>
       </Card>
     </motion.div>
+  );
+}
+
+/* ---------- StagePlanEditor (sortable cards + prereq collapse + auto-sort) ---------- */
+
+interface StagePlanEditorProps {
+  planNodes: TrainingPlanNode[];
+  setPlanNodes: React.Dispatch<React.SetStateAction<TrainingPlanNode[]>>;
+  addNode: () => void;
+  removeNode: (index: number) => void;
+  updateNode: (index: number, patch: Partial<TrainingPlanNode>) => void;
+  updateNodeId: (index: number, nextId: number) => void;
+  toggleDependency: (index: number, dependencyId: number) => void;
+}
+
+/**
+ * Topological sort by `requireNids` dependencies. Falls back to ID-asc if the
+ * graph has a cycle (no valid topo order exists).
+ */
+function topologicalSort(nodes: TrainingPlanNode[]): TrainingPlanNode[] {
+  const idToNode = new Map<number, TrainingPlanNode>();
+  const inDegree = new Map<number, number>();
+  for (const n of nodes) {
+    idToNode.set(n._id, n);
+    inDegree.set(n._id, 0);
+  }
+  for (const n of nodes) {
+    for (const req of n.requireNids) {
+      if (idToNode.has(req)) inDegree.set(n._id, (inDegree.get(n._id) || 0) + 1);
+    }
+  }
+  // Kahn's algorithm; tie-break by id ascending so output is deterministic.
+  const ready: number[] = [];
+  for (const [id, deg] of inDegree) if (deg === 0) ready.push(id);
+  ready.sort((a, b) => a - b);
+  const out: TrainingPlanNode[] = [];
+  while (ready.length) {
+    const id = ready.shift()!;
+    const n = idToNode.get(id);
+    if (!n) continue;
+    out.push(n);
+    for (const dep of nodes) {
+      if (dep.requireNids.includes(id)) {
+        const next = (inDegree.get(dep._id) || 0) - 1;
+        inDegree.set(dep._id, next);
+        if (next === 0) {
+          // Insert preserving ascending id order.
+          const idx = ready.findIndex((x) => x > dep._id);
+          if (idx < 0) ready.push(dep._id); else ready.splice(idx, 0, dep._id);
+        }
+      }
+    }
+  }
+  return out.length === nodes.length ? out : [...nodes].sort((a, b) => a._id - b._id);
+}
+
+function StagePlanEditor({
+  planNodes, setPlanNodes, addNode, removeNode, updateNode, updateNodeId, toggleDependency,
+}: StagePlanEditorProps) {
+  // 8px pointer activation distance prevents drag-handle clicks from
+  // triggering on every mousedown — users can still click stage cards normally.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
+  const ids = useMemo(() => planNodes.map((n) => `${n._id}`), [planNodes]);
+
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const from = ids.indexOf(String(active.id));
+    const to = ids.indexOf(String(over.id));
+    if (from < 0 || to < 0) return;
+    setPlanNodes((prev) => arrayMove(prev, from, to));
+  };
+
+  const applyAutoSort = (kind: 'id_asc' | 'topo') => {
+    if (kind === 'id_asc') {
+      setPlanNodes((prev) => [...prev].sort((a, b) => a._id - b._id));
+    } else {
+      setPlanNodes((prev) => topologicalSort(prev));
+    }
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <label className="text-sm font-medium">训练计划 ({planNodes.length} 阶段)</label>
+        <div className="flex items-center gap-2">
+          <SimpleSelect
+            value=""
+            onValueChange={(v) => {
+              if (v) applyAutoSort(v as 'id_asc' | 'topo');
+            }}
+            className="h-8 w-36"
+            placeholder="自动排序…"
+            options={[
+              { value: '', label: '自动排序…' },
+              { value: 'id_asc', label: '按 ID 升序' },
+              { value: 'topo', label: '按依赖拓扑序' },
+            ]}
+          />
+          <Button type="button" variant="outline" size="sm" onClick={addNode}>
+            <Plus className="size-3.5" />
+            添加阶段
+          </Button>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        拖动左侧 <GripVertical className="inline size-3" /> 重新排序；阶段顺序决定详情页展示顺序。
+      </p>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+          <div className="space-y-3">
+            {planNodes.map((node, index) => (
+              <SortableStageCard
+                key={`${node._id}`}
+                node={node}
+                index={index}
+                planNodes={planNodes}
+                onRemove={() => removeNode(index)}
+                onUpdate={(patch) => updateNode(index, patch)}
+                onUpdateId={(id) => updateNodeId(index, id)}
+                onToggleDependency={(dep) => toggleDependency(index, dep)}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+    </div>
+  );
+}
+
+const PREREQ_COLLAPSE_THRESHOLD = 4;
+
+interface SortableStageCardProps {
+  node: TrainingPlanNode;
+  index: number;
+  planNodes: TrainingPlanNode[];
+  onRemove: () => void;
+  onUpdate: (patch: Partial<TrainingPlanNode>) => void;
+  onUpdateId: (id: number) => void;
+  onToggleDependency: (dep: number) => void;
+}
+
+function SortableStageCard({
+  node, index, planNodes, onRemove, onUpdate, onUpdateId, onToggleDependency,
+}: SortableStageCardProps) {
+  const sortable = useSortable({ id: `${node._id}` });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = sortable;
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  const otherNodes = planNodes.filter((c) => c._id !== node._id);
+  const [showAllPrereqs, setShowAllPrereqs] = useState(false);
+  const shouldCollapse = otherNodes.length > PREREQ_COLLAPSE_THRESHOLD && !showAllPrereqs;
+  const visibleOthers = shouldCollapse ? otherNodes.slice(0, PREREQ_COLLAPSE_THRESHOLD) : otherNodes;
+  const hiddenCount = otherNodes.length - visibleOthers.length;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="rounded-md border bg-muted/20 p-4"
+    >
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          {/* Drag handle. Cursor changes to grab/grabbing; the rest of the
+              card stays clickable thanks to PointerSensor's 8px activation. */}
+          <button
+            type="button"
+            {...attributes}
+            {...listeners}
+            className="cursor-grab touch-none rounded p-1 text-muted-foreground hover:bg-accent active:cursor-grabbing"
+            title="拖动以重排"
+          >
+            <GripVertical className="size-4" />
+          </button>
+          <div>
+            <p className="text-sm font-semibold">阶段 {index + 1}</p>
+            <p className="text-xs text-muted-foreground">
+              {node.pids.length} 题 · {node.requireNids.length ? `依赖 ${node.requireNids.join(', ')}` : '无前置'}
+            </p>
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-8 text-destructive"
+          onClick={onRemove}
+          disabled={planNodes.length <= 1}
+          title="删除阶段"
+        >
+          <Trash2 className="size-4" />
+        </Button>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-[96px_1fr]">
+        <div className="space-y-1.5">
+          <label className="text-xs text-muted-foreground" htmlFor={`plan-id-${index}`}>ID</label>
+          <Input
+            id={`plan-id-${index}`}
+            type="number"
+            min={1}
+            required
+            value={node._id}
+            onChange={(event) => onUpdateId(Number(event.target.value))}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs text-muted-foreground" htmlFor={`plan-title-${index}`}>标题</label>
+          <Input
+            id={`plan-title-${index}`}
+            required
+            value={node.title}
+            onChange={(event) => onUpdate({ title: event.target.value })}
+          />
+        </div>
+      </div>
+
+      <div className="mt-3 space-y-1.5">
+        <label className="text-xs text-muted-foreground">题目</label>
+        <ProblemPicker
+          value={node.pids}
+          onChange={(next) => onUpdate({ pids: next })}
+          placeholder="搜索题目 (pid / 标题)…"
+        />
+      </div>
+
+      <div className="mt-3 space-y-2">
+        <label className="text-xs text-muted-foreground">前置阶段</label>
+        {otherNodes.length ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {visibleOthers.map((candidate) => (
+              <label
+                key={candidate._id}
+                className="inline-flex cursor-pointer items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
+              >
+                <Checkbox
+                  size="sm"
+                  checked={node.requireNids.includes(candidate._id)}
+                  onChange={() => onToggleDependency(candidate._id)}
+                />
+                #{candidate._id} {candidate.title}
+              </label>
+            ))}
+            {hiddenCount > 0 ? (
+              <button
+                type="button"
+                onClick={() => setShowAllPrereqs(true)}
+                className="inline-flex items-center gap-1 rounded-md border border-dashed bg-background px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent"
+              >
+                + {hiddenCount} 个
+              </button>
+            ) : null}
+            {!shouldCollapse && otherNodes.length > PREREQ_COLLAPSE_THRESHOLD ? (
+              <button
+                type="button"
+                onClick={() => setShowAllPrereqs(false)}
+                className="inline-flex items-center gap-1 rounded-md border border-dashed bg-background px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent"
+              >
+                收起
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">无可选阶段</p>
+        )}
+      </div>
+    </div>
   );
 }
 

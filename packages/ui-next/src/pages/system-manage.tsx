@@ -30,6 +30,8 @@ import { Separator } from '@/components/ui/separator';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { AdminPage } from '@/components/admin/admin-page';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { SimpleSelect } from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -94,6 +96,7 @@ export function ManageSettingPage() {
     setting_basic: '基本',
     setting_smtp: '邮件 (SMTP)',
     setting_oauth: 'OAuth',
+    setting_vigil: '反作弊',
     setting_storage: '存储',
     setting_file: '文件',
     setting_judge: '评测',
@@ -632,11 +635,11 @@ export function ManageUserImportPage() {
             <CardTitle className="text-sm">导入日志</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="max-h-48 overflow-y-auto rounded border bg-muted/30 p-3">
+            <ScrollArea className="max-h-48 rounded border bg-muted/30" viewportClassName="p-3">
               {messages.map((msg, i) => (
                 <p key={i} className="font-mono text-xs text-muted-foreground">{msg}</p>
               ))}
-            </div>
+            </ScrollArea>
           </CardContent>
         </Card>
       )}
@@ -909,7 +912,7 @@ export function ManageUserPrivPage() {
             />
           </div>
         </CardContent>
-        <div className="overflow-x-auto">
+        <div>
           <Table>
             <TableHeader>
               <TableRow>
@@ -1019,14 +1022,12 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
             <span className="text-sm text-muted-foreground">{setting.ui || '启用'}</span>
           </label>
         ) : setting.type === 'select' ? (
-          <select
+          <SimpleSelect
             name={setting.key}
-            defaultValue={value ?? setting.value}
+            defaultValue={String(value ?? setting.value ?? '')}
             disabled={isDisabled}
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
-          >
-            {renderRange(setting.range)}
-          </select>
+            options={rangeOptions(setting.range)}
+          />
         ) : setting.type === 'yaml' || setting.type === 'json' ? (
           <textarea
             name={setting.key}
@@ -1081,22 +1082,17 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
   );
 }
 
-function renderRange(range: any) {
-  if (!range) return null;
+function rangeOptions(range: any): { value: string; label: string }[] {
+  if (!range) return [];
   if (Array.isArray(range)) {
     return range.map((opt: any) => {
       const val = Array.isArray(opt) ? opt[0] : opt;
       const label = Array.isArray(opt) ? (opt[1] || opt[0]) : opt;
-      return (
-        <option key={String(val)} value={String(val)}>
-          {String(label)}
-        </option>
-      );
+      return { value: String(val), label: String(label) };
     });
   }
-  return Object.entries(range).map(([val, label]) => (
-    <option key={val} value={val}>
-      {String(label)}
-    </option>
-  ));
+  return Object.entries(range).map(([val, label]) => ({
+    value: val,
+    label: String(label),
+  }));
 }

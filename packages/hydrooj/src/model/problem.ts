@@ -456,12 +456,18 @@ export class ProblemModel {
         return document.setStatus(domainId, document.TYPE_PROBLEM, pid, uid, { star });
     }
 
-    static canViewBy(pdoc: ProblemDoc, udoc: User) {
+    static canViewBy(pdoc: ProblemDoc, udoc: User & { _permitPids?: Set<number> }) {
         if (!udoc.hasPerm(PERM.PERM_VIEW_PROBLEM)) return false;
         if (udoc.own(pdoc)) return true;
         if (udoc.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN)) return true;
-        if (pdoc.hidden) return false;
-        return true;
+        if (!pdoc.hidden) return true;
+        // Legacy maintainer field (was inconsistent — checked by getList
+        // but not by canViewBy; Krypton fix to align behavior).
+        if (pdoc.maintainer?.includes(udoc._id)) return true;
+        // krypton-permits: per-problem verifier/maintainer grant. Set
+        // populated by handlers via `attachUserPermits` before calling.
+        if (udoc._permitPids?.has(pdoc.docId)) return true;
+        return false;
     }
 
     static async import(domainId: string, filepath: string, options: ProblemImportOptions = {}) {

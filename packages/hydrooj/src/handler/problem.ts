@@ -41,14 +41,22 @@ import { ContestDetailBaseHandler } from './contest';
 
 export const parseCategory = (value: string) => value.replace(/，/g, ',').split(',').map((e) => e.trim());
 
-function buildQuery(udoc: User) {
+function buildQuery(udoc: User & { _permitPids?: Set<number> }) {
     const q: Filter<ProblemDoc> = {};
     if (!udoc.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN)) {
-        q.$or = [
+        const or: Filter<ProblemDoc>[] = [
             { hidden: false },
             { owner: udoc._id },
             { maintainer: udoc._id },
         ];
+        // krypton-permits: include problems the user has a direct permit
+        // on. Set is populated by `attachUserPermits` in the list handler
+        // before this filter is built; if not populated, no-op.
+        const permittedPids = udoc._permitPids;
+        if (permittedPids && permittedPids.size) {
+            or.push({ docId: { $in: Array.from(permittedPids) } });
+        }
+        q.$or = or;
     }
     return q;
 }
@@ -615,6 +623,7 @@ export class ProblemManageHandler extends ProblemDetailHandler {
 
 export class ProblemEditHandler extends ProblemManageHandler {
     async get() {
+        this.response.body.testdata = sortFiles(this.pdoc.data || []);
         this.response.body.additional_file = sortFiles(this.pdoc.additional_file || []);
         this.response.body.statementLangs = this.ctx.i18n.langs(false);
         this.response.template = 'problem_edit.html';
@@ -627,14 +636,17 @@ export class ProblemEditHandler extends ProblemManageHandler {
     @post('hidden', Types.Boolean)
     @post('tag', Types.Content, true, null, parseCategory)
     @post('difficulty', Types.PositiveInt, (i) => +i <= 10, true)
+    @post('lockHidden', Types.Boolean, true)
     async post(
         domainId: string, pid: string | number, title: string, content: string,
         newPid: string | number = '', hidden = false, tag: string[] = [], difficulty = 0,
+        lockHidden = false,
     ) {
         if (typeof newPid !== 'string') newPid = `P${newPid}`;
         if (newPid !== this.pdoc.pid && await problem.get(domainId, newPid)) throw new ProblemAlreadyExistError(newPid);
         const $update: Partial<ProblemDoc> = {
             title, content, pid: newPid, hidden, tag: tag ?? [], difficulty, html: false,
+            lockHidden: !!lockHidden,
         };
         const pdoc = await problem.edit(domainId, this.pdoc.docId, $update);
         this.response.redirect = this.url('problem_detail', { pid: newPid || pdoc.docId });
@@ -715,7 +727,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
         if (!file) throw new ValidationError('file');
         filename ||= file.originalFilename || randomstring(16);
         const files = [];
-        if (filename.endsWith('.zip') && type === 'testdata') {
+        if (filename.toLowerCase().endsWith('.zip') && type === 'testdata') {
             const zip = new ZipReader(Readable.toWeb(createReadStream(file.filepath)));
             let entries: Entry[];
             try {

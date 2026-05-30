@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 import { Compartment, EditorState, type Extension } from '@codemirror/state';
 import {
@@ -39,6 +40,7 @@ import {
   defaultHighlightStyle,
   foldGutter,
   foldKeymap,
+  indentUnit,
   indentOnInput,
   syntaxHighlighting,
 } from '@codemirror/language';
@@ -57,6 +59,8 @@ import { java } from '@codemirror/lang-java';
 import { javascript } from '@codemirror/lang-javascript';
 import { rust } from '@codemirror/lang-rust';
 import { go } from '@codemirror/lang-go';
+import { yaml } from '@codemirror/lang-yaml';
+import { json } from '@codemirror/lang-json';
 
 import { oneDark } from '@codemirror/theme-one-dark';
 
@@ -68,12 +72,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { SimpleSelect } from '@/components/ui/select';
 import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   Clock,
-  ClipboardCopy,
   FileUp,
   History,
   Loader2,
@@ -99,6 +104,14 @@ interface LangEntry {
 }
 
 const LANGUAGES: Record<string, LangEntry> = {
+  // Non-submission "config / data" languages used by file editing dialogs.
+  // These don't correspond to Hydro submit langs; passing the id to KryptonIDE
+  // simply enables syntax highlighting.
+  yaml: { label: 'YAML', extension: yaml },
+  yml: { label: 'YAML', extension: yaml },
+  json: { label: 'JSON', extension: json },
+  txt: { label: 'Text', extension: () => [] },
+  // Submission languages below
   'cc.cc20': { label: 'C++20', extension: cpp },
   'cc.cc17': { label: 'C++17', extension: cpp },
   'cc.cc14': { label: 'C++14', extension: cpp },
@@ -119,8 +132,76 @@ const LANGUAGES: Record<string, LangEntry> = {
   kt: { label: 'Kotlin', extension: () => [] },
 };
 
+/**
+ * Cached longest-first key list for `getLangEntry`'s prefix fallback.
+ * Computed once on first access — `LANGUAGES` is module-scoped const.
+ */
+let LANG_KEYS_DESC: string[] | null = null;
+function langKeysDesc(): string[] {
+  if (!LANG_KEYS_DESC) {
+    LANG_KEYS_DESC = Object.keys(LANGUAGES).sort((a, b) => b.length - a.length);
+  }
+  return LANG_KEYS_DESC;
+}
+
+/**
+ * Pretty labels for the Hydro language-id "modifier" suffix — the bit
+ * tacked onto a base variant id to indicate a compile flag or toolchain.
+ * `cc.cc14o2` → base `cc.cc14` + modifier `o2` → label "C++14 (O2)".
+ */
+const MODIFIER_LABELS: Record<string, string> = {
+  o2: ' (O2)',
+  o3: ' (O3)',
+  gcc: ' (GCC)',
+  clang: ' (Clang)',
+  msvc: ' (MSVC)',
+  fpc: ' (Free Pascal)',
+  pp: ' (Free Pascal)',
+};
+
+function decorateLabel(baseLabel: string, modifier: string): string {
+  if (!modifier) return baseLabel;
+  const key = modifier.toLowerCase().replace(/^[._-]+/, '');
+  return baseLabel + (MODIFIER_LABELS[key] ?? ` (${key})`);
+}
+
+/**
+ * Look up the CodeMirror language config for a Hydro language id.
+ *
+ * Hydro uses `{family}.{variant}[modifier]` naming. The `variant` may
+ * carry a compile-flag suffix appended directly to the version token,
+ * e.g. `cc.cc14o2` (C++14 with -O2) or `cc.cc20gcc` (force g++).
+ * The `LANGUAGES` registry only lists the bare versions because the
+ * compile flag doesn't change the *grammar*. To get a useful menu
+ * label we inherit the base entry's extension but synthesise the label
+ * as `{base.label} ({modifier})`, so listing `cc.cc14` and `cc.cc14o2`
+ * side by side shows "C++14" and "C++14 (O2)" respectively.
+ */
 export function getLangEntry(id: string): LangEntry {
-  return LANGUAGES[id] || { label: id, extension: () => [] };
+  if (LANGUAGES[id]) return LANGUAGES[id];
+  for (const key of langKeysDesc()) {
+    if (id.startsWith(key) && id !== key) {
+      const base = LANGUAGES[key];
+      const modifier = id.slice(key.length);
+      return {
+        label: decorateLabel(base.label, modifier),
+        extension: base.extension,
+      };
+    }
+  }
+  // Last-ditch: try the `{family}` segment (e.g. an unknown variant
+  // like `cc.something_exotic` still picks up the cc highlighter).
+  const dotIdx = id.indexOf('.');
+  if (dotIdx > 0) {
+    const family = id.slice(0, dotIdx);
+    if (LANGUAGES[family]) {
+      return {
+        label: id,  // unknown variant — show the raw id so the user can tell which
+        extension: LANGUAGES[family].extension,
+      };
+    }
+  }
+  return { label: id, extension: () => [] };
 }
 
 /* ================================================================== */
@@ -183,10 +264,29 @@ const DEFAULT_CONFIG: IdeConfig = {
   fontFamily: 'JetBrains Mono',
 };
 
+function normalizeConfig(value: Partial<IdeConfig> = {}): IdeConfig {
+  const fontSize = Number(value.fontSize);
+  const tabSize = Number(value.tabSize);
+  const theme = value.theme && ['light', 'dark', 'oneDark'].includes(value.theme)
+    ? value.theme
+    : DEFAULT_CONFIG.theme;
+  return {
+    ...DEFAULT_CONFIG,
+    ...value,
+    fontSize: [12, 13, 14, 15, 16, 18, 20, 22, 24].includes(fontSize)
+      ? fontSize
+      : DEFAULT_CONFIG.fontSize,
+    tabSize: [2, 4, 8].includes(tabSize) ? tabSize : DEFAULT_CONFIG.tabSize,
+    theme,
+    wordWrap: typeof value.wordWrap === 'boolean' ? value.wordWrap : DEFAULT_CONFIG.wordWrap,
+    fontFamily: value.fontFamily || DEFAULT_CONFIG.fontFamily,
+  };
+}
+
 function loadConfig(): IdeConfig {
   try {
     const raw = localStorage.getItem(IDE_CONFIG_KEY);
-    if (raw) return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+    if (raw) return normalizeConfig(JSON.parse(raw));
   } catch { /* empty */ }
   return { ...DEFAULT_CONFIG };
 }
@@ -322,18 +422,16 @@ function SettingsDialog({
             {tab === 'editor' && (
               <>
                 <SettingRow label="字号">
-                  <select
-                    value={config.fontSize}
-                    onChange={(e) => onChange({ ...config, fontSize: +e.target.value })}
-                    className="rounded-md border bg-background px-3 py-1.5 text-sm"
-                    title="字号"
-                  >
-                    {[12, 13, 14, 15, 16, 18, 20, 22, 24].map((s) => (
-                      <option key={s} value={s}>
-                        {s}px
-                      </option>
-                    ))}
-                  </select>
+                  <SimpleSelect
+                    value={String(config.fontSize)}
+                    onValueChange={(v) => onChange({ ...config, fontSize: +v })}
+                    size="sm"
+                    className="w-auto min-w-[6rem]"
+                    ariaLabel="字号"
+                    options={[12, 13, 14, 15, 16, 18, 20, 22, 24].map((s) => ({
+                      value: String(s), label: `${s}px`,
+                    }))}
+                  />
                 </SettingRow>
 
                 <SettingRow label="Tab 宽度">
@@ -368,33 +466,29 @@ function SettingsDialog({
             {tab === 'appearance' && (
               <>
                 <SettingRow label="主题">
-                  <select
+                  <SimpleSelect
                     value={config.theme}
-                    onChange={(e) =>
-                      onChange({ ...config, theme: e.target.value as ThemeName })
-                    }
-                    className="rounded-md border bg-background px-3 py-1.5 text-sm"
-                    title="主题"
-                  >
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
-                    <option value="oneDark">One Dark</option>
-                  </select>
+                    onValueChange={(v) => onChange({ ...config, theme: v as ThemeName })}
+                    size="sm"
+                    className="w-auto min-w-[8rem]"
+                    ariaLabel="主题"
+                    options={[
+                      { value: 'light', label: 'Light' },
+                      { value: 'dark', label: 'Dark' },
+                      { value: 'oneDark', label: 'One Dark' },
+                    ]}
+                  />
                 </SettingRow>
 
                 <SettingRow label="字体">
-                  <select
+                  <SimpleSelect
                     value={config.fontFamily}
-                    onChange={(e) => onChange({ ...config, fontFamily: e.target.value })}
-                    className="rounded-md border bg-background px-3 py-1.5 text-sm"
-                    title="字体"
-                  >
-                    {FONT_OPTIONS.map((f) => (
-                      <option key={f} value={f}>
-                        {f}
-                      </option>
-                    ))}
-                  </select>
+                    onValueChange={(v) => onChange({ ...config, fontFamily: v })}
+                    size="sm"
+                    className="w-auto min-w-[10rem]"
+                    ariaLabel="字体"
+                    options={FONT_OPTIONS.map((f) => ({ value: f, label: f }))}
+                  />
                 </SettingRow>
               </>
             )}
@@ -433,6 +527,7 @@ export interface RecordEntry {
   status: number;
   time?: number;
   memory?: number;
+  score?: number;
   timestamp: number;
 }
 
@@ -532,7 +627,7 @@ function PretestResultInline({
       </div>
 
       {/* Result content */}
-      <div className="flex-1 overflow-auto min-h-0">
+      <ScrollArea orientation="both" className="flex-1 min-h-0">
         {activeResultTab === 'output' && (
           <pre className="p-2 font-mono text-xs whitespace-pre-wrap break-all">
             {actualOutput || '(无输出)'}
@@ -575,7 +670,7 @@ function PretestResultInline({
             {result.error}
           </div>
         )}
-      </div>
+      </ScrollArea>
     </div>
   );
 }
@@ -593,6 +688,8 @@ export interface KryptonIDEProps {
   defaultCode?: string;
   /** POST URL for submit / pretest (e.g. /p/:pid/submit) */
   submitUrl?: string;
+  /** Detail URL template for a submitted record, e.g. `/exam-mode/:tid/record/__RID__`. */
+  recordUrlTemplate?: string;
   /** Whether pretest is available for this problem */
   canPretest?: boolean;
   /** Fallback submit handler when submitUrl is not provided */
@@ -609,8 +706,33 @@ export interface KryptonIDEProps {
   onRecordsChange?: (records: RecordEntry[]) => void;
   /** Called when user toggles the records panel */
   onToggleRecords?: () => void;
+  /** Called when a fresh submit should make the external records panel visible */
+  onOpenRecords?: () => void;
   /** Whether to show the records toggle button */
   showRecordsButton?: boolean;
+  /** External records panel visibility, used to style the toolbar button */
+  recordsVisible?: boolean;
+  /** Number of records displayed by the external panel */
+  recordsCount?: number;
+
+  /* ── Editor modes ───────────────────────────────────────────── */
+
+  /**
+   * Editor mode.
+   *  - `full` (default): submit/pretest toolbar, records, settings — full IDE.
+   *  - `simple`: just the editor + syntax highlighting. No submit, no pretest,
+   *    no records, no language menu. Used for embedded YAML / config editing.
+   *  - `readonly`: `simple` + editor is non-editable.
+   */
+  mode?: 'full' | 'simple' | 'readonly';
+  /**
+   * Controlled value. When provided, the editor mirrors this string and
+   * fires `onValueChange` on every keystroke. Required for `simple`/`readonly`
+   * use because there's no submit button to flush state.
+   */
+  value?: string;
+  /** Controlled value change handler. */
+  onValueChange?: (value: string) => void;
 }
 
 export function KryptonIDE({
@@ -618,6 +740,7 @@ export function KryptonIDE({
   defaultLang,
   defaultCode = '',
   submitUrl,
+  recordUrlTemplate,
   canPretest = false,
   onSubmit,
   className,
@@ -626,8 +749,16 @@ export function KryptonIDE({
   samples = [],
   onRecordsChange,
   onToggleRecords,
+  onOpenRecords,
   showRecordsButton = false,
+  recordsVisible,
+  recordsCount = 0,
+  mode = 'full',
+  value,
+  onValueChange,
 }: KryptonIDEProps) {
+  const isSimple = mode === 'simple' || mode === 'readonly';
+  const isReadOnly = mode === 'readonly';
   /* ── refs ── */
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -640,7 +771,11 @@ export function KryptonIDE({
   const pretestHDragging = useRef(false);
   const pretestVDragging = useRef(false);
   const pretestPanelRef = useRef<HTMLDivElement>(null);
-  const langMenuRef = useRef<HTMLDivElement>(null);
+  // Language dropdown rendered via Portal — the toolbar uses `overflow-x-auto`
+  // which (per CSS spec) forces `overflow-y` to non-visible and would clip a
+  // normally-positioned absolute dropdown. Portal + fixed positioning avoids it.
+  const langButtonRef = useRef<HTMLButtonElement>(null);
+  const langDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mountedRef = useRef(true);
 
@@ -653,10 +788,16 @@ export function KryptonIDE({
     return defaultLang || langs[0] || 'cc.cc17';
   });
   const [showLangMenu, setShowLangMenu] = useState(false);
+  const [langMenuPos, setLangMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [showPretest, setShowPretest] = useState(false);
   const [pretestHeight, setPretestHeight] = useState(200);
-  const [pretestLoading, setPretestLoading] = useState(false);
-  const [pretestResult, setPretestResult] = useState<PretestResult | null>(null);
+  // Per-tab loading + result state. A single pretest run owns a set of
+  // tabIds (1 tab for "运行此自测" / F9, all non-empty tabs for "运行全部自测")
+  // and writes per-tab results back into the map. Aborting a run clears
+  // its own tabIds from `pretestRunning` only.
+  const [pretestRunning, setPretestRunning] = useState<Set<string>>(new Set());
+  const [pretestResults, setPretestResults] = useState<Map<string, PretestResult>>(new Map());
+  const pretestLoading = pretestRunning.size > 0;
   const [showSettings, setShowSettings] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -691,7 +832,19 @@ export function KryptonIDE({
   const activeTab = pretestTabs.find((t) => t.id === activeTestTab) || pretestTabs[pretestTabs.length - 1];
   const isSampleTab = activeTab.id.startsWith('sample-');
 
-  /* ── sync samples if they change ── */
+  /**
+   * Sync sample-derived tabs whenever the actual sample CONTENT changes.
+   *
+   * Using `samples` directly as a dep was a footgun: parent components
+   * routinely pass a fresh array (especially when defaulting to `[]`),
+   * which made this effect fire every render and call setPretestTabs
+   * with a new array reference every time → infinite re-render loop.
+   * We use a serialised signature instead so identity churn is ignored.
+   */
+  const samplesKey = useMemo(
+    () => samples.map((s) => `${s.id}|${(s.input || '').length}|${(s.output || '').length}`).join('\n'),
+    [samples],
+  );
   useEffect(() => {
     setPretestTabs((prev) => {
       const custom = prev.filter((t) => t.id === 'custom' || t.id.startsWith('custom-'));
@@ -702,9 +855,16 @@ export function KryptonIDE({
         expectedOutput: s.output,
       }));
       const customTabs = custom.length > 0 ? custom : [{ id: 'custom', label: '自定义', input: '', expectedOutput: '' }];
-      return [...sampleTabs, ...customTabs];
+      const next = [...sampleTabs, ...customTabs];
+      // Cheap equality check — same length + same ids + same data lengths means we're done.
+      if (prev.length === next.length
+        && prev.every((t, i) => t.id === next[i].id && t.input === next[i].input && t.expectedOutput === next[i].expectedOutput)) {
+        return prev;
+      }
+      return next;
     });
-  }, [samples]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [samplesKey]);
 
   const updateTabField = useCallback((tabId: string, field: 'input' | 'expectedOutput', value: string) => {
     setPretestTabs((prev) =>
@@ -786,6 +946,7 @@ export function KryptonIDE({
       }),
       ...(config.wordWrap ? [EditorView.lineWrapping] : []),
       EditorState.tabSize.of(config.tabSize),
+      indentUnit.of(' '.repeat(config.tabSize)),
       /* Code caching – debounced write to localStorage */
       EditorView.updateListener.of((update) => {
         if (update.docChanged && codeCacheKey) {
@@ -803,8 +964,14 @@ export function KryptonIDE({
           setCursorPos({ line: line.number, col: pos - line.from + 1 });
         }
       }),
+      /* Read-only flag for `mode='readonly'` */
+      ...(isReadOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
+      /* Controlled value: emit onValueChange on each keystroke */
+      ...(onValueChange ? [EditorView.updateListener.of((update) => {
+        if (update.docChanged) onValueChange(update.state.doc.toString());
+      })] : []),
     ];
-  }, [selectedLang, config, codeCacheKey]);
+  }, [selectedLang, config, codeCacheKey, isReadOnly, onValueChange]);
 
   /* ── Create / reconfigure editor ── */
   useEffect(() => {
@@ -817,8 +984,10 @@ export function KryptonIDE({
       return;
     }
 
-    let initialDoc = defaultCode;
-    if (codeCacheKey) {
+    // Controlled `value` (simple/readonly mode) wins; otherwise fall back to
+    // defaultCode or the cached document.
+    let initialDoc = value != null ? value : defaultCode;
+    if (value == null && codeCacheKey) {
       const cached = localStorage.getItem(codeCacheKey);
       if (cached) initialDoc = cached;
     }
@@ -836,6 +1005,20 @@ export function KryptonIDE({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extensions]);
+
+  /* ── External value sync (controlled mode) ──
+   *  When the caller changes `value` (e.g. swapping the file being edited),
+   *  replace the editor document. Skip when the change came from our own
+   *  keystrokes by comparing strings. */
+  useEffect(() => {
+    if (value == null) return;
+    const view = viewRef.current;
+    if (!view) return;
+    if (view.state.doc.toString() === value) return;
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: value },
+    });
+  }, [value]);
 
   /* ── Poll a submitted record for final status ── */
   const pollRecord = useCallback(async (rid: string, url: string) => {
@@ -862,6 +1045,13 @@ export function KryptonIDE({
     }
   }, []);
 
+  const resolveRecordUrl = useCallback((rid: string, fallback?: string) => {
+    if (recordUrlTemplate) {
+      return recordUrlTemplate.replace(/__RID__/g, encodeURIComponent(rid));
+    }
+    return fallback || `/record/${rid}`;
+  }, [recordUrlTemplate]);
+
   /* ── Submit handler ── */
   const handleSubmit = useCallback(async () => {
     if (submitting || submitCooldown > 0) return;
@@ -883,9 +1073,9 @@ export function KryptonIDE({
       });
       if (res.ok) {
         const data = await res.json();
-        const rid = data.rid;
+        const rid = data.rid ? String(data.rid) : '';
         if (rid) {
-          const url = data.url || `/record/${rid}`;
+          const url = resolveRecordUrl(rid, data.url || `/record/${rid}`);
           const entry: RecordEntry = {
             rid,
             url,
@@ -895,6 +1085,7 @@ export function KryptonIDE({
           };
           setRecords((prev) => [entry, ...prev]);
           setShowRecords(true);
+          onOpenRecords?.();
           setSubmitCooldown(3);
           pollRecord(rid, url);
           return;
@@ -910,25 +1101,82 @@ export function KryptonIDE({
     } finally {
       setSubmitting(false);
     }
-  }, [submitUrl, selectedLang, getCode, onSubmit, submitting, submitCooldown, pollRecord]);
+  }, [submitUrl, selectedLang, getCode, onSubmit, onOpenRecords, submitting, submitCooldown, pollRecord, resolveRecordUrl]);
 
-  /* ── Pretest handler (runs a single test with given input) ── */
-  const runPretest = useCallback(async (input: string) => {
-    if (!submitUrl || pretestLoading || !canPretest) return;
+  /* ── Pretest handler ──
+   *  Runs one or more tabs in a single backend pretest request. The judge
+   *  treats `input: string[]` as N test cases sharing one record; the
+   *  response rdoc's `testCases[i]` maps back to the i-th tab. We fan
+   *  results out into `pretestResults` so the per-tab panel + tab badges
+   *  light up independently.
+   *
+   *  Why a single request instead of N sequential POSTs:
+   *   - one rate-limiter consumption (limit.pretest defaults to 60/min)
+   *   - one judge queue slot, so "run all" stays atomic
+   *   - results stream in together — easier to render partial progress
+   */
+  const runPretestForTabs = useCallback(async (tabIds: string[]) => {
+    if (!submitUrl || !canPretest) return;
+    const tabs = tabIds
+      .map((id) => pretestTabs.find((t) => t.id === id))
+      .filter((t): t is PretestTab => !!t && t.input.length > 0);
+    if (tabs.length === 0) return;
 
+    // Any in-flight pretest gets aborted — only one run owns the controller.
     pretestAbort.current?.abort();
     const abort = new AbortController();
     pretestAbort.current = abort;
-    setPretestLoading(true);
+    const runningIds = tabs.map((t) => t.id);
+    setPretestRunning(new Set(runningIds));
     setPretestCooldown(3);
-    setPretestResult(null);
+    setPretestResults((prev) => {
+      const m = new Map(prev);
+      runningIds.forEach((id) => m.delete(id));
+      return m;
+    });
+
+    const distributeFromRdoc = (rdoc: any) => {
+      setPretestResults((prev) => {
+        const m = new Map(prev);
+        const cases = Array.isArray(rdoc.testCases) ? rdoc.testCases : [];
+        runningIds.forEach((tabId, i) => {
+          const tc = cases[i];
+          // testCases settle one at a time. If this tab's case hasn't
+          // landed yet, show the record-level status (pending / compile
+          // error / etc.) so the tab badge isn't blank.
+          m.set(tabId, tc
+            ? {
+                status: tc.status,
+                time: tc.time,
+                memory: tc.memory,
+                testCases: [tc],
+                compilerTexts: rdoc.compilerTexts,
+                judgeTexts: rdoc.judgeTexts,
+              }
+            : {
+                status: rdoc.status ?? 0,
+                compilerTexts: rdoc.compilerTexts,
+                judgeTexts: rdoc.judgeTexts,
+              });
+        });
+        return m;
+      });
+    };
+
+    const setErrorForAll = (status: number, error?: string) => {
+      setPretestResults((prev) => {
+        const m = new Map(prev);
+        runningIds.forEach((id) => m.set(id, { status, error }));
+        return m;
+      });
+    };
 
     try {
       const code = getCode();
       const res = await fetch(submitUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ lang: selectedLang, code, pretest: true, input: [input] }),
+        body: JSON.stringify({ lang: selectedLang, code, pretest: true, input: tabs.map((t) => t.input) }),
         signal: abort.signal,
         credentials: 'same-origin',
       });
@@ -940,8 +1188,9 @@ export function KryptonIDE({
 
       const recordUrl = data.url || `/record/${rid}`;
 
-      // Poll for final result (max 60 s)
-      for (let i = 0; i < 60; i++) {
+      // Multi-case runs need more headroom — judge time scales with N.
+      const maxAttempts = tabs.length > 1 ? 90 : 60;
+      for (let i = 0; i < maxAttempts; i++) {
         await new Promise((r) => setTimeout(r, 1000));
         if (abort.signal.aborted) return;
 
@@ -953,37 +1202,50 @@ export function KryptonIDE({
         const rData = await rRes.json();
         const rdoc = rData.rdoc || rData;
         const s: number = rdoc.status ?? 0;
+        distributeFromRdoc(rdoc);
 
         // Final status: 1-19
         if (s > 0 && s < 20) {
-          setPretestResult(rdoc);
           setPretestResultTab('output');
           return;
         }
       }
 
-      setPretestResult({ status: 8, error: '评测超时，请稍后重试' });
+      setErrorForAll(8, '评测超时，请稍后重试');
     } catch (e: any) {
       if (e.name !== 'AbortError') {
-        setPretestResult({ status: 8, error: e.message || '请求失败' });
+        setErrorForAll(8, e.message || '请求失败');
       }
     } finally {
-      setPretestLoading(false);
+      setPretestRunning((prev) => {
+        const s = new Set(prev);
+        runningIds.forEach((id) => s.delete(id));
+        return s;
+      });
     }
-  }, [submitUrl, selectedLang, pretestLoading, canPretest, getCode]);
+  }, [submitUrl, canPretest, pretestTabs, selectedLang, getCode]);
 
-  /** Toolbar "运行全部自测" — run current active tab */
-  const handlePretest = useCallback(() => {
+  /** Toolbar "运行全部自测" — run every non-empty pretest tab in one request. */
+  const handleRunAll = useCallback(() => {
     if (!showPretest) {
       setShowPretest(true);
       return;
     }
-    runPretest(activeTab.input);
-  }, [showPretest, activeTab, runPretest]);
+    runPretestForTabs(pretestTabs.map((t) => t.id));
+  }, [showPretest, pretestTabs, runPretestForTabs]);
+
+  /** F9 + per-tab ▶ — run only the currently-active tab (fast iteration). */
+  const handleRunActive = useCallback(() => {
+    if (!showPretest) {
+      setShowPretest(true);
+      return;
+    }
+    runPretestForTabs([activeTab.id]);
+  }, [showPretest, activeTab.id, runPretestForTabs]);
 
   /* ── Ref bridge so keymap closures always call latest handlers ── */
   submitRef.current = handleSubmit;
-  pretestRef.current = handlePretest;
+  pretestRef.current = handleRunActive;
 
   /* ── Pretest panel resize via drag (top edge, horizontal split, vertical split) ── */
   useEffect(() => {
@@ -1040,16 +1302,38 @@ export function KryptonIDE({
     };
   }, []);
 
-  /* ── Click-outside to close language menu ── */
+  /* ── Click-outside closes; scroll/resize re-position so dropdown follows the button ── */
   useEffect(() => {
     if (!showLangMenu) return;
     const handler = (e: MouseEvent) => {
-      if (langMenuRef.current && !langMenuRef.current.contains(e.target as Node)) {
+      const t = e.target as Node;
+      if (langButtonRef.current?.contains(t)) return;
+      if (langDropdownRef.current?.contains(t)) return;
+      setShowLangMenu(false);
+    };
+    const reposition = () => {
+      const btn = langButtonRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      // If the button has scrolled out of viewport, close the menu;
+      // otherwise update fixed position so the dropdown tracks the button.
+      const offscreen = r.bottom < 0 || r.top > window.innerHeight
+        || r.right < 0 || r.left > window.innerWidth;
+      if (offscreen) {
         setShowLangMenu(false);
+      } else {
+        setLangMenuPos({ top: r.bottom + 4, left: r.left });
       }
     };
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    // Capture phase to catch nested scroll containers (e.g. the toolbar's own overflow-x-auto).
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
   }, [showLangMenu]);
 
   /* ── Escape to exit fullscreen ── */
@@ -1125,43 +1409,61 @@ export function KryptonIDE({
         className,
       )}
     >
-      {/* ── Toolbar ── */}
-      <div className="krypton-scrollbar flex items-center gap-1 overflow-x-auto border-b bg-muted/50 px-2 py-1">
-        {/* Language selector */}
-        <div className="relative" ref={langMenuRef}>
-          <button
-            type="button"
-            onClick={() => setShowLangMenu((p) => !p)}
-            className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium hover:bg-accent"
+      {/* ── Toolbar (hidden in simple/readonly mode) ── */}
+      {!isSimple ? (
+      <ScrollArea
+        orientation="horizontal"
+        className="shrink-0 border-b bg-muted/50"
+        viewportClassName="px-2 py-1 [&>div]:!flex [&>div]:items-center [&>div]:gap-1"
+      >
+        {/* Language selector — button stays in toolbar, dropdown portals to body */}
+        <button
+          ref={langButtonRef}
+          type="button"
+          onClick={() => {
+            if (showLangMenu) {
+              setShowLangMenu(false);
+              return;
+            }
+            const r = langButtonRef.current?.getBoundingClientRect();
+            if (r) setLangMenuPos({ top: r.bottom + 4, left: r.left });
+            setShowLangMenu(true);
+          }}
+          className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium hover:bg-accent"
+        >
+          {langLabel}
+          <ChevronDown className="size-3" />
+        </button>
+        {showLangMenu && langMenuPos && createPortal(
+          <ScrollArea
+            ref={langDropdownRef as any}
+            style={{ position: 'fixed', top: langMenuPos.top, left: langMenuPos.left }}
+            className="z-[60] max-h-64 w-48 rounded-lg border bg-popover shadow-lg"
+            viewportClassName="p-1"
           >
-            {langLabel}
-            <ChevronDown className="size-3" />
-          </button>
-          {showLangMenu && (
-            <div className="absolute left-0 top-full z-50 mt-1 max-h-64 w-48 overflow-y-auto rounded-lg border bg-popover p-1 shadow-lg">
-              {availableLangs.map((id) => {
-                const entry = getLangEntry(id);
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedLang(id);
-                      setShowLangMenu(false);
-                    }}
-                    className={cn(
-                      'flex w-full items-center rounded px-2 py-1.5 text-xs hover:bg-accent',
-                      id === selectedLang && 'bg-accent font-medium',
-                    )}
-                  >
-                    {entry.label}
-                    <span className="ml-auto text-[10px] text-muted-foreground">{id}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
+            {availableLangs.map((id) => {
+              const entry = getLangEntry(id);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedLang(id);
+                    setShowLangMenu(false);
+                  }}
+                  className={cn(
+                    'flex w-full items-center rounded px-2 py-1.5 text-xs hover:bg-accent',
+                    id === selectedLang && 'bg-accent font-medium',
+                  )}
+                >
+                  {entry.label}
+                  <span className="ml-auto text-[10px] text-muted-foreground">{id}</span>
+                </button>
+              );
+            })}
+          </ScrollArea>,
+          document.body,
+        )}
 
         {/* Pretest toggle + Run */}
         {canPretest && submitUrl && (
@@ -1185,7 +1487,8 @@ export function KryptonIDE({
               variant="outline"
               className="h-7 gap-1 text-xs"
               disabled={pretestLoading || pretestCooldown > 0}
-              onClick={handlePretest}
+              onClick={handleRunAll}
+              title="一次评测所有非空自测 tab"
             >
               {pretestLoading ? (
                 <Loader2 className="size-3 animate-spin" />
@@ -1195,7 +1498,6 @@ export function KryptonIDE({
                 <Play className="size-3" />
               )}
               {pretestCooldown > 0 ? `${pretestCooldown}s` : '运行全部自测'}
-              <kbd className="ml-0.5 rounded border bg-muted px-1 text-[10px] font-normal">F9</kbd>
             </Button>
           </>
         )}
@@ -1224,14 +1526,22 @@ export function KryptonIDE({
 
         {/* Records toggle — right next to submit */}
         {showRecordsButton && (
-          <button
+          <Button
             type="button"
+            variant={(recordsVisible ?? showRecords) ? 'secondary' : 'ghost'}
+            size="sm"
             onClick={onToggleRecords}
-            className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-            title="提交记录"
+            className="h-7 gap-1 px-2 text-xs"
+            title={(recordsVisible ?? showRecords) ? '收起提交记录' : '展开提交记录'}
           >
-            <History className="size-3.5" />
-          </button>
+            <History className="size-3" />
+            <span>提交记录</span>
+            {recordsCount > 0 ? (
+              <span className="ml-0.5 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground">
+                {recordsCount}
+              </span>
+            ) : null}
+          </Button>
         )}
 
         <div className="flex-1" />
@@ -1279,7 +1589,8 @@ export function KryptonIDE({
             <Maximize2 className="size-3.5" />
           )}
         </button>
-      </div>
+      </ScrollArea>
+      ) : null}
 
       {/* ── Editor area ── */}
       <div
@@ -1299,7 +1610,7 @@ export function KryptonIDE({
       </div>
 
       {/* ── Pretest panel (multi-tab, inline results) ── */}
-      {showPretest && canPretest && (
+      {!isSimple && showPretest && canPretest && (
         <div className="border-t flex flex-col" style={{ height: pretestHeight, minHeight: 120 }}>
           {/* Drag handle — top edge for panel height */}
           <div
@@ -1311,35 +1622,52 @@ export function KryptonIDE({
             }}
           />
 
-          {/* Tab bar */}
+          {/* Tab bar — each tab carries an inline pass/fail/judging badge
+              so "运行全部自测" results are scannable without clicking through
+              every tab. */}
           <div className="flex items-center gap-0 border-b bg-muted/30 px-1 shrink-0 overflow-x-auto overflow-y-hidden" style={{ scrollbarWidth: 'none' }}>
-            {pretestTabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTestTab(tab.id)}
-                className={cn(
-                  'flex items-center gap-1 whitespace-nowrap px-3 py-1.5 text-xs transition-colors border-b-2 -mb-px shrink-0',
-                  activeTestTab === tab.id
-                    ? 'border-primary text-primary font-medium'
-                    : 'border-transparent text-muted-foreground hover:text-foreground',
-                )}
-              >
-                {tab.label}
-                {/* close button for custom tabs (only if more than one custom tab) */}
-                {tab.id.startsWith('custom') && pretestTabs.filter((t) => t.id.startsWith('custom') || t.id === 'custom').length > 1 && (
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => { e.stopPropagation(); removeTab(tab.id); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); removeTab(tab.id); } }}
-                    className="ml-1 rounded-full p-0.5 hover:bg-accent"
-                  >
-                    <XCircle className="size-3" />
-                  </span>
-                )}
-              </button>
-            ))}
+            {pretestTabs.map((tab) => {
+              const tabResult = pretestResults.get(tab.id);
+              const tabBusy = pretestRunning.has(tab.id);
+              const status = tabResult?.status ?? null;
+              const isAccepted = status === 1;
+              // 1 = AC; ≥2 and <20 = some kind of failure (WA/RE/TLE/CE/etc.)
+              const isFinalFail = status !== null && status >= 2 && status < 20;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTestTab(tab.id)}
+                  className={cn(
+                    'flex items-center gap-1 whitespace-nowrap px-3 py-1.5 text-xs transition-colors border-b-2 -mb-px shrink-0',
+                    activeTestTab === tab.id
+                      ? 'border-primary text-primary font-medium'
+                      : 'border-transparent text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {tabBusy ? (
+                    <Loader2 className="size-3 animate-spin text-muted-foreground" />
+                  ) : isAccepted ? (
+                    <CheckCircle2 className="size-3 text-green-500" />
+                  ) : isFinalFail ? (
+                    <XCircle className="size-3 text-red-500" />
+                  ) : null}
+                  {tab.label}
+                  {/* close button for custom tabs (only if more than one custom tab) */}
+                  {tab.id.startsWith('custom') && pretestTabs.filter((t) => t.id.startsWith('custom') || t.id === 'custom').length > 1 && (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => { e.stopPropagation(); removeTab(tab.id); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); removeTab(tab.id); } }}
+                      className="ml-1 rounded-full p-0.5 hover:bg-accent"
+                    >
+                      <XCircle className="size-3" />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
             <button
               type="button"
               onClick={addCustomTab}
@@ -1349,16 +1677,17 @@ export function KryptonIDE({
               <Plus className="size-3" />
             </button>
             <div className="flex-1" />
-            {/* Per-tab run button */}
+            {/* Per-tab run button — runs only the active tab; F9 shortcut */}
             <button
               type="button"
-              disabled={pretestLoading || pretestCooldown > 0}
-              onClick={() => runPretest(activeTab.input)}
+              disabled={pretestLoading || pretestCooldown > 0 || !activeTab.input.trim()}
+              onClick={handleRunActive}
               className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 shrink-0"
-              title="运行当前测试"
+              title="运行当前自测 (F9)"
             >
-              {pretestLoading ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
-              运行
+              {pretestRunning.has(activeTab.id) ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
+              运行此自测
+              <kbd className="ml-0.5 rounded border bg-muted px-1 text-[10px] font-normal">F9</kbd>
             </button>
             <button
               type="button"
@@ -1450,25 +1779,39 @@ export function KryptonIDE({
               }}
             />
 
-            {/* Right: result panel */}
+            {/* Right: result panel — bound to the currently-active tab. Each
+                tab keeps its own latest result in `pretestResults`, so
+                switching tabs while a "运行全部自测" pass is mid-judge shows
+                the per-tab progress without races. */}
             <div className="krypton-split-pane flex flex-col min-w-0 min-h-0 overflow-hidden" style={{ width: `${100 - pretestLeftPct}%` }}>
-              {pretestLoading ? (
-                <div className="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin" />
-                  评测中…
-                </div>
-              ) : pretestResult ? (
-                <PretestResultInline
-                  result={pretestResult}
-                  expectedOutput={activeTab.expectedOutput}
-                  activeResultTab={pretestResultTab}
-                  onResultTabChange={setPretestResultTab}
-                />
-              ) : (
-                <div className="flex flex-1 items-center justify-center text-xs text-muted-foreground">
-                  按 F9 或点击"运行"开始自测
-                </div>
-              )}
+              {(() => {
+                const result = pretestResults.get(activeTab.id) || null;
+                const thisTabRunning = pretestRunning.has(activeTab.id);
+                if (thisTabRunning && !result) {
+                  return (
+                    <div className="flex flex-1 items-center justify-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="size-4 animate-spin" />
+                      {pretestRunning.size > 1 ? `评测中… (${pretestRunning.size} 个 tab)` : '评测中…'}
+                    </div>
+                  );
+                }
+                if (result) {
+                  return (
+                    <PretestResultInline
+                      result={result}
+                      expectedOutput={activeTab.expectedOutput}
+                      activeResultTab={pretestResultTab}
+                      onResultTabChange={setPretestResultTab}
+                    />
+                  );
+                }
+                return (
+                  <div className="flex flex-1 flex-col items-center justify-center gap-1 text-xs text-muted-foreground">
+                    <div>按 F9 或点击"运行此自测"测试当前 tab</div>
+                    <div className="text-[10px]">"运行全部自测" 一次评测所有非空 tab</div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>

@@ -18,7 +18,7 @@ import {
 import type {
     ExportPackage, ImportConflictPolicy, ImportReport, School, StudentRecord, UserGroup,
 } from './types';
-import { userBindModel } from './model';
+import { deriveEnrollmentYear, userBindModel } from './model';
 
 export async function exportDomain(domainId: string): Promise<ExportPackage> {
     const [schools, userGroups, students, bindTokens] = await Promise.all([
@@ -159,6 +159,7 @@ export async function importDomain(
                 groupIds: newGroupIds,
                 boundUserId: null,
                 boundAt: null,
+                enrollmentYear: deriveEnrollmentYear(oldStudent.studentId),
                 createdAt: new Date(),
                 createdBy: oldStudent.createdBy,
             });

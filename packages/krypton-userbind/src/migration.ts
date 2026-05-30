@@ -23,6 +23,7 @@ import {
     bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl,
     userGroupsColl,
 } from './db';
+import { deriveEnrollmentYear } from './model';
 
 const logger = new Logger('userbind.migration');
 
@@ -131,6 +132,7 @@ async function migrateSchools(domainId: string): Promise<Map<string, ObjectId>> 
                 groupIds: [],
                 boundUserId: member.bound && member.boundBy ? member.boundBy : null,
                 boundAt: member.bound && member.boundAt ? member.boundAt : null,
+                enrollmentYear: deriveEnrollmentYear(studentId),
                 createdAt: old.createdAt || new Date(),
                 createdBy: old.createdBy || 1,
             });
@@ -202,6 +204,7 @@ async function migrateUserGroups(
                     groupIds: [newId],
                     boundUserId: member.bound && member.boundBy ? member.boundBy : null,
                     boundAt: member.bound && member.boundAt ? member.boundAt : null,
+                    enrollmentYear: deriveEnrollmentYear(studentId),
                     createdAt: old.createdAt || new Date(),
                     createdBy: old.createdBy || 1,
                 });
@@ -360,6 +363,35 @@ async function migrateV2(_ctx: Context): Promise<void> {
 }
 
 /**
+ * V3: Derive and backfill `enrollmentYear` on existing StudentRecord docs.
+ * For each student missing the field, parse the first two digits of
+ * studentId — `240340179` → 2024. If the prefix isn't two digits, store
+ * `null` so admins can override individually in the student detail view.
+ */
+async function migrateV3(_ctx: Context): Promise<void> {
+    const V3_FLAG = 'userbind.migration_v3_done';
+    return await oncePerSetting(V3_FLAG, async () => {
+        const cursor = studentsColl.find({ enrollmentYear: { $exists: false } as any });
+        let updated = 0;
+        let nullCount = 0;
+        for await (const s of cursor) {
+            const yy = (s.studentId || '').slice(0, 2);
+            const year = /^\d{2}$/.test(yy) ? 2000 + parseInt(yy, 10) : null;
+            await studentsColl.updateOne(
+                { _id: s._id },
+                { $set: { enrollmentYear: year } },
+            );
+            updated++;
+            if (year === null) nullCount++;
+        }
+        logger.info(
+            'v3 enrollmentYear backfill: %d students updated, %d ended up null (admin should review)',
+            updated, nullCount,
+        );
+    });
+}
+
+/**
  * Migration channel script list — registered in `index.ts` via
  * `migration.registerChannel('userbind', migrationScripts)`.
  *
@@ -370,4 +402,6 @@ export const migrationScripts = [
     migrateV1,
     // Version 1 → 2: backfill kind/sourceTokenId for the multi-kind token model
     migrateV2,
+    // Version 2 → 3: derive enrollmentYear from studentId for existing records
+    migrateV3,
 ];

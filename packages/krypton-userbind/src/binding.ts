@@ -19,19 +19,20 @@
  */
 import type { Filter } from 'mongodb';
 import {
-    ObjectId, ValidationError, UserModel, NotFoundError, PRIV,
+    ObjectId, ValidationError, UserModel, NotFoundError,
 } from 'hydrooj';
+import RecordModel from 'hydrooj/src/model/record';
 import { randomBytes } from 'node:crypto';
 import {
     bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl, userGroupsColl,
 } from './db';
 import {
-    findStudentByStudentId, userBindModel,
+    deriveEnrollmentYear, userBindModel,
 } from './model';
 import type {
     BindToken, BindTokenKind, BindingRequest, LookupStudentResult,
     RosterLookupOutcome, School, SchoolBindToken, StudentBindToken, StudentRecord,
-    UserGroup, UserGroupBindToken,
+    UserGroupBindToken,
 } from './types';
 
 function randomTokenId(): string {
@@ -408,6 +409,7 @@ export async function approveBindingRequest(
             groupIds: [],
             boundUserId: null,
             boundAt: null,
+            enrollmentYear: deriveEnrollmentYear(req.studentIdInput),
             createdAt: nowDate(),
             createdBy: reviewerUid,
         };
@@ -466,42 +468,208 @@ export async function rejectBindingRequest(
 
 // ─── Lookup contract (Phase 3 — Vigil integration) ────────────────────────
 
+function normalizeLookupStudentId(input: string): string {
+    return (input || '').trim().normalize('NFKC');
+}
+
+function normalizeLookupRealName(input: string): string {
+    return (input || '')
+        .trim()
+        .normalize('NFKC')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .replace(/\s+/g, '');
+}
+
+function objectIdEquals(a: ObjectId, b: ObjectId): boolean {
+    return a.toString() === b.toString();
+}
+
+function uniqueObjectIds(ids: ObjectId[]): ObjectId[] {
+    const seen = new Set<string>();
+    const out: ObjectId[] = [];
+    for (const id of ids) {
+        const key = id.toString();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(id);
+    }
+    return out;
+}
+
+async function buildLookupResultFromRecords(
+    records: StudentRecord[],
+    requestedContestId?: string,
+): Promise<LookupStudentResult> {
+    const boundRecords = records.filter((r) => !!r.boundUserId);
+    if (boundRecords.length === 0) {
+        return { found: false, eligibleContestIds: [], reason: 'not_bound' };
+    }
+
+    const requestedContestObjectId = requestedContestId && ObjectId.isValid(requestedContestId)
+        ? new ObjectId(requestedContestId)
+        : null;
+    const candidates: Array<{
+        record: StudentRecord;
+        userId: number;
+        eligibleContestIds: ObjectId[];
+    }> = [];
+    for (const record of boundRecords) {
+        const userId = record.boundUserId!;
+        const eligibleContestIds = await userBindModel.computeEligibleContests(record.domainId, userId);
+        candidates.push({ record, userId, eligibleContestIds });
+    }
+
+    const contestHits = requestedContestObjectId
+        ? candidates.filter((c) => c.eligibleContestIds.some((id) => objectIdEquals(id, requestedContestObjectId)))
+        : [];
+    if (requestedContestObjectId && contestHits.length === 0) {
+        const userIds = Array.from(new Set(candidates.map((c) => c.userId)));
+        if (userIds.length !== 1) {
+            return { found: false, eligibleContestIds: [], reason: 'ambiguous_match' };
+        }
+        const matched = candidates.find((c) => c.userId === userIds[0])!;
+        return {
+            found: true,
+            userId: matched.userId,
+            domainId: matched.record.domainId,
+            eligibleContestIds: [],
+        };
+    }
+    const nonEmpty = candidates.filter((c) => c.eligibleContestIds.length > 0);
+    const pool = contestHits.length > 0 ? contestHits : nonEmpty.length > 0 ? nonEmpty : candidates;
+    const userIds = Array.from(new Set(pool.map((c) => c.userId)));
+    if (userIds.length !== 1) {
+        return { found: false, eligibleContestIds: [], reason: 'ambiguous_match' };
+    }
+    const userId = userIds[0];
+    const matched = pool.filter((c) => c.userId === userId);
+    const eligibleContestIds = uniqueObjectIds(matched.flatMap((c) => c.eligibleContestIds));
+    return {
+        found: true,
+        userId,
+        domainId: matched[0].record.domainId,
+        eligibleContestIds,
+    };
+}
+
 export async function lookupStudent(
     domainId: string, studentIdInput: string, realNameInput: string,
+    options: { contestId?: string } = {},
 ): Promise<LookupStudentResult> {
-    const sid = (studentIdInput || '').trim();
-    const name = (realNameInput || '').trim();
+    const sid = normalizeLookupStudentId(studentIdInput);
+    const name = normalizeLookupRealName(realNameInput);
     if (!sid || !name) return { found: false, eligibleContestIds: [], reason: 'no_match' };
 
-    const records = await studentsColl.find({
-        domainId, studentId: sid, realName: name,
-    }).toArray();
-    if (records.length === 0) return { found: false, eligibleContestIds: [], reason: 'no_match' };
+    const sameDomainRecords = (await studentsColl.find({ domainId, studentId: sid }).toArray())
+        .filter((r) => normalizeLookupRealName(r.realName) === name);
+    if (sameDomainRecords.length > 0) {
+        const sameDomainResult = await buildLookupResultFromRecords(sameDomainRecords, options.contestId);
+        if (sameDomainResult.found) return sameDomainResult;
+    }
 
-    const bound = records.find((r) => !!r.boundUserId);
-    if (!bound) return { found: false, eligibleContestIds: [], reason: 'not_bound' };
-
-    // Eligible contests come from userBindModel.computeEligibleExamContests
-    // (added below; kept simple here for the import shape).
-    const eligibleContestIds = await userBindModel.computeEligibleExamContests(
-        domainId, bound.boundUserId!,
-    );
-    return { found: true, userId: bound.boundUserId!, eligibleContestIds };
+    // Vigil may be configured with a default domain while the contest and
+    // roster live in another domain. Treat the supplied domain as a hint, then
+    // fall back to a global lookup only when it resolves to one unambiguous
+    // bound OJ user. This keeps existing strict behavior for ambiguous data
+    // while preventing valid client login requests from becoming "未知考生".
+    const allDomainRecords = (await studentsColl.find({ studentId: sid }).toArray())
+        .filter((r) => normalizeLookupRealName(r.realName) === name);
+    if (allDomainRecords.length === 0) {
+        return { found: false, eligibleContestIds: [], reason: 'no_match' };
+    }
+    return await buildLookupResultFromRecords(allDomainRecords, options.contestId);
 }
 
-// ─── Eligible exam contests for a user (Phase 3 — Vigil integration) ──────
+// ─── Eligible contests for a user (Phase 3 — Vigil integration) ──────────
 
-export async function computeEligibleExamContests(
+function scopeMatchesContest(tdoc: any, record: StudentRecord): boolean {
+    if (tdoc.participantScopeMode === 'schools') {
+        const wantIds = (tdoc.participantSchoolIds || []).map((id: ObjectId) => id.toString());
+        return !!record.schoolId && wantIds.includes(record.schoolId.toString());
+    }
+    if (tdoc.participantScopeMode === 'groups') {
+        const wantIds = (tdoc.participantGroupIds || []).map((id: ObjectId) => id.toString());
+        return (record.groupIds || []).some((id) => wantIds.includes(id.toString()));
+    }
+    return true;
+}
+
+async function legacyHydroContestAccess(domainId: string, tdoc: any, uid: number): Promise<boolean> {
+    if (tdoc.assign?.length) {
+        const userModel = require('hydrooj/src/model/user').default;
+        const groups = await userModel.listGroup(domainId, uid);
+        const groupNames = groups.map((g: any) => g.name);
+        if (!tdoc.assign.some((name: string) => groupNames.includes(name))) return false;
+    }
+    if (tdoc._code) {
+        const contest = require('hydrooj/src/model/contest');
+        const tsdoc = await (contest as any).getStatus(domainId, tdoc.docId, uid);
+        if (!tsdoc?.attend) return false;
+    }
+    return true;
+}
+
+function isClientCandidateTime(contestModel: any, tdoc: any, now: number): boolean {
+    const dayMs = 24 * 60 * 60 * 1000;
+    const begin = tdoc.beginAt?.getTime?.();
+    const end = tdoc.endAt?.getTime?.();
+    if (!Number.isFinite(begin) || !Number.isFinite(end)) return false;
+    if (end < now) return false;
+    if (contestModel.isClientRequired(tdoc)) {
+        const window = contestModel.effectiveLockoutWindow(tdoc);
+        if (window && window.blockStart.getTime() <= now && now < window.blockEnd.getTime()) {
+            return true;
+        }
+    }
+    return begin <= now + dayMs;
+}
+
+/**
+ * Compute the list of contests in `domainId` that this user could
+ * choose from in the Qt Client right now.
+ *
+ * Filter (DESIGN §10.2):
+ *   - Any rule (was hardcoded to `exam` before — that was wrong for
+ *     ACM/XCPC test contests).
+ *   - `vigilEnabled === true`.
+ *   - Client-current window or upcoming within 24h; ended contests are
+ *     excluded for new client sessions.
+ *   - Krypton school/group scope must match when configured.
+ *   - Legacy Hydro access is still respected: assign must match and
+ *     invitation-code contests require the user to have attended already.
+ *
+ * The legacy name `computeEligibleExamContests` is retained as an alias
+ * for back-compat — Vigil server pinned to the old name still works.
+ */
+export async function computeEligibleContests(
     domainId: string, uid: number,
 ): Promise<ObjectId[]> {
-    // We delegate to the contest model. This is a thin helper used by lookupStudent.
-    // For now: list all exam-rule contests in this domain — Vigil expects a hint set,
-    // not a strict permission filter (permission gating is done at handler layer).
-    const { default: contest } = await import('hydrooj/src/model/contest');
-    const cursor = (contest as any).getMulti(domainId, { rule: 'exam' });
+    const contest = require('hydrooj/src/model/contest');
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const record = await studentsColl.findOne({ domainId, boundUserId: uid });
+    if (!record) return [];
+    // We can't filter by *effective* lockout window in the DB (per-contest
+    // before/after offsets) — overfetch within ±1d and filter in JS.
+    const cursor = (contest as any).getMulti(domainId, {
+        vigilEnabled: true,
+        endAt: { $gte: new Date(now) },
+        beginAt: { $lte: new Date(now + dayMs) },
+    });
     const tdocs = await cursor.toArray();
-    return tdocs.map((t: any) => t._id);
+    const eligible: ObjectId[] = [];
+    for (const tdoc of tdocs) {
+        if (!isClientCandidateTime(contest, tdoc, now)) continue;
+        if (!scopeMatchesContest(tdoc, record)) continue;
+        if (!(await legacyHydroContestAccess(domainId, tdoc, uid))) continue;
+        eligible.push(tdoc.docId || tdoc._id);
+    }
+    return eligible;
 }
+
+/** @deprecated use `computeEligibleContests`. Retained for callers
+ *  pinned to the old API (Vigil Server pre-v2 lookup-student). */
+export const computeEligibleExamContests = computeEligibleContests;
 
 // ─── Claim temporary account (Task 2 / Phase 1.6) ─────────────────────────
 
@@ -514,17 +682,15 @@ export async function claimTemporaryAccount(
         throw new ValidationError('user', null, 'Source UID is not a temporary account');
     }
     // Reassign all the temp user's records to the real user.
-    const db = (await import('hydrooj')).default || (await import('hydrooj'));
     let recordsTransferred = 0;
     try {
-        const RecordModel: any = (db as any).RecordModel || (db as any).model?.record;
         if (RecordModel?.coll) {
             const res = await RecordModel.coll.updateMany(
                 { uid: tempUid }, { $set: { uid: realUid } },
             );
             recordsTransferred = res.modifiedCount || 0;
         }
-    } catch (e: any) {
+    } catch {
         // RecordModel might not be exposed in all builds; best-effort.
     }
     // Mark temp user as claimed (we don't delete to preserve audit trail).
@@ -580,6 +746,7 @@ userBindModel.getBindingRequest = getBindingRequest;
 userBindModel.approveBindingRequest = approveBindingRequest;
 userBindModel.rejectBindingRequest = rejectBindingRequest;
 userBindModel.lookupStudent = lookupStudent;
+userBindModel.computeEligibleContests = computeEligibleContests;
 userBindModel.computeEligibleExamContests = computeEligibleExamContests;
 userBindModel.claimTemporaryAccount = claimTemporaryAccount;
 userBindModel.findClaimCandidates = findClaimCandidates;

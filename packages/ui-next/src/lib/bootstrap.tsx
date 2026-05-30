@@ -49,6 +49,10 @@ export interface KryptonUser {
   tfa: boolean;
   authn: boolean;
   pinnedDomains: string[];
+  /** Hydro avatar spec, e.g. 'url:/file/12/.avatar.png?t=1234' or 'gravatar:…'. */
+  avatar?: string;
+  /** Fully-resolved image URL (always populated for signed-in users). */
+  avatarUrl?: string;
 }
 
 export interface KryptonDomain {
@@ -72,6 +76,13 @@ export interface KryptonPage {
   data: Record<string, any>;
 }
 
+export interface KryptonFooter {
+  /** HTML lines from `system.ui-default.footer_extra_html`, newline-split. */
+  systemHtml?: string;
+  /** HTML lines from `domain.ui.footer_extra_html`, newline-split. */
+  domainHtml?: string;
+}
+
 export interface KryptonBootstrap {
   appName: string;
   siteName: string;
@@ -82,6 +93,7 @@ export interface KryptonBootstrap {
   domain: KryptonDomain;
   urls: KryptonUrls;
   udict: Record<string, GenericUserDoc>;
+  footer?: KryptonFooter;
   page: KryptonPage;
 }
 

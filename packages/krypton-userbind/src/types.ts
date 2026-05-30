@@ -42,6 +42,14 @@ export interface StudentRecord {
     groupIds: ObjectId[];
     boundUserId: number | null;
     boundAt: Date | null;
+    /**
+     * Enrollment year (入学年) e.g. 2024. Auto-derived from the first two
+     * digits of `studentId` at create/edit time (240340179 → 2024), or null
+     * if the prefix isn't a valid 2-digit year. Admins can override in the
+     * student detail page — useful for non-standard student IDs or transfers.
+     * Used by `TaskAccess.grade` and `TaskCondition.by_grade` (krypton-tasks).
+     */
+    enrollmentYear: number | null;
     createdAt: Date;
     createdBy: number;
 }
@@ -136,10 +144,12 @@ export interface BindingRequest {
 export interface LookupStudentResult {
     found: boolean;
     userId?: number;
+    /** Domain where the matched StudentRecord lives. */
+    domainId?: string;
     /** Contest._id list of exam-rule contests the student is eligible to enter. */
     eligibleContestIds: ObjectId[];
     /** When `found` is false, the reason. */
-    reason?: 'no_match' | 'not_bound' | 'name_mismatch' | 'school_not_specified';
+    reason?: 'no_match' | 'not_bound' | 'name_mismatch' | 'school_not_specified' | 'ambiguous_match';
 }
 
 /** Used by the migration tool. */
@@ -151,6 +161,9 @@ export interface ImportStudentRow {
 export interface ImportStudentReport {
     inserted: number;
     duplicates: Array<{ studentId: string; reason: string }>;
+    alreadyBound?: number;
+    autoBound?: number;
+    autoBindSkipped?: Array<{ studentId: string; reason: string }>;
 }
 
 /** Cross-domain export package — see PRD §3.8. */

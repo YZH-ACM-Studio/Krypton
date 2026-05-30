@@ -10,11 +10,15 @@ import {
   Settings,
   Sun,
   Swords,
+  User,
 } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
+import { replaceRouteTokens } from '@/lib/format';
+import { KryptonFooter } from '@/components/layout/footer';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sidebar } from '@/components/layout/sidebar';
 import { PageResolver } from '@/pages/resolver';
 import { AnnouncementPopover } from '@/components/announcement-popover';
@@ -29,7 +33,9 @@ const THEME_KEY = 'krypton:theme';
  */
 const STANDALONE_TEMPLATES = new Set([
   'exam_mode_home.html',
+  'exam_contest.html',
   'exam_paper.html',
+  'contest_workspace.html',
 ]);
 
 function AppShell() {
@@ -172,6 +178,7 @@ function DefaultAppShell() {
                     onClick={(e) => { e.stopPropagation(); setUserMenuOpen((p) => !p); }}
                   >
                     <Avatar className="size-7">
+                      {bs.user.avatarUrl ? <AvatarImage src={bs.user.avatarUrl} alt={bs.user.name} /> : null}
                       <AvatarFallback className="text-[10px]">{makeInitials(bs.user.name)}</AvatarFallback>
                     </Avatar>
                     <span className="hidden max-w-[120px] truncate text-sm font-medium sm:inline-block">
@@ -189,6 +196,10 @@ function DefaultAppShell() {
                         <p className="text-[11px] text-muted-foreground">{bs.user.rp} RP</p>
                       </div>
                       <div className="my-1 h-px bg-border" />
+                      <a href={replaceRouteTokens(bs.urls.userDetail, { UID: String(bs.user.id) })} className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-accent">
+                        <User className="size-3.5" />
+                        个人主页
+                      </a>
                       <a href={`${bs.urls.settings}/preference`} className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-accent">
                         <Settings className="size-3.5" />
                         账号设置
@@ -223,12 +234,21 @@ function DefaultAppShell() {
         </header>
 
         {/* Content area — full-bleed; pages decide their own max width.
-            Outer padding scales: 12 / 24 / 32 / 40 px on mobile→ultrawide. */}
-        <main className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-6 xl:p-8 2xl:px-10">
-          <div className="min-w-0">
-            <Outlet />
-          </div>
-        </main>
+            The viewport's inner wrapper is forced to flex-col + min-h-full
+            so on short pages it stretches to the viewport height (sticking
+            the footer to the bottom), and on tall pages it grows naturally
+            (footer ends up below scrolled content). */}
+        <ScrollArea
+          className="min-w-0 flex-1"
+          viewportClassName="[&>div]:!flex [&>div]:!flex-col [&>div]:!min-h-full"
+        >
+          <main className="flex min-w-0 flex-1 flex-col">
+            <div className="min-w-0 flex-1 p-3 sm:p-6 xl:p-8 2xl:px-10">
+              <Outlet />
+            </div>
+            <KryptonFooter />
+          </main>
+        </ScrollArea>
       </div>
     </div>
   );

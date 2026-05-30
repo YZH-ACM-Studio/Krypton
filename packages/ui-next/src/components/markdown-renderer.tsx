@@ -26,6 +26,9 @@ import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { cn } from '@/lib/cn';
+import { splitMarkdownBySamples } from '@/lib/samples';
+import { SampleBlocks } from '@/components/sample-blocks';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 /* ------------------------------------------------------------------ */
 /*  Plugin config                                                      */
@@ -165,16 +168,52 @@ function LangTabs({
 // keep headings / lists / code blocks legible in both light and dark themes.
 const PROSE_CLASS = 'krypton-prose';
 
-function MarkdownContent({ source }: { source: string }) {
+type FileUrlResolver = (filename: string, original: string) => string;
+
+function normalizePreviewSource(source: string, resolveFileUrl?: FileUrlResolver): string {
+  if (!resolveFileUrl) return source;
+  return source.replace(/file:\/\/([^ \n)\\"]+)/g, (raw, fileinfo: string) => {
+    const filenamePart = fileinfo.split('?')[0];
+    let filename = filenamePart;
+    try {
+      filename = decodeURIComponent(filenamePart);
+    } catch {
+      /* keep the original encoded filename */
+    }
+    return resolveFileUrl(filename, fileinfo) || raw;
+  });
+}
+
+function MarkdownContent({ source, resolveFileUrl }: { source: string; resolveFileUrl?: FileUrlResolver }) {
+  const renderedSource = useMemo(() => normalizePreviewSource(source, resolveFileUrl), [source, resolveFileUrl]);
   return (
     <div className={PROSE_CLASS}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={rehypePlugins as any}
       >
-        {source}
+        {renderedSource}
       </ReactMarkdown>
     </div>
+  );
+}
+
+/**
+ * Editor preview: detect ```inputN/```outputN sample blocks and render
+ * them in place (inline) as dedicated "样例" cards, so the preview
+ * matches the detail page and respects the author's ordering.
+ */
+function PreviewWithSamples({ source, resolveFileUrl }: { source: string; resolveFileUrl?: FileUrlResolver }) {
+  const chunks = useMemo(() => splitMarkdownBySamples(source), [source]);
+  if (chunks.length === 0) return <MarkdownContent source={source} resolveFileUrl={resolveFileUrl} />;
+  return (
+    <>
+      {chunks.map((chunk, i) => (
+        chunk.kind === 'md'
+          ? <MarkdownContent key={i} source={chunk.md || ''} resolveFileUrl={resolveFileUrl} />
+          : <SampleBlocks key={i} samples={chunk.samples || []} suppressHeader />
+      ))}
+    </>
   );
 }
 
@@ -201,6 +240,7 @@ export function MarkdownView({
     pickInitialLang(langs, preferredLang),
   );
   const md = langs[activeLang] || langs[keys[0]] || '';
+  const chunks = useMemo(() => splitMarkdownBySamples(md), [md]);
 
   return (
     <div className={className}>
@@ -209,7 +249,15 @@ export function MarkdownView({
         active={activeLang}
         onChange={setActiveLang}
       />
-      <MarkdownContent source={md} />
+      {chunks.length > 0 ? (
+        chunks.map((chunk, i) => (
+          chunk.kind === 'md'
+            ? <MarkdownContent key={i} source={chunk.md || ''} />
+            : <SampleBlocks key={i} samples={chunk.samples || []} suppressHeader />
+        ))
+      ) : (
+        <MarkdownContent source={md} />
+      )}
     </div>
   );
 }
@@ -217,6 +265,18 @@ export function MarkdownView({
 /* ------------------------------------------------------------------ */
 /*  Editable renderer — left edit, right live preview                   */
 /* ------------------------------------------------------------------ */
+
+function imageExtension(type: string): string {
+  const ext = type.split('/')[1]?.toLowerCase() || 'png';
+  return ext === 'jpeg' ? 'jpg' : ext;
+}
+
+function makeUploadToken(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID().replace(/-/g, '');
+  }
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
 
 export interface MarkdownEditorProps {
   /** Field name for the form */
@@ -230,6 +290,14 @@ export interface MarkdownEditorProps {
   preferredLang?: string;
   /** Height of the editor area */
   minHeight?: number;
+  /** Optional endpoint for pasted image uploads. */
+  pasteUpload?: {
+    endpoint: string;
+    meta?: Record<string, string>;
+    makeUrl?: (filename: string) => string;
+  };
+  /** Resolve file:// attachments inside the live preview without changing the saved markdown. */
+  previewFileUrl?: FileUrlResolver;
 }
 
 export function MarkdownEditor({
@@ -239,6 +307,8 @@ export function MarkdownEditor({
   className,
   preferredLang,
   minHeight = 400,
+  pasteUpload,
+  previewFileUrl,
 }: MarkdownEditorProps) {
   const initialLangs = useMemo(() => parseContent(value), [value]);
   const [drafts, setDrafts] = useState(() => initialLangs);
@@ -249,9 +319,24 @@ export function MarkdownEditor({
   );
   const [source, setSource] = useState(() => initialLangs[activeLang] || '');
   const [preview, setPreview] = useState('');
+  const sourceRef = useRef(source);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+
+  const commitSource = useCallback((nextSource: string) => {
+    sourceRef.current = nextSource;
+    setSource(nextSource);
+    if (isMultiLang) {
+      setDrafts((current) => {
+        const next = { ...current, [activeLang]: nextSource };
+        onChange?.(JSON.stringify(next));
+        return next;
+      });
+    } else {
+      onChange?.(nextSource);
+    }
+  }, [activeLang, isMultiLang, onChange]);
 
   // Debounced preview update
   useEffect(() => {
@@ -273,19 +358,9 @@ export function MarkdownEditor({
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const v = e.target.value;
-      setSource(v);
-      if (isMultiLang) {
-        setDrafts((current) => {
-          const next = { ...current, [activeLang]: v };
-          onChange?.(JSON.stringify(next));
-          return next;
-        });
-      } else {
-        onChange?.(v);
-      }
+      commitSource(e.target.value);
     },
-    [activeLang, isMultiLang, onChange],
+    [commitSource],
   );
 
   // Handle tab key in textarea
@@ -298,23 +373,65 @@ export function MarkdownEditor({
         const end = ta.selectionEnd;
         const val = ta.value;
         const newVal = val.substring(0, start) + '  ' + val.substring(end);
-        setSource(newVal);
-        if (isMultiLang) {
-          setDrafts((current) => {
-            const next = { ...current, [activeLang]: newVal };
-            onChange?.(JSON.stringify(next));
-            return next;
-          });
-        } else {
-          onChange?.(newVal);
-        }
+        commitSource(newVal);
         requestAnimationFrame(() => {
           ta.selectionStart = ta.selectionEnd = start + 2;
         });
       }
     },
-    [activeLang, isMultiLang, onChange],
+    [commitSource],
   );
+
+  const replaceInsertedText = useCallback((needle: string, replacement: string) => {
+    const current = sourceRef.current;
+    const index = current.indexOf(needle);
+    if (index < 0) return;
+    commitSource(current.slice(0, index) + replacement + current.slice(index + needle.length));
+  }, [commitSource]);
+
+  const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!pasteUpload?.endpoint) return;
+    const items = Array.from(e.clipboardData?.items || []);
+    const item = items.find((i) => /^image\/(png|jpe?g|gif|webp)$/i.test(i.type));
+    if (!item) return;
+    const file = item.getAsFile();
+    if (!file) return;
+
+    e.preventDefault();
+    const ext = imageExtension(file.type);
+    const token = makeUploadToken();
+    const filename = `${token}.${ext}`;
+    const placeholder = `![image](uploading-${token})`;
+    const ta = e.currentTarget;
+    const start = ta.selectionStart ?? sourceRef.current.length;
+    const end = ta.selectionEnd ?? start;
+    const current = sourceRef.current;
+    commitSource(current.slice(0, start) + placeholder + current.slice(end));
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = start + placeholder.length;
+    });
+
+    const form = new FormData();
+    for (const [key, val] of Object.entries(pasteUpload.meta || {})) form.append(key, val);
+    if (!form.has('operation')) form.append('operation', 'upload_file');
+    if (!form.has('filename')) form.append('filename', filename);
+    form.append('file', file, filename);
+
+    try {
+      const res = await fetch(pasteUpload.endpoint, {
+        method: 'POST',
+        body: form,
+        credentials: 'same-origin',
+      });
+      if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
+      const url = pasteUpload.makeUrl ? pasteUpload.makeUrl(filename) : filename;
+      replaceInsertedText(placeholder, `![image](${url})`);
+    } catch (err) {
+      const message = err instanceof Error && err.message ? err.message : '上传失败';
+      replaceInsertedText(placeholder, `图片上传失败：${message}`);
+    }
+  }, [commitSource, pasteUpload, replaceInsertedText]);
 
   return (
     <div className={cn('space-y-2', className)}>
@@ -329,6 +446,7 @@ export function MarkdownEditor({
           onChange={(lang) => {
             setActiveLang(lang);
             const text = drafts[lang] || '';
+            sourceRef.current = text;
             setSource(text);
             setPreview(text);
           }}
@@ -362,6 +480,7 @@ export function MarkdownEditor({
             onChange={handleChange}
             onScroll={handleScroll}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             className="krypton-markdown-editor h-full w-full resize-none bg-background py-2 pl-10 pr-3 font-mono text-sm leading-[1.625rem] focus:outline-none"
             spellCheck={false}
             placeholder={'在此输入 Markdown 内容…\n支持 LaTeX 公式: $x^2$ 或 $$\\sum_{i=1}^n$$\n支持 HTML 标签'}
@@ -369,16 +488,18 @@ export function MarkdownEditor({
         </div>
 
         {/* Preview pane */}
-        <div
-          ref={previewRef}
-          className="h-full min-h-0 overflow-auto bg-card p-4"
+        <ScrollArea
+          viewportRef={previewRef}
+          orientation="both"
+          className="h-full min-h-0 bg-card"
+          viewportClassName="p-4"
         >
           {preview ? (
-            <MarkdownContent source={preview} />
+            <PreviewWithSamples source={preview} resolveFileUrl={previewFileUrl} />
           ) : (
             <p className="text-sm italic text-muted-foreground">预览区域</p>
           )}
-        </div>
+        </ScrollArea>
       </div>
     </div>
   );

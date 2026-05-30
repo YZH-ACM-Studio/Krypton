@@ -39,6 +39,7 @@ import { AdminPage } from '@/components/admin/admin-page';
 import { Pagination } from '@/components/ui/pagination';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
+import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatRelativeTime, formatDateTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
@@ -129,260 +130,8 @@ function ProblemSidebar({ problemUrl, active }: { problemUrl: string; active: st
 
 /* ---------- Problem Config ---------- */
 
-export function ProblemConfigPage() {
-  const bs = useBootstrap();
-  const data = bs.page.data;
-  const pdoc: R = data.pdoc || {};
-  const testdata: R[] = data.testdata || [];
-  const config: string = data.config || '';
-  const pid = pdoc.pid || pdoc.docId || '';
-  const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
+export { ProblemConfigPage } from './problem-config-page-wrapper';
 
-  const [configText, setConfigText] = useState(config);
-  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const configType = readYamlScalar(configText, 'type') || 'default';
-  const timeLimit = readYamlScalar(configText, 'time') || '';
-  const memoryLimit = readYamlScalar(configText, 'memory') || '';
-  const checkerType = readYamlScalar(configText, 'checker_type') || '';
-  const scoreMode = readYamlScalar(configText, 'score') || '';
-
-  const updateConfigField = (key: string, value: string) => {
-    setConfigText((text) => writeYamlScalar(text, key, value));
-  };
-
-  const toggleFile = (name: string) => {
-    const next = new Set(selectedFiles);
-    if (next.has(name)) next.delete(name); else next.add(name);
-    setSelectedFiles(next);
-  };
-
-  const toggleAll = () => {
-    if (selectedFiles.size === testdata.length) {
-      setSelectedFiles(new Set());
-    } else {
-      setSelectedFiles(new Set(testdata.map((f) => f.name)));
-    }
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      <div className="mb-4 flex items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
-          <a href={problemUrl}><ArrowLeft className="size-4" /></a>
-        </Button>
-        <div>
-          <h1 className="text-xl font-semibold">评测配置</h1>
-          <p className="text-sm text-muted-foreground">{pdoc.title || pid}</p>
-        </div>
-      </div>
-
-      <div className="flex gap-6">
-        {/* Main content */}
-        <div className="min-w-0 flex-1 space-y-6">
-          {/* Config YAML editor */}
-          <Card>
-            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <FileCode className="size-4" />
-                config.yaml
-              </CardTitle>
-              <form method="post" action={`${problemUrl}/files`} encType="multipart/form-data">
-                <input type="hidden" name="type" value="testdata" />
-                <input type="hidden" name="filename" value="config.yaml" />
-                {/* Hidden textarea to carry the config content as a file-like upload */}
-                <Button
-                  type="button"
-                  size="sm"
-                  className="gap-1.5"
-                  onClick={() => {
-                    // Save config.yaml by creating a Blob and posting via fetch
-                    const formData = new FormData();
-                    formData.append('type', 'testdata');
-                    formData.append('filename', 'config.yaml');
-                    formData.append('file', new Blob([configText], { type: 'text/yaml' }), 'config.yaml');
-                    fetch(`${problemUrl}/files`, {
-                      method: 'POST',
-                      body: formData,
-                      headers: { Accept: 'application/json' },
-                    }).then((r) => {
-                      if (r.ok) window.location.reload();
-                      else r.json().then((d) => alert(d.error || '保存失败'));
-                    });
-                  }}
-                >
-                  <Save className="size-3.5" />
-                  保存配置
-                </Button>
-              </form>
-            </CardHeader>
-            <CardContent>
-              <div className="mb-4 grid gap-3 rounded-md border bg-muted/20 p-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <label htmlFor="config-type" className="text-xs text-muted-foreground">题目类型</label>
-                  <select
-                    id="config-type"
-                    value={configType}
-                    onChange={(event) => updateConfigField('type', event.target.value)}
-                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                  >
-                    <option value="default">传统评测</option>
-                    <option value="submit_answer">提交答案</option>
-                    <option value="objective">客观题</option>
-                    <option value="interactive">交互题</option>
-                    <option value="communication">通信题</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label htmlFor="config-score" className="text-xs text-muted-foreground">计分方式</label>
-                  <select
-                    id="config-score"
-                    value={scoreMode}
-                    onChange={(event) => updateConfigField('score', event.target.value)}
-                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                  >
-                    <option value="">默认</option>
-                    <option value="sum">求和</option>
-                    <option value="min">最小值</option>
-                    <option value="max">最大值</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <label htmlFor="config-time" className="text-xs text-muted-foreground">时间限制</label>
-                  <Input
-                    id="config-time"
-                    value={timeLimit}
-                    onChange={(event) => updateConfigField('time', event.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label htmlFor="config-memory" className="text-xs text-muted-foreground">内存限制</label>
-                  <Input
-                    id="config-memory"
-                    value={memoryLimit}
-                    onChange={(event) => updateConfigField('memory', event.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5 sm:col-span-2">
-                  <label htmlFor="config-checker" className="text-xs text-muted-foreground">检查器</label>
-                  <Input
-                    id="config-checker"
-                    value={checkerType}
-                    onChange={(event) => updateConfigField('checker_type', event.target.value)}
-                  />
-                </div>
-              </div>
-              <textarea
-                value={configText}
-                onChange={(e) => setConfigText(e.target.value)}
-                className="w-full resize-y rounded-md border bg-background px-4 py-3 font-mono text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-ring"
-                rows={Math.max(10, configText.split('\n').length + 2)}
-                placeholder="# 在此编辑评测配置&#10;type: default&#10;time: 1s&#10;memory: 256m"
-                spellCheck={false}
-              />
-            </CardContent>
-          </Card>
-
-          {/* Testdata files */}
-          <Card>
-            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <FolderOpen className="size-4" />
-                测试数据 ({testdata.length})
-              </CardTitle>
-              <div className="flex items-center gap-2">
-                <form method="post" action={`${problemUrl}/files`} encType="multipart/form-data" className="flex items-center gap-2">
-                  <input type="hidden" name="type" value="testdata" />
-                  <input ref={fileInputRef} type="file" name="file" className="hidden" onChange={(e) => {
-                    if (e.target.files?.length) e.target.form?.submit();
-                  }} />
-                  <Button type="button" size="sm" variant="outline" onClick={() => fileInputRef.current?.click()}>
-                    <Upload className="mr-1 size-3" />上传
-                  </Button>
-                </form>
-                {selectedFiles.size > 0 && (
-                  <>
-                    {/* Download selected */}
-                    <form method="post" action={`${problemUrl}/files`}>
-                      <input type="hidden" name="operation" value="get_links" />
-                      <input type="hidden" name="type" value="testdata" />
-                      {Array.from(selectedFiles).map((f) => (
-                        <input key={f} type="hidden" name="files" value={f} />
-                      ))}
-                      <Button type="submit" size="sm" variant="outline">
-                        <Download className="mr-1 size-3" />下载 ({selectedFiles.size})
-                      </Button>
-                    </form>
-                    {/* Delete selected */}
-                    <form method="post" action={`${problemUrl}/files`}>
-                      <input type="hidden" name="operation" value="delete_files" />
-                      <input type="hidden" name="type" value="testdata" />
-                      {Array.from(selectedFiles).map((f) => (
-                        <input key={f} type="hidden" name="files" value={f} />
-                      ))}
-                      <Button type="submit" size="sm" variant="destructive">
-                        <Trash2 className="mr-1 size-3" />删除 ({selectedFiles.size})
-                      </Button>
-                    </form>
-                  </>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              {testdata.length > 0 ? (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-8">
-                        <Checkbox
-                          checked={selectedFiles.size === testdata.length && testdata.length > 0}
-                          onChange={toggleAll}
-                         />
-                      </TableHead>
-                      <TableHead>文件名</TableHead>
-                      <TableHead className="w-28 text-right">大小</TableHead>
-                      <TableHead className="w-40 text-right">修改时间</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {testdata.map((f) => (
-                      <TableRow key={f.name} className={selectedFiles.has(f.name) ? 'bg-muted/50' : ''}>
-                        <TableCell>
-                          <Checkbox
-                            checked={selectedFiles.has(f.name)}
-                            onChange={() => toggleFile(f.name)}
-                           />
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">{f.name}</TableCell>
-                        <TableCell className="text-right text-sm text-muted-foreground">{formatSize(f.size || 0)}</TableCell>
-                        <TableCell className="text-right text-sm text-muted-foreground">
-                          {f.lastModified ? formatDateTime(f.lastModified, bs.locale) : '-'}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              ) : (
-                <p className="p-4 text-sm text-muted-foreground">暂无测试数据</p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Right sidebar */}
-        <div className="hidden w-56 shrink-0 lg:block">
-          <div className="sticky top-20 space-y-6">
-            <ProblemSidebar problemUrl={problemUrl} active="config" />
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
 
 /* ---------- Problem Files ---------- */
 
@@ -624,22 +373,30 @@ export function ProblemFilesPage() {
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-1.5">
                         <label className="text-sm font-medium">数据生成器</label>
-                        <select name="gen" className="w-full rounded-md border bg-background px-3 py-2 text-sm" required>
-                          <option value="">选择生成器文件…</option>
-                          {testdata.filter((f) => !f.name.endsWith('.in') && !f.name.endsWith('.out') && !f.name.endsWith('.ans') && f.name !== 'config.yaml').map((f) => (
-                            <option key={f.name} value={f.name}>{f.name}</option>
-                          ))}
-                        </select>
+                        <SimpleSelect
+                          name="gen"
+                          required
+                          defaultValue=""
+                          placeholder="选择生成器文件…"
+                          options={[
+                            { value: '', label: '选择生成器文件…' },
+                            ...testdata.filter((f) => !f.name.endsWith('.in') && !f.name.endsWith('.out') && !f.name.endsWith('.ans') && f.name !== 'config.yaml').map((f) => ({ value: f.name, label: f.name })),
+                          ]}
+                        />
                         <p className="text-xs text-muted-foreground">输出测试数据到 stdout 的程序</p>
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-sm font-medium">标准程序</label>
-                        <select name="std" className="w-full rounded-md border bg-background px-3 py-2 text-sm" required>
-                          <option value="">选择标程文件…</option>
-                          {testdata.filter((f) => !f.name.endsWith('.in') && !f.name.endsWith('.out') && !f.name.endsWith('.ans') && f.name !== 'config.yaml').map((f) => (
-                            <option key={f.name} value={f.name}>{f.name}</option>
-                          ))}
-                        </select>
+                        <SimpleSelect
+                          name="std"
+                          required
+                          defaultValue=""
+                          placeholder="选择标程文件…"
+                          options={[
+                            { value: '', label: '选择标程文件…' },
+                            ...testdata.filter((f) => !f.name.endsWith('.in') && !f.name.endsWith('.out') && !f.name.endsWith('.ans') && f.name !== 'config.yaml').map((f) => ({ value: f.name, label: f.name })),
+                          ]}
+                        />
                         <p className="text-xs text-muted-foreground">输出答案到 stdout 的程序</p>
                       </div>
                     </div>
@@ -835,25 +592,36 @@ export function ProblemStatisticsPage() {
           <form method="get" className="grid gap-3 sm:grid-cols-[1fr_140px_180px_auto] sm:items-end">
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">排序字段</label>
-              <select name="sort" defaultValue={sort} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                {types.map((type) => <option key={type} value={type}>{SORT_LABELS[type] || type}</option>)}
-              </select>
+              <SimpleSelect
+                name="sort"
+                defaultValue={sort}
+                options={types.map((type) => ({ value: type, label: SORT_LABELS[type] || type }))}
+              />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">方向</label>
-              <select name="direction" defaultValue={String(direction)} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                <option value="1">升序</option>
-                <option value="-1">降序</option>
-              </select>
+              <SimpleSelect
+                name="direction"
+                defaultValue={String(direction)}
+                options={[
+                  { value: '1', label: '升序' },
+                  { value: '-1', label: '降序' },
+                ]}
+              />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">语言</label>
-              <select name="lang" defaultValue={currentLang} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                <option value="">全部语言</option>
-                {Object.entries(langs).map(([key, lang]) => (
-                  <option key={key} value={key}>{String(lang.display || key)}</option>
-                ))}
-              </select>
+              <SimpleSelect
+                name="lang"
+                defaultValue={currentLang}
+                options={[
+                  { value: '', label: '全部语言' },
+                  ...Object.entries(langs).map(([key, lang]) => ({
+                    value: key,
+                    label: String((lang as any).display || key),
+                  })),
+                ]}
+              />
             </div>
             <Button type="submit" size="sm">筛选</Button>
           </form>

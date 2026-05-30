@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { ArrowLeftRight, Cpu } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 // Phase 0 spike probe page. Paired with ecosystems/KryptonVigilSystem/Client/spike-webview.
 // Loaded inside a Qt 6 QWebEngineView; uses QWebChannel to talk to the host.
@@ -116,7 +117,7 @@ export function SpikeWebViewProbePage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="max-h-72 overflow-y-auto rounded-md border bg-muted/30 p-3 font-mono text-xs">
+          <ScrollArea className="max-h-72 rounded-md border bg-muted/30 font-mono text-xs" viewportClassName="p-3">
             {messages.length === 0 ? (
               <p className="text-muted-foreground">(no messages yet — click a control above)</p>
             ) : (
@@ -129,7 +130,7 @@ export function SpikeWebViewProbePage() {
                 </p>
               ))
             )}
-          </div>
+          </ScrollArea>
           {platformName ? (
             <p className="mt-3 text-xs text-muted-foreground">
               host platform: <code className="font-mono">{platformName}</code>

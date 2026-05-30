@@ -3,36 +3,52 @@
  * clarification, print.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
-  Calendar,
+  CheckCircle2,
   Clock,
   Copy,
   Download,
+  ExternalLink,
   FileText,
   FolderOpen,
   HelpCircle,
+  LayoutDashboard,
+  ListChecks,
   MessageSquare,
   Palette,
   Printer,
   RefreshCw,
   Save,
+  Send,
+  Settings,
+  ShieldCheck,
   Trash2,
+  Trophy,
   Upload,
   UserPlus,
   Users,
+  WifiOff,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
+import { MultiSelect } from '@/components/ui/multi-select';
+import { MiniTabs } from '@/components/ui/mini-tabs';
+import { SimpleSelect } from '@/components/ui/select';
+import {
+  COMMON_LANG_OPTIONS, type LangOption, resolveLangs,
+  searchProblems, fetchProblemsByIds, type ProblemOption,
+} from '@/lib/multi-select-presets';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 
@@ -162,12 +178,149 @@ function serializeBalloonRows(rows: BalloonColorRow[]) {
 
 /* ---------- Contest Edit ---------- */
 
+// Cheap "keep all panels mounted, just toggle visibility" tab nav. Built
+// inline here because the shared <Tabs> component (components/ui/tabs.tsx)
+// only renders the active panel — that breaks form submission because
+// inputs in inactive panels never get serialized. For editor forms we
+// want them all live.
+function MiniTabsNav({
+  items, active, onChange,
+}: {
+  items: { value: string; label: string }[];
+  active: string;
+  onChange: (next: string) => void;
+}) {
+  return (
+    <div className="inline-flex items-center rounded-lg bg-muted p-1 text-muted-foreground">
+      {items.map((tab) => (
+        <button
+          key={tab.value}
+          type="button"
+          onClick={() => onChange(tab.value)}
+          className={`whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium transition-all ${
+            active === tab.value
+              ? 'bg-background text-foreground shadow'
+              : 'hover:text-foreground/80'
+          }`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+type ScopeOption = { _id: string; name: string; schoolName?: string };
+type UserOption = {
+  _id: number;
+  uname?: string;
+  mail?: string;
+  avatarUrl?: string;
+};
+
+type ManagementSection = 'overview' | 'edit' | 'users' | 'clarification' | 'balloon' | 'print';
+
+function contestId(tdoc: R) {
+  return String(tdoc.docId || tdoc._id || '');
+}
+
+function contestDetailUrl(bs: ReturnType<typeof useBootstrap>, tdoc: R) {
+  return replaceRouteTokens(bs.urls.contestDetail, { TID: contestId(tdoc) });
+}
+
+function examModeUrls(bs: ReturnType<typeof useBootstrap>) {
+  return bs.page.data?.examMode?.urls || null;
+}
+
+function contestProblemUrl(bs: ReturnType<typeof useBootstrap>, tdoc: R, pid: string | number) {
+  const urls = examModeUrls(bs);
+  if (urls?.problem) return String(urls.problem).replace('__PID__', String(pid));
+  const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
+  return `${problemUrl}?tid=${encodeURIComponent(contestId(tdoc))}`;
+}
+
+function managementItems(tdoc: R, contestUrl: string): Array<{
+  key: ManagementSection | 'scoreboard' | 'records' | 'code';
+  label: string;
+  href: string;
+  icon: typeof LayoutDashboard;
+  show?: boolean;
+}> {
+  const isACM = tdoc.rule === 'acm';
+  return [
+    { key: 'overview', label: '概览与文件', href: `${contestUrl}/management`, icon: LayoutDashboard },
+    { key: 'edit', label: '编辑比赛', href: `${contestUrl}/edit`, icon: Settings },
+    { key: 'users', label: '参赛选手', href: `${contestUrl}/user`, icon: Users },
+    { key: 'clarification', label: '答疑管理', href: `${contestUrl}/clarification`, icon: MessageSquare },
+    { key: 'balloon', label: '气球分发', href: `${contestUrl}/balloon`, icon: Trophy, show: isACM },
+    { key: 'print', label: '打印服务', href: `${contestUrl}/print`, icon: Printer, show: !!tdoc.allowPrint },
+    { key: 'scoreboard', label: '排行榜', href: `${contestUrl}/scoreboard`, icon: Trophy },
+    { key: 'records', label: '全部提交', href: `/record?tid=${encodeURIComponent(contestId(tdoc))}`, icon: Send },
+    { key: 'code', label: '导出代码', href: `${contestUrl}/code`, icon: Download },
+  ].filter((item) => item.show !== false);
+}
+
+function ContestManagementChrome({
+  tdoc,
+  active,
+  children,
+}: {
+  tdoc: R;
+  active: ManagementSection;
+  children: React.ReactNode;
+}) {
+  const bs = useBootstrap();
+  const tid = contestId(tdoc);
+  if (!tid) return <>{children}</>;
+  const contestUrl = contestDetailUrl(bs, tdoc);
+  const items = managementItems(tdoc, contestUrl);
+  return (
+    <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <aside className="space-y-3">
+        <div className="rounded-xl border bg-card p-3">
+          <a href={contestUrl} className="group block rounded-lg px-2 py-2 hover:bg-accent/40">
+            <p className="line-clamp-2 text-sm font-medium group-hover:text-primary">{tdoc.title || '比赛'}</p>
+            <p className="mt-1 text-xs text-muted-foreground">返回比赛详情</p>
+          </a>
+          <div className="my-2 h-px bg-border" />
+          <nav className="space-y-1">
+            {items.map((item) => {
+              const Icon = item.icon;
+              const current = item.key === active;
+              return (
+                <a
+                  key={item.key}
+                  href={item.href}
+                  className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors ${
+                    current ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                  }`}
+                >
+                  <Icon className="size-4" />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  {!['overview', 'edit', 'users', 'clarification', 'balloon', 'print'].includes(String(item.key)) ? (
+                    <ExternalLink className="size-3 opacity-60" />
+                  ) : null}
+                </a>
+              );
+            })}
+          </nav>
+        </div>
+      </aside>
+      <main className="min-w-0">{children}</main>
+    </div>
+  );
+}
+
 export function ContestEditPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
   const tdoc: R = data.tdoc || {};
   const rules: Record<string, string> = data.rules || {};
   const isEdit = data.page_name === 'contest_edit';
+  const canAutoHideProblems = !!data.canAutoHideProblems;
+  const defaultRated = isEdit ? !!tdoc.rated : true;
+  const defaultAutoHide = isEdit ? !!tdoc.autoHide : canAutoHideProblems;
+  const defaultAllowViewCode = isEdit ? !!tdoc.allowViewCode : true;
   const contestUrl = isEdit
     ? replaceRouteTokens(bs.urls.contestDetail, { TID: String(tdoc.docId || tdoc._id) })
     : bs.urls.contests;
@@ -186,6 +339,83 @@ export function ContestEditPage() {
     ? Math.max(0, Math.round((endAtDate.getTime() - lockAtDate.getTime()) / 60000))
     : '';
 
+  // MultiSelect state — pids resolved async on mount, langs from preset map.
+  const initialPidCsv: string = (typeof data.pids === 'string' ? data.pids : '') || '';
+  const initialPidIds = initialPidCsv.split(',').map((s) => s.trim()).filter(Boolean);
+  const [pidValue, setPidValue] = useState<ProblemOption[]>(() => initialPidIds.map((id) => ({
+    docId: Number(id) || 0, pid: id, title: '',
+  })));
+  useEffect(() => {
+    if (!initialPidIds.length) return;
+    let cancelled = false;
+    fetchProblemsByIds(initialPidIds).then((res) => { if (!cancelled) setPidValue(res); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const initialLangIds: string[] = Array.isArray(tdoc.langs) ? tdoc.langs : [];
+  const [langValue, setLangValue] = useState<LangOption[]>(() => resolveLangs(initialLangIds));
+
+  // ── Krypton: client-required & participant scope ─────────────────────
+  const [activeTab, setActiveTab] = useState<
+    'basic' | 'access' | 'scope' | 'vigil' | 'settings'
+  >('basic');
+  const [vigilEnabled, setVigilEnabled] = useState<boolean>(!!tdoc.vigilEnabled);
+  const [entryMode, setEntryMode] = useState<'open' | 'client_required'>(
+    tdoc.entryMode === 'client_required' ? 'client_required' : 'open',
+  );
+  const [approvalMode, setApprovalMode] = useState<'strict' | 'auto'>(
+    tdoc.approvalMode === 'auto' ? 'auto' : 'strict',
+  );
+  const [lockdownMode, setLockdownMode] = useState<boolean>(!!tdoc.lockdownMode);
+  const [networkTouched, setNetworkTouched] = useState<boolean>(tdoc.networkLockdownMode != null);
+  const [networkLockdownMode, setNetworkLockdownMode] = useState<boolean>(
+    tdoc.networkLockdownMode != null ? !!tdoc.networkLockdownMode : !!tdoc.lockdownMode,
+  );
+  const [networkFailurePolicy, setNetworkFailurePolicy] = useState<'strict' | 'report_only' | 'off'>(
+    tdoc.networkLockdownFailurePolicy === 'report_only'
+      ? 'report_only'
+      : tdoc.networkLockdownFailurePolicy === 'off'
+        ? 'off'
+        : 'strict',
+  );
+  const [scopeMode, setScopeMode] = useState<'none' | 'schools' | 'groups'>(
+    tdoc.participantScopeMode || 'none',
+  );
+
+  // Scope option catalog comes pre-loaded from the handler (data.scopeSchools,
+  // data.scopeGroups). Each is `{_id, name}` (groups also carry `schoolId`).
+  const schoolCatalog: ScopeOption[] = (data.scopeSchools || []).map((s: any) => ({
+    _id: String(s._id), name: s.name,
+  }));
+  const groupCatalog: ScopeOption[] = (data.scopeGroups || []).map((g: any) => {
+    const parent = (data.scopeSchools || []).find((s: any) => String(s._id) === String(g.schoolId));
+    return { _id: String(g._id), name: g.name, schoolName: parent?.name };
+  });
+  const initialSchoolIds: string[] = (tdoc.participantSchoolIds || []).map((id: any) => String(id));
+  const initialGroupIds: string[] = (tdoc.participantGroupIds || []).map((id: any) => String(id));
+  const [schoolValue, setSchoolValue] = useState<ScopeOption[]>(
+    initialSchoolIds.map((id) => schoolCatalog.find((s) => s._id === id) || { _id: id, name: id }),
+  );
+  const [groupValue, setGroupValue] = useState<ScopeOption[]>(
+    initialGroupIds.map((id) => groupCatalog.find((g) => g._id === id) || { _id: id, name: id }),
+  );
+
+  // client_required forces vigilEnabled true
+  useEffect(() => {
+    if (entryMode === 'client_required' && !vigilEnabled) setVigilEnabled(true);
+  }, [entryMode, vigilEnabled]);
+  // vigilEnabled=false forces entryMode=open
+  useEffect(() => {
+    if (!vigilEnabled && entryMode !== 'open') setEntryMode('open');
+  }, [vigilEnabled, entryMode]);
+  useEffect(() => {
+    if (!networkTouched) setNetworkLockdownMode(lockdownMode);
+  }, [lockdownMode, networkTouched]);
+  useEffect(() => {
+    if (!networkLockdownMode && networkFailurePolicy !== 'off') setNetworkFailurePolicy('off');
+    if (networkLockdownMode && networkFailurePolicy === 'off') setNetworkFailurePolicy('strict');
+  }, [networkLockdownMode, networkFailurePolicy]);
+
   return (
     <motion.div
       className="space-y-6"
@@ -200,128 +430,491 @@ export function ContestEditPage() {
         <h1 className="text-xl font-semibold">{isEdit ? '编辑比赛' : '创建比赛'}</h1>
       </div>
 
-      <Card>
-        <CardContent className="p-6">
+      <ContestManagementChrome tdoc={tdoc} active="edit">
+        <Card>
+          <CardContent className="p-6">
           <form method="post" className="space-y-4">
-            <div className="space-y-1.5">
-              <label htmlFor="title" className="text-sm font-medium">比赛标题</label>
-              <Input id="title" name="title" defaultValue={tdoc.title || ''} required />
-            </div>
+            <MiniTabsNav
+              items={[
+                { value: 'basic', label: '基本信息' },
+                { value: 'access', label: '访问控制' },
+                { value: 'scope', label: '参赛范围' },
+                { value: 'vigil', label: '客户端与反作弊' },
+                { value: 'settings', label: '比赛设置' },
+              ]}
+              active={activeTab}
+              onChange={(v) => setActiveTab(v as any)}
+            />
 
-            <div className="space-y-1.5">
-              <label htmlFor="rule" className="text-sm font-medium">赛制</label>
-              <select id="rule" name="rule" defaultValue={tdoc.rule || ''} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                {Object.entries(rules).map(([k, v]) => (
-                  <option key={k} value={k}>{v}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
+            {/* ─── Tab 1: 基本信息 ─── */}
+            <div className="space-y-4" hidden={activeTab !== 'basic'}>
               <div className="space-y-1.5">
-                <label htmlFor="beginAtDate" className="text-sm font-medium">开始日期</label>
-                <Input id="beginAtDate" name="beginAtDate" type="date" value={beginDate} onChange={(e) => setBeginDate(e.target.value)} required />
+                <label htmlFor="title" className="text-sm font-medium">比赛标题</label>
+                <Input id="title" name="title" defaultValue={tdoc.title || ''} required />
               </div>
+
               <div className="space-y-1.5">
-                <label htmlFor="beginAtTime" className="text-sm font-medium">开始时间</label>
-                <Input id="beginAtTime" name="beginAtTime" type="time" value={beginTime} onChange={(e) => setBeginTime(e.target.value)} required />
+                <label htmlFor="rule" className="text-sm font-medium">赛制</label>
+                <SimpleSelect
+                  id="rule"
+                  name="rule"
+                  defaultValue={tdoc.rule || ''}
+                  options={Object.entries(rules).map(([k, v]) => ({
+                    value: k,
+                    label: v as string,
+                  }))}
+                />
               </div>
-            </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <label htmlFor="duration" className="text-sm font-medium">时长 (小时)</label>
-                <Input id="duration" name="duration" type="number" step="0.5" min="0" value={duration} onChange={(e) => setDuration(e.target.value)} required />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">结束时间</label>
-                <Input value={formatDateTimeInput(beginDate, beginTime, duration)} readOnly className="text-muted-foreground" />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label htmlFor="pids" className="text-sm font-medium">题目列表 (逗号分隔)</label>
-              <Input id="pids" name="pids" defaultValue={data.pids || ''} placeholder="P1001,P1002,P1003" />
-            </div>
-
-            <div className="space-y-1.5">
-              <label htmlFor="content" className="text-sm font-medium">比赛说明 (Markdown)</label>
-              <MarkdownEditor name="content" value={tdoc.content || ''} minHeight={320} />
-            </div>
-
-            <div className="space-y-3 rounded-md border bg-muted/20 p-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <label htmlFor="maintainer" className="text-sm font-medium">比赛维护者</label>
-                  <Input id="maintainer" name="maintainer" defaultValue={formatCommaValue(tdoc.maintainer)} placeholder="UID，逗号分隔" />
+                  <label htmlFor="beginAtDate" className="text-sm font-medium">开始日期</label>
+                  <Input id="beginAtDate" name="beginAtDate" type="date" value={beginDate} onChange={(e) => setBeginDate(e.target.value)} required />
                 </div>
                 <div className="space-y-1.5">
-                  <label htmlFor="permission" className="text-sm font-medium">访问控制</label>
-                  <select
-                    id="permission"
-                    value={permission}
-                    onChange={(e) => setPermission(e.target.value)}
-                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                  >
-                    <option value="public">公开</option>
-                    <option value="invite">需要邀请码</option>
-                    <option value="assign">指定用户 / 用户组</option>
-                  </select>
+                  <label htmlFor="beginAtTime" className="text-sm font-medium">开始时间</label>
+                  <Input id="beginAtTime" name="beginAtTime" type="time" value={beginTime} onChange={(e) => setBeginTime(e.target.value)} required />
                 </div>
               </div>
-              {permission === 'invite' && (
+
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
-                  <label htmlFor="code" className="text-sm font-medium">邀请码</label>
-                  <Input id="code" name="code" defaultValue={tdoc._code || tdoc.code || ''} placeholder="留空表示不设置邀请码" />
+                  <label htmlFor="duration" className="text-sm font-medium">时长 (小时)</label>
+                  <Input id="duration" name="duration" type="number" step="0.5" min="0" value={duration} onChange={(e) => setDuration(e.target.value)} required />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">结束时间</label>
+                  <Input value={formatDateTimeInput(beginDate, beginTime, duration)} readOnly className="text-muted-foreground" />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">题目列表</label>
+                <MultiSelect<ProblemOption>
+                  loadOptions={(q) => searchProblems(q, 20)}
+                  value={pidValue}
+                  onChange={setPidValue}
+                  getKey={(p) => String(p.docId || p.pid)}
+                  getLabel={(p) => `${p.pid || p.docId} ${p.title || ''}`.trim()}
+                  renderChip={(p) => (
+                    <span className="flex items-center gap-1">
+                      <span className="font-mono text-[10px] text-muted-foreground">{p.pid || p.docId}</span>
+                      {p.title ? <span className="truncate max-w-[140px]">{p.title}</span> : null}
+                    </span>
+                  )}
+                  renderOption={(p) => (
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-mono text-[11px] text-muted-foreground shrink-0">{p.pid || p.docId}</span>
+                      <span className="truncate flex-1">{p.title || '—'}</span>
+                      {p.difficulty ? <Badge variant="outline" className="text-[10px] shrink-0">Lv.{p.difficulty}</Badge> : null}
+                      {p.nSubmit ? (
+                        <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">{p.nAccept ?? 0}/{p.nSubmit}</span>
+                      ) : null}
+                    </div>
+                  )}
+                  name="pids"
+                  placeholder="搜索题目 (pid / 标题)…"
+                  minHeight={48}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="content" className="text-sm font-medium">比赛说明 (Markdown)</label>
+                <MarkdownEditor name="content" value={tdoc.content || ''} minHeight={320} />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">允许语言（留空为全部）</label>
+                <MultiSelect<LangOption>
+                  options={COMMON_LANG_OPTIONS}
+                  value={langValue}
+                  onChange={setLangValue}
+                  getKey={(o) => o.value}
+                  getLabel={(o) => `${o.label} (${o.value})`}
+                  renderChip={(o) => <span className="font-mono">{o.label}</span>}
+                  renderOption={(o) => (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{o.label}</span>
+                      <span className="text-[10px] font-mono text-muted-foreground">{o.value}</span>
+                    </div>
+                  )}
+                  name="langs"
+                  placeholder="留空 = 全部"
+                />
+              </div>
+            </div>
+
+            {/* ─── Tab 2: 访问控制 ─── */}
+            <div className="space-y-4" hidden={activeTab !== 'access'}>
+              <div className="space-y-3 rounded-md border bg-muted/20 p-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <label htmlFor="maintainer" className="text-sm font-medium">比赛维护者</label>
+                    <Input id="maintainer" name="maintainer" defaultValue={formatCommaValue(tdoc.maintainer)} placeholder="UID，逗号分隔" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label htmlFor="permission" className="text-sm font-medium">访问控制</label>
+                    <SimpleSelect
+                      id="permission"
+                      value={permission}
+                      onValueChange={setPermission}
+                      options={[
+                        { value: 'public', label: '公开' },
+                        { value: 'invite', label: '需要邀请码' },
+                        { value: 'assign', label: '指定用户 / 旧用户组' },
+                      ]}
+                    />
+                  </div>
+                </div>
+                {permission === 'invite' && (
+                  <div className="space-y-1.5">
+                    <label htmlFor="code" className="text-sm font-medium">邀请码</label>
+                    <Input id="code" name="code" defaultValue={tdoc._code || tdoc.code || ''} placeholder="留空表示不设置邀请码" />
+                  </div>
+                )}
+                {permission === 'assign' && (
+                  <div className="space-y-1.5">
+                    <label htmlFor="assign" className="text-sm font-medium">分配给（旧用户组，兼容字段）</label>
+                    <Input id="assign" name="assign" defaultValue={formatCommaValue(tdoc.assign)} placeholder="用户组 / UID，逗号分隔" />
+                    <p className="text-[11px] text-muted-foreground">
+                      新比赛建议使用「参赛范围」标签页里的 Krypton 学校 / 用户组。
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Contest-level verifier panel — only meaningful for an unstarted
+                  contest whose problems are still hidden. Once contest opens
+                  the unhide worker clears the hidden flag (unless lockHidden);
+                  permits become moot regardless. */}
+              {tdoc._id ? (
+                <ContestVerifierPanel tid={String(tdoc._id)} verifiers={tdoc.verifiers || []} />
+              ) : null}
+            </div>
+
+            {/* ─── Tab 3: 参赛范围 (Krypton) ─── */}
+            <div className="space-y-4" hidden={activeTab !== 'scope'}>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">参赛范围模式</label>
+                <SimpleSelect
+                  value={scopeMode}
+                  onValueChange={(v) => setScopeMode(v as any)}
+                  options={[
+                    { value: 'none', label: '不限（仅看老 Hydro 访问控制）' },
+                    { value: 'schools', label: '按学校限定' },
+                    { value: 'groups', label: '按用户组限定' },
+                  ]}
+                />
+                <input type="hidden" name="participantScopeMode" value={scopeMode} />
+                <p className="text-[11px] text-muted-foreground">
+                  范围与老 Hydro 访问控制取 AND（同时满足）。学校与用户组互斥。
+                </p>
+              </div>
+
+              {scopeMode === 'schools' && (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">学校</label>
+                  <MultiSelect<ScopeOption>
+                    options={schoolCatalog}
+                    value={schoolValue}
+                    onChange={setSchoolValue}
+                    getKey={(o) => o._id}
+                    getLabel={(o) => o.name}
+                    name="participantSchoolIds"
+                    placeholder="选择学校…"
+                  />
                 </div>
               )}
-              {permission === 'assign' && (
+
+              {scopeMode === 'groups' && (
                 <div className="space-y-1.5">
-                  <label htmlFor="assign" className="text-sm font-medium">分配给</label>
-                  <Input id="assign" name="assign" defaultValue={formatCommaValue(tdoc.assign)} placeholder="用户组 / UID，逗号分隔" />
+                  <label className="text-sm font-medium">用户组</label>
+                  <MultiSelect<ScopeOption>
+                    options={groupCatalog}
+                    value={groupValue}
+                    onChange={setGroupValue}
+                    getKey={(o) => o._id}
+                    getLabel={(o) => (o.schoolName ? `${o.name}（${o.schoolName}）` : o.name)}
+                    name="participantGroupIds"
+                    placeholder="选择用户组…"
+                  />
                 </div>
+              )}
+
+              {/* Keep the OTHER mode's id list out of the post so the
+                  back-end normalization can rely on emptiness. */}
+              {scopeMode !== 'schools' && (
+                <input type="hidden" name="participantSchoolIds" value="" />
+              )}
+              {scopeMode !== 'groups' && (
+                <input type="hidden" name="participantGroupIds" value="" />
               )}
             </div>
 
-            <div className="space-y-1.5">
-              <label htmlFor="langs" className="text-sm font-medium">允许语言 (逗号分隔，留空为全部)</label>
-              <Input id="langs" name="langs" defaultValue={Array.isArray(tdoc.langs) ? tdoc.langs.join(',') : ''} />
+            {/* ─── Tab 4: 客户端与反作弊 (Krypton) ─── */}
+            <div className="space-y-4" hidden={activeTab !== 'vigil'}>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={vigilEnabled}
+                  onCheckedChange={(v) => setVigilEnabled(!!v)}
+                />
+                启用 Vigil 反作弊
+                <span className="ml-auto text-[11px] text-muted-foreground">
+                  开启后比赛的会话会被推送到 Vigil Server
+                </span>
+              </label>
+              <input type="hidden" name="vigilEnabled" value={vigilEnabled ? 'true' : 'false'} />
+
+              {vigilEnabled && (
+                <>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium">进入模式</label>
+                      <SimpleSelect
+                        value={entryMode}
+                        onValueChange={(v) => setEntryMode(v as any)}
+                        options={[
+                          { value: 'open', label: '普通网页可进入（Vigil 可选）' },
+                          { value: 'client_required', label: '必须通过 Qt Client 进入' },
+                        ]}
+                      />
+                      <input type="hidden" name="entryMode" value={entryMode} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium">审批模式</label>
+                      <SimpleSelect
+                        value={approvalMode}
+                        onValueChange={(v) => setApprovalMode(v as any)}
+                        options={[
+                          { value: 'auto', label: 'auto（已绑定且命中范围的学生自动通过）' },
+                          { value: 'strict', label: 'strict（全部进入老师审批）' },
+                        ]}
+                      />
+                      <input type="hidden" name="approvalMode" value={approvalMode} />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={lockdownMode}
+                        onCheckedChange={(v) => setLockdownMode(!!v)}
+                      />
+                      启用客户端锁屏 / 热键拦截
+                    </label>
+                    <input type="hidden" name="lockdownMode" value={lockdownMode ? 'true' : 'false'} />
+                    <label className="flex items-center gap-2 text-sm">
+                      <Checkbox name="pauseOnDisconnect" value="true" defaultChecked={!!tdoc.pauseOnDisconnect} />
+                      断线时暂停
+                    </label>
+                    <label className="flex items-center gap-2 text-sm">
+                      <Checkbox name="exclusive" value="true" defaultChecked={!!tdoc.exclusive} />
+                      锁定当前比赛工作台（不显示比赛切换器）
+                    </label>
+                  </div>
+
+                  {/* 实时媒体三开关 */}
+                  <div className="space-y-3 rounded-md border bg-muted/20 p-4">
+                    <h3 className="text-sm font-medium">实时媒体</h3>
+                    <p className="text-xs text-muted-foreground">
+                      推流到 SRS 媒体服务器；老师在反作弊详情页可看实时画面。<strong>失败不影响考试</strong>。
+                    </p>
+                    <div className="flex flex-wrap gap-4">
+                      <label className="flex items-center gap-2 text-sm">
+                        <Checkbox name="liveEnabled" value="true" defaultChecked={tdoc.liveEnabled !== false} />
+                        实时屏幕直播
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <Checkbox name="cameraEnabled" value="true" defaultChecked={tdoc.cameraEnabled !== false} />
+                        摄像头直播（防替考）
+                      </label>
+                      <label className="flex items-center gap-2 text-sm">
+                        <Checkbox name="recordEnabled" value="true" defaultChecked={!!tdoc.recordEnabled} />
+                        服务器录屏 mp4（存储压力大，默认关闭）
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium">截图间隔 (ms)</label>
+                      <Input
+                        type="number"
+                        name="screenshotIntervalMs"
+                        min={1000}
+                        step={1000}
+                        defaultValue={tdoc.screenshotIntervalMs || 60000}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium">截图抖动 (ms)</label>
+                      <Input
+                        type="number"
+                        name="screenshotJitterMs"
+                        min={0}
+                        step={1000}
+                        defaultValue={tdoc.screenshotJitterMs ?? 30000}
+                      />
+                      <p className="text-[11px] text-muted-foreground">实际 = 间隔 ± rand(0, 抖动)，防学生预判</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium">封锁开始（分钟）</label>
+                      <Input
+                        type="number"
+                        name="clientLoginBlockBeforeMinutes"
+                        min={0}
+                        defaultValue={tdoc.clientLoginBlockBeforeMinutes ?? 60}
+                      />
+                      <p className="text-[11px] text-muted-foreground">比赛开始前 N 分钟开始拒绝普通网页登录</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium">封锁结束（分钟）</label>
+                      <Input
+                        type="number"
+                        name="clientLoginBlockAfterMinutes"
+                        min={0}
+                        defaultValue={tdoc.clientLoginBlockAfterMinutes ?? 30}
+                      />
+                      <p className="text-[11px] text-muted-foreground">比赛结束后 N 分钟解除拒绝</p>
+                    </div>
+                  </div>
+
+                  {/* 进程白名单 */}
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium">进程白名单（每行一个，加在服务器全局默认之上）</label>
+                    <textarea
+                      name="vigilProcessWhitelist"
+                      defaultValue={(tdoc.vigilProcessWhitelist || []).join('\n')}
+                      rows={5}
+                      className="w-full rounded-md border bg-background p-2 font-mono text-xs"
+                      placeholder={'Code.exe\npython.exe\nmsedge.exe'}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      不在白名单的进程启动会触发 <code>process_started_unauthorized</code> 事件
+                    </p>
+                  </div>
+
+                  <div className="space-y-4 rounded-md border bg-muted/20 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="space-y-1">
+                        <h3 className="flex items-center gap-2 text-sm font-medium">
+                          <WifiOff className="size-4" />考试网络锁
+                        </h3>
+                        <p className="text-xs text-muted-foreground">
+                          进入考试 WebView 后，只允许访问默认白名单和下方附加白名单；系统层由客户端服务执行，WebView 内也会拦截非白名单 URL。
+                        </p>
+                      </div>
+                      <label className="flex shrink-0 items-center gap-2 text-sm">
+                        <Checkbox
+                          checked={networkLockdownMode}
+                          onCheckedChange={(v) => {
+                            setNetworkTouched(true);
+                            setNetworkLockdownMode(!!v);
+                          }}
+                        />
+                        启用网络锁
+                      </label>
+                    </div>
+                    <input type="hidden" name="networkLockdownMode" value={networkLockdownMode ? 'true' : 'false'} />
+
+                    <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium">失败策略</label>
+                        <SimpleSelect
+                          value={networkFailurePolicy}
+                          onValueChange={(v) => setNetworkFailurePolicy(v as any)}
+                          options={[
+                            { value: 'strict', label: 'strict：失败则不进入考试' },
+                            { value: 'report_only', label: 'report_only：失败上报后放行' },
+                            { value: 'off', label: 'off：不启用系统网络锁' },
+                          ]}
+                        />
+                        <input type="hidden" name="networkLockdownFailurePolicy" value={networkFailurePolicy} />
+                      </div>
+                      <div className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
+                        默认白名单会自动包含 OJ、Vigil Server、回环、DNS/DHCP 基础连接。下方只填写这场比赛额外允许的地址。
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 lg:grid-cols-3">
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium">附加域名 / Host</label>
+                        <textarea
+                          name="networkWhitelistHosts"
+                          defaultValue={(tdoc.networkWhitelistHosts || []).join('\n')}
+                          rows={4}
+                          className="w-full rounded-md border bg-background p-2 font-mono text-xs"
+                          placeholder={'docs.school.edu.cn\n*.school.edu.cn'}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium">附加 IP / CIDR</label>
+                        <textarea
+                          name="networkWhitelistIps"
+                          defaultValue={(tdoc.networkWhitelistIps || []).join('\n')}
+                          rows={4}
+                          className="w-full rounded-md border bg-background p-2 font-mono text-xs"
+                          placeholder={'10.1.234.2\n10.1.0.0/16'}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium">附加端口</label>
+                        <textarea
+                          name="networkWhitelistPorts"
+                          defaultValue={(tdoc.networkWhitelistPorts || []).join('\n')}
+                          rows={4}
+                          className="w-full rounded-md border bg-background p-2 font-mono text-xs"
+                          placeholder={'80\n443\n8765'}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <label htmlFor="lock" className="text-sm font-medium">封榜时间 (剩余分钟)</label>
-                <Input id="lock" name="lock" type="number" min="0" defaultValue={lockMinutes} placeholder="留空表示不封榜" />
+            {/* ─── Tab 5: 比赛设置 ─── */}
+            <div className="space-y-4" hidden={activeTab !== 'settings'}>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label htmlFor="lock" className="text-sm font-medium">封榜时间 (剩余分钟)</label>
+                  <Input id="lock" name="lock" type="number" min="0" defaultValue={lockMinutes} placeholder="留空表示不封榜" />
+                </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="contestDuration" className="text-sm font-medium">弹性时长 (小时)</label>
+                  <Input id="contestDuration" name="contestDuration" type="number" min="0" step="0.5" defaultValue={tdoc.duration || ''} placeholder="留空表示不限制" />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <label htmlFor="contestDuration" className="text-sm font-medium">弹性时长 (小时)</label>
-                <Input id="contestDuration" name="contestDuration" type="number" min="0" step="0.5" defaultValue={tdoc.duration || ''} placeholder="留空表示不限制" />
+
+              <Separator />
+
+              <div className="flex flex-wrap gap-4">
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox name="rated" value="true" defaultChecked={defaultRated} />
+                  计入 Rating
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    name="autoHide"
+                    value="true"
+                    defaultChecked={defaultAutoHide}
+                    disabled={!canAutoHideProblems}
+                  />
+                  赛后自动隐藏题目
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox name="allowViewCode" value="true" defaultChecked={defaultAllowViewCode} />
+                  允许查看代码
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox name="allowPrint" value="true" defaultChecked={tdoc.allowPrint} />
+                  允许打印
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox name="keepScoreboardHidden" value="true" defaultChecked={tdoc.keepScoreboardHidden} />
+                  赛后保持榜单隐藏
+                </label>
               </div>
-            </div>
-
-            <Separator />
-
-            <div className="flex flex-wrap gap-4">
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="rated" value="true" defaultChecked={tdoc.rated}  />
-                计入 Rating
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="autoHide" value="true" defaultChecked={tdoc.autoHide}  />
-                赛后自动隐藏题目
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="allowViewCode" value="true" defaultChecked={tdoc.allowViewCode}  />
-                允许查看代码
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="allowPrint" value="true" defaultChecked={tdoc.allowPrint}  />
-                允许打印
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="keepScoreboardHidden" value="true" defaultChecked={tdoc.keepScoreboardHidden}  />
-                赛后保持榜单隐藏
-              </label>
             </div>
 
             <div className="flex items-center gap-3">
@@ -354,9 +947,80 @@ export function ContestEditPage() {
               )}
             </div>
           </form>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </ContestManagementChrome>
     </motion.div>
+  );
+}
+
+/* ---------- Contest verifier panel ---------- */
+
+function ContestVerifierPanel({ tid, verifiers }: { tid: string; verifiers: number[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="space-y-3 rounded-md border bg-muted/20 p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-medium">验比赛人</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            邀请后将自动对所有比赛题目（含将来添加的）授权可见，比赛开始 / 删除时自动清理。
+          </p>
+        </div>
+        <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)}>
+          邀请
+        </Button>
+      </div>
+      {verifiers.length === 0 ? (
+        <p className="text-xs text-muted-foreground">还没有验比赛人</p>
+      ) : (
+        <ul className="space-y-1">
+          {verifiers.map((uid) => (
+            <li key={uid} className="flex items-center justify-between text-sm">
+              <span>UID {uid}</span>
+              <form
+                method="post"
+                action={`/contest/${tid}/verifiers/remove`}
+                onSubmit={(e) => { if (!confirm(`确定移除 UID ${uid}？该用户对所有比赛题目的查看权将被撤销。`)) e.preventDefault(); }}
+              >
+                <input type="hidden" name="uid" value={uid} />
+                <Button type="submit" size="sm" variant="ghost" className="h-7 text-xs text-destructive">
+                  移除
+                </Button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Dialog open={open} onOpenChange={(v) => !v && setOpen(false)}>
+        <DialogContent className="w-full sm:w-[480px]" onClose={() => setOpen(false)}>
+          <DialogHeader>
+            <DialogTitle>邀请验比赛人</DialogTitle>
+          </DialogHeader>
+          <form
+            method="post"
+            action={`/contest/${tid}/verifiers`}
+            className="space-y-3 p-5"
+          >
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground" htmlFor="cv-uid">用户 UID</label>
+              <Input id="cv-uid" name="uid" type="number" min={2} required />
+            </div>
+            {/* Role hidden; same C1 simplification as the problem-edit panel. */}
+            <input type="hidden" name="role" value="verifier" />
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground" htmlFor="cv-note">附言（可选）</label>
+              <Input id="cv-note" name="note" placeholder="例：帮忙验一下比赛 P1-P4" />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="ghost" onClick={() => setOpen(false)}>取消</Button>
+              <Button type="submit">发送邀请</Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 
@@ -373,6 +1037,7 @@ export function ContestManagePage() {
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
   const [selectedPublic, setSelectedPublic] = useState<Set<string>>(new Set());
   const [selectedPrivate, setSelectedPrivate] = useState<Set<string>>(new Set());
+  const [activeManageTab, setActiveManageTab] = useState<'score' | 'public' | 'private'>('score');
 
   const toggleContestFile = (selected: Set<string>, setSelected: (next: Set<string>) => void, name: string) => {
     const next = new Set(selected);
@@ -495,46 +1160,70 @@ export function ContestManagePage() {
         </div>
       </div>
 
-      {/* Problem scores */}
-      {Object.keys(pdict).length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">题目分值</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>题号</TableHead>
-                  <TableHead>题目</TableHead>
-                  <TableHead className="w-32 text-right">分值</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {Object.entries(pdict).map(([pid, p]) => (
-                  <TableRow key={pid}>
-                    <TableCell className="font-mono text-sm">{p.pid || pid}</TableCell>
-                    <TableCell className="text-sm">{p.title || '-'}</TableCell>
-                    <TableCell className="text-right">
-                      <form method="post" className="flex items-center justify-end gap-1">
-                        <input type="hidden" name="operation" value="set_score" />
-                        <input type="hidden" name="pid" value={pid} />
-                        <Input name="score" type="number" min="1" defaultValue={tdoc.score?.[pid] || 100} className="w-20 text-right" />
-                        <Button type="submit" size="icon" variant="ghost" className="size-7">
-                          <Save className="size-3" />
-                        </Button>
-                      </form>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+      <ContestManagementChrome tdoc={tdoc} active="overview">
+        <div className="space-y-4">
+          <MiniTabs
+            value={activeManageTab}
+            onValueChange={setActiveManageTab}
+            items={[
+              { value: 'score', label: '题目分值', count: Object.keys(pdict).length, icon: ListChecks },
+              { value: 'public', label: '公开文件', count: files.length, icon: FolderOpen },
+              { value: 'private', label: '私有材料', count: privateFiles.length, icon: ShieldCheck },
+            ]}
+            size="md"
+            aria-label="比赛管理功能"
+          />
 
-      <FileSection title="公开文件" fileList={files} type="public" selected={selectedPublic} setSelected={setSelectedPublic} />
-      <FileSection title="私有文件" fileList={privateFiles} type="private" selected={selectedPrivate} setSelected={setSelectedPrivate} />
+          {activeManageTab === 'score' ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">题目分值</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                {Object.keys(pdict).length > 0 ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>题号</TableHead>
+                        <TableHead>题目</TableHead>
+                        <TableHead className="w-32 text-right">分值</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {Object.entries(pdict).map(([pid, p]) => (
+                        <TableRow key={pid}>
+                          <TableCell className="font-mono text-sm">{p.pid || pid}</TableCell>
+                          <TableCell className="text-sm">{p.title || '-'}</TableCell>
+                          <TableCell className="text-right">
+                            <form method="post" className="flex items-center justify-end gap-1">
+                              <input type="hidden" name="operation" value="set_score" />
+                              <input type="hidden" name="pid" value={pid} />
+                              <Input name="score" type="number" min="1" defaultValue={tdoc.score?.[pid] || 100} className="w-20 text-right" />
+                              <Button type="submit" size="icon" variant="ghost" className="size-7">
+                                <Save className="size-3" />
+                              </Button>
+                            </form>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <p className="p-6 text-center text-sm text-muted-foreground">该比赛还没有题目</p>
+                )}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {activeManageTab === 'public' ? (
+            <FileSection title="公开文件" fileList={files} type="public" selected={selectedPublic} setSelected={setSelectedPublic} />
+          ) : null}
+
+          {activeManageTab === 'private' ? (
+            <FileSection title="私有文件" fileList={privateFiles} type="private" selected={selectedPrivate} setSelected={setSelectedPrivate} />
+          ) : null}
+        </div>
+      </ContestManagementChrome>
     </motion.div>
   );
 }
@@ -547,10 +1236,16 @@ export function ContestProblemListPage() {
   const tdoc: R = data.tdoc || {};
   const pdict: Record<string, R> = data.pdict || {};
   const tcdocs: R[] = data.tcdocs || [];
+  const rdocs: R[] = data.rdocs || [];
   const pids: number[] = tdoc.pids || [];
   const tid = tdoc.docId || tdoc._id;
-  const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
+  const urls = examModeUrls(bs);
+  const contestUrl = urls?.overview || replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
+  const recordDetailUrl = (rid: string) => urls?.record
+    ? String(urls.record).replace('__RID__', rid)
+    : replaceRouteTokens(bs.urls.recordDetail, { RID: rid });
   const showScore = data.showScore;
+  const [workspaceTab, setWorkspaceTab] = useState<'problems' | 'submissions' | 'clarifications'>('problems');
 
   return (
     <motion.div
@@ -569,9 +1264,22 @@ export function ContestProblemListPage() {
         </div>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          <Table>
+      <MiniTabs
+        value={workspaceTab}
+        onValueChange={setWorkspaceTab}
+        items={[
+          { value: 'problems', label: '题目', count: pids.length, icon: ListChecks },
+          { value: 'submissions', label: '我的提交', count: rdocs.length, icon: Send },
+          { value: 'clarifications', label: '澄清', count: tcdocs.length, icon: MessageSquare },
+        ]}
+        size="md"
+        aria-label="比赛入口"
+      />
+
+      {workspaceTab === 'problems' ? (
+        <Card>
+          <CardContent className="p-0">
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-16 text-center">#</TableHead>
@@ -586,7 +1294,7 @@ export function ContestProblemListPage() {
                   <TableRow key={String(pid)}>
                     <TableCell className="text-center font-mono font-semibold">{getAlphabeticId(idx)}</TableCell>
                     <TableCell>
-                      <a href={`${contestUrl}/p/${p.pid || pid}`} className="text-sm text-primary hover:underline">
+                      <a href={contestProblemUrl(bs, tdoc, pid)} className="text-sm text-primary hover:underline">
                         {p.title || `P${pid}`}
                       </a>
                     </TableCell>
@@ -597,12 +1305,55 @@ export function ContestProblemListPage() {
                 );
               })}
             </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {workspaceTab === 'submissions' ? (
+        <Card>
+          <CardContent className="p-0">
+            {rdocs.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-28">状态</TableHead>
+                    <TableHead>题目</TableHead>
+                    <TableHead className="w-24">语言</TableHead>
+                    <TableHead className="w-24 text-right">时间</TableHead>
+                    <TableHead className="w-24 text-right">内存</TableHead>
+                    <TableHead className="w-40 text-right">提交时间</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rdocs.map((rdoc) => {
+                    const problem = pdict[String(rdoc.pid)] || {};
+                    return (
+                      <TableRow key={String(rdoc._id)}>
+                        <TableCell>
+                          <a href={recordDetailUrl(String(rdoc._id))} className="text-xs font-medium text-primary hover:underline">
+                            {rdoc.statusText || rdoc.status || 'Submitted'}
+                          </a>
+                        </TableCell>
+                        <TableCell className="text-sm">{problem.title || `P${rdoc.pid}`}</TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">{rdoc.lang || '—'}</TableCell>
+                        <TableCell className="text-right text-sm tabular-nums">{rdoc.time != null ? `${rdoc.time}ms` : '—'}</TableCell>
+                        <TableCell className="text-right text-sm tabular-nums">{rdoc.memory != null ? `${rdoc.memory}KB` : '—'}</TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground">{formatObjectIdTime(rdoc._id, bs.locale) || '—'}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            ) : (
+              <p className="p-6 text-center text-sm text-muted-foreground">暂无提交</p>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Clarifications */}
-      {tcdocs.length > 0 && (
+      {workspaceTab === 'clarifications' && tcdocs.length > 0 ? (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -633,10 +1384,11 @@ export function ContestProblemListPage() {
             ))}
           </CardContent>
         </Card>
-      )}
+      ) : null}
 
       {/* Submit clarification */}
-      <Card>
+      {workspaceTab === 'clarifications' ? (
+        <Card>
         <CardHeader>
           <CardTitle className="text-base">提交答疑</CardTitle>
         </CardHeader>
@@ -645,14 +1397,21 @@ export function ContestProblemListPage() {
             <input type="hidden" name="operation" value="clarification" />
             <div className="space-y-1.5">
               <label className="text-sm font-medium">主题</label>
-              <select name="subject" className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                <option value="0">通用</option>
-                <option value="-1">技术问题</option>
-                {pids.map((pid, idx) => {
-                  const p = pdict[String(pid)] || {};
-                  return <option key={String(pid)} value={pid}>{getAlphabeticId(idx)} — {p.title || `P${pid}`}</option>;
-                })}
-              </select>
+              <SimpleSelect
+                name="subject"
+                defaultValue="0"
+                options={[
+                  { value: '0', label: '通用' },
+                  { value: '-1', label: '技术问题' },
+                  ...pids.map((pid, idx) => {
+                    const p = pdict[String(pid)] || {};
+                    return {
+                      value: String(pid),
+                      label: `${getAlphabeticId(idx)} — ${p.title || `P${pid}`}`,
+                    };
+                  }),
+                ]}
+              />
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium">内容 (Markdown)</label>
@@ -661,7 +1420,8 @@ export function ContestProblemListPage() {
             <Button type="submit">发送</Button>
           </form>
         </CardContent>
-      </Card>
+        </Card>
+      ) : null}
     </motion.div>
   );
 }
@@ -676,6 +1436,28 @@ export function ContestUserPage() {
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
   const tid = tdoc.docId || tdoc._id;
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
+  const [userTab, setUserTab] = useState<'list' | 'add'>('list');
+  const [selectedUsers, setSelectedUsers] = useState<UserOption[]>([]);
+  const searchUsers = useCallback(async (query: string): Promise<UserOption[]> => {
+    const q = query.trim();
+    if (!q) return [];
+    const domainId = encodeURIComponent(bs.domain?.id || 'system');
+    const response = await fetch(`/d/${domainId}/api/users`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        args: { search: q, limit: 10, exact: false },
+        projection: ['_id', 'uname', 'mail', 'avatarUrl'],
+      }),
+    });
+    if (!response.ok) return [];
+    const users = await response.json();
+    return Array.isArray(users) ? users : [];
+  }, [bs.domain?.id]);
 
   return (
     <motion.div
@@ -694,26 +1476,70 @@ export function ContestUserPage() {
         </div>
       </div>
 
-      {/* Add user */}
-      <Card>
-        <CardContent className="p-4">
-          <form method="post" className="flex items-end gap-3">
-            <input type="hidden" name="operation" value="add_user" />
-            <div className="flex-1 space-y-1.5">
-              <label className="text-sm font-medium">用户 UID (逗号分隔)</label>
-              <Input name="uids" placeholder="1001,1002" required />
-            </div>
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox name="unrank" value="true"  />不计入排名
-            </label>
-            <Button type="submit"><UserPlus className="mr-1 size-4" />添加</Button>
-          </form>
-        </CardContent>
-      </Card>
+      <ContestManagementChrome tdoc={tdoc} active="users">
+        <div className="space-y-4">
+          <MiniTabs
+            value={userTab}
+            onValueChange={setUserTab}
+            items={[
+              { value: 'list', label: '选手列表', count: tsdocs.length, icon: Users },
+              { value: 'add', label: '添加选手', icon: UserPlus },
+            ]}
+            size="md"
+            aria-label="选手管理"
+          />
 
-      <Card>
-        <CardContent className="p-0">
-          <Table>
+          {userTab === 'add' ? (
+            <Card>
+              <CardContent className="p-4">
+                <form method="post" className="space-y-4">
+                  <input type="hidden" name="operation" value="add_user" />
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium">用户</label>
+                    <MultiSelect<UserOption>
+                      value={selectedUsers}
+                      onChange={setSelectedUsers}
+                      loadOptions={searchUsers}
+                      getKey={(u) => String(u._id)}
+                      getLabel={(u) => `${u.uname || `uid:${u._id}`} ${u._id} ${u.mail || ''}`}
+                      renderChip={(u) => (
+                        <span className="inline-flex items-center gap-1">
+                          <span>{u.uname || `uid:${u._id}`}</span>
+                          <span className="font-mono text-[10px] text-muted-foreground">#{u._id}</span>
+                        </span>
+                      )}
+                      renderOption={(u) => (
+                        <span className="flex min-w-0 flex-col">
+                          <span className="truncate text-sm font-medium">
+                            {u.uname || `uid:${u._id}`}
+                            <span className="ml-2 font-mono text-[11px] text-muted-foreground">UID {u._id}</span>
+                          </span>
+                          {u.mail ? <span className="truncate text-[11px] text-muted-foreground">{u.mail}</span> : null}
+                        </span>
+                      )}
+                      name="uids"
+                      placeholder="输入 UID / 用户名 / 邮箱搜索"
+                      emptyText="没有找到用户"
+                      minHeight={44}
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <label className="flex items-center gap-2 text-sm">
+                      <Checkbox name="unrank" value="true" />不计入排名
+                    </label>
+                    <Button type="submit" disabled={selectedUsers.length === 0}>
+                      <UserPlus className="mr-1 size-4" />添加选手
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {userTab === 'list' ? (
+            <Card>
+              <CardContent className="p-0">
+                <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>用户</TableHead>
@@ -769,9 +1595,12 @@ export function ContestUserPage() {
                 </TableRow>
               )}
             </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                </Table>
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
+      </ContestManagementChrome>
     </motion.div>
   );
 }
@@ -788,6 +1617,10 @@ export function ContestBalloonPage() {
   const tid = tdoc.docId || tdoc._id;
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
   const [balloonRows, setBalloonRows] = useState<BalloonColorRow[]>(() => normalizeBalloonRows(tdoc, pdict));
+  const [balloonTab, setBalloonTab] = useState<'pending' | 'sent' | 'all'>('pending');
+  const pendingBalloons = bdocs.filter((b) => !b.sent);
+  const sentBalloons = bdocs.filter((b) => b.sent);
+  const visibleBalloons = balloonTab === 'pending' ? pendingBalloons : balloonTab === 'sent' ? sentBalloons : bdocs;
 
   const updateBalloonRow = (pid: string, patch: Partial<BalloonColorRow>) => {
     setBalloonRows((rows) => rows.map((row) => (row.pid === pid ? { ...row, ...patch } : row)));
@@ -810,56 +1643,70 @@ export function ContestBalloonPage() {
         </div>
       </div>
 
-      {balloonRows.length > 0 && (
-        <div className="rounded-lg border bg-card p-4">
-          <form method="post" className="space-y-3">
-            <input type="hidden" name="operation" value="set_color" />
-            <input type="hidden" name="color" value={serializeBalloonRows(balloonRows)} readOnly />
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-medium">题目气球配置</h2>
-                <p className="text-xs text-muted-foreground">为每道题设置发放时显示的颜色和气球名称。</p>
-              </div>
-              <Button type="submit" size="sm">
-                <Palette className="mr-1 size-3" />保存颜色
-              </Button>
-            </div>
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {balloonRows.map((row) => (
-                <div key={row.pid} className="grid gap-2 rounded-md border bg-muted/20 p-3">
-                  <div className="flex items-center gap-2">
-                    <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-xs font-semibold">
-                      {row.label}
-                    </span>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{row.title}</p>
-                      <p className="text-xs text-muted-foreground">P{row.pid}</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-[2.75rem_1fr] gap-2">
-                    <input
-                      type="color"
-                      value={row.color}
-                      className="h-9 w-11 cursor-pointer rounded-md border bg-background p-1"
-                      onChange={(e) => updateBalloonRow(row.pid, { color: e.target.value })}
-                      aria-label={`${row.label} 题气球颜色`}
-                    />
-                    <Input
-                      value={row.name}
-                      onChange={(e) => updateBalloonRow(row.pid, { name: e.target.value })}
-                      placeholder="气球名称"
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </form>
-        </div>
-      )}
+      <ContestManagementChrome tdoc={tdoc} active="balloon">
+        <div className="space-y-4">
+          <MiniTabs
+            value={balloonTab}
+            onValueChange={setBalloonTab}
+            items={[
+              { value: 'pending', label: '待处理', count: pendingBalloons.length, icon: Clock },
+              { value: 'sent', label: '已送达', count: sentBalloons.length, icon: CheckCircle2 },
+              { value: 'all', label: '全部', count: bdocs.length, icon: Trophy },
+            ]}
+            size="md"
+            aria-label="气球任务"
+          />
 
-      <Card>
-        <CardContent className="p-0">
-          <Table>
+          {balloonRows.length > 0 && (
+            <div className="rounded-lg border bg-card p-4">
+              <form method="post" className="space-y-3">
+                <input type="hidden" name="operation" value="set_color" />
+                <input type="hidden" name="color" value={serializeBalloonRows(balloonRows)} readOnly />
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-medium">题目气球配置</h2>
+                    <p className="text-xs text-muted-foreground">为每道题设置发放时显示的颜色和气球名称。</p>
+                  </div>
+                  <Button type="submit" size="sm">
+                    <Palette className="mr-1 size-3" />保存颜色
+                  </Button>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  {balloonRows.map((row) => (
+                    <div key={row.pid} className="grid gap-2 rounded-md border bg-muted/20 p-3">
+                      <div className="flex items-center gap-2">
+                        <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-xs font-semibold">
+                          {row.label}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{row.title}</p>
+                          <p className="text-xs text-muted-foreground">P{row.pid}</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-[2.75rem_1fr] gap-2">
+                        <input
+                          type="color"
+                          value={row.color}
+                          className="h-9 w-11 cursor-pointer rounded-md border bg-background p-1"
+                          onChange={(e) => updateBalloonRow(row.pid, { color: e.target.value })}
+                          aria-label={`${row.label} 题气球颜色`}
+                        />
+                        <Input
+                          value={row.name}
+                          onChange={(e) => updateBalloonRow(row.pid, { name: e.target.value })}
+                          placeholder="气球名称"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </form>
+            </div>
+          )}
+
+          <Card>
+            <CardContent className="p-0">
+              <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="w-24">状态</TableHead>
@@ -872,7 +1719,7 @@ export function ContestBalloonPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {bdocs.map((b) => {
+              {visibleBalloons.map((b) => {
                 const u = getUser(udict, b.uid);
                 const sentBy = getUser(udict, b.sent);
                 const p = pdict[String(b.pid)] || {};
@@ -923,15 +1770,17 @@ export function ContestBalloonPage() {
                   </TableRow>
                 );
               })}
-              {bdocs.length === 0 && (
+              {visibleBalloons.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={7} className="py-6 text-center text-sm text-muted-foreground">暂无气球任务</TableCell>
                 </TableRow>
               )}
             </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
+      </ContestManagementChrome>
     </motion.div>
   );
 }
@@ -948,6 +1797,9 @@ export function ContestClarificationPage() {
   const tid = tdoc.docId || tdoc._id;
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
   const pids: number[] = tdoc.pids || [];
+  const [clarificationTab, setClarificationTab] = useState<'broadcast' | 'pending' | 'all'>('all');
+  const pendingClarifications = tcdocs.filter((tc) => tc.owner && (!Array.isArray(tc.reply) || tc.reply.length === 0));
+  const visibleClarifications = clarificationTab === 'pending' ? pendingClarifications : tcdocs;
 
   return (
     <motion.div
@@ -966,37 +1818,59 @@ export function ContestClarificationPage() {
         </div>
       </div>
 
-      {/* Reply form */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">发布通知/回复</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form method="post" className="space-y-3">
-            <input type="hidden" name="operation" value="clarification" />
-            <div className="grid gap-3 sm:grid-cols-3">
-              <select name="subject" className="rounded-md border bg-background px-3 py-2 text-sm sm:col-span-1">
-                <option value="0">通用通知</option>
-                <option value="-1">技术问题</option>
-                {pids.map((pid, idx) => {
-                  const p = pdict[String(pid)] || {};
-                  return <option key={String(pid)} value={pid}>{getAlphabeticId(idx)} — {p.title || `P${pid}`}</option>;
-                })}
-              </select>
-              <div className="hidden sm:col-span-2 sm:block" />
-              <div className="sm:col-span-3">
-                <MarkdownEditor name="content" value="" minHeight={180} preferredLang={bs.locale} />
-              </div>
-            </div>
-            <Button type="submit"><MessageSquare className="mr-1 size-4" />发送</Button>
-          </form>
-        </CardContent>
-      </Card>
+      <ContestManagementChrome tdoc={tdoc} active="clarification">
+        <div className="space-y-4">
+          <MiniTabs
+            value={clarificationTab}
+            onValueChange={setClarificationTab}
+            items={[
+              { value: 'broadcast', label: '广播', icon: MessageSquare },
+              { value: 'pending', label: '待回复', count: pendingClarifications.length, icon: HelpCircle },
+              { value: 'all', label: '全部答疑', count: tcdocs.length, icon: ListChecks },
+            ]}
+            size="md"
+            aria-label="答疑管理"
+          />
 
-      {/* Clarification list */}
-      {tcdocs.length > 0 ? (
-        <div className="space-y-3">
-          {tcdocs.map((tc) => {
+          {clarificationTab === 'broadcast' ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">发布通知</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form method="post" className="space-y-3">
+                  <input type="hidden" name="operation" value="clarification" />
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <SimpleSelect
+                      name="subject"
+                      defaultValue="0"
+                      className="sm:col-span-1"
+                      options={[
+                        { value: '0', label: '通用通知' },
+                        { value: '-1', label: '技术问题' },
+                        ...pids.map((pid, idx) => {
+                          const p = pdict[String(pid)] || {};
+                          return {
+                            value: String(pid),
+                            label: `${getAlphabeticId(idx)} — ${p.title || `P${pid}`}`,
+                          };
+                        }),
+                      ]}
+                    />
+                    <div className="hidden sm:col-span-2 sm:block" />
+                    <div className="sm:col-span-3">
+                      <MarkdownEditor name="content" value="" minHeight={180} preferredLang={bs.locale} />
+                    </div>
+                  </div>
+                  <Button type="submit"><MessageSquare className="mr-1 size-4" />发送</Button>
+                </form>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {clarificationTab !== 'broadcast' && visibleClarifications.length > 0 ? (
+            <div className="space-y-3">
+              {visibleClarifications.map((tc) => {
             const u = getUser(udict, tc.owner);
             return (
               <Card key={String(tc._id)}>
@@ -1035,13 +1909,15 @@ export function ContestClarificationPage() {
                 </CardContent>
               </Card>
             );
-          })}
+              })}
+            </div>
+          ) : clarificationTab !== 'broadcast' ? (
+            <Card>
+              <CardContent className="py-8 text-center text-sm text-muted-foreground">暂无答疑</CardContent>
+            </Card>
+          ) : null}
         </div>
-      ) : (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">暂无答疑</CardContent>
-        </Card>
-      )}
+      </ContestManagementChrome>
     </motion.div>
   );
 }
@@ -1053,12 +1929,14 @@ export function ContestPrintPage() {
   const data = bs.page.data;
   const tdoc: R = data.tdoc || {};
   const tid = tdoc.docId || tdoc._id;
-  const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
+  const urls = examModeUrls(bs);
+  const contestUrl = urls?.overview || replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
   const isPrintAdmin = Boolean(data.isAdmin || data.canEdit || String(bs.user.id) === String(tdoc.owner));
   const [tasks, setTasks] = useState<R[]>([]);
   const [udict, setUdict] = useState<Record<string, GenericUserDoc>>({});
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [kioskEnabled, setKioskEnabled] = useState(false);
+  const [printTab, setPrintTab] = useState<'submit' | 'queue' | 'kiosk'>('queue');
 
   const postPrintOperation = async (payload: Record<string, string>) => {
     const response = await fetch(window.location.href, {
@@ -1158,6 +2036,14 @@ export function ContestPrintPage() {
     return () => { active = false; };
   }, [kioskEnabled]);
 
+  const PrintChrome = ({ children }: { children: any }) => urls ? (
+    <>{children}</>
+  ) : (
+    <ContestManagementChrome tdoc={tdoc} active="print">
+      {children}
+    </ContestManagementChrome>
+  );
+
   return (
     <motion.div
       className="space-y-6"
@@ -1175,62 +2061,86 @@ export function ContestPrintPage() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Printer className="size-4" />提交打印
-          </CardTitle>
-          <form method="post" encType="multipart/form-data" className="flex items-center gap-2">
-            <input type="hidden" name="operation" value="print" />
-            <input type="file" name="file" className="text-xs" />
-            <Button type="submit" size="sm" variant="outline">
-              <Upload className="mr-1 size-3.5" />
-              上传文件
-            </Button>
-          </form>
-        </CardHeader>
-        <CardContent>
-          <form method="post" className="space-y-4">
-            <input type="hidden" name="operation" value="print" />
-            <div className="space-y-1.5">
-              <label htmlFor="title" className="text-sm font-medium">标题</label>
-              <Input id="title" name="title" placeholder="文件标题" required />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">内容</label>
-              <textarea
-                name="content"
-                rows={12}
-                className="w-full rounded-md border bg-background px-3 py-2 font-mono text-sm"
-                placeholder="粘贴要打印的代码或文本..."
-                required
-              />
-            </div>
-            <Button type="submit"><Printer className="mr-1 size-4" />提交打印</Button>
-          </form>
-        </CardContent>
-      </Card>
+      <PrintChrome>
+        <div className="space-y-4">
+          <MiniTabs
+            value={printTab}
+            onValueChange={setPrintTab}
+            items={[
+              { value: 'submit', label: '提交打印', icon: Upload },
+              { value: 'queue', label: '打印队列', count: tasks.length, icon: FileText },
+              { value: 'kiosk', label: '打印亭', icon: Printer, disabled: !isPrintAdmin },
+            ]}
+            size="md"
+            aria-label="打印服务"
+          />
 
-      <Card>
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <FileText className="size-4" />打印队列
-          </CardTitle>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => refreshTasks().catch((error) => alert(error.message))}>
-              <RefreshCw className="mr-1 size-3.5" />
-              {loadingTasks ? '刷新中' : '刷新'}
-            </Button>
-            {isPrintAdmin && (
-              <Button type="button" size="sm" variant={kioskEnabled ? 'default' : 'outline'} onClick={() => setKioskEnabled((value) => !value)}>
-                <Printer className="mr-1 size-3.5" />
-                {kioskEnabled ? '打印亭已开启' : '开启打印亭'}
-              </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          <Table>
+          {printTab === 'submit' ? (
+            <Card>
+              <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Printer className="size-4" />提交打印
+                </CardTitle>
+                <form method="post" encType="multipart/form-data" className="flex items-center gap-2">
+                  <input type="hidden" name="operation" value="print" />
+                  <input type="file" name="file" className="text-xs" />
+                  <Button type="submit" size="sm" variant="outline">
+                    <Upload className="mr-1 size-3.5" />
+                    上传文件
+                  </Button>
+                </form>
+              </CardHeader>
+              <CardContent>
+                <form method="post" className="space-y-4">
+                  <input type="hidden" name="operation" value="print" />
+                  <div className="space-y-1.5">
+                    <label htmlFor="title" className="text-sm font-medium">标题</label>
+                    <Input id="title" name="title" placeholder="文件标题" required />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium">内容</label>
+                    <textarea
+                      name="content"
+                      rows={12}
+                      className="w-full rounded-md border bg-background px-3 py-2 font-mono text-sm"
+                      placeholder="粘贴要打印的代码或文本..."
+                      required
+                    />
+                  </div>
+                  <Button type="submit"><Printer className="mr-1 size-4" />提交打印</Button>
+                </form>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {printTab === 'kiosk' && isPrintAdmin ? (
+            <Card>
+              <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+                <div>
+                  <p className="text-sm font-medium">打印亭模式</p>
+                  <p className="text-xs text-muted-foreground">开启后自动领取待打印任务、打开系统打印对话并标记为已打印。</p>
+                </div>
+                <Button type="button" variant={kioskEnabled ? 'default' : 'outline'} onClick={() => setKioskEnabled((value) => !value)}>
+                  <Printer className="mr-1 size-4" />
+                  {kioskEnabled ? '打印亭已开启' : '开启打印亭'}
+                </Button>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {printTab !== 'submit' ? (
+            <Card>
+              <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <FileText className="size-4" />打印队列
+                </CardTitle>
+                <Button type="button" size="sm" variant="outline" onClick={() => refreshTasks().catch((error) => alert(error.message))}>
+                  <RefreshCw className="mr-1 size-3.5" />
+                  {loadingTasks ? '刷新中' : '刷新'}
+                </Button>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="pl-5">用户</TableHead>
@@ -1284,9 +2194,12 @@ export function ContestPrintPage() {
                 })
               )}
             </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                </Table>
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
+      </PrintChrome>
     </motion.div>
   );
 }

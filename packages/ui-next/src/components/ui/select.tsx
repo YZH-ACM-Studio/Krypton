@@ -141,7 +141,7 @@ export const SelectContent = React.forwardRef<
         position={position}
         sideOffset={4}
         className={cn(
-          'relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md',
+          'relative z-[250] max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md',
           // Match the trigger width when using popper positioning.
           position === 'popper'
             && 'w-[var(--radix-select-trigger-width)] min-w-[var(--radix-select-trigger-width)]',

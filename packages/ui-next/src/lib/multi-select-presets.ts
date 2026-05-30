@@ -95,8 +95,7 @@ export async function fetchProblemsByIds(ids: string[]): Promise<ProblemOption[]
   return results;
 }
 
-/** Identify a ProblemOption — keep pid as the canonical key. */
+/** Identify a ProblemOption by Hydro's internal numeric docId for form submits. */
 export function problemKey(p: ProblemOption): string {
-  return String(p.pid || p.docId);
+  return String(p.docId || p.pid);
 }
-

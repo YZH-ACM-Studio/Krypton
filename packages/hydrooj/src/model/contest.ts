@@ -82,6 +82,110 @@ export function isExtended(tdoc: Tdoc) {
     return tdoc.penaltySince.getTime() <= now && now < tdoc.endAt.getTime();
 }
 
+// ── Krypton: client-required & Vigil anti-cheat helpers ───────────────────
+//
+// These are pure-tdoc predicates with no DB I/O — they're safe to call from
+// any handler hot path. The scope-hit check (which needs the userbind
+// StudentRecord) lives in krypton-vigilguard, not here, because that's the
+// plugin boundary.
+
+export function isVigilEnabled(tdoc: Tdoc): boolean {
+    return tdoc.vigilEnabled === true;
+}
+
+export function isClientRequired(tdoc: Tdoc): boolean {
+    return tdoc.entryMode === 'client_required';
+}
+
+export function isClientFinished(tsdoc: any): boolean {
+    return !!tsdoc?.clientFinishedAt;
+}
+
+export async function markClientFinished(
+    domainId: string,
+    tid: ObjectId,
+    uid: number,
+    payload: {
+        reason?: string;
+        sessionId?: string;
+        machineId?: string;
+        studentIdInput?: string;
+        realNameInput?: string;
+        finishedAt?: Date;
+    } = {},
+) {
+    const finishedAt = payload.finishedAt || new Date();
+    return await setStatus(domainId, tid, uid, {
+        clientFinishedAt: finishedAt,
+        clientFinishedReason: payload.reason || 'student_exit',
+        clientFinishedSessionId: payload.sessionId || '',
+        clientFinishedMachineId: payload.machineId || '',
+        clientFinishedStudentIdInput: payload.studentIdInput || '',
+        clientFinishedRealNameInput: payload.realNameInput || '',
+    });
+}
+
+export async function clearClientFinished(domainId: string, tid: ObjectId, uid: number) {
+    return await document.collStatus.findOneAndUpdate(
+        { domainId, docType: document.TYPE_CONTEST, docId: tid, uid },
+        {
+            $unset: {
+                clientFinishedAt: '',
+                clientFinishedReason: '',
+                clientFinishedSessionId: '',
+                clientFinishedMachineId: '',
+                clientFinishedStudentIdInput: '',
+                clientFinishedRealNameInput: '',
+            },
+        },
+        { returnDocument: 'after' },
+    );
+}
+
+/**
+ * The lockout window for a `client_required` contest, expressed as a pair
+ * of wall-clock Dates: `[blockStart, blockEnd]`.
+ *
+ * - `blockStart` = `tdoc.beginAt - clientLoginBlockBeforeMinutes`
+ * - `blockEnd`   = `tdoc.endAt   + clientLoginBlockAfterMinutes`
+ *
+ * Per DESIGN §7.2 the defaults are 60/30 minutes when the fields are
+ * unset. Elastic-duration (per-user lockAt) is *not* considered here — we
+ * use the global `endAt` so the window is conservative (Q6).
+ *
+ * Returns `null` when the contest is not client_required (no window).
+ */
+export function effectiveLockoutWindow(tdoc: Tdoc): { blockStart: Date; blockEnd: Date } | null {
+    if (!isClientRequired(tdoc)) return null;
+    const beforeMin = Number.isFinite(tdoc.clientLoginBlockBeforeMinutes) ? tdoc.clientLoginBlockBeforeMinutes : 60;
+    const afterMin = Number.isFinite(tdoc.clientLoginBlockAfterMinutes) ? tdoc.clientLoginBlockAfterMinutes : 30;
+    return {
+        blockStart: new Date(tdoc.beginAt.getTime() - beforeMin * 60 * 1000),
+        blockEnd: new Date(tdoc.endAt.getTime() + afterMin * 60 * 1000),
+    };
+}
+
+/**
+ * Is `now` inside the lockout window? Defaults `now` to `new Date()`.
+ */
+export function isInLockoutWindow(tdoc: Tdoc, now: Date = new Date()): boolean {
+    const w = effectiveLockoutWindow(tdoc);
+    if (!w) return false;
+    return w.blockStart <= now && now < w.blockEnd;
+}
+
+/**
+ * Does this contest restrict participants by Krypton school / group scope?
+ * Returns true iff `participantScopeMode` is set and not `'none'`.
+ *
+ * The actual scope-hit check (lookup the user's StudentRecord, compare
+ * schoolId/groupIds against the contest's lists) lives in
+ * `krypton-vigilguard` to avoid a hydrooj→plugin reverse dependency.
+ */
+export function hasParticipantScope(tdoc: Tdoc): boolean {
+    return tdoc.participantScopeMode === 'schools' || tdoc.participantScopeMode === 'groups';
+}
+
 export function buildContestRule<T>(def: Optional<ContestRule<T>, 'applyProjection'>): ContestRule<T>;
 export function buildContestRule<T>(def: Partial<ContestRule<T>>, baseRule: ContestRule<T>): ContestRule<T>;
 export function buildContestRule<T>(def: Partial<ContestRule<T>>, baseRule: ContestRule<T> = {} as any) {
@@ -854,7 +958,14 @@ export async function edit(domainId: string, tid: ObjectId, $set: Partial<Tdoc>)
     await bus.parallel('contest/before-edit', tdoc, $set);
     RULES[$set.rule || tdoc.rule].check(Object.assign(tdoc, $set));
     const res = await document.set(domainId, document.TYPE_CONTEST, tid, $set);
-    await bus.parallel('contest/edit', res);
+    // `contest/edit` payload enriched (Krypton): now includes domainId,
+    // tid, and the *post*-mutation tdoc so listeners (vigilguard's Vigil
+    // push, etc.) can act on the new state without re-fetching. Legacy
+    // listeners that only read the first arg get the same matched/
+    // modified result they used to (we pass `res` as the fourth arg for
+    // compatibility — but no current Hydro core code reads it).
+    const updatedTdoc = await document.get(domainId, document.TYPE_CONTEST, tid);
+    await bus.parallel('contest/edit', updatedTdoc, domainId, tid, res);
     return res;
 }
 
@@ -1199,6 +1310,15 @@ global.Hydro.model.contest = {
     isDone,
     isLocked,
     isExtended,
+    // ── Krypton: client-required & Vigil anti-cheat helpers ──────────
+    isVigilEnabled,
+    isClientRequired,
+    isClientFinished,
+    markClientFinished,
+    clearClientFinished,
+    effectiveLockoutWindow,
+    isInLockoutWindow,
+    hasParticipantScope,
     applyProjection,
     statusText,
     addPrintTask,

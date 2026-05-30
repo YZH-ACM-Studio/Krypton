@@ -16,6 +16,7 @@
  */
 import { type HTMLAttributes, type TdHTMLAttributes, type ThHTMLAttributes, forwardRef } from 'react';
 import { cn } from '@/lib/cn';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 export type TableDensity = 'comfortable' | 'compact' | 'flush';
 
@@ -29,9 +30,10 @@ interface TableProps extends HTMLAttributes<HTMLTableElement> {
  */
 const Table = forwardRef<HTMLTableElement, TableProps>(
   ({ className, density = 'comfortable', ...props }, ref) => (
-    <div
+    <ScrollArea
+      orientation="horizontal"
       className={cn(
-        'krypton-table-shell krypton-scrollbar relative w-full overflow-x-auto overflow-y-hidden',
+        'krypton-table-shell relative w-full',
         // Tiny vertical breathing room so first/last row aren't flush against
         // a tight container; horizontal inset is handled per-cell below.
         density !== 'flush' && 'py-1',
@@ -48,7 +50,7 @@ const Table = forwardRef<HTMLTableElement, TableProps>(
         )}
         {...props}
       />
-    </div>
+    </ScrollArea>
   ),
 );
 Table.displayName = 'Table';

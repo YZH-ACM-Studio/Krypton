@@ -13,7 +13,7 @@
 import type { Context } from 'hydrooj';
 import {
     db, Handler, NotFoundError, ObjectId, param, PRIV,
-    PrivilegeError, Types,
+    PrivilegeError, Types, UserModel,
 } from 'hydrooj';
 import {
     addAward, createPerson, deleteAwardType, deletePerson, getConfig, getPerson,
@@ -295,6 +295,69 @@ class AdminPeopleSearchHandler extends AdminBase {
     }
 }
 
+/**
+ * Search teammates by OJ uname OR userbind student (studentId / realName).
+ *
+ * Returns a unified result list distinguished by `kind`:
+ *   - `user`    — an OJ account; `label` is the uname.
+ *   - `student` — a userbind.students entry without (or with) an OJ binding;
+ *                 `label` is "学号 姓名" so the stored teammate string stays
+ *                 readable even when the student has no OJ account.
+ *
+ * The frontend writes `label` into the `teammates: string[]` field directly,
+ * so freetext picks (non-OJ, non-student) still work.
+ */
+class AdminUserSearchHandler extends AdminBase {
+    @param('q', Types.String, true)
+    async get(_ctx: any, q?: string) {
+        const results: Array<{
+            kind: 'user' | 'student';
+            label: string;
+            uid?: number;
+            uname?: string;
+            studentId?: string;
+            realName?: string;
+            boundUserId?: number | null;
+        }> = [];
+        const query = (q || '').trim();
+        if (!query) {
+            this.response.body = { results, users: [] };
+            return;
+        }
+
+        // OJ users by uname prefix.
+        const userMatches = await UserModel.getPrefixList(this.domain._id, query, 10);
+        for (const u of userMatches.filter(Boolean)) {
+            results.push({ kind: 'user', label: u.uname, uid: u._id, uname: u.uname });
+        }
+
+        // userbind.students by studentId or realName.
+        const safe = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const studentDocs = await studentsColl.find({
+            $or: [
+                { studentId: { $regex: safe, $options: 'i' } },
+                { realName: { $regex: safe, $options: 'i' } },
+            ],
+        }).limit(10).toArray();
+        for (const s of studentDocs) {
+            const label = `${s.studentId} ${s.realName}`;
+            results.push({
+                kind: 'student',
+                label,
+                studentId: s.studentId,
+                realName: s.realName,
+                boundUserId: s.boundUserId ?? null,
+            });
+        }
+
+        // Legacy `users` field kept for older callers.
+        const users = results
+            .filter((r) => r.kind === 'user')
+            .map((r) => ({ uid: r.uid!, uname: r.uname! }));
+        this.response.body = { results, users };
+    }
+}
+
 export function applyHandlers(ctx: Context) {
     ctx.Route('rankboard_main', '/rankboard', RankBoardMainHandler);
     ctx.Route('rankboard_detail', '/rankboard/:studentDocId', RankBoardDetailHandler);
@@ -302,4 +365,5 @@ export function applyHandlers(ctx: Context) {
     ctx.Route('admin_rankboard_awards', '/admin/rankboard/awards', AdminAwardTypesHandler);
     ctx.Route('admin_rankboard_person', '/admin/rankboard/people/:id', AdminPersonDetailHandler);
     ctx.Route('admin_rankboard_search', '/admin/rankboard/search', AdminPeopleSearchHandler);
+    ctx.Route('admin_rankboard_user_search', '/admin/rankboard/user-search', AdminUserSearchHandler);
 }

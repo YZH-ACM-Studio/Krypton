@@ -141,11 +141,15 @@ export type BaseUserDict = Record<number, BaseUser>;
 export interface ProblemConfig {
     redirect?: [string, string];
     count: number;
+    time?: number;
+    memory?: number;
     memoryMax: number;
     memoryMin: number;
     timeMax: number;
     timeMin: number;
     langs?: string[];
+    time_limit_rate?: Record<string, number>;
+    memory_limit_rate?: Record<string, number>;
     type: string;
     subType?: string;
     target?: string;
@@ -291,6 +295,69 @@ export interface Tdoc extends Document {
     // For training
     description?: string;
     dag?: TrainingNode[];
+
+    // ── Krypton: client-required contest & Vigil anti-cheat ───────────────
+    /**
+     * `vigilEnabled` — whether this contest is wired to Vigil anti-cheat.
+     * `entryMode`    — `open` allows normal browser entry; `client_required`
+     *                  forces the Qt Client. `client_required` implies
+     *                  `vigilEnabled = true`.
+     * The lockout-window fields control how many minutes before/after the
+     * contest the normal-browser-login lockout is active for in-scope
+     * students (default 60/30). They only matter when entryMode is
+     * client_required.
+     */
+    vigilEnabled?: boolean;
+    entryMode?: 'open' | 'client_required';
+    approvalMode?: 'strict' | 'auto';
+    lockdownMode?: boolean;
+    networkLockdownMode?: boolean;
+    networkLockdownFailurePolicy?: 'strict' | 'report_only' | 'off';
+    networkWhitelistHosts?: string[];
+    networkWhitelistIps?: string[];
+    networkWhitelistPorts?: number[];
+    pauseOnDisconnect?: boolean;
+    screenshotIntervalMs?: number;
+    exclusive?: boolean;
+    clientLoginBlockBeforeMinutes?: number;
+    clientLoginBlockAfterMinutes?: number;
+
+    // ── Krypton: live media + recording + 8-class event detection ─────────
+    /**
+     * `liveEnabled`    — client pushes RTMP screen stream to SRS. Default true.
+     * `recordEnabled`  — SRS dvr writes mp4 (300 students × 1080p × 2h ≈ 510 GB
+     *                    per session). Default false. Only meaningful when
+     *                    `liveEnabled = true`.
+     * `cameraEnabled`  — client pushes a second RTMP stream from the webcam.
+     *                    Default true (lab assumes physical proctoring).
+     * `screenshotJitterMs` — random jitter added to/subtracted from
+     *                    `screenshotIntervalMs` per capture so students cannot
+     *                    predict timing. Default 30000 (60s ± 30s).
+     * `vigilProcessWhitelist` — additional allow-listed executable names on
+     *                    top of the Vigil server's global whitelist.
+     *                    Anything else triggers
+     *                    `process_started_unauthorized` event.
+     */
+    liveEnabled?: boolean;
+    recordEnabled?: boolean;
+    cameraEnabled?: boolean;
+    screenshotJitterMs?: number;
+    vigilProcessWhitelist?: string[];
+
+    /**
+     * Krypton participant scope — independent of legacy `assign`.
+     *
+     * `participantScopeMode = 'none'`   → fall back to legacy Hydro access control.
+     * `participantScopeMode = 'schools'`→ restrict to `participantSchoolIds`.
+     * `participantScopeMode = 'groups'` → restrict to `participantGroupIds`.
+     *
+     * The two list fields are mutually exclusive (school mode ignores the
+     * group list and vice versa). When a non-`none` mode is selected the
+     * effective check is `(legacy Hydro access) AND (Krypton scope hit)`.
+     */
+    participantScopeMode?: 'none' | 'schools' | 'groups';
+    participantSchoolIds?: ObjectId[];
+    participantGroupIds?: ObjectId[];
 }
 
 export interface TrainingDoc extends Omit<Tdoc, 'docType'> {

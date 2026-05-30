@@ -7,7 +7,7 @@
  * current templateName from bootstrap.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   FolderOpen,
@@ -17,6 +17,7 @@ import {
   LogOut,
   Lock,
   Mail,
+  Quote,
   Send,
   Settings,
   Shield,
@@ -24,12 +25,16 @@ import {
   Upload,
   User as UserIcon,
 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { SimpleSelect } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { AvatarUpload } from '@/components/uploader';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -41,7 +46,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
-import { makeInitials, formatRelativeTime, formatDateTime } from '@/lib/format';
+import { makeInitials, formatRelativeTime, formatDateTime, replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
 type R = Record<string, any>;
@@ -263,6 +268,38 @@ function SettingsPanel() {
 function SettingField({ setting, value }: { setting: R; value: any }) {
   const isDisabled = !!(setting.flag & 2); // FLAG_DISABLED
   const isSecret = !!(setting.flag & 4); // FLAG_SECRET
+  const bs = useBootstrap();
+  const isAvatar = setting.key === 'avatar';
+
+  if (isAvatar) {
+    // Replace the plain text field with the full avatar uploader.
+    // The text input is still emitted as a hidden input so the form
+    // round-trips a non-empty value if the user picks a provider via
+    // the popover (the popover hits /home/avatar directly and reloads).
+    const data = bs.page.data as R;
+    const current = data.current || {};
+    const uname = bs.user.name;
+    const avatarUrl = current.avatarUrl || null;
+    return (
+      <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
+        <div>
+          <label className="text-sm font-medium">{setting.name || setting.key}</label>
+          {setting.desc ? (
+            <p className="text-[11px] leading-tight text-muted-foreground">{setting.desc}</p>
+          ) : null}
+        </div>
+        <div>
+          <AvatarUpload
+            uname={uname}
+            currentUrl={avatarUrl || (typeof value === 'string' && /^https?:|^\//.test(value) ? value : null)}
+            size={96}
+          />
+          {/* Preserve the existing text value when posting the rest of the form. */}
+          <input type="hidden" name={setting.key} value={value ?? ''} readOnly />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
@@ -283,14 +320,12 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
             <span className="text-sm text-muted-foreground">{setting.ui || '启用'}</span>
           </label>
         ) : setting.type === 'select' ? (
-          <select
+          <SimpleSelect
             name={setting.key}
-            defaultValue={value ?? setting.value}
+            defaultValue={String(value ?? setting.value ?? '')}
             disabled={isDisabled}
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
-          >
-            {renderRange(setting.range)}
-          </select>
+            options={rangeOptions(setting.range)}
+          />
         ) : setting.type === 'markdown' && !isDisabled ? (
           <MarkdownEditor
             name={setting.key}
@@ -337,25 +372,20 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
   );
 }
 
-function renderRange(range: any) {
-  if (!range) return null;
+function rangeOptions(range: any): { value: string; label: string }[] {
+  if (!range) return [];
   if (Array.isArray(range)) {
     return range.map((opt: any) => {
       const val = Array.isArray(opt) ? opt[0] : opt;
       const label = Array.isArray(opt) ? (opt[1] || opt[0]) : opt;
-      return (
-        <option key={String(val)} value={String(val)}>
-          {String(label)}
-        </option>
-      );
+      return { value: String(val), label: String(label) };
     });
   }
   // Record<string, string>
-  return Object.entries(range).map(([val, label]) => (
-    <option key={val} value={val}>
-      {String(label)}
-    </option>
-  ));
+  return Object.entries(range).map(([val, label]) => ({
+    value: val,
+    label: String(label),
+  }));
 }
 
 /* ------------------------------------------------------------------ */
@@ -611,47 +641,193 @@ function SecurityPanel() {
 /*  Messages panel — data.messages is { [uid]: { udoc, messages[] } }  */
 /* ------------------------------------------------------------------ */
 
+type Conv = { uid: number; udoc: R; messages: R[] };
+
+function parseConversations(raw: any): Conv[] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const result: Conv[] = [];
+  for (const [uid, conv] of Object.entries(raw)) {
+    const c = conv as R;
+    result.push({
+      uid: Number(uid),
+      udoc: c.udoc || {},
+      messages: Array.isArray(c.messages) ? c.messages : [],
+    });
+  }
+  // Sort by last message time (most recent first).
+  result.sort((a, b) => {
+    const ta = lastMessageTime(a.messages);
+    const tb = lastMessageTime(b.messages);
+    return tb - ta;
+  });
+  return result;
+}
+
+function lastMessageTime(messages: R[]): number {
+  const last = messages[messages.length - 1];
+  if (!last) return 0;
+  return objectIdDate(last._id)?.getTime() || 0;
+}
+
+/** Hydro `FLAG_UNREAD = 1` — count incoming messages still flagged unread. */
+function countUnread(conv: Conv, selfUid: number): number {
+  let n = 0;
+  for (const m of conv.messages) {
+    if (m.from === selfUid) continue;
+    if ((m.flag ?? 0) & 1) n += 1;
+  }
+  return n;
+}
+
 function MessagesPanel() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const raw = data.messages;
+  const selfUid = bs.user.id;
 
-  // Convert from object-keyed format to array
-  const conversations: Array<{ uid: number; udoc: R; messages: R[] }> = [];
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    for (const [uid, conv] of Object.entries(raw)) {
-      const c = conv as R;
-      conversations.push({
-        uid: Number(uid),
-        udoc: c.udoc || {},
-        messages: Array.isArray(c.messages) ? c.messages : [],
+  const [conversations, setConversations] = useState<Conv[]>(() => parseConversations(data.messages));
+  const [selectedUid, setSelectedUid] = useState<number | null>(conversations[0]?.uid ?? null);
+  const [search, setSearch] = useState('');
+  const [draftContent, setDraftContent] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<R | null>(null);
+  const [sending, setSending] = useState(false);
+  const draftRef = useRef<HTMLTextAreaElement | null>(null);
+
+  /* Poll /home/messages every 15s for new messages. Hydro doesn't expose
+     a dedicated WS endpoint for messages, so polling is the simplest way
+     to keep the panel live. We merge by message _id so existing scrolling
+     position / drafts aren't disturbed. */
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      try {
+        const res = await fetch('/home/messages', { headers: { Accept: 'application/json' }, credentials: 'include' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data2 = await res.json();
+        if (cancelled) return;
+        const fresh = parseConversations(data2.messages);
+        // Detect new messages for desktop notification
+        let newIncoming = 0;
+        const prevIds = new Set<string>();
+        for (const c of conversations) for (const m of c.messages) prevIds.add(String(m._id));
+        for (const c of fresh) for (const m of c.messages) {
+          if (!prevIds.has(String(m._id)) && m.from !== selfUid) newIncoming += 1;
+        }
+        setConversations(fresh);
+        if (newIncoming > 0 && typeof window !== 'undefined' && 'Notification' in window
+          && Notification.permission === 'granted' && document.visibilityState === 'hidden') {
+          new Notification('Krypton', { body: `${newIncoming} 条新消息` });
+        }
+      } catch { /* network blips ignored */ }
+      finally {
+        if (!cancelled) timer = setTimeout(tick, 15000);
+      }
+    };
+    timer = setTimeout(tick, 15000);
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* Ask for notification permission once (best-effort). */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'default') Notification.requestPermission().catch(() => {});
+  }, []);
+
+  // Filter conversations by search (uname or message content)
+  const filteredConvs = conversations.filter((c) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    if ((c.udoc.uname || '').toLowerCase().includes(q)) return true;
+    return c.messages.some((m) => String(m.content || '').toLowerCase().includes(q));
+  });
+
+  const activeConv = conversations.find((c) => c.uid === selectedUid) || null;
+
+  const insertQuote = (m: R) => {
+    if (!activeConv) return;
+    const uname = activeConv.udoc.uname || `UID ${activeConv.uid}`;
+    const body = String(m.content || '').split('\n').map((l) => `> ${l}`).join('\n');
+    const quote = `> @${uname} 写道：\n${body}\n\n`;
+    setDraftContent((cur) => cur + (cur && !cur.endsWith('\n') ? '\n' : '') + quote);
+    requestAnimationFrame(() => draftRef.current?.focus());
+  };
+
+  const sendMessage = async () => {
+    if (!activeConv) return;
+    if (!draftContent.trim() || sending) return;
+    setSending(true);
+    try {
+      const form = new FormData();
+      form.append('operation', 'send');
+      form.append('uid', String(activeConv.uid));
+      form.append('content', draftContent);
+      const res = await fetch('/home/messages', {
+        method: 'POST', body: form, credentials: 'include',
+        headers: { Accept: 'application/json' },
       });
-    }
-  }
+      if (res.ok || res.redirected) {
+        setDraftContent('');
+        // Refresh now so we see the just-sent message
+        const fr = await fetch('/home/messages', { headers: { Accept: 'application/json' }, credentials: 'include' });
+        if (fr.ok) {
+          const data3 = await fr.json();
+          setConversations(parseConversations(data3.messages));
+        }
+      }
+    } finally { setSending(false); }
+  };
 
-  const [selectedUid, setSelectedUid] = useState<number | null>(
-    conversations[0]?.uid ?? null,
-  );
-  const activeConv = conversations.find((c) => c.uid === selectedUid);
+  const confirmDelete = async (msg: R) => {
+    setPendingDelete(null);
+    if (!msg?._id) return;
+    const form = new FormData();
+    form.append('operation', 'delete_message');
+    form.append('messageId', String(msg._id));
+    try {
+      await fetch('/home/messages', {
+        method: 'POST', body: form, credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      // Drop locally
+      setConversations((cur) => cur.map((c) => ({
+        ...c,
+        messages: c.messages.filter((m) => String(m._id) !== String(msg._id)),
+      })).filter((c) => c.messages.length > 0));
+    } catch { /* ignore */ }
+  };
 
   return (
     <Card className="overflow-hidden">
-      <div className="grid md:grid-cols-[240px_1fr] min-h-[400px]">
+      {/* Definite height so the thread + composer can flex inside without
+          pushing the surrounding Card past the viewport. The grid cells
+          inherit this and the message list scrolls internally. */}
+      <div className="grid md:grid-cols-[260px_1fr] h-[calc(100vh-220px)] min-h-[480px]">
         {/* Conversation list */}
-        <div className="border-r bg-muted/20">
-          <div className="p-3">
+        <div className="border-r bg-muted/20 flex flex-col min-h-0">
+          <div className="p-3 border-b space-y-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">会话</h3>
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="搜索用户 / 内容…"
+              className="h-8 text-xs"
+            />
           </div>
-          {conversations.length === 0 ? (
+          {filteredConvs.length === 0 ? (
             <div className="px-3 py-6 text-center">
               <Mail className="mx-auto size-8 text-muted-foreground/40" />
-              <p className="mt-2 text-xs text-muted-foreground">暂无消息</p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {conversations.length === 0 ? '暂无消息' : '无匹配会话'}
+              </p>
             </div>
           ) : (
-            <div className="space-y-0.5 p-1">
-              {conversations.map((c) => {
+            <ScrollArea className="flex-1" viewportClassName="space-y-0.5 p-1">
+              {filteredConvs.map((c) => {
                 const name = c.udoc.uname || `UID ${c.uid}`;
                 const last = c.messages[c.messages.length - 1];
+                const unread = countUnread(c, selfUid);
                 return (
                   <button
                     key={c.uid}
@@ -663,10 +839,16 @@ function MessagesPanel() {
                     )}
                   >
                     <Avatar className="size-7 shrink-0">
+                      {c.udoc?.avatarUrl ? <AvatarImage src={String(c.udoc.avatarUrl)} alt={name} /> : null}
                       <AvatarFallback className="text-[10px]">{makeInitials(name)}</AvatarFallback>
                     </Avatar>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{name}</p>
+                      <div className="flex items-center justify-between gap-1.5">
+                        <p className="truncate text-sm font-medium">{name}</p>
+                        {unread > 0 ? (
+                          <Badge className="shrink-0 h-4 min-w-4 px-1 text-[10px]">{unread > 99 ? '99+' : unread}</Badge>
+                        ) : null}
+                      </div>
                       {last && (
                         <p className="truncate text-[11px] text-muted-foreground">{getMessagePreview(last)}</p>
                       )}
@@ -674,51 +856,57 @@ function MessagesPanel() {
                   </button>
                 );
               })}
-            </div>
+            </ScrollArea>
           )}
         </div>
 
-        {/* Message thread */}
-        <div className="flex flex-col">
+        {/* Thread + composer — `min-h-0` so the message list (flex-1) can
+            actually shrink below its content and scroll internally. */}
+        <div className="flex flex-col min-h-0">
           {activeConv ? (
             <>
-              <div className="border-b px-4 py-2.5">
-                <p className="text-sm font-medium">{activeConv.udoc.uname || `UID ${activeConv.uid}`}</p>
+              <div className="border-b px-4 py-2.5 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Avatar className="size-7 shrink-0">
+                    {activeConv.udoc?.avatarUrl ? <AvatarImage src={String(activeConv.udoc.avatarUrl)} alt={activeConv.udoc.uname || '?'} /> : null}
+                    <AvatarFallback className="text-[10px]">{makeInitials(activeConv.udoc.uname || '?')}</AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{activeConv.udoc.uname || `UID ${activeConv.uid}`}</p>
+                    <p className="text-[10px] text-muted-foreground">{activeConv.messages.length} 条消息</p>
+                  </div>
+                </div>
+                <a
+                  href={replaceRouteTokens(bs.urls.userDetail, { UID: String(activeConv.uid) })}
+                  className="text-xs text-primary hover:underline"
+                >
+                  资料 →
+                </a>
               </div>
-              <div className="flex-1 space-y-2 overflow-y-auto p-4">
-                {activeConv.messages.map((m, i) => {
-                  const fromMe = m.from === bs.user.id;
-                  const time = objectIdDate(m._id);
-                  return (
-                    <div key={i} className={cn('flex', fromMe ? 'justify-end' : 'justify-start')}>
-                      <div
-                        className={cn(
-                          'max-w-[75%] rounded-lg px-3 py-2 text-sm leading-6',
-                          fromMe ? 'bg-primary text-primary-foreground' : 'bg-muted',
-                        )}
-                      >
-                        <div>
-                          {renderMessageContent(m, fromMe ? 'font-medium underline underline-offset-2' : 'font-medium text-primary underline underline-offset-2')}
-                        </div>
-                        {time && (
-                          <div className={cn('mt-1 text-[10px]', fromMe ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
-                            {formatRelativeTime(time, bs.locale)}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="border-t p-3">
-                <form method="post" className="flex gap-2">
-                  <input type="hidden" name="operation" value="send" />
-                  <input type="hidden" name="uid" value={activeConv.uid} />
-                  <Input name="content" placeholder="输入消息…" className="flex-1" autoComplete="off" />
-                  <Button type="submit" size="sm">
-                    <Send className="mr-1 size-3.5" />发送
+              <ScrollArea className="flex-1" viewportClassName="space-y-2 p-4">
+                {renderGroupedMessages(activeConv.messages, selfUid, bs.locale, insertQuote, setPendingDelete)}
+              </ScrollArea>
+              <div className="border-t p-3 space-y-2">
+                <textarea
+                  ref={draftRef}
+                  value={draftContent}
+                  onChange={(e) => setDraftContent(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      sendMessage();
+                    }
+                  }}
+                  rows={3}
+                  placeholder="输入消息… 支持 Markdown · Ctrl/⌘+Enter 发送"
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
+                />
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] text-muted-foreground">{draftContent.length} 字符</span>
+                  <Button type="button" size="sm" disabled={!draftContent.trim() || sending} onClick={sendMessage}>
+                    <Send className="mr-1 size-3.5" />{sending ? '发送中…' : '发送'}
                   </Button>
-                </form>
+                </div>
               </div>
             </>
           ) : (
@@ -728,8 +916,78 @@ function MessagesPanel() {
           )}
         </div>
       </div>
+
+      {/* Delete confirm */}
+      <Dialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
+        <DialogContent className="w-full sm:w-[400px]" onClose={() => setPendingDelete(null)}>
+          <DialogHeader>
+            <DialogTitle>删除消息</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">此操作无法撤销。该消息将从你和对方的会话中移除。</p>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setPendingDelete(null)}>取消</Button>
+            <Button variant="destructive" onClick={() => pendingDelete && confirmDelete(pendingDelete)}>删除</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
+}
+
+/**
+ * Render messages with same-minute grouping (only show timestamp on the
+ * first message of each minute-bucket) and per-message quote / delete
+ * affordances.
+ */
+function renderGroupedMessages(
+  messages: R[],
+  selfUid: number,
+  locale: string,
+  onQuote: (m: R) => void,
+  onAskDelete: (m: R) => void,
+) {
+  return messages.map((m, i) => {
+    const fromMe = m.from === selfUid;
+    const time = objectIdDate(m._id);
+    const prevTime = i > 0 ? objectIdDate(messages[i - 1]._id) : null;
+    const showTime = !prevTime || (time && prevTime && Math.abs(time.getTime() - prevTime.getTime()) > 60_000);
+    return (
+      <div key={String(m._id) || i} className="space-y-1">
+        {showTime && time ? (
+          <p className="my-1 text-center text-[10px] text-muted-foreground/70">
+            {formatRelativeTime(time, locale)}
+          </p>
+        ) : null}
+        <div className={cn('group flex items-center gap-1.5', fromMe ? 'justify-end' : 'justify-start')}>
+          {fromMe ? (
+            <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button type="button" onClick={() => onQuote(m)} title="引用" className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+                <Quote className="size-3" />
+              </button>
+              <button type="button" onClick={() => onAskDelete(m)} title="删除" className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
+                <Trash2 className="size-3" />
+              </button>
+            </div>
+          ) : null}
+          <div className={cn(
+            'max-w-[75%] rounded-lg px-3 py-2 text-sm leading-6',
+            fromMe ? 'bg-primary text-primary-foreground' : 'bg-muted',
+          )}>
+            <div className={cn('break-words whitespace-pre-wrap', fromMe ? '[&_a]:underline' : '')}>
+              {renderMessageContent(m, fromMe ? 'font-medium underline underline-offset-2' : 'font-medium text-primary underline underline-offset-2')}
+            </div>
+          </div>
+          {!fromMe ? (
+            <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button type="button" onClick={() => onQuote(m)} title="引用" className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+                <Quote className="size-3" />
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  });
 }
 
 /* ------------------------------------------------------------------ */

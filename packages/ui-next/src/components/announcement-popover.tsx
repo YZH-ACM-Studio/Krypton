@@ -10,6 +10,7 @@ import { Megaphone, Pin } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DateTime } from '@/components/ui/datetime';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/cn';
 
 interface UnreadDoc {
@@ -90,7 +91,7 @@ export function AnnouncementPopover({ signedIn }: { signedIn: boolean }) {
             <span className="text-sm font-medium">公告</span>
             {count > 0 && <Badge variant="secondary" className="text-[10px]">{count} 条未读</Badge>}
           </div>
-          <div className="max-h-[400px] overflow-y-auto">
+          <ScrollArea className="max-h-[400px]">
             {!loaded ? (
               <p className="px-4 py-8 text-center text-xs text-muted-foreground">加载中…</p>
             ) : docs.length === 0 ? (
@@ -121,7 +122,7 @@ export function AnnouncementPopover({ signedIn }: { signedIn: boolean }) {
                 ))}
               </ul>
             )}
-          </div>
+          </ScrollArea>
           <div className="border-t px-4 py-2">
             <a href="/announce" className="text-xs text-primary hover:underline">
               查看全部公告 →

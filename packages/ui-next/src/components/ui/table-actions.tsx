@@ -24,9 +24,11 @@
  * If a `formAction` is set, the action renders as a `<form>` so it can
  * POST to a hydrooj handler (no JS required).
  */
-import { type ComponentType, type ReactNode } from 'react';
+import { useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 export type TableActionVariant = 'default' | 'destructive' | 'primary';
 
@@ -61,7 +63,9 @@ export function TableAction({
 }: TableActionProps) {
   const isIconOnly = !children;
   const base = cn(
-    'inline-flex h-7 items-center justify-center gap-1 rounded-md border text-xs font-medium transition-colors',
+    // whitespace-nowrap stops cramped action columns from word-wrapping Chinese
+    // characters one-per-line ("置/顶" rendered as a vertical column).
+    'inline-flex h-7 items-center justify-center gap-1 rounded-md border text-xs font-medium whitespace-nowrap transition-colors',
     isIconOnly ? 'w-7 px-0' : 'px-2.5',
     variant === 'destructive'
       ? 'border-destructive/50 text-destructive hover:border-destructive hover:bg-destructive/10'
@@ -89,19 +93,18 @@ export function TableAction({
 
   if (formAction) {
     return (
-      <form
-        method="post"
-        action={formAction}
-        className="inline-block"
-        onSubmit={(e) => { if (confirm && !window.confirm(confirm)) e.preventDefault(); }}
+      <TableActionForm
+        formAction={formAction}
+        confirm={confirm}
+        hidden={hidden}
+        base={base}
+        hint={hint}
+        disabled={disabled}
+        variant={variant}
+        label={typeof children === 'string' ? children : undefined}
       >
-        {hidden && Object.entries(hidden).map(([k, v]) => (
-          <input key={k} type="hidden" name={k} value={v} />
-        ))}
-        <button type="submit" className={base} title={hint} disabled={disabled}>
-          {inner}
-        </button>
-      </form>
+        {inner}
+      </TableActionForm>
     );
   }
 
@@ -109,6 +112,80 @@ export function TableAction({
     <button type="button" onClick={onClick} className={base} title={hint} disabled={disabled}>
       {inner}
     </button>
+  );
+}
+
+/**
+ * Internal: renders a `<form>` action with an in-page Dialog instead of
+ * `window.confirm` for destructive confirmation.
+ */
+function TableActionForm({
+  formAction, confirm, hidden, base, hint, disabled, variant, label, children,
+}: {
+  formAction: string;
+  confirm?: string;
+  hidden?: Record<string, string | number>;
+  base: string;
+  hint?: string;
+  disabled?: boolean;
+  variant: TableActionVariant;
+  label?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  return (
+    <>
+      <form
+        ref={formRef}
+        method="post"
+        action={formAction}
+        className="inline-block"
+        onSubmit={(e) => {
+          if (confirm && !open) {
+            e.preventDefault();
+            setOpen(true);
+          }
+        }}
+      >
+        {hidden && Object.entries(hidden).map(([k, v]) => (
+          <input key={k} type="hidden" name={k} value={v} />
+        ))}
+        <button type="submit" className={base} title={hint} disabled={disabled}>
+          {children}
+        </button>
+      </form>
+      {confirm ? (
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogContent className="w-full sm:w-[440px]">
+            <DialogHeader>
+              <DialogTitle>{label ? `${label}确认` : '确认操作'}</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">{confirm}</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                取消
+              </Button>
+              <Button
+                type="button"
+                variant={variant === 'destructive' ? 'destructive' : 'default'}
+                onClick={() => {
+                  setOpen(false);
+                  // Bypass the confirm path now that the user has agreed.
+                  if (formRef.current) {
+                    const f = formRef.current;
+                    // Manually submit (HTMLFormElement.submit skips submit event)
+                    f.submit();
+                  }
+                }}
+              >
+                {label || '确认'}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+    </>
   );
 }
 

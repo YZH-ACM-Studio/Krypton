@@ -5,16 +5,18 @@
  *   admin_rankboard_awards.html    → AdminAwardTypesPage
  *   admin_rankboard_person.html    → AdminRankBoardPersonPage
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Award as AwardIcon, FileSpreadsheet, Image as ImageIcon, Pencil, Plus, Save,
-  Search, Settings, Star, Trash2, Upload,
+  Search, Settings, Star, Trash2, Upload, X,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormField, FormRow } from '@/components/ui/form';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { SimpleSelect } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
@@ -40,6 +42,181 @@ registerAdminNavSection({
 interface AwardType {
   _id: string; key: string; name: string; weight: number;
   useRankDecay: boolean; hidden: boolean; order: number; builtin: boolean;
+}
+
+/**
+ * Field visibility per award category. Keyed off the award_type.key so the
+ * preset names map predictably:
+ *   ICPC / CCPC  — 3-person team contests: team name + teammates + 现场 + 学校排名
+ *   天梯赛-团队   — team name + single 排名 (no teammates)
+ *   天梯赛-个人   — single 排名 only
+ *   PAT 系列     — single 排名 + 实际考试得分 (independent of ranking formula)
+ *   其它         — single 排名 only
+ */
+function awardFields(typeKey: string) {
+  const isICPC = /^icpc/i.test(typeKey);
+  const isCCPC = /^ccpc/i.test(typeKey);
+  const isLadderTeam = /^ladder_team/.test(typeKey);
+  const isLadderIndividual = /^ladder_individual/.test(typeKey);
+  const isLadder = isLadderTeam || isLadderIndividual;
+  const isPAT = /^pat/i.test(typeKey);
+  const hasTeam = isICPC || isCCPC || isLadderTeam;
+  const hasTeammates = isICPC || isCCPC;
+  const hasDualRank = isICPC || isCCPC;
+  const hasSingleRank = !hasDualRank;
+  const hasExamScore = isPAT;
+  return { hasTeam, hasTeammates, hasDualRank, hasSingleRank, hasExamScore };
+}
+
+interface SearchResult {
+  kind: 'user' | 'student';
+  label: string;
+  uid?: number;
+  uname?: string;
+  studentId?: string;
+  realName?: string;
+  boundUserId?: number | null;
+}
+
+/**
+ * TeammatesPicker — multi-select with autocomplete over OJ users and
+ * userbind students (by 学号 / 姓名), plus freetext for anyone outside
+ * either system. Stored as `string[]` where each entry is the chosen
+ * label (uname / "学号 姓名" / freetext).
+ */
+function TeammatesPicker({ value, onChange, placeholder }: {
+  value: string[];
+  onChange: (next: string[]) => void;
+  placeholder?: string;
+}) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!query.trim()) { setResults([]); return; }
+    setLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/admin/rankboard/user-search?q=${encodeURIComponent(query.trim())}`, {
+          headers: { Accept: 'application/json' },
+        });
+        const body = await r.json();
+        setResults((body.results || []) as SearchResult[]);
+      } catch {
+        setResults([]);
+      } finally {
+        setLoading(false);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const add = (label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    if (value.includes(trimmed)) return;
+    onChange([...value, trimmed]);
+    setQuery('');
+    setResults([]);
+  };
+
+  const remove = (idx: number) => {
+    onChange(value.filter((_, i) => i !== idx));
+  };
+
+  const exactMatch = results.find(
+    (r) => r.label.toLowerCase() === query.trim().toLowerCase(),
+  );
+
+  return (
+    <div className="relative">
+      <div className="flex flex-wrap items-center gap-1 rounded-md border bg-background p-1.5 min-h-9">
+        {value.map((v, i) => (
+          <span
+            key={`${v}-${i}`}
+            className="inline-flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-xs"
+          >
+            {v}
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              className="rounded p-0.5 hover:bg-foreground/10"
+              title="移除"
+            >
+              <X className="size-3" />
+            </button>
+          </span>
+        ))}
+        <input
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              if (results[0]) add(results[0].label);
+              else if (query.trim()) add(query.trim());
+            } else if (e.key === 'Backspace' && !query && value.length > 0) {
+              remove(value.length - 1);
+            } else if (e.key === 'Escape') {
+              setOpen(false);
+            }
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => {
+            blurTimer.current = setTimeout(() => setOpen(false), 150);
+          }}
+          className="min-w-32 flex-1 bg-transparent text-sm outline-none"
+          placeholder={value.length === 0 ? (placeholder || '搜索 OJ 用户名 / 学号 / 姓名，或直接输入') : ''}
+        />
+      </div>
+      {open && (query || results.length > 0) && (
+        <ScrollArea
+          className="absolute left-0 right-0 z-10 mt-1 max-h-72 rounded-md border bg-popover shadow-lg"
+          onMouseDown={() => { if (blurTimer.current) clearTimeout(blurTimer.current); }}
+        >
+          {loading && (
+            <p className="px-3 py-1.5 text-xs text-muted-foreground">搜索中…</p>
+          )}
+          {results.map((r, i) => (
+            <button
+              key={`${r.kind}-${i}`}
+              type="button"
+              onClick={() => add(r.label)}
+              className="flex w-full items-center justify-between px-3 py-1.5 text-sm hover:bg-accent"
+            >
+              <span className="flex items-center gap-2 truncate">
+                <Badge variant="outline" className="shrink-0 text-[9px]">
+                  {r.kind === 'user' ? 'OJ' : '学生'}
+                </Badge>
+                <span className="truncate">{r.label}</span>
+              </span>
+              <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">
+                {r.kind === 'user' && `UID ${r.uid}`}
+                {r.kind === 'student' && (r.boundUserId ? `绑定 UID ${r.boundUserId}` : '未绑定')}
+              </span>
+            </button>
+          ))}
+          {query.trim() && !exactMatch && (
+            <button
+              type="button"
+              onClick={() => add(query.trim())}
+              className="flex w-full items-center gap-2 border-t px-3 py-1.5 text-sm hover:bg-accent"
+            >
+              <Plus className="size-3" />
+              <span>添加 "{query.trim()}"</span>
+              <span className="ml-auto text-[10px] text-muted-foreground">自定义</span>
+            </button>
+          )}
+          {!loading && !query.trim() && results.length === 0 && (
+            <p className="px-3 py-1.5 text-xs text-muted-foreground">输入用户名 / 学号 / 姓名搜索</p>
+          )}
+        </ScrollArea>
+      )}
+    </div>
+  );
 }
 
 interface Award {
@@ -249,7 +426,7 @@ function AddPersonDialog({ onClose }: { onClose: () => void }) {
           </div>
           {loading && <p className="text-xs text-muted-foreground">搜索中…</p>}
           {results.length > 0 && (
-            <div className="max-h-72 overflow-y-auto rounded border">
+            <ScrollArea className="max-h-72 rounded border">
               {results.map((s) => (
                 <form key={s._id} method="post" action="/admin/rankboard" className="block">
                   <input type="hidden" name="operation" value="add" />
@@ -268,7 +445,7 @@ function AddPersonDialog({ onClose }: { onClose: () => void }) {
                   </button>
                 </form>
               ))}
-            </div>
+            </ScrollArea>
           )}
           {!loading && q && results.length === 0 && (
             <p className="text-center text-sm text-muted-foreground">没有匹配的学生</p>
@@ -553,21 +730,20 @@ export function AdminRankBoardPersonPage() {
           {awards.map((award, idx) => {
             const type = typeMap.get(award.type);
             const cover = award.imageUrls?.[award.coverIndex ?? 0];
+            const fields = awardFields(award.type);
             return (
               <Card key={idx}>
                 <CardContent className="space-y-3 p-4">
                   <div className="flex items-start gap-3">
                     <div className="grid flex-1 gap-3 sm:grid-cols-2">
                       <FormField label="奖项类型">
-                        <select
+                        <SimpleSelect
                           value={award.type}
-                          onChange={(e) => updateAward(idx, { type: e.target.value })}
-                          className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                        >
-                          {data.types.filter((t) => !t.hidden || t.key === award.type).map((t) => (
-                            <option key={t.key} value={t.key}>{t.name}</option>
-                          ))}
-                        </select>
+                          onValueChange={(v) => updateAward(idx, { type: v })}
+                          options={data.types
+                            .filter((t) => !t.hidden || t.key === award.type)
+                            .map((t) => ({ value: t.key, label: t.name }))}
+                        />
                       </FormField>
                       <FormField label="比赛 / 场次">
                         <Input value={award.contest || ''} onChange={(e) => updateAward(idx, { contest: e.target.value })} />
@@ -575,26 +751,46 @@ export function AdminRankBoardPersonPage() {
                       <FormField label="日期">
                         <Input value={award.date || ''} onChange={(e) => updateAward(idx, { date: e.target.value })} placeholder="2025-04" />
                       </FormField>
-                      <FormField label="队名">
-                        <Input value={award.team || ''} onChange={(e) => updateAward(idx, { team: e.target.value })} />
-                      </FormField>
-                      <FormField label="现场排名（liveRank）">
-                        <Input type="number" value={award.liveRank ?? ''} onChange={(e) => updateAward(idx, { liveRank: e.target.value ? Number(e.target.value) : undefined })} />
-                      </FormField>
-                      <FormField label="校内排名（schoolRank）">
-                        <Input type="number" value={award.schoolRank ?? ''} onChange={(e) => updateAward(idx, { schoolRank: e.target.value ? Number(e.target.value) : undefined })} />
-                      </FormField>
-                      <FormField label="队友（逗号分隔）">
-                        <Input
-                          value={(award.teammates || []).join(', ')}
-                          onChange={(e) => updateAward(idx, {
-                            teammates: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
-                          })}
-                        />
-                      </FormField>
-                      <FormField label="自定义得分（覆盖公式，留空走公式）">
-                        <Input type="number" step="any" value={award.score ?? ''} onChange={(e) => updateAward(idx, { score: e.target.value ? Number(e.target.value) : undefined })} />
-                      </FormField>
+                      {fields.hasTeam && (
+                        <FormField label="队名">
+                          <Input value={award.team || ''} onChange={(e) => updateAward(idx, { team: e.target.value })} />
+                        </FormField>
+                      )}
+                      {fields.hasDualRank && (
+                        <>
+                          <FormField label="现场排名">
+                            <Input type="number" value={award.liveRank ?? ''} onChange={(e) => updateAward(idx, { liveRank: e.target.value ? Number(e.target.value) : undefined })} />
+                          </FormField>
+                          <FormField label="学校排名">
+                            <Input type="number" value={award.schoolRank ?? ''} onChange={(e) => updateAward(idx, { schoolRank: e.target.value ? Number(e.target.value) : undefined })} />
+                          </FormField>
+                        </>
+                      )}
+                      {fields.hasSingleRank && (
+                        <FormField label="排名">
+                          <Input type="number" value={award.liveRank ?? ''} onChange={(e) => updateAward(idx, { liveRank: e.target.value ? Number(e.target.value) : undefined })} />
+                        </FormField>
+                      )}
+                      {fields.hasTeammates && (
+                        <FormField label="队友" className="sm:col-span-2">
+                          <TeammatesPicker
+                            value={award.teammates || []}
+                            onChange={(next) => updateAward(idx, { teammates: next })}
+                          />
+                        </FormField>
+                      )}
+                      {fields.hasExamScore && (
+                        <FormField label="实际考试得分">
+                          <Input
+                            type="number"
+                            step="any"
+                            value={award.score ?? ''}
+                            onChange={(e) => updateAward(idx, { score: e.target.value ? Number(e.target.value) : undefined })}
+                            placeholder="如 PAT 98 分"
+                          />
+                          <p className="mt-1 text-[11px] text-muted-foreground">独立于 OJ ranking 得分，仅用于展示。</p>
+                        </FormField>
+                      )}
                     </div>
                     <Button type="button" variant="ghost" size="icon" onClick={() => removeAward(idx)} title="移除奖项">
                       <Trash2 className="size-4 text-destructive" />

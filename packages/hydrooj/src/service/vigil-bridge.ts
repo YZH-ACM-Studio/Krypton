@@ -72,13 +72,28 @@ export interface OjContestPayload {
     ojContestId: string;
     ojDomainId: string;
     title: string;
+    rule?: string;
     beginAt: string;
     endAt: string;
+    entryMode?: 'open' | 'client_required';
     approvalMode: 'strict' | 'auto';
     lockdownMode: boolean;
+    networkLockdownMode?: boolean;
+    networkLockdownFailurePolicy?: 'strict' | 'report_only' | 'off';
+    networkWhitelistHosts?: string[];
+    networkWhitelistIps?: string[];
+    networkWhitelistPorts?: number[];
     pauseOnDisconnect: boolean;
     screenshotIntervalMs: number;
     exclusive: boolean;
+    clientLoginBlockBeforeMinutes?: number;
+    clientLoginBlockAfterMinutes?: number;
+    // Krypton: live media + 8-class event detection
+    liveEnabled?: boolean;
+    recordEnabled?: boolean;
+    cameraEnabled?: boolean;
+    screenshotJitterMs?: number;
+    processWhitelist?: string[];
 }
 
 export async function pushExamToVigil(payload: OjContestPayload): Promise<void> {
@@ -119,9 +134,32 @@ export async function closeSessionOnVigil(
     }
 }
 
+export interface VigilAccessVerification {
+    valid: boolean;
+    ojUserId?: number;
+    /** Owning OJ domain (Vigil knows which OJ instance issued the token). */
+    ojDomainId?: string;
+    /** Contest id this Vigil session is bound to (single-contest binding). */
+    ojContestId?: string;
+    /** Machine fingerprint Vigil recorded at session-open time. */
+    machineId?: string;
+    /**
+     * True when this session is for a Vigil-created temporary user
+     * (proctor approval path, see DESIGN §9). The OJ-side checks combine
+     * this with `scopeOverride` to allow temp accounts past scope gates.
+     */
+    isTemporary?: boolean;
+    /**
+     * True iff the human approver explicitly granted scope override
+     * (e.g., student couldn't be matched against StudentRecord but the
+     * proctor approved them anyway). Defaults to `false`.
+     */
+    scopeOverride?: boolean;
+}
+
 export async function verifyAccessTokenWithVigil(
     sessionId: string, accessToken: string,
-): Promise<{ valid: boolean; ojUserId?: number; ojContestId?: string }> {
+): Promise<VigilAccessVerification> {
     try {
         const res = await fetchWithRetry(`${baseUrl()}/api/integrations/oj/verify-access-token`, {
             method: 'POST',

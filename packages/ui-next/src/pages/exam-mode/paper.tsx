@@ -17,6 +17,8 @@ import {
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { SimpleSelect } from '@/components/ui/select';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { ExamDetailShell, useExamSection, type ExamSection } from '@/components/layout/exam-shell';
 import {
@@ -440,14 +442,14 @@ function ProblemsSection({
               onChange={switchKind}
               lockedKinds={lockedKinds}
             />
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            <ScrollArea className="min-h-0 flex-1">
               <CellNavigator
                 cells={tabCells}
                 activeIndex={activeCellIndex}
                 statuses={statuses}
                 onJump={jumpToCell}
               />
-            </div>
+            </ScrollArea>
             {/* Bottom: 提交本类 (only when contest config opens it) */}
             <div className="border-t bg-card/40 p-2.5">
               {showLockButton ? (
@@ -475,9 +477,9 @@ function ProblemsSection({
         )}
 
         {/* Main scroll area */}
-        <main
-          ref={mainRef}
-          className="min-w-0 flex-1 overflow-y-auto"
+        <ScrollArea
+          viewportRef={mainRef}
+          className="min-w-0 flex-1"
         >
           <div className="space-y-5 p-6">
             {tabCells.map((cell, i) => (
@@ -512,7 +514,7 @@ function ProblemsSection({
               </div>
             ))}
           </div>
-        </main>
+        </ScrollArea>
       </div>
     </div>
   );
@@ -557,7 +559,7 @@ function CellEditor({
     >
       {pdoc.content && (
         <div className="prose prose-sm dark:prose-invert max-w-none">
-          <MarkdownView value={pdoc.content} />
+          <MarkdownView content={pdoc.content} />
         </div>
       )}
       {cell.kind === 'single' && (
@@ -616,16 +618,16 @@ function CellEditor({
           />
           <div className="flex items-center gap-2">
             <label className="text-xs text-muted-foreground">语言:</label>
-            <select
+            <SimpleSelect
               value={draft.lang || (pdoc.config?.langs?.[0] || 'cpp')}
-              onChange={(e) => onCodeChange(draft.code || '', e.target.value)}
+              onValueChange={(v) => onCodeChange(draft.code || '', v)}
               disabled={isLocked}
-              className="rounded-md border bg-background px-2 py-1 text-xs"
-            >
-              {(pdoc.config?.langs || ['cpp', 'python', 'java']).map((l) => (
-                <option key={l} value={l}>{l}</option>
-              ))}
-            </select>
+              size="sm"
+              className="w-auto min-w-[6rem] text-xs"
+              options={(pdoc.config?.langs || ['cpp', 'python', 'java']).map((l) => ({
+                value: l, label: l,
+              }))}
+            />
           </div>
         </>
       )}

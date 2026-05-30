@@ -20,6 +20,13 @@ import {
 } from '../service/server';
 import { ContestCodeHandler, ContestFileDownloadHandler, ContestScoreboardHandler } from './contest';
 
+function parseProblemDocIds(input: string) {
+    const tokens = input.replace(/，/g, ',').split(',').map((i) => i.trim()).filter(Boolean);
+    const pids = tokens.map((i) => Number(i));
+    if (!pids.every((i) => Number.isSafeInteger(i) && i > 0)) throw new ValidationError('pids');
+    return pids;
+}
+
 const validatePenaltyRules = (input: string) => {
     try {
         const res = yaml.load(input);
@@ -196,7 +203,7 @@ class HomeworkEditHandler extends Handler {
         penaltyRules: PenaltyRules, title: string, content: string, _pids: string, rated = false,
         maintainer: number[] = [], assign: string[] = [], langs: string[] = [],
     ) {
-        const pids = _pids.replace(/，/g, ',').split(',').map((i) => +i).filter((i) => i);
+        const pids = parseProblemDocIds(_pids);
         const tdoc = tid ? await contest.get(domainId, tid) : null;
         if (!tid) this.checkPerm(PERM.PERM_CREATE_HOMEWORK);
         else if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_HOMEWORK);

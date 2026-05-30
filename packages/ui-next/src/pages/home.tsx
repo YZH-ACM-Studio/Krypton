@@ -19,7 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { AnnouncementHomeBlock } from '@/components/announcement-home-block';
 import { type GenericUserDoc, useBootstrap } from '@/lib/bootstrap';
@@ -206,9 +206,6 @@ export function KryptonHomePage() {
                 <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
                   {bs.domain.name}
                 </h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  基于 Hydro 构建的现代在线评测系统
-                </p>
               </div>
               {bs.domain.bulletin ? (
                 <div className="max-w-xl text-sm leading-relaxed text-foreground/80">
@@ -424,6 +421,7 @@ export function KryptonHomePage() {
                       href={replaceRouteTokens(bs.urls.discussionDetail, { DID: String(d._id) })}
                     >
                       <Avatar className="mt-0.5 size-7">
+                        {owner?.avatarUrl ? <AvatarImage src={String(owner.avatarUrl)} alt={String(owner.uname || '')} /> : null}
                         <AvatarFallback className="text-[10px]">
                           {makeInitials(owner?.uname || '?')}
                         </AvatarFallback>
@@ -448,6 +446,7 @@ export function KryptonHomePage() {
           <SectionShell title={bs.user.signedIn ? '个人' : '账号'} delay={0.1}>
             <div className="flex items-center gap-3">
               <Avatar>
+                {bs.user.avatarUrl ? <AvatarImage src={bs.user.avatarUrl} alt={bs.user.name} /> : null}
                 <AvatarFallback>{makeInitials(bs.user.name)}</AvatarFallback>
               </Avatar>
               <div className="min-w-0 flex-1">
@@ -496,6 +495,7 @@ export function KryptonHomePage() {
                     <div key={uid} className="flex items-center gap-2 rounded-md px-2 py-1.5">
                       <span className="w-5 text-center text-xs font-medium text-muted-foreground">{i + 1}</span>
                       <Avatar className="size-6">
+                        {u?.avatarUrl ? <AvatarImage src={String(u.avatarUrl)} alt={String(u?.uname || '')} /> : null}
                         <AvatarFallback className="text-[10px]">{makeInitials(u?.uname || '?')}</AvatarFallback>
                       </Avatar>
                       <span className="flex-1 truncate text-sm">{u?.uname || `#${uid}`}</span>

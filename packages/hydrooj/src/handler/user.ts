@@ -1,7 +1,7 @@
 import { generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
 import { isoBase64URL } from '@simplewebauthn/server/helpers';
 import moment from 'moment-timezone';
-import { Binary } from 'mongodb';
+import { Binary, ObjectId } from 'mongodb';
 import Schema from 'schemastery';
 import { randomstring } from '@hydrooj/utils';
 import type { Context } from '../context';
@@ -21,6 +21,7 @@ import * as ContestModel from '../model/contest';
 import domain from '../model/domain';
 import * as oplog from '../model/oplog';
 import problem, { ProblemDoc } from '../model/problem';
+import RecordModel from '../model/record';
 import ScheduleModel from '../model/schedule';
 import SolutionModel from '../model/solution';
 import system from '../model/system';
@@ -41,6 +42,22 @@ async function successfulAuth(this: Handler, udoc: User) {
     this.session.oauthBind = null;
     this.session.recreate = true;
     if (udoc._id !== 0) await oplog.log(this, 'user.loginSuccess', { uid: udoc._id });
+}
+
+async function blockNormalBrowserLoginIfNeeded(this: Handler, domainId: string, udoc: User) {
+    if (!udoc?._id || udoc.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return false;
+    const vg = (global as any).Hydro?.model?.vigilguard;
+    if (!vg?.getBrowserLockoutDecision) return false;
+    const decision = await vg.getBrowserLockoutDecision(domainId, udoc._id);
+    if (!decision) return false;
+    this.session.uid = 0;
+    this.session.scope = PERM.PERM_ALL.toString();
+    this.response.redirect = `/client-required-notice?tid=${encodeURIComponent(decision.contestId)}`;
+    await oplog.log(this, 'vigilguard.login_blocked', {
+        uid: udoc._id,
+        contestId: decision.contestId,
+    });
+    return true;
 }
 
 class UserLoginHandler extends Handler {
@@ -90,6 +107,7 @@ class UserLoginHandler extends Handler {
         }
         await udoc.checkPassword(password);
         if (!udoc.hasPriv(PRIV.PRIV_USER_PROFILE)) throw new BlacklistedError(uname, udoc.banReason);
+        if (await blockNormalBrowserLoginIfNeeded.call(this, domainId, udoc)) return;
         await successfulAuth.call(this, udoc);
         this.session.save = rememberme;
         this.response.redirect = redirect || ((this.request.referer || '/login').endsWith('/login')
@@ -203,8 +221,10 @@ class UserWebauthnHandler extends Handler {
         authenticator.counter = verification.authenticationInfo.newCounter;
         await user.setById(udoc._id, { authenticators: udoc._authenticators });
         if (tdoc.uid === 'login') {
-            await successfulAuth.call(this, await user.getById(domainId, udoc._id));
             await token.del(challenge, token.TYPE_WEBAUTHN);
+            const loginUser = await user.getById(domainId, udoc._id);
+            if (await blockNormalBrowserLoginIfNeeded.call(this, domainId, loginUser)) return;
+            await successfulAuth.call(this, loginUser);
             this.response.redirect = redirect || ((this.request.referer || '/login').endsWith('/login')
                 ? this.url('homepage') : this.request.referer);
         } else {
@@ -418,9 +438,45 @@ class UserDetailHandler extends Handler {
         const tsdocs = await ContestModel.getMultiStatus(domainId, { uid, attend: { $exists: true } }).project({ docId: 1 }).toArray();
         const tdocs = await ContestModel.getMulti(domainId, { docId: { $in: tsdocs.map((i) => i.docId) } })
             .project({ docId: 1, title: 1, rule: 1 }).sort({ _id: -1 }).toArray();
+        // Daily submission heatmap — past ~53 weeks aligned to today.
+        // Range: from the Sunday before "today - 364 days" up to today
+        // (inclusive). Each cell is a YYYY-MM-DD string -> submission count.
+        // Aggregation uses the ObjectId timestamp so no extra field is
+        // needed, and the (domainId, uid) index covers the $match.
+        const daily: Record<string, number> = {};
+        try {
+            const endDay = new Date();
+            endDay.setHours(23, 59, 59, 999);
+            const startDay = new Date(endDay);
+            startDay.setDate(startDay.getDate() - 364);
+            startDay.setHours(0, 0, 0, 0);
+            const minId = ObjectId.createFromTime(Math.floor(startDay.getTime() / 1000));
+            const rows = await RecordModel.coll.aggregate([
+                { $match: { domainId, uid, _id: { $gte: minId } } },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: {
+                                format: '%Y-%m-%d',
+                                date: { $toDate: '$_id' },
+                                // Use the user's recorded timezone if any, otherwise server TZ.
+                                ...(udoc.timezone ? { timezone: String(udoc.timezone) } : {}),
+                            },
+                        },
+                        count: { $sum: 1 },
+                    },
+                },
+            ]).toArray();
+            for (const r of rows) daily[r._id as string] = r.count as number;
+        } catch (e) {
+            // Heatmap is non-critical: if aggregation fails (e.g. permissions),
+            // we just render an empty grid rather than blowing up the page.
+            daily;
+        }
+
         this.response.template = 'user_detail.html';
         this.response.body = {
-            isSelfProfile, udoc, sdoc, pdocs, tags, tdocs,
+            isSelfProfile, udoc, sdoc, pdocs, tags, tdocs, daily,
         };
         if (this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_SOLUTION)) {
             const psdocs = await SolutionModel.getByUser(domainId, uid).limit(10).toArray();
@@ -481,13 +537,16 @@ class OauthCallbackHandler extends Handler {
         const effective = existing.find((i) => i);
 
         if (effective) {
-            await successfulAuth.call(this, await user.getById('system', effective));
+            const udoc = await user.getById('system', effective);
+            if (await blockNormalBrowserLoginIfNeeded.call(this, args.domainId || 'system', udoc)) return;
+            await successfulAuth.call(this, udoc);
             this.response.redirect = '/';
             return;
         }
         const udoc = await user.getByEmail('system', r.email);
         if (udoc) {
             await Promise.all(ids.map((i) => this.ctx.oauth.set(args.type, i, udoc._id)));
+            if (await blockNormalBrowserLoginIfNeeded.call(this, args.domainId || 'system', udoc)) return;
             await successfulAuth.call(this, udoc);
             this.response.redirect = '/';
             return;

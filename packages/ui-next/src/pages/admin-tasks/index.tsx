@@ -1,19 +1,24 @@
 /**
  * /admin/tasks (admin-facing) — task management.
  *
- * Pages:
- *   - admin_tasks.html           → AdminTasksListPage
- *   - admin_tasks_edit.html      → AdminTasksEditPage (create + edit)
- *   - admin_tasks_assign.html    → AdminTasksAssignPage
- *   - admin_tasks_stats.html     → AdminTasksStatsPage
- *   - admin_tasks_scores.html    → AdminTasksScoresPage
- *   - admin_tasks_settings.html  → AdminTasksSettingsPage
+ * Pages (registered template names → page export):
+ *   - admin_tasks.html             → AdminTasksListPage
+ *   - admin_tasks_edit.html        → AdminTasksEditPage     (create + edit, xyflow canvas)
+ *   - admin_tasks_assign.html      → AdminTasksAssignPage   (bulk assign)
+ *   - admin_tasks_stats.html       → AdminTasksStatsPage    (per-task stats)
+ *   - admin_tasks_candidates.html  → AdminTasksCandidatesPage  (quota-mode candidate pool)
+ *   - admin_tasks_scores.html      → AdminTasksScoresPage
+ *   - admin_tasks_settings.html    → AdminTasksSettingsPage
+ *
+ * v2 (2026-05-25): task definition is now a DAG (TaskGraph) rendered with
+ * @xyflow/react. See ~/Krypton/packages/krypton-tasks/src/types.ts for
+ * the canonical schema and grill rationale.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle, ArrowLeft, ChevronRight, ClipboardList, Copy, FileDown, Flag,
-  Layers, ListChecks, Loader2, Lock, Plus, Settings, Star, Tag, Trash2, Trophy,
-  Users, X,
+  Layers, ListChecks, Loader2, Lock, Maximize2, Minimize2, Network, Plus, Save,
+  Settings, Star, Tag, Target, Trash2, Trophy, UserCheck, Users, X,
 } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
@@ -30,6 +35,14 @@ import { DateTime } from '@/components/ui/datetime';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { SimpleSelect } from '@/components/ui/select';
+import {
+  TaskGraphRenderer, TOOLBOX_MIME,
+  type PresetSummary, type TaskGraph, type TaskGraphNode,
+  type TaskPointResult,
+} from '@/components/task-graph';
 
 // ─── Register admin nav ───────────────────────────────────────────────────
 
@@ -37,9 +50,12 @@ registerAdminNavSection({
   key: 'tasks',
   label: '任务系统',
   order: 35,
-  requiredPriv: PRIV.PRIV_USER_PROFILE, // open to anyone with create-task perm; handler does fine-grained check
+  requiredPriv: PRIV.PRIV_USER_PROFILE,
   items: [
-    { key: 'tasks', label: '任务列表', href: '/admin/tasks', icon: ClipboardList, templateNames: ['admin_tasks.html', 'admin_tasks_edit.html', 'admin_tasks_assign.html', 'admin_tasks_stats.html'] },
+    {
+      key: 'tasks', label: '任务列表', href: '/admin/tasks', icon: ClipboardList,
+      templateNames: ['admin_tasks.html', 'admin_tasks_edit.html', 'admin_tasks_assign.html', 'admin_tasks_stats.html', 'admin_tasks_candidates.html'],
+    },
     { key: 'scores', label: '比赛分数', href: '/admin/tasks/scores', icon: Trophy, templateNames: ['admin_tasks_scores.html'] },
     { key: 'settings', label: '系统设置', href: '/admin/tasks/settings', icon: Settings, templateNames: ['admin_tasks_settings.html'] },
   ],
@@ -47,12 +63,15 @@ registerAdminNavSection({
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
-interface TaskPoint {
-  id: string;
-  presetId: string;
-  name: string;
-  params: Record<string, any>;
-}
+type TaskAccess =
+  | { type: 'public' }
+  | { type: 'user_group'; targetId: string }
+  | { type: 'school'; targetId: string }
+  | { type: 'grade'; years: number[] };
+
+type AdmissionMode = 'auto' | 'quota';
+
+type AssignmentStatus = 'pending' | 'qualified' | 'admitted' | 'completed' | 'cancelled';
 
 interface TaskDoc {
   _id: string;
@@ -60,37 +79,99 @@ interface TaskDoc {
   title: string;
   description: string;
   tags: string[];
-  points: TaskPoint[];
-  condition: { type: 'all' } | { type: 'groups'; groups: { points: string[]; require: number }[] };
-  access: { type: 'public' | 'user_group' | 'school'; targetId?: string };
+  graph: TaskGraph;
+  access: TaskAccess;
   isActive: boolean;
   startDate: string | null;
   endDate: string | null;
+  claimStartAt: string | null;
+  claimEndAt: string | null;
   maxAssignments: number | null;
   currentAssignments: number;
+  countsAsStay?: boolean;
+  admissionMode: AdmissionMode;
+  quota: number | null;
   createdAt: string;
   createdBy: number;
 }
 
-interface PresetParam {
-  name: string;
-  label: string;
-  type: string;
-  required?: boolean;
-  default?: any;
-  options?: { value: string; label: string }[];
-  helper?: string;
-}
-
-interface PresetSummary {
-  id: string;
-  name: string;
-  description: string;
-  params: PresetParam[];
-}
-
 interface SchoolRef { _id: string; name: string }
 interface GroupRef { _id: string; schoolId: string; name: string }
+interface ContestRef { _id: string; title: string; beginAt?: string; rule?: string }
+interface HomeworkRef { _id: string; title: string; beginAt?: string }
+interface TrainingRef { _id: string; title: string }
+
+interface AssignmentEntry {
+  _id: string;
+  userId: number;
+  status: AssignmentStatus;
+  canCancel: boolean;
+  assignedAt: string;
+  completedAt?: string | null;
+  qualifiedAt?: string | null;
+  admittedAt?: string | null;
+  admittedBy?: number;
+  admissionNote?: string;
+  confirmedAt?: string | null;
+  confirmedBy?: number;
+  note: string;
+  progress: Record<string, TaskPointResult>;
+}
+
+interface AuditEntry {
+  _id: string;
+  assignmentId: string | null;
+  eventType: string;
+  pointId?: string;
+  adminUid: number;
+  before: any;
+  after: any;
+  reason: string;
+  createdAt: string;
+}
+
+interface StudentLite {
+  studentId: string;
+  realName: string;
+  enrollmentYear: number | null;
+  schoolId: string;
+  groupIds?: string[];
+}
+
+// ─── Status helpers (used across pages) ───────────────────────────────────
+
+function StatusBadge({ status }: { status: AssignmentStatus }) {
+  if (status === 'completed') return <Badge className="bg-emerald-500 text-white hover:bg-emerald-500/90">已完成</Badge>;
+  if (status === 'admitted') return <Badge className="bg-violet-500 text-white hover:bg-violet-500/90">已录取</Badge>;
+  if (status === 'qualified') return <Badge className="bg-amber-500 text-white hover:bg-amber-500/90">候选</Badge>;
+  if (status === 'cancelled') return <Badge variant="outline">已取消</Badge>;
+  return <Badge className="bg-sky-500 text-white hover:bg-sky-500/90">进行中</Badge>;
+}
+
+function toCstDateTimeLocal(value?: string | null): string {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const cst = new Date(d.getTime() + 8 * 60 * 60 * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${cst.getUTCFullYear()}-${pad(cst.getUTCMonth() + 1)}-${pad(cst.getUTCDate())}T${pad(cst.getUTCHours())}:${pad(cst.getUTCMinutes())}`;
+}
+
+function WindowLine({
+  start, end, emptyText,
+}: {
+  start?: string | null;
+  end?: string | null;
+  emptyText: string;
+}) {
+  if (!start && !end) return <span className="text-muted-foreground">{emptyText}</span>;
+  return (
+    <div className="space-y-0.5 text-xs">
+      <div>{start ? <><DateTime value={start} mode="datetime" /> 开始</> : <span className="text-muted-foreground">不限开始</span>}</div>
+      <div>{end ? <><DateTime value={end} mode="datetime" /> 截止</> : <span className="text-muted-foreground">不限截止</span>}</div>
+    </div>
+  );
+}
 
 // ─── Admin Tasks List ────────────────────────────────────────────────────
 
@@ -115,7 +196,7 @@ export function AdminTasksListPage() {
   return (
     <AdminPage
       title="任务管理"
-      description="创建并管理你的训练任务。任务点会根据用户的 OJ 提交、比赛参与情况自动判定。"
+      description="基于流程图的任务系统：从 START 经过若干任务点到 END，存在一条全亮路径即任务完成。"
       actions={
         <div className="flex gap-2">
           <Button asChild variant="outline"><a href="/admin/tasks/scores"><Trophy className="mr-1 size-4" />比赛分数</a></Button>
@@ -152,68 +233,82 @@ export function AdminTasksListPage() {
               <TableRow>
                 <TableHead>任务</TableHead>
                 <TableHead>标签</TableHead>
-                <TableHead>任务点</TableHead>
+                <TableHead>节点</TableHead>
                 <TableHead>认领</TableHead>
+                <TableHead>模式</TableHead>
                 <TableHead>状态</TableHead>
-                <TableHead className="w-72">操作</TableHead>
+                <TableHead className="w-80">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-12 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
                     {data.tasks.length === 0 ? '还没有任务，点击右上角"新建任务"开始创建' : '没有匹配的任务'}
                   </TableCell>
                 </TableRow>
-              ) : filtered.map((task) => (
-                <TableRow key={task._id}>
-                  <TableCell>
-                    <div className="space-y-0.5">
-                      <a href={`/admin/tasks/${task._id}/edit`} className="font-medium hover:underline">{task.title}</a>
-                      <p className="line-clamp-1 text-xs text-muted-foreground">{task.description || '暂无描述'}</p>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {task.tags.map((t) => <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>)}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="gap-1 text-[10px]"><Flag className="size-3" />{task.points.length}</Badge>
-                    {task.condition.type === 'groups' && <Badge variant="outline" className="ml-1 text-[10px]">分组</Badge>}
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    {task.currentAssignments}
-                    {task.maxAssignments && <span className="text-muted-foreground"> / {task.maxAssignments}</span>}
-                  </TableCell>
-                  <TableCell>
-                    {task.isActive ? (
-                      <Badge className="bg-emerald-500 text-white hover:bg-emerald-500/90">启用</Badge>
-                    ) : <Badge variant="outline">停用</Badge>}
-                  </TableCell>
-                  <TableCell>
-                    <TableActions>
-                      <TableAction href={`/admin/tasks/${task._id}/stats`}>统计</TableAction>
-                      <TableAction href={`/admin/tasks/${task._id}/assign`}>分配</TableAction>
-                      <TableAction href={`/admin/tasks/${task._id}/edit`}>编辑</TableAction>
-                      <TableAction
-                        formAction="/admin/tasks"
-                        hidden={{ operation: 'clone', tid: task._id }}
-                        icon={Copy}
-                        hint="复制"
-                      />
-                      <TableAction
-                        formAction="/admin/tasks"
-                        hidden={{ operation: 'delete', tid: task._id }}
-                        icon={Trash2}
-                        variant="destructive"
-                        hint="删除"
-                        confirm={`确定删除任务"${task.title}"？这将一并删除所有用户的分配记录。`}
-                      />
-                    </TableActions>
-                  </TableCell>
-                </TableRow>
-              ))}
+              ) : filtered.map((task) => {
+                const taskNodes = (task.graph?.nodes || []).filter((n) => n.type === 'task');
+                return (
+                  <TableRow key={task._id}>
+                    <TableCell>
+                      <div className="space-y-0.5">
+                        <a href={`/admin/tasks/${task._id}/edit`} className="font-medium hover:underline">{task.title}</a>
+                        <p className="line-clamp-1 text-xs text-muted-foreground">{task.description || '暂无描述'}</p>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {task.tags.map((t) => <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>)}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="gap-1 text-[10px]"><Network className="size-3" />{taskNodes.length}</Badge>
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      <div className="font-medium">
+                        {task.currentAssignments}
+                        {task.maxAssignments && <span className="text-muted-foreground"> / {task.maxAssignments}</span>}
+                      </div>
+                      <WindowLine start={task.claimStartAt} end={task.claimEndAt} emptyText="认领不限时间" />
+                    </TableCell>
+                    <TableCell>
+                      {task.admissionMode === 'quota'
+                        ? <Badge variant="outline" className="gap-1 text-[10px]"><Users className="size-3" />配额 {task.quota ?? '?'}</Badge>
+                        : <Badge variant="outline" className="text-[10px]">自动</Badge>}
+                    </TableCell>
+                    <TableCell>
+                      {task.isActive ? (
+                        <Badge className="bg-emerald-500 text-white hover:bg-emerald-500/90">启用</Badge>
+                      ) : <Badge variant="outline">停用</Badge>}
+                    </TableCell>
+                    <TableCell>
+                      <TableActions>
+                        {task.admissionMode === 'quota' && (
+                          <TableAction href={`/admin/tasks/${task._id}/candidates`}>候选池</TableAction>
+                        )}
+                        <TableAction href={`/admin/tasks/${task._id}/stats`}>统计</TableAction>
+                        <TableAction href={`/admin/tasks/${task._id}/assign`}>分配</TableAction>
+                        <TableAction href={`/admin/tasks/${task._id}/edit`}>编辑</TableAction>
+                        <TableAction
+                          formAction="/admin/tasks"
+                          hidden={{ operation: 'clone', tid: task._id }}
+                          icon={Copy}
+                          hint="复制"
+                        />
+                        <TableAction
+                          formAction="/admin/tasks"
+                          hidden={{ operation: 'delete', tid: task._id }}
+                          icon={Trash2}
+                          variant="destructive"
+                          hint="删除"
+                          confirm={`确定删除任务"${task.title}"？这将一并删除所有用户的分配记录。`}
+                        />
+                      </TableActions>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </CardContent>
@@ -222,54 +317,104 @@ export function AdminTasksListPage() {
   );
 }
 
-// ─── Admin Tasks Edit ─────────────────────────────────────────────────────
+// ─── Admin Tasks Edit (xyflow canvas) ────────────────────────────────────
+
+interface EditPageData {
+  task: TaskDoc | null;
+  isEdit: boolean;
+  presets: PresetSummary[];
+  schools: SchoolRef[];
+  userGroups: GroupRef[];
+  contests: ContestRef[];
+  homeworks: HomeworkRef[];
+  trainings: TrainingRef[];
+}
 
 export function AdminTasksEditPage() {
-  const data = useBootstrap().page.data as {
-    task: TaskDoc | null;
-    isEdit: boolean;
-    presets: PresetSummary[];
-    schools: SchoolRef[];
-    userGroups: GroupRef[];
-  };
+  const data = useBootstrap().page.data as EditPageData;
   const initial = data.task;
+
+  // ── Top-level task fields
   const [title, setTitle] = useState(initial?.title || '');
   const [description, setDescription] = useState(initial?.description || '');
   const [tagsCsv, setTagsCsv] = useState((initial?.tags || []).join(', '));
   const [isActive, setIsActive] = useState(initial?.isActive ?? true);
-  const [startDate, setStartDate] = useState(initial?.startDate?.slice(0, 10) || '');
-  const [endDate, setEndDate] = useState(initial?.endDate?.slice(0, 10) || '');
+  const [countsAsStay, setCountsAsStay] = useState(initial?.countsAsStay ?? false);
+  const [startDate, setStartDate] = useState(toCstDateTimeLocal(initial?.startDate));
+  const [endDate, setEndDate] = useState(toCstDateTimeLocal(initial?.endDate));
+  const [claimStartAt, setClaimStartAt] = useState(toCstDateTimeLocal(initial?.claimStartAt));
+  const [claimEndAt, setClaimEndAt] = useState(toCstDateTimeLocal(initial?.claimEndAt));
   const [maxAssignments, setMaxAssignments] = useState(initial?.maxAssignments?.toString() || '');
-  const [accessType, setAccessType] = useState<'public' | 'user_group' | 'school'>(initial?.access.type || 'public');
-  const [accessTargetId, setAccessTargetId] = useState(initial?.access.targetId || '');
-  const [conditionType, setConditionType] = useState<'all' | 'groups'>(initial?.condition.type || 'all');
-  const [groups, setGroups] = useState<{ points: string[]; require: number }[]>(
-    initial?.condition.type === 'groups' ? initial.condition.groups : [],
+  const [accessType, setAccessType] = useState<TaskAccess['type']>(initial?.access.type || 'public');
+  const [accessTargetId, setAccessTargetId] = useState(
+    (initial?.access.type === 'user_group' || initial?.access.type === 'school')
+      ? (initial.access as any).targetId : '',
   );
-  const [points, setPoints] = useState<TaskPoint[]>(initial?.points || []);
-  const [showPresetPicker, setShowPresetPicker] = useState(false);
+  const [accessYears, setAccessYears] = useState<number[]>(
+    initial?.access.type === 'grade' ? initial.access.years : [],
+  );
+  const [admissionMode, setAdmissionMode] = useState<AdmissionMode>(initial?.admissionMode || 'auto');
+  const [quota, setQuota] = useState<string>(initial?.quota?.toString() || '');
 
-  const presetMap = useMemo(() => Object.fromEntries(data.presets.map((p) => [p.id, p])), [data.presets]);
+  // ── Graph state
+  const [graph, setGraph] = useState<TaskGraph>(() => initial?.graph || {
+    nodes: [
+      { id: 'start', type: 'start', position: { x: 0, y: 0 } },
+      { id: 'end', type: 'end', position: { x: 400, y: 0 } },
+    ],
+    edges: [],
+  });
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const selectedNode = useMemo(() => graph.nodes.find((n) => n.id === selectedNodeId), [graph, selectedNodeId]);
 
-  function addPoint(preset: PresetSummary) {
-    const id = `p_${Math.random().toString(36).slice(2, 10)}`;
-    const params: Record<string, any> = {};
-    for (const p of preset.params) {
-      if (p.default !== undefined) params[p.name] = p.default;
+  // Fullscreen canvas — same pattern as Krypton IDE (krypton-ide.tsx). When
+  // active, the editor card becomes `fixed inset-0` so it covers the whole
+  // viewport. The side panel stays as an inline `<aside>` next to the canvas,
+  // so it naturally anchors to the canvas's right edge in both modes — which
+  // equals the screen's right edge when fullscreen, the card's right edge
+  // when not.
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    if (!fullscreen) return;
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setFullscreen(false); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [fullscreen]);
+
+  // Group presets by category for the left toolbox.
+  const presetsByCategory = useMemo(() => {
+    const out: Record<string, PresetSummary[]> = { behavior: [], condition: [] };
+    for (const p of data.presets) {
+      (out[p.category] = out[p.category] || []).push(p);
     }
-    setPoints([...points, { id, presetId: preset.id, name: preset.name, params }]);
-    setShowPresetPicker(false);
+    return out;
+  }, [data.presets]);
+
+  function updateNode(nodeId: string, patch: Partial<TaskGraphNode>) {
+    setGraph({
+      ...graph,
+      nodes: graph.nodes.map((n) => (n.id === nodeId ? { ...n, ...patch } : n)),
+    });
   }
-  function removePoint(i: number) {
-    const removed = points[i];
-    setPoints(points.filter((_, j) => j !== i));
-    setGroups(groups.map((g) => ({ ...g, points: g.points.filter((p) => p !== removed.id) })));
+  function updateNodeParams(nodeId: string, name: string, value: any) {
+    const node = graph.nodes.find((n) => n.id === nodeId);
+    if (!node) return;
+    updateNode(nodeId, { params: { ...(node.params || {}), [name]: value } });
   }
-  function updatePoint(i: number, patch: Partial<TaskPoint>) {
-    setPoints(points.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  function deleteNode(nodeId: string) {
+    const node = graph.nodes.find((n) => n.id === nodeId);
+    if (!node || node.type !== 'task') return;
+    setGraph({
+      nodes: graph.nodes.filter((n) => n.id !== nodeId),
+      edges: graph.edges.filter((e) => e.from !== nodeId && e.to !== nodeId),
+    });
+    setSelectedNodeId(null);
   }
-  function updatePointParam(i: number, name: string, value: any) {
-    updatePoint(i, { params: { ...points[i].params, [name]: value } });
+
+  function serializedAccess(): TaskAccess {
+    if (accessType === 'public') return { type: 'public' };
+    if (accessType === 'grade') return { type: 'grade', years: accessYears };
+    return { type: accessType, targetId: accessTargetId };
   }
 
   return (
@@ -277,274 +422,420 @@ export function AdminTasksEditPage() {
       title={data.isEdit ? '编辑任务' : '新建任务'}
       actions={<Button asChild variant="outline"><a href="/admin/tasks"><ArrowLeft className="mr-1 size-4" />返回列表</a></Button>}
     >
-      <form method="post" className="space-y-6">
-        <input type="hidden" name="points" value={JSON.stringify(points)} />
-        <input type="hidden" name="condition" value={JSON.stringify(
-          conditionType === 'all'
-            ? { type: 'all' }
-            : { type: 'groups', groups: groups.map((g) => ({ points: g.points, require: g.require })) },
-        )} />
-        <input type="hidden" name="access" value={JSON.stringify(
-          accessType === 'public'
-            ? { type: 'public' }
-            : { type: accessType, targetId: accessTargetId },
-        )} />
+      <form method="post" className="space-y-4">
+        <input type="hidden" name="graph" value={JSON.stringify(graph)} />
+        <input type="hidden" name="access" value={JSON.stringify(serializedAccess())} />
         <input type="hidden" name="isActive" value={isActive ? 'true' : 'false'} />
+        <input type="hidden" name="countsAsStay" value={countsAsStay ? 'true' : 'false'} />
+        <input type="hidden" name="admissionMode" value={admissionMode} />
 
+        {/* Top: basic info + access + admission */}
         <Card>
           <CardHeader><CardTitle className="text-sm">基本信息</CardTitle></CardHeader>
           <CardContent>
             <FormSection>
-              <FormField label="任务名称" required>
-                <Input name="title" value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="例如：ICPC 2026 区域赛参赛资格" />
-              </FormField>
-              <FormField label="任务描述" hint="支持纯文本">
+              <FormRow columns={2}>
+                <FormField label="任务名称" required>
+                  <Input name="title" value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="例如：ICPC 2026 区域赛参赛资格" />
+                </FormField>
+                <FormField label="标签" hint="逗号分隔，便于筛选">
+                  <Input name="tags" value={tagsCsv} onChange={(e) => setTagsCsv(e.target.value)} placeholder="例如：ICPC, 2026, 资格审核" />
+                </FormField>
+              </FormRow>
+              <FormField label="任务描述">
                 <textarea
                   name="description"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="min-h-[80px] w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="min-h-[60px] w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   placeholder="说明这个任务的目的、奖励等"
                 />
               </FormField>
-              <FormRow columns={2}>
-                <FormField label="标签" hint="逗号分隔，便于筛选">
-                  <Input name="tags" value={tagsCsv} onChange={(e) => setTagsCsv(e.target.value)} placeholder="例如：ICPC, 2026, 资格审核" />
+              <FormRow columns={4}>
+                <FormField label="统计开始" hint="任务点未单独设置时继承这里">
+                  <Input type="datetime-local" name="startDate" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
                 </FormField>
-                <FormField label="状态">
-                  <label className="flex items-center gap-2 pt-2 text-sm">
-                    <Checkbox checked={isActive} onChange={(e) => setIsActive(e.target.checked)}  />
-                    启用（用户可见可认领）
-                  </label>
+                <FormField label="统计结束" hint="用于任务进度统计，不限制已认领用户重查">
+                  <Input type="datetime-local" name="endDate" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                </FormField>
+                <FormField label="认领开始" hint="只限制用户自行认领">
+                  <Input type="datetime-local" name="claimStartAt" value={claimStartAt} onChange={(e) => setClaimStartAt(e.target.value)} />
+                </FormField>
+                <FormField label="认领截止" hint="管理员分配不受影响">
+                  <Input type="datetime-local" name="claimEndAt" value={claimEndAt} onChange={(e) => setClaimEndAt(e.target.value)} />
                 </FormField>
               </FormRow>
-              <FormRow columns={3}>
-                <FormField label="开始日期">
-                  <Input type="date" name="startDate" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-                </FormField>
-                <FormField label="结束日期">
-                  <Input type="date" name="endDate" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-                </FormField>
+              <FormRow columns={2}>
                 <FormField label="最大认领数" hint="留空=不限">
                   <Input type="number" min={1} name="maxAssignments" value={maxAssignments} onChange={(e) => setMaxAssignments(e.target.value)} />
                 </FormField>
+                <FormField label="启用状态">
+                  <label className="flex h-9 items-center gap-2 text-sm">
+                    <Checkbox checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+                    用户可见可认领
+                  </label>
+                </FormField>
               </FormRow>
+              <FormField label="完成后计入留校次数" hint="勾选后：任务进入 completed 状态时，自动 +1 留校（idempotent）。配额模式下只有 admin 点「确认录取」后才触发。">
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox checked={countsAsStay} onChange={(e) => setCountsAsStay(e.target.checked)} />
+                  完成此任务计 1 次留校
+                </label>
+              </FormField>
             </FormSection>
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader><CardTitle className="text-sm">可见范围</CardTitle></CardHeader>
-          <CardContent>
-            <MiniTabs
-              size="md"
-              value={accessType}
-              onValueChange={(t) => { setAccessType(t); if (t === 'public') setAccessTargetId(''); }}
-              items={[
-                { value: 'public', label: '所有人' },
-                { value: 'user_group', label: '限定用户组' },
-                { value: 'school', label: '限定学校' },
-              ]}
-            />
-            {accessType === 'school' && (
-              <FormField label="选择学校" className="mt-3">
-                <select
-                  value={accessTargetId}
-                  onChange={(e) => setAccessTargetId(e.target.value)}
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                  required
-                >
-                  <option value="">— 选择 —</option>
-                  {data.schools.map((s) => (<option key={s._id} value={s._id}>{s.name}</option>))}
-                </select>
-              </FormField>
-            )}
-            {accessType === 'user_group' && (
-              <FormField label="选择用户组" className="mt-3">
-                <select
-                  value={accessTargetId}
-                  onChange={(e) => setAccessTargetId(e.target.value)}
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                  required
-                >
-                  <option value="">— 选择 —</option>
-                  {data.userGroups.map((g) => {
-                    const s = data.schools.find((s2) => s2._id === g.schoolId);
-                    return (<option key={g._id} value={g._id}>{s ? `${s.name} / ` : ''}{g.name}</option>);
-                  })}
-                </select>
-              </FormField>
-            )}
-          </CardContent>
-        </Card>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader><CardTitle className="text-sm">可见范围</CardTitle></CardHeader>
+            <CardContent>
+              <MiniTabs
+                size="md"
+                value={accessType}
+                onValueChange={(t) => {
+                  setAccessType(t as TaskAccess['type']);
+                  if (t === 'public') setAccessTargetId('');
+                }}
+                items={[
+                  { value: 'public', label: '所有人' },
+                  { value: 'user_group', label: '用户组' },
+                  { value: 'school', label: '学校' },
+                  { value: 'grade', label: '年级' },
+                ]}
+              />
+              {accessType === 'grade' && (
+                <FormField label="允许的入学年" className="mt-3">
+                  <Input
+                    value={accessYears.join(' ')}
+                    onChange={(e) => setAccessYears(
+                      e.target.value.split(/[\s,，]+/).map((s) => parseInt(s.trim(), 10))
+                        .filter((n) => Number.isInteger(n) && n >= 1900 && n <= 2099),
+                    )}
+                    placeholder="例如：2023 2024"
+                  />
+                </FormField>
+              )}
+              {accessType === 'school' && (
+                <FormField label="选择学校" className="mt-3">
+                  <SimpleSelect
+                    value={accessTargetId}
+                    onValueChange={setAccessTargetId}
+                    placeholder="— 选择 —"
+                    options={[
+                      { value: '', label: '— 选择 —' },
+                      ...data.schools.map((s) => ({ value: s._id, label: s.name })),
+                    ]}
+                  />
+                </FormField>
+              )}
+              {accessType === 'user_group' && (
+                <FormField label="选择用户组" className="mt-3">
+                  <SimpleSelect
+                    value={accessTargetId}
+                    onValueChange={setAccessTargetId}
+                    placeholder="— 选择 —"
+                    options={[
+                      { value: '', label: '— 选择 —' },
+                      ...data.userGroups.map((g) => {
+                        const s = data.schools.find((s2) => s2._id === g.schoolId);
+                        return { value: g._id, label: `${s ? `${s.name} / ` : ''}${g.name}` };
+                      }),
+                    ]}
+                  />
+                </FormField>
+              )}
+            </CardContent>
+          </Card>
 
-        <Card>
+          <Card>
+            <CardHeader><CardTitle className="text-sm">完成模式</CardTitle></CardHeader>
+            <CardContent>
+              <MiniTabs
+                size="md"
+                value={admissionMode}
+                onValueChange={(v) => setAdmissionMode(v as AdmissionMode)}
+                items={[
+                  { value: 'auto', label: '自动（满足图条件即完成）' },
+                  { value: 'quota', label: '配额（候选池 + 管理员审核）' },
+                ]}
+              />
+              {admissionMode === 'quota' && (
+                <FormField label="名额数（quota）" className="mt-3" hint="软上限——超额录取会警告但不阻止">
+                  <Input
+                    type="number"
+                    name="quota"
+                    min={1}
+                    value={quota}
+                    onChange={(e) => setQuota(e.target.value)}
+                    placeholder="例如 30"
+                  />
+                </FormField>
+              )}
+              {admissionMode === 'auto' && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  用户图条件全满足后直接进入 <b>completed</b>。若勾了「完成后计入留校次数」，立即触发 +1。
+                </p>
+              )}
+              {admissionMode === 'quota' && !quota && (
+                <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                  未填名额数 — 留空 = 不设上限（仍走候选池流程，admin 自行控制）
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* The big canvas — flex row [toolbox | canvas | side-panel-when-selected].
+            When fullscreen, the whole Card escapes its page slot via
+            `fixed inset-0 z-50` (same trick as krypton-ide). The inner flex
+            layout is unchanged, so the side panel keeps tracking the canvas's
+            right edge — which is the screen's right edge in fullscreen. */}
+        <Card
+          className={cn(
+            'overflow-hidden',
+            fullscreen && 'fixed inset-0 z-50 rounded-none border-0',
+          )}
+        >
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm">任务点 ({points.length})</CardTitle>
-              <Button type="button" size="sm" variant="outline" onClick={() => setShowPresetPicker(true)}>
-                <Plus className="mr-1 size-4" />添加任务点
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <CardTitle className="text-sm">任务流程图</CardTitle>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  从左侧拖拽节点到画布；连线拖动节点边上的圆点；删除连线双击它或选中后按 Delete。
+                </p>
+              </div>
+              {/* Header keeps just the fullscreen toggle. Save lives in the
+                  bottom action card so the form follows natural top-down flow
+                  (same pattern as AssignPage / ScoresPage / SettingsPage). */}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setFullscreen((p) => !p)}
+                title={fullscreen ? '退出全屏 (Esc)' : '全屏编辑'}
+              >
+                {fullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
-            {points.length === 0 ? (
-              <div className="rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground">
-                <Flag className="mx-auto size-8 text-muted-foreground/40" />
-                <p className="mt-2">点击"添加任务点"开始构建任务</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {points.map((point, i) => {
-                  const preset = presetMap[point.presetId];
-                  return (
-                    <Card key={point.id} className="bg-muted/30">
-                      <CardContent className="space-y-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1">
-                            <Input
-                              value={point.name}
-                              onChange={(e) => updatePoint(i, { name: e.target.value })}
-                              className="font-medium"
-                            />
-                            {preset && <p className="mt-1 text-xs text-muted-foreground">{preset.description}</p>}
-                          </div>
-                          <Button type="button" size="sm" variant="ghost" onClick={() => removePoint(i)}>
-                            <X className="size-4" />
-                          </Button>
-                        </div>
-                        {preset?.params && preset.params.length > 0 && (
-                          <div className="grid gap-3 sm:grid-cols-2">
-                            {preset.params.map((p) => (
-                              <ParamInput
-                                key={p.name}
-                                spec={p}
-                                value={point.params[p.name] ?? ''}
-                                onChange={(v) => updatePointParam(i, p.name, v)}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
+          <CardContent
+            className={cn(
+              'p-0',
+              fullscreen ? 'flex-1 min-h-0' : '',
             )}
+            // In fullscreen, the Card is `fixed inset-0` and uses default
+            // CardContent height. Force flex-col on the Card so the canvas
+            // row can flex-1 fill remaining viewport height.
+            style={fullscreen ? { height: 'calc(100% - 4rem)' } : undefined}
+          >
+            <div
+              className={cn('flex', fullscreen ? 'h-full' : 'h-[68vh]')}
+            >
+              <Toolbox presetsByCategory={presetsByCategory} />
+              <div className="flex min-w-0 flex-1">
+                <TaskGraphRenderer
+                  graph={graph}
+                  presets={data.presets}
+                  onChange={setGraph}
+                  selectedNodeId={selectedNodeId}
+                  onNodeSelect={setSelectedNodeId}
+                  height="100%"
+                />
+              </div>
+              {selectedNode && (
+                <aside className="flex w-[400px] shrink-0 flex-col border-l bg-background">
+                  <div className="flex shrink-0 items-center justify-between border-b px-5 py-3">
+                    <h3 className="text-sm font-semibold">
+                      {selectedNode.type === 'start' ? '开始节点'
+                        : selectedNode.type === 'end' ? '完成节点'
+                        : '编辑任务点'}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedNodeId(null)}
+                      className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      title="关闭"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+                  <ScrollArea className="min-h-0 flex-1">
+                    <div className="space-y-4 px-5 py-4">
+                      {selectedNode.type === 'task' ? (
+                        <NodeEditor
+                          node={selectedNode}
+                          presets={data.presets}
+                          contests={data.contests}
+                          homeworks={data.homeworks}
+                          trainings={data.trainings}
+                          schools={data.schools}
+                          userGroups={data.userGroups}
+                          onChangeName={(name) => updateNode(selectedNode.id, { name })}
+                          onChangeParam={(name, value) => updateNodeParams(selectedNode.id, name, value)}
+                          onDelete={() => deleteNode(selectedNode.id)}
+                        />
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          {selectedNode.type === 'start' ? '开始节点：所有路径的起点，不可删除。可拖动调整位置。' : '完成节点：所有路径的终点，不可删除。可拖动调整位置。'}
+                        </p>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </aside>
+              )}
+            </div>
           </CardContent>
         </Card>
 
+        {/* Bottom action bar. Sits outside the canvas Card so it's NOT covered
+            when the canvas enters fullscreen — admin must Esc out of fullscreen
+            to save, which is the right workflow (review whole graph → save). */}
         <Card>
-          <CardHeader><CardTitle className="text-sm">完成条件</CardTitle></CardHeader>
-          <CardContent className="space-y-3">
-            <MiniTabs
-              size="md"
-              value={conditionType}
-              onValueChange={setConditionType}
-              items={[
-                { value: 'all', label: '满足全部任务点' },
-                { value: 'groups', label: '分组条件' },
-              ]}
-            />
-            {conditionType === 'groups' && (
-              <div className="space-y-3">
-                {groups.map((g, i) => (
-                  <Card key={i} className="bg-muted/30">
-                    <CardContent className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium">分组 {i + 1}</span>
-                        <Button type="button" size="sm" variant="ghost" onClick={() => setGroups(groups.filter((_, j) => j !== i))}>
-                          <X className="size-4" />
-                        </Button>
-                      </div>
-                      <FormRow columns={2}>
-                        <FormField label="至少完成（个）">
-                          <Input
-                            type="number"
-                            min={1}
-                            value={g.require}
-                            onChange={(e) => setGroups(groups.map((gg, j) => (j === i ? { ...gg, require: +e.target.value || 1 } : gg)))}
-                          />
-                        </FormField>
-                      </FormRow>
-                      <div className="space-y-1.5 text-sm">
-                        <label className="text-xs text-muted-foreground">勾选属于此组的任务点：</label>
-                        <div className="space-y-1">
-                          {points.map((p) => (
-                            <label key={p.id} className="flex items-center gap-2">
-                              <Checkbox
-                                checked={g.points.includes(p.id)}
-                                onChange={(e) => {
-                                  const newPoints = e.target.checked
-                                    ? [...g.points, p.id]
-                                    : g.points.filter((pp) => pp !== p.id);
-                                  setGroups(groups.map((gg, j) => (j === i ? { ...gg, points: newPoints } : gg)));
-                                }}
-                               />
-                              {p.name}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-                <Button
-                  type="button" size="sm" variant="outline"
-                  onClick={() => setGroups([...groups, { points: [], require: 1 }])}
-                >
-                  <Plus className="mr-1 size-4" />添加分组
-                </Button>
-              </div>
-            )}
+          <CardContent className="flex items-center justify-end gap-2 py-4">
+            <Button asChild type="button" variant="outline">
+              <a href="/admin/tasks"><X className="mr-1 size-4" />取消</a>
+            </Button>
+            <Button type="submit">
+              <Save className="mr-1 size-4" />{data.isEdit ? '保存修改' : '创建任务'}
+            </Button>
           </CardContent>
         </Card>
-
-        <div className="flex justify-end gap-2">
-          <Button asChild variant="outline"><a href="/admin/tasks">取消</a></Button>
-          <Button type="submit"><ListChecks className="mr-1 size-4" />{data.isEdit ? '保存' : '创建'}</Button>
-        </div>
       </form>
-
-      {showPresetPicker && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowPresetPicker(false)}>
-          <div className="max-h-[80vh] w-full max-w-3xl overflow-y-auto rounded-lg border bg-card shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="sticky top-0 flex items-center justify-between border-b bg-card px-5 py-3">
-              <h3 className="font-semibold">选择任务点类型</h3>
-              <Button size="sm" variant="ghost" onClick={() => setShowPresetPicker(false)}><X className="size-4" /></Button>
-            </div>
-            <div className="grid gap-2 p-5">
-              {data.presets.map((p) => (
-                <button
-                  type="button"
-                  key={p.id}
-                  onClick={() => addPoint(p)}
-                  className="rounded-md border bg-background p-3 text-left hover:border-primary hover:bg-accent"
-                >
-                  <div className="font-medium">{p.name}</div>
-                  <div className="text-xs text-muted-foreground">{p.description}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </AdminPage>
   );
 }
 
-function ParamInput({ spec, value, onChange }: { spec: PresetParam; value: any; onChange: (v: any) => void }) {
+function Toolbox({ presetsByCategory }: { presetsByCategory: Record<string, PresetSummary[]> }) {
+  function onDragStart(event: React.DragEvent<HTMLDivElement>, presetId: string) {
+    event.dataTransfer.setData(TOOLBOX_MIME, presetId);
+    event.dataTransfer.effectAllowed = 'move';
+  }
+  const groups = [
+    { key: 'behavior', label: '行为型', icon: Target, tone: 'sky' },
+    { key: 'condition', label: '条件型', icon: UserCheck, tone: 'amber' },
+  ] as const;
+  // Toolbox is the leftmost column inside a fixed-height flex row, so we let
+  // the parent dictate height: `w-[220px]` width, `h-full` to fill the flex
+  // row, then ScrollArea inside is `min-h-0 flex-1`. Hardcoded `h-[68vh]`
+  // (old behavior) clipped wrong when the page entered fullscreen.
+  return (
+    <div className="flex h-full w-[220px] shrink-0 flex-col border-r bg-muted/30">
+      <h3 className="shrink-0 px-3 pb-2 pt-3 text-xs font-medium text-muted-foreground">从这里拖到画布</h3>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="space-y-3 px-3 pb-4">
+          {groups.map((g) => (
+            <div key={g.key}>
+              <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <g.icon className={cn('size-3', g.key === 'behavior' ? 'text-sky-500' : 'text-amber-500')} />
+                {g.label}
+              </div>
+              <div className="space-y-1">
+                {(presetsByCategory[g.key] || []).map((p) => (
+                  <div
+                    key={p.id}
+                    draggable
+                    onDragStart={(e) => onDragStart(e, p.id)}
+                    className={cn(
+                      'cursor-grab rounded border bg-card px-2 py-1.5 text-xs transition-colors hover:bg-accent active:cursor-grabbing',
+                      g.key === 'behavior' && 'hover:border-sky-400',
+                      g.key === 'condition' && 'hover:border-amber-400',
+                    )}
+                    title={p.description}
+                  >
+                    <div className="font-medium">{p.name}</div>
+                    <div className="line-clamp-2 text-[10px] text-muted-foreground">{p.description}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}
+
+interface NodeEditorProps {
+  node: TaskGraphNode;
+  presets: PresetSummary[];
+  contests: ContestRef[];
+  homeworks: HomeworkRef[];
+  trainings: TrainingRef[];
+  schools: SchoolRef[];
+  userGroups: GroupRef[];
+  onChangeName: (name: string) => void;
+  onChangeParam: (name: string, value: any) => void;
+  onDelete: () => void;
+}
+
+function NodeEditor(props: NodeEditorProps) {
+  const preset = props.presets.find((p) => p.id === props.node.presetId);
+  if (!preset) {
+    return (
+      <div className="space-y-2 text-xs text-muted-foreground">
+        <p>未知的 preset：{props.node.presetId}</p>
+        <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={props.onDelete}>
+          <Trash2 className="mr-1 size-3.5" />删除节点
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3 text-sm">
+      <FormField label="节点显示名">
+        <Input value={props.node.name || ''} onChange={(e) => props.onChangeName(e.target.value)} placeholder={preset.name} />
+      </FormField>
+      <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        <div className="mb-0.5 font-medium">{preset.name}</div>
+        {preset.description}
+      </div>
+      {preset.params.map((p) => (
+        <NodeParamInput
+          key={p.name}
+          spec={p}
+          value={props.node.params?.[p.name] ?? ''}
+          onChange={(v) => props.onChangeParam(p.name, v)}
+          contests={props.contests}
+          homeworks={props.homeworks}
+          trainings={props.trainings}
+          schools={props.schools}
+          userGroups={props.userGroups}
+        />
+      ))}
+      <div className="pt-2">
+        <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={props.onDelete}>
+          <Trash2 className="mr-1 size-3.5" />删除节点
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+interface NodeParamInputProps {
+  spec: PresetSummary['params'][number];
+  value: any;
+  onChange: (v: any) => void;
+  contests: ContestRef[];
+  homeworks: HomeworkRef[];
+  trainings: TrainingRef[];
+  schools: SchoolRef[];
+  userGroups: GroupRef[];
+}
+
+function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings, schools, userGroups }: NodeParamInputProps) {
   if (spec.type === 'select' || spec.type === 'pat_level' || spec.type === 'pat_season' || spec.type === 'gplt_level') {
     return (
       <FormField label={spec.label} hint={spec.helper} required={spec.required}>
-        <select
+        <SimpleSelect
           value={value || ''}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-        >
-          <option value="">—</option>
-          {spec.options?.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
-        </select>
+          onValueChange={onChange}
+          placeholder="—"
+          options={[
+            { value: '', label: '—' },
+            ...(spec.options?.map((o) => ({ value: o.value, label: o.label })) || []),
+          ]}
+        />
       </FormField>
     );
   }
@@ -555,11 +846,116 @@ function ParamInput({ spec, value, onChange }: { spec: PresetParam; value: any; 
       </FormField>
     );
   }
+  if (spec.type === 'contest') {
+    return (
+      <FormField label={spec.label} hint={spec.helper} required={spec.required}>
+        <SimpleSelect
+          value={value || ''}
+          onValueChange={onChange}
+          placeholder="— 选择比赛 —"
+          options={[
+            { value: '', label: '— 选择比赛 —' },
+            ...contests.map((c) => ({ value: c._id, label: c.title })),
+          ]}
+        />
+      </FormField>
+    );
+  }
+  if (spec.type === 'homework') {
+    return (
+      <FormField label={spec.label} hint={spec.helper} required={spec.required}>
+        <SimpleSelect
+          value={value || ''}
+          onValueChange={onChange}
+          placeholder="— 选择 homework —"
+          options={[
+            { value: '', label: '— 选择 homework —' },
+            ...homeworks.map((c) => ({ value: c._id, label: c.title })),
+          ]}
+        />
+      </FormField>
+    );
+  }
+  if (spec.type === 'training') {
+    return (
+      <FormField label={spec.label} hint={spec.helper} required={spec.required}>
+        <SimpleSelect
+          value={value || ''}
+          onValueChange={onChange}
+          placeholder="— 选择 training —"
+          options={[
+            { value: '', label: '— 选择 training —' },
+            ...trainings.map((c) => ({ value: c._id, label: c.title })),
+          ]}
+        />
+      </FormField>
+    );
+  }
+  if (spec.type === 'school') {
+    return (
+      <FormField label={spec.label} hint={spec.helper} required={spec.required}>
+        <SimpleSelect
+          value={value || ''}
+          onValueChange={onChange}
+          placeholder="— 选择学校 —"
+          options={[
+            { value: '', label: '— 选择学校 —' },
+            ...schools.map((c) => ({ value: c._id, label: c.name })),
+          ]}
+        />
+      </FormField>
+    );
+  }
+  if (spec.type === 'user_group') {
+    return (
+      <FormField label={spec.label} hint={spec.helper} required={spec.required}>
+        <SimpleSelect
+          value={value || ''}
+          onValueChange={onChange}
+          placeholder="— 选择用户组 —"
+          options={[
+            { value: '', label: '— 选择用户组 —' },
+            ...userGroups.map((g) => {
+              const s = schools.find((sc) => sc._id === g.schoolId);
+              return { value: g._id, label: `${s ? `${s.name} / ` : ''}${g.name}` };
+            }),
+          ]}
+        />
+      </FormField>
+    );
+  }
+  if (spec.type === 'problem') {
+    return (
+      <FormField label={spec.label} hint={spec.helper || '题目 ID / pid（v2: 后续接入 autocomplete）'} required={spec.required}>
+        <Input
+          value={value || ''}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="例如 1001 或 P1001"
+        />
+      </FormField>
+    );
+  }
+  if (spec.type === 'years') {
+    const years = Array.isArray(value) ? value : [];
+    return (
+      <FormField label={spec.label} hint={spec.helper} required={spec.required}>
+        <Input
+          value={years.join(' ')}
+          onChange={(e) => onChange(
+            e.target.value.split(/[\s,，]+/)
+              .map((s) => parseInt(s.trim(), 10))
+              .filter((n) => Number.isInteger(n) && n >= 1900 && n <= 2099),
+          )}
+          placeholder="例如 2023 2024"
+        />
+      </FormField>
+    );
+  }
   return (
-    <FormField label={spec.label} hint={spec.helper || (spec.type === 'problem' ? '填入题目 ID' : spec.type === 'contest' ? '填入比赛 ObjectId' : spec.type === 'user_group' ? '填入用户组 ObjectId' : '')} required={spec.required}>
+    <FormField label={spec.label} hint={spec.helper} required={spec.required}>
       <Input
         type={spec.type === 'number' ? 'number' : 'text'}
-        value={value || ''}
+        value={value ?? ''}
         onChange={(e) => onChange(spec.type === 'number' ? +e.target.value : e.target.value)}
         placeholder={spec.default !== undefined ? String(spec.default) : ''}
       />
@@ -568,11 +964,6 @@ function ParamInput({ spec, value, onChange }: { spec: PresetParam; value: any; 
 }
 
 // ─── Admin Tasks Assign ──────────────────────────────────────────────────
-
-interface AssignmentEntry {
-  _id: string; userId: number; status: string; canCancel: boolean;
-  assignedAt: string; note: string; progress: Record<string, any>;
-}
 
 export function AdminTasksAssignPage() {
   const data = useBootstrap().page.data as {
@@ -602,7 +993,7 @@ export function AdminTasksAssignPage() {
             <MiniTabs
               size="md"
               value={scope}
-              onValueChange={setScope}
+              onValueChange={setScope as any}
               items={[
                 { value: 'uid', label: '单个用户' },
                 { value: 'user_group', label: '整个用户组' },
@@ -616,24 +1007,36 @@ export function AdminTasksAssignPage() {
             )}
             {scope === 'user_group' && (
               <FormField label="用户组" required>
-                <select name="targetId" value={targetId} onChange={(e) => setTargetId(e.target.value)} required className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                  <option value="">— 选择 —</option>
-                  {data.userGroups.map((g) => {
-                    const s = data.schools.find((s2) => s2._id === g.schoolId);
-                    return (<option key={g._id} value={g._id}>{s ? `${s.name} / ` : ''}{g.name}</option>);
-                  })}
-                </select>
+                <SimpleSelect
+                  name="targetId"
+                  value={targetId}
+                  onValueChange={setTargetId}
+                  placeholder="— 选择 —"
+                  options={[
+                    { value: '', label: '— 选择 —' },
+                    ...data.userGroups.map((g) => {
+                      const s = data.schools.find((s2) => s2._id === g.schoolId);
+                      return { value: g._id, label: `${s ? `${s.name} / ` : ''}${g.name}` };
+                    }),
+                  ]}
+                />
               </FormField>
             )}
             {scope === 'school' && (
               <FormField label="学校" required>
-                <select name="targetId" value={targetId} onChange={(e) => setTargetId(e.target.value)} required className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                  <option value="">— 选择 —</option>
-                  {data.schools.map((s) => (<option key={s._id} value={s._id}>{s.name}</option>))}
-                </select>
+                <SimpleSelect
+                  name="targetId"
+                  value={targetId}
+                  onValueChange={setTargetId}
+                  placeholder="— 选择 —"
+                  options={[
+                    { value: '', label: '— 选择 —' },
+                    ...data.schools.map((s) => ({ value: s._id, label: s.name })),
+                  ]}
+                />
               </FormField>
             )}
-            <FormField label="备注" hint="可选 — 会显示给被分配的用户">
+            <FormField label="备注">
               <Input name="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="例如：你们班今年的必做任务" />
             </FormField>
             <Button type="submit"><Users className="mr-1 size-4" />分配</Button>
@@ -666,11 +1069,7 @@ export function AdminTasksAssignPage() {
                     <TableRow key={a._id}>
                       <TableCell>{u?.uname || `uid:${a.userId}`}</TableCell>
                       <TableCell>{a.canCancel ? '自主认领' : '管理员分配'}</TableCell>
-                      <TableCell>
-                        {a.status === 'completed' ? <Badge className="bg-emerald-500 text-white">已完成</Badge>
-                          : a.status === 'cancelled' ? <Badge variant="outline">已取消</Badge>
-                          : <Badge className="bg-sky-500 text-white">进行中</Badge>}
-                      </TableCell>
+                      <TableCell><StatusBadge status={a.status} /></TableCell>
                       <TableCell className="text-xs text-muted-foreground"><DateTime value={a.assignedAt} /></TableCell>
                       <TableCell className="text-xs">{a.note || '—'}</TableCell>
                     </TableRow>
@@ -687,36 +1086,49 @@ export function AdminTasksAssignPage() {
 
 // ─── Admin Tasks Stats ───────────────────────────────────────────────────
 
-interface AuditEntry {
-  _id: string; assignmentId: string; pointId: string; adminUid: number;
-  before: any; after: any; reason: string; createdAt: string;
-}
-
 export function AdminTasksStatsPage() {
   const data = useBootstrap().page.data as {
     task: TaskDoc;
     assignments: AssignmentEntry[];
     udict: Record<string, { _id: number; uname: string }>;
+    studentByUid: Record<string, StudentLite>;
     audit: AuditEntry[];
     presets: PresetSummary[];
   };
+  const taskNodes = (data.task.graph?.nodes || []).filter((n) => n.type === 'task');
   const total = data.assignments.length;
   const completed = data.assignments.filter((a) => a.status === 'completed').length;
+  const qualified = data.assignments.filter((a) => a.status === 'qualified').length;
+  const admitted = data.assignments.filter((a) => a.status === 'admitted').length;
+  const [drillIn, setDrillIn] = useState<AssignmentEntry | null>(null);
+  const [statsTab, setStatsTab] = useState<'progress' | 'audit'>('progress');
+  const presetMap = useMemo(() => Object.fromEntries(data.presets.map((p) => [p.id, p])), [data.presets]);
+  const drillUser = drillIn ? data.udict[drillIn.userId] : null;
+  const drillStudent = drillIn ? data.studentByUid[String(drillIn.userId)] : null;
 
   return (
     <AdminPage
       title={`统计 — ${data.task.title}`}
       actions={
         <div className="flex gap-2">
+          {data.task.admissionMode === 'quota' && (
+            <Button asChild variant="outline">
+              <a href={`/admin/tasks/${data.task._id}/candidates`}><Users className="mr-1 size-4" />候选池</a>
+            </Button>
+          )}
           <Button asChild variant="outline"><a href={`/admin/tasks/${data.task._id}/stats?format=csv`}><FileDown className="mr-1 size-4" />导出 CSV</a></Button>
           <Button asChild variant="outline"><a href="/admin/tasks"><ArrowLeft className="mr-1 size-4" />返回列表</a></Button>
         </div>
       }
     >
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-4">
         <Card><CardContent>
           <p className="text-xs text-muted-foreground">总分配</p>
           <p className="mt-1 text-2xl font-semibold">{total}</p>
+        </CardContent></Card>
+        <Card><CardContent>
+          <p className="text-xs text-muted-foreground">候选 / 已录取</p>
+          <p className="mt-1 text-2xl font-semibold">{qualified}<span className="text-base text-muted-foreground"> / {admitted}</span></p>
         </CardContent></Card>
         <Card><CardContent>
           <p className="text-xs text-muted-foreground">已完成</p>
@@ -729,42 +1141,344 @@ export function AdminTasksStatsPage() {
       </div>
 
       <Card>
-        <CardHeader><CardTitle className="text-sm">用户进度</CardTitle></CardHeader>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle className="text-sm">统计明细</CardTitle>
+          <MiniTabs
+            value={statsTab}
+            onValueChange={setStatsTab}
+            items={[
+              { value: 'progress', label: '用户进度', count: data.assignments.length, icon: ListChecks },
+              { value: 'audit', label: '审计日志', count: data.audit.length, icon: ClipboardList },
+            ]}
+          />
+        </CardHeader>
+        <CardContent className={cn(statsTab === 'progress' && 'p-0')}>
+          {statsTab === 'progress' ? (
+            data.assignments.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">还没有人认领此任务</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>用户</TableHead>
+                    <TableHead>完成进度</TableHead>
+                    <TableHead>状态</TableHead>
+                    <TableHead>完成时间</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.assignments.map((a) => {
+                    const u = data.udict[a.userId];
+                    const st = data.studentByUid[String(a.userId)];
+                    const done = taskNodes.filter((n) => a.progress?.[n.id]?.completed).length;
+                    return (
+                      <TableRow key={a._id} className="cursor-pointer hover:bg-muted/40" onClick={() => setDrillIn(a)}>
+                        <TableCell>
+                          <div className="font-medium">{u?.uname || `uid:${a.userId}`}</div>
+                          {st ? (
+                            <div className="text-xs text-muted-foreground">
+                              {st.studentId} · {st.realName}
+                            </div>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+                              <div
+                                className={cn('h-full', a.status === 'completed' ? 'bg-emerald-500' : 'bg-sky-500')}
+                                style={{ width: `${taskNodes.length ? (done / taskNodes.length) * 100 : 0}%` }}
+                              />
+                            </div>
+                            <span className="text-xs text-muted-foreground">{done}/{taskNodes.length}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell><StatusBadge status={a.status} /></TableCell>
+                        <TableCell className="text-xs">{a.completedAt ? <DateTime value={a.completedAt} mode="date" /> : '—'}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )
+          ) : (
+            <div className="space-y-2">
+              {data.audit.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">暂无审计日志</p>
+              ) : data.audit.map((row) => (
+                <div key={row._id} className="rounded-md border p-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-[10px]">{row.eventType}</Badge>
+                    {row.pointId ? <span className="font-mono text-muted-foreground">{row.pointId}</span> : null}
+                    <span className="ml-auto text-muted-foreground"><DateTime value={row.createdAt} /></span>
+                  </div>
+                  {row.reason && <p className="mt-1 text-muted-foreground">原因：{row.reason}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Sheet open={!!drillIn} onOpenChange={(o) => { if (!o) setDrillIn(null); }}>
+        <SheetContent side="right" className="w-[640px] sm:max-w-[640px]">
+          <SheetHeader>
+            <SheetTitle>
+              {drillIn ? (drillUser?.uname || `uid:${drillIn.userId}`) : '—'}
+            </SheetTitle>
+            {drillStudent ? (
+              <p className="text-xs text-muted-foreground">
+                {drillStudent.studentId} · {drillStudent.realName}
+              </p>
+            ) : null}
+          </SheetHeader>
+          {drillIn && (
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="space-y-4 px-6 py-5">
+                <div className="flex items-center gap-2">
+                  <StatusBadge status={drillIn.status} />
+                  <span className="text-xs text-muted-foreground">认领于 <DateTime value={drillIn.assignedAt} /></span>
+                </div>
+                {drillIn.note && (
+                  <div className="rounded-md bg-muted/40 px-3 py-2 text-xs">📝 {drillIn.note}</div>
+                )}
+                <TaskGraphRenderer
+                  graph={data.task.graph}
+                  presets={data.presets}
+                  progress={drillIn.progress}
+                  height="45vh"
+                />
+                <div className="space-y-1.5">
+                  {taskNodes.map((n) => {
+                    const r = drillIn.progress?.[n.id];
+                    return (
+                      <AdminNodeProgressRow
+                        key={n.id}
+                        taskId={data.task._id}
+                        assignment={drillIn}
+                        node={n}
+                        preset={n.presetId ? presetMap[n.presetId] : null}
+                        result={r}
+                        redirectTo={`/admin/tasks/${data.task._id}/stats`}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            </ScrollArea>
+          )}
+        </SheetContent>
+      </Sheet>
+    </AdminPage>
+  );
+}
+
+// ─── Admin Tasks Candidates (quota mode) ─────────────────────────────────
+
+export function AdminTasksCandidatesPage() {
+  const data = useBootstrap().page.data as {
+    task: TaskDoc;
+    assignments: AssignmentEntry[];
+    udict: Record<string, { _id: number; uname: string }>;
+    studentByUid: Record<string, StudentLite>;
+    schools: SchoolRef[];
+    userGroups: GroupRef[];
+    counts: { qualified: number; admitted: number; completed: number };
+    presets: PresetSummary[];
+  };
+  const taskNodes = (data.task.graph?.nodes || []).filter((n) => n.type === 'task');
+
+  // Local filter state.
+  const [query, setQuery] = useState('');
+  const [schoolFilter, setSchoolFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'qualified' | 'admitted' | 'completed'>('all');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [drillIn, setDrillIn] = useState<AssignmentEntry | null>(null);
+  const presetMap = useMemo(() => Object.fromEntries(data.presets.map((p) => [p.id, p])), [data.presets]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return data.assignments.filter((a) => {
+      if (statusFilter !== 'all' && a.status !== statusFilter) return false;
+      const u = data.udict[a.userId];
+      const st = data.studentByUid[a.userId];
+      if (schoolFilter && st?.schoolId !== schoolFilter) return false;
+      if (q) {
+        const hay = `${u?.uname || ''} ${st?.realName || ''} ${st?.studentId || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [data.assignments, data.udict, data.studentByUid, query, schoolFilter, statusFilter]);
+
+  const allVisibleSelected = visible.length > 0 && visible.every((a) => selected.has(a._id));
+  function toggleAllVisible() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) for (const a of visible) next.delete(a._id);
+      else for (const a of visible) next.add(a._id);
+      return next;
+    });
+  }
+  function toggleOne(aid: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(aid)) next.delete(aid);
+      else next.add(aid);
+      return next;
+    });
+  }
+
+  return (
+    <AdminPage
+      title={`候选池 — ${data.task.title}`}
+      actions={
+        <div className="flex items-center gap-2">
+          <Badge
+            variant="outline"
+            className={cn('gap-1',
+              data.task.quota && data.counts.admitted > data.task.quota && 'border-rose-500 text-rose-700')}
+          >
+            <Users className="size-3" />
+            已选 {data.counts.admitted + data.counts.completed}
+            {data.task.quota != null ? ` / ${data.task.quota}` : ''}
+          </Badge>
+          <Button asChild variant="outline"><a href={`/admin/tasks/${data.task._id}/stats`}>统计</a></Button>
+          <Button asChild variant="outline"><a href="/admin/tasks"><ArrowLeft className="mr-1 size-4" />返回</a></Button>
+        </div>
+      }
+    >
+      {/* Filter bar */}
+      <Card>
+        <CardContent className="flex flex-wrap items-center gap-3">
+          <Input
+            placeholder="搜索 用户名 / 真实姓名 / 学号…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="max-w-xs"
+          />
+          <SimpleSelect
+            value={schoolFilter}
+            onValueChange={setSchoolFilter}
+            options={[
+              { value: '', label: '所有学校' },
+              ...data.schools.map((s) => ({ value: s._id, label: s.name })),
+            ]}
+            className="w-40"
+          />
+          <MiniTabs
+            value={statusFilter}
+            onValueChange={setStatusFilter as any}
+            items={[
+              { value: 'all', label: `全部 (${data.assignments.length})` },
+              { value: 'qualified', label: `候选 (${data.counts.qualified})` },
+              { value: 'admitted', label: `已录取 (${data.counts.admitted})` },
+              { value: 'completed', label: `已完成 (${data.counts.completed})` },
+            ]}
+          />
+          <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+            选中 <span className="font-semibold text-foreground">{selected.size}</span> 人
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <Card className="border-primary/50 bg-primary/5">
+          <CardContent className="flex flex-wrap items-center gap-2 py-2">
+            <BulkActionForm
+              taskId={data.task._id}
+              operation="admit"
+              aids={Array.from(selected)}
+              label="批量录取"
+              variant="default"
+            />
+            <BulkActionForm
+              taskId={data.task._id}
+              operation="unadmit"
+              aids={Array.from(selected)}
+              label="撤销录取"
+              variant="outline"
+            />
+            <BulkActionForm
+              taskId={data.task._id}
+              operation="confirm"
+              aids={Array.from(selected)}
+              label="确认录取并生效"
+              variant="default"
+              confirm={`确定让这 ${selected.size} 人进入 completed 状态？此操作不可逆，将触发留校 +1 等副作用。`}
+            />
+            <Button type="button" size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+              <X className="mr-1 size-3.5" />清空选择
+            </Button>
+            <div className="ml-auto flex gap-2">
+              <ExportCSV taskId={data.task._id} filter={{ status: 'admitted' }} label="导出录取名单" />
+              <ExportCSV taskId={data.task._id} filter={{ status: 'qualified' }} label="导出候选名单" />
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Main table */}
+      <Card>
         <CardContent className="p-0">
-          {data.assignments.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">还没有人认领此任务</p>
+          {visible.length === 0 ? (
+            <p className="py-12 text-center text-sm text-muted-foreground">
+              {data.assignments.length === 0 ? '候选池还为空——等用户图条件全满足后会自动进入此池' : '没有匹配的候选'}
+            </p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-8">
+                    <Checkbox checked={allVisibleSelected} onChange={toggleAllVisible} />
+                  </TableHead>
                   <TableHead>用户</TableHead>
-                  <TableHead>完成进度</TableHead>
+                  <TableHead>学校 / 年级</TableHead>
+                  <TableHead>节点完成</TableHead>
                   <TableHead>状态</TableHead>
-                  <TableHead>完成时间</TableHead>
+                  <TableHead>候选时间</TableHead>
+                  <TableHead>备注</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.assignments.map((a) => {
+                {visible.map((a) => {
                   const u = data.udict[a.userId];
-                  const done = data.task.points.filter((p) => a.progress?.[p.id]?.completed).length;
+                  const st = data.studentByUid[a.userId];
+                  const school = st ? data.schools.find((s) => s._id === st.schoolId) : null;
                   return (
                     <TableRow key={a._id}>
-                      <TableCell>{u?.uname || `uid:${a.userId}`}</TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
-                            <div className={cn('h-full', a.status === 'completed' ? 'bg-emerald-500' : 'bg-sky-500')}
-                              style={{ width: `${(done / data.task.points.length) * 100}%` }} />
-                          </div>
-                          <span className="text-xs text-muted-foreground">{done}/{data.task.points.length}</span>
-                        </div>
+                        <Checkbox
+                          checked={selected.has(a._id)}
+                          onChange={() => toggleOne(a._id)}
+                        />
                       </TableCell>
                       <TableCell>
-                        {a.status === 'completed' ? <Badge className="bg-emerald-500 text-white">完成</Badge>
-                          : a.status === 'cancelled' ? <Badge variant="outline">取消</Badge>
-                          : <Badge className="bg-sky-500 text-white">进行中</Badge>}
+                        <button
+                          type="button"
+                          className="text-left hover:underline"
+                          onClick={() => setDrillIn(a)}
+                        >
+                          <div className="font-medium">{u?.uname || `uid:${a.userId}`}</div>
+                          {st && (
+                            <div className="text-xs text-muted-foreground">
+                              {st.realName} · {st.studentId}
+                            </div>
+                          )}
+                        </button>
                       </TableCell>
-                      <TableCell className="text-xs">{(a as any).completedAt ? <DateTime value={(a as any).completedAt} mode="date" /> : "—"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {school?.name || '—'}
+                        {st?.enrollmentYear ? ` · ${st.enrollmentYear} 级` : ''}
+                      </TableCell>
+                      <TableCell>
+                        <DotMatrix nodes={taskNodes} progress={a.progress} />
+                      </TableCell>
+                      <TableCell><StatusBadge status={a.status} /></TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {a.qualifiedAt ? <DateTime value={a.qualifiedAt} /> : '—'}
+                      </TableCell>
+                      <TableCell className="text-xs">{a.admissionNote || a.note || '—'}</TableCell>
                     </TableRow>
                   );
                 })}
@@ -774,24 +1488,211 @@ export function AdminTasksStatsPage() {
         </CardContent>
       </Card>
 
-      {data.audit.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle className="text-sm">审计日志（管理员覆盖记录）</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            {data.audit.map((row) => (
-              <div key={row._id} className="rounded-md border p-2 text-xs">
+      {/* Drill-in sheet */}
+      <Sheet open={!!drillIn} onOpenChange={(o) => { if (!o) setDrillIn(null); }}>
+        <SheetContent side="right" className="w-[680px] sm:max-w-[680px]">
+          <SheetHeader>
+            <SheetTitle>
+              {drillIn ? (data.udict[drillIn.userId]?.uname || `uid:${drillIn.userId}`) : '—'}
+            </SheetTitle>
+          </SheetHeader>
+          {drillIn && (
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="space-y-4 px-6 py-5">
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[10px]">{row.pointId}</Badge>
-                  <span>{row.after?.completed ? '判定完成' : '撤销完成'}</span>
-                  <span className="ml-auto text-muted-foreground"><DateTime value={row.createdAt} /></span>
+                  <StatusBadge status={drillIn.status} />
+                  {drillIn.admittedAt && (
+                    <span className="text-xs text-muted-foreground">
+                      录取于 <DateTime value={drillIn.admittedAt} />
+                    </span>
+                  )}
                 </div>
-                {row.reason && <p className="mt-1 text-muted-foreground">原因：{row.reason}</p>}
+                <TaskGraphRenderer
+                  graph={data.task.graph}
+                  presets={data.presets}
+                  progress={drillIn.progress}
+                  height="40vh"
+                />
+                <div className="space-y-1.5">
+                  {taskNodes.map((n) => {
+                    const r = drillIn.progress?.[n.id];
+                    return (
+                      <AdminNodeProgressRow
+                        key={n.id}
+                        taskId={data.task._id}
+                        assignment={drillIn}
+                        node={n}
+                        preset={n.presetId ? presetMap[n.presetId] : null}
+                        result={r}
+                        redirectTo={`/admin/tasks/${data.task._id}/candidates`}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="flex flex-wrap gap-2 border-t pt-3">
+                  {drillIn.status === 'qualified' && (
+                    <BulkActionForm
+                      taskId={data.task._id}
+                      operation="admit"
+                      aids={[drillIn._id]}
+                      label="录取此人"
+                      variant="default"
+                    />
+                  )}
+                  {drillIn.status === 'admitted' && (
+                    <>
+                      <BulkActionForm
+                        taskId={data.task._id}
+                        operation="confirm"
+                        aids={[drillIn._id]}
+                        label="确认录取并生效"
+                        variant="default"
+                        confirm="确认后此人状态变 completed，触发留校等副作用。"
+                      />
+                      <BulkActionForm
+                        taskId={data.task._id}
+                        operation="unadmit"
+                        aids={[drillIn._id]}
+                        label="撤销录取"
+                        variant="outline"
+                      />
+                    </>
+                  )}
+                </div>
               </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+            </ScrollArea>
+          )}
+        </SheetContent>
+      </Sheet>
     </AdminPage>
+  );
+}
+
+function DotMatrix({ nodes, progress }: {
+  nodes: TaskGraphNode[];
+  progress: Record<string, TaskPointResult>;
+}) {
+  return (
+    <div className="flex flex-wrap gap-0.5">
+      {nodes.map((n) => {
+        const r = progress[n.id];
+        const detail = r
+          ? `${n.name || n.presetId}: ${r.completed ? '✓' : '○'} ${r.target > 1 ? `${r.current}/${r.target}` : ''} ${r.details || ''}`
+          : `${n.name || n.presetId}: ○`;
+        return (
+          <span
+            key={n.id}
+            title={detail}
+            className={cn(
+              'inline-block size-2.5 rounded-full',
+              r?.completed ? 'bg-emerald-500' : 'bg-muted-foreground/30',
+            )}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function AdminNodeProgressRow({
+  taskId, assignment, node, preset, result, redirectTo,
+}: {
+  taskId: string;
+  assignment: AssignmentEntry;
+  node: TaskGraphNode;
+  preset?: PresetSummary | null;
+  result?: TaskPointResult;
+  redirectTo: string;
+}) {
+  const completed = !!result?.completed;
+  const isManualConfirm = node.presetId === 'manual_confirm';
+  const canOverride = assignment.status !== 'completed' && assignment.status !== 'cancelled';
+  const reason = completed
+    ? '从管理端进度抽屉撤销人工判定'
+    : isManualConfirm ? '管理员手动确认' : '从管理端进度抽屉人工判定完成';
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-md border px-3 py-2 text-xs">
+      <div className="min-w-0 space-y-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={cn('inline-flex size-4 shrink-0 items-center justify-center rounded-full',
+            completed ? 'bg-emerald-500 text-white' : 'bg-muted text-muted-foreground')}>
+            {completed ? '✓' : '○'}
+          </span>
+          <span className="truncate font-medium">{node.name || preset?.name || node.presetId}</span>
+          {isManualConfirm && <Badge variant="secondary" className="shrink-0 text-[10px]">手动确认</Badge>}
+          {result?.overridden && <Badge variant="outline" className="shrink-0 text-[10px]">人工</Badge>}
+        </div>
+        <div className="pl-6 text-[11px] text-muted-foreground">
+          {result?.details || preset?.description || '尚未评估'}
+          {result && result.target > 1 && (
+            <span className="ml-2 tabular-nums">{result.current}/{result.target}</span>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center">
+        {canOverride ? (
+          <form method="post" action={`/admin/tasks/${taskId}/override`}>
+            <input type="hidden" name="aid" value={assignment._id} />
+            <input type="hidden" name="pointId" value={node.id} />
+            <input type="hidden" name="completed" value={completed ? 'false' : 'true'} />
+            <input type="hidden" name="reason" value={reason} />
+            <input type="hidden" name="redirect" value={redirectTo} />
+            <Button
+              type="submit"
+              size="sm"
+              variant={completed ? 'outline' : 'default'}
+              className="h-7 px-2 text-xs"
+            >
+              {completed ? '撤销判定' : isManualConfirm ? '确认完成' : '判定完成'}
+            </Button>
+          </form>
+        ) : (
+          <span className="text-[11px] text-muted-foreground">已终局</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BulkActionForm({ taskId, operation, aids, label, variant, confirm }: {
+  taskId: string;
+  operation: 'admit' | 'unadmit' | 'confirm';
+  aids: string[];
+  label: string;
+  variant?: 'default' | 'outline' | 'ghost';
+  confirm?: string;
+}) {
+  return (
+    <form
+      method="post"
+      action={`/admin/tasks/${taskId}/candidates`}
+      onSubmit={(e) => { if (confirm && !window.confirm(confirm)) e.preventDefault(); }}
+    >
+      <input type="hidden" name="operation" value={operation} />
+      <input type="hidden" name="aids" value={aids.join(',')} />
+      <Button type="submit" size="sm" variant={variant || 'default'}>
+        {operation === 'admit' && <UserCheck className="mr-1 size-3.5" />}
+        {operation === 'confirm' && <ListChecks className="mr-1 size-3.5" />}
+        {operation === 'unadmit' && <X className="mr-1 size-3.5" />}
+        {label}
+      </Button>
+    </form>
+  );
+}
+
+function ExportCSV({ taskId, filter, label }: {
+  taskId: string;
+  filter: { status: string };
+  label: string;
+}) {
+  // CSV export piggy-backs on stats?format=csv for now; future endpoint can
+  // narrow by status (TODO).
+  return (
+    <Button asChild size="sm" variant="outline">
+      <a href={`/admin/tasks/${taskId}/stats?format=csv`}>
+        <FileDown className="mr-1 size-3.5" />{label}
+      </a>
+    </Button>
   );
 }
 
@@ -805,10 +1706,14 @@ interface DomainSettings {
   maxPatScore: number; maxGpltScore: number; maxCspScore: number;
 }
 
+interface StayEvent { _id: string; userId: number; year: number; source: string; createdAt: string }
+
 export function AdminTasksScoresPage() {
   const data = useBootstrap().page.data as {
-    tab: 'pat' | 'gplt' | 'csp';
+    tab: 'pat' | 'gplt' | 'csp' | 'stay';
     scores: any[];
+    stayEvents?: StayEvent[];
+    schools?: { _id: string; name: string }[];
     udict: Record<string, { _id: number; uname: string }>;
     settings: DomainSettings;
     level: string;
@@ -818,6 +1723,7 @@ export function AdminTasksScoresPage() {
     { key: 'pat', label: 'PAT 认证' },
     { key: 'gplt', label: '天梯赛' },
     { key: 'csp', label: 'CSP 认证' },
+    { key: 'stay', label: '留校次数' },
   ];
 
   return (
@@ -834,6 +1740,13 @@ export function AdminTasksScoresPage() {
       {data.tab === 'pat' && <PatScoreTab scores={data.scores} udict={data.udict} settings={data.settings} />}
       {data.tab === 'gplt' && <GpltScoreTab scores={data.scores} udict={data.udict} settings={data.settings} />}
       {data.tab === 'csp' && <CspScoreTab scores={data.scores} udict={data.udict} settings={data.settings} />}
+      {data.tab === 'stay' && (
+        <StayCountTab
+          events={data.stayEvents || []}
+          schools={data.schools || []}
+          udict={data.udict}
+        />
+      )}
     </AdminPage>
   );
 }
@@ -851,21 +1764,31 @@ function PatScoreTab({ scores, udict, settings }: { scores: PatScore[]; udict: a
                 <Input name="userId" type="number" min={1} required />
               </FormField>
               <FormField label="等级" required>
-                <select name="level" required className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                  <option value="advanced">甲级</option>
-                  <option value="basic">乙级</option>
-                </select>
+                <SimpleSelect
+                  name="level"
+                  required
+                  defaultValue="advanced"
+                  options={[
+                    { value: 'advanced', label: '甲级' },
+                    { value: 'basic', label: '乙级' },
+                  ]}
+                />
               </FormField>
               <FormField label="年份" required>
                 <Input name="year" type="number" min={2010} max={2100} defaultValue={new Date().getFullYear()} required />
               </FormField>
               <FormField label="季节" required>
-                <select name="season" required className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                  <option value="spring">春季</option>
-                  <option value="summer">夏季</option>
-                  <option value="autumn">秋季</option>
-                  <option value="winter">冬季</option>
-                </select>
+                <SimpleSelect
+                  name="season"
+                  required
+                  defaultValue="spring"
+                  options={[
+                    { value: 'spring', label: '春季' },
+                    { value: 'summer', label: '夏季' },
+                    { value: 'autumn', label: '秋季' },
+                    { value: 'winter', label: '冬季' },
+                  ]}
+                />
               </FormField>
             </FormRow>
             <FormRow columns={4}>
@@ -919,10 +1842,15 @@ function GpltScoreTab({ scores, udict, settings }: { scores: GpltScore[]; udict:
             <FormRow columns={4}>
               <FormField label="用户 UID" required><Input name="userId" type="number" min={1} required /></FormField>
               <FormField label="比赛级别" required>
-                <select name="level" required className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                  <option value="school">校赛</option>
-                  <option value="national">国赛</option>
-                </select>
+                <SimpleSelect
+                  name="level"
+                  required
+                  defaultValue="school"
+                  options={[
+                    { value: 'school', label: '校赛' },
+                    { value: 'national', label: '国赛' },
+                  ]}
+                />
               </FormField>
               <FormField label="年份" required><Input name="year" type="number" min={2010} max={2100} defaultValue={new Date().getFullYear()} required /></FormField>
               <FormField label={`分数 (0-${settings.maxGpltScore})`} required>
@@ -999,6 +1927,126 @@ function CspScoreTab({ scores, udict, settings }: { scores: CspScore[]; udict: a
                     <TableCell className="text-xs text-muted-foreground"><DateTime value={s.createdAt} mode="date" /></TableCell>
                   </TableRow>
                 ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+}
+
+function StayCountTab({
+  events, schools, udict,
+}: {
+  events: StayEvent[];
+  schools: { _id: string; name: string }[];
+  udict: any;
+}) {
+  return (
+    <>
+      <Card>
+        <CardHeader><CardTitle className="text-sm">单条录入留校事件</CardTitle></CardHeader>
+        <CardContent>
+          <form method="post" action="/admin/tasks/scores?tab=stay" className="space-y-3">
+            <input type="hidden" name="operation" value="stay" />
+            <FormRow columns={4}>
+              <FormField label="学校" required>
+                <SimpleSelect
+                  name="schoolId"
+                  required
+                  defaultValue=""
+                  placeholder="选择"
+                  options={[
+                    { value: '', label: '选择学校' },
+                    ...schools.map((s) => ({ value: s._id, label: s.name })),
+                  ]}
+                />
+              </FormField>
+              <FormField label="学号" required><Input name="studentId" required /></FormField>
+              <FormField label="姓名" required><Input name="realName" required /></FormField>
+              <FormField label="年份" required>
+                <Input name="year" type="number" min={2010} max={2100} defaultValue={new Date().getFullYear()} required />
+              </FormField>
+            </FormRow>
+            <Button type="submit"><Plus className="mr-1 size-4" />添加</Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-sm">TSV 批量导入</CardTitle></CardHeader>
+        <CardContent>
+          <form method="post" action="/admin/tasks/scores?tab=stay" className="space-y-3">
+            <input type="hidden" name="operation" value="stayImport" />
+            <FormField label="选择学校" required>
+              <SimpleSelect
+                name="schoolId"
+                required
+                defaultValue=""
+                placeholder="选择"
+                options={[
+                  { value: '', label: '选择学校' },
+                  ...schools.map((s) => ({ value: s._id, label: s.name })),
+                ]}
+              />
+            </FormField>
+            <FormField label="粘贴 TSV：每行「学号 姓名 年份」" hint="字段用 Tab 或空格分隔；重复的行 = 重复 +1。每行不匹配学生档案 / 未绑定 OJ 都会跳过并报错">
+              <textarea
+                name="text" rows={6}
+                className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs"
+                placeholder={'240340179\t张三\t2024\n240340180\t李四\t2024'}
+                required
+              />
+            </FormField>
+            <Button type="submit"><FileDown className="mr-1 size-4" />批量导入</Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">已录入留校事件 ({events.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {events.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">还没有留校事件</p>
+          ) : (
+            <Table>
+              <TableHeader><TableRow>
+                <TableHead>用户</TableHead>
+                <TableHead>年份</TableHead>
+                <TableHead>来源</TableHead>
+                <TableHead>录入时间</TableHead>
+                <TableHead></TableHead>
+              </TableRow></TableHeader>
+              <TableBody>
+                {events.map((e) => {
+                  const isManual = e.source.startsWith('manual:');
+                  return (
+                    <TableRow key={e._id}>
+                      <TableCell>{udict[e.userId]?.uname || `uid:${e.userId}`}</TableCell>
+                      <TableCell className="tabular-nums">{e.year}</TableCell>
+                      <TableCell>
+                        <Badge variant={isManual ? 'secondary' : 'default'} className="text-[10px]">
+                          {isManual ? '手动录入' : `自动（${e.source.slice(0, 16)}…）`}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground"><DateTime value={e.createdAt} mode="date" /></TableCell>
+                      <TableCell>
+                        <form
+                          method="post" action="/admin/tasks/scores?tab=stay"
+                          className="inline"
+                          onSubmit={(ev) => { if (!confirm('确定删除该事件？此操作不会撤销已完成的任务')) ev.preventDefault(); }}
+                        >
+                          <input type="hidden" name="operation" value="stayDelete" />
+                          <input type="hidden" name="id" value={e._id} />
+                          <Button type="submit" size="sm" variant="ghost" className="h-7 text-xs text-destructive">删除</Button>
+                        </form>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}

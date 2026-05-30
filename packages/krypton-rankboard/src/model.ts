@@ -199,15 +199,32 @@ export async function importAwardsBatch(
 
 /* ─── scoring + leaderboard ─── */
 
+/**
+ * Computes the ranking-score contribution of one award.
+ *
+ * Derived from the legacy `CAUCOJRankBoard` algorithm (see
+ * `dev/CAUCOJRankBoard/index.ts:233-248`) but with the ICPC/CCPC live-rank
+ * decay deliberately **removed**:
+ *
+ *   score = weight × baseScore   (for every award type)
+ *
+ * Rationale: the original `weight * decayFactor^(liveRank-1)` decay
+ * collapsed to 0 once `liveRank` was filled with real region/national
+ * ranks (e.g. 47, 87) — which is how it ends up populated in production
+ * today. The legacy OJ's screenshots produced non-zero ICPC scores only
+ * because `liveRank` was empty back then; admins have since filled it in,
+ * breaking the formula. We honor the displayed semantics (every award
+ * worth its full weight) rather than the literal old code path.
+ *
+ * `award.liveRank` / `award.schoolRank` are preserved on the doc for UI
+ * display ("现场 #87", "校内 #60") but no longer affect the score.
+ * `award.score` (PAT exam grade) is also ignored — it's displayed
+ * separately as the "实际考试得分".
+ */
 export function computeAwardScore(
-    award: Award, type: AwardType, baseScore: number, decayFactor: number,
+    _award: Award, type: AwardType, baseScore: number, _decayFactor: number,
 ): number {
-    if (award.score != null && Number.isFinite(award.score)) return award.score;
-    let w = type.weight;
-    if (type.useRankDecay && award.liveRank && award.liveRank > 0) {
-        w *= Math.pow(decayFactor, Math.max(0, award.liveRank - 1));
-    }
-    return w * baseScore;
+    return type.weight * baseScore;
 }
 
 /** Resolve a list of people into joined leaderboard rows. */
@@ -253,14 +270,15 @@ export async function listLeaderboard(): Promise<LeaderboardRow[]> {
                 .filter((n: string | undefined) => !!n) as string[]
             : [];
         const udoc = student?.boundUserId ? (udocs as any)[student.boundUserId] : null;
+        // Legacy algorithm: each award is independent (no occurrence grouping).
         let totalScore = 0;
-        const awardScores: number[] = [];
-        for (const award of person.awards || []) {
+        const awardScores: number[] = (person.awards || []).map((award) => {
             const t = typeMap.get(award.type);
-            const s = t ? computeAwardScore(award, t, config.baseScore, config.decayFactor) : 0;
-            awardScores.push(s);
+            if (!t) return 0;
+            const s = computeAwardScore(award, t, config.baseScore, config.decayFactor);
             totalScore += s;
-        }
+            return s;
+        });
         return {
             person,
             student: student ? {
@@ -280,7 +298,11 @@ export async function listLeaderboard(): Promise<LeaderboardRow[]> {
                 groupNames: [],
                 boundUserId: null,
             },
-            user: udoc ? { uname: udoc.uname, nAccept: udoc.nAccept || 0 } : null,
+            user: udoc ? {
+                uname: udoc.uname,
+                nAccept: udoc.nAccept || 0,
+                avatarUrl: (udoc as any).avatarUrl || '',
+            } : null,
             totalScore,
             awardCount: (person.awards || []).length,
             rank: 0, // assigned below

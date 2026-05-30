@@ -187,10 +187,15 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml }: {
     setSaving(true);
     setSaveMsg(null);
     try {
+      const currentYaml = lastSource.current === 'form'
+        ? serializeJudgeConfig(config, { preserveSource: yamlText })
+        : yamlText;
+      if (currentYaml !== yamlText) setYamlText(currentYaml);
       const formData = new FormData();
+      formData.append('operation', 'upload_file');
       formData.append('type', 'testdata');
       formData.append('filename', 'config.yaml');
-      formData.append('file', new Blob([yamlText], { type: 'text/yaml' }), 'config.yaml');
+      formData.append('file', new Blob([currentYaml], { type: 'text/yaml' }), 'config.yaml');
       const res = await fetch(`${problemUrl}/files`, {
         method: 'POST',
         body: formData,
@@ -208,7 +213,7 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml }: {
     } finally {
       setSaving(false);
     }
-  }, [yamlText, problemUrl]);
+  }, [config, yamlText, problemUrl]);
 
   // --- drag handlers ---
   // Activation distance was 4px — that's so small that even an accidental
@@ -530,6 +535,10 @@ function FileEditDialog({ file, problemUrl, onClose }: {
   const size: number = file.size ?? 0;
   const tooBig = size > MAX_FILE_EDIT_BYTES;
   const lang = useMemo(() => detectLanguage(filename), [filename]);
+  const fileUrl = useMemo(
+    () => `${problemUrl}/file/${encodeURIComponent(filename)}?type=testdata&noDisposition=1`,
+    [problemUrl, filename],
+  );
   const [content, setContent] = useState<string | null>(null);
   const [originalContent, setOriginalContent] = useState<string>('');
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -546,8 +555,9 @@ function FileEditDialog({ file, problemUrl, onClose }: {
       setLoadError(`文件过大 (${bytesLabel(size)})，请下载后用本地编辑器修改。`);
       return;
     }
-    fetch(`${problemUrl}/file/${encodeURIComponent(filename)}`, {
+    fetch(fileUrl, {
       headers: { Accept: 'text/plain' },
+      credentials: 'same-origin',
     })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -563,7 +573,7 @@ function FileEditDialog({ file, problemUrl, onClose }: {
         setLoadError(e?.message || '加载失败');
       });
     return () => { cancelled = true; };
-  }, [problemUrl, filename, size, tooBig]);
+  }, [fileUrl, size, tooBig]);
 
   const dirty = content != null && content !== originalContent;
 
@@ -573,6 +583,7 @@ function FileEditDialog({ file, problemUrl, onClose }: {
     setSaveMsg(null);
     try {
       const form = new FormData();
+      form.append('operation', 'upload_file');
       form.append('type', 'testdata');
       form.append('filename', filename);
       form.append('file', new Blob([content], { type: 'text/plain' }), filename);
@@ -599,7 +610,7 @@ function FileEditDialog({ file, problemUrl, onClose }: {
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent
-        className="w-full max-w-5xl"
+        className="h-[88vh] w-[92vw] max-w-none max-h-[92vh]"
         onClose={onClose}
       >
         <DialogHeader>
@@ -612,35 +623,35 @@ function FileEditDialog({ file, problemUrl, onClose }: {
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 p-5">
           {loadError ? (
             <div className="rounded border border-amber-300 bg-amber-50/40 p-3 text-sm text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300">
               {loadError}
               <div className="mt-2">
                 <Button asChild variant="outline" size="sm">
-                  <a href={`${problemUrl}/file/${encodeURIComponent(filename)}`} download={filename}>
+                  <a href={fileUrl} download={filename}>
                     <Download className="size-3.5 mr-1" />下载文件
                   </a>
                 </Button>
               </div>
             </div>
           ) : content == null ? (
-            <div className="p-8 text-center text-sm text-muted-foreground">加载中…</div>
+            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">加载中…</div>
           ) : (
-            <div className="rounded-md border overflow-hidden" style={{ height: '60vh', minHeight: 360 }}>
+            <div className="min-h-0 flex-1 overflow-hidden rounded-md border">
               <KryptonIDE
                 mode={readonly ? 'readonly' : 'simple'}
                 langs={[]}
                 defaultLang={lang}
                 value={content}
                 onValueChange={setContent}
-                minHeight={360}
+                minHeight={420}
                 className="h-full"
               />
             </div>
           )}
 
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex shrink-0 items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {!tooBig && content != null ? (
                 <label className="flex items-center gap-1 cursor-pointer">
@@ -852,6 +863,9 @@ function PerLangLimits({ config, updateConfig }: {
 }) {
   const baseTimeMs = parseTimeMS(config.time);
   const baseMemMb = parseMemoryMB(config.memory);
+  const hasTimeBase = baseTimeMs != null;
+  const hasMemoryBase = baseMemMb != null;
+  const canAddLanguageLimit = hasTimeBase || hasMemoryBase;
 
   // Union of langs that have any rate set
   const langKeys = Array.from(new Set([
@@ -861,12 +875,14 @@ function PerLangLimits({ config, updateConfig }: {
   const [pendingLang, setPendingLang] = useState('');
 
   const addLang = (id: string) => {
+    if (!canAddLanguageLimit) return;
     if (!id.trim()) return;
     if (langKeys.includes(id)) return;
     // Seed with rate 1 (= same as base) so the user just tweaks the number.
     updateConfig((c) => ({
       ...c,
-      time_limit_rate: { ...(c.time_limit_rate || {}), [id]: 1 },
+      time_limit_rate: hasTimeBase ? { ...(c.time_limit_rate || {}), [id]: 1 } : c.time_limit_rate,
+      memory_limit_rate: hasMemoryBase ? { ...(c.memory_limit_rate || {}), [id]: 1 } : c.memory_limit_rate,
     }));
     setPendingLang('');
   };
@@ -919,39 +935,50 @@ function PerLangLimits({ config, updateConfig }: {
 
   return (
     <div className="rounded-md border bg-muted/10 p-3 space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-medium">按语言时空限制</p>
           <p className="text-[10px] text-muted-foreground">
             基准 {baseTimeMs ? formatTime(baseTimeMs) : '未设'} / {baseMemMb ? formatMemory(baseMemMb) : '未设'}；填入实际限制，保存时自动换算为倍率
           </p>
         </div>
-        <div className="flex items-center gap-1">
-          <SimpleSelect
-            value=""
-            onValueChange={(v) => { if (v) addLang(v); }}
-            size="sm"
-            disabled={baseTimeMs == null && baseMemMb == null}
-            className="w-auto min-w-[10rem] text-[11px]"
-            placeholder="+ 添加语言…"
-            options={COMMON_LANG_OPTIONS
-              .filter((o) => !langKeys.includes(o.value))
-              .map((o) => ({ value: o.value, label: o.label }))}
-          />
-          <input
-            value={pendingLang}
-            onChange={(e) => setPendingLang(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addLang(pendingLang); } }}
-            placeholder="或自定义 id"
-            className="w-28 rounded border bg-background px-1.5 py-1 text-[11px]"
-          />
+        <div className="space-y-1">
+          <div className="flex items-center gap-1">
+            <SimpleSelect
+              value=""
+              onValueChange={(v) => { if (v) addLang(v); }}
+              size="sm"
+              disabled={!canAddLanguageLimit}
+              className="w-auto min-w-[10rem] text-[11px]"
+              placeholder={canAddLanguageLimit ? '+ 添加语言…' : '先填写默认限制'}
+              ariaLabel="添加语言时空限制"
+              options={COMMON_LANG_OPTIONS
+                .filter((o) => !langKeys.includes(o.value))
+                .map((o) => ({ value: o.value, label: o.label }))}
+            />
+            <input
+              value={pendingLang}
+              onChange={(e) => setPendingLang(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addLang(pendingLang); } }}
+              placeholder="或自定义 id"
+              disabled={!canAddLanguageLimit}
+              title={canAddLanguageLimit ? undefined : '先填写上方默认时间限制或默认内存限制'}
+              className="w-28 rounded border bg-background px-1.5 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-60"
+            />
+          </div>
+          {!canAddLanguageLimit ? (
+            <p className="text-[10px] text-amber-700 dark:text-amber-300">
+              先填写上方默认时间限制或默认内存限制后，才能添加语言覆写。
+            </p>
+          ) : null}
         </div>
       </div>
 
-      {baseTimeMs == null && baseMemMb == null ? (
-        <p className="rounded bg-amber-50 px-2 py-1 text-[10px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-          先设全局时间/内存基准，才能为单语言设置覆写
-        </p>
+      {!canAddLanguageLimit ? (
+        <div className="flex gap-2 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+          <AlertTriangle className="mt-0.5 size-3 shrink-0" />
+          <span>语言限制保存的是“相对默认限制的倍率”。当前没有默认时空基准，所以下拉框会保持禁用。</span>
+        </div>
       ) : null}
 
       {langKeys.length === 0 ? (
@@ -983,11 +1010,13 @@ function PerLangLimits({ config, updateConfig }: {
                   value={langTimeAbs}
                   onChange={(v) => updateLangTime(id, v)}
                   placeholder={baseTimeMs ? formatTime(baseTimeMs) : '未设基准'}
+                  disabled={!hasTimeBase}
                 />
                 <MemoryInput
                   value={langMemAbs}
                   onChange={(v) => updateLangMemory(id, v)}
                   placeholder={baseMemMb ? formatMemory(baseMemMb) : '未设基准'}
+                  disabled={!hasMemoryBase}
                 />
                 <button
                   type="button"
@@ -1035,12 +1064,13 @@ function FilePicker({ value, files, onChange }: { value: string; files: R[]; onC
  * Empty value renders the placeholder (e.g. "默认 1s"). Output is `undefined`
  * when value is cleared, so the config object drops the override entirely.
  */
-function DurationInput({ value, onChange, placeholder, className, size = 'sm' }: {
+function DurationInput({ value, onChange, placeholder, className, size = 'sm', disabled }: {
   value?: string;
   onChange: (next: string | undefined) => void;
   placeholder?: string;
   className?: string;
   size?: 'sm' | 'md';
+  disabled?: boolean;
 }) {
   const split = splitTime(value);
   const inputCls = size === 'sm' ? 'h-7 text-[11px] px-1.5' : 'h-8 text-xs px-2';
@@ -1053,12 +1083,14 @@ function DurationInput({ value, onChange, placeholder, className, size = 'sm' }:
         value={split.value}
         onChange={(e) => onChange(joinTime(e.target.value, split.unit))}
         placeholder={placeholder}
-        className={`flex-1 min-w-0 rounded border bg-background tabular-nums ${inputCls}`}
+        disabled={disabled}
+        className={`flex-1 min-w-0 rounded border bg-background tabular-nums disabled:cursor-not-allowed disabled:opacity-60 ${inputCls}`}
       />
       <SimpleSelect
         value={split.unit}
         onValueChange={(v) => onChange(joinTime(split.value, v as 'ms' | 's'))}
         size="sm"
+        disabled={disabled}
         className={`w-auto min-w-[4rem] ${inputCls}`}
         options={[
           { value: 'ms', label: 'ms' },
@@ -1070,12 +1102,13 @@ function DurationInput({ value, onChange, placeholder, className, size = 'sm' }:
 }
 
 /** Number-plus-unit picker for a Hydro memory string ("256m" / "1g" / "512k"). */
-function MemoryInput({ value, onChange, placeholder, className, size = 'sm' }: {
+function MemoryInput({ value, onChange, placeholder, className, size = 'sm', disabled }: {
   value?: string;
   onChange: (next: string | undefined) => void;
   placeholder?: string;
   className?: string;
   size?: 'sm' | 'md';
+  disabled?: boolean;
 }) {
   const split = splitMemory(value);
   const inputCls = size === 'sm' ? 'h-7 text-[11px] px-1.5' : 'h-8 text-xs px-2';
@@ -1088,12 +1121,14 @@ function MemoryInput({ value, onChange, placeholder, className, size = 'sm' }: {
         value={split.value}
         onChange={(e) => onChange(joinMemory(e.target.value, split.unit))}
         placeholder={placeholder}
-        className={`flex-1 min-w-0 rounded border bg-background tabular-nums ${inputCls}`}
+        disabled={disabled}
+        className={`flex-1 min-w-0 rounded border bg-background tabular-nums disabled:cursor-not-allowed disabled:opacity-60 ${inputCls}`}
       />
       <SimpleSelect
         value={split.unit}
         onValueChange={(v) => onChange(joinMemory(split.value, v as 'k' | 'm' | 'g'))}
         size="sm"
+        disabled={disabled}
         className={`w-auto min-w-[4rem] ${inputCls}`}
         options={[
           { value: 'k', label: 'KB' },
@@ -1219,19 +1254,21 @@ function FilesColumn({ files, usedInPairs, problemUrl, addCase, onOpenFile }: {
               上传测试数据
             </DialogTitle>
           </DialogHeader>
-          <FileUploader
-            endpoint={`${problemUrl}/files`}
-            fieldName="file"
-            meta={{ type: 'testdata' }}
-            maxFileSize={256 * 1024 * 1024}
-            maxFiles={200}
-            onBatchComplete={() => {
-              // Refresh so the new files appear in the pool
-              setTimeout(() => window.location.reload(), 600);
-            }}
-          />
-          <div className="flex justify-end pt-2">
-            <Button variant="outline" onClick={() => setUploadOpen(false)}>关闭</Button>
+          <div className="space-y-4 p-5">
+            <FileUploader
+              endpoint={`${problemUrl}/files`}
+              fieldName="file"
+              meta={{ type: 'testdata' }}
+              maxFileSize={256 * 1024 * 1024}
+              maxFiles={200}
+              onBatchComplete={() => {
+                // Refresh so the new files appear in the pool
+                setTimeout(() => window.location.reload(), 600);
+              }}
+            />
+            <div className="flex justify-end">
+              <Button variant="outline" onClick={() => setUploadOpen(false)}>关闭</Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

@@ -2,7 +2,7 @@
  * Domain management pages — edit, users, permissions, roles, groups.
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   FileDown,
   FileUp,
@@ -24,6 +24,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { AdminPage } from '@/components/admin/admin-page';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { SimpleSelect } from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -81,14 +83,12 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
             <span className="text-sm text-muted-foreground">{setting.ui || '启用'}</span>
           </label>
         ) : setting.type === 'select' ? (
-          <select
+          <SimpleSelect
             name={setting.key}
-            defaultValue={value ?? setting.value}
+            defaultValue={String(value ?? setting.value ?? '')}
             disabled={isDisabled}
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
-          >
-            {renderRange(setting.range)}
-          </select>
+            options={rangeOptions(setting.range)}
+          />
         ) : setting.type === 'markdown' && !isDisabled ? (
           <MarkdownEditor
             name={setting.key}
@@ -134,24 +134,49 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
   );
 }
 
-function renderRange(range: any) {
-  if (!range) return null;
+/**
+ * Inline role picker for the user roster — re-submits the surrounding form
+ * (`<form method="post">`) whenever the user picks a new role. We render a
+ * hidden `<input name="role">` ourselves so the change handler can find the
+ * native form via the input's `form` property; the SimpleSelect popover
+ * lives in a Portal, so `event.currentTarget.form` won't reach the row.
+ */
+function RoleQuickSelect({
+  defaultValue, roleOptions,
+}: { defaultValue: string; roleOptions: string[] }) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  return (
+    <>
+      <input ref={inputRef} type="hidden" name="role" defaultValue={defaultValue} />
+      <SimpleSelect
+        defaultValue={defaultValue}
+        size="sm"
+        className="text-xs"
+        options={roleOptions.map((option) => ({ value: option, label: option }))}
+        onValueChange={(v) => {
+          if (inputRef.current) {
+            inputRef.current.value = v;
+            inputRef.current.form?.requestSubmit();
+          }
+        }}
+      />
+    </>
+  );
+}
+
+function rangeOptions(range: any): { value: string; label: string }[] {
+  if (!range) return [];
   if (Array.isArray(range)) {
     return range.map((opt: any) => {
       const val = Array.isArray(opt) ? opt[0] : opt;
       const label = Array.isArray(opt) ? (opt[1] || opt[0]) : opt;
-      return (
-        <option key={String(val)} value={String(val)}>
-          {String(label)}
-        </option>
-      );
+      return { value: String(val), label: String(label) };
     });
   }
-  return Object.entries(range).map(([val, label]) => (
-    <option key={val} value={val}>
-      {String(label)}
-    </option>
-  ));
+  return Object.entries(range).map(([val, label]) => ({
+    value: val,
+    label: String(label),
+  }));
 }
 
 /* ================================================================== */
@@ -266,11 +291,15 @@ export function DomainUserPage() {
             </div>
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground" htmlFor="domain-user-role">角色</label>
-              <select id="domain-user-role" name="role" className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                {(selectableRoles.length ? selectableRoles : roleOptions).map((role) => (
-                  <option key={role} value={role}>{role}</option>
-                ))}
-              </select>
+              <SimpleSelect
+                id="domain-user-role"
+                name="role"
+                defaultValue={(selectableRoles.length ? selectableRoles : roleOptions)[0]}
+                options={(selectableRoles.length ? selectableRoles : roleOptions).map((role) => ({
+                  value: role,
+                  label: role,
+                }))}
+              />
             </div>
             <label className="flex items-center gap-2 pb-2 text-sm">
               <Checkbox name="join" value="true"  />
@@ -292,9 +321,12 @@ export function DomainUserPage() {
               <form method="post" className="flex flex-wrap items-center gap-2">
                 <input type="hidden" name="operation" value="set_users" />
                 {selectedList.map((uid) => <input key={uid} type="hidden" name="uids" value={uid} />)}
-                <select name="role" className="rounded-md border bg-background px-3 py-2 text-sm">
-                  {roleOptions.map((role) => <option key={role} value={role}>{role}</option>)}
-                </select>
+                <SimpleSelect
+                  name="role"
+                  defaultValue={roleOptions[0]}
+                  className="w-auto min-w-[8rem]"
+                  options={roleOptions.map((role) => ({ value: role, label: role }))}
+                />
                 <Button type="submit" size="sm" variant="outline">
                   设置角色
                 </Button>
@@ -372,14 +404,10 @@ export function DomainUserPage() {
                           <form method="post">
                             <input type="hidden" name="operation" value="set_users" />
                             <input type="hidden" name="uids" value={u._id} />
-                            <select
-                              name="role"
+                            <RoleQuickSelect
                               defaultValue={u.role || role}
-                              onChange={(event) => event.currentTarget.form?.requestSubmit()}
-                              className="w-full rounded-md border bg-background px-2 py-1 text-xs"
-                            >
-                              {roleOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-                            </select>
+                              roleOptions={roleOptions}
+                            />
                           </form>
                         </TableCell>
                         <TableCell className="text-right pr-5">
@@ -587,7 +615,7 @@ function RolePermissionDialog({
               the literal "1000" sentinel. */}
           <input type="hidden" name={role._id} value="1000" />
 
-          <div className="krypton-scrollbar flex-1 space-y-5 overflow-y-auto p-5">
+          <ScrollArea className="flex-1" viewportClassName="space-y-5 p-5">
             {Object.entries(permsByFamily).map(([family, perms]) => {
               const familyKeys = perms.map((p) => String(p.key));
               const familyAll = familyKeys.every((k) => checked.has(k));
@@ -632,7 +660,7 @@ function RolePermissionDialog({
                 </div>
               );
             })}
-          </div>
+          </ScrollArea>
 
           <div className="flex items-center justify-between gap-2 border-t bg-muted/20 px-5 py-3">
             <p className="text-xs text-muted-foreground">

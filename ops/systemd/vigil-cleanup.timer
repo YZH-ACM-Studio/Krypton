@@ -1,0 +1,11 @@
+[Unit]
+Description=Krypton Vigil cleanup daily timer
+
+[Timer]
+# Daily at 04:00 local time. Persistent=true means missed runs (e.g. host
+# offline at 04:00) trigger at next boot.
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

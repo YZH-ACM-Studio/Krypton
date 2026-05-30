@@ -51,10 +51,20 @@ function safeUrl(context: Record<string, any>, name: string, params?: Record<str
     try { return params ? context.url(name, params) : context.url(name); } catch { return '#'; }
 }
 
+function safeSystemGet(key: string): string {
+    try {
+        return (global as any).Hydro?.model?.system?.get?.(key) || '';
+    } catch { return ''; }
+}
+
 function buildBootstrap(templateName: string, args: Record<string, any>, context: Record<string, any>) {
     const currentUser = context.UserContext || {};
     const domain = args.domain || context.handler?.domain || {};
     const siteName = domain?.ui?.name || domain?.name || 'Hydro';
+    // Footer extras: system-wide and per-domain HTML lines. Pre-sanitised
+    // by hydrooj when configured via system settings.
+    const systemFooterHtml = safeSystemGet('ui-default.footer_extra_html');
+    const domainFooterHtml = (domain?.ui?.footer_extra_html || '');
 
     return {
         appName: 'Krypton',
@@ -77,6 +87,8 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
             tfa: !!currentUser.tfa,
             authn: !!currentUser.authn,
             pinnedDomains: currentUser.pinnedDomains || [],
+            avatar: currentUser.avatar || '',
+            avatarUrl: currentUser.avatarUrl || '',
         },
         domain: {
             id: String(domain._id || 'system'),
@@ -114,6 +126,10 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
             recordDetail: safeUrl(context, 'record_detail', { rid: '__RID__' }),
         },
         udict: args.udict || {},
+        footer: {
+            systemHtml: systemFooterHtml,
+            domainHtml: domainFooterHtml,
+        },
         page: {
             templateName,
             data: args,
@@ -191,6 +207,10 @@ function renderMissingBuild(bootstrap: ReturnType<typeof buildBootstrap>) {
 }
 
 async function renderApp(templateName: string, args: Record<string, any>, context: Record<string, any>, vite: ViteDevServer | null) {
+    context.handler?.response?.addHeader?.('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    context.handler?.response?.addHeader?.('Pragma', 'no-cache');
+    context.handler?.response?.addHeader?.('Expires', '0');
+
     const bootstrap = buildBootstrap(templateName, args, context);
     let serializedBootstrap: string;
     try {

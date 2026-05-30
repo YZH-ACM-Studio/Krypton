@@ -31,7 +31,17 @@ class DomainRankHandler extends Handler {
             'ranking',
         );
         const udict = await user.getList(domainId, dudocs.map((dudoc) => dudoc.uid));
-        const udocs = dudocs.map((i) => udict[i.uid]);
+        // Per-domain stats (rp / nAccept / rank / rpInfo) live on the dudoc, not
+        // the global user doc. Merge them so the frontend can render real values
+        // instead of zeroes pulled from the user-level fallback.
+        const udocs = dudocs.map((i) => ({
+            ...udict[i.uid],
+            rp: i.rp ?? 0,
+            rpInfo: i.rpInfo,
+            rank: i.rank,
+            nAccept: i.nAccept ?? 0,
+            nSubmit: i.nSubmit ?? 0,
+        }));
         const rpDefinitions = Object.fromEntries(Object.entries(global.Hydro.model.rp || {})
             .map(([key, def]: [string, any]) => [key, { hidden: !!def.hidden }]));
         const self = this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
@@ -46,9 +56,20 @@ class DomainRankHandler extends Handler {
                 bio: this.user.bio,
             }
             : null;
+        // Admin-only column data: studentId / realName looked up via userbind
+        // for all visible users. Populated only when viewer has system priv
+        // and the userbind plugin is loaded (defensive null-check).
+        let studentDict: Record<string, { studentId: string; realName: string }> = {};
+        if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && global.Hydro?.model?.userbind?.findStudentsByUserIds) {
+            const uids = dudocs.map((d) => d.uid).filter((u) => u && u > 1);
+            const students = await global.Hydro.model.userbind.findStudentsByUserIds(domainId, uids);
+            studentDict = Object.fromEntries(Object.entries(students).map(
+                ([uid, s]: [string, any]) => [uid, { studentId: s.studentId, realName: s.realName }],
+            ));
+        }
         this.response.template = 'ranking.html';
         this.response.body = {
-            udocs, upcount, ucount, page, rpDefinitions, self,
+            udocs, upcount, ucount, page, rpDefinitions, self, studentDict,
         };
     }
 }

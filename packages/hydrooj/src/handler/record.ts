@@ -44,7 +44,14 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         let tdoc = null;
         let invalid = false;
         this.response.template = 'record_main.html';
-        const q: Filter<RecordDoc> = { contest: tid };
+        // tid undefined → practice mode. The Node MongoDB driver strips
+        // {contest: undefined} from the filter, which would otherwise let
+        // pretest records (contest = RECORD_PRETEST sentinel) leak into
+        // the per-problem "提交记录" list. Build the contest filter
+        // explicitly to keep practice records (no contest field) only.
+        const q: Filter<RecordDoc> = tid
+            ? { contest: tid }
+            : { contest: { $exists: false } };
         if (full) uidOrName = this.user._id.toString();
         if (uidOrName) {
             const udoc = await user.getById(domainId, +uidOrName)
@@ -108,12 +115,24 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         if (this.tdoc && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
             rdocs = rdocs.map((i) => contest.applyProjection(tdoc, i, this.user));
         }
+        // Admin extra column: 学号 / 姓名. Only populated when the viewer has
+        // PRIV_EDIT_SYSTEM and krypton-userbind is loaded; otherwise the dict
+        // stays empty and the UI hides the column.
+        let studentDict: Record<string, { studentId: string; realName: string }> = {};
+        if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && global.Hydro?.model?.userbind?.findStudentsByUserIds) {
+            const uids = Array.from(new Set(rdocs.map((r) => r.uid))).filter((u) => u && u > 1);
+            const students = await global.Hydro.model.userbind.findStudentsByUserIds(domainId, uids);
+            studentDict = Object.fromEntries(Object.entries(students).map(
+                ([uid, s]: [string, any]) => [uid, { studentId: s.studentId, realName: s.realName }],
+            ));
+        }
         this.response.body = {
             page,
             rdocs,
             tdoc,
             pdict,
             udict,
+            studentDict,
             all,
             allDomain,
             filterPid: pid,
@@ -209,6 +228,10 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         this.response.template = 'record_detail.html';
         this.response.body = {
             udoc, rdoc: canViewDetail ? rdoc : pick(rdoc, ['_id', 'lang', 'code']), pdoc, tdoc: this.tdoc, rev, allRevs,
+            // ui-next needs `langs` to render `rdoc.lang` (e.g. "cc.cc17") as
+            // a human-readable label (e.g. "C++ 17"). RecordsMain already
+            // ships this; mirror it here for the detail page.
+            langs,
         };
     }
 

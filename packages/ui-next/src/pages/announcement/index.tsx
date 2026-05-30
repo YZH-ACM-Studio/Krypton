@@ -9,7 +9,7 @@
  */
 import { useMemo, useState } from 'react';
 import {
-  ArrowUpDown, BellRing, Calendar, ChevronDown, ChevronUp,
+  ArrowUpDown, Calendar,
   Eye, EyeOff, GripVertical, Megaphone, Pencil, Pin, PinOff,
   Plus, Save, Tag, Trash2,
 } from 'lucide-react';
@@ -21,6 +21,7 @@ import { FormField, FormRow } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { Pagination } from '@/components/ui/pagination';
+import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { DateTime } from '@/components/ui/datetime';
@@ -110,26 +111,48 @@ export function AnnounceListPage() {
     limit: number;
     category: string;
     categories: Category[];
+    sort?: 'asc' | 'desc';
   };
   const catMap = new Map(data.categories.map((c) => [c.key, c]));
   const pcount = Math.max(1, Math.ceil(data.total / data.limit));
+  const currentSort = data.sort === 'asc' ? 'asc' : 'desc';
 
-  const baseQuery = data.category ? `?category=${encodeURIComponent(data.category)}&` : '?';
+  // Preserve current filters when building pagination / sort-toggle URLs.
+  const parts: string[] = [];
+  if (data.category) parts.push(`category=${encodeURIComponent(data.category)}`);
+  if (currentSort === 'asc') parts.push('sort=asc');
+  const baseQuery = parts.length ? `?${parts.join('&')}&` : '?';
+
+  const toggleSortUrl = () => {
+    const np: string[] = [];
+    if (data.category) np.push(`category=${encodeURIComponent(data.category)}`);
+    if (currentSort === 'desc') np.push('sort=asc'); // otherwise omit (= desc default)
+    return np.length ? `/announce?${np.join('&')}` : '/announce';
+  };
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5">
+    <div className="w-full space-y-5">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Megaphone className="size-5 text-primary" />
           <h1 className="text-xl font-semibold">公告</h1>
         </div>
+        <Button asChild variant="outline" size="sm">
+          <a href={toggleSortUrl()} className="gap-1.5">
+            <ArrowUpDown className="size-3.5" />
+            {currentSort === 'desc' ? '最新优先' : '最早优先'}
+          </a>
+        </Button>
       </header>
 
       <MiniTabs
         size="sm"
         value={data.category || 'all'}
         onValueChange={(v) => {
-          window.location.href = v === 'all' ? '/announce' : `/announce?category=${encodeURIComponent(v)}`;
+          const q: string[] = [];
+          if (v !== 'all') q.push(`category=${encodeURIComponent(v)}`);
+          if (currentSort === 'asc') q.push('sort=asc');
+          window.location.href = q.length ? `/announce?${q.join('&')}` : '/announce';
         }}
         items={[
           { value: 'all', label: '全部' },
@@ -184,7 +207,7 @@ export function AnnounceDetailPage() {
     category: Category | null;
   };
   return (
-    <div className="mx-auto max-w-4xl space-y-5">
+    <div className="w-full space-y-5">
       <Button variant="ghost" size="sm" asChild>
         <a href="/announce" className="gap-1.5">
           <ArrowUpDown className="size-3.5 rotate-90" />
@@ -290,7 +313,7 @@ export function AdminAnnounceListPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.map((doc, idx) => {
+              {items.map((doc) => {
                 const cat = catMap.get(doc.category);
                 return (
                   <TableRow
@@ -355,18 +378,18 @@ export function AdminAnnounceListPage() {
                       <TableActions>
                         <TableAction href={`/admin/announce/${doc._id}/edit`} icon={Pencil}>编辑</TableAction>
                         <TableAction
-                          formAction="/admin/announce"
+                          formAction={`/admin/announce/${doc._id}/edit`}
                           hidden={{ operation: 'update', aid: doc._id, pin: doc.pin ? 'false' : 'true' }}
                           icon={doc.pin ? PinOff : Pin}
                         >
                           {doc.pin ? '取消置顶' : '置顶'}
                         </TableAction>
                         <TableAction
-                          formAction="/admin/announce"
+                          formAction={`/admin/announce/${doc._id}/edit`}
                           hidden={{ operation: 'delete', aid: doc._id }}
                           icon={Trash2}
                           variant="destructive"
-                          confirm="确定删除？"
+                          confirm="确定要删除这条公告吗？该操作无法撤销。"
                         >
                           删除
                         </TableAction>
@@ -434,7 +457,7 @@ export function AdminAnnounceEditorPage() {
     >
       <Card>
         <CardContent className="p-6">
-          <form method="post" action="/admin/announce" className="space-y-5">
+          <form method="post" action={isNew ? '/admin/announce' : `/admin/announce/${data.doc!._id}/edit`} className="space-y-5">
             <input type="hidden" name="operation" value={isNew ? 'create' : 'update'} />
             {!isNew && <input type="hidden" name="aid" value={data.doc!._id} />}
             <input type="hidden" name="content" value={content} />
@@ -445,22 +468,28 @@ export function AdminAnnounceEditorPage() {
 
             <FormRow columns={2}>
               <FormField label="分类" required htmlFor="ann-cat">
-                <select id="ann-cat" name="category" value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full max-w-md rounded-md border bg-background px-3 py-2 text-sm">
-                  {data.categories.map((c) => (
-                    <option key={c.key} value={c.key}>{c.name}</option>
-                  ))}
-                </select>
+                <SimpleSelect
+                  id="ann-cat"
+                  name="category"
+                  value={category}
+                  onValueChange={setCategory}
+                  className="max-w-md"
+                  options={data.categories.map((c) => ({ value: c.key, label: c.name }))}
+                />
               </FormField>
               <FormField label="范围" htmlFor="ann-scope">
-                <select id="ann-scope" name="scope" value={scope}
-                  onChange={(e) => setScope(e.target.value as 'global' | 'domain')}
+                <SimpleSelect
+                  id="ann-scope"
+                  name="scope"
+                  value={scope}
+                  onValueChange={(v) => setScope(v as 'global' | 'domain')}
                   disabled={!isNew}
-                  className="w-full max-w-md rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-60">
-                  <option value="domain">当前域</option>
-                  {data.canEditGlobal && <option value="global">全局（全 OJ）</option>}
-                </select>
+                  className="max-w-md"
+                  options={[
+                    { value: 'domain', label: '当前域' },
+                    ...(data.canEditGlobal ? [{ value: 'global', label: '全局（全 OJ）' }] : []),
+                  ]}
+                />
               </FormField>
             </FormRow>
 
@@ -617,13 +646,15 @@ function CategoryEditorDialog({
             </FormRow>
             <FormRow columns={2}>
               <FormField label="配色" htmlFor="cat-color">
-                <select id="cat-color" name="color" value={color}
-                  onChange={(e) => setColor(e.target.value)}
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                  {['gray', 'amber', 'blue', 'purple', 'green', 'rose', 'sky'].map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
+                <SimpleSelect
+                  id="cat-color"
+                  name="color"
+                  value={color}
+                  onValueChange={setColor}
+                  options={['gray', 'amber', 'blue', 'purple', 'green', 'rose', 'sky'].map((c) => ({
+                    value: c, label: c,
+                  }))}
+                />
               </FormField>
               <FormField label="排序" htmlFor="cat-order">
                 <Input id="cat-order" name="order" type="number" value={order}

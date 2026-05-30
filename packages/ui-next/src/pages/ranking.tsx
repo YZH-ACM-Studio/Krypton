@@ -1,10 +1,16 @@
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import { Medal } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Pagination } from '@/components/ui/pagination';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { MarkdownView } from '@/components/markdown-renderer';
+import { ExternalLink } from 'lucide-react';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatPlainTextSummary, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
@@ -37,14 +43,20 @@ function RankingRow({
   rank,
   rpKeys,
   current,
+  onShowBio,
+  studentInfo,
 }: {
   user: GenericUserDoc & R;
   rank: number | string;
   rpKeys: string[];
   current?: boolean;
+  onShowBio?: (user: GenericUserDoc & R) => void;
+  /** Admin-only column. When undefined, the cell is suppressed. */
+  studentInfo?: { studentId: string; realName: string } | null;
 }) {
   const bs = useBootstrap();
   const numericRank = typeof rank === 'number' ? rank : Number(rank);
+  const bioPreview = formatPlainTextSummary(user.bio);
 
   return (
     <TableRow className={cn(current && 'bg-primary/5')}>
@@ -61,12 +73,25 @@ function RankingRow({
           className="flex min-w-0 items-center gap-2 hover:text-primary"
         >
           <Avatar className="size-7">
+            {user.avatarUrl ? <AvatarImage src={String(user.avatarUrl)} alt={String(user.uname || '')} /> : null}
             <AvatarFallback className="text-[10px]">{makeInitials(user.uname || '?')}</AvatarFallback>
           </Avatar>
           <span className="truncate font-medium">{user.uname || `#${user._id}`}</span>
           {current ? <Badge variant="secondary" className="text-[10px]">我</Badge> : null}
         </a>
       </TableCell>
+      {studentInfo !== undefined ? (
+        <TableCell className="text-xs">
+          {studentInfo ? (
+            <>
+              <div className="font-mono">{studentInfo.studentId}</div>
+              <div className="text-muted-foreground">{studentInfo.realName}</div>
+            </>
+          ) : (
+            <span className="text-muted-foreground/40">—</span>
+          )}
+        </TableCell>
+      ) : null}
       <TableCell className="text-right tabular-nums font-medium">
         {Math.round(Number(user.rp || 0))}
       </TableCell>
@@ -78,8 +103,19 @@ function RankingRow({
       <TableCell className="text-right tabular-nums">
         {user.nAccept ?? 0}
       </TableCell>
-      <TableCell className="max-w-48 truncate text-sm text-muted-foreground">
-        {formatPlainTextSummary(user.bio) || '—'}
+      <TableCell className="max-w-64 text-sm">
+        {bioPreview ? (
+          <button
+            type="button"
+            onClick={() => onShowBio?.(user)}
+            className="block w-full max-w-full truncate text-left text-muted-foreground hover:text-foreground hover:underline"
+            title="点击查看完整简介"
+          >
+            {bioPreview}
+          </button>
+        ) : (
+          <span className="text-muted-foreground/40">—</span>
+        )}
       </TableCell>
     </TableRow>
   );
@@ -101,6 +137,9 @@ export function RankingPage() {
     .filter(([, def]) => !(def as R)?.hidden)
     .map(([key]) => key);
   const self: R | null = data.self || null;
+  const studentDict: Record<string, { studentId: string; realName: string }> = data.studentDict || {};
+  const hasStudentColumn = Object.keys(studentDict).length > 0;
+  const [bioUser, setBioUser] = useState<(GenericUserDoc & R) | null>(null);
 
   return (
     <motion.div
@@ -116,12 +155,15 @@ export function RankingPage() {
 
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
+          <div>
             <Table>
               <TableHeader>
-                <TableRow>
+<TableRow>
                   <TableHead className="w-16 text-center">#</TableHead>
                   <TableHead>用户</TableHead>
+                  {hasStudentColumn ? (
+                    <TableHead className="w-32">学号 / 姓名</TableHead>
+                  ) : null}
                   <TableHead className="w-20 text-right">RP</TableHead>
                   {rpKeys.map((key) => (
                     <TableHead key={key} className="hidden w-24 text-right md:table-cell">
@@ -134,11 +176,18 @@ export function RankingPage() {
               </TableHeader>
               <TableBody>
                 {self ? (
-                  <RankingRow user={self as GenericUserDoc & R} rank={self.rank || '—'} rpKeys={rpKeys} current />
+                  <RankingRow
+                    user={self as GenericUserDoc & R}
+                    rank={self.rank || '—'}
+                    rpKeys={rpKeys}
+                    current
+                    onShowBio={setBioUser}
+                    studentInfo={hasStudentColumn ? (studentDict[String(self._id)] ?? null) : undefined}
+                  />
                 ) : null}
                 {rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5 + rpKeys.length} className="py-8 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={5 + rpKeys.length + (hasStudentColumn ? 1 : 0)} className="py-8 text-center text-sm text-muted-foreground">
                       暂无排名数据
                     </TableCell>
                   </TableRow>
@@ -149,6 +198,8 @@ export function RankingPage() {
                       user={user}
                       rank={user.rank || userRankFallback(page, index)}
                       rpKeys={rpKeys}
+                      onShowBio={setBioUser}
+                      studentInfo={hasStudentColumn ? (studentDict[String(user._id)] ?? null) : undefined}
                     />
                   ))
                 )}
@@ -159,6 +210,42 @@ export function RankingPage() {
       </Card>
 
       <Pagination current={page} total={upcount} baseUrl={bs.urls.ranking} />
+
+      {/* Bio detail dialog */}
+      <Dialog open={!!bioUser} onOpenChange={(o) => !o && setBioUser(null)}>
+        <DialogContent
+          className="flex h-[80vh] w-[80vw] max-w-4xl flex-col"
+          onClose={() => setBioUser(null)}
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Avatar className="size-7">
+                {bioUser?.avatarUrl ? <AvatarImage src={String(bioUser.avatarUrl)} alt={bioUser?.uname || ''} /> : null}
+                <AvatarFallback className="text-[10px]">{makeInitials(bioUser?.uname || '?')}</AvatarFallback>
+              </Avatar>
+              <span>{bioUser?.uname || '用户'}</span>
+              <span className="text-xs font-normal text-muted-foreground">· 个人简介</span>
+            </DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="flex-1" viewportClassName="px-6 py-5">
+            {bioUser?.bio ? (
+              <MarkdownView content={bioUser.bio} preferredLang={bs.locale} />
+            ) : (
+              <p className="text-sm text-muted-foreground">该用户暂无简介</p>
+            )}
+          </ScrollArea>
+          <div className="flex shrink-0 justify-end border-t px-6 py-3">
+            <Button asChild variant="default" size="sm">
+              <a
+                href={replaceRouteTokens(bs.urls.userDetail, { UID: String(bioUser?._id || '') })}
+              >
+                查看完整资料
+                <ExternalLink className="size-3.5" />
+              </a>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 }

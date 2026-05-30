@@ -19,24 +19,48 @@ import {
     ContestModel, DocumentModel, ObjectId, RecordModel, STATUS,
 } from 'hydrooj';
 import { userBindModel } from '@hydrooj/krypton-userbind';
-import { cspScoreColl, gpltScoreColl, patScoreColl } from './db';
+import { cspScoreColl, gpltScoreColl, patScoreColl, stayEventsColl } from './db';
 import type {
     TaskCheckerContext, TaskPointParamSchema, TaskPointPreset, TaskPointResult,
 } from './types';
 
 // ============ shared helpers ============
 
-/** Build an ObjectId range from a yyyy-mm-dd string for record query windowing. */
-function dateRangeQuery(start?: string, end?: string): Record<string, any> {
+type DateLike = string | Date | null | undefined;
+
+function dateBoundaryMs(value: DateLike, boundary: 'start' | 'end'): number | null {
+    if (!value) return null;
+    if (value instanceof Date) {
+        const t = value.getTime();
+        return Number.isNaN(t) ? null : t;
+    }
+    const raw = String(value).trim();
+    if (!raw) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        const time = boundary === 'end' ? '23:59:59.999' : '00:00:00.000';
+        const t = new Date(`${raw}T${time}+08:00`).getTime();
+        return Number.isNaN(t) ? null : t;
+    }
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/.test(raw)) {
+        const withSeconds = raw.length === 16 ? `${raw}:00` : raw;
+        const t = new Date(`${withSeconds}+08:00`).getTime();
+        return Number.isNaN(t) ? null : t;
+    }
+    const t = new Date(raw).getTime();
+    return Number.isNaN(t) ? null : t;
+}
+
+function hasDateValue(value: DateLike): boolean {
+    return dateBoundaryMs(value, 'start') !== null;
+}
+
+/** Build an ObjectId range from a date/date-time for record query windowing. */
+function dateRangeQuery(start?: DateLike, end?: DateLike): Record<string, any> {
     const r: any = {};
-    if (start) {
-        const t = new Date(start).getTime();
-        if (!Number.isNaN(t)) r.$gte = new ObjectId(Math.floor(t / 1000).toString(16).padStart(8, '0') + '0000000000000000');
-    }
-    if (end) {
-        const t = new Date(end).getTime();
-        if (!Number.isNaN(t)) r.$lte = new ObjectId(Math.floor(t / 1000).toString(16).padStart(8, '0') + 'ffffffffffffffff');
-    }
+    const startT = dateBoundaryMs(start, 'start');
+    if (startT !== null) r.$gte = new ObjectId(Math.floor(startT / 1000).toString(16).padStart(8, '0') + '0000000000000000');
+    const endT = dateBoundaryMs(end, 'end');
+    if (endT !== null) r.$lte = new ObjectId(Math.floor(endT / 1000).toString(16).padStart(8, '0') + 'ffffffffffffffff');
     return r;
 }
 
@@ -56,6 +80,7 @@ function pct(current: number, target: number, completed: boolean, details: strin
 const acCountPreset: TaskPointPreset = {
     id: 'ac_count',
     name: 'AC 题目数量',
+    category: 'behavior',
     description: '统计用户在 OJ 上独立 AC 的题目数量是否达到指定值',
     params: [
         { name: 'count', type: 'number', label: '需要 AC 的题目数', default: 10, required: true },
@@ -74,6 +99,7 @@ const acCountPreset: TaskPointPreset = {
 const submitCountPreset: TaskPointPreset = {
     id: 'submit_count',
     name: '提交次数',
+    category: 'behavior',
     description: '用户提交代码的总次数达到指定值',
     params: [
         { name: 'count', type: 'number', label: '需要提交次数', default: 50, required: true },
@@ -92,6 +118,7 @@ const submitCountPreset: TaskPointPreset = {
 const contestParticipatePreset: TaskPointPreset = {
     id: 'contest_participate',
     name: '参加比赛次数',
+    category: 'behavior',
     description: '用户参加过的比赛数量达到指定值',
     params: [
         { name: 'count', type: 'number', label: '需要参加的比赛场数', default: 3, required: true },
@@ -105,15 +132,15 @@ const contestParticipatePreset: TaskPointPreset = {
             attend: 1,
         }).toArray();
         let count = attended.length;
-        if (params.startDate || params.endDate) {
+        if (hasDateValue(params.startDate) || hasDateValue(params.endDate)) {
             const ids = attended.map((a: any) => a.docId);
             const contests = await DocumentModel.coll.find({
                 domainId: ctx.domainId,
                 docType: DocumentModel.TYPE_CONTEST,
                 docId: { $in: ids },
             }).toArray();
-            const startT = params.startDate ? new Date(params.startDate).getTime() : -Infinity;
-            const endT = params.endDate ? new Date(params.endDate).getTime() : Infinity;
+            const startT = dateBoundaryMs(params.startDate, 'start') ?? -Infinity;
+            const endT = dateBoundaryMs(params.endDate, 'end') ?? Infinity;
             count = contests.filter((c: any) => {
                 const t = c.beginAt?.getTime() || 0;
                 return t >= startT && t <= endT;
@@ -127,7 +154,8 @@ const contestParticipatePreset: TaskPointPreset = {
 const specificContestPreset: TaskPointPreset = {
     id: 'specific_contest',
     name: '参加特定比赛',
-    description: '用户参加了管理员指定的某场比赛',
+    category: 'behavior',
+    description: '用户参加了管理员指定的某场比赛，并在该比赛中至少提交过一次',
     params: [
         { name: 'contestId', type: 'contest', label: '比赛', required: true },
     ],
@@ -141,13 +169,24 @@ const specificContestPreset: TaskPointPreset = {
             docId: id,
             attend: 1,
         });
-        return pct(tsdoc ? 1 : 0, 1, !!tsdoc, tsdoc ? '已参加该比赛' : '未参加该比赛');
+        if (!tsdoc) return pct(0, 1, false, '未参加该比赛');
+        const submitted = await RecordModel.coll.findOne({
+            domainId: ctx.domainId,
+            uid: ctx.userId,
+            contest: id,
+            status: { $ne: STATUS.STATUS_CANCELED },
+        }, { projection: { _id: 1 } });
+        return pct(
+            submitted ? 1 : 0, 1, !!submitted,
+            submitted ? '已参加该比赛且已有提交' : '已参加该比赛，但暂无有效提交',
+        );
     },
 };
 
 const contestRankPreset: TaskPointPreset = {
     id: 'contest_rank',
     name: '比赛排名',
+    category: 'behavior',
     description: '用户在指定比赛中获得指定排名以内',
     params: [
         { name: 'contestId', type: 'contest', label: '比赛', required: true },
@@ -168,9 +207,78 @@ const contestRankPreset: TaskPointPreset = {
     },
 };
 
+const contestRankTopNPreset: TaskPointPreset = {
+    id: 'contest_rank_top_n',
+    name: '指定比赛排名前 N 名',
+    category: 'behavior',
+    description: '用户在指定比赛中的排名进入前 N 名以内（含第 N 名）',
+    params: [
+        { name: 'contestId', type: 'contest', label: '比赛', required: true },
+        { name: 'topN', type: 'number', label: '前 N 名（含）', default: 10, required: true },
+    ],
+    async checker(ctx, params) {
+        if (!params.contestId) return pct(0, 1, false, '未配置比赛');
+        const id = typeof params.contestId === 'string' ? new ObjectId(params.contestId) : params.contestId;
+        const target = Math.max(1, +params.topN || 1);
+        const tsdoc = await DocumentModel.collStatus.findOne({
+            domainId: ctx.domainId,
+            uid: ctx.userId,
+            docType: DocumentModel.TYPE_CONTEST,
+            docId: id,
+        });
+        if (!tsdoc || !tsdoc.rank) return pct(0, 1, false, '未参加该比赛或无排名');
+        const ok = tsdoc.rank <= target;
+        return pct(ok ? 1 : 0, 1, ok, `当前第 ${tsdoc.rank} 名（目标前 ${target} 名）`);
+    },
+};
+
+/**
+ * Top-percent variant. Needs the contest's total ranked-participant count to
+ * convert the user's absolute rank into a percentile. We count attendees with
+ * `rank > 0` (rank=0 means "no ranking emitted yet" for that scoreboard).
+ */
+const contestRankTopPercentPreset: TaskPointPreset = {
+    id: 'contest_rank_top_percent',
+    name: '指定比赛排名前 X%',
+    category: 'behavior',
+    description: '用户在指定比赛中的排名进入前 X%（按已出排名的参赛者总数计）',
+    params: [
+        { name: 'contestId', type: 'contest', label: '比赛', required: true },
+        { name: 'percent', type: 'number', label: '前百分比 (0-100)', default: 10, required: true },
+    ],
+    async checker(ctx, params) {
+        if (!params.contestId) return pct(0, 1, false, '未配置比赛');
+        const id = typeof params.contestId === 'string' ? new ObjectId(params.contestId) : params.contestId;
+        const targetPct = Math.max(0, Math.min(100, +params.percent || 0));
+        const [tsdoc, total] = await Promise.all([
+            DocumentModel.collStatus.findOne({
+                domainId: ctx.domainId,
+                uid: ctx.userId,
+                docType: DocumentModel.TYPE_CONTEST,
+                docId: id,
+            }),
+            DocumentModel.collStatus.countDocuments({
+                domainId: ctx.domainId,
+                docType: DocumentModel.TYPE_CONTEST,
+                docId: id,
+                rank: { $gt: 0 },
+            }),
+        ]);
+        if (!tsdoc || !tsdoc.rank) return pct(0, 1, false, '未参加该比赛或无排名');
+        if (!total) return pct(0, 1, false, '比赛尚无排名数据');
+        const userPct = (tsdoc.rank / total) * 100;
+        const ok = userPct <= targetPct;
+        return pct(
+            ok ? 1 : 0, 1, ok,
+            `排名 ${tsdoc.rank}/${total}（位列前 ${userPct.toFixed(1)}% / 目标 ≤ ${targetPct}%）`,
+        );
+    },
+};
+
 const specificProblemPreset: TaskPointPreset = {
     id: 'specific_problem',
     name: 'AC 指定题目',
+    category: 'behavior',
     description: '用户通过了管理员指定的某道题目',
     params: [
         { name: 'problemId', type: 'problem', label: '题目', required: true },
@@ -192,6 +300,7 @@ const specificProblemPreset: TaskPointPreset = {
 const continuousCheckinPreset: TaskPointPreset = {
     id: 'continuous_checkin',
     name: '连续活跃天数',
+    category: 'behavior',
     description: '用户连续提交代码的天数达到指定值（任意题目均算）',
     params: [
         { name: 'days', type: 'number', label: '需要连续活跃天数', default: 7, required: true },
@@ -221,6 +330,7 @@ const continuousCheckinPreset: TaskPointPreset = {
 const totalScorePreset: TaskPointPreset = {
     id: 'total_score',
     name: '累计得分',
+    category: 'behavior',
     description: '用户在 OJ 上累计获得的分数总和达到指定值',
     params: [
         { name: 'score', type: 'number', label: '需要达到的总分', default: 500, required: true },
@@ -243,6 +353,8 @@ const basePresets: TaskPointPreset[] = [
     contestParticipatePreset,
     specificContestPreset,
     contestRankPreset,
+    contestRankTopNPreset,
+    contestRankTopPercentPreset,
     specificProblemPreset,
     continuousCheckinPreset,
     totalScorePreset,
@@ -253,6 +365,7 @@ const basePresets: TaskPointPreset[] = [
 const examFinalizedPreset: TaskPointPreset = {
     id: 'exam_finalized',
     name: '完成指定 exam（已最终提交）',
+    category: 'behavior',
     description: '用户最终提交了指定的 exam-rule 比赛',
     params: [
         { name: 'contestId', type: 'contest', label: 'Exam 比赛', required: true, helper: '仅支持 rule=exam 的比赛' },
@@ -278,6 +391,7 @@ const examFinalizedPreset: TaskPointPreset = {
 const groupMembershipPreset: TaskPointPreset = {
     id: 'group_membership',
     name: '属于指定 user_group / school',
+    category: 'condition',
     description: '用户当前是指定 user_group 或 school 的成员',
     params: [
         { name: 'scope', type: 'select', label: '范围', required: true, default: 'user_group',
@@ -309,6 +423,7 @@ const groupMembershipPreset: TaskPointPreset = {
 const homeworkProgressPreset: TaskPointPreset = {
     id: 'homework_progress',
     name: '完成 homework 进度',
+    category: 'behavior',
     description: '用户在 homework 中 AC 的题目占比达到指定百分比',
     params: [
         { name: 'homeworkId', type: 'homework', label: 'Homework', required: true },
@@ -338,6 +453,7 @@ const homeworkProgressPreset: TaskPointPreset = {
 const trainingProgressPreset: TaskPointPreset = {
     id: 'training_progress',
     name: '完成 training 进度',
+    category: 'behavior',
     description: '用户在 training 课程中完成的阶段数达到指定值',
     params: [
         { name: 'trainingId', type: 'training', label: 'Training', required: true },
@@ -367,11 +483,105 @@ const trainingProgressPreset: TaskPointPreset = {
     },
 };
 
+/**
+ * Manual-confirm placeholder. Checker always returns `completed: false` —
+ * admin must use the override mechanism (overridePointCompletion) to mark
+ * it done. Use for events with no automatic signal: on-site sign-in,
+ * physical attendance, oral defense pass, etc. Every override writes an
+ * audit row so the action is traceable.
+ */
+const manualConfirmPreset: TaskPointPreset = {
+    id: 'manual_confirm',
+    name: '管理员手动确认',
+    category: 'behavior',
+    description: '需要管理员手动判定为完成（点击任务点旁的"判定完成"按钮）。适用于现场签到、面试、留校报到等无法自动判定的事件。',
+    params: [],
+    async checker(_ctx, _params) {
+        return pct(0, 1, false, '等待管理员手动判定');
+    },
+};
+
+/**
+ * Lifetime stay-count threshold. Counts all `tasks.stay_events` rows for
+ * the user (regardless of year or source). Used by rules like "已留校过
+ * 一次方可参加测试赛".
+ */
+const stayCountTotalPreset: TaskPointPreset = {
+    id: 'stay_count_total',
+    name: '历史留校次数达标',
+    category: 'behavior',
+    description: '用户历史留校次数（手动录入 + 任务自动 +1 汇总）达到指定值',
+    params: [
+        { name: 'count', type: 'number', label: '所需留校次数', default: 1, required: true },
+    ],
+    async checker(ctx, params) {
+        const target = +params.count || 0;
+        const current = await stayEventsColl.countDocuments({
+            domainId: ctx.domainId,
+            userId: ctx.userId,
+        });
+        return pct(current, target, current >= target, `已留校 ${current}/${target} 次`);
+    },
+};
+
+// ─── New condition presets (grilled 2026-05-25) ─────────────────────────────
+//
+// These are pure attribute checks against the user's bound StudentRecord.
+// Unlike behavior presets they don't read submissions — they answer "is this
+// person currently in <group>?" In the graph editor they live in the
+// 「条件型」 toolbox group so admins instantly know they don't ask users to
+// "do" anything; they gate path branches by who the user is.
+
+const enrollmentYearPreset: TaskPointPreset = {
+    id: 'enrollment_year',
+    name: '入学年份属于',
+    category: 'condition',
+    description: '用户绑定的学生档案 enrollmentYear 属于指定的年份集合（用于按年级分支）',
+    params: [
+        {
+            name: 'years',
+            type: 'years',
+            label: '允许的入学年份',
+            required: true,
+            helper: '多个年份用逗号或空格分隔，例如「2023 2024」',
+        },
+    ],
+    async checker(ctx, params) {
+        const years = Array.isArray(params.years)
+            ? (params.years as any[]).map((y) => +y).filter((y) => Number.isInteger(y))
+            : [];
+        if (!years.length) return pct(0, 1, false, '未配置年份');
+        const student = await userBindModel.findStudentByUserId(ctx.domainId, ctx.userId);
+        if (!student) return pct(0, 1, false, '未绑定学生身份');
+        const y = student.enrollmentYear;
+        if (y == null) return pct(0, 1, false, '档案缺失入学年份');
+        const ok = years.includes(y);
+        return pct(ok ? 1 : 0, 1, ok, ok ? `${y} 级 ✓` : `${y} 级 (需 ${years.join('/')} 级)`);
+    },
+};
+
+const boundToUserbindPreset: TaskPointPreset = {
+    id: 'bound_to_userbind',
+    name: '已绑定学生身份',
+    category: 'condition',
+    description: '用户 OJ 账号已绑定 userbind 学生档案（通过 invite-token 或 admin 手动绑定）',
+    params: [],
+    async checker(ctx, _params) {
+        const student = await userBindModel.findStudentByUserId(ctx.domainId, ctx.userId);
+        const ok = !!student;
+        return pct(ok ? 1 : 0, 1, ok, ok ? '已绑定 ✓' : '未绑定学生身份');
+    },
+};
+
 const kryptonPresets: TaskPointPreset[] = [
     examFinalizedPreset,
     groupMembershipPreset,
     homeworkProgressPreset,
     trainingProgressPreset,
+    manualConfirmPreset,
+    stayCountTotalPreset,
+    enrollmentYearPreset,
+    boundToUserbindPreset,
 ];
 
 // ============ Score presets (PAT / GPLT / CSP) ============
@@ -396,6 +606,7 @@ const GPLT_LEVELS: TaskPointParamSchema['options'] = [
 const patSpecificPreset: TaskPointPreset = {
     id: 'pat_specific_exam',
     name: 'PAT 指定考试达标',
+    category: 'behavior',
     description: '用户在指定的 PAT 考试中达到指定分数',
     params: [
         { name: 'level', type: 'pat_level', label: '等级', default: 'advanced', required: true, options: PAT_LEVELS },
@@ -420,6 +631,7 @@ const patSpecificPreset: TaskPointPreset = {
 const patAnyPreset: TaskPointPreset = {
     id: 'pat_any_score',
     name: 'PAT 任意场次达标',
+    category: 'behavior',
     description: '用户在任意一次 PAT 考试中达到指定分数即可',
     params: [
         { name: 'level', type: 'pat_level', label: '等级', default: 'advanced', required: true, options: PAT_LEVELS },
@@ -441,6 +653,7 @@ const patAnyPreset: TaskPointPreset = {
 const gpltSpecificPreset: TaskPointPreset = {
     id: 'gplt_specific_year',
     name: '天梯赛指定年份达标',
+    category: 'behavior',
     description: '用户在指定年份的天梯赛中达到指定分数',
     params: [
         { name: 'level', type: 'gplt_level', label: '比赛级别', default: 'school', required: true, options: GPLT_LEVELS },
@@ -463,6 +676,7 @@ const gpltSpecificPreset: TaskPointPreset = {
 const gpltAnyPreset: TaskPointPreset = {
     id: 'gplt_any_score',
     name: '天梯赛任意年份达标',
+    category: 'behavior',
     description: '用户在任意一年的天梯赛中达到指定分数即可',
     params: [
         { name: 'level', type: 'gplt_level', label: '比赛级别', default: 'school', required: true, options: GPLT_LEVELS },
@@ -483,6 +697,7 @@ const gpltAnyPreset: TaskPointPreset = {
 const cspSpecificPreset: TaskPointPreset = {
     id: 'csp_specific_round',
     name: 'CSP 指定次数达标',
+    category: 'behavior',
     description: '用户在指定次 CSP 认证中达到指定分数',
     params: [
         { name: 'round', type: 'number', label: '认证次数（第几次）', default: 37, required: true },
@@ -503,6 +718,7 @@ const cspSpecificPreset: TaskPointPreset = {
 const cspAnyPreset: TaskPointPreset = {
     id: 'csp_any_score',
     name: 'CSP 任意次数达标',
+    category: 'behavior',
     description: '用户在任意一次 CSP 认证中达到指定分数即可',
     params: [
         { name: 'minScore', type: 'number', label: '最低分数', default: 200, required: true },
@@ -533,11 +749,12 @@ export const taskPointPresets: Record<string, TaskPointPreset> = Object.fromEntr
     [...basePresets, ...kryptonPresets, ...scorePresets].map((p) => [p.id, p]),
 );
 
-/** Public summary (no checkers) — used by frontend to render the picker. */
+/** Public summary (no checkers) — used by frontend to render the toolbox. */
 export function presetSummaries(): Array<Omit<TaskPointPreset, 'checker'>> {
     return Object.values(taskPointPresets).map((p) => ({
         id: p.id,
         name: p.name,
+        category: p.category,
         description: p.description,
         params: p.params,
     }));
@@ -554,7 +771,10 @@ export async function runChecker(
         return { completed: false, current: 0, target: 0, details: `未知任务点类型: ${presetId}` };
     }
     try {
-        return await preset.checker(ctx, params);
+        const effectiveParams = { ...(params || {}) };
+        if (!hasDateValue(effectiveParams.startDate) && ctx.startDate) effectiveParams.startDate = ctx.startDate;
+        if (!hasDateValue(effectiveParams.endDate) && ctx.endDate) effectiveParams.endDate = ctx.endDate;
+        return await preset.checker(ctx, effectiveParams);
     } catch (e: any) {
         return { completed: false, current: 0, target: 0, details: `校验错误: ${e?.message || e}` };
     }

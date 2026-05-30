@@ -20,3 +20,20 @@ export function AvatarFallback({ className, ...props }: React.ComponentProps<'sp
     />
   );
 }
+
+/** Render an <img> filling the parent Avatar slot. Falls back to the
+ *  sibling AvatarFallback if the image errors or has no src. */
+export function AvatarImage({ className, alt = '', ...props }: React.ComponentProps<'img'>) {
+  return (
+    <img
+      data-slot="avatar-image"
+      alt={alt}
+      className={cn('absolute inset-0 h-full w-full object-cover', className)}
+      onError={(e) => {
+        // Hide on error — the AvatarFallback (z-stacked behind) becomes visible.
+        (e.currentTarget as HTMLImageElement).style.display = 'none';
+      }}
+      {...props}
+    />
+  );
+}

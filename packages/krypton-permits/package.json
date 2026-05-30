@@ -1,0 +1,7 @@
+{
+    "name": "@hydrooj/krypton-permits",
+    "version": "0.1.0",
+    "description": "Krypton OJ: per-problem permit / verifier role + contest verifier cascade + lockHidden",
+    "main": "./index.ts",
+    "license": "AGPL-3.0-or-later"
+}

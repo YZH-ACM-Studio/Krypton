@@ -10,7 +10,7 @@ import {
 } from '@hydrooj/utils/lib/utils';
 import { Context, Service } from '../context';
 import {
-    BadRequestError, ContestNotAttendedError, ContestNotEndedError, ContestNotFoundError, ContestNotLiveError,
+    BadRequestError, ContestClientFinishedError, ContestClientRequiredError, ContestNotAttendedError, ContestNotEndedError, ContestNotFoundError, ContestNotLiveError,
     ContestScoreboardHiddenError, FileLimitExceededError, FileUploadError,
     InvalidTokenError, MethodNotAllowedError, NotAssignedError, NotFoundError, PermissionError, ValidationError,
 } from '../error';
@@ -29,6 +29,27 @@ import user from '../model/user';
 import {
     Handler, param, post, Type, Types,
 } from '../service/server';
+
+function parseProblemDocIds(input: string) {
+    const tokens = input.replace(/，/g, ',').split(',').map((i) => i.trim()).filter(Boolean);
+    const pids = tokens.map((i) => Number(i));
+    if (!pids.every((i) => Number.isSafeInteger(i) && i > 0)) throw new ValidationError('pids');
+    return pids;
+}
+
+function parseStringList(value: any): string[] {
+    const raw = Array.isArray(value) ? value.join('\n') : String(value || '');
+    return raw.split(/[\s,;]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+function parsePortList(value: any): number[] {
+    const ports = parseStringList(value)
+        .map((item) => Number(item))
+        .filter((port) => Number.isInteger(port) && port > 0 && port <= 65535);
+    return Array.from(new Set(ports));
+}
 
 export class ContestListHandler extends Handler {
     @param('rule', Types.Range(contest.RULES), true)
@@ -90,6 +111,44 @@ export class ContestDetailBaseHandler extends Handler {
             const groups = await user.listGroup(domainId, this.user._id);
             if (!new Set(this.tdoc.assign).intersection(new Set(groups.map((i) => i.name))).size) {
                 throw new NotAssignedError('contest', tid);
+            }
+        }
+        // ── Krypton: client-required contest gate ────────────────────────
+        //
+        // Two-part overlay layered on top of the legacy `assign` check above:
+        //   (a) Participant scope (school / group) — must match the user's
+        //       StudentRecord. Off when participantScopeMode==='none'.
+        //   (b) Client-required gate — when entryMode==='client_required',
+        //       the request must carry an active vigil.client_sessions row
+        //       bound to *this* contestId (single-contest binding).
+        //
+        // Admins / owner / maintainer bypass both for diagnostics and
+        // preview mode (DESIGN §11.3). Preview mode is signaled to the UI
+        // via `this.response.body.previewMode` so the frontend can show a
+        // banner; that gets set by the concrete handler that needs it.
+        const isAdminBypass = this.user.own(this.tdoc)
+            || this.user.hasPerm(PERM.PERM_EDIT_CONTEST)
+            || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        if (!isAdminBypass) {
+            if (contest.isClientRequired(this.tdoc) && contest.isClientFinished(this.tsdoc)) {
+                throw new ContestClientFinishedError();
+            }
+            const vg = (global as any).Hydro?.model?.vigilguard;
+            if (vg?.effectiveContestAccess) {
+                const sid = vg.clientSessionKeyFromSession
+                    ? vg.clientSessionKeyFromSession((this as any).session)
+                    : ((this as any).session?.sessionId || (this as any).session?._id || '');
+                const result = await vg.effectiveContestAccess(
+                    domainId, this.tdoc, this.user._id, sid,
+                );
+                if (!result.ok) {
+                    if (result.reason === 'scope_miss') {
+                        throw new NotAssignedError('contest', tid);
+                    }
+                    if (result.reason === 'client_only') {
+                        throw new ContestClientRequiredError();
+                    }
+                }
             }
         }
         if (this.tdoc.duration && this.tsdoc?.startAt) {
@@ -155,11 +214,40 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
     @param('tid', Types.ObjectId)
     async get(domainId: string, tid: ObjectId) {
         this.response.template = 'contest_detail.html';
-        const udict = await user.getList(domainId, [this.tdoc.owner]);
+        // Load contest problem dict so the new UI can render the problem table
+        // inline. Older Hydro split this across /contest/:tid (description) and
+        // /contest/:tid/problems (table), but Krypton merges them.
+        // attend alone is not enough — the contest must also have started.
+        // Otherwise a user who clicked "参加比赛" can peek the problem set
+        // ahead of time (same bug class the `files` field already guards
+        // against below at line ~185, and that `ContestProblemListHandler`
+        // already guards at line ~305).
+        const canPeekProblems = (this.tsdoc?.attend && !contest.isNotStarted(this.tdoc))
+            || contest.isDone(this.tdoc)
+            || this.user.own(this.tdoc)
+            || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+        const [udict, pdict] = await Promise.all([
+            user.getList(domainId, [this.tdoc.owner]),
+            canPeekProblems
+                ? problem.getList(
+                    domainId, this.tdoc.pids, true, true,
+                    // PROJECTION_CONTEST_LIST omits nSubmit/nAccept/difficulty/tag —
+                    // include them so the detail page can show real pass/submit
+                    // counts in its problem table.
+                    [...problem.PROJECTION_CONTEST_LIST, 'nSubmit', 'nAccept', 'difficulty', 'tag'],
+                )
+                : Promise.resolve({}),
+        ]);
+        const psdict = canPeekProblems ? (this.tsdoc?.detail || {}) : {};
+        const canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
         this.response.body = {
             tdoc: this.tdoc,
             tsdoc: this.tsdocAsPublic(),
             udict,
+            pdict,
+            psdict,
+            canManageContest,
+            canViewRecord: contest.canShowSelfRecord.call(this, this.tdoc),
             files: (this.tsdoc?.attend && !contest.isNotStarted(this.tdoc)) ? sortFiles(this.tdoc.privateFiles || []) : [],
             urlForFile: (filename: string) => this.url('contest_file_download', { tid, filename, type: 'private' }),
         };
@@ -374,6 +462,19 @@ export class ContestEditHandler extends Handler {
         let ts = Date.now();
         ts = ts - (ts % (15 * Time.minute)) + 15 * Time.minute;
         const beginAt = moment(this.tdoc?.beginAt || new Date(ts)).tz(this.user.timeZone);
+
+        // Hydrate the school + user-group catalog when krypton-userbind is
+        // loaded, so the participant-scope picker in the editor doesn't
+        // have to make a second roundtrip. Both lists are admin-only
+        // metadata; we already gate on PERM_EDIT_CONTEST / CREATE.
+        let scopeSchools: any[] = [];
+        let scopeGroups: any[] = [];
+        try {
+            const userbind = (global as any).Hydro?.model?.userbind;
+            if (userbind?.listSchools) scopeSchools = await userbind.listSchools(domainId);
+            if (userbind?.listUserGroups) scopeGroups = await userbind.listUserGroups(domainId);
+        } catch { /* best-effort */ }
+
         this.response.body = {
             rules,
             tdoc: this.tdoc,
@@ -383,6 +484,9 @@ export class ContestEditHandler extends Handler {
             page_name: tid ? 'contest_edit' : 'contest_create',
             files: tid ? this.tdoc.files : [],
             urlForFile: (filename: string) => this.url('contest_file_download', { tid, filename, type: 'public' }),
+            scopeSchools,
+            scopeGroups,
+            canAutoHideProblems: this.user.hasPerm(PERM.PERM_EDIT_PROBLEM),
         };
     }
 
@@ -405,16 +509,63 @@ export class ContestEditHandler extends Handler {
     @param('allowPrint', Types.Boolean)
     @param('keepScoreboardHidden', Types.Boolean)
     @param('langs', Types.CommaSeperatedArray, true)
+    // ── Krypton: client-required & Vigil anti-cheat ─────────────────────
+    @param('vigilEnabled', Types.Boolean)
+    @param('entryMode', Types.Range(['open', 'client_required']), true)
+    @param('approvalMode', Types.Range(['strict', 'auto']), true)
+    @param('lockdownMode', Types.Boolean)
+    @param('networkLockdownMode', Types.Boolean)
+    @param('networkLockdownFailurePolicy', Types.Range(['strict', 'report_only', 'off']), true)
+    @param('networkWhitelistHosts', Types.Content, true)
+    @param('networkWhitelistIps', Types.Content, true)
+    @param('networkWhitelistPorts', Types.Content, true)
+    @param('pauseOnDisconnect', Types.Boolean)
+    @param('screenshotIntervalMs', Types.UnsignedInt, true)
+    @param('exclusive', Types.Boolean)
+    @param('clientLoginBlockBeforeMinutes', Types.UnsignedInt, true)
+    @param('clientLoginBlockAfterMinutes', Types.UnsignedInt, true)
+    // ── Krypton: live media + recording + event detection ───────────────
+    @param('liveEnabled', Types.Boolean)
+    @param('recordEnabled', Types.Boolean)
+    @param('cameraEnabled', Types.Boolean)
+    @param('screenshotJitterMs', Types.UnsignedInt, true)
+    @param('vigilProcessWhitelist', Types.Content, true)
+    // ── Krypton: participant scope ──────────────────────────────────────
+    @param('participantScopeMode', Types.Range(['none', 'schools', 'groups']), true)
+    @param('participantSchoolIds', Types.CommaSeperatedArray, true)
+    @param('participantGroupIds', Types.CommaSeperatedArray, true)
     async postUpdate(
         domainId: string, tid: ObjectId, beginAtDate: string, beginAtTime: string, duration: number,
         title: string, content: string, rule: string, _pids: string, rated = false,
         _code = '', autoHide = false, assign: string[] = [], lock: number = null,
         contestDuration: number = null, maintainer: number[] = [], allowViewCode = false, allowPrint = false,
         keepScoreboardHidden = false, langs: string[] = [],
+        vigilEnabled = false,
+        entryMode: 'open' | 'client_required' = 'open',
+        approvalMode: 'strict' | 'auto' = 'strict',
+        lockdownMode = false,
+        networkLockdownMode = false,
+        networkLockdownFailurePolicy: 'strict' | 'report_only' | 'off' = 'strict',
+        networkWhitelistHosts = '',
+        networkWhitelistIps = '',
+        networkWhitelistPorts = '',
+        pauseOnDisconnect = false,
+        screenshotIntervalMs: number = null,
+        exclusive = false,
+        clientLoginBlockBeforeMinutes: number = null,
+        clientLoginBlockAfterMinutes: number = null,
+        liveEnabled = true,
+        recordEnabled = false,
+        cameraEnabled = true,
+        screenshotJitterMs: number = null,
+        vigilProcessWhitelist = '',
+        participantScopeMode: 'none' | 'schools' | 'groups' = 'none',
+        participantSchoolIds: string[] = [],
+        participantGroupIds: string[] = [],
     ) {
         if (!Object.keys(contest.RULES).includes(rule) || contest.RULES[rule].hidden) throw new ValidationError('rule');
         if (autoHide) this.checkPerm(PERM.PERM_EDIT_PROBLEM);
-        const pids = _pids.replace(/，/g, ',').split(',').map((i) => +i).filter((i) => i);
+        const pids = parseProblemDocIds(_pids);
         const beginAtMoment = moment.tz(`${beginAtDate} ${beginAtTime}`, this.user.timeZone);
         if (!beginAtMoment.isValid()) throw new ValidationError('beginAtDate', 'beginAtTime');
         const endAt = beginAtMoment.clone().add(duration, 'hours').toDate();
@@ -451,8 +602,67 @@ export class ContestEditHandler extends Handler {
                 executeAfter: endAt,
             });
         }
+        // ── Krypton: client-required & Vigil anti-cheat normalization ─────
+        //
+        // Cross-field invariants (CLIENT_REQUIRED_CONTEST_DESIGN.md §5.1):
+        //   client_required → vigilEnabled is force-true
+        //   vigilEnabled=false → entryMode is force-open
+        // Anything else the editor sends is taken at face value.
+        if (entryMode === 'client_required') vigilEnabled = true;
+        else if (!vigilEnabled) entryMode = 'open';
+        if (!vigilEnabled) {
+            networkLockdownMode = false;
+            networkLockdownFailurePolicy = 'off';
+        } else if (!networkLockdownMode) {
+            networkLockdownFailurePolicy = 'off';
+        }
+
+        // Default lockout-window values when the editor leaves them blank
+        // (i.e., the param decoded to `null`). The 60/30 default mirrors
+        // §7.2 and the v1 migration backfill in krypton-vigilguard.
+        const beforeMin = clientLoginBlockBeforeMinutes ?? 60;
+        const afterMin = clientLoginBlockAfterMinutes ?? 30;
+        const shotMs = screenshotIntervalMs ?? 60000;
+        const jitterMs = screenshotJitterMs ?? 30000;
+        const networkHosts = parseStringList(networkWhitelistHosts);
+        const networkIps = parseStringList(networkWhitelistIps);
+        const networkPorts = parsePortList(networkWhitelistPorts);
+        const processWhitelist = parseStringList(vigilProcessWhitelist);
+
+        // recordEnabled implies liveEnabled (cannot record without streaming).
+        // If admin set recordEnabled=true but liveEnabled=false, force liveEnabled.
+        if (recordEnabled && !liveEnabled) liveEnabled = true;
+        // When vigilEnabled=false, all media switches are moot.
+        if (!vigilEnabled) {
+            liveEnabled = false;
+            recordEnabled = false;
+            cameraEnabled = false;
+        }
+
+        // Participant scope normalization (§5.2): the two lists are
+        // mutually exclusive — clear whichever isn't active.
+        const sids = participantScopeMode === 'schools'
+            ? participantSchoolIds.map((s) => new ObjectId(s.trim())).filter(Boolean)
+            : [];
+        const gids = participantScopeMode === 'groups'
+            ? participantGroupIds.map((s) => new ObjectId(s.trim())).filter(Boolean)
+            : [];
+
         await contest.edit(domainId, tid, {
             assign, _code, autoHide, lockAt, maintainer, allowViewCode, allowPrint, keepScoreboardHidden, langs,
+            vigilEnabled, entryMode, approvalMode, lockdownMode, networkLockdownMode,
+            networkLockdownFailurePolicy, networkWhitelistHosts: networkHosts,
+            networkWhitelistIps: networkIps, networkWhitelistPorts: networkPorts,
+            pauseOnDisconnect,
+            screenshotIntervalMs: shotMs, exclusive,
+            clientLoginBlockBeforeMinutes: beforeMin,
+            clientLoginBlockAfterMinutes: afterMin,
+            liveEnabled, recordEnabled, cameraEnabled,
+            screenshotJitterMs: jitterMs,
+            vigilProcessWhitelist: processWhitelist,
+            participantScopeMode,
+            participantSchoolIds: sids,
+            participantGroupIds: gids,
         });
         this.response.body = { tid };
         this.response.redirect = this.url('contest_detail', { tid });
@@ -461,6 +671,28 @@ export class ContestEditHandler extends Handler {
     @param('tid', Types.ObjectId)
     async postDelete(domainId: string, tid: ObjectId) {
         if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_CONTEST);
+
+        // ── Krypton: block delete while Vigil client sessions are active ─
+        //
+        // A `vigilEnabled` contest with live `vigil.client_sessions` rows
+        // means students are *currently* inside the Qt Client for this
+        // contest. Deleting now would orphan their session. Force the
+        // admin to force-close those first (the Vigil dashboard has the
+        // tool). DESIGN: deferred decision Q12 → friendly error wins
+        // over auto-cleanup.
+        if (this.tdoc?.vigilEnabled) {
+            const vg = (global as any).Hydro?.model?.vigilguard;
+            if (vg?.listActiveSessionsForContest) {
+                const active = await vg.listActiveSessionsForContest(domainId, tid);
+                if (active.length) {
+                    throw new BadRequestError(
+                        `Cannot delete this contest: ${active.length} Vigil client session(s) are still active.`
+                        + ' Force-close them from the Vigil dashboard first.',
+                    );
+                }
+            }
+        }
+
         const [ddocs] = await Promise.all([
             discussion.getMulti(domainId, { parentType: document.TYPE_CONTEST, parentId: tid }).project({ _id: 1 }).toArray(),
             contest.del(domainId, tid),
@@ -905,8 +1137,18 @@ export async function apply(ctx: Context) {
         const tasks = [];
         for (const op of doc.operation) {
             if (op === 'unhide') {
+                // krypton-permits: skip problems with `lockHidden` (题源题 /
+                // 套路题 / 集训内部题). lockHidden is an explicit opt-out
+                // from the contest-end auto-publish — admin can still
+                // unhide manually. Other contest workflows (assign, code,
+                // etc.) are unaffected.
                 for (const pid of tdoc.pids) {
-                    tasks.push(problem.edit(doc.domainId, pid, { hidden: false }));
+                    tasks.push((async () => {
+                        const pdoc = await problem.get(doc.domainId, pid);
+                        if (!pdoc) return;
+                        if ((pdoc as any).lockHidden) return;
+                        await problem.edit(doc.domainId, pid, { hidden: false });
+                    })());
                 }
             }
         }

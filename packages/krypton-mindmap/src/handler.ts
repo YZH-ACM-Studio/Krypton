@@ -10,6 +10,7 @@ import type { Context } from 'hydrooj';
 import {
     Handler, NotFoundError, ObjectId, param, PRIV, PrivilegeError, Types,
 } from 'hydrooj';
+import { rebuildFromCategories } from './db';
 import {
     clearAllPositions,
     createNode, deleteNodeRecursive, getConfig, getNode, listAllNodes,
@@ -158,9 +159,23 @@ class AdminConfig extends AdminBase {
     }
 }
 
+/**
+ * Drop all nodes + rebuild from the hydrooj `problem.categories` setting.
+ * POST /admin/mindmap/rebuild — destructive (loses node-attached problemIds).
+ * Returns { ok, categories, leaves }.
+ */
+class AdminRebuildFromCategories extends Handler {
+    async post() {
+        if (!this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) throw new PrivilegeError();
+        const stats = await rebuildFromCategories();
+        this.response.body = { ok: true, ...stats };
+    }
+}
+
 export function applyHandlers(ctx: Context) {
     ctx.Route('mindmap_main', '/mindmap', MindmapPage);
     ctx.Route('mindmap_api_problems', '/api/mindmap/problems', ProblemsApi);
     ctx.Route('admin_mindmap_nodes', '/admin/mindmap/nodes', AdminMutateNodes);
     ctx.Route('admin_mindmap_config', '/admin/mindmap/config', AdminConfig);
+    ctx.Route('admin_mindmap_rebuild', '/admin/mindmap/rebuild', AdminRebuildFromCategories);
 }

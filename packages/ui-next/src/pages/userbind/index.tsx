@@ -9,7 +9,7 @@
 import { type ReactNode, useState } from 'react';
 import {
   AlertCircle, Building2, ChevronRight, Copy, FileDown, GraduationCap, Inbox, KeyRound,
-  LinkIcon, ListChecks, Mail, Plus, ShieldCheck, Users, UserPlus,
+  LinkIcon, ListChecks, Mail, Plus, RefreshCw, Search, ShieldCheck, UserCheck, Users, UserPlus,
 } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { PRIV } from '@/lib/perms';
@@ -21,12 +21,15 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Pagination } from '@/components/ui/pagination';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { ImportResultPanel, RosterImporter, type ImportResult } from '@/components/userbind/roster-importer';
 import { DateTime } from '@/components/ui/datetime';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { SimpleSelect } from '@/components/ui/select';
 
 // Register navigation entries for the admin sidebar — happens once at module load.
 // (overview was dropped; /admin/userbind still resolves server-side but doesn't
@@ -152,7 +155,7 @@ function CreateSchoolDialog({ open, onClose }: { open: boolean; onClose: () => v
           <DialogTitle>新建学校</DialogTitle>
         </DialogHeader>
         <form method="post" className="flex flex-col">
-          <div className="krypton-scrollbar max-h-[60vh] space-y-4 overflow-y-auto p-5">
+          <ScrollArea className="h-[55vh]" viewportClassName="space-y-4 p-5">
             <input type="hidden" name="operation" value="create" />
             <FormField label="学校名称" required htmlFor="school-name">
               <Input
@@ -187,7 +190,7 @@ function CreateSchoolDialog({ open, onClose }: { open: boolean; onClose: () => v
                 )}
               </div>
             </FormField>
-          </div>
+          </ScrollArea>
           <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
             <Button type="button" variant="ghost" onClick={onClose}>取消</Button>
             <Button type="submit" disabled={!newName.trim()}>创建学校</Button>
@@ -203,20 +206,21 @@ function CreateSchoolDialog({ open, onClose }: { open: boolean; onClose: () => v
  * flex-wrap of badges so a school with 50+ groups doesn't overflow the page.
  */
 function SchoolGroupsList({
-  schoolId, groups,
+  schoolId, groups, total, page, pageSize, query,
 }: {
   schoolId: string;
   groups: Array<{ _id: string; name: string; memberCount: number }>;
+  total: number;
+  page: number;
+  pageSize: number;
+  query: string;
 }) {
-  const [q, setQ] = useState('');
-  const filtered = q.trim()
-    ? groups.filter((g) => g.name.toLowerCase().includes(q.toLowerCase()))
-    : groups;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center justify-between text-base">
-          <span>用户组 ({groups.length})</span>
+          <span>用户组 ({total})</span>
           <Button asChild size="sm" variant="outline" className="gap-1">
             <a href={`/admin/userbind/groups?schoolId=${schoolId}`}>
               <Users className="size-3.5" />在用户组页新建
@@ -225,26 +229,32 @@ function SchoolGroupsList({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {groups.length === 0 ? (
+        <form method="get" action={`/admin/userbind/schools/${schoolId}`} className="flex flex-wrap gap-2">
+          <input type="hidden" name="tab" value="groups" />
+          <Input
+            name="groupQ"
+            placeholder="搜索用户组名称"
+            defaultValue={query}
+            className="max-w-sm"
+          />
+          <Button type="submit" variant="outline" className="gap-1">
+            <Search className="size-3.5" />搜索
+          </Button>
+        </form>
+        {groups.length === 0 && !query ? (
           <div className="rounded-md border border-dashed bg-muted/20 p-6 text-center text-sm text-muted-foreground">
             该学校暂无用户组。前往「用户组」页面创建一个。
           </div>
         ) : (
           <>
-            <Input
-              placeholder="搜索用户组名称…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              className="max-w-sm"
-            />
-            <div className="max-h-80 overflow-y-auto rounded-md border bg-muted/10">
-              {filtered.length === 0 ? (
+            <ScrollArea className="max-h-80 rounded-md border bg-muted/10">
+              {groups.length === 0 ? (
                 <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-                  没有匹配「{q}」的用户组
+                  没有匹配「{query}」的用户组
                 </p>
               ) : (
                 <ul className="divide-y divide-border/60">
-                  {filtered.map((g) => (
+                  {groups.map((g) => (
                     <li key={g._id}>
                       <a
                         href={`/admin/userbind/groups/${g._id}`}
@@ -261,11 +271,15 @@ function SchoolGroupsList({
                   ))}
                 </ul>
               )}
-            </div>
-            {q && filtered.length < groups.length && (
-              <p className="text-xs text-muted-foreground">
-                显示 {filtered.length} / {groups.length} 个用户组
-              </p>
+            </ScrollArea>
+            {pageCount > 1 && (
+              <div className="flex justify-center">
+                <Pagination
+                  current={page}
+                  total={pageCount}
+                  baseUrl={`/admin/userbind/schools/${schoolId}?tab=groups&groupQ=${encodeURIComponent(query)}&`}
+                />
+              </div>
             )}
           </>
         )}
@@ -279,110 +293,173 @@ export function AdminUserbindSchoolDetailPage() {
   const data = bs.page.data as {
     school: { _id: string; name: string };
     groups: Array<{ _id: string; name: string; memberCount: number }>;
+    groupTotal: number;
+    groupPage: number;
+    groupLimit: number;
+    groupQuery: string;
     students: Array<{ _id: string; studentId: string; realName: string; boundUserId: number | null }>;
     studentTotal: number;
+    studentPage: number;
+    studentLimit: number;
+    studentQuery: string;
     schoolTokens: Array<{ _id: string; createdAt: string; expiresAt: string | null }>;
+    importSearchResults: Array<{ _id: string; studentId: string; realName: string; boundUserId: number | null }>;
+    importQ: string;
+    tab: 'students' | 'import' | 'groups' | 'links';
     importReport: ImportResult | null;
   };
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const activeTab = data.tab || 'students';
+  const studentPage = data.studentPage || 1;
+  const studentLimit = data.studentLimit || 50;
+  const studentPageCount = Math.max(1, Math.ceil((data.studentTotal || 0) / studentLimit));
   return (
     <AdminPage title={`学校 - ${data.school.name}`} requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
-      {/* Invite links */}
-      <Card>
-        <CardHeader className="px-5 pb-3 pt-5">
-          <CardTitle className="flex items-center justify-between text-base">
-            <span className="flex items-center gap-2"><LinkIcon className="size-4" />学校邀请链接</span>
-            <form method="post" className="flex items-end gap-2">
-              <input type="hidden" name="operation" value="generateLink" />
-              <Input name="ttlDays" type="number" placeholder="有效天数（留空=永久）" className="max-w-[160px]" />
-              <Button type="submit" size="sm">生成新链接</Button>
-            </form>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-5 pb-5">
-          {(data.schoolTokens || []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">还没有该学校的邀请链接。生成一个，群发给学生 — 他们填学号姓名后会自动匹配并绑定。</p>
-          ) : (
-            <div className="space-y-2">
-              {data.schoolTokens.map((t) => {
-                const url = `${origin}/bind/${t._id}`;
-                return (
-                  <div key={t._id} className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-xs">
-                    <code className="flex-1 break-all font-mono">{url}</code>
-                    <Button
-                      type="button" variant="ghost" size="sm" className="h-7 gap-1"
-                      onClick={() => { navigator.clipboard?.writeText(url).catch(() => {}); }}
-                    >
-                      <Copy className="size-3" />复制
-                    </Button>
-                    <span className="text-muted-foreground">
-                      {t.expiresAt ? <>过期 <DateTime value={t.expiresAt} mode="date" /></> : "永久"}
-                    </span>
-                    <form method="post" action="/admin/userbind/tokens" className="inline-block">
-                      <input type="hidden" name="operation" value="revoke" />
-                      <input type="hidden" name="tokenId" value={t._id} />
-                      <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">撤销</Button>
-                    </form>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Groups — searchable scrollable list (handles many groups gracefully) */}
-      <SchoolGroupsList schoolId={data.school._id} groups={data.groups} />
-
-
-      {/* Import students into this school */}
-      <RosterImporter
-        title="导入学生到本校"
-        description="把名单粘贴到下方，每行一条「学号 姓名」。系统会自动跳过格式不合规或重复的行。"
-        action={`/admin/userbind/schools/${data.school._id}`}
-        hiddenFields={{ operation: 'importText' }}
-        submitLabel="导入名单"
+      <MiniTabs
+        items={[
+          { value: 'students', label: '学生', count: data.studentTotal || 0, icon: GraduationCap, href: `/admin/userbind/schools/${data.school._id}?tab=students` },
+          { value: 'import', label: '导入', icon: UserPlus, href: `/admin/userbind/schools/${data.school._id}?tab=import` },
+          { value: 'groups', label: '用户组', count: data.groupTotal || 0, icon: Users, href: `/admin/userbind/schools/${data.school._id}?tab=groups` },
+          { value: 'links', label: '邀请链接', count: (data.schoolTokens || []).length, icon: LinkIcon, href: `/admin/userbind/schools/${data.school._id}?tab=links` },
+        ]}
+        value={activeTab}
       />
 
-      {data.importReport && <ImportResultPanel report={data.importReport} />}
-
-      {/* Students */}
-      <Card>
-        <CardHeader><CardTitle className="text-base">学生 ({data.studentTotal})</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-5">学号</TableHead>
-                <TableHead>姓名</TableHead>
-                <TableHead className="w-32">绑定状态</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.students.map((s) => (
-                <TableRow key={s._id}>
-                  <TableCell className="pl-5 font-mono text-sm">{s.studentId}</TableCell>
-                  <TableCell>{s.realName}</TableCell>
-                  <TableCell>
-                    {s.boundUserId ? (
-                      <Badge variant="secondary">已绑定 UID {s.boundUserId}</Badge>
-                    ) : (
-                      <Badge variant="outline">未绑定</Badge>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {data.students.length === 0 && (
+      {activeTab === 'students' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-base">
+              <span>学生 ({data.studentTotal})</span>
+              <form method="get" action={`/admin/userbind/schools/${data.school._id}`} className="flex gap-2">
+                <input type="hidden" name="tab" value="students" />
+                <Input name="q" defaultValue={data.studentQuery || ''} placeholder="搜索学号 / 姓名" className="w-56" />
+                <Button type="submit" variant="outline" className="gap-1">
+                  <Search className="size-3.5" />搜索
+                </Button>
+              </form>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
-                    暂无学生。使用上方的「导入学生到本校」面板添加。
-                  </TableCell>
+                  <TableHead className="pl-5">学号</TableHead>
+                  <TableHead>姓名</TableHead>
+                  <TableHead className="w-32">绑定状态</TableHead>
                 </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+              </TableHeader>
+              <TableBody>
+                {data.students.map((s) => (
+                  <TableRow key={s._id}>
+                    <TableCell className="pl-5 font-mono text-sm">{s.studentId}</TableCell>
+                    <TableCell>{s.realName}</TableCell>
+                    <TableCell>
+                      {s.boundUserId ? (
+                        <Badge variant="secondary">已绑定 UID {s.boundUserId}</Badge>
+                      ) : (
+                        <Badge variant="outline">未绑定</Badge>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {data.students.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
+                      {data.studentQuery ? `没有匹配「${data.studentQuery}」的学生` : '暂无学生。使用「导入」页添加。'}
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+          {studentPageCount > 1 && (
+            <div className="flex justify-center border-t px-5 py-3">
+              <Pagination
+                current={studentPage}
+                total={studentPageCount}
+                baseUrl={`/admin/userbind/schools/${data.school._id}?tab=students&q=${encodeURIComponent(data.studentQuery || '')}&`}
+              />
+            </div>
+          )}
+        </Card>
+      )}
+
+      {activeTab === 'import' && (
+        <>
+          <RosterImporter
+            title="导入学生到本校"
+            description="批量导入会先建档；搜索导入会从已有 OJ 用户中选择，并在学号姓名精确匹配后直接绑定。"
+            action={`/admin/userbind/schools/${data.school._id}`}
+            hiddenFields={{ operation: 'importText' }}
+            enableSearch
+            searchUrl={`/admin/userbind/schools/${data.school._id}`}
+            searchHiddenFields={{ tab: 'import' }}
+            searchParamName="importQ"
+            searchResults={data.importSearchResults || []}
+            searchQuery={data.importQ || ''}
+            searchSelectFieldName="userIds"
+            searchResultHint="搜索已有 OJ 用户，选择后会导入并自动绑定"
+            submitLabel="导入到学校"
+          />
+          {data.importReport && <ImportResultPanel report={data.importReport} />}
+        </>
+      )}
+
+      {activeTab === 'groups' && (
+        <SchoolGroupsList
+          schoolId={data.school._id}
+          groups={data.groups}
+          total={data.groupTotal || 0}
+          page={data.groupPage || 1}
+          pageSize={data.groupLimit || 20}
+          query={data.groupQuery || ''}
+        />
+      )}
+
+      {activeTab === 'links' && (
+        <Card>
+          <CardHeader className="px-5 pb-3 pt-5">
+            <CardTitle className="flex items-center justify-between text-base">
+              <span className="flex items-center gap-2"><LinkIcon className="size-4" />学校邀请链接</span>
+              <form method="post" className="flex items-end gap-2">
+                <input type="hidden" name="operation" value="generateLink" />
+                <Input name="ttlDays" type="number" placeholder="有效天数（留空=永久）" className="max-w-[160px]" />
+                <Button type="submit" size="sm">生成新链接</Button>
+              </form>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-5 pb-5">
+            {(data.schoolTokens || []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">还没有该学校的邀请链接。生成一个，群发给学生；他们填学号姓名后会自动匹配并绑定。</p>
+            ) : (
+              <div className="space-y-2">
+                {data.schoolTokens.map((t) => {
+                  const url = `${origin}/bind/${t._id}`;
+                  return (
+                    <div key={t._id} className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-xs">
+                      <code className="flex-1 break-all font-mono">{url}</code>
+                      <Button
+                        type="button" variant="ghost" size="sm" className="h-7 gap-1"
+                        onClick={() => { navigator.clipboard?.writeText(url).catch(() => {}); }}
+                      >
+                        <Copy className="size-3" />复制
+                      </Button>
+                      <span className="text-muted-foreground">
+                        {t.expiresAt ? <>过期 <DateTime value={t.expiresAt} mode="date" /></> : '永久'}
+                      </span>
+                      <form method="post" action="/admin/userbind/tokens" className="inline-block">
+                        <input type="hidden" name="operation" value="revoke" />
+                        <input type="hidden" name="tokenId" value={t._id} />
+                        <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">撤销</Button>
+                      </form>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </AdminPage>
   );
 }
@@ -474,19 +551,21 @@ function CreateGroupDialog({
           <DialogTitle>新建用户组</DialogTitle>
         </DialogHeader>
         <form method="post" className="flex flex-col">
-          <div className="krypton-scrollbar max-h-[60vh] space-y-4 overflow-y-auto p-5">
+          <ScrollArea className="h-[55vh]" viewportClassName="space-y-4 p-5">
             <input type="hidden" name="operation" value="create" />
             <FormRow columns={2}>
               <FormField label="所属学校" required htmlFor="group-school">
-                <select
+                <SimpleSelect
                   id="group-school"
                   name="schoolId"
                   required
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                >
-                  <option value="">选择学校</option>
-                  {schools.map((s) => (<option key={s._id} value={s._id}>{s.name}</option>))}
-                </select>
+                  defaultValue=""
+                  placeholder="选择学校"
+                  options={[
+                    { value: '', label: '选择学校' },
+                    ...schools.map((s) => ({ value: s._id, label: s.name })),
+                  ]}
+                />
               </FormField>
               <FormField label="用户组名称" required htmlFor="group-name">
                 <Input id="group-name" name="name" placeholder="如 计网2025春-1班" required autoFocus />
@@ -514,7 +593,7 @@ function CreateGroupDialog({
                 )}
               </div>
             </FormField>
-          </div>
+          </ScrollArea>
           <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
             <Button type="button" variant="ghost" onClick={onClose}>取消</Button>
             <Button type="submit">创建用户组</Button>
@@ -529,106 +608,221 @@ export function AdminUserbindGroupDetailPage() {
   const data = useBootstrap().page.data as {
     group: { _id: string; name: string };
     school: { _id: string; name: string } | null;
-    members: Array<{ _id: string; studentId: string; realName: string }>;
+    members: Array<{
+      _id: string;
+      studentId: string;
+      realName: string;
+      boundUserId: number | null;
+      boundUser?: { _id: number; uname?: string; studentId?: string; realName?: string } | null;
+    }>;
+    memberTotal?: number;
+    page?: number;
+    membersLimit?: number;
+    unboundMemberCount?: number;
     groupTokens: Array<{ _id: string; createdAt: string; expiresAt: string | null }>;
     searchResults: Array<{ _id: string; studentId: string; realName: string; boundUserId: number | null }>;
     q: string;
     importReport: ImportResult | null;
+    tab?: 'overview' | 'members' | 'add';
   };
+  const memberTotal = data.memberTotal ?? data.members.length;
+  const memberPage = data.page || 1;
+  const memberLimit = data.membersLimit || 50;
+  const memberPageCount = Math.max(1, Math.ceil(memberTotal / memberLimit));
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const activeTab = data.tab || 'overview';
+  const groupHref = `/admin/userbind/groups/${data.group._id}`;
   return (
     <AdminPage title={`用户组 - ${data.group.name}`} description={data.school?.name} requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
-      <Card>
-        <CardHeader className="px-5 pb-3 pt-5">
-          <CardTitle className="flex items-center justify-between text-base">
-            <span className="flex items-center gap-2"><LinkIcon className="size-4" />用户组邀请链接</span>
-            <form method="post" className="flex items-end gap-2">
-              <input type="hidden" name="operation" value="generateLink" />
-              <Input name="ttlDays" type="number" placeholder="有效天数（留空=永久）" className="max-w-[160px]" />
-              <Button type="submit" size="sm">生成新链接</Button>
-            </form>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-5 pb-5">
-          {(data.groupTokens || []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">还没有该用户组的邀请链接。点击右上方按钮生成，群发给学生。</p>
-          ) : (
-            <div className="space-y-2">
-              {data.groupTokens.map((t) => {
-                const url = `${origin}/bind/${t._id}`;
-                return (
-                  <div key={t._id} className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-xs">
-                    <code className="flex-1 break-all font-mono">{url}</code>
-                    <Button
-                      type="button" variant="ghost" size="sm" className="h-7 gap-1"
-                      onClick={() => { navigator.clipboard?.writeText(url).catch(() => {}); }}
-                    >
-                      <Copy className="size-3" />复制
-                    </Button>
-                    <span className="text-muted-foreground">
-                      {t.expiresAt ? <>过期 <DateTime value={t.expiresAt} mode="date" /></> : "永久"}
-                    </span>
-                    <form method="post" action="/admin/userbind/tokens" className="inline-block">
-                      <input type="hidden" name="operation" value="revoke" />
-                      <input type="hidden" name="tokenId" value={t._id} />
-                      <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">撤销</Button>
-                    </form>
+      <div className="flex flex-col gap-4">
+        <MiniTabs
+          value={activeTab}
+          size="md"
+          aria-label="用户组详情分页"
+          items={[
+            { value: 'overview', label: '总览', icon: LinkIcon, href: `${groupHref}?tab=overview` },
+            { value: 'members', label: '人员', count: memberTotal, icon: Users, href: `${groupHref}?tab=members` },
+            { value: 'add', label: '添加人员', icon: UserPlus, href: `${groupHref}?tab=add` },
+          ]}
+        />
+
+        {activeTab === 'overview' && (
+          <>
+            <div className="grid gap-3 md:grid-cols-3">
+              <Card>
+                <CardContent className="flex items-center justify-between px-5 py-4">
+                  <div>
+                    <p className="text-xs text-muted-foreground">成员</p>
+                    <p className="mt-1 text-2xl font-semibold">{memberTotal}</p>
                   </div>
-                );
-              })}
+                  <Users className="size-5 text-muted-foreground" />
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="flex items-center justify-between px-5 py-4">
+                  <div>
+                    <p className="text-xs text-muted-foreground">未绑定</p>
+                    <p className="mt-1 text-2xl font-semibold">{data.unboundMemberCount || 0}</p>
+                  </div>
+                  <AlertCircle className="size-5 text-muted-foreground" />
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="flex items-center justify-between px-5 py-4">
+                  <div>
+                    <p className="text-xs text-muted-foreground">邀请链接</p>
+                    <p className="mt-1 text-2xl font-semibold">{(data.groupTokens || []).length}</p>
+                  </div>
+                  <LinkIcon className="size-5 text-muted-foreground" />
+                </CardContent>
+              </Card>
             </div>
-          )}
-        </CardContent>
-      </Card>
-      {/* Two-mode importer: text + search */}
-      <RosterImporter
-        title="添加成员"
-        description="名单导入：粘贴学号+姓名，新学生先在所属学校建档再加入此组；搜索导入：从该学校已有学生中勾选。"
-        action={`/admin/userbind/groups/${data.group._id}`}
-        hiddenFields={{ operation: 'importText' }}
-        enableSearch
-        searchScope="school_roster"
-        searchUrl={`/admin/userbind/groups/${data.group._id}`}
-        searchResults={data.searchResults || []}
-        searchQuery={data.q || ''}
-        searchSelectFieldName="studentIds"
-        submitLabel="加入用户组"
-      />
-      {/* Hidden form to handle the search-pick submit — uses postAssign. */}
-      {/* Note: RosterImporter handles its own form; this is for the existing postAssign endpoint */}
 
-      {data.importReport && <ImportResultPanel report={data.importReport} />}
+            <Card>
+              <CardHeader className="px-5 pb-3 pt-5">
+                <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-base">
+                  <span className="flex items-center gap-2"><LinkIcon className="size-4" />用户组邀请链接</span>
+                  <form method="post" className="flex flex-wrap items-end gap-2">
+                    <input type="hidden" name="operation" value="generateLink" />
+                    <Input name="ttlDays" type="number" placeholder="有效天数（留空=永久）" className="w-[180px]" />
+                    <Button type="submit" size="sm">生成新链接</Button>
+                  </form>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-5 pb-5">
+                {(data.groupTokens || []).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">还没有该用户组的邀请链接。生成后可以发给学生自行加入并绑定。</p>
+                ) : (
+                  <div className="space-y-2">
+                    {data.groupTokens.map((t) => {
+                      const url = `${origin}/bind/${t._id}`;
+                      return (
+                        <div key={t._id} className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-3 text-xs">
+                          <code className="min-w-0 flex-1 break-all font-mono">{url}</code>
+                          <Button
+                            type="button" variant="ghost" size="sm" className="h-7 gap-1"
+                            onClick={() => { navigator.clipboard?.writeText(url).catch(() => {}); }}
+                          >
+                            <Copy className="size-3" />复制
+                          </Button>
+                          <span className="text-muted-foreground">
+                            {t.expiresAt ? <>过期 <DateTime value={t.expiresAt} mode="date" /></> : '永久'}
+                          </span>
+                          <form method="post" action="/admin/userbind/tokens" className="inline-block">
+                            <input type="hidden" name="operation" value="revoke" />
+                            <input type="hidden" name="tokenId" value={t._id} />
+                            <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">撤销</Button>
+                          </form>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">成员 ({data.members.length})</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-5">学号</TableHead>
-                <TableHead>姓名</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.members.map((m) => (
-                <TableRow key={m._id}>
-                  <TableCell className="pl-5 font-mono text-sm">{m.studentId}</TableCell>
-                  <TableCell>{m.realName}</TableCell>
-                </TableRow>
-              ))}
-              {data.members.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={2} className="py-6 text-center text-sm text-muted-foreground">
-                    该组暂无成员。使用上方的「添加成员」面板批量加入。
-                  </TableCell>
-                </TableRow>
+        {activeTab === 'members' && (
+          <>
+            {data.importReport && <ImportResultPanel report={data.importReport} />}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-base">
+                  <span>成员 ({memberTotal})</span>
+                  <form method="post">
+                    <input type="hidden" name="operation" value="retryBind" />
+                    <Button type="submit" variant="outline" size="sm" className="gap-1" disabled={(data.unboundMemberCount || 0) === 0}>
+                      <RefreshCw className="size-3.5" />重新尝试绑定未绑定成员
+                    </Button>
+                  </form>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="pl-5">学号</TableHead>
+                      <TableHead>姓名</TableHead>
+                      <TableHead>绑定用户</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.members.map((m) => {
+                      const boundUser = m.boundUser;
+                      const userMatches = boundUser
+                        ? String(boundUser.studentId || '') === m.studentId && String(boundUser.realName || '') === m.realName
+                        : false;
+                      return (
+                        <TableRow key={m._id}>
+                          <TableCell className="pl-5 font-mono text-sm">{m.studentId}</TableCell>
+                          <TableCell>{m.realName}</TableCell>
+                          <TableCell>
+                            {m.boundUserId ? (
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                                  <UserCheck className="mr-1 size-3" />已绑定
+                                </Badge>
+                                <a href={`/user/${m.boundUserId}`} className="font-mono text-xs hover:text-primary">
+                                  UID {m.boundUserId}
+                                </a>
+                                {boundUser?.uname && <span className="text-xs text-muted-foreground">{boundUser.uname}</span>}
+                                {boundUser && !userMatches && (
+                                  <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                                    用户资料不一致
+                                  </Badge>
+                                )}
+                              </div>
+                            ) : (
+                              <Badge variant="outline" className="text-muted-foreground">未绑定</Badge>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {data.members.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">
+                          该组暂无成员。使用「添加人员」分页批量加入。
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+              {memberPageCount > 1 && (
+                <div className="flex justify-center border-t px-5 py-3">
+                  <Pagination
+                    current={memberPage}
+                    total={memberPageCount}
+                    baseUrl={`${groupHref}?tab=members`}
+                  />
+                </div>
               )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            </Card>
+          </>
+        )}
+
+        {activeTab === 'add' && (
+          <>
+            <RosterImporter
+              title="添加成员"
+              description="名单导入会先在所属学校建档，再加入此组；搜索导入会从该学校已有学生中勾选。"
+              action={groupHref}
+              hiddenFields={{ operation: 'importText' }}
+              enableSearch
+              searchScope="school_roster"
+              searchUrl={groupHref}
+              searchHiddenFields={{ tab: 'add' }}
+              searchResults={data.searchResults || []}
+              searchQuery={data.q || ''}
+              searchSelectFieldName="studentIds"
+              submitLabel="加入用户组"
+            />
+            {data.importReport && <ImportResultPanel report={data.importReport} />}
+          </>
+        )}
+      </div>
     </AdminPage>
   );
 }
@@ -637,25 +831,39 @@ export function AdminUserbindGroupDetailPage() {
 
 export function AdminUserbindStudentsPage() {
   const data = useBootstrap().page.data as {
-    students: Array<{ _id: string; studentId: string; realName: string; boundUserId: number | null; schoolId: string }>;
+    students: Array<{
+      _id: string; studentId: string; realName: string;
+      boundUserId: number | null; schoolId: string;
+      enrollmentYear: number | null;
+    }>;
     total: number; page: number; pageSize: number;
     schools: Array<{ _id: string; name: string }>;
     filterSchoolId: string | null;
+    filterGroupId: string | null;
     q: string | null;
   };
+  const page = data.page || 1;
+  const pageSize = data.pageSize || 50;
+  const pageCount = Math.max(1, Math.ceil((data.total || 0) / pageSize));
+  const baseParams = new URLSearchParams();
+  if (data.filterSchoolId) baseParams.set('schoolId', data.filterSchoolId);
+  if (data.filterGroupId) baseParams.set('groupId', data.filterGroupId);
+  if (data.q) baseParams.set('q', data.q);
+  const paginationBaseUrl = `/admin/userbind/students${baseParams.toString() ? `?${baseParams}` : ''}`;
   return (
     <AdminPage title="学生记录" description={`共 ${data.total} 条`} requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
       <Card>
         <CardContent className="p-5">
           <form method="get" className="flex flex-wrap gap-3">
-            <select
+            <SimpleSelect
               name="schoolId"
               defaultValue={data.filterSchoolId || ''}
-              className="rounded-md border bg-background px-3 py-2 text-sm"
-            >
-              <option value="">所有学校</option>
-              {data.schools.map((s) => (<option key={s._id} value={s._id}>{s.name}</option>))}
-            </select>
+              className="w-auto min-w-[10rem]"
+              options={[
+                { value: '', label: '所有学校' },
+                ...data.schools.map((s) => ({ value: s._id, label: s.name })),
+              ]}
+            />
             <Input name="q" defaultValue={data.q || ''} placeholder="搜索学号 / 姓名" className="max-w-xs" />
             <Button type="submit">筛选</Button>
           </form>
@@ -668,6 +876,7 @@ export function AdminUserbindStudentsPage() {
               <TableRow>
                 <TableHead className="pl-5 w-40">学号</TableHead>
                 <TableHead>姓名</TableHead>
+                <TableHead className="w-32">入学年</TableHead>
                 <TableHead className="w-40">绑定状态</TableHead>
                 <TableHead className="w-32">操作</TableHead>
               </TableRow>
@@ -677,6 +886,15 @@ export function AdminUserbindStudentsPage() {
                 <TableRow key={s._id}>
                   <TableCell className="pl-5 font-mono text-sm">{s.studentId}</TableCell>
                   <TableCell>{s.realName}</TableCell>
+                  <TableCell>
+                    {s.enrollmentYear ? (
+                      <Badge variant="outline" className="font-mono text-[11px]">
+                        {s.enrollmentYear}
+                      </Badge>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     {s.boundUserId ? (
                       <Badge variant="secondary">已绑定 UID {s.boundUserId}</Badge>
@@ -697,9 +915,21 @@ export function AdminUserbindStudentsPage() {
                   </TableCell>
                 </TableRow>
               ))}
+              {data.students.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
+                    {data.q ? `没有匹配「${data.q}」的学生` : '暂无学生记录。'}
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </CardContent>
+        {pageCount > 1 && (
+          <div className="flex justify-center border-t px-5 py-3">
+            <Pagination current={page} total={pageCount} baseUrl={paginationBaseUrl} />
+          </div>
+        )}
       </Card>
     </AdminPage>
   );
@@ -767,28 +997,32 @@ export function AdminUserbindStudentsImportPage() {
           </div>
           {target === 'school' && (
             <FormField label="目标学校" required htmlFor="imp-school">
-              <select
+              <SimpleSelect
                 id="imp-school"
                 value={schoolId}
-                onChange={(e) => setSchoolId(e.target.value)}
-                className="w-full max-w-md rounded-md border bg-background px-3 py-2 text-sm"
-              >
-                <option value="">选择学校</option>
-                {data.schools.map((s) => (<option key={s._id} value={s._id}>{s.name}</option>))}
-              </select>
+                onValueChange={setSchoolId}
+                className="max-w-md"
+                placeholder="选择学校"
+                options={[
+                  { value: '', label: '选择学校' },
+                  ...data.schools.map((s) => ({ value: s._id, label: s.name })),
+                ]}
+              />
             </FormField>
           )}
           {target === 'user_group' && (
             <FormField label="目标用户组" required htmlFor="imp-group" hint="不存在的学生会先在该组所属学校建档，再加入此组">
-              <select
+              <SimpleSelect
                 id="imp-group"
                 value={groupId}
-                onChange={(e) => setGroupId(e.target.value)}
-                className="w-full max-w-md rounded-md border bg-background px-3 py-2 text-sm"
-              >
-                <option value="">选择用户组</option>
-                {data.groups.map((g) => (<option key={g._id} value={g._id}>{g.name}</option>))}
-              </select>
+                onValueChange={setGroupId}
+                className="max-w-md"
+                placeholder="选择用户组"
+                options={[
+                  { value: '', label: '选择用户组' },
+                  ...data.groups.map((g) => ({ value: g._id, label: g.name })),
+                ]}
+              />
             </FormField>
           )}
         </CardContent>
@@ -1093,10 +1327,17 @@ export function UserBindPage() {
         <CardContent className="p-6">
           <form method="post" className="space-y-4">
             <FormField label="学校" required htmlFor="bind-school">
-              <select id="bind-school" name="schoolId" required className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                <option value="">选择学校</option>
-                {data.schools.map((s) => (<option key={s._id} value={s._id}>{s.name}</option>))}
-              </select>
+              <SimpleSelect
+                id="bind-school"
+                name="schoolId"
+                required
+                defaultValue=""
+                placeholder="选择学校"
+                options={[
+                  { value: '', label: '选择学校' },
+                  ...data.schools.map((s) => ({ value: s._id, label: s.name })),
+                ]}
+              />
             </FormField>
             <FormRow columns={2}>
               <FormField label="学号" required htmlFor="bind-studentId">
@@ -1500,22 +1741,34 @@ export function UserBindClaimPage() {
                 <input type="hidden" name="studentId" value={data.studentIdInput || ''} />
                 <input type="hidden" name="realName" value={data.realNameInput || ''} />
                 <FormField label="选择临时账号" required htmlFor="claim-temp-select" hint={`找到 ${data.candidates!.length} 个匹配账号`}>
-                  <select id="claim-temp-select" name="tempUserId" required className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                    <option value="">请选择…</option>
-                    {data.candidates!.map((c) => (
-                      <option key={c.uid} value={c.uid}>
-                        UID {c.uid} · {c.uname} · 创建于 <DateTime value={c.createdAt} mode="date" />
-                      </option>
-                    ))}
-                  </select>
+                  <SimpleSelect
+                    id="claim-temp-select"
+                    name="tempUserId"
+                    required
+                    defaultValue=""
+                    placeholder="请选择…"
+                    options={[
+                      { value: '', label: '请选择…' },
+                      ...data.candidates!.map((c) => ({
+                        value: String(c.uid),
+                        label: `UID ${c.uid} · ${c.uname}`,
+                      })),
+                    ]}
+                  />
                 </FormField>
                 <FormField label="学校" required htmlFor="claim-school-select" hint={data.schoolLocked ? '已根据你当前的学校锁定' : undefined}>
-                  <select id="claim-school-select" name="schoolId" required disabled={data.schoolLocked} className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-70">
-                    {!data.schoolLocked && <option value="">请选择…</option>}
-                    {data.schools.map((s) => (
-                      <option key={s._id} value={s._id}>{s.name}</option>
-                    ))}
-                  </select>
+                  <SimpleSelect
+                    id="claim-school-select"
+                    name="schoolId"
+                    required
+                    disabled={data.schoolLocked}
+                    defaultValue={data.schoolLocked ? (data.schools[0]?._id || '') : ''}
+                    placeholder="请选择…"
+                    options={[
+                      ...(!data.schoolLocked ? [{ value: '', label: '请选择…' }] : []),
+                      ...data.schools.map((s) => ({ value: s._id, label: s.name })),
+                    ]}
+                  />
                 </FormField>
                 <div className="flex gap-2">
                   <Button type="submit">提交认领申请</Button>

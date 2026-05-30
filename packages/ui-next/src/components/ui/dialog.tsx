@@ -49,7 +49,10 @@ export function DialogContent({
   return (
     <div
       className={cn(
-        'relative max-h-[85vh] w-full overflow-hidden rounded-xl border bg-background shadow-2xl',
+        // flex column so ScrollArea children can be flex-1 + min-h-0 to fill
+        // remaining space. Without this, ScrollArea inside dialogs falls back
+        // to `height: auto` and the viewport has no scroll context.
+        'relative flex max-h-[85vh] w-full flex-col overflow-hidden rounded-xl border bg-background shadow-2xl',
         className,
       )}
       {...props}
@@ -73,7 +76,7 @@ export function DialogHeader({
   className,
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('border-b px-6 py-4', className)} {...props} />;
+  return <div className={cn('shrink-0 border-b px-6 py-4', className)} {...props} />;
 }
 
 export function DialogTitle({

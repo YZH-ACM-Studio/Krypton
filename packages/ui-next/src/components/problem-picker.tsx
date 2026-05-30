@@ -41,7 +41,11 @@ export function ProblemPicker({
     fetchProblemsByIds(value).then((res) => {
       if (cancelled) return;
       // Honour the order of `value` rather than the search results.
-      const byKey = new Map(res.map((p) => [problemKey(p), p]));
+      const byKey = new Map<string, ProblemOption>();
+      for (const problem of res) {
+        byKey.set(String(problem.docId), problem);
+        if (problem.pid) byKey.set(String(problem.pid), problem);
+      }
       setItems(value.map((id) => byKey.get(id) || { docId: Number(id) || 0, pid: id, title: '' }));
     });
     return () => { cancelled = true; };

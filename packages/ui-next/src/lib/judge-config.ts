@@ -319,7 +319,7 @@ export function serializeJudgeConfig(config: JudgeConfig, opts?: { preserveSourc
         const scalarKeys = [
           'type', 'time', 'memory', 'score', 'checker', 'checker_type',
           'float_relative', 'float_absolute', 'interactor', 'user', 'manager',
-          'filename', 'langs',
+          'filename', 'langs', 'time_limit_rate', 'memory_limit_rate',
         ];
         for (const k of scalarKeys) {
           if (obj[k] !== undefined && oldTop[k] !== obj[k]) {

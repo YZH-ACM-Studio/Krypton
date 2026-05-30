@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { AdminPage } from '@/components/admin/admin-page';
@@ -203,29 +204,42 @@ export function DomainJoinApplicationsPage() {
           <form method="post" className="grid gap-4 sm:max-w-xl">
             <div className="space-y-1.5">
               <label htmlFor="method" className="text-sm font-medium">加入方式</label>
-              <select id="method" name="method" defaultValue={joinSettings?.method ?? 0} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                <option value="0">禁止加入</option>
-                <option value="1">自由加入</option>
-                <option value="2">需要邀请码</option>
-              </select>
+              <SimpleSelect
+                id="method"
+                name="method"
+                defaultValue={String(joinSettings?.method ?? 0)}
+                options={[
+                  { value: '0', label: '禁止加入' },
+                  { value: '1', label: '自由加入' },
+                  { value: '2', label: '需要邀请码' },
+                ]}
+              />
             </div>
 
             <div className="space-y-1.5">
               <label htmlFor="role" className="text-sm font-medium">默认角色</label>
-              <select id="role" name="role" defaultValue={joinSettings?.role || 'default'} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                {rolesWithText.map(([val, text]) => (
-                  <option key={val} value={val}>{text}</option>
-                ))}
-              </select>
+              <SimpleSelect
+                id="role"
+                name="role"
+                defaultValue={joinSettings?.role || 'default'}
+                options={rolesWithText.map(([val, text]) => ({
+                  value: val,
+                  label: text,
+                }))}
+              />
             </div>
 
             <div className="space-y-1.5">
               <label htmlFor="expire" className="text-sm font-medium">有效期</label>
-              <select id="expire" name="expire" className="w-full rounded-md border bg-background px-3 py-2 text-sm">
-                {Object.entries(expirations).map(([k, v]) => (
-                  <option key={k} value={k}>{v}</option>
-                ))}
-              </select>
+              <SimpleSelect
+                id="expire"
+                name="expire"
+                defaultValue={Object.keys(expirations)[0]}
+                options={Object.entries(expirations).map(([k, v]) => ({
+                  value: k,
+                  label: v as string,
+                }))}
+              />
             </div>
 
             <div className="space-y-1.5">

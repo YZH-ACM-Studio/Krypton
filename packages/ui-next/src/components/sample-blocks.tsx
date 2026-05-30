@@ -3,8 +3,55 @@
  * markdown editor preview. Mirrors the look-and-feel so what the editor
  * shows is exactly what readers see.
  */
-import { useState } from 'react';
+import { useState, type MouseEvent } from 'react';
+import { Check, ClipboardCopy, XCircle } from 'lucide-react';
 import type { SampleCase } from '@/lib/samples';
+
+type CopyState = 'idle' | 'copied' | 'failed';
+
+function fallbackCopyText(text: string): boolean {
+  if (typeof document === 'undefined') return false;
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '0';
+  textarea.style.left = '0';
+  textarea.style.width = '1px';
+  textarea.style.height = '1px';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+  document.body.appendChild(textarea);
+
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, text.length);
+
+  let ok = false;
+  try {
+    ok = document.execCommand('copy');
+  } catch {
+    ok = false;
+  } finally {
+    document.body.removeChild(textarea);
+    active?.focus?.();
+  }
+  return ok;
+}
+
+async function copyText(text: string): Promise<boolean> {
+  if (!text) return false;
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // HTTP / permission-blocked browsers fall back to the legacy path below.
+    }
+  }
+  return fallbackCopyText(text);
+}
 
 export function SampleBlocks({
   samples,
@@ -26,14 +73,16 @@ export function SampleBlocks({
 }
 
 export function SampleBlock({ label, content }: { label: string; content: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = () => {
+  const [copyState, setCopyState] = useState<CopyState>('idle');
+  const handleCopy = async (e: MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (!content) return;
-    navigator.clipboard.writeText(content).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
+    const ok = await copyText(content);
+    setCopyState(ok ? 'copied' : 'failed');
+    window.setTimeout(() => setCopyState('idle'), 1500);
   };
+  const Icon = copyState === 'copied' ? Check : copyState === 'failed' ? XCircle : ClipboardCopy;
   return (
     <div className="rounded-md border bg-muted/20 overflow-hidden">
       <div className="flex items-center justify-between px-3 py-1.5 border-b bg-muted/40">
@@ -41,9 +90,11 @@ export function SampleBlock({ label, content }: { label: string; content: string
         <button
           type="button"
           onClick={handleCopy}
-          className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[10px] text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          aria-label={`复制${label}`}
         >
-          {copied ? '已复制' : '复制'}
+          <Icon className="size-3" />
+          {copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制'}
         </button>
       </div>
       <pre className="p-3 font-mono text-xs whitespace-pre-wrap break-all min-h-[2em]">{content}</pre>

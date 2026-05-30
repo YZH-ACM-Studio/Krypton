@@ -1,9 +1,13 @@
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import { ChevronRight, Download, Filter, RotateCcw, Search } from 'lucide-react';
+import { useRecordSocket } from '@/hooks/use-record-socket';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { KryptonIDE } from '@/components/krypton-ide';
 import { Input } from '@/components/ui/input';
+import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
@@ -126,6 +130,17 @@ function normalizeSubtasks(value: unknown): SubtaskView[] {
   return [];
 }
 
+/**
+ * Resolve a Hydro language id (e.g. "cc.cc17") to its human-readable
+ * display name from `data.langs` (e.g. "C++ 17"). Falls back to the
+ * raw id if the lookup table or entry is missing.
+ */
+function langDisplay(langs: R | undefined, id: string | undefined): string {
+  if (!id) return '—';
+  const entry = (langs || {})[id] as R | undefined;
+  return (entry?.display as string) || (entry?.name as string) || id;
+}
+
 function DiagnosticCard({ title, texts }: { title: string; texts: string[] }) {
   if (!texts.length) return null;
 
@@ -144,11 +159,19 @@ function DiagnosticCard({ title, texts }: { title: string; texts: string[] }) {
 export function RecordsPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const rdocs: R[] = data.rdocs || [];
+  const initialRdocs: R[] = data.rdocs || [];
+  // Local state so WS updates can splice in / patch existing rows.
+  // The first render mirrors server pagination; subsequent rdoc updates
+  // arrive via the WS hook below and merge by `_id`.
+  const [rdocs, setRdocs] = useState<R[]>(initialRdocs);
   const page = Number(data.page) || 1;
   const locale = bs.locale;
   const pdict: Record<string, R> = data.pdict || {};
   const udict: Record<string, GenericUserDoc> = { ...bs.udict, ...(data.udict || {}) };
+  // Admin-only studentId/realName column data. Empty for non-admin viewers;
+  // we render the column conditionally on `hasStudentColumn`.
+  const studentDict: Record<string, { studentId: string; realName: string }> = data.studentDict || {};
+  const hasStudentColumn = Object.keys(studentDict).length > 0;
   const langs: R = data.langs || {};
   const statusTexts: R = data.statusTexts || {};
   const filterStatus = typeof data.filterStatus === 'number' ? String(data.filterStatus) : '';
@@ -169,6 +192,37 @@ export function RecordsPage() {
   const statusOptions: Array<[string, string]> = Object.keys(statusTexts).length
     ? Object.keys(statusTexts).map((key) => [key, statusLabel(key, statusTexts)])
     : Object.entries(STATUS_MAP).map(([key, value]) => [key, value.label]);
+
+  // Live updates: subscribe to /record-conn with the same filters as the
+  // current page so newly arriving rdocs (or status flips) update the
+  // table without a full reload. New ids land at the top; existing ones
+  // get patched in place.
+  useRecordSocket({
+    filters: {
+      tid: filterParams.tid || undefined,
+      pid: filterParams.pid || undefined,
+      uidOrName: filterParams.uidOrName || undefined,
+      status: filterStatus || undefined,
+      all: filterParams.all === '1' || undefined,
+      allDomain: filterParams.allDomain === '1' || undefined,
+    },
+    onRdoc: (rdoc) => {
+      const id = String(rdoc._id);
+      setRdocs((prev) => {
+        const idx = prev.findIndex((r) => String(r._id) === id);
+        if (idx >= 0) {
+          const next = prev.slice();
+          next[idx] = { ...prev[idx], ...rdoc };
+          return next;
+        }
+        // Insert new record at the top; keep the page-size cap so we
+        // don't grow unboundedly between page navigations.
+        const limit = prev.length || 100;
+        return [rdoc, ...prev].slice(0, limit);
+      });
+    },
+    disabled: !bs.user.signedIn && !filterParams.tid,
+  });
 
   return (
     <motion.div
@@ -199,33 +253,33 @@ export function RecordsPage() {
             </div>
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">语言</label>
-              <select
+              <SimpleSelect
                 name="lang"
                 defaultValue={data.filterLang || ''}
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-              >
-                <option value="">全部语言</option>
-                {languageOptions.map(([key, value]) => (
-                  <option key={key} value={key}>
-                    {String((value as R)?.display || (value as R)?.name || key)}
-                  </option>
-                ))}
-              </select>
+                className="h-9"
+                options={[
+                  { value: '', label: '全部语言' },
+                  ...languageOptions.map(([key, value]) => ({
+                    value: key,
+                    label: String((value as R)?.display || (value as R)?.name || key),
+                  })),
+                ]}
+              />
             </div>
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">状态</label>
-              <select
+              <SimpleSelect
                 name="status"
                 defaultValue={filterStatus}
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-              >
-                <option value="">全部提交</option>
-                {statusOptions.map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+                className="h-9"
+                options={[
+                  { value: '', label: '全部提交' },
+                  ...statusOptions.map(([key, label]) => ({
+                    value: key,
+                    label,
+                  })),
+                ]}
+              />
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button type="submit" size="sm">
@@ -265,6 +319,9 @@ export function RecordsPage() {
                 <TableHead className="w-28">状态</TableHead>
                 <TableHead>题目</TableHead>
                 <TableHead className="w-28">用户</TableHead>
+                {hasStudentColumn ? (
+                  <TableHead className="w-32">学号 / 姓名</TableHead>
+                ) : null}
                 <TableHead className="w-20 text-center">语言</TableHead>
                 <TableHead className="w-24 text-right">得分</TableHead>
                 <TableHead className="w-24 text-right">时间</TableHead>
@@ -304,8 +361,20 @@ export function RecordsPage() {
                       <TableCell className="text-sm">
                         {user?.uname || `#${r.uid}`}
                       </TableCell>
+                      {hasStudentColumn ? (
+                        <TableCell className="text-xs">
+                          {studentDict[String(r.uid)] ? (
+                            <>
+                              <div className="font-mono">{studentDict[String(r.uid)].studentId}</div>
+                              <div className="text-muted-foreground">{studentDict[String(r.uid)].realName}</div>
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground/40">—</span>
+                          )}
+                        </TableCell>
+                      ) : null}
                       <TableCell className="text-center">
-                        <Badge variant="outline" className="text-[10px]">{r.lang || '—'}</Badge>
+                        <Badge variant="outline" className="text-[10px]">{langDisplay(langs, r.lang)}</Badge>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {r.score != null ? (
@@ -383,7 +452,10 @@ export function RecordsPage() {
 export function RecordDetailPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
-  const rdoc: R = data.rdoc || {};
+  const initialRdoc: R = data.rdoc || {};
+  // Live-tracking state — WS updates patch subtask/case progress in place
+  // so the user sees judging move from "Pending" → "Judging" → final.
+  const [rdoc, setRdoc] = useState<R>(initialRdoc);
   const pdoc: R = data.pdoc || {};
   const code = data.code || rdoc.code || '';
   const locale = bs.locale;
@@ -393,8 +465,27 @@ export function RecordDetailPage() {
   const judgeTexts = collectTexts(rdoc.judgeTexts);
   const subtasks = normalizeSubtasks(rdoc.subtasks);
   const allRevs = Object.entries(data.allRevs || {}) as Array<[string, string]>;
-  const recordUrl = replaceRouteTokens(bs.urls.recordDetail, { RID: String(rdoc._id) });
+  const examUrls: R = data.examMode?.urls || {};
+  const recordUrl = examUrls.record
+    ? String(examUrls.record).replace('__RID__', String(rdoc._id))
+    : replaceRouteTokens(bs.urls.recordDetail, { RID: String(rdoc._id) });
   const downloadUrl = `${recordUrl}?download=true`;
+  const problemUrl = examUrls.problem
+    ? String(examUrls.problem).replace('__PID__', String(rdoc.pid))
+    : replaceRouteTokens(bs.urls.problemDetail, { PID: String(rdoc.pid) });
+  const recordListUrl = examUrls.problems || bs.urls.records;
+
+  useRecordSocket({
+    path: '/record-detail-conn',
+    filters: { rid: String(rdoc._id || '') },
+    onRdoc: (next) => {
+      if (!next || !next._id) return;
+      // Merge — preserve any fields the server may not echo (e.g. `code`
+      // may be omitted from later updates to save bandwidth).
+      setRdoc((cur) => ({ ...cur, ...next }));
+    },
+    disabled: !rdoc._id,
+  });
 
   return (
     <motion.div
@@ -406,7 +497,7 @@ export function RecordDetailPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <a href={bs.urls.records} className="hover:text-primary">记录</a>
+            <a href={recordListUrl} className="hover:text-primary">记录</a>
             <ChevronRight className="size-3" />
           </div>
           <h1 className="mt-1 text-xl font-semibold">
@@ -448,7 +539,7 @@ export function RecordDetailPage() {
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">题目 / 用户</p>
             <p className="mt-1 text-sm">
-              <a href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(rdoc.pid) })} className="font-medium hover:text-primary">
+              <a href={problemUrl} className="font-medium hover:text-primary">
                 {pdoc.title || rdoc.pid}
               </a>
               <span className="text-muted-foreground"> · {user?.uname || `#${rdoc.uid}`}</span>
@@ -461,7 +552,7 @@ export function RecordDetailPage() {
         <CardContent className="grid gap-4 p-4 text-sm sm:grid-cols-4">
           <div>
             <p className="text-xs text-muted-foreground">语言</p>
-            <p className="mt-1 font-medium">{rdoc.lang || '—'}</p>
+            <p className="mt-1 font-medium">{langDisplay(data.langs, rdoc.lang)}</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">提交时间</p>
@@ -551,11 +642,19 @@ export function RecordDetailPage() {
           <CardContent className="p-0">
             <div className="flex items-center justify-between border-b px-4 py-2">
               <span className="text-sm font-medium">代码</span>
-              <Badge variant="outline">{rdoc.lang || '未知语言'}</Badge>
+              <Badge variant="outline">{langDisplay(data.langs, rdoc.lang)}</Badge>
             </div>
-            <pre className="overflow-auto p-4 text-sm leading-relaxed">
-              <code>{code}</code>
-            </pre>
+            <div className="overflow-hidden" style={{ height: 'min(60vh, 640px)', minHeight: 320 }}>
+              <KryptonIDE
+                mode="readonly"
+                langs={[]}
+                defaultLang={rdoc.lang || 'cc.cc17'}
+                value={String(code)}
+                onValueChange={() => { /* read-only */ }}
+                minHeight={320}
+                className="h-full rounded-none border-0"
+              />
+            </div>
           </CardContent>
         </Card>
       ) : null}

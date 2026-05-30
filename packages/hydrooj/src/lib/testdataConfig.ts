@@ -17,6 +17,24 @@ export async function parseConfig(config: string | ProblemConfigFile = {}, files
         type: cfg.type || 'default',
         hackable: cfg.validator && cfg.checker && !['default', 'strict'].includes(cfg.checker_type),
     };
+    if (cfg.time != null) result.time = cfg.time as unknown as number;
+    if (cfg.memory != null) result.memory = cfg.memory as unknown as number;
+    if (cfg.time_limit_rate && typeof cfg.time_limit_rate === 'object') {
+        const rates: Record<string, number> = {};
+        for (const [key, value] of Object.entries(cfg.time_limit_rate)) {
+            const rate = Number(value);
+            if (Number.isFinite(rate) && rate > 0) rates[key] = rate;
+        }
+        if (Object.keys(rates).length) result.time_limit_rate = rates;
+    }
+    if (cfg.memory_limit_rate && typeof cfg.memory_limit_rate === 'object') {
+        const rates: Record<string, number> = {};
+        for (const [key, value] of Object.entries(cfg.memory_limit_rate)) {
+            const rate = Number(value);
+            if (Number.isFinite(rate) && rate > 0) rates[key] = rate;
+        }
+        if (Object.keys(rates).length) result.memory_limit_rate = rates;
+    }
     if (cfg.subType) result.subType = cfg.subType;
     if (cfg.target) result.target = cfg.target;
     result.count ||= Math.sum(readSubtasksFromFiles(files, cfg).map((i) => i.cases.length));

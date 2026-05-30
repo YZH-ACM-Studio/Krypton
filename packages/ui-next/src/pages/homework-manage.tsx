@@ -2,7 +2,7 @@
  * Homework management pages — edit and files.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
@@ -19,6 +19,12 @@ import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
+import { MultiSelect } from '@/components/ui/multi-select';
+import {
+  COMMON_LANG_OPTIONS, type LangOption, resolveLangs,
+  searchProblems, fetchProblemsByIds, type ProblemOption,
+} from '@/lib/multi-select-presets';
+import { Badge } from '@/components/ui/badge';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens } from '@/lib/format';
 
@@ -78,6 +84,23 @@ export function HomeworkEditPage() {
   const updatePenaltyRule = (id: string, patch: Partial<PenaltyRuleRow>) => {
     setPenaltyRules((rows) => rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
   };
+
+  /* MultiSelect state — pids resolved async on mount, langs sync. */
+  const initialPidCsv: string = (typeof data.pids === 'string' ? data.pids : '') || '';
+  const initialPidIds = initialPidCsv.split(',').map((s) => s.trim()).filter(Boolean);
+  const [pidValue, setPidValue] = useState<ProblemOption[]>(() => initialPidIds.map((id) => ({
+    docId: Number(id) || 0, pid: id, title: '',
+  })));
+  useEffect(() => {
+    if (!initialPidIds.length) return;
+    let cancelled = false;
+    fetchProblemsByIds(initialPidIds).then((res) => { if (!cancelled) setPidValue(res); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const initialLangIds: string[] = Array.isArray(tdoc.langs) ? tdoc.langs
+    : typeof tdoc.langs === 'string' ? tdoc.langs.split(',').filter(Boolean) : [];
+  const [langValue, setLangValue] = useState<LangOption[]>(() => resolveLangs(initialLangIds));
 
   return (
     <motion.div
@@ -150,17 +173,52 @@ export function HomeworkEditPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="pids" className="text-sm font-medium">题目列表 (逗号分隔)</label>
-              <Input id="pids" name="pids" defaultValue={data.pids || ''} placeholder="P1001,P1002" />
+              <label className="text-sm font-medium">题目列表</label>
+              <MultiSelect<ProblemOption>
+                loadOptions={(q) => searchProblems(q, 20)}
+                value={pidValue}
+                onChange={setPidValue}
+                getKey={(p) => String(p.docId || p.pid)}
+                getLabel={(p) => `${p.pid || p.docId} ${p.title || ''}`.trim()}
+                renderChip={(p) => (
+                  <span className="flex items-center gap-1">
+                    <span className="font-mono text-[10px] text-muted-foreground">{p.pid || p.docId}</span>
+                    {p.title ? <span className="truncate max-w-[140px]">{p.title}</span> : null}
+                  </span>
+                )}
+                renderOption={(p) => (
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-mono text-[11px] text-muted-foreground shrink-0">{p.pid || p.docId}</span>
+                    <span className="truncate flex-1">{p.title || '—'}</span>
+                    {p.difficulty ? <Badge variant="outline" className="text-[10px] shrink-0">Lv.{p.difficulty}</Badge> : null}
+                    {p.nSubmit ? (
+                      <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">{p.nAccept ?? 0}/{p.nSubmit}</span>
+                    ) : null}
+                  </div>
+                )}
+                name="pids"
+                placeholder="搜索题目 (pid / 标题)…"
+                minHeight={48}
+              />
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="langs" className="text-sm font-medium">提交语言限制</label>
-              <Input
-                id="langs"
+              <label className="text-sm font-medium">提交语言限制</label>
+              <MultiSelect<LangOption>
+                options={COMMON_LANG_OPTIONS}
+                value={langValue}
+                onChange={setLangValue}
+                getKey={(o) => o.value}
+                getLabel={(o) => `${o.label} (${o.value})`}
+                renderChip={(o) => <span className="font-mono">{o.label}</span>}
+                renderOption={(o) => (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium">{o.label}</span>
+                    <span className="text-[10px] font-mono text-muted-foreground">{o.value}</span>
+                  </div>
+                )}
                 name="langs"
-                defaultValue={(tdoc.langs || []).join?.(',') || tdoc.langs || ''}
-                placeholder="cc.cc14,gcc,g++"
+                placeholder="留空 = 全部"
               />
             </div>
 

@@ -145,7 +145,7 @@ export function OverviewSection({ data, onEnterProblems }: { data: OverviewData;
           <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-sm">说明</CardTitle></CardHeader>
           <CardContent className="px-5 pb-5">
             <div className="prose prose-sm dark:prose-invert max-w-none">
-              <MarkdownView value={tdoc.content} />
+              <MarkdownView content={tdoc.content} />
             </div>
           </CardContent>
         </Card>
@@ -196,7 +196,7 @@ export function AnnouncementsSection({ broadcasts }: { broadcasts: Array<{ _id: 
                 </CardHeader>
                 <CardContent className="px-5 pb-5">
                   <div className="prose prose-sm dark:prose-invert max-w-none">
-                    <MarkdownView value={b.content} />
+                    <MarkdownView content={b.content} />
                   </div>
                 </CardContent>
               </Card>

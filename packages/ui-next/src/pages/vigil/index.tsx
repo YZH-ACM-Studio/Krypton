@@ -545,8 +545,9 @@ export function AdminVigilExamDetailPage() {
   const examId = String(bs.page.data.examId || '');
   const examTitle = bs.page.data.examTitle as string | null | undefined;
   // Contest config — needed for live-player URL + record-enabled UI gates.
-  // Hydro injects these via page.data; missing fields default to safe values.
-  const recordEnabled = !!(bs.page.data as any)?.recordEnabled;
+  // Hydro injects this via page.data; the student list carries the same field
+  // as a fallback for older OJ pages that did not expose it yet.
+  const pageRecordEnabled = (bs.page.data as any)?.recordEnabled;
 
   // ─── Toolbar state (URL-aware so refresh keeps the user's filter) ───
   const initialUrl = useMemo(() => new URL(window.location.href), []);
@@ -617,6 +618,9 @@ export function AdminVigilExamDetailPage() {
   const counters = studentResp?.counters;
   const totalPages = studentResp ? Math.max(1, Math.ceil(studentResp.total / PAGE_SIZE)) : 1;
   const students = studentResp?.items || [];
+  const recordEnabled = typeof pageRecordEnabled === 'boolean'
+    ? pageRecordEnabled
+    : students.some((s) => s.recordEnabled === true);
 
   // ─── Selected student (drawer / quick live-player from double-click) ──
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -1049,7 +1053,7 @@ export function AdminVigilExamDetailPage() {
         onOpenChange={setDrawerOpen}
         contestId={examId}
         student={selectedStudent}
-        recordEnabled={recordEnabled}
+        recordEnabled={selectedStudent?.recordEnabled ?? recordEnabled}
         newEventVersion={newEventVersion}
       />
 
@@ -1060,7 +1064,7 @@ export function AdminVigilExamDetailPage() {
           onOpenChange={setDoubleClickLiveOpen}
           contestId={examId}
           student={selectedStudent}
-          recordEnabled={recordEnabled}
+          recordEnabled={selectedStudent.recordEnabled ?? recordEnabled}
         />
       )}
 

@@ -22,6 +22,28 @@ import * as document from '../model/document';
 import system from '../model/system';
 import db from '../service/db';
 
+function parseStringList(value: any): string[] {
+    if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+    return String(value || '')
+        .split(/[\s,;]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+function vigilMediaFields(tdoc: any) {
+    const processWhitelist = Array.from(new Set([
+        ...parseStringList(system.get('vigil.processWhitelistGlobal')),
+        ...parseStringList(tdoc?.vigilProcessWhitelist || []),
+    ]));
+    return {
+        liveEnabled: tdoc?.liveEnabled !== false,
+        recordEnabled: !!tdoc?.recordEnabled,
+        cameraEnabled: tdoc?.cameraEnabled !== false,
+        screenshotJitterMs: tdoc?.screenshotJitterMs ?? 30000,
+        processWhitelist,
+    };
+}
+
 function clientSessionKeyFromHydroSession(session: any): string {
     return session?.sessionId || session?._id || session?.sid || '';
 }
@@ -224,6 +246,7 @@ class VigilLookupStudentHandler extends VigilApiHandler {
                     exclusive: !!t.exclusive,
                     clientLoginBlockBeforeMinutes: t.clientLoginBlockBeforeMinutes ?? 60,
                     clientLoginBlockAfterMinutes: t.clientLoginBlockAfterMinutes ?? 30,
+                    ...vigilMediaFields(t),
                 }));
         }
         this.response.body = {
@@ -828,14 +851,30 @@ class VigilAdminExamDetailHandler extends Handler {
     async prepare() { this.checkPriv(PRIV.PRIV_EDIT_SYSTEM); }
     async get({ domainId, examId }: { domainId: string; examId: string }) {
         let examTitle: string | null = null;
+        let liveEnabled = true;
+        let recordEnabled = false;
+        let cameraEnabled = true;
         if (ObjectId.isValid(examId)) {
             try {
-                const tdoc = await contestModel.get(domainId, new ObjectId(examId));
+                const tid = new ObjectId(examId);
+                const tdoc = await contestModel.get(domainId || 'system', tid).catch(() => null)
+                    || await document.coll.findOne({ docType: document.TYPE_CONTEST, docId: tid });
                 if (tdoc?.title) examTitle = tdoc.title;
+                if (tdoc) {
+                    liveEnabled = tdoc.liveEnabled !== false;
+                    recordEnabled = !!tdoc.recordEnabled;
+                    cameraEnabled = tdoc.cameraEnabled !== false;
+                }
             } catch { /* not found → leave null, React falls back to id */ }
         }
         this.response.template = 'admin_vigil_exam_detail.html';
-        this.response.body = { examId, examTitle };
+        this.response.body = {
+            examId,
+            examTitle,
+            liveEnabled,
+            recordEnabled,
+            cameraEnabled,
+        };
     }
 }
 

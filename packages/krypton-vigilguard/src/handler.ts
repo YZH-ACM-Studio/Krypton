@@ -82,6 +82,20 @@ function networkFields(tdoc: any) {
     };
 }
 
+function mediaFields(tdoc: any) {
+    const processWhitelist = Array.from(new Set([
+        ...parseList(system.get('vigil.processWhitelistGlobal')),
+        ...parseList(tdoc.vigilProcessWhitelist),
+    ]));
+    return {
+        liveEnabled: tdoc.liveEnabled !== false,
+        recordEnabled: !!tdoc.recordEnabled,
+        cameraEnabled: tdoc.cameraEnabled !== false,
+        screenshotJitterMs: tdoc.screenshotJitterMs ?? 30000,
+        processWhitelist,
+    };
+}
+
 /**
  * Manual "push this contest to Vigil now" trigger. Used by the admin
  * Vigil page when the auto-push at save time failed (Vigil down, etc.)
@@ -115,6 +129,7 @@ class VigilGuardResyncContestHandler extends Handler {
                     exclusive: !!tdoc.exclusive,
                     clientLoginBlockBeforeMinutes: tdoc.clientLoginBlockBeforeMinutes ?? 60,
                     clientLoginBlockAfterMinutes: tdoc.clientLoginBlockAfterMinutes ?? 30,
+                    ...mediaFields(tdoc),
                 } as any);
             } else {
                 await vigilBridge().deleteExamFromVigil(tid.toString());

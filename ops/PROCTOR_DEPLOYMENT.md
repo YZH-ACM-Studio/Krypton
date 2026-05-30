@@ -23,6 +23,7 @@ ssh oj-vigil 'SP=jyh521315
   echo $SP | sudo -S -p "" install -m 755 /tmp/srs /opt/srs/objs/srs
   echo $SP | sudo -S -p "" useradd -r -s /usr/sbin/nologin srs 2>/dev/null || true
   echo $SP | sudo -S -p "" mkdir -p /data/vigil/recordings /opt/srs/objs/nginx/html
+  echo $SP | sudo -S -p "" ln -sfn /data/vigil/recordings /opt/srs/objs/nginx/html/recordings
   echo $SP | sudo -S -p "" chown -R srs:srs /data/vigil/recordings /opt/srs/objs/nginx/html /var/log
 '
 
@@ -163,6 +164,13 @@ ssh oj-vigil 'SP=jyh521315
 1. 启动客户端 → 登录 → 进入考试 webview
 2. 等 10 秒 — 检查 `tasklist | findstr ffmpeg` 应该有 2 个 ffmpeg.exe (screen + camera)
 3. 在 oj-vigil 上：`ls -l /data/vigil/recordings/` （如果开了 recordEnabled）
+4. 回放 URL 应该返回 `200 video/mp4`：
+   `curl -I http://10.1.234.2/vigil-hls/recordings/<filename>.mp4`
+
+> SRS 的 HTTP 根目录是 `/opt/srs/objs/nginx/html`，DVR mp4 写在
+> `/data/vigil/recordings`。必须保留
+> `/opt/srs/objs/nginx/html/recordings -> /data/vigil/recordings` 符号链接，
+> 否则 OJ 的 `/vigil-hls/recordings/*.mp4` 会被 Caddy 转发到 SRS 后返回 404。
 
 老师端：
 4. 打开 `/admin/vigil/exams/{cid}` — 学生卡片墙出现

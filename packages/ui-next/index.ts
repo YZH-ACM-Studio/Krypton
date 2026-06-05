@@ -18,6 +18,37 @@ const templateEntryTag = '<script type="module" src="/src/main.tsx"></script>';
 const devEntryTag = '<script type="module" src="/src/main.tsx"></script>';
 const bootstrapPlaceholder = '__KRYPTON_BOOTSTRAP_DATA__';
 
+type MailTemplateConfig = {
+    title: string;
+    intro: string;
+    button: string;
+    pathArg: 'path' | 'url';
+    nameArg?: 'uname';
+};
+
+const mailTemplates: Record<string, MailTemplateConfig> = {
+    'user_register_mail.html': {
+        title: 'Sign Up',
+        intro: 'Hello! You can click following link to sign up your {0} account:',
+        button: 'Sign Up',
+        pathArg: 'path',
+    },
+    'user_lostpass_mail.html': {
+        title: 'Lost Password',
+        intro: 'Hello, {0}! You can click following link to reset the password of your {1} account:',
+        button: 'Reset Password',
+        pathArg: 'url',
+        nameArg: 'uname',
+    },
+    'user_changemail_mail.html': {
+        title: 'Change Email',
+        intro: 'Hello, {0}! You can click following link to active your new email of your {1} account:',
+        button: 'Change Email',
+        pathArg: 'path',
+        nameArg: 'uname',
+    },
+};
+
 function escapeForScript(data: unknown, handler?: any) {
     return JSON.stringify(data, serializer(false, handler))
         .replace(/</g, '\\u003c')
@@ -55,6 +86,98 @@ function safeSystemGet(key: string): string {
     try {
         return (global as any).Hydro?.model?.system?.get?.(key) || '';
     } catch { return ''; }
+}
+
+function escapeHtml(value: unknown) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function translate(context: Record<string, any>, message: string) {
+    try {
+        return context._?.(message) || message;
+    } catch { return message; }
+}
+
+function formatMessage(message: string, values: unknown[]) {
+    return message.replace(/\{(\d+)\}/g, (_, index) => String(values[Number(index)] ?? ''));
+}
+
+function renderUiNextMail(templateName: string, args: Record<string, any>, context: Record<string, any>) {
+    const config = mailTemplates[templateName];
+    if (!config) return null;
+
+    const handler = context.handler || {};
+    const domain = args.domain || handler.domain || {};
+    const siteName = domain?.ui?.name || domain?.name || safeSystemGet('server.name') || 'Krypton';
+    const urlPrefix = String(args.url_prefix || safeSystemGet('server.url') || '').replace(/\/$/, '');
+    const pathOrUrl = String(args[config.pathArg] || '');
+    const link = `${urlPrefix}${pathOrUrl}`;
+    const title = translate(context, config.title);
+    const name = config.nameArg ? String(args[config.nameArg] || '') : '';
+    const introValues = config.nameArg ? [name, siteName] : [siteName];
+    const intro = formatMessage(translate(context, config.intro), introValues);
+    const button = translate(context, config.button);
+    const senderLink = `<a href="${escapeHtml(`${urlPrefix || '#'}/`)}" target="_blank" style="color:#0ea5e9;text-decoration:none;">${escapeHtml(siteName)}</a>`;
+    const footerText = formatMessage(
+        escapeHtml(translate(context, 'This email was sent by {0} automatically, and please do not reply directly.')),
+        [senderLink],
+    );
+    const requestIp = handler.request?.ip || '';
+    const requestText = requestIp
+        ? escapeHtml(formatMessage(translate(context, 'This email was requested from {0}'), [requestIp]))
+        : '';
+
+    return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(title)}</title>
+</head>
+<body style="margin:0;padding:0;background:#f3f7fb;color:#0f172a;font-family:Arial,'Segoe UI','Microsoft YaHei',sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f3f7fb;">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;border-collapse:collapse;background:#ffffff;border:1px solid #dbe7f3;border-radius:14px;overflow:hidden;">
+          <tr>
+            <td style="padding:22px 28px;background:#07111f;color:#ffffff;">
+              <div style="font-size:13px;line-height:1.5;color:#94a3b8;">${escapeHtml(siteName)}</div>
+              <div style="margin-top:4px;font-size:22px;line-height:1.3;font-weight:700;">${escapeHtml(title)}</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:30px 28px 8px;">
+              <p style="margin:0;color:#334155;font-size:15px;line-height:1.8;">${escapeHtml(intro)}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 28px 10px;">
+              <a href="${escapeHtml(link)}" target="_blank" style="display:inline-block;background:#0ea5e9;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;line-height:1;padding:13px 20px;border-radius:8px;">${escapeHtml(button)}</a>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:10px 28px 30px;">
+              <p style="margin:0 0 8px;color:#64748b;font-size:13px;line-height:1.7;">${escapeHtml(translate(context, 'If the button does not work, copy and open this link in your browser:'))}</p>
+              <p style="margin:0;word-break:break-all;color:#0f172a;font-size:13px;line-height:1.7;"><a href="${escapeHtml(link)}" target="_blank" style="color:#0284c7;text-decoration:none;">${escapeHtml(link)}</a></p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px;line-height:1.7;">
+              <p style="margin:0;">${footerText}</p>
+              ${requestText ? `<p style="margin:6px 0 0;">${requestText}</p>` : ''}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }
 
 function buildBootstrap(templateName: string, args: Record<string, any>, context: Record<string, any>) {
@@ -207,6 +330,9 @@ function renderMissingBuild(bootstrap: ReturnType<typeof buildBootstrap>) {
 }
 
 async function renderApp(templateName: string, args: Record<string, any>, context: Record<string, any>, vite: ViteDevServer | null) {
+    const mail = renderUiNextMail(templateName, args, context);
+    if (mail) return mail;
+
     context.handler?.response?.addHeader?.('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     context.handler?.response?.addHeader?.('Pragma', 'no-cache');
     context.handler?.response?.addHeader?.('Expires', '0');

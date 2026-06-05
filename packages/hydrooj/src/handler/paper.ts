@@ -698,22 +698,30 @@ class ExamModeEntryHandler extends Handler {
     async get(domainId: string, tid: ObjectId) {
         const tdoc = await contest.get(domainId, tid);
         if (!tdoc) throw new NotFoundError('Contest');
-        const { previewMode } = await ensureExamModeAccess(this, domainId, tid, tdoc);
+        const { previewMode, isAdminBypass } = await ensureExamModeAccess(this, domainId, tid, tdoc);
         if (tdoc.rule === 'exam') {
             this.response.redirect = this.url('paper_layout', { tid });
             return;
         }
 
-        // Resolve problem dict so the workspace can render the topbar /
-        // problem list inline.
+        // Before the start time, the client workspace may be open for check-in,
+        // but students must not receive problem ids/titles in the bootstrap JSON.
+        const hideProblemsBeforeStart = contest.isNotStarted(tdoc) && !isAdminBypass;
+        const workspaceTdoc = hideProblemsBeforeStart
+            ? { ...tdoc, pids: [], allowPrint: false }
+            : tdoc;
+
+        // Resolve problem dict so the workspace can render the problem list inline.
         const pdict: Record<number, any> = {};
-        await Promise.all((tdoc.pids as number[] || []).map(async (pid) => {
-            const pdoc = await ProblemModel.get(tdoc.domainId, pid, undefined, true);
-            if (pdoc) pdict[pid] = pdoc;
-        }));
+        if (!hideProblemsBeforeStart) {
+            await Promise.all((tdoc.pids as number[] || []).map(async (pid) => {
+                const pdoc = await ProblemModel.get(tdoc.domainId, pid, undefined, true);
+                if (pdoc) pdict[pid] = pdoc;
+            }));
+        }
 
         this.response.body = {
-            tdoc,
+            tdoc: workspaceTdoc,
             pdict,
             previewMode,
             currentUserId: this.user._id,

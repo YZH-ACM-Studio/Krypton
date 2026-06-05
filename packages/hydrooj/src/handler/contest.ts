@@ -1173,8 +1173,21 @@ export async function apply(ctx: Context) {
                     ? 'homework_scoreboard'
                     : 'contest_scoreboard';
                 const availableViews = scoreboard.getAvailableViews(tdoc.rule);
+                // Admin-only columns: studentId / realName looked up via userbind
+                // for every contestant. Mirrors DomainRankHandler — populated only
+                // when the viewer is a system admin so student identities never
+                // leak to ordinary contestants (the frontend hides the columns
+                // when the dict is empty).
+                let studentDict: Record<string, { studentId: string; realName: string }> = {};
+                if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && global.Hydro?.model?.userbind?.findStudentsByUserIds) {
+                    const uids = Object.keys(udict).map(Number).filter((u) => u && u > 1);
+                    const students = await global.Hydro.model.userbind.findStudentsByUserIds(tdoc.domainId, uids);
+                    studentDict = Object.fromEntries(Object.entries(students).map(
+                        ([uid, s]: [string, any]) => [uid, { studentId: s.studentId, realName: s.realName }],
+                    ));
+                }
                 this.response.body = {
-                    tdoc: this.tdoc, tsdoc: this.tsdocAsPublic(), rows, udict, pdict, page_name, groups, availableViews,
+                    tdoc: this.tdoc, tsdoc: this.tsdocAsPublic(), rows, udict, pdict, page_name, groups, availableViews, studentDict,
                 };
                 this.response.pjax = 'partials/scoreboard.html';
                 this.response.template = 'contest_scoreboard.html';

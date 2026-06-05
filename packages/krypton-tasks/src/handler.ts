@@ -1022,7 +1022,8 @@ function parseScoreImport(
     const rows: Record<string, string>[] = [];
     const errors: string[] = [];
     lines.forEach((line, idx) => {
-        const cells = line.split(/[,\t]/).map((c) => c.trim());
+        const primaryDelimiter = /[,\t]/.test(line) ? /[,\t]/ : /\s+/;
+        const cells = line.split(primaryDelimiter).map((c) => c.trim()).filter(Boolean);
         if (cells.length < columns.length) {
             errors.push(`第 ${idx + 1} 行: 字段数不足，需要 ${columns.length} 列`);
             return;

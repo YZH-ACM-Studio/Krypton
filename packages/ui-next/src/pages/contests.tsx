@@ -850,6 +850,34 @@ export function ContestScoreboardPage() {
   const availableViews = Array.isArray(data.availableViews) ? data.availableViews : [];
   const extraViews = availableViews.filter(([id]: [string]) => !['html', 'csv', 'default', 'ghost'].includes(id));
 
+  // Admin-only 学号 / 姓名 columns. The backend only sends studentDict to
+  // system admins, so a non-empty dict is the signal to render the columns —
+  // they stay invisible to ordinary contestants. The cells are injected right
+  // after the user column, keeping header / body alignment intact.
+  const studentDict: Record<string, { studentId: string; realName: string }> = data.studentDict || {};
+  const userColIndex = header.findIndex((cell) => cell.type === 'user');
+  const showStudentCols = Object.keys(studentDict).length > 0 && userColIndex >= 0;
+  const displayHeader: ScoreboardCell[] = showStudentCols
+    ? [
+      ...header.slice(0, userColIndex + 1),
+      { type: 'studentId', value: '学号' },
+      { type: 'realName', value: '姓名' },
+      ...header.slice(userColIndex + 1),
+    ]
+    : header;
+  const displayBody: ScoreboardCell[][] = showStudentCols
+    ? body.map((row) => {
+      const uid = row[userColIndex]?.raw;
+      const info = studentDict[String(uid)] || null;
+      return [
+        ...row.slice(0, userColIndex + 1),
+        { type: 'studentId', value: info?.studentId, raw: uid },
+        { type: 'realName', value: info?.realName, raw: uid },
+        ...row.slice(userColIndex + 1),
+      ];
+    })
+    : body;
+
   function cellText(cell: ScoreboardCell) {
     return cell.value == null ? '—' : String(cell.value);
   }
@@ -905,6 +933,9 @@ export function ContestScoreboardPage() {
       </span>
     );
     if (!cell.raw) return content;
+    // In the Qt client workspace, submissions should only be browsed from the
+    // user's own IDE history. Scoreboard cells can point at other users' records.
+    if (inExamMode) return content;
     return (
       <a
         href={examUrls.record ? String(examUrls.record).replace('__RID__', String(cell.raw)) : replaceRouteTokens(bs.urls.recordDetail, { RID: String(cell.raw) })}
@@ -956,6 +987,12 @@ export function ContestScoreboardPage() {
           {name}
         </a>
       ) : <span className="font-medium">{name}</span>;
+    }
+    if (cell.type === 'studentId') {
+      return <span className="font-mono text-xs text-muted-foreground">{cellText(cell)}</span>;
+    }
+    if (cell.type === 'realName') {
+      return <span className="text-xs text-muted-foreground">{cellText(cell)}</span>;
     }
     if (cell.type === 'record') return renderRecordCell(cell);
     if (cell.type === 'records' && Array.isArray(cell.raw)) {
@@ -1036,7 +1073,7 @@ export function ContestScoreboardPage() {
             <Table className="min-w-max">
               <TableHeader>
                 <TableRow>
-                  {header.map((cell, index) => (
+                  {displayHeader.map((cell, index) => (
                     <TableHead
                       key={`${cell.type || 'col'}-${index}`}
                       className={cell.type === 'problem' || cell.type === 'record' || cell.type === 'records' ? 'min-w-20 text-center' : 'min-w-24'}
@@ -1047,9 +1084,9 @@ export function ContestScoreboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {body.map((row, rowIndex) => (
+                {displayBody.map((row, rowIndex) => (
                   <TableRow key={rowIndex}>
-                    {header.map((head, columnIndex) => {
+                    {displayHeader.map((head, columnIndex) => {
                       const cell = row[columnIndex] || {};
                       return (
                         <TableCell

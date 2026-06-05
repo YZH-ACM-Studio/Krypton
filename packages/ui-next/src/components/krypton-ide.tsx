@@ -690,6 +690,8 @@ export interface KryptonIDEProps {
   submitUrl?: string;
   /** Detail URL template for a submitted record, e.g. `/exam-mode/:tid/record/__RID__`. */
   recordUrlTemplate?: string;
+  /** JSON polling URL template for pretest records. Pretests are not contest records. */
+  pretestRecordUrlTemplate?: string;
   /** Whether pretest is available for this problem */
   canPretest?: boolean;
   /** Fallback submit handler when submitUrl is not provided */
@@ -741,6 +743,7 @@ export function KryptonIDE({
   defaultCode = '',
   submitUrl,
   recordUrlTemplate,
+  pretestRecordUrlTemplate,
   canPretest = false,
   onSubmit,
   className,
@@ -1052,6 +1055,13 @@ export function KryptonIDE({
     return fallback || `/record/${rid}`;
   }, [recordUrlTemplate]);
 
+  const resolvePretestRecordUrl = useCallback((rid: string, fallback?: string) => {
+    if (pretestRecordUrlTemplate) {
+      return pretestRecordUrlTemplate.replace(/__RID__/g, encodeURIComponent(rid));
+    }
+    return fallback || `/record/${rid}`;
+  }, [pretestRecordUrlTemplate]);
+
   /* ── Submit handler ── */
   const handleSubmit = useCallback(async () => {
     if (submitting || submitCooldown > 0) return;
@@ -1183,10 +1193,10 @@ export function KryptonIDE({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const data = await res.json();
-      const rid = data.rid;
+      const rid = data.rid ? String(data.rid) : '';
       if (!rid) throw new Error('No rid in response');
 
-      const recordUrl = data.url || `/record/${rid}`;
+      const recordUrl = resolvePretestRecordUrl(rid, data.url || `/record/${rid}`);
 
       // Multi-case runs need more headroom — judge time scales with N.
       const maxAttempts = tabs.length > 1 ? 90 : 60;
@@ -1199,6 +1209,11 @@ export function KryptonIDE({
           signal: abort.signal,
           credentials: 'same-origin',
         });
+        if (!rRes.ok) throw new Error(`Record HTTP ${rRes.status}`);
+        const contentType = rRes.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          throw new Error('评测记录接口返回了非 JSON，请检查记录轮询地址');
+        }
         const rData = await rRes.json();
         const rdoc = rData.rdoc || rData;
         const s: number = rdoc.status ?? 0;
@@ -1223,7 +1238,7 @@ export function KryptonIDE({
         return s;
       });
     }
-  }, [submitUrl, canPretest, pretestTabs, selectedLang, getCode]);
+  }, [submitUrl, canPretest, pretestTabs, selectedLang, getCode, resolvePretestRecordUrl]);
 
   /** Toolbar "运行全部自测" — run every non-empty pretest tab in one request. */
   const handleRunAll = useCallback(() => {

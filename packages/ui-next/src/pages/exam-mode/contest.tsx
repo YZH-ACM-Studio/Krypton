@@ -1,7 +1,8 @@
-import { Bell, HelpCircle, MessageSquare, Send } from 'lucide-react';
+import { Bell, HelpCircle, Lock, MessageSquare, Send } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { DateTime } from '@/components/ui/datetime';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { ExamContestShell } from '@/components/layout/exam-shell';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -162,7 +163,43 @@ function ExamAnnouncementsPage() {
   );
 }
 
-function renderExamContestContent(template: string) {
+const START_GATED_TEMPLATES = new Set([
+  'contest_problemlist.html',
+  'problem_detail.html',
+  'contest_print.html',
+]);
+
+function isContestBeforeStart(tdoc: R) {
+  const begin = new Date(tdoc?.beginAt).getTime();
+  return Number.isFinite(begin) && Date.now() < begin;
+}
+
+function BeforeStartGate({ tdoc }: { tdoc: R }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Lock className="size-4 text-blue-500" />
+          考试尚未开始
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm text-muted-foreground">
+        <p>题目、题面和打印将在开赛后开放。</p>
+        {tdoc?.beginAt && (
+          <p>
+            开始时间：<DateTime value={tdoc.beginAt} />
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function renderExamContestContent(template: string, data: R) {
+  if (START_GATED_TEMPLATES.has(template) && isContestBeforeStart(data.tdoc || {}) && !data.previewMode) {
+    return <BeforeStartGate tdoc={data.tdoc || {}} />;
+  }
+
   switch (template) {
     case 'contest_workspace.html':
       return <ContestWorkspaceContent />;
@@ -191,10 +228,11 @@ function renderExamContestContent(template: string) {
 
 export function ExamContestPage() {
   const bs = useBootstrap();
-  const template = String(bs.page.data?.examMode?.contentTemplate || 'contest_workspace.html');
+  const data = bs.page.data || {};
+  const template = String(data.examMode?.contentTemplate || 'contest_workspace.html');
   return (
     <ExamContestShell>
-      {renderExamContestContent(template)}
+      {renderExamContestContent(template, data)}
     </ExamContestShell>
   );
 }

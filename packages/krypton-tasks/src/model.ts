@@ -684,6 +684,7 @@ async function addManualStayEvent(
         createdAt: new Date(),
         createdBy: adminUid,
     });
+    await markUserAssignmentsStale(domainId, student.boundUserId);
     return { ok: true, userId: student.boundUserId };
 }
 
@@ -702,7 +703,9 @@ async function countStayEvents(domainId: string, userId: number): Promise<number
 }
 
 async function deleteStayEvent(domainId: string, id: ObjectId): Promise<void> {
+    const doc = await stayEventsColl.findOne({ domainId, _id: id });
     await stayEventsColl.deleteOne({ domainId, _id: id });
+    if (doc?.userId) await markUserAssignmentsStale(domainId, doc.userId);
 }
 
 // ============ exported model ============

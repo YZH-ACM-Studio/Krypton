@@ -236,12 +236,12 @@
     "src": "../../node_modules/.bun/katex@0.16.45/node_modules/katex/dist/fonts/KaTeX_Typewriter-Regular.woff2"
   },
   "index.html": {
-    "file": "assets/index-CJ5GY-uI.js",
+    "file": "assets/index-ou88KtcI.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "css": [
-      "assets/index-BdZEOoF9.css"
+      "assets/index-Cwt0NEjY.css"
     ],
     "assets": [
       "assets/KaTeX_AMS-Regular-BQhdFMY1.woff2",

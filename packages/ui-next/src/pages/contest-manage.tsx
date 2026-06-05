@@ -1033,6 +1033,11 @@ export function ContestManagePage() {
   const files: R[] = data.files || [];
   const privateFiles: R[] = data.privateFiles || [];
   const pdict: Record<string, R> = data.pdict || {};
+  // tdoc.pids is the canonical, de-duplicated, ordered list of problem docIds.
+  // pdict is keyed by BOTH docId and pid (ProblemModel.getList merges r + l),
+  // so iterating Object.entries(pdict) renders problems with a custom pid twice
+  // — drive the table off pids instead.
+  const pids: number[] = tdoc.pids || [];
   const tid = tdoc.docId || tdoc._id;
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
   const [selectedPublic, setSelectedPublic] = useState<Set<string>>(new Set());
@@ -1166,7 +1171,7 @@ export function ContestManagePage() {
             value={activeManageTab}
             onValueChange={setActiveManageTab}
             items={[
-              { value: 'score', label: '题目分值', count: Object.keys(pdict).length, icon: ListChecks },
+              { value: 'score', label: '题目分值', count: pids.length, icon: ListChecks },
               { value: 'public', label: '公开文件', count: files.length, icon: FolderOpen },
               { value: 'private', label: '私有材料', count: privateFiles.length, icon: ShieldCheck },
             ]}
@@ -1180,32 +1185,35 @@ export function ContestManagePage() {
                 <CardTitle className="text-base">题目分值</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
-                {Object.keys(pdict).length > 0 ? (
+                {pids.length > 0 ? (
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>题号</TableHead>
+                        <TableHead className="w-16 text-center">#</TableHead>
                         <TableHead>题目</TableHead>
                         <TableHead className="w-32 text-right">分值</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {Object.entries(pdict).map(([pid, p]) => (
-                        <TableRow key={pid}>
-                          <TableCell className="font-mono text-sm">{p.pid || pid}</TableCell>
-                          <TableCell className="text-sm">{p.title || '-'}</TableCell>
-                          <TableCell className="text-right">
-                            <form method="post" className="flex items-center justify-end gap-1">
-                              <input type="hidden" name="operation" value="set_score" />
-                              <input type="hidden" name="pid" value={pid} />
-                              <Input name="score" type="number" min="1" defaultValue={tdoc.score?.[pid] || 100} className="w-20 text-right" />
-                              <Button type="submit" size="icon" variant="ghost" className="size-7">
-                                <Save className="size-3" />
-                              </Button>
-                            </form>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {pids.map((pid, idx) => {
+                        const p = pdict[String(pid)] || {};
+                        return (
+                          <TableRow key={String(pid)}>
+                            <TableCell className="text-center font-mono font-semibold">{getAlphabeticId(idx)}</TableCell>
+                            <TableCell className="text-sm">{p.title || `P${pid}`}</TableCell>
+                            <TableCell className="text-right">
+                              <form method="post" className="flex items-center justify-end gap-1">
+                                <input type="hidden" name="operation" value="set_score" />
+                                <input type="hidden" name="pid" value={pid} />
+                                <Input name="score" type="number" min="1" defaultValue={tdoc.score?.[pid] || 100} className="w-20 text-right" />
+                                <Button type="submit" size="icon" variant="ghost" className="size-7">
+                                  <Save className="size-3" />
+                                </Button>
+                              </form>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 ) : (

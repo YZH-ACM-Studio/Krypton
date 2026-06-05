@@ -288,6 +288,9 @@ export function ExamContestShell({
   const section = (examMode.section || 'overview') as ExamSection;
   const title = examMode.title || tdoc.title || '考试';
   const urls = examMode.urls || {};
+  const beginAt = examMode.beginAt ? Date.parse(examMode.beginAt) : NaN;
+  const beforeStart = Number.isFinite(beginAt) && Date.now() < beginAt && !examMode.previewMode;
+  const lockedBeforeStart = new Set<ExamSection>(['problems', 'print']);
   const items = CLIENT_WORKSPACE_SIDEBAR.filter((item) => item.key !== 'print' || examMode.allowPrint);
   const subtitle = examMode.previewMode ? (
     <span className="text-amber-600 dark:text-amber-300">管理员预览模式</span>
@@ -321,13 +324,20 @@ export function ExamContestShell({
           <nav className="flex flex-col gap-1.5 p-2.5">
             {items.map((item) => {
               const active = section === item.key;
+              const disabled = beforeStart && lockedBeforeStart.has(item.key);
+              const href = disabled ? '#' : hrefFor(item.key);
               return (
                 <a
                   key={item.key}
-                  href={hrefFor(item.key)}
+                  href={href}
+                  aria-disabled={disabled}
+                  title={disabled ? '考试开始后开放' : item.label}
+                  onClick={disabled ? (event) => event.preventDefault() : undefined}
                   className={cn(
                     'flex aspect-square flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-medium transition-colors',
-                    active
+                    disabled
+                      ? 'cursor-not-allowed text-muted-foreground/45'
+                      : active
                       ? 'bg-primary/10 text-primary shadow-sm ring-1 ring-primary/30'
                       : 'text-muted-foreground hover:bg-accent hover:text-foreground',
                   )}

@@ -633,6 +633,7 @@ export function ProblemDetailPage() {
     ? (examUrls.overview || replaceRouteTokens(isHomework ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid }))
     : null;
   const recordDetailRoute = examUrls.record || bs.urls.recordDetail;
+  const pretestRecordRoute = buildUrlWithQuery(bs.urls.recordDetail, { tid });
   // Alphabetic id "A" / "B" / "C" from contest problem order
   const contestPids: any[] = Array.isArray(tdoc?.pids) ? tdoc!.pids : [];
   const contestIdx = inContest ? contestPids.findIndex((x) => String(x) === String(pdoc.docId)) : -1;
@@ -928,6 +929,7 @@ export function ProblemDetailPage() {
               onToggleRecords={handleToggleRecords}
               onOpenRecords={() => setShowIdeRecords(true)}
               recordUrlTemplate={recordDetailRoute}
+              pretestRecordUrlTemplate={pretestRecordRoute}
               showRecordsButton
               recordsVisible={showIdeRecords}
               recordsCount={ideRecords.length}

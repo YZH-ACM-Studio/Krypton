@@ -13,6 +13,8 @@ Restart=on-failure
 RestartSec=5
 User=srs
 Group=srs
+RuntimeDirectory=srs
+RuntimeDirectoryMode=0755
 
 # CPU isolation: leave 4 cores free for vigil-server / FastAPI / SQLite.
 # 400% = up to 4 cores total. Monitor with `systemd-cgtop -c srs.service`.
@@ -24,7 +26,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=full
 ProtectHome=yes
-ReadWritePaths=/data/vigil/recordings /var/log /var/run /opt/srs/objs/nginx/html
+ReadWritePaths=/data/vigil/recordings /var/log /run/srs /opt/srs/objs/nginx/html
 
 [Install]
 WantedBy=multi-user.target

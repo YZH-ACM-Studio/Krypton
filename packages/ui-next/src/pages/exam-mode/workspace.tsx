@@ -14,7 +14,6 @@
  */
 import { motion } from 'motion/react';
 import {
-  AlertTriangle,
   BookOpen,
   CheckCircle2,
   ChevronRight,
@@ -22,6 +21,7 @@ import {
   Code,
   Eye,
   ListChecks,
+  Lock,
   MessageCircle,
   Printer,
   Trophy,
@@ -94,6 +94,7 @@ export function ContestWorkspaceContent() {
   const inWindow = begin <= now && now < end;
   const notStarted = now < begin;
   const ended = now >= end;
+  const shouldHideProblems = notStarted && !previewMode;
 
   return (
     <div className="space-y-6">
@@ -157,7 +158,17 @@ export function ContestWorkspaceContent() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {(!tdoc.pids || tdoc.pids.length === 0) ? (
+            {shouldHideProblems ? (
+              <div className="flex items-start gap-3 rounded-lg border border-blue-500/25 bg-blue-500/5 p-4 text-sm">
+                <Lock className="mt-0.5 size-4 shrink-0 text-blue-500" />
+                <div className="space-y-1">
+                  <p className="font-medium text-blue-700 dark:text-blue-200">考试尚未开始</p>
+                  <p className="text-muted-foreground">
+                    题目将在 <DateTime value={tdoc.beginAt} /> 后开放，请先停留在概览等待开赛。
+                  </p>
+                </div>
+              </div>
+            ) : (!tdoc.pids || tdoc.pids.length === 0) ? (
               <p className="text-sm text-muted-foreground">该比赛没有题目</p>
             ) : (
               <ul className="divide-y">
@@ -198,7 +209,7 @@ export function ContestWorkspaceContent() {
               澄清
             </a>
           </Button>
-          {tdoc.allowPrint && (
+          {tdoc.allowPrint && !shouldHideProblems && (
             <Button asChild variant="outline" className="justify-start gap-2 h-auto py-3">
               <a href={urls.print || `/contest/${tid}/print`}>
                 <Printer className="size-4" />

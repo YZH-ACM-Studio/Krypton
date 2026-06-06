@@ -1548,6 +1548,20 @@ function CaseRow({ c, idx, fileSet, selected, onToggleSelect, onRemove, onUpdate
               placeholder="留空 = 默认"
             />
           </label>
+          <label className="col-span-2 space-y-0.5">
+            <span className="text-[10px] text-muted-foreground">测试点提示（PTA 风格，显示在评测详情该测试点旁）</span>
+            <textarea
+              value={c.hint || ''}
+              onChange={(e) => onUpdate({ hint: e.target.value || undefined })}
+              placeholder="留空 = 无提示"
+              rows={2}
+              className="w-full resize-y rounded border bg-transparent px-1.5 py-1 text-[11px] outline-none focus:border-primary"
+            />
+          </label>
+          <label className="col-span-2 flex items-center gap-1.5">
+            <Checkbox checked={!!c.hintPublic} onChange={() => onUpdate({ hintPublic: !c.hintPublic })} />
+            <span className="text-[10px] text-muted-foreground">对外公开（题库/训练显示；比赛进行中自动隐藏，赛后恢复）</span>
+          </label>
         </div>
       ) : null}
     </div>

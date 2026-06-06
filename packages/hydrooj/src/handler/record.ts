@@ -1,6 +1,9 @@
 import {
     omit, pick, throttle, uniqBy,
 } from 'lodash';
+import { normalizeSubtasks } from '@hydrooj/common';
+import { readYamlCases } from '@hydrooj/common/cases';
+import { load as loadYaml } from 'js-yaml';
 import { Filter, ObjectId } from 'mongodb';
 import {
     ContestNotFoundError, HackRejudgeFailedError,
@@ -225,6 +228,38 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             rdoc.files = {};
             rdoc.compilerTexts = [];
         } else if (download) return await this.download();
+        // PTA-style per-test-point hints. Visibility is enforced HERE (server
+        // side), never trusted to the client: a hint is exposed only when its
+        // author flag `hintPublic` is set AND the record is NOT being viewed
+        // inside a contest that is not yet done for THIS viewer (passing tsdoc
+        // covers per-attendee duration windows — revealed only after the
+        // contest ends). parseConfig() strips per-case fields, so re-load the
+        // raw config and run it through the SAME readYamlCases + normalizeSubtasks
+        // the judge uses, so the (subtaskId, caseId) keys line up EXACTLY with
+        // the record's testCases (positional flattening mis-maps under parallel
+        // judging + subtask/case id sorting). Keyed `${subtaskId}-${caseId}`.
+        // NOTE(MVP): does not yet block the "open the same problem from the bank
+        // while attending an ongoing contest that contains it" bypass — left as
+        // a follow-up; the practice problem is normally contest-hidden anyway.
+        const testHints: Record<string, { hint?: string; videoUrl?: string }> = {};
+        try {
+            const inActiveContest = this.tdoc ? !contest.isDone(this.tdoc, this.tsdoc) : false;
+            if (canViewDetail && !inActiveContest) {
+                const rawCfg = (await problem.get(rdoc.domainId, rdoc.pid, ['domainId', 'docId', 'config'], true))?.config;
+                const cfgObj: any = typeof rawCfg === 'string' ? loadYaml(rawCfg) : rawCfg;
+                if (cfgObj && typeof cfgObj === 'object') {
+                    const parsed: any = await readYamlCases(cfgObj);
+                    const normalized = normalizeSubtasks(parsed.subtasks || [], (s: string) => s, parsed.time, parsed.memory, true);
+                    for (const st of normalized) {
+                        for (const c of (st.cases || []) as any[]) {
+                            if (c?.hintPublic && (c.hint || c.videoUrl)) {
+                                testHints[`${st.id}-${c.id}`] = { hint: c.hint, videoUrl: c.videoUrl };
+                            }
+                        }
+                    }
+                }
+            }
+        } catch { /* malformed config → no hints, never break the page */ }
         this.response.template = 'record_detail.html';
         this.response.body = {
             udoc, rdoc: canViewDetail ? rdoc : pick(rdoc, ['_id', 'lang', 'code']), pdoc, tdoc: this.tdoc, rev, allRevs,
@@ -232,6 +267,9 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             // a human-readable label (e.g. "C++ 17"). RecordsMain already
             // ships this; mirror it here for the detail page.
             langs,
+            // Per-test-point hints to render next to each case (already
+            // visibility-filtered above). Keyed by 1-based case order.
+            testHints,
         };
     }
 

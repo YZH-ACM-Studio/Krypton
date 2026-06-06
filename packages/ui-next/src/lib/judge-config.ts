@@ -39,6 +39,12 @@ export interface JudgeCase {
   output: string;
   time?: string;
   memory?: string;
+  /** PTA-style hint shown next to this case in the record (judge) detail. */
+  hint?: string;
+  /** Author intent: may students see this hint (practice / after contest). */
+  hintPublic?: boolean;
+  /** Reserved slot for a future per-test-point explainer video link. */
+  videoUrl?: string;
 }
 
 export interface JudgeSubtask {
@@ -238,6 +244,9 @@ function normalizeCase(raw: any): JudgeCase | null {
   const c: JudgeCase = { input: String(input), output: String(output) };
   if (raw.time != null) c.time = String(raw.time);
   if (raw.memory != null) c.memory = String(raw.memory);
+  if (typeof raw.hint === 'string' && raw.hint) c.hint = raw.hint;
+  if (raw.hintPublic != null) c.hintPublic = !!raw.hintPublic;
+  if (typeof raw.videoUrl === 'string' && raw.videoUrl) c.videoUrl = raw.videoUrl;
   return c;
 }
 
@@ -339,6 +348,9 @@ function caseToObj(c: JudgeCase): Record<string, any> {
   const o: Record<string, any> = { input: c.input, output: c.output };
   if (c.time) o.time = c.time;
   if (c.memory) o.memory = c.memory;
+  if (c.hint) o.hint = c.hint;
+  if (c.hintPublic) o.hintPublic = true;
+  if (c.videoUrl) o.videoUrl = c.videoUrl;
   return o;
 }
 

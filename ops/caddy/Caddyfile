@@ -1,0 +1,75 @@
+:80 {
+    encode zstd gzip
+
+    # ── Krypton: HLS reverse proxy for vigil live + recordings ───────────
+    #
+    # SRS HLS master playlist (returned at /vigil-hls/.../screen.m3u8)
+    # contains an absolute media-playlist URL pointing at
+    #   /live-nodvr/{contestId}_{machineId}_screen.m3u8?hls_ctx=...
+    # which the player then fetches directly. We therefore proxy BOTH the
+    # vigil-hls/ entry path AND the bare /live-nodvr|/live-record|/recordings
+    # paths through to SRS — the bare ones are only ever requested by an
+    # already-loaded LL-HLS session.
+    #
+    # No forward_auth gate: vigil-hls path contains 24-char ObjectId +
+    # opaque machineId, unguessable; vigil itself is bound to the lab LAN.
+    # Same trust model as `/api/screenshots/{id}/thumbnail`.
+
+    @vigil_hls_entry path /vigil-hls/*
+    handle @vigil_hls_entry {
+        uri strip_prefix /vigil-hls
+        reverse_proxy 10.1.235.155:8080 {
+            header_up Host {upstream_hostport}
+            transport http {
+                response_header_timeout 30s
+                read_timeout 60s
+            }
+        }
+    }
+
+    @vigil_hls_inner path /live-nodvr/* /live-record/* /recordings/*
+    handle @vigil_hls_inner {
+        reverse_proxy 10.1.235.155:8080 {
+            header_up Host {upstream_hostport}
+            transport http {
+                response_header_timeout 30s
+                read_timeout 60s
+            }
+        }
+    }
+
+    # ── Krypton: HTTP-FLV low-latency live (mpegts.js, ~1-3s vs HLS ~10s) ──
+    # SRS exposes HTTP-FLV for every RTMP app on the same :8080. Single
+    # long-lived streaming response → disable buffering (flush_interval -1)
+    # and don't time out mid-stream. Same ObjectId-in-path trust model as
+    # vigil-hls above (no forward_auth).
+    @vigil_flv path /vigil-flv/*
+    handle @vigil_flv {
+        uri strip_prefix /vigil-flv
+        reverse_proxy 10.1.235.155:8080 {
+            header_up Host {upstream_hostport}
+            flush_interval -1
+            transport http {
+                response_header_timeout 30s
+                read_timeout 0
+                write_timeout 0
+            }
+        }
+    }
+
+    # ── Everything else → hydrooj ───────────────────────────────────────
+    handle {
+        reverse_proxy http://127.0.0.1:8888 {
+            header_up X-Forwarded-For {http.request.header.X-Forwarded-For}
+            header_up X-Real-IP {http.request.header.X-Forwarded-For}
+        }
+    }
+
+    log {
+        output file /data/access.log {
+            roll_size 1gb
+            roll_keep_for 72h
+        }
+        format json
+    }
+}

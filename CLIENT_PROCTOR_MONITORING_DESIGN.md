@@ -1728,7 +1728,7 @@ vhost live-nodvr {
 新建：
 - `ops/srs/krypton.conf` — SRS 配置（live-record / live-nodvr 双 application）
 - `ops/systemd/srs.service` — systemd unit
-- `ops/caddy/Caddyfile.vigil-hls.snippet` — Caddy 反代配置
+- `ops/caddy/Caddyfile` — Caddy 全量配置（与生产 `/root/.hydro/Caddyfile` 同步；vigil-hls + vigil-flv 反代到 SRS，ObjectId-trust，无 forward_auth）
 - `ecosystems/KryptonVigilSystem/Server/app/api/srs_callbacks.py` — 4 个 SRS callback endpoints
 - `ecosystems/KryptonVigilSystem/Client/streaming/rtmp_publisher.{h,cpp}` — ffmpeg 推流栈
 - `ecosystems/KryptonVigilSystem/Client/deploy/ffmpeg-build.md` — ffmpeg 内置说明

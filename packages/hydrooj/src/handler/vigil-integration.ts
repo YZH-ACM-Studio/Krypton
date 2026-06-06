@@ -957,7 +957,12 @@ class VigilCheckHlsAccessHandler extends Handler {
         const recMatch = path.match(
             /^\/vigil-hls\/recordings\/([0-9a-f]{24})_(.+?)_(screen|camera)(?:_\d{8}_\d{6})?\.mp4$/,
         );
-        if (!liveMatch && !recMatch) {
+        // Low-latency HTTP-FLV live path (mpegts.js), proxied by Caddy's
+        // /vigil-flv/*: /vigil-flv/{live-record|live-nodvr}/{contestId}_{machineId}_{type}.flv
+        const flvMatch = path.match(
+            /^\/vigil-flv\/(live-record|live-nodvr)\/([0-9a-f]{24})_(.+?)_(screen|camera)\.flv$/,
+        );
+        if (!liveMatch && !recMatch && !flvMatch) {
             this.response.status = 403;
             this.response.body = { error: 'invalid path' };
             return;

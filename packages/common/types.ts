@@ -65,6 +65,17 @@ export interface TestCaseConfig {
     time?: string;
     memory?: string;
     score?: number;
+    /**
+     * PTA-style per-test-point hint shown next to this case in the record
+     * (judge) detail. Authored in the problem config editor. Visibility is
+     * enforced server-side (RecordDetailHandler): shown only when `hintPublic`
+     * and NOT during an ongoing contest (revealed after the contest ends).
+     */
+    hint?: string;
+    /** Author intent: may students ever see this hint (practice/post-contest). */
+    hintPublic?: boolean;
+    /** Reserved slot for a future per-test-point explainer video link. */
+    videoUrl?: string;
 }
 
 export enum SubtaskType {

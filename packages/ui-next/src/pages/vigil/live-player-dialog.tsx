@@ -37,10 +37,11 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
+import mpegts from 'mpegts.js';
 import { Camera, Lock, MessageSquare, X, AlertTriangle } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { buildHlsStreamUrl, type VigilStudentCard } from '@/lib/vigil-api';
+import { buildFlvStreamUrl, buildHlsStreamUrl, type VigilStudentCard } from '@/lib/vigil-api';
 import { cn } from '@/lib/cn';
 
 const MAX_CONCURRENT_PLAYERS = 4;
@@ -190,8 +191,9 @@ function LiveVideoCanvas({
       ref={containerRef}
       className="relative flex-1 overflow-hidden bg-black"
     >
-      <HlsVideo
-        src={buildHlsStreamUrl(contestId, machineId, 'screen', recordEnabled)}
+      <LiveVideo
+        flvSrc={buildFlvStreamUrl(contestId, machineId, 'screen', recordEnabled)}
+        hlsSrc={buildHlsStreamUrl(contestId, machineId, 'screen', recordEnabled)}
         kind="screen"
         className="h-full w-full object-contain"
       />
@@ -214,8 +216,9 @@ function LiveVideoCanvas({
           {/* video pixels themselves don't initiate drag (pointer-events-none
               would break HLS rendering); pixels still receive mousedown via
               the parent — that's fine, just don't propagate from video */}
-          <HlsVideo
-            src={buildHlsStreamUrl(contestId, machineId, 'camera', recordEnabled)}
+          <LiveVideo
+            flvSrc={buildFlvStreamUrl(contestId, machineId, 'camera', recordEnabled)}
+            hlsSrc={buildHlsStreamUrl(contestId, machineId, 'camera', recordEnabled)}
             kind="camera"
             className="h-full w-full object-cover"
           />
@@ -225,26 +228,62 @@ function LiveVideoCanvas({
   );
 }
 
-function HlsVideo({ src, kind, className }: { src: string; kind: 'screen' | 'camera'; className?: string }) {
+/**
+ * Live monitor video. Primary path = HTTP-FLV via mpegts.js (~1-3s glass-to-
+ * glass), the low-latency win over the old HLS-only path (~10s). HLS (hls.js,
+ * or native on iOS Safari) is kept ONLY as a fallback for browsers without
+ * MSE-FLV or when the FLV stream errors. Screen track is muted (silent); the
+ * camera track is left unmuted so the newly-added microphone audio plays.
+ */
+function LiveVideo({ flvSrc, hlsSrc, kind, className }: {
+  flvSrc: string; hlsSrc: string; kind: 'screen' | 'camera'; className?: string;
+}) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const hlsRef = useRef<Hls | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Latch to HLS once FLV proves unusable so we don't ping-pong between them.
+  const [useHls, setUseHls] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return undefined;
 
-    let hls: Hls | null = null;
+    // ── Path A: HTTP-FLV via mpegts.js (low latency, primary) ──
+    if (!useHls && mpegts.getFeatureList().mseLivePlayback) {
+      const player = mpegts.createPlayer(
+        { type: 'flv', isLive: true, url: flvSrc, hasAudio: kind === 'camera', hasVideo: true },
+        // Disable the stash buffer + chase the live edge to keep latency low.
+        { enableStashBuffer: false, liveBufferLatencyChasing: true, lazyLoad: false },
+      );
+      let flvFailed = false;
+      const fallback = () => {
+        if (flvFailed) return;
+        flvFailed = true;
+        try { player.destroy(); } catch { /* ignore */ }
+        setUseHls(true); // re-run effect on the HLS branch
+      };
+      player.on(mpegts.Events.ERROR, fallback);
+      try {
+        player.attachMediaElement(video);
+        player.load();
+        video.play().catch(() => { /* autoplay block; user can click */ });
+      } catch { fallback(); }
+      return () => {
+        try { player.pause(); } catch { /* ignore */ }
+        try { player.unload(); } catch { /* ignore */ }
+        try { player.detachMediaElement(); } catch { /* ignore */ }
+        try { player.destroy(); } catch { /* ignore */ }
+        if (video) {
+          try { video.pause(); } catch { /* ignore */ }
+          video.removeAttribute('src');
+          video.load();
+        }
+      };
+    }
 
-    // Prefer HLS.js when MSE is available (Chromium, Firefox, modern
-    // Edge). Native HLS via `canPlayType('application/vnd.apple.mpegurl')`
-    // is a fallback for iOS Safari only — some Chromium-based browsers
-    // also report "maybe" for the MIME but don't actually decode HLS
-    // streams, leaving `<video src=.../>.readyState` stuck at 0 forever
-    // with no error. Checking `Hls.isSupported()` first dodges that.
+    // ── Path B: HLS fallback (MSE-FLV unavailable, or FLV errored) ──
+    let hls: Hls | null = null;
     if (Hls.isSupported()) {
       hls = new Hls({
-        // Tuned for low-latency monitoring; defaults work but be explicit.
         lowLatencyMode: true,
         liveSyncDuration: 2,
         liveMaxLatencyDuration: 6,
@@ -252,11 +291,8 @@ function HlsVideo({ src, kind, className }: { src: string; kind: 'screen' | 'cam
         manifestLoadingTimeOut: 8_000,
         manifestLoadingMaxRetry: 3,
       });
-      hlsRef.current = hls;
       hls.attachMedia(video);
-      hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-        hls!.loadSource(src);
-      });
+      hls.on(Hls.Events.MEDIA_ATTACHED, () => { hls!.loadSource(hlsSrc); });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
         switch (data.type) {
@@ -276,26 +312,21 @@ function HlsVideo({ src, kind, className }: { src: string; kind: 'screen' | 'cam
       });
       video.play().catch(() => { /* autoplay block */ });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // iOS Safari native HLS fallback (MSE unavailable there).
-      video.src = src;
+      video.src = hlsSrc; // iOS Safari native HLS
       video.play().catch(() => { /* autoplay block; user can tap */ });
     } else {
-      setError('当前浏览器不支持 HLS 播放');
+      setError('当前浏览器不支持直播播放');
     }
 
     return () => {
-      // Critical cleanup — see file header.
-      if (hls) {
-        try { hls.destroy(); } catch { /* ignore */ }
-      }
+      if (hls) { try { hls.destroy(); } catch { /* ignore */ } }
       if (video) {
         try { video.pause(); } catch { /* ignore */ }
         video.removeAttribute('src');
         video.load();
       }
-      hlsRef.current = null;
     };
-  }, [src]);
+  }, [flvSrc, hlsSrc, useHls, kind]);
 
   return (
     <div className={cn('relative', className)}>

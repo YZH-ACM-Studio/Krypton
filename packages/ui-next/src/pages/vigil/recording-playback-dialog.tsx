@@ -11,11 +11,10 @@
  * route (no HLS — these are single-file dvr segments, mp4 muxing is done by
  * SRS at segment close).
  */
-import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Film, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle, Film, Pause, Play, X } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { SimpleSelect } from '@/components/ui/select';
 import {
   buildRecordingUrl, listContestRecordings,
   type VigilRecording, type VigilStudentCard, VigilOfflineError,
@@ -37,7 +36,6 @@ export function RecordingPlaybackDialog({
   const [items, setItems] = useState<VigilRecording[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [activeId, setActiveId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -68,18 +66,7 @@ export function RecordingPlaybackDialog({
     .filter((r) => r.machineId === student.machineId && r.streamType === streamType)
     .sort((a, b) => new Date(a.startTs).getTime() - new Date(b.startTs).getTime()), [items, student.machineId, streamType]);
 
-  // Pick the first chunk by default when items / filter change.
-  useEffect(() => {
-    if (!candidates.length) {
-      setActiveId(null);
-      return;
-    }
-    if (!candidates.find((c) => c.recordingId === activeId)) {
-      setActiveId(candidates[0].recordingId);
-    }
-  }, [candidates, activeId]);
-
-  const active = candidates.find((c) => c.recordingId === activeId) || null;
+  const totalBytes = useMemo(() => candidates.reduce((s, c) => s + (c.size || 0), 0), [candidates]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -126,25 +113,9 @@ export function RecordingPlaybackDialog({
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-muted-foreground">分片</label>
-            <SimpleSelect
-              size="sm"
-              className="w-72"
-              value={activeId || ''}
-              onValueChange={(v) => setActiveId(v)}
-              placeholder={candidates.length ? '选择分片' : '无可用分片'}
-              disabled={!candidates.length}
-              options={candidates.map((c) => ({
-                value: c.recordingId,
-                label: formatChunkLabel(c),
-              }))}
-            />
-          </div>
-
-          {active && (
+          {candidates.length > 0 && (
             <p className="ml-auto text-[11px] text-muted-foreground">
-              {formatBytes(active.size)} · {formatDuration(active.durationMs)}
+              {candidates.length} 段 · 连续时间轴 · {formatBytes(totalBytes)}
             </p>
           )}
         </div>
@@ -164,19 +135,167 @@ export function RecordingPlaybackDialog({
               <Film className="size-8" />
               <p>此学生在当前比赛暂无 {streamType === 'screen' ? '屏幕' : '摄像头'} 录屏。</p>
             </div>
-          ) : active ? (
-            <video
-              key={active.recordingId /* force reset between chunks */}
-              src={buildRecordingUrl(active.filename)}
-              controls
-              autoPlay={false}
-              playsInline
-              className="h-full w-full object-contain"
-            />
-          ) : null}
+          ) : (
+            <UnifiedTimelinePlayer chunks={candidates} />
+          )}
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Probe an mp4's duration (seconds) via a throwaway metadata-only load. */
+function probeDuration(url: string): Promise<number> {
+  return new Promise((resolve) => {
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.muted = true;
+    const done = (val: number) => {
+      v.removeAttribute('src');
+      try { v.load(); } catch { /* ignore */ }
+      resolve(Number.isFinite(val) && val > 0 ? val : 0);
+    };
+    v.onloadedmetadata = () => done(v.duration);
+    v.onerror = () => done(0);
+    v.src = url;
+  });
+}
+
+/**
+ * Cross-chunk unified-timeline player (issue 2.3 "进阶"): presents all 30-min
+ * DVR chunks of a stream as ONE continuous video with a single seek bar.
+ * Scrubbing maps the global position → (chunk, in-chunk offset), swaps the
+ * <video> src when the chunk changes, and auto-advances on chunk end. Durations
+ * come from the API when present, else probed via <video> metadata (SRS leaves
+ * durationMs = 0). The single <video> + faststart mp4 (now produced by the AV1
+ * transcode) gives a working, seekable scrubber.
+ */
+function UnifiedTimelinePlayer({ chunks }: { chunks: VigilRecording[] }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const pendingSeekRef = useRef<number | null>(null);
+  const [durations, setDurations] = useState<Record<string, number>>({});
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [globalTime, setGlobalTime] = useState(0);
+  const [playing, setPlaying] = useState(false);
+
+  // Probe chunk durations (metadata only; cheap). Prefer the API value.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      for (const c of chunks) {
+        if (cancelled) return;
+        const seconds = c.durationMs > 0
+          ? c.durationMs / 1000
+          // eslint-disable-next-line no-await-in-loop
+          : await probeDuration(buildRecordingUrl(c.filename));
+        if (cancelled) return;
+        setDurations((d) => (d[c.recordingId] != null ? d : { ...d, [c.recordingId]: seconds }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [chunks]);
+
+  const layout = useMemo(() => {
+    let acc = 0;
+    const segs = chunks.map((c) => {
+      const dur = durations[c.recordingId] ?? 0;
+      const seg = { chunk: c, start: acc, dur };
+      acc += dur;
+      return seg;
+    });
+    return { segs, total: acc };
+  }, [chunks, durations]);
+
+  // Reset to the start when the chunk set (stream type) changes.
+  useEffect(() => { setActiveIdx(0); setGlobalTime(0); setPlaying(false); }, [chunks]);
+
+  const seekToGlobal = useCallback((t: number) => {
+    const total = layout.total || 0;
+    const clamped = Math.max(0, Math.min(t, total));
+    let idx = layout.segs.findIndex((s) => clamped < s.start + s.dur);
+    if (idx < 0) idx = Math.max(0, layout.segs.length - 1);
+    const offset = clamped - (layout.segs[idx]?.start ?? 0);
+    setGlobalTime(clamped);
+    if (idx !== activeIdx) {
+      pendingSeekRef.current = offset;
+      setActiveIdx(idx);
+    } else if (videoRef.current) {
+      try { videoRef.current.currentTime = offset; } catch { /* not ready */ }
+    }
+  }, [layout, activeIdx]);
+
+  const togglePlay = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) { v.play().catch(() => {}); setPlaying(true); } else { v.pause(); setPlaying(false); }
+  }, []);
+
+  const activeChunk = chunks[activeIdx];
+  const activeStart = layout.segs[activeIdx]?.start ?? 0;
+  if (!chunks.length) return null;
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="relative min-h-0 flex-1">
+        <video
+          ref={videoRef}
+          key={activeChunk?.recordingId}
+          src={activeChunk ? buildRecordingUrl(activeChunk.filename) : undefined}
+          playsInline
+          className="h-full w-full object-contain"
+          onLoadedMetadata={() => {
+            const v = videoRef.current;
+            if (!v) return;
+            if (pendingSeekRef.current != null) {
+              try { v.currentTime = pendingSeekRef.current; } catch { /* ignore */ }
+              pendingSeekRef.current = null;
+            }
+            if (playing) v.play().catch(() => {});
+          }}
+          onTimeUpdate={() => {
+            const v = videoRef.current;
+            if (v) setGlobalTime(activeStart + v.currentTime);
+          }}
+          onEnded={() => {
+            if (activeIdx < chunks.length - 1) {
+              pendingSeekRef.current = 0;
+              setActiveIdx(activeIdx + 1);
+            } else {
+              setPlaying(false);
+            }
+          }}
+          onClick={togglePlay}
+        />
+      </div>
+      <div className="flex items-center gap-3 border-t border-white/10 bg-black/60 px-4 py-2">
+        <button type="button" onClick={togglePlay} className="text-white/90 hover:text-white" title={playing ? '暂停' : '播放'}>
+          {playing ? <Pause className="size-5" /> : <Play className="size-5" />}
+        </button>
+        <span className="w-16 shrink-0 text-right font-mono text-[11px] text-white/80">{formatClock(globalTime)}</span>
+        <div
+          className="relative h-1.5 flex-1 cursor-pointer rounded-full bg-white/20"
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const ratio = (e.clientX - rect.left) / rect.width;
+            seekToGlobal(ratio * (layout.total || 0));
+          }}
+          title="点击跳转（跨分片连续时间轴）"
+        >
+          {layout.segs.slice(1).map((s) => (
+            <span
+              key={s.chunk.recordingId}
+              className="absolute top-1/2 h-2 w-px -translate-y-1/2 bg-white/40"
+              style={{ left: `${layout.total ? (s.start / layout.total) * 100 : 0}%` }}
+            />
+          ))}
+          <span
+            className="absolute left-0 top-0 h-full rounded-full bg-primary"
+            style={{ width: `${layout.total ? Math.min(100, (globalTime / layout.total) * 100) : 0}%` }}
+          />
+        </div>
+        <span className="w-16 shrink-0 font-mono text-[11px] text-white/60">{formatClock(layout.total)}</span>
+      </div>
+    </div>
   );
 }
 
@@ -186,17 +305,12 @@ function pad2(n: number): string {
   return n.toString().padStart(2, '0');
 }
 
-function formatChunkLabel(c: VigilRecording): string {
-  const start = new Date(c.startTs);
-  const end = new Date(c.endTs);
-  return `${pad2(start.getHours())}:${pad2(start.getMinutes())} - ${pad2(end.getHours())}:${pad2(end.getMinutes())}`;
-}
-
-function formatDuration(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  return `${m}分${pad2(s)}秒`;
+function formatClock(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  return h > 0 ? `${h}:${pad2(m)}:${pad2(ss)}` : `${pad2(m)}:${pad2(ss)}`;
 }
 
 function formatBytes(b: number): string {

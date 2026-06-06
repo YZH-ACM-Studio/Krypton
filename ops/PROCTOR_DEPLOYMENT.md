@@ -68,16 +68,23 @@ ssh oj-vigil 'sudo tail -100 /var/log/krypton-vigil.log'
 - `start_heartbeat_watcher()` 启动
 - 没有 SQLAlchemy ALTER 失败
 
-## 3. Caddy reverse-proxy 加 vigil-hls 段
+## 3. Caddy reverse-proxy（vigil-hls + vigil-flv）
+
+`ops/caddy/Caddyfile` 是与生产 `/root/.hydro/Caddyfile` 同步的**全量**配置（vigil-hls
+HLS 反代 + vigil-flv 低延迟 HTTP-FLV 反代到 SRS:8080，ObjectId-trust，无 forward_auth）。
+同步整文件 → `caddy validate` → install → 热 reload：
 
 ```bash
+cat ops/caddy/Caddyfile | ssh oj 'cat > /tmp/Caddyfile.new'
 ssh oj 'export SP=zhangzhi93
   echo $SP | sudo -S -p "" cp /root/.hydro/Caddyfile /data/backup/Caddyfile.$(date +%s).bak
-  # 手工编辑 /root/.hydro/Caddyfile，把 ops/caddy/Caddyfile.vigil-hls.snippet 内容
-  # 追加到现有 oj-domain 块的最后
-  echo $SP | sudo -S -p "" /root/.nix-profile/bin/caddy reload --config /root/.hydro/Caddyfile
+  echo $SP | sudo -S -p "" /root/.nix-profile/bin/caddy validate --config /tmp/Caddyfile.new --adapter caddyfile \
+    && echo $SP | sudo -S -p "" install -m 644 /tmp/Caddyfile.new /root/.hydro/Caddyfile \
+    && echo $SP | sudo -S -p "" /root/.nix-profile/bin/caddy reload --config /root/.hydro/Caddyfile --adapter caddyfile
 '
 ```
+
+> 同步生产→仓库（反向）：`ssh oj 'sudo cat /root/.hydro/Caddyfile' > ops/caddy/Caddyfile`
 
 ## 4. OJ 代码增量更新
 

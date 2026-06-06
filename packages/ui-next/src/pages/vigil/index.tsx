@@ -615,6 +615,17 @@ export function AdminVigilExamDetailPage() {
     return () => { cancelled = true; };
   }, [examId, page, queryDebounced, statusFilter, sortKey, reloadVer]);
 
+  // Safety-net: periodically re-pull the full card-wall so a *missed* WS
+  // status-recovery broadcast (e.g. dropped during a dashboard WS reconnect)
+  // self-corrects instead of leaving a card stuck on a stale online/offline
+  // state. WS deltas keep it fresh in real time; this only backstops gaps.
+  // No flicker: the spinner only shows on first load (`!studentResp`), so a
+  // background reload swaps data in place.
+  useEffect(() => {
+    const id = setInterval(() => setReloadVer((v) => v + 1), 30000);
+    return () => clearInterval(id);
+  }, []);
+
   const counters = studentResp?.counters;
   const totalPages = studentResp ? Math.max(1, Math.ceil(studentResp.total / PAGE_SIZE)) : 1;
   const students = studentResp?.items || [];
@@ -844,7 +855,7 @@ export function AdminVigilExamDetailPage() {
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
         <CompactStat
           label="已连接"
-          value={(counters?.online ?? 0) + (counters?.anomaly ?? 0) + (counters?.locked ?? 0)}
+          value={(counters?.online ?? 0) + (counters?.locked ?? 0)}
           color="emerald"
         />
         <CompactStat label="异常" value={counters?.anomaly ?? 0} color="amber" highlight={(counters?.anomaly ?? 0) > 0} />

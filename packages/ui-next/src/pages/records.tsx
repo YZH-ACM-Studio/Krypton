@@ -461,6 +461,10 @@ export function RecordDetailPage() {
   const locale = bs.locale;
   const user = getUser(bs.udict, rdoc.uid);
   const cases: R[] = rdoc.testCases || rdoc.cases || [];
+  // PTA-style per-test-point hints, already visibility-filtered server-side
+  // (RecordDetailHandler). Keyed by case identity `${subtaskId}-${caseId}` (the
+  // same numbering the judge assigns), looked up per row below.
+  const testHints: Record<string, { hint?: string; videoUrl?: string }> = data.testHints || {};
   const compilerTexts = collectTexts(rdoc.compilerTexts);
   const judgeTexts = collectTexts(rdoc.judgeTexts);
   const subtasks = normalizeSubtasks(rdoc.subtasks);
@@ -624,6 +628,25 @@ export function RecordDetailPage() {
                             {message}
                           </p>
                         ) : null}
+                        {(() => {
+                          // Key by the case's IDENTITY (subtaskId-caseId), which
+                          // the server emits via the same normalizeSubtasks the
+                          // judge uses — robust against parallel-judge completion
+                          // order. Flat (subtask-less) problems are judged as
+                          // subtask 1, so fall back to that.
+                          const h = testHints[subtaskId != null ? `${subtaskId}-${caseId}` : `1-${caseId}`];
+                          if (!h?.hint && !h?.videoUrl) return null;
+                          return (
+                            <div className="mt-1.5 max-w-xl rounded border border-amber-200 bg-amber-50/60 px-2 py-1 text-xs dark:border-amber-900/50 dark:bg-amber-950/20">
+                              {h.hint ? (
+                                <p className="whitespace-pre-wrap break-words text-amber-800 dark:text-amber-200">💡 {h.hint}</p>
+                              ) : null}
+                              {h.videoUrl ? (
+                                <a href={h.videoUrl} target="_blank" rel="noreferrer" className="mt-0.5 inline-block text-primary hover:underline">▶ 讲解视频</a>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">{c.score ?? '—'}</TableCell>
                       <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatTime(c.time, c.status)}</TableCell>

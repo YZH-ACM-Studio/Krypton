@@ -513,6 +513,22 @@ export function buildHlsStreamUrl(
   return `/vigil-hls/${app}/${encodeURIComponent(contestId)}_${encodeURIComponent(machineId)}_${streamType}.m3u8`;
 }
 
+/**
+ * Low-latency HTTP-FLV stream URL (mpegts.js), the primary live path (~1-3s vs
+ * HLS ~10s). Goes via Caddy's `/vigil-flv/*` reverse proxy → SRS :8080
+ * `{app}/{stream}.flv` (SRS exposes HTTP-FLV for any RTMP app at no extra
+ * cost). Same forward_auth gate as the HLS route.
+ */
+export function buildFlvStreamUrl(
+  contestId: string,
+  machineId: string,
+  streamType: 'screen' | 'camera',
+  recordEnabled: boolean,
+): string {
+  const app = recordEnabled ? 'live-record' : 'live-nodvr';
+  return `/vigil-flv/${app}/${encodeURIComponent(contestId)}_${encodeURIComponent(machineId)}_${streamType}.flv`;
+}
+
 /** Build the URL that the recording playback player should load. */
 export function buildRecordingUrl(filename: string): string {
   return `/vigil-hls/recordings/${filename}`;

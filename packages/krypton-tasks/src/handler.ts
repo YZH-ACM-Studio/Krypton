@@ -1014,6 +1014,20 @@ function clampScore(value: number, max: number): number {
     return value;
 }
 
+/**
+ * Resolve a human-entered studentId to its userbind student doc. Scores are
+ * keyed by `studentDocId` (= student._id) since 2026-06-07, so this is the
+ * single resolution point for both single-entry and bulk import. Uses an EXACT
+ * match (no fuzzy regex / limit). Returns null when the studentId resolves to
+ * other than exactly one student — i.e. not found (0) OR ambiguous across
+ * schools (>1) — so a score is never silently attributed to the wrong student.
+ * Binding to an OJ account is NOT required — unbound students can hold scores.
+ */
+async function findStudentDoc(domainId: string, studentId: string) {
+    const matches = await userBindModel.findStudentsByStudentId(domainId, studentId);
+    return matches.length === 1 ? matches[0] : null;
+}
+
 function parseScoreImport(
     text: string,
     columns: string[],
@@ -1052,44 +1066,59 @@ class AdminScoresHandler extends Handler {
             const filter: any = { domainId };
             if (level && PAT_LEVELS_OK.includes(level as PatLevel)) filter.level = level;
             if (year) filter.year = year;
-            scores = await patScoreColl.find(filter).sort({ year: -1, season: 1, userId: 1 }).limit(500).toArray();
+            scores = await patScoreColl.find(filter).sort({ year: -1, season: 1, studentDocId: 1 }).limit(500).toArray();
         } else if (tab === 'gplt') {
             const filter: any = { domainId };
             if (level && GPLT_LEVELS_OK.includes(level as GpltLevel)) filter.level = level;
             if (year) filter.year = year;
-            scores = await gpltScoreColl.find(filter).sort({ year: -1, userId: 1 }).limit(500).toArray();
+            scores = await gpltScoreColl.find(filter).sort({ year: -1, studentDocId: 1 }).limit(500).toArray();
         } else if (tab === 'csp') {
             const filter: any = { domainId };
-            scores = await cspScoreColl.find(filter).sort({ round: -1, userId: 1 }).limit(500).toArray();
+            scores = await cspScoreColl.find(filter).sort({ round: -1, studentDocId: 1 }).limit(500).toArray();
         } else if (tab === 'stay') {
             stayEvents = await taskModel.listStayEvents(domainId, year ? { year } : {});
             schools = await userBindModel.listSchools(domainId);
         }
-        const uids = Array.from(new Set([
-            ...scores.map((s) => s.userId),
-            ...stayEvents.map((e) => e.userId),
-        ]));
+        // Scores are keyed by studentDocId — join student records for display
+        // (学号/姓名/学校) plus bound OJ users for uname. Stay events remain
+        // userId-keyed (not re-keyed), so collect their uids separately.
+        const studentDocIds = Array.from(new Set(scores.map((s) => String(s.studentDocId))))
+            .map((s) => new ObjectId(s));
+        const studentDict: Record<string, any> = {};
+        const boundUids: number[] = [];
+        await Promise.all(studentDocIds.map(async (sid) => {
+            const st = await userBindModel.getStudent(domainId, sid);
+            if (!st) return;
+            studentDict[String(sid)] = {
+                studentId: st.studentId, realName: st.realName,
+                schoolId: st.schoolId, boundUserId: st.boundUserId,
+            };
+            if (st.boundUserId) boundUids.push(st.boundUserId);
+        }));
+        const uids = Array.from(new Set([...boundUids, ...stayEvents.map((e) => e.userId)]));
         const udict = await UserModel.getList(domainId, uids);
         this.response.template = 'admin_tasks_scores.html';
-        this.response.body = { tab, scores, stayEvents, schools, udict, settings, level, year };
+        this.response.body = { tab, scores, stayEvents, schools, udict, studentDict, settings, level, year };
     }
 
     // PAT single entry
-    @param('userId', Types.Int)
+    @param('studentId', Types.String)
     @param('level', Types.String)
     @param('year', Types.Int)
     @param('season', Types.String)
     @param('score', Types.Float)
     async postPat(
         { domainId }: { domainId: string },
-        userId: number, level: string, year: number, season: string, score: number,
+        studentId: string, level: string, year: number, season: string, score: number,
     ) {
         if (!PAT_LEVELS_OK.includes(level as PatLevel)) throw new ValidationError('level');
         if (!PAT_SEASONS_OK.includes(season as PatSeason)) throw new ValidationError('season');
+        const student = await findStudentDoc(domainId, studentId);
+        if (!student) throw new ValidationError('studentId', null, `学号 ${studentId}: 未找到学生档案`);
         const settings = await taskModel.getDomainSettings(domainId);
         const safe = clampScore(score, settings.maxPatScore);
         await patScoreColl.updateOne(
-            { domainId, userId, level: level as PatLevel, year, season: season as PatSeason },
+            { domainId, studentDocId: student._id, level: level as PatLevel, year, season: season as PatSeason },
             {
                 $set: { score: safe, updatedAt: new Date(), updatedBy: this.user._id },
                 $setOnInsert: { _id: new ObjectId(), createdAt: new Date(), createdBy: this.user._id },
@@ -1105,21 +1134,21 @@ class AdminScoresHandler extends Handler {
         this.response.body = { success: true };
     }
 
+    // PAT bulk import — format per line: 学号,级别(advanced|basic),年,季节,分
     @param('text', Types.Content)
-    @param('level', Types.String)
-    async postPatImport({ domainId }: { domainId: string }, text: string, level: string) {
-        if (!PAT_LEVELS_OK.includes(level as PatLevel)) throw new ValidationError('level');
+    async postPatImport({ domainId }: { domainId: string }, text: string) {
         const settings = await taskModel.getDomainSettings(domainId);
-        const { rows, errors } = parseScoreImport(text, ['studentId', 'year', 'season', 'score']);
+        const { rows, errors } = parseScoreImport(text, ['studentId', 'level', 'year', 'season', 'score']);
         let imported = 0;
         const rowErrors: string[] = [...errors];
         for (const r of rows) {
-            const { docs: matched } = await userBindModel.listStudents(domainId, {
-                query: r.studentId, boundOnly: true, limit: 5,
-            });
-            const student = matched.find((s) => s.studentId === r.studentId);
-            if (!student?.boundUserId) {
-                rowErrors.push(`学号 ${r.studentId}: 未绑定用户`);
+            const student = await findStudentDoc(domainId, r.studentId);
+            if (!student) {
+                rowErrors.push(`学号 ${r.studentId}: 未找到学生档案`);
+                continue;
+            }
+            if (!PAT_LEVELS_OK.includes(r.level as PatLevel)) {
+                rowErrors.push(`学号 ${r.studentId}: 等级无效 (advanced/basic)`);
                 continue;
             }
             const score = parseFloat(r.score);
@@ -1137,7 +1166,7 @@ class AdminScoresHandler extends Handler {
                 continue;
             }
             await patScoreColl.updateOne(
-                { domainId, userId: student.boundUserId, level: level as PatLevel, year, season: r.season as PatSeason },
+                { domainId, studentDocId: student._id, level: r.level as PatLevel, year, season: r.season as PatSeason },
                 {
                     $set: { score, updatedAt: new Date(), updatedBy: this.user._id },
                     $setOnInsert: { _id: new ObjectId(), createdAt: new Date(), createdBy: this.user._id },
@@ -1149,21 +1178,23 @@ class AdminScoresHandler extends Handler {
         this.response.body = { success: true, imported, errors: rowErrors };
     }
 
-    // GPLT
-    @param('userId', Types.Int)
+    // GPLT single entry
+    @param('studentId', Types.String)
     @param('level', Types.String)
     @param('year', Types.Int)
     @param('score', Types.Float)
     @param('rank', Types.Int, true)
     async postGplt(
         { domainId }: { domainId: string },
-        userId: number, level: string, year: number, score: number, rank: number,
+        studentId: string, level: string, year: number, score: number, rank: number,
     ) {
         if (!GPLT_LEVELS_OK.includes(level as GpltLevel)) throw new ValidationError('level');
+        const student = await findStudentDoc(domainId, studentId);
+        if (!student) throw new ValidationError('studentId', null, `学号 ${studentId}: 未找到学生档案`);
         const settings = await taskModel.getDomainSettings(domainId);
         const safe = clampScore(score, settings.maxGpltScore);
         await gpltScoreColl.updateOne(
-            { domainId, userId, level: level as GpltLevel, year },
+            { domainId, studentDocId: student._id, level: level as GpltLevel, year },
             {
                 $set: { score: safe, rank: rank || null, updatedAt: new Date(), updatedBy: this.user._id },
                 $setOnInsert: { _id: new ObjectId(), createdAt: new Date(), createdBy: this.user._id },
@@ -1179,18 +1210,53 @@ class AdminScoresHandler extends Handler {
         this.response.body = { success: true };
     }
 
-    // CSP
-    @param('userId', Types.Int)
+    // GPLT bulk import — format per line: 学号,级别(school|national),年,分
+    @param('text', Types.Content)
+    async postGpltImport({ domainId }: { domainId: string }, text: string) {
+        const settings = await taskModel.getDomainSettings(domainId);
+        const { rows, errors } = parseScoreImport(text, ['studentId', 'level', 'year', 'score']);
+        let imported = 0;
+        const rowErrors: string[] = [...errors];
+        for (const r of rows) {
+            const student = await findStudentDoc(domainId, r.studentId);
+            if (!student) { rowErrors.push(`学号 ${r.studentId}: 未找到学生档案`); continue; }
+            if (!GPLT_LEVELS_OK.includes(r.level as GpltLevel)) { rowErrors.push(`学号 ${r.studentId}: 级别无效 (school/national)`); continue; }
+            const year = parseInt(r.year, 10);
+            if (!year) { rowErrors.push(`学号 ${r.studentId}: 年份无效`); continue; }
+            const score = parseFloat(r.score);
+            if (Number.isNaN(score) || score < 0 || score > settings.maxGpltScore) {
+                rowErrors.push(`学号 ${r.studentId}: 分数无效 (0-${settings.maxGpltScore})`);
+                continue;
+            }
+            await gpltScoreColl.updateOne(
+                { domainId, studentDocId: student._id, level: r.level as GpltLevel, year },
+                {
+                    // rank is set only via single-entry; bulk import preserves any existing rank
+                    $set: { score, updatedAt: new Date(), updatedBy: this.user._id },
+                    $setOnInsert: { _id: new ObjectId(), createdAt: new Date(), createdBy: this.user._id, rank: null },
+                },
+                { upsert: true },
+            );
+            imported++;
+        }
+        this.response.body = { success: true, imported, errors: rowErrors };
+    }
+
+    // CSP single entry
+    @param('studentId', Types.String)
     @param('round', Types.Int)
     @param('score', Types.Float)
     async postCsp(
         { domainId }: { domainId: string },
-        userId: number, round: number, score: number,
+        studentId: string, round: number, score: number,
     ) {
+        if (!round || round < 1) throw new ValidationError('round', null, '认证次数无效');
+        const student = await findStudentDoc(domainId, studentId);
+        if (!student) throw new ValidationError('studentId', null, `学号 ${studentId}: 未找到学生档案`);
         const settings = await taskModel.getDomainSettings(domainId);
         const safe = clampScore(score, settings.maxCspScore);
         await cspScoreColl.updateOne(
-            { domainId, userId, round },
+            { domainId, studentDocId: student._id, round },
             {
                 $set: { score: safe, updatedAt: new Date(), updatedBy: this.user._id },
                 $setOnInsert: { _id: new ObjectId(), createdAt: new Date(), createdBy: this.user._id },
@@ -1204,6 +1270,36 @@ class AdminScoresHandler extends Handler {
     async postCspDelete({ domainId }: { domainId: string }, id: ObjectId) {
         await cspScoreColl.deleteOne({ domainId, _id: id });
         this.response.body = { success: true };
+    }
+
+    // CSP bulk import — format per line: 学号,轮次,分
+    @param('text', Types.Content)
+    async postCspImport({ domainId }: { domainId: string }, text: string) {
+        const settings = await taskModel.getDomainSettings(domainId);
+        const { rows, errors } = parseScoreImport(text, ['studentId', 'round', 'score']);
+        let imported = 0;
+        const rowErrors: string[] = [...errors];
+        for (const r of rows) {
+            const student = await findStudentDoc(domainId, r.studentId);
+            if (!student) { rowErrors.push(`学号 ${r.studentId}: 未找到学生档案`); continue; }
+            const round = parseInt(r.round, 10);
+            if (!round) { rowErrors.push(`学号 ${r.studentId}: 轮次无效`); continue; }
+            const score = parseFloat(r.score);
+            if (Number.isNaN(score) || score < 0 || score > settings.maxCspScore) {
+                rowErrors.push(`学号 ${r.studentId}: 分数无效 (0-${settings.maxCspScore})`);
+                continue;
+            }
+            await cspScoreColl.updateOne(
+                { domainId, studentDocId: student._id, round },
+                {
+                    $set: { score, updatedAt: new Date(), updatedBy: this.user._id },
+                    $setOnInsert: { _id: new ObjectId(), createdAt: new Date(), createdBy: this.user._id },
+                },
+                { upsert: true },
+            );
+            imported++;
+        }
+        this.response.body = { success: true, imported, errors: rowErrors };
     }
 
     // ─── 留校次数（stay events）─────────────────────────────────────────

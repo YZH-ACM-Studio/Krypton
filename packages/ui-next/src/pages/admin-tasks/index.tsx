@@ -38,6 +38,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import {
   TaskGraphRenderer, TOOLBOX_MIME,
   type PresetSummary, type TaskGraph, type TaskGraphNode,
@@ -1698,9 +1699,9 @@ function ExportCSV({ taskId, filter, label }: {
 
 // ─── Admin Tasks Scores ──────────────────────────────────────────────────
 
-interface PatScore { _id: string; userId: number; level: string; year: number; season: string; score: number; createdAt: string }
-interface GpltScore { _id: string; userId: number; level: string; year: number; score: number; rank: number | null; createdAt: string }
-interface CspScore { _id: string; userId: number; round: number; score: number; createdAt: string }
+interface PatScore { _id: string; studentDocId: string; level: string; year: number; season: string; score: number; createdAt: string }
+interface GpltScore { _id: string; studentDocId: string; level: string; year: number; score: number; rank: number | null; createdAt: string }
+interface CspScore { _id: string; studentDocId: string; round: number; score: number; createdAt: string }
 
 interface DomainSettings {
   maxPatScore: number; maxGpltScore: number; maxCspScore: number;
@@ -1715,6 +1716,7 @@ export function AdminTasksScoresPage() {
     stayEvents?: StayEvent[];
     schools?: { _id: string; name: string }[];
     udict: Record<string, { _id: number; uname: string }>;
+    studentDict: Record<string, { studentId: string; realName: string; schoolId: string; boundUserId: number | null }>;
     settings: DomainSettings;
     level: string;
     year: number;
@@ -1737,9 +1739,9 @@ export function AdminTasksScoresPage() {
         items={tabs.map((t) => ({ value: t.key as any, label: t.label, href: `/admin/tasks/scores?tab=${t.key}` }))}
       />
 
-      {data.tab === 'pat' && <PatScoreTab scores={data.scores} udict={data.udict} settings={data.settings} />}
-      {data.tab === 'gplt' && <GpltScoreTab scores={data.scores} udict={data.udict} settings={data.settings} />}
-      {data.tab === 'csp' && <CspScoreTab scores={data.scores} udict={data.udict} settings={data.settings} />}
+      {data.tab === 'pat' && <PatScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
+      {data.tab === 'gplt' && <GpltScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
+      {data.tab === 'csp' && <CspScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
       {data.tab === 'stay' && (
         <StayCountTab
           events={data.stayEvents || []}
@@ -1751,17 +1753,85 @@ export function AdminTasksScoresPage() {
   );
 }
 
-function PatScoreTab({ scores, udict, settings }: { scores: PatScore[]; udict: any; settings: DomainSettings }) {
+/** Score rows are keyed by studentDocId; show 学号/姓名 (+ OJ uname if bound). */
+function StudentCell({ studentDict, udict, studentDocId }: { studentDict: any; udict: any; studentDocId: string }) {
+  const sd = studentDict?.[studentDocId];
+  if (!sd) return <span className="text-muted-foreground">未知学生</span>;
+  const uname = sd.boundUserId ? udict?.[sd.boundUserId]?.uname : null;
+  return (
+    <span>
+      <span className="font-mono">{sd.studentId}</span> {sd.realName}
+      {uname ? <span className="text-xs text-muted-foreground"> · {uname}</span> : null}
+    </span>
+  );
+}
+
+/** Fetch-based bulk score import (studentId-keyed). Posts operation+text and
+ *  shows imported count + per-row errors; reloads on a clean import. */
+function BulkScoreImport({ action, operation, formatHint }: { action: string; operation: string; formatHint: string }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ imported?: number; errors?: string[] } | null>(null);
+  const submit = async () => {
+    setBusy(true);
+    setResult(null);
+    try {
+      const resp = await fetch(action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', Accept: 'application/json' },
+        body: new URLSearchParams({ operation, text }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      setResult(json);
+      if (json?.imported && !json?.errors?.length) setTimeout(() => window.location.reload(), 600);
+    } catch (e: any) {
+      setResult({ errors: [String(e?.message || e)] });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-sm">批量导入</CardTitle></CardHeader>
+      <CardContent className="space-y-2">
+        <p className="text-xs text-muted-foreground">每行一条，逗号 / Tab / 空格分隔：{formatHint}（# 开头的行忽略）</p>
+        <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} placeholder={formatHint} className="font-mono text-xs" />
+        <Button type="button" size="sm" onClick={submit} disabled={busy || !text.trim()}>
+          {busy ? '导入中…' : '导入'}
+        </Button>
+        {result ? (
+          <div className="text-xs">
+            {typeof result.imported === 'number' ? (
+              <p className="text-green-600">成功导入 {result.imported} 条{result.errors?.length ? '，部分失败见下' : '，即将刷新…'}</p>
+            ) : null}
+            {result.errors?.length ? (
+              <ul className="mt-1 max-h-40 list-disc overflow-auto rounded bg-muted/30 p-2 pl-5 text-red-600">
+                {result.errors.map((er, i) => <li key={i}>{er}</li>)}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PatScoreTab({ scores, udict, studentDict, settings }: { scores: PatScore[]; udict: any; studentDict: any; settings: DomainSettings }) {
   return (
     <>
+      <BulkScoreImport
+        action="/admin/tasks/scores?tab=pat"
+        operation="pat_import"
+        formatHint="学号,advanced|basic,年,spring|summer|autumn|winter,分"
+      />
       <Card>
         <CardHeader><CardTitle className="text-sm">添加 / 更新 PAT 成绩</CardTitle></CardHeader>
         <CardContent>
           <form method="post" action="/admin/tasks/scores?tab=pat" className="space-y-3">
             <input type="hidden" name="operation" value="pat" />
             <FormRow columns={4}>
-              <FormField label="用户 UID" required>
-                <Input name="userId" type="number" min={1} required />
+              <FormField label="学号" required>
+                <Input name="studentId" required placeholder="学号" />
               </FormField>
               <FormField label="等级" required>
                 <SimpleSelect
@@ -1808,13 +1878,13 @@ function PatScoreTab({ scores, udict, settings }: { scores: PatScore[]; udict: a
           ) : (
             <Table>
               <TableHeader><TableRow>
-                <TableHead>用户</TableHead><TableHead>等级</TableHead><TableHead>年份</TableHead>
+                <TableHead>学号 / 姓名</TableHead><TableHead>等级</TableHead><TableHead>年份</TableHead>
                 <TableHead>季节</TableHead><TableHead>分数</TableHead><TableHead>录入时间</TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 {scores.map((s) => (
                   <TableRow key={s._id}>
-                    <TableCell>{udict[s.userId]?.uname || `uid:${s.userId}`}</TableCell>
+                    <TableCell><StudentCell studentDict={studentDict} udict={udict} studentDocId={s.studentDocId} /></TableCell>
                     <TableCell>{s.level === 'advanced' ? '甲级' : '乙级'}</TableCell>
                     <TableCell>{s.year}</TableCell>
                     <TableCell>{{ spring: '春', summer: '夏', autumn: '秋', winter: '冬' }[s.season] || s.season}</TableCell>
@@ -1831,16 +1901,21 @@ function PatScoreTab({ scores, udict, settings }: { scores: PatScore[]; udict: a
   );
 }
 
-function GpltScoreTab({ scores, udict, settings }: { scores: GpltScore[]; udict: any; settings: DomainSettings }) {
+function GpltScoreTab({ scores, udict, studentDict, settings }: { scores: GpltScore[]; udict: any; studentDict: any; settings: DomainSettings }) {
   return (
     <>
+      <BulkScoreImport
+        action="/admin/tasks/scores?tab=gplt"
+        operation="gplt_import"
+        formatHint="学号,school|national,年,分"
+      />
       <Card>
         <CardHeader><CardTitle className="text-sm">添加 / 更新天梯赛成绩</CardTitle></CardHeader>
         <CardContent>
           <form method="post" action="/admin/tasks/scores?tab=gplt" className="space-y-3">
             <input type="hidden" name="operation" value="gplt" />
             <FormRow columns={4}>
-              <FormField label="用户 UID" required><Input name="userId" type="number" min={1} required /></FormField>
+              <FormField label="学号" required><Input name="studentId" required placeholder="学号" /></FormField>
               <FormField label="比赛级别" required>
                 <SimpleSelect
                   name="level"
@@ -1868,13 +1943,13 @@ function GpltScoreTab({ scores, udict, settings }: { scores: GpltScore[]; udict:
           {scores.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">还没有天梯赛成绩</p> : (
             <Table>
               <TableHeader><TableRow>
-                <TableHead>用户</TableHead><TableHead>级别</TableHead><TableHead>年份</TableHead>
+                <TableHead>学号 / 姓名</TableHead><TableHead>级别</TableHead><TableHead>年份</TableHead>
                 <TableHead>分数</TableHead><TableHead>排名</TableHead><TableHead>录入时间</TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 {scores.map((s) => (
                   <TableRow key={s._id}>
-                    <TableCell>{udict[s.userId]?.uname || `uid:${s.userId}`}</TableCell>
+                    <TableCell><StudentCell studentDict={studentDict} udict={udict} studentDocId={s.studentDocId} /></TableCell>
                     <TableCell>{s.level === 'school' ? '校赛' : '国赛'}</TableCell>
                     <TableCell>{s.year}</TableCell>
                     <TableCell className="font-medium">{s.score}</TableCell>
@@ -1891,16 +1966,21 @@ function GpltScoreTab({ scores, udict, settings }: { scores: GpltScore[]; udict:
   );
 }
 
-function CspScoreTab({ scores, udict, settings }: { scores: CspScore[]; udict: any; settings: DomainSettings }) {
+function CspScoreTab({ scores, udict, studentDict, settings }: { scores: CspScore[]; udict: any; studentDict: any; settings: DomainSettings }) {
   return (
     <>
+      <BulkScoreImport
+        action="/admin/tasks/scores?tab=csp"
+        operation="csp_import"
+        formatHint="学号,轮次,分"
+      />
       <Card>
         <CardHeader><CardTitle className="text-sm">添加 / 更新 CSP 成绩</CardTitle></CardHeader>
         <CardContent>
           <form method="post" action="/admin/tasks/scores?tab=csp" className="space-y-3">
             <input type="hidden" name="operation" value="csp" />
             <FormRow columns={3}>
-              <FormField label="用户 UID" required><Input name="userId" type="number" min={1} required /></FormField>
+              <FormField label="学号" required><Input name="studentId" required placeholder="学号" /></FormField>
               <FormField label="认证次数（第几次）" required><Input name="round" type="number" min={1} max={100} required placeholder="例如 37" /></FormField>
               <FormField label={`分数 (0-${settings.maxCspScore})`} required>
                 <Input name="score" type="number" min={0} max={settings.maxCspScore} step={1} required />
@@ -1916,12 +1996,12 @@ function CspScoreTab({ scores, udict, settings }: { scores: CspScore[]; udict: a
           {scores.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">还没有 CSP 成绩</p> : (
             <Table>
               <TableHeader><TableRow>
-                <TableHead>用户</TableHead><TableHead>次数</TableHead><TableHead>分数</TableHead><TableHead>录入时间</TableHead>
+                <TableHead>学号 / 姓名</TableHead><TableHead>次数</TableHead><TableHead>分数</TableHead><TableHead>录入时间</TableHead>
               </TableRow></TableHeader>
               <TableBody>
                 {scores.map((s) => (
                   <TableRow key={s._id}>
-                    <TableCell>{udict[s.userId]?.uname || `uid:${s.userId}`}</TableCell>
+                    <TableCell><StudentCell studentDict={studentDict} udict={udict} studentDocId={s.studentDocId} /></TableCell>
                     <TableCell>第 {s.round} 次</TableCell>
                     <TableCell className="font-medium">{s.score}</TableCell>
                     <TableCell className="text-xs text-muted-foreground"><DateTime value={s.createdAt} mode="date" /></TableCell>

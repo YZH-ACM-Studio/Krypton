@@ -774,6 +774,20 @@ export async function findStudentByStudentId(
 }
 
 /**
+ * Find ALL student records matching a studentId within a domain. studentId is
+ * unique only per (schoolId), so cross-school collisions are possible — callers
+ * needing exactly one student should treat `length !== 1` as unresolved
+ * (0 = not found, >1 = ambiguous across schools). Exact match — no fuzzy regex
+ * or result limit. Used by krypton-tasks score entry/import to resolve
+ * studentId → studentDocId safely (the scores are keyed by studentDocId).
+ */
+export async function findStudentsByStudentId(
+    domainId: string, studentId: string,
+): Promise<StudentRecord[]> {
+    return await studentsColl.find({ domainId, studentId }).toArray();
+}
+
+/**
  * Find the student record bound to a given OJ user. Returns null if the user
  * has no binding in this domain. Used by sibling plugins (e.g. krypton-tasks)
  * to resolve a user's school / group membership without reaching into our
@@ -937,6 +951,7 @@ export const userBindModel = {
     listStudents,
     getStudent,
     findStudentByStudentId,
+    findStudentsByStudentId,
     findStudentByUserId,
     findStudentsByUserIds,
     updateStudent,

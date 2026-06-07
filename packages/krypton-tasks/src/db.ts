@@ -31,6 +31,20 @@ export async function ensureIndexes(): Promise<void> {
     if (indexesEnsured) return;
     indexesEnsured = true;
 
+    // 2026-06-07: score collections were re-keyed userId → studentDocId. Drop
+    // any surviving legacy index whose key includes `userId` — new docs carry no
+    // `userId` field, so the old non-sparse unique index would treat them all as
+    // `userId: null` and collide (E11000) on the 2nd row per (level, year)/round.
+    // Name-independent + idempotent; no-op on fresh installs. See docs/PLAN-2026-06-07.
+    await Promise.all([patScoreColl, gpltScoreColl, cspScoreColl].map(async (coll) => {
+        try {
+            const existing = await coll.indexes();
+            await Promise.all(existing
+                .filter((i) => i.name !== '_id_' && i.key && Object.prototype.hasOwnProperty.call(i.key, 'userId'))
+                .map((i) => coll.dropIndex(i.name as string).catch(() => { /* concurrent drop / gone */ })));
+        } catch { /* collection not created yet — nothing to drop */ }
+    }));
+
     await Promise.all([
         tasksColl.createIndex({ domainId: 1, isActive: 1, _id: -1 }),
         tasksColl.createIndex({ domainId: 1, createdBy: 1 }),
@@ -59,19 +73,19 @@ export async function ensureIndexes(): Promise<void> {
         settingsColl.createIndex({ domainId: 1 }, { unique: true }),
 
         patScoreColl.createIndex(
-            { domainId: 1, userId: 1, level: 1, year: 1, season: 1 },
+            { domainId: 1, studentDocId: 1, level: 1, year: 1, season: 1 },
             { unique: true },
         ),
         patScoreColl.createIndex({ domainId: 1, level: 1, year: 1 }),
 
         gpltScoreColl.createIndex(
-            { domainId: 1, userId: 1, level: 1, year: 1 },
+            { domainId: 1, studentDocId: 1, level: 1, year: 1 },
             { unique: true },
         ),
         gpltScoreColl.createIndex({ domainId: 1, level: 1, year: 1 }),
 
         cspScoreColl.createIndex(
-            { domainId: 1, userId: 1, round: 1 },
+            { domainId: 1, studentDocId: 1, round: 1 },
             { unique: true },
         ),
         cspScoreColl.createIndex({ domainId: 1, round: 1 }),

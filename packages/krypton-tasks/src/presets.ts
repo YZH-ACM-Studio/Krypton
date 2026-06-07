@@ -75,6 +75,17 @@ function pct(current: number, target: number, completed: boolean, details: strin
     return { current, target, completed, details };
 }
 
+/**
+ * Resolve the task user to their userbind student `_id` (= `studentDocId`, the
+ * key for PAT/GPLT/CSP scores after the 2026-06-07 re-key). Returns null if the
+ * user has no bound student record — score conditions are then simply unmet
+ * (we can't know an unbound user's competition score). See docs/PLAN-2026-06-07.
+ */
+async function scoreStudentDocId(ctx: TaskCheckerContext): Promise<ObjectId | null> {
+    const student = await userBindModel.findStudentByUserId(ctx.domainId, ctx.userId);
+    return student?._id ?? null;
+}
+
 // ============ base 8 presets ============
 
 const acCountPreset: TaskPointPreset = {
@@ -616,9 +627,11 @@ const patSpecificPreset: TaskPointPreset = {
     ],
     async checker(ctx, params) {
         const target = +params.minScore || 0;
+        const studentDocId = await scoreStudentDocId(ctx);
+        if (!studentDocId) return pct(0, target, false, '未绑定学生档案');
         const doc = await patScoreColl.findOne({
             domainId: ctx.domainId,
-            userId: ctx.userId,
+            studentDocId,
             level: params.level,
             year: +params.year,
             season: params.season,
@@ -639,9 +652,11 @@ const patAnyPreset: TaskPointPreset = {
     ],
     async checker(ctx, params) {
         const target = +params.minScore || 0;
+        const studentDocId = await scoreStudentDocId(ctx);
+        if (!studentDocId) return pct(0, target, false, '未绑定学生档案');
         const best = await patScoreColl.find({
             domainId: ctx.domainId,
-            userId: ctx.userId,
+            studentDocId,
             level: params.level,
         }).sort({ score: -1 }).limit(1).next();
         if (!best) return pct(0, target, false, '暂无 PAT 成绩');
@@ -662,9 +677,11 @@ const gpltSpecificPreset: TaskPointPreset = {
     ],
     async checker(ctx, params) {
         const target = +params.minScore || 0;
+        const studentDocId = await scoreStudentDocId(ctx);
+        if (!studentDocId) return pct(0, target, false, '未绑定学生档案');
         const doc = await gpltScoreColl.findOne({
             domainId: ctx.domainId,
-            userId: ctx.userId,
+            studentDocId,
             level: params.level,
             year: +params.year,
         });
@@ -684,9 +701,11 @@ const gpltAnyPreset: TaskPointPreset = {
     ],
     async checker(ctx, params) {
         const target = +params.minScore || 0;
+        const studentDocId = await scoreStudentDocId(ctx);
+        if (!studentDocId) return pct(0, target, false, '未绑定学生档案');
         const best = await gpltScoreColl.find({
             domainId: ctx.domainId,
-            userId: ctx.userId,
+            studentDocId,
             level: params.level,
         }).sort({ score: -1 }).limit(1).next();
         if (!best) return pct(0, target, false, '暂无成绩');
@@ -705,9 +724,11 @@ const cspSpecificPreset: TaskPointPreset = {
     ],
     async checker(ctx, params) {
         const target = +params.minScore || 0;
+        const studentDocId = await scoreStudentDocId(ctx);
+        if (!studentDocId) return pct(0, target, false, '未绑定学生档案');
         const doc = await cspScoreColl.findOne({
             domainId: ctx.domainId,
-            userId: ctx.userId,
+            studentDocId,
             round: +params.round,
         });
         if (!doc) return pct(0, target, false, '未参加该次认证');
@@ -725,9 +746,11 @@ const cspAnyPreset: TaskPointPreset = {
     ],
     async checker(ctx, params) {
         const target = +params.minScore || 0;
+        const studentDocId = await scoreStudentDocId(ctx);
+        if (!studentDocId) return pct(0, target, false, '未绑定学生档案');
         const best = await cspScoreColl.find({
             domainId: ctx.domainId,
-            userId: ctx.userId,
+            studentDocId,
         }).sort({ score: -1 }).limit(1).next();
         if (!best) return pct(0, target, false, '暂无成绩');
         return pct(best.score, target, best.score >= target, `最佳: 第 ${best.round} 次 ${best.score} 分`);

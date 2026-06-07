@@ -16,7 +16,7 @@ import {
     PrivilegeError, Types, UserModel,
 } from 'hydrooj';
 import {
-    addAward, createPerson, deleteAwardType, deletePerson, getConfig, getPerson,
+    addAward, applyGpltStoreScores, createPerson, deleteAwardType, deletePerson, getConfig, getPerson,
     importAwardsBatch, listAwardTypes, listLeaderboard, removeAwardAt,
     setConfig, updateAwardAt, updatePerson, upsertAwardType,
 } from './model';
@@ -233,6 +233,9 @@ class AdminPersonDetailHandler extends AdminBase {
     async get(_ctx: any, id: ObjectId) {
         const person = await getPerson(id);
         if (!person) throw new NotFoundError('person', String(id));
+        // Overlay 天梯赛 scores from the store (store-first, embedded fallback)
+        // so the admin sees the same numeric score as the public board.
+        await applyGpltStoreScores([person]);
         const student = await studentsColl.findOne({ _id: person.studentDocId });
         const types = await listAwardTypes({ includeHidden: true });
         this.response.template = 'admin_rankboard_person.html';

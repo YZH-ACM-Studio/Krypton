@@ -33,9 +33,13 @@
  *    `confirm`/`unconfirm`, and `condition_change` events. Every irreversible
  *    or sensitive action writes a row.
  *
- *  - PAT/GPLT/CSP scores remain unchanged from v1 — independent collections,
- *    admin-fed via paste import / single entry. Per-domain max-score
- *    settings are unchanged.
+ *  - PAT/GPLT/CSP scores are keyed by `studentDocId` (userbind.students._id),
+ *    NOT userId — a score belongs to the student, which covers unbound students
+ *    and aligns with the rankboard. Admin-fed via studentId paste-import /
+ *    single entry; task checkers resolve userId→studentDocId at check time.
+ *    Per-domain max-score settings are unchanged.
+ *    (2026-06-07: re-keyed from userId; the GPLT collection is the single
+ *    source of truth that the rankboard reads. See docs/PLAN-2026-06-07.)
  */
 import type { ObjectId } from 'mongodb';
 
@@ -264,7 +268,9 @@ export type GpltLevel = 'school' | 'national';
 export interface PatScoreDoc {
     _id: ObjectId;
     domainId: string;
-    userId: number;
+    /** Student identity = userbind.students._id. Keyed by the student (not the
+     *  OJ account) so unbound students are covered; tasks resolve userId→this. */
+    studentDocId: ObjectId;
     level: PatLevel;
     year: number;
     season: PatSeason;
@@ -278,7 +284,9 @@ export interface PatScoreDoc {
 export interface GpltScoreDoc {
     _id: ObjectId;
     domainId: string;
-    userId: number;
+    /** Student identity = userbind.students._id. Single source of truth for the
+     *  天梯赛 numeric score; the rankboard reads it for display. */
+    studentDocId: ObjectId;
     level: GpltLevel;
     year: number;
     score: number;
@@ -292,7 +300,8 @@ export interface GpltScoreDoc {
 export interface CspScoreDoc {
     _id: ObjectId;
     domainId: string;
-    userId: number;
+    /** Student identity = userbind.students._id. */
+    studentDocId: ObjectId;
     round: number;
     score: number;
     createdAt: Date;

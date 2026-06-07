@@ -36,8 +36,19 @@ export interface Award {
     team?: string;
     liveRank?: number;
     schoolRank?: number;
-    /** Manual override for an unusual scoring case; if set, replaces formula. */
+    /**
+     * 天梯赛 numeric score (0–290) — DISPLAY only, never affects ranking.
+     * Single source of truth is `tasks.score_gplt`; this embedded value is now
+     * a fallback. The leaderboard overlays the store value at read time (see
+     * model.ts applyGpltStoreScores). For PAT it's the "实际考试得分".
+     */
     score?: number;
+    /**
+     * 天梯赛 edition year (= 2015 + 届号), stamped by the one-time import so the
+     * leaderboard can key the store lookup `(studentDocId, national, gpltYear)`
+     * without re-parsing the contest name. See docs/PLAN-2026-06-07.
+     */
+    gpltYear?: number;
     teammates?: string[];
     /** Internal Hydro file URLs and / or external image URLs. */
     imageUrls?: string[];

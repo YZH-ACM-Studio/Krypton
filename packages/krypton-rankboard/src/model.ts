@@ -227,6 +227,52 @@ export function computeAwardScore(
     return type.weight * baseScore;
 }
 
+/**
+ * Parse the 天梯赛 edition year from an award's contest name. Prefers the
+ * "YYYY年" prefix; falls back to the "第N届" edition (year = 2015 + N). Used
+ * only as a fallback before the migration stamps `award.gpltYear`.
+ */
+export function gpltYearFromContest(contest?: string): number | null {
+    if (!contest) return null;
+    const m = contest.match(/(\d{4})\s*年/);
+    if (m) return Number.parseInt(m[1], 10);
+    const ed = contest.match(/第\s*0*(\d+)\s*届/);
+    if (ed) return 2015 + Number.parseInt(ed[1], 10);
+    return null;
+}
+
+/**
+ * Overlay the 天梯赛 numeric score from the single source of truth
+ * (tasks.score_gplt, national level) onto each `ladder_*` award for display.
+ * Store-first, falls back to the award's embedded `score` when the store has
+ * no row (unbound-but-not-imported, or pre-migration). Mutates in place; does
+ * NOT affect ranking (computeAwardScore ignores award.score). If the tasks
+ * plugin / helper is absent, embedded scores are kept. See docs/PLAN-2026-06-07.
+ */
+export async function applyGpltStoreScores(people: PersonRecord[]): Promise<void> {
+    const tasksModel = (global as any).Hydro?.model?.tasks;
+    if (!tasksModel?.listGpltScores) return;
+    const studentDocIds = people.map((p) => p.studentDocId);
+    if (!studentDocIds.length) return;
+    let docs: Array<{ studentDocId: ObjectId; year: number; score: number }> = [];
+    try {
+        docs = await tasksModel.listGpltScores('system', { studentDocIds, level: 'national' });
+    } catch {
+        return;
+    }
+    const scoreMap = new Map<string, number>();
+    for (const d of docs) scoreMap.set(`${String(d.studentDocId)}:${d.year}`, d.score);
+    for (const p of people) {
+        for (const award of p.awards || []) {
+            if (!String(award.type).startsWith('ladder_')) continue;
+            const year = (award as any).gpltYear ?? gpltYearFromContest(award.contest);
+            if (year == null) continue;
+            const s = scoreMap.get(`${String(p.studentDocId)}:${year}`);
+            if (s != null) award.score = s;
+        }
+    }
+}
+
 /** Resolve a list of people into joined leaderboard rows. */
 export async function listLeaderboard(): Promise<LeaderboardRow[]> {
     const [people, awardTypes, config] = await Promise.all([
@@ -235,6 +281,10 @@ export async function listLeaderboard(): Promise<LeaderboardRow[]> {
         getConfig(),
     ]);
     const typeMap = new Map(awardTypes.map((t) => [t.key, t]));
+
+    // Overlay 天梯赛 numeric scores from the single source of truth (tasks
+    // store) onto ladder awards before serving — store-first, embedded fallback.
+    await applyGpltStoreScores(people);
 
     // Pull student + school + groups + udoc in bulk.
     const studentIds = people.map((p) => p.studentDocId);

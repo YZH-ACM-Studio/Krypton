@@ -23,11 +23,11 @@
 import { NotFoundError, ObjectId, PermissionError } from 'hydrooj';
 import { userBindModel } from '@hydrooj/krypton-userbind';
 import {
-    assignmentsColl, auditColl, settingsColl, stayEventsColl, tasksColl,
+    assignmentsColl, auditColl, gpltScoreColl, settingsColl, stayEventsColl, tasksColl,
 } from './db';
 import { runChecker, taskPointPresets } from './presets';
 import type {
-    AuditEventType, AuditLogDoc, DomainSettingsDoc, StayEventDoc,
+    AuditEventType, AuditLogDoc, DomainSettingsDoc, GpltLevel, GpltScoreDoc, StayEventDoc,
     TaskAssignmentDoc, TaskDoc, TaskGraph, TaskPointResult,
 } from './types';
 import { DEFAULT_DOMAIN_SETTINGS, emptyTaskGraph } from './types';
@@ -710,6 +710,22 @@ async function deleteStayEvent(domainId: string, id: ObjectId): Promise<void> {
 
 // ============ exported model ============
 
+/**
+ * Read GPLT scores for a set of students — exposed for cross-plugin use by the
+ * rankboard, which displays the 天梯赛 numeric score sourced from here (the
+ * single source of truth after 2026-06-07). Pass `level` to narrow (rankboard
+ * uses 'national'). Returns raw docs; caller indexes by (studentDocId, year).
+ */
+export async function listGpltScores(
+    domainId: string,
+    opts: { studentDocIds?: ObjectId[]; level?: GpltLevel } = {},
+): Promise<GpltScoreDoc[]> {
+    const q: Record<string, any> = { domainId };
+    if (opts.studentDocIds?.length) q.studentDocId = { $in: opts.studentDocIds };
+    if (opts.level) q.level = opts.level;
+    return gpltScoreColl.find(q).toArray();
+}
+
 export const taskModel = {
     presets: taskPointPresets,
     emptyTaskGraph,
@@ -727,6 +743,8 @@ export const taskModel = {
     getDomainSettings, setDomainSettings,
     // stay events
     addManualStayEvent, listStayEvents, countStayEvents, deleteStayEvent,
+    // scores (read; cross-plugin — rankboard reads GPLT scores from here)
+    listGpltScores,
     // hooks
     markUserAssignmentsStale,
 };

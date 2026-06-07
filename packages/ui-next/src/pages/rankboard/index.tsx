@@ -86,11 +86,15 @@ function awardFields(typeKey: string) {
   const isICPC = /^icpc/i.test(typeKey);
   const isCCPC = /^ccpc/i.test(typeKey);
   const isPAT = /^pat/i.test(typeKey);
+  const isLadder = /^ladder_/.test(typeKey);
   const hasDualRank = isICPC || isCCPC;
   return {
     hasDualRank,
     hasSingleRank: !hasDualRank,
     hasExamScore: isPAT,
+    // 天梯赛 numeric score — sourced from the tasks store (single source of
+    // truth) via the backend overlay; display only. See docs/PLAN-2026-06-07.
+    hasLadderScore: isLadder,
   };
 }
 
@@ -227,6 +231,9 @@ function AwardsDrawer({
                       {award.liveRank != null && fields.hasSingleRank && <span>排名 #{award.liveRank}</span>}
                       {award.score != null && fields.hasExamScore && (
                         <span className="font-semibold text-foreground">考试 {award.score} 分</span>
+                      )}
+                      {award.score != null && fields.hasLadderScore && (
+                        <span className="font-semibold text-foreground">天梯赛 {award.score} 分</span>
                       )}
                     </div>
                     {award.teammates && award.teammates.length > 0 && (
@@ -521,6 +528,9 @@ export function RankBoardDetailPage() {
                   {award.liveRank != null && fields.hasSingleRank && <span>排名 #{award.liveRank}</span>}
                   {award.score != null && fields.hasExamScore && (
                     <span className="font-semibold text-foreground">考试 {award.score} 分</span>
+                  )}
+                  {award.score != null && fields.hasLadderScore && (
+                    <span className="font-semibold text-foreground">天梯赛 {award.score} 分</span>
                   )}
                 </div>
                 {award.teammates && award.teammates.length > 0 && (

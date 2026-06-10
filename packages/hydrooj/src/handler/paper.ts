@@ -30,6 +30,43 @@ import { DiscussionDetailHandler } from './discussion';
 import { ProblemDetailHandler } from './problem';
 import { RecordDetailHandler } from './record';
 
+/**
+ * Exam-mode renders problem statements inside ui-next at deep routes such as
+ * `/exam-mode/:tid/problem/:pid`. The classic ProblemDetailHandler rewrites
+ * `file://name` image attachments to the *relative* `./<docId>/file/name`,
+ * which only resolves at the shallow `/p/:pid` depth — under the exam-mode URL
+ * it resolves to `/exam-mode/:tid/problem/<docId>/file/name` and 404s, so the
+ * problem images vanish. JSON / client-side navigations skip that rewrite
+ * entirely and leave a raw `file://` src, which also can't load. And the paper
+ * answer-sheet's getProblemDict() reads raw pdocs that are never rewritten.
+ * Normalise BOTH forms to an absolute, domain-correct file URL so images render
+ * regardless of page depth or load type.
+ */
+function absolutizeProblemFileUrls(handler: Handler, content: string, pdoc: any, tid: ObjectId | string): string {
+    if (!content || !pdoc) return content;
+    const docId = pdoc.docId;
+    const tidHex = typeof tid === 'string' ? tid : tid.toHexString();
+    // Absolute, domain-aware base, e.g. "/p/123/file/" or "/d/x/p/123/file/".
+    // A plain alnum placeholder isn't URL-encoded by handler.url, so slicing it
+    // back off yields a clean prefix.
+    const ph = 'KRYPTONFILEPH';
+    const sample = handler.url('problem_file_download', { pid: docId, filename: ph });
+    const absBase = sample.slice(0, sample.lastIndexOf(ph));
+    const withTid = (url: string) => `${url}${url.includes('?') ? '&' : '?'}tid=${tidHex}`;
+    // 1) raw file:// — JSON-load path + getProblemDict's untouched raw pdoc.
+    let out = content.replace(/file:\/\/([^ \n)\\"]+)/g, (str: string, fileinfo: string) => {
+        let filename = fileinfo.split('?')[0];
+        try { filename = decodeURIComponent(filename); } catch { /* keep encoded */ }
+        if (!pdoc.additional_file?.find((i: any) => i.name === filename)) return str;
+        return withTid(`${absBase}${fileinfo}`);
+    });
+    // 2) relative ./<docId>/file/ — non-JSON path where super.get() already
+    //    rewrote (and already appended ?tid=); only swap the prefix.
+    const relPrefix = `./${docId}/file/`;
+    if (out.includes(relPrefix)) out = out.split(relPrefix).join(absBase);
+    return out;
+}
+
 class PaperBaseHandler extends Handler {
     tdoc: any;
     tid: ObjectId;
@@ -106,7 +143,13 @@ class PaperBaseHandler extends Handler {
         const pdict: Record<number, any> = {};
         await Promise.all((this.tdoc.pids as number[]).map(async (pid) => {
             const pdoc = await ProblemModel.get(this.tdoc.domainId, pid, undefined, true);
-            if (pdoc) pdict[pid] = pdoc;
+            if (!pdoc) return;
+            // Raw pdoc → file:// image attachments are never rewritten; make them
+            // absolute so they load under the deep /exam-mode/:tid/... routes.
+            if (typeof pdoc.content === 'string') {
+                pdoc.content = absolutizeProblemFileUrls(this, pdoc.content, pdoc, this.tdoc.docId);
+            }
+            pdict[pid] = pdoc;
         }));
         return pdict;
     }
@@ -716,7 +759,12 @@ class ExamModeEntryHandler extends Handler {
         if (!hideProblemsBeforeStart) {
             await Promise.all((tdoc.pids as number[] || []).map(async (pid) => {
                 const pdoc = await ProblemModel.get(tdoc.domainId, pid, undefined, true);
-                if (pdoc) pdict[pid] = pdoc;
+                if (!pdoc) return;
+                // Absolutize file:// image attachments for the deep exam-mode route.
+                if (typeof pdoc.content === 'string') {
+                    pdoc.content = absolutizeProblemFileUrls(this, pdoc.content, pdoc, tdoc.docId);
+                }
+                pdict[pid] = pdoc;
             }));
         }
 
@@ -792,6 +840,13 @@ class ExamModeProblemDetailHandler extends ProblemDetailHandler {
     async get(domainId: string, tid: ObjectId) {
         if (this.response.redirect) return;  // _prepare already bounced.
         await super.get(domainId, tid, false);
+        // super.get() rewrote file:// attachments to a *relative* ./<docId>/file/
+        // path that breaks under the deep /exam-mode/:tid/problem/:pid URL (and
+        // JSON loads leave raw file://). Re-absolutize so problem images load.
+        const pdoc = this.response.body?.pdoc;
+        if (pdoc && typeof pdoc.content === 'string') {
+            pdoc.content = absolutizeProblemFileUrls(this, pdoc.content, pdoc, tid);
+        }
         const { previewMode } = await ensureExamModeAccess(this, domainId, tid, this.tdoc);
         await decorateExamMode(this, this.tdoc, 'problems', 'problem_detail.html', previewMode);
     }

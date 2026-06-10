@@ -1,0 +1,12 @@
+[Unit]
+Description=Krypton Vigil health probe every 2 minutes
+
+[Timer]
+# Probe /health every 2 minutes. Catches a wedged event loop that
+# `systemctl is-active` cannot see (the 2026-06-07 outage blind spot).
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

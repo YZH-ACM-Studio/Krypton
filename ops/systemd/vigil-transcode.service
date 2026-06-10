@@ -1,0 +1,15 @@
+[Unit]
+Description=Krypton Vigil AV1 batch transcode (off-hours H.264 -> AV1)
+After=krypton-vigil.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/krypton-vigil
+ExecStart=/opt/krypton-vigil/.venv/bin/python -m app.scripts.transcode_av1
+User=root
+Group=root
+# Hard-cap the run to the 03:00–08:00 off-hours window so a large backlog can
+# never grind into exam hours. On timeout the run is SIGTERMed (resumable —
+# the next nightly run picks up the remaining un-transcoded recordings).
+RuntimeMaxSec=5h
+TimeoutStopSec=30s

@@ -17,7 +17,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle, ArrowLeft, ChevronRight, ClipboardList, Copy, FileDown, Flag,
-  Layers, ListChecks, Loader2, Lock, Maximize2, Minimize2, Network, Plus, Save,
+  Layers, ListChecks, Loader2, Lock, Maximize2, Minimize2, Network, Plus, RefreshCw, Save,
   Settings, Star, Tag, Target, Trash2, Trophy, UserCheck, Users, X,
 } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -1117,6 +1117,14 @@ export function AdminTasksStatsPage() {
               <a href={`/admin/tasks/${data.task._id}/candidates`}><Users className="mr-1 size-4" />候选池</a>
             </Button>
           )}
+          <form
+            method="post"
+            action={`/admin/tasks/${data.task._id}/stats`}
+            onSubmit={(e) => { if (!confirm('对该任务所有「未完成」的分配强制重算进度？已完成的不受影响。')) e.preventDefault(); }}
+          >
+            <input type="hidden" name="operation" value="recheck_all" />
+            <Button type="submit" variant="outline"><RefreshCw className="mr-1 size-4" />全部重算</Button>
+          </form>
           <Button asChild variant="outline"><a href={`/admin/tasks/${data.task._id}/stats?format=csv`}><FileDown className="mr-1 size-4" />导出 CSV</a></Button>
           <Button asChild variant="outline"><a href="/admin/tasks"><ArrowLeft className="mr-1 size-4" />返回列表</a></Button>
         </div>

@@ -194,6 +194,68 @@ const specificContestPreset: TaskPointPreset = {
     },
 };
 
+/**
+ * Generic comparator from a Mongo-style statusSort object (e.g. acm
+ * `{accept:-1, time:1}`, oi `{score:-1}`). Negative = `a` ranks before `b`.
+ */
+function compareByStatusSort(a: any, b: any, statusSort: Record<string, number>): number {
+    for (const k of Object.keys(statusSort || {})) {
+        const dir = statusSort[k] < 0 ? -1 : 1;
+        const av = a[k] ?? 0;
+        const bv = b[k] ?? 0;
+        if (av !== bv) return (av < bv ? -1 : 1) * dir;
+    }
+    return 0;
+}
+
+/**
+ * Compute a user's LIVE rank in a contest.
+ *
+ * Hydro does NOT persist `rank`/`score` on the contest status doc — the
+ * scoreboard derives them on the fly from each contestant's journal via the
+ * rule's `stat()` + `statusSort`. So rank presets must compute the rank the
+ * same way; reading `tsdoc.rank` (the old impl) always saw `undefined` and
+ * failed for everyone. We replay every attendee's journal through the contest
+ * rule's own `stat()` (penalty / lock / subtask logic identical to the
+ * scoreboard), sort by the rule's `statusSort`, and return the competition
+ * rank (ties share a rank: rank = 1 + #strictly-better).
+ *
+ * Returns null if the contest is missing; `{attended:false}` when the user has
+ * no attend record; otherwise `{attended:true, rank, total}`.
+ */
+async function contestUserRank(
+    ctx: TaskCheckerContext, contestId: any,
+): Promise<{ attended: boolean; rank: number; total: number } | null> {
+    const id = typeof contestId === 'string' ? new ObjectId(contestId) : contestId;
+    let tdoc: any;
+    try {
+        tdoc = await ContestModel.get(ctx.domainId, id);
+    } catch {
+        return null;
+    }
+    const rule = tdoc ? (ContestModel as any).RULES?.[tdoc.rule] : null;
+    if (!tdoc || !rule?.stat) return null;
+    const statuses = await DocumentModel.collStatus.find({
+        domainId: ctx.domainId,
+        docType: DocumentModel.TYPE_CONTEST,
+        docId: id,
+        attend: 1,
+    }).toArray();
+    const rows = statuses.map((ts: any) => {
+        const journal = [...(ts.journal || [])].sort(
+            (a: any, b: any) => a.rid.getTimestamp().getTime() - b.rid.getTimestamp().getTime(),
+        );
+        let s: any = {};
+        try { s = rule.stat(tdoc, journal); } catch { s = {}; }
+        return { uid: ts.uid, ...s };
+    });
+    const me = rows.find((r) => r.uid === ctx.userId);
+    if (!me) return { attended: false, rank: 0, total: rows.length };
+    const ss = rule.statusSort || { accept: -1, time: 1 };
+    const rank = 1 + rows.filter((r) => compareByStatusSort(r, me, ss) < 0).length;
+    return { attended: true, rank, total: rows.length };
+}
+
 const contestRankPreset: TaskPointPreset = {
     id: 'contest_rank',
     name: '比赛排名',
@@ -204,17 +266,12 @@ const contestRankPreset: TaskPointPreset = {
         { name: 'rank', type: 'number', label: '最低排名（不超过）', default: 10, required: true },
     ],
     async checker(ctx, params) {
-        if (!params.contestId) return pct(0, +params.rank || 1, false, '未配置比赛');
-        const id = typeof params.contestId === 'string' ? new ObjectId(params.contestId) : params.contestId;
-        const tsdoc = await DocumentModel.collStatus.findOne({
-            domainId: ctx.domainId,
-            uid: ctx.userId,
-            docType: DocumentModel.TYPE_CONTEST,
-            docId: id,
-        });
         const target = +params.rank || 1;
-        if (!tsdoc || !tsdoc.rank) return pct(0, target, false, '未参加该比赛或无排名');
-        return pct(tsdoc.rank, target, tsdoc.rank <= target, `当前排名 ${tsdoc.rank}，目标 ≤ ${target}`);
+        if (!params.contestId) return pct(0, target, false, '未配置比赛');
+        const r = await contestUserRank(ctx, params.contestId);
+        if (!r) return pct(0, target, false, '比赛不存在');
+        if (!r.attended) return pct(0, target, false, '未参加该比赛');
+        return pct(r.rank, target, r.rank <= target, `当前排名 ${r.rank}/${r.total}，目标 ≤ ${target}`);
     },
 };
 
@@ -229,17 +286,12 @@ const contestRankTopNPreset: TaskPointPreset = {
     ],
     async checker(ctx, params) {
         if (!params.contestId) return pct(0, 1, false, '未配置比赛');
-        const id = typeof params.contestId === 'string' ? new ObjectId(params.contestId) : params.contestId;
         const target = Math.max(1, +params.topN || 1);
-        const tsdoc = await DocumentModel.collStatus.findOne({
-            domainId: ctx.domainId,
-            uid: ctx.userId,
-            docType: DocumentModel.TYPE_CONTEST,
-            docId: id,
-        });
-        if (!tsdoc || !tsdoc.rank) return pct(0, 1, false, '未参加该比赛或无排名');
-        const ok = tsdoc.rank <= target;
-        return pct(ok ? 1 : 0, 1, ok, `当前第 ${tsdoc.rank} 名（目标前 ${target} 名）`);
+        const r = await contestUserRank(ctx, params.contestId);
+        if (!r) return pct(0, 1, false, '比赛不存在');
+        if (!r.attended) return pct(0, 1, false, '未参加该比赛');
+        const ok = r.rank <= target;
+        return pct(ok ? 1 : 0, 1, ok, `当前第 ${r.rank}/${r.total} 名（目标前 ${target} 名）`);
     },
 };
 
@@ -259,29 +311,16 @@ const contestRankTopPercentPreset: TaskPointPreset = {
     ],
     async checker(ctx, params) {
         if (!params.contestId) return pct(0, 1, false, '未配置比赛');
-        const id = typeof params.contestId === 'string' ? new ObjectId(params.contestId) : params.contestId;
         const targetPct = Math.max(0, Math.min(100, +params.percent || 0));
-        const [tsdoc, total] = await Promise.all([
-            DocumentModel.collStatus.findOne({
-                domainId: ctx.domainId,
-                uid: ctx.userId,
-                docType: DocumentModel.TYPE_CONTEST,
-                docId: id,
-            }),
-            DocumentModel.collStatus.countDocuments({
-                domainId: ctx.domainId,
-                docType: DocumentModel.TYPE_CONTEST,
-                docId: id,
-                rank: { $gt: 0 },
-            }),
-        ]);
-        if (!tsdoc || !tsdoc.rank) return pct(0, 1, false, '未参加该比赛或无排名');
-        if (!total) return pct(0, 1, false, '比赛尚无排名数据');
-        const userPct = (tsdoc.rank / total) * 100;
+        const r = await contestUserRank(ctx, params.contestId);
+        if (!r) return pct(0, 1, false, '比赛不存在');
+        if (!r.attended) return pct(0, 1, false, '未参加该比赛');
+        if (!r.total) return pct(0, 1, false, '比赛尚无参赛数据');
+        const userPct = (r.rank / r.total) * 100;
         const ok = userPct <= targetPct;
         return pct(
             ok ? 1 : 0, 1, ok,
-            `排名 ${tsdoc.rank}/${total}（位列前 ${userPct.toFixed(1)}% / 目标 ≤ ${targetPct}%）`,
+            `排名 ${r.rank}/${r.total}（位列前 ${userPct.toFixed(1)}% / 目标 ≤ ${targetPct}%）`,
         );
     },
 };

@@ -553,6 +553,40 @@ function diffLines(actual: string, expected: string): { type: 'same' | 'add' | '
   return result;
 }
 
+/** Extract the program's stdout from a pretest record (same precedence the
+ *  output/diff panes use). */
+function pretestActualOutput(result: Pick<PretestResult, 'testCases' | 'stdout' | 'judgeTexts'> | null | undefined): string {
+  return result?.testCases?.[0]?.message || result?.stdout || result?.judgeTexts?.join('\n') || '';
+}
+
+/**
+ * Display verdict for a self-test run.
+ *
+ * The judge backend returns `STATUS_ACCEPTED` (1) for ANY program that merely
+ * compiles and runs — a self-test is NOT diffed against an expected answer
+ * server-side. So a raw `status === 1` must NOT be surfaced as "通过/AC": that
+ * implies the output matched the expected output. We re-derive the verdict on
+ * the client from the user-supplied expected output:
+ *   - 'ac'      ran AND expected provided AND output matches
+ *   - 'wa'      ran AND expected provided AND output differs (shown even though
+ *               the backend said AC — this is the whole point)
+ *   - 'ran'     ran AND no expected output to compare against (neutral)
+ *   - 'fail'    a real failure status (WA/RE/TLE/MLE/CE/… : 2..19)
+ *   - 'pending' still judging / queued (>=20 or 0)
+ *   - 'none'    no result yet
+ */
+type SelfTestVerdict = 'ac' | 'wa' | 'ran' | 'fail' | 'pending' | 'none';
+function selfTestVerdict(
+  result: Pick<PretestResult, 'status' | 'testCases' | 'stdout' | 'judgeTexts'> | null | undefined,
+  expectedOutput: string,
+): SelfTestVerdict {
+  const status = result?.status;
+  if (status == null) return 'none';
+  if (status !== 1) return status >= 2 && status < 20 ? 'fail' : 'pending';
+  if (expectedOutput.trim().length === 0) return 'ran';
+  return pretestActualOutput(result).trim() === expectedOutput.trim() ? 'ac' : 'wa';
+}
+
 function PretestResultInline({
   result,
   expectedOutput,
@@ -565,7 +599,15 @@ function PretestResultInline({
   onResultTabChange: (t: 'output' | 'diff' | 'compiler') => void;
 }) {
   const status = getStatus(result.status ?? 8);
-  const isAccepted = result.status === 1;
+  // The judge returns AC for any program that compiles+runs (it does NOT diff
+  // the self-test output), so derive the shown verdict from the user's
+  // expected output instead of the raw backend status. See selfTestVerdict.
+  const verdict = selfTestVerdict(result, expectedOutput);
+  const verdictDisplay =
+    verdict === 'ac' ? { label: '通过 (Accepted)', className: 'text-green-500' }
+      : verdict === 'wa' ? { label: '答案错误 (Wrong Answer)', className: 'text-red-500' }
+        : verdict === 'ran' ? { label: '运行完成', className: 'text-muted-foreground' }
+          : status;
   const time = result.time != null ? `${result.time} ms` : '—';
   const memory =
     result.memory != null
@@ -593,12 +635,14 @@ function PretestResultInline({
     <div className="flex flex-col flex-1 min-h-0">
       {/* Result header */}
       <div className="flex items-center gap-2 bg-muted/20 px-3 py-1 border-b shrink-0">
-        {isAccepted ? (
+        {verdict === 'ac' ? (
           <CheckCircle2 className="size-3.5 text-green-500" />
+        ) : verdict === 'ran' ? (
+          <CheckCircle2 className="size-3.5 text-muted-foreground" />
         ) : (
           <XCircle className="size-3.5 text-red-500" />
         )}
-        <span className={cn('text-xs font-medium', status.className)}>{status.label}</span>
+        <span className={cn('text-xs font-medium', verdictDisplay.className)}>{verdictDisplay.label}</span>
         <span className="text-[10px] text-muted-foreground">{time} · {memory}</span>
         {hasExpected && (
           <span className={cn('text-[10px] font-medium ml-auto', outputMatch ? 'text-green-500' : 'text-red-500')}>
@@ -1644,10 +1688,10 @@ export function KryptonIDE({
             {pretestTabs.map((tab) => {
               const tabResult = pretestResults.get(tab.id);
               const tabBusy = pretestRunning.has(tab.id);
-              const status = tabResult?.status ?? null;
-              const isAccepted = status === 1;
-              // 1 = AC; ≥2 and <20 = some kind of failure (WA/RE/TLE/CE/etc.)
-              const isFinalFail = status !== null && status >= 2 && status < 20;
+              // Badge reflects whether the program output matches THIS tab's
+              // expected output — not the raw backend AC (which only means
+              // "compiled & ran"; the self-test isn't diffed server-side).
+              const tabVerdict = selfTestVerdict(tabResult, tab.expectedOutput || '');
               return (
                 <button
                   key={tab.id}
@@ -1662,9 +1706,11 @@ export function KryptonIDE({
                 >
                   {tabBusy ? (
                     <Loader2 className="size-3 animate-spin text-muted-foreground" />
-                  ) : isAccepted ? (
+                  ) : tabVerdict === 'ac' ? (
                     <CheckCircle2 className="size-3 text-green-500" />
-                  ) : isFinalFail ? (
+                  ) : tabVerdict === 'ran' ? (
+                    <CheckCircle2 className="size-3 text-muted-foreground" />
+                  ) : tabVerdict === 'wa' || tabVerdict === 'fail' ? (
                     <XCircle className="size-3 text-red-500" />
                   ) : null}
                   {tab.label}

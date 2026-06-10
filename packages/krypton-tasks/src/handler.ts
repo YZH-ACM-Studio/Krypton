@@ -820,6 +820,29 @@ class AdminTasksStatsHandler extends Handler {
             task, assignments: fresh, udict, studentByUid, audit, presets: presetSummaries(),
         };
     }
+
+    // Force-recheck EVERY non-cancelled assignment of this task. Unlike the
+    // on-view recompute (which only touches never-checked assignments), this
+    // re-evaluates already-checked-but-stale ones too — needed after a checker
+    // logic change. Completed assignments short-circuit inside
+    // checkTaskCompletion (terminal); pending ones recompute and may
+    // auto-complete (+ award stay events). Errors are swallowed per-row.
+    @param('tid', Types.ObjectId)
+    async postRecheckAll({ domainId }: { domainId: string }, tid: ObjectId) {
+        const task = await taskModel.getTask(domainId, tid);
+        if (!task) throw new NotFoundError('任务不存在');
+        if (!canModifyTask(this.user as any, task)) throw new ValidationError('tid', null, '无权操作');
+        const assignments = await taskModel.getTaskAssignments(domainId, tid, { status: { $ne: 'cancelled' } });
+        let rechecked = 0;
+        for (const a of assignments) {
+            try {
+                await taskModel.checkTaskCompletion(domainId, a._id, { force: true });
+                rechecked++;
+            } catch { /* per-row */ }
+        }
+        await OplogModel.log(this, 'tasks.recheckAll', { tid: tid.toHexString(), count: rechecked });
+        this.response.redirect = this.url('admin_tasks_stats', { tid });
+    }
 }
 
 // ─── Admin: candidate pool (quota mode) ──────────────────────────────────

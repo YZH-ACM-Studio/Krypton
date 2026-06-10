@@ -130,7 +130,17 @@ export class ContestDetailBaseHandler extends Handler {
             || this.user.hasPerm(PERM.PERM_EDIT_CONTEST)
             || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         if (!isAdminBypass) {
-            if (contest.isClientRequired(this.tdoc) && contest.isClientFinished(this.tsdoc)) {
+            // The client-required gate (must enter through the locked-down Vigil
+            // client) protects exam integrity only WHILE the contest is running.
+            // Once it has ended, lift it so participants can review the problems
+            // and the scoreboard from an ordinary browser — otherwise the
+            // post-contest "外部榜单" is visible to admins only. Uses the global
+            // endAt (isDone(tdoc) without tsdoc) so a per-user duration expiring
+            // early can't open the scoreboard while others are still competing.
+            // Participant scope (scope_miss) is eligibility, not integrity, so it
+            // stays enforced regardless.
+            const contestDone = contest.isDone(this.tdoc);
+            if (!contestDone && contest.isClientRequired(this.tdoc) && contest.isClientFinished(this.tsdoc)) {
                 throw new ContestClientFinishedError();
             }
             const vg = (global as any).Hydro?.model?.vigilguard;
@@ -145,7 +155,7 @@ export class ContestDetailBaseHandler extends Handler {
                     if (result.reason === 'scope_miss') {
                         throw new NotAssignedError('contest', tid);
                     }
-                    if (result.reason === 'client_only') {
+                    if (result.reason === 'client_only' && !contestDone) {
                         throw new ContestClientRequiredError();
                     }
                 }

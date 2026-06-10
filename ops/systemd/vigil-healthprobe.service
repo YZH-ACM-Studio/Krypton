@@ -1,0 +1,10 @@
+[Unit]
+Description=Krypton Vigil health probe (alerts to /var/log/krypton-vigil-health.log)
+After=krypton-vigil.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/krypton-vigil
+ExecStart=/opt/krypton-vigil/.venv/bin/python -m app.scripts.health_probe
+User=root
+Group=root

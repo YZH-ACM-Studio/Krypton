@@ -1,0 +1,12 @@
+[Unit]
+Description=Krypton Vigil AV1 transcode nightly timer
+
+[Timer]
+# Nightly at 03:00 local (before the 04:00 cleanup). AV1 transcode is decoupled
+# from on_dvr and runs serially at lowest priority here — never during exams.
+# Persistent=true: a missed run (host offline) fires at next boot.
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

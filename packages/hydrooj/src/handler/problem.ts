@@ -313,7 +313,16 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         if (tid) {
             if (!this.tdoc?.pids?.includes(this.pdoc.docId)) throw new ContestNotFoundError(domainId, tid);
             if (contest.isNotStarted(this.tdoc)) throw new ContestNotLiveError(tid);
-            if (!contest.isDone(this.tdoc, this.tsdoc) && (!this.tsdoc?.attend || !this.tsdoc.startAt)) throw new ContestNotAttendedError(tid);
+            // Krypton: a privileged viewer (contest owner / editor / system admin)
+            // who opened a problem from an external scoreboard hasn't "attended"
+            // the live contest. Don't block them — let them view it (contest
+            // "view" mode, no submit, since !attend). Ordinary contestants still
+            // must attend before the contest ends.
+            const canManageContest = this.user.own(this.tdoc)
+                || this.user.hasPerm(PERM.PERM_EDIT_CONTEST)
+                || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+            if (!canManageContest && !contest.isDone(this.tdoc, this.tsdoc)
+                && (!this.tsdoc?.attend || !this.tsdoc.startAt)) throw new ContestNotAttendedError(tid);
             // Delete problem-related info in contest mode
             this.pdoc.tag.length = 0;
             delete this.pdoc.nAccept;

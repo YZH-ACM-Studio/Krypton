@@ -423,7 +423,9 @@ interface EditorBody {
 }
 
 export function AdminAnnounceEditorPage() {
-  const data = useBootstrap().page.data as EditorBody;
+  const bs = useBootstrap();
+  const data = bs.page.data as EditorBody;
+  const uid = bs.user.id;
   const isNew = !data.doc;
   const [title, setTitle] = useState(data.doc?.title || '');
   const [content, setContent] = useState(data.doc?.content || '');
@@ -518,7 +520,15 @@ export function AdminAnnounceEditorPage() {
             </div>
 
             <FormField label="正文（Markdown）">
-              <MarkdownEditor value={content} onChange={setContent} minHeight={480} />
+              <MarkdownEditor
+                value={content}
+                onChange={setContent}
+                minHeight={480}
+                pasteUpload={{
+                  endpoint: '/file',
+                  makeUrl: (filename) => `/file/${uid}/${filename}`,
+                }}
+              />
             </FormField>
 
             <div className="flex justify-end gap-2 border-t pt-4">

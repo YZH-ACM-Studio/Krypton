@@ -19,12 +19,12 @@
  */
 import yaml from 'js-yaml';
 import {
-    Context, Handler, OplogModel, param, Types, requireServiceToken,
+    Context, Handler, OplogModel, param, PERM, Types,
 } from 'hydrooj';
+import { requireAuthToken } from '../lib/auth-token';
 import * as document from '../model/document';
 import problem from '../model/problem';
 import system from '../model/system';
-import { CreateError, ForbiddenError } from '../error';
 
 const CHANNEL = 'tagger';
 const MAX_APPLY_ITEMS = 1000;
@@ -32,14 +32,6 @@ const MAX_APPLY_ITEMS = 1000;
 // we embed in a single oplog document so it can never approach mongo's 16MB
 // limit. The full affectedDocIds list (compact) is always logged.
 const OPLOG_CHANGE_CAP = 500;
-
-// ServiceTokenError (from the shared lib) is NOT a UserFacingError, so it would
-// surface as a 500 + HTML bsod. Re-throw token failures as this (403 + JSON) so
-// the desktop client gets a clean, parseable error. Scoped to tagger — the
-// shared service-token lib is untouched (Vigil unaffected).
-const ServiceTokenRejectedError = CreateError(
-    'ServiceTokenRejectedError', ForbiddenError, '服务令牌无效或缺失。',
-);
 
 /** Domain the tool operates on. Client-supplied domains are ignored on purpose. */
 function taggerDomain(): string {
@@ -78,6 +70,37 @@ function readCategories(): Record<string, string[]> {
     return out;
 }
 
+/** Parse a problem `config` (YAML string or object) into audit-relevant facts.
+ * No config at all = default judging, treated as OK. Present-but-unparseable
+ * is the actionable signal (`ok=false`). */
+function auditConfig(raw: any): { ok: boolean; time: string | null; memory: string | null; scoreSum: number | null } {
+    if (raw === undefined || raw === null || raw === '') {
+        return { ok: true, time: null, memory: null, scoreSum: null };
+    }
+    let cfg: any = raw;
+    if (typeof raw === 'string') {
+        try { cfg = yaml.load(raw); } catch { return { ok: false, time: null, memory: null, scoreSum: null }; }
+    }
+    if (!cfg || typeof cfg !== 'object') return { ok: false, time: null, memory: null, scoreSum: null };
+    const time = cfg.time != null ? String(cfg.time) : null;
+    const memory = cfg.memory != null ? String(cfg.memory) : null;
+    // Only report a subtask total when EVERY subtask carries a numeric score —
+    // configs that score on cases (subtask.score absent) would otherwise sum to a
+    // misleading 0 and false-flag "总分≠100".
+    let scoreSum: number | null = null;
+    if (Array.isArray(cfg.subtasks) && cfg.subtasks.length) {
+        let sum = 0;
+        let allScored = true;
+        for (const st of cfg.subtasks) {
+            const s = Number(st?.score);
+            if (Number.isFinite(s)) sum += s;
+            else { allScored = false; break; }
+        }
+        scoreSum = allScored ? sum : null;
+    }
+    return { ok: true, time, memory, scoreSum };
+}
+
 // ─── base: service-token gate + worker-label resolution ──────────────────────
 
 class TaggerApiHandler extends Handler {
@@ -85,21 +108,12 @@ class TaggerApiHandler extends Handler {
     workerLabel = 'unknown';
 
     async prepare() {
-        try {
-            requireServiceToken(this, CHANNEL);
-        } catch {
-            throw new ServiceTokenRejectedError();
-        }
-        // Resolve a human-readable operator name from the presented token so the
-        // oplog reads "张三 renamed X→Y" rather than just a token prefix.
-        const presented = this.request.headers['x-service-token'];
-        const token = Array.isArray(presented) ? presented[0] : presented;
-        const labels = system.get(`serviceToken.${CHANNEL}.labels`);
-        if (token && labels && typeof labels === 'object' && (labels as any)[token]) {
-            this.workerLabel = String((labels as any)[token]);
-        } else if (token) {
-            this.workerLabel = `token:${token.slice(0, 8)}`;
-        }
+        // Validates the token + binds `this.user` to the token's Hydro user
+        // (capped by scopeMask), so the per-method `checkPerm` calls below run
+        // against that user. Throws AuthTokenRejectedError (403 + JSON) on failure.
+        await requireAuthToken(this, CHANNEL);
+        // oplog reads "张三 renamed X→Y" via the bound user's uname.
+        this.workerLabel = this.user.uname || `uid:${this.user._id}`;
     }
 }
 
@@ -107,6 +121,7 @@ class TaggerApiHandler extends Handler {
 
 class TaggerProblemsHandler extends TaggerApiHandler {
     async get() {
+        this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
         const pdocs = await problem.getMulti(
             domainId, { hidden: { $ne: true } }, ['docId', 'pid', 'title', 'tag'],
@@ -127,6 +142,7 @@ class TaggerProblemsHandler extends TaggerApiHandler {
 
 class TaggerVocabHandler extends TaggerApiHandler {
     async get() {
+        this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
         const agg = await document.coll.aggregate([
             { $match: { domainId, docType: document.TYPE_PROBLEM, hidden: { $ne: true } } },
@@ -142,11 +158,49 @@ class TaggerVocabHandler extends TaggerApiHandler {
     }
 }
 
+// ─── GET /api/tagger/audit ───────────────────────────────────────────────────
+// Read-only structural metadata for the desktop "题库体检" tab. Includes hidden
+// problems (the "假上线" check needs the hidden flag); returns NO content — only
+// non-sensitive counts/flags. The client runs the rule engine locally.
+
+class TaggerAuditHandler extends TaggerApiHandler {
+    async get() {
+        // Returns HIDDEN problems too (the 假上线 check needs the flag), so it must
+        // require hidden-view rights — consistent with every other read path.
+        this.checkPerm(PERM.PERM_VIEW_PROBLEM);
+        this.checkPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN);
+        const domainId = taggerDomain();
+        const pdocs = await problem.getMulti(domainId, {}, [
+            'docId', 'pid', 'title', 'tag', 'hidden', 'difficulty', 'nSubmit', 'nAccept', 'config', 'data',
+        ]).toArray();
+        this.response.body = {
+            domainId,
+            problems: pdocs.map((p) => {
+                const c = auditConfig((p as any).config);
+                return {
+                    docId: p.docId,
+                    pid: p.pid || '',
+                    title: p.title || '',
+                    hidden: (p as any).hidden === true,
+                    tag: Array.isArray(p.tag) ? p.tag : [],
+                    difficulty: Number((p as any).difficulty) || 0,
+                    nSubmit: Number((p as any).nSubmit) || 0,
+                    nAccept: Number((p as any).nAccept) || 0,
+                    dataCount: Array.isArray((p as any).data) ? (p as any).data.length : 0,
+                    configOk: c.ok,
+                    scoreSum: c.scoreSum,
+                };
+            }),
+        };
+    }
+}
+
 // ─── POST /api/tagger/apply (single edit + bulk-on-selection) ─────────────────
 
 class TaggerApplyHandler extends TaggerApiHandler {
     @param('items', Types.Any)
     async post(_args: any, items: any) {
+        this.checkPerm(PERM.PERM_EDIT_PROBLEM);
         if (!Array.isArray(items)) {
             this.response.status = 400;
             this.response.body = { error: 'items_must_be_array' };
@@ -213,6 +267,7 @@ class TaggerRetagHandler extends TaggerApiHandler {
     @param('to', Types.Any, true)
     @param('dryRun', Types.Any, true)
     async post(_args: any, from: any, to: any, dryRun: any) {
+        this.checkPerm(PERM.PERM_EDIT_PROBLEM);
         const fromTags = normalizeTags(from);
         if (!fromTags.length) {
             this.response.status = 400;
@@ -265,6 +320,7 @@ class TaggerRetagHandler extends TaggerApiHandler {
 export async function apply(ctx: Context) {
     ctx.Route('tagger_problems', '/api/tagger/problems', TaggerProblemsHandler);
     ctx.Route('tagger_vocab', '/api/tagger/vocab', TaggerVocabHandler);
+    ctx.Route('tagger_audit', '/api/tagger/audit', TaggerAuditHandler);
     ctx.Route('tagger_apply', '/api/tagger/apply', TaggerApplyHandler);
     ctx.Route('tagger_retag', '/api/tagger/retag', TaggerRetagHandler);
 }

@@ -348,6 +348,11 @@ SystemSetting(
         report_only: 'report_only',
         off: 'off',
     }, 'vigil.networkLockFailurePolicy', 'Default network lockdown failure policy.'),
+    // Krypton §4：题库白名单模式。开启后 /p 列表页要求 PERM_VIEW_PROBLEM_BANK
+    // （教师+），学生被重定向到训练页；题目详情不受影响（canViewBy 原样）。
+    // 默认关——部署后先写好 role 数据再翻开关（PLAN 2026-07-02 §4/§14）。
+    Setting('setting_basic', 'problem.hideBank', false, 'boolean', 'problem.hideBank',
+        'Hide the problem bank list from users without PERM_VIEW_PROBLEM_BANK (they are redirected to trainings).'),
     Setting('setting_limits', 'limit.by_user', false, 'boolean', 'limit.by_user', 'Use per-user limits instead of per ip limits'),
     Setting('setting_limits', 'limit.problem_files_max', 100, 'number', 'limit.problem_files_max', 'Max files per problem'),
     Setting('setting_limits', 'limit.problem_files_max_size', 256 * 1024 * 1024, 'number', 'limit.problem_files_max_size', 'Max files size per problem'),

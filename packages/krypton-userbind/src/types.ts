@@ -23,6 +23,12 @@ export interface UserGroup {
     name: string;
     createdAt: Date;
     createdBy: number;
+    /**
+     * Soft-delete marker (PLAN 2026-07-02 §9). Archived groups keep student
+     * membership intact and stay resolvable in历史筛选; pickers render them
+     * grayed under "已归档". Only archived groups can be permanently deleted.
+     */
+    archivedAt?: Date;
 }
 
 /**

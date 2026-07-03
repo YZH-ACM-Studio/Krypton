@@ -53,6 +53,7 @@ export { parseConfig as testdataConfig } from './lib/testdataConfig';
 export { sendMail } from './lib/mail';
 export * from './lib/migration-helpers';
 export * from './lib/service-token';
+export * from './lib/auth-token';
 export * from './lib/problem-config';
 export * from './lib/exam-lock';
 export { UiContextBase } from './service/layers/base';

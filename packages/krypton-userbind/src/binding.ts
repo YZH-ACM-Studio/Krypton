@@ -97,6 +97,7 @@ export async function generateUserGroupInviteToken(
 ): Promise<UserGroupBindToken> {
     const group = await userGroupsColl.findOne({ domainId, _id: userGroupId });
     if (!group) throw new NotFoundError('UserGroup');
+    if (group.archivedAt) throw new ValidationError('userGroupId', null, '该用户组已归档，无法生成邀请');
     const doc: UserGroupBindToken = {
         _id: randomTokenId(),
         domainId,
@@ -124,6 +125,12 @@ export async function getInviteToken(tokenId: string): Promise<BindToken> {
     }
     if (token.kind === 'student' && token.used) {
         throw new ValidationError('token', null, 'Token already used');
+    }
+    // 归档组的既有邀请链接（多次可用、可能永不过期）在落地页即拒绝，
+    // 防止归档后继续扩员（PLAN §9）。
+    if (token.kind === 'user_group') {
+        const group = await userGroupsColl.findOne({ domainId: token.domainId, _id: token.userGroupId });
+        if (group?.archivedAt) throw new ValidationError('token', null, '该邀请对应的用户组已归档');
     }
     return token as BindToken;
 }
@@ -216,6 +223,15 @@ export async function bindMatchedStudent(
     const school = await schoolsColl.findOne({ _id: record.schoolId });
     if (!school) throw new NotFoundError('School');
 
+    // 归档组拦截必须在这里（任何写入之前）——落地页 POST 的 matched_unbound
+    // 分支和管理员审批 approveBindingRequest 都汇聚到本函数，是归档后继续
+    // 扩员的主干路径（第二轮对抗审查发现 #1）。
+    if (extraGroupId) {
+        const extraGroup = await userGroupsColl.findOne({ _id: extraGroupId });
+        if (extraGroup?.archivedAt) {
+            throw new ValidationError('userGroupId', null, '该邀请对应的用户组已归档，无法加入');
+        }
+    }
     const groupIdsToAdd = [...record.groupIds];
     if (extraGroupId && !groupIdsToAdd.some((g) => g.equals(extraGroupId))) {
         groupIdsToAdd.push(extraGroupId);
@@ -247,6 +263,9 @@ export async function bindMatchedStudent(
 export async function joinUserGroup(
     userId: number, studentRecord: StudentRecord, userGroupId: ObjectId,
 ): Promise<void> {
+    // 兜底防线：无论从哪条 claim/审批路径走到这里，归档组一律拒绝加人。
+    const group = await userGroupsColl.findOne({ _id: userGroupId });
+    if (group?.archivedAt) throw new ValidationError('userGroupId', null, '该用户组已归档，无法加入');
     await Promise.all([
         studentsColl.updateOne(
             { _id: studentRecord._id },

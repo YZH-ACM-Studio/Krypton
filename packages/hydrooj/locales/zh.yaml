@@ -577,14 +577,23 @@ Path {0} not found.: 路径 {0} 不存在。
 Peak Memory: 峰值内存
 Penalty (Minutes): 罚时（分钟）
 perm_contest: 比赛
+perm_course: 课程
 perm_discussion: 讨论
 perm_general: 一般
 perm_homework: 作业
 perm_problem_solution: 题解
 perm_problem: 题库
 perm_ranking: 排名
+perm_rankboard: 荣誉榜
 perm_record: 记录
 perm_training: 训练
+perm_userbind: 学生档案
+Browse the problem bank list: 浏览题库列表
+Import and edit rankboard data: 导入与编辑荣誉榜数据
+Manage rankboard structure and scoring: 管理荣誉榜结构与计分
+Manage student records and groups: 管理学生档案与班级
+Create courses: 创建课程
+Edit any courses: 编辑所有课程
 Permission: 权限
 Permissions: 权限
 Phone: 手机号

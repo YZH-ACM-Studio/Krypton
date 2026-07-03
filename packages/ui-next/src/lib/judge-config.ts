@@ -43,8 +43,10 @@ export interface JudgeCase {
   hint?: string;
   /** Author intent: may students see this hint (practice / after contest). */
   hintPublic?: boolean;
-  /** Reserved slot for a future per-test-point explainer video link. */
+  /** Per-test-point explainer video link, shown next to the hint. */
   videoUrl?: string;
+  /** Author intent for the video link; absent = follow hintPublic. */
+  videoPublic?: boolean;
 }
 
 export interface JudgeSubtask {
@@ -247,6 +249,7 @@ function normalizeCase(raw: any): JudgeCase | null {
   if (typeof raw.hint === 'string' && raw.hint) c.hint = raw.hint;
   if (raw.hintPublic != null) c.hintPublic = !!raw.hintPublic;
   if (typeof raw.videoUrl === 'string' && raw.videoUrl) c.videoUrl = raw.videoUrl;
+  if (raw.videoPublic != null) c.videoPublic = !!raw.videoPublic;
   return c;
 }
 
@@ -351,6 +354,7 @@ function caseToObj(c: JudgeCase): Record<string, any> {
   if (c.hint) o.hint = c.hint;
   if (c.hintPublic) o.hintPublic = true;
   if (c.videoUrl) o.videoUrl = c.videoUrl;
+  if (c.videoPublic != null) o.videoPublic = c.videoPublic;
   return o;
 }
 

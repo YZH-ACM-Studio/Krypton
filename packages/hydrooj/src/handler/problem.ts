@@ -115,6 +115,13 @@ export class ProblemMainHandler extends Handler {
     @param('quick', Types.Boolean)
     @param('sort', Types.Range(['default', 'recent']), true)
     async get(domainId: string, page = 1, q = '', limit: number, pjax = false, quick = false, sortStrategy = 'default') {
+        // Krypton §4 题库白名单模式：开关打开时，无 PERM_VIEW_PROBLEM_BANK 的
+        // 用户（学生）不能浏览题库列表，302 到训练页——学生通过 导图/训练/
+        // 比赛/作业 进入题目。题目详情路由不受影响（canViewBy 原样）。
+        if (system.get('problem.hideBank') && !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_BANK)) {
+            this.response.redirect = this.url('training_main');
+            return;
+        }
         this.response.template = 'problem_main.html';
         if (!limit || limit > this.ctx.setting.get('pagination.problem') || page > 1) limit = this.ctx.setting.get('pagination.problem');
         this.queryContext.query = buildQuery(this.user);
@@ -287,6 +294,12 @@ export class ProblemMainHandler extends Handler {
 export class ProblemRandomHandler extends Handler {
     @param('q', Types.Content, true)
     async get(domainId: string, qs = '') {
+        // §4 题库白名单模式：random 会 302 到公开题详情，等于给学生一个
+        // 无链接的题库枚举旁路——同样门控（对抗性审查 #3）。
+        if (system.get('problem.hideBank') && !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_BANK)) {
+            this.response.redirect = this.url('training_main');
+            return;
+        }
         const category = flattenDeep(qs.split(' ')
             .filter((i) => i.startsWith('category:'))
             .map((i) => i.split('category:')[1]?.split(',')));
@@ -1010,6 +1023,34 @@ export class ProblemStatisticsHandler extends ProblemDetailHandler {
     }
 }
 
+/**
+ * 我的题目（PLAN 2026-07-02 §4）——出题人的工作台。题库列表对学生隐藏后，
+ * 出过题的用户（含无 PERM_VIEW_PROBLEM_BANK 的历史学生作者）在这里管理
+ * 自己 own 的题：列表 + 建题入口。只列 owner=自己 的题，无越权面。
+ */
+export class ProblemMineHandler extends Handler {
+    @param('page', Types.PositiveInt, true)
+    async get(domainId: string, page = 1) {
+        const limit = this.ctx.setting.get('pagination.problem');
+        const query = { domainId, owner: this.user._id };
+        const [pdocs, pcount] = await Promise.all([
+            problem.getMulti(domainId, query)
+                .sort({ docId: -1 })
+                .skip((page - 1) * limit).limit(limit)
+                .toArray(),
+            problem.getMulti(domainId, query).count(),
+        ]);
+        this.response.template = 'problem_mine.html';
+        this.response.body = {
+            pdocs,
+            page,
+            pcount,
+            ppcount: Math.ceil(pcount / limit),
+            canCreate: this.user.hasPerm(PERM.PERM_CREATE_PROBLEM),
+        };
+    }
+}
+
 export class ProblemCreateHandler extends Handler {
     async get() {
         this.response.body.statementLangs = this.ctx.i18n.langs(false);
@@ -1097,6 +1138,7 @@ export async function apply(ctx: Context) {
     ctx.Route('problem_solution_raw', '/p/:pid/solution/:psid/raw', ProblemSolutionRawHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_solution_reply_raw', '/p/:pid/solution/:psid/:psrid/raw', ProblemSolutionRawHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_statistics', '/p/:pid/stat', ProblemStatisticsHandler, PERM.PERM_VIEW_PROBLEM);
+    ctx.Route('problem_mine', '/problem/mine', ProblemMineHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('problem_create', '/problem/create', ProblemCreateHandler, PERM.PERM_CREATE_PROBLEM);
     await ctx.inject(['api'], ({ api }) => {
         api.provide(ProblemApi);

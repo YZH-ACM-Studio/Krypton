@@ -287,12 +287,30 @@ class AdminGroupsHandler extends UserbindAdminHandler {
     @param('name', Types.String)
     async postRename({ domainId }: { domainId: string }, groupId: ObjectId, name: string) {
         await userBindModel.updateUserGroup(domainId, groupId, { name });
+        await OplogModel.log(this, 'userbind.group.rename', { groupId, name });
+        this.response.redirect = this.url('admin_userbind_groups');
+    }
+
+    @param('groupId', Types.ObjectId)
+    async postArchive({ domainId }: { domainId: string }, groupId: ObjectId) {
+        await userBindModel.archiveUserGroup(domainId, groupId);
+        await OplogModel.log(this, 'userbind.group.archive', { groupId });
+        this.response.redirect = this.url('admin_userbind_groups');
+    }
+
+    @param('groupId', Types.ObjectId)
+    async postUnarchive({ domainId }: { domainId: string }, groupId: ObjectId) {
+        await userBindModel.unarchiveUserGroup(domainId, groupId);
+        await OplogModel.log(this, 'userbind.group.unarchive', { groupId });
         this.response.redirect = this.url('admin_userbind_groups');
     }
 
     @param('groupId', Types.ObjectId)
     async postDelete({ domainId }: { domainId: string }, groupId: ObjectId) {
+        // Guarded: must be archived + no members + no task/course references
+        // (throws ValidationError with the blocker otherwise).
         await userBindModel.deleteUserGroup(domainId, groupId);
+        await OplogModel.log(this, 'userbind.group.delete', { groupId });
         this.response.redirect = this.url('admin_userbind_groups');
     }
 }
@@ -873,6 +891,16 @@ class BindLandingHandler extends Handler {
         }
         if (tokenDoc.kind === 'user_group') {
             const group = await userGroupsColl.findOne({ _id: tokenDoc.userGroupId });
+            // 归档组的既有永久邀请链接在落地页 GET 即拒绝（PLAN §9）。
+            if (group?.archivedAt) {
+                this.response.template = 'user_bind_landing.html';
+                this.response.body = {
+                    token, signedIn: this.user._id !== 0,
+                    error: 'group_archived', errorMessage: '该邀请对应的用户组已归档，无法加入。',
+                    kind: 'user_group',
+                };
+                return;
+            }
             const school = group ? await schoolsColl.findOne({ _id: group.schoolId }) : null;
             const inviterUser = await UserModel.getById(
                 this.domain?._id || 'system', tokenDoc.createdBy,
@@ -944,6 +972,11 @@ class BindLandingHandler extends Handler {
         } else if (tokenDoc.kind === 'user_group') {
             const group = await userGroupsColl.findOne({ _id: tokenDoc.userGroupId });
             if (!group) throw new NotFoundError('UserGroup');
+            // POST 侧同样提前拦（GET 已拦，但直接构造 POST 也走不进来；
+            // bindMatchedStudent 内还有最后一道防线）。
+            if (group.archivedAt) {
+                throw new ValidationError('token', null, '该邀请对应的用户组已归档，无法加入');
+            }
             targetSchoolId = group.schoolId;
             targetGroupId = group._id;
         } else {
@@ -1133,6 +1166,27 @@ export function applyHandlers(ctx: Context) {
     ctx.Route('user_bind_applications', '/userbind/applications', UserBindApplicationsHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('user_bind_claim', '/userbind/claim', UserBindClaimHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('user_bind_landing', '/bind/:token', BindLandingHandler);
+
+    // 个人主页真实身份注入（PLAN 2026-07-02 §3）。绑定状态对所有访客可见；
+    // 真实姓名/学号仅登录用户可见（校园网内未登录也能访问，防止被爬成
+    // 全校学号姓名名录）。有绑定时前端以此为准、隐藏用户自填的 studentId。
+    ctx.on('handler/after/UserDetail#get', async (h) => {
+        const uid = h.response?.body?.udoc?._id;
+        if (typeof uid !== 'number') return;
+        const domainId = (h.args as any)?.domainId || 'system';
+        const student = await userBindModel.findStudentByUserId(domainId, uid);
+        const signedIn = (h as Handler).user?.hasPriv?.(PRIV.PRIV_USER_PROFILE);
+        h.response.body.studentBinding = student
+            ? {
+                bound: true,
+                ...(signedIn ? {
+                    realName: student.realName,
+                    studentId: student.studentId,
+                    enrollmentYear: student.enrollmentYear ?? null,
+                } : {}),
+            }
+            : { bound: false };
+    });
 
     // Force-bind enforcement hook (PRD §3.2 — "保留，但条件化")
     ctx.on('handler/before-prepare', async (h) => {

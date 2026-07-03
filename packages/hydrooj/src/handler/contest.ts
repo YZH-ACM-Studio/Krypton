@@ -785,6 +785,52 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
     @param('d', Types.Range(['public', 'private']), true)
     @param('sidebar', Types.Boolean)
     async get(domainId: string, tid: ObjectId, d?: string, sidebar?: boolean) {
+        // 本场提交统计（PLAN 2026-07-02 §8）：总量/AC/参与人数 + 按题分布 +
+        // 按小时曲线。本 handler 已由 ContestManagementBaseHandler 限定
+        // own || PERM_EDIT_CONTEST，学生不可达。聚合失败不阻塞页面。
+        let submissionStats: any = null;
+        try {
+            const scope = { domainId, contest: tid };
+            const [overall, byProblem, byHour] = await Promise.all([
+                record.stat(domainId, tid),
+                record.coll.aggregate([
+                    { $match: scope },
+                    {
+                        $group: {
+                            _id: '$pid',
+                            total: { $sum: 1 },
+                            accepted: { $sum: { $cond: [{ $eq: ['$status', STATUS.STATUS_ACCEPTED] }, 1, 0] } },
+                        },
+                    },
+                    { $sort: { _id: 1 } },
+                ]).toArray(),
+                record.coll.aggregate([
+                    { $match: scope },
+                    {
+                        $group: {
+                            _id: {
+                                $dateToString: {
+                                    format: '%Y-%m-%dT%H',
+                                    date: { $toDate: '$_id' },
+                                    // 不带 timezone 时 mongo 按 UTC 分桶，中国部署下
+                                    // 曲线整体偏 8 小时（对抗性审查发现 #3）。
+                                    timezone: (this.user as any).timeZone || 'Asia/Shanghai',
+                                },
+                            },
+                            count: { $sum: 1 },
+                        },
+                    },
+                    { $sort: { _id: 1 } },
+                ]).toArray(),
+            ]);
+            submissionStats = {
+                total: overall.total,
+                accepted: (overall as any).accepted ?? 0,
+                participants: (overall as any).participants ?? 0,
+                byProblem: byProblem.map((r) => ({ pid: r._id, total: r.total, accepted: r.accepted })),
+                byHour: byHour.map((r) => ({ hour: r._id, count: r.count })),
+            };
+        } catch { /* stats are non-critical */ }
         this.response.body = {
             tdoc: this.tdoc,
             tsdoc: this.tsdoc,
@@ -793,6 +839,7 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
             files: sortFiles(this.tdoc.files || []),
             privateFiles: sortFiles(this.tdoc.privateFiles || []),
             urlForFile: (filename: string, type: string) => this.url('contest_file_download', { tid, filename, type }),
+            submissionStats,
         };
         this.response.pjax = [
             ...((!d || d === 'public') ? [['partials/files.html', { filetype: 'public', sidebar }] as const] : []),

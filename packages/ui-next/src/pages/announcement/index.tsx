@@ -508,13 +508,21 @@ export function AdminAnnounceEditorPage() {
               </FormField>
             </FormRow>
 
+            {/* Always submit explicit true/false. A native checkbox omits its
+                field entirely when unchecked, so unchecking "隐藏"/"置顶" sent
+                nothing and postUpdate (a partial patch — it only touches fields
+                that are present) left the old value stuck. Hidden inputs force
+                the field to always be sent; the Checkbox is now display-only
+                (no name/value) so it can't double-submit the same field. */}
+            <input type="hidden" name="pin" value={pin ? 'true' : 'false'} />
+            <input type="hidden" name="hidden" value={hidden ? 'true' : 'false'} />
             <div className="flex items-center gap-6">
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="pin" checked={pin} onChange={(e) => setPin(e.target.checked)} value="true" />
+                <Checkbox checked={pin} onChange={(e) => setPin(e.target.checked)} />
                 置顶
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="hidden" checked={hidden} onChange={(e) => setHidden(e.target.checked)} value="true" />
+                <Checkbox checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
                 隐藏（暂不公开）
               </label>
             </div>

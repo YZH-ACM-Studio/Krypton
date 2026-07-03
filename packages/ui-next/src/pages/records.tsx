@@ -425,6 +425,11 @@ export function RecordsPage() {
             <div className="mb-3 flex items-center gap-2 text-sm font-medium">
               <Search className="size-4 text-primary" />
               评测统计
+              {data.statisticsScope === 'contest' ? (
+                <Badge variant="secondary" className="text-[10px]">本场比赛</Badge>
+              ) : data.statisticsScope === 'all' ? (
+                <Badge variant="secondary" className="text-[10px]">全站</Badge>
+              ) : null}
             </div>
             <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-7">
               {[
@@ -442,6 +447,24 @@ export function RecordsPage() {
                 </div>
               ))}
             </div>
+            {data.statisticsScope === 'contest' ? (
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                <div className="rounded-md border bg-muted/20 px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">本场 AC</div>
+                  <div className="font-mono text-sm font-medium">{statistics.accepted ?? 0}</div>
+                </div>
+                <div className="rounded-md border bg-muted/20 px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">提交人数</div>
+                  <div className="font-mono text-sm font-medium">{statistics.participants ?? 0}</div>
+                </div>
+                <div className="rounded-md border bg-muted/20 px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">人均提交</div>
+                  <div className="font-mono text-sm font-medium">
+                    {statistics.participants ? (statistics.total / statistics.participants).toFixed(1) : '—'}
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
@@ -641,7 +664,7 @@ export function RecordDetailPage() {
                               {h.hint ? (
                                 <p className="whitespace-pre-wrap break-words text-amber-800 dark:text-amber-200">💡 {h.hint}</p>
                               ) : null}
-                              {h.videoUrl ? (
+                              {h.videoUrl && /^https?:\/\//i.test(h.videoUrl) ? (
                                 <a href={h.videoUrl} target="_blank" rel="noreferrer" className="mt-0.5 inline-block text-primary hover:underline">▶ 讲解视频</a>
                               ) : null}
                             </div>

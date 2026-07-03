@@ -78,6 +78,12 @@ export const PERMS = [
     Permission('perm_tasks', PERM.PERM_VIEW_TASKS, 'View tasks'),
     Permission('perm_tasks', PERM.PERM_CREATE_TASK, 'Create tasks'),
     Permission('perm_tasks', PERM.PERM_MANAGE_TASKS, 'Manage all tasks in this domain'),
+    Permission('perm_problem', PERM.PERM_VIEW_PROBLEM_BANK, 'Browse the problem bank list'),
+    Permission('perm_rankboard', PERM.PERM_RANKBOARD_IMPORT, 'Import and edit rankboard data'),
+    Permission('perm_rankboard', PERM.PERM_RANKBOARD_MANAGE, 'Manage rankboard structure and scoring'),
+    Permission('perm_userbind', PERM.PERM_USERBIND_MANAGE_STUDENTS, 'Manage student records and groups'),
+    Permission('perm_course', PERM.PERM_CREATE_COURSE, 'Create courses'),
+    Permission('perm_course', PERM.PERM_EDIT_COURSE, 'Edit any courses'),
 ];
 
 export const PERMS_BY_FAMILY = {};
@@ -92,6 +98,7 @@ export const LEVELS = [100, 90, 70, 55, 40, 30, 20, 10, 5, 2, 1];
 export const BUILTIN_ROLES = {
     guest: PERM.PERM_BASIC,
     default: PERM.PERM_DEFAULT,
+    teacher: PERM.PERM_TEACHER,
     root: PERM.PERM_ALL,
 };
 

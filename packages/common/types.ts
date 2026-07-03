@@ -74,8 +74,13 @@ export interface TestCaseConfig {
     hint?: string;
     /** Author intent: may students ever see this hint (practice/post-contest). */
     hintPublic?: boolean;
-    /** Reserved slot for a future per-test-point explainer video link. */
+    /** Per-test-point explainer video link, shown next to the hint. */
     videoUrl?: string;
+    /**
+     * Author intent: may students ever see the video link. Absent means
+     * "follow hintPublic" so pre-existing configs keep their behavior.
+     */
+    videoPublic?: boolean;
 }
 
 export enum SubtaskType {

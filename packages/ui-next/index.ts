@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import c2k from 'koa2-connect';
-import { Context } from 'hydrooj';
+import { Context, PERM } from 'hydrooj';
 import { serializer } from '@hydrooj/framework';
 import type { ViteDevServer } from 'vite';
 
@@ -212,6 +212,18 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
             pinnedDomains: currentUser.pinnedDomains || [],
             avatar: currentUser.avatar || '',
             avatarUrl: currentUser.avatarUrl || '',
+            // Krypton §4：侧边栏级 affordance（真正的强制在服务端 handler）。
+            // handler.user 是带 hasPerm 的 User 实例；缺失时放行以免误伤。
+            canViewProblemBank: (() => {
+                try {
+                    const u = context.handler?.user;
+                    if (!u?.hasPerm) return true;
+                    return !safeSystemGet('problem.hideBank') || !!u.hasPerm(PERM.PERM_VIEW_PROBLEM_BANK);
+                } catch { return true; }
+            })(),
+            canCreateProblem: (() => {
+                try { return !!context.handler?.user?.hasPerm?.(PERM.PERM_CREATE_PROBLEM); } catch { return false; }
+            })(),
         },
         domain: {
             id: String(domain._id || 'system'),

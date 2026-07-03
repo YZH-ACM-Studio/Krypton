@@ -6,7 +6,7 @@
  * and `claimTemporaryAccount` specifically — those are stable contracts.
  */
 import type { Filter } from 'mongodb';
-import { ObjectId, ValidationError, UserModel } from 'hydrooj';
+import { db, ObjectId, ValidationError, UserModel } from 'hydrooj';
 import {
     bindTokensColl,
     ensureIndexes,
@@ -347,12 +347,64 @@ export async function updateUserGroup(
     }
 }
 
+/**
+ * Archive (soft-delete) a user group — PLAN 2026-07-02 §9. Archived groups
+ * keep all student membership intact (history stays queryable); pickers
+ * render them grayed under an "已归档" section, and only archived groups can
+ * be permanently deleted.
+ */
+export async function archiveUserGroup(domainId: string, id: ObjectId): Promise<void> {
+    await userGroupsColl.updateOne({ domainId, _id: id }, { $set: { archivedAt: nowDate() } });
+}
+
+export async function unarchiveUserGroup(domainId: string, id: ObjectId): Promise<void> {
+    await userGroupsColl.updateOne({ domainId, _id: id }, { $unset: { archivedAt: '' } });
+}
+
+/**
+ * Permanent delete with PTA-style guard rails: the group must be archived
+ * first, must have no remaining members, and must not be referenced by any
+ * task graph or course audience. Throws ValidationError listing the blocker.
+ */
 export async function deleteUserGroup(domainId: string, id: ObjectId): Promise<void> {
-    // Remove group ref from any student that still has it.
-    await studentsColl.updateMany(
-        { domainId, groupIds: id },
-        { $pull: { groupIds: id } as any },
-    );
+    const group = await userGroupsColl.findOne({ domainId, _id: id });
+    if (!group) return;
+    if (!group.archivedAt) {
+        throw new ValidationError('groupId', null, '请先归档该用户组，只有已归档的用户组才能永久删除');
+    }
+    const memberCount = await studentsColl.countDocuments({ domainId, groupIds: id });
+    if (memberCount > 0) {
+        throw new ValidationError('groupId', null, `该用户组仍有 ${memberCount} 名成员，请先移除全部成员`);
+    }
+    // References that would dangle: task graphs store the group as a hex
+    // string in node params; task访问范围 (TaskDoc.access) stores it as an
+    // ObjectId; courses/trainings via groupIds; contests/homework via
+    // participantGroupIds. Query raw collections to avoid cross-plugin
+    // import cycles.
+    const hex = id.toHexString();
+    const [taskRefs, courseRefs, contestRefs] = await Promise.all([
+        // $or 保证同一任务的图节点 + 可见范围双引用只计一次。
+        db.collection('tasks.tasks' as any).countDocuments({
+            domainId,
+            $or: [
+                { 'graph.nodes.params.targetId': hex },
+                { 'access.type': 'user_group', 'access.targetId': id },
+            ],
+        }),
+        db.collection('document' as any).countDocuments({ domainId, docType: 40, groupIds: id }),
+        db.collection('document' as any).countDocuments({ domainId, docType: 30, participantGroupIds: id }),
+    ]);
+    if (taskRefs > 0) {
+        throw new ValidationError('groupId', null, `该用户组被 ${taskRefs} 个任务引用（图节点或可见范围），请先在任务中移除`);
+    }
+    if (courseRefs > 0) {
+        throw new ValidationError('groupId', null, `该用户组被 ${courseRefs} 个课程/训练引用，请先在其中移除`);
+    }
+    if (contestRefs > 0) {
+        throw new ValidationError('groupId', null, `该用户组被 ${contestRefs} 个比赛/作业的参赛范围引用，请先在其中移除`);
+    }
+    // Clean up group invite tokens (ephemeral), then the group itself.
+    await bindTokensColl.deleteMany({ domainId, kind: 'user_group', userGroupId: id } as any);
     await userGroupsColl.deleteOne({ domainId, _id: id });
 }
 
@@ -590,6 +642,7 @@ export async function importStudentsToGroup(
 ): Promise<ImportGroupReport> {
     const group = await userGroupsColl.findOne({ domainId, _id: groupId });
     if (!group) throw new ValidationError('groupId', null, '用户组不存在');
+    if (group.archivedAt) throw new ValidationError('groupId', null, '该用户组已归档，无法导入成员');
     const schoolId = group.schoolId;
 
     const report: ImportGroupReport = {
@@ -878,6 +931,7 @@ export async function assignStudentsToGroup(
     if (studentRecordIds.length === 0) return;
     const group = await userGroupsColl.findOne({ domainId, _id: groupId });
     if (!group) throw new ValidationError('groupId', null, 'Group not found');
+    if (group.archivedAt) throw new ValidationError('groupId', null, '该用户组已归档，无法添加成员');
     await studentsColl.updateMany(
         { domainId, _id: { $in: studentRecordIds }, schoolId: group.schoolId },
         { $addToSet: { groupIds: groupId } as any },
@@ -940,6 +994,8 @@ export const userBindModel = {
     listUserGroups,
     getUserGroup,
     updateUserGroup,
+    archiveUserGroup,
+    unarchiveUserGroup,
     deleteUserGroup,
 
     // Students

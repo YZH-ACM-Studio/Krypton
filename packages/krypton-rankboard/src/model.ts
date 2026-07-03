@@ -1,9 +1,10 @@
-import { ObjectId, UserModel, db } from 'hydrooj';
+import { createHash } from 'crypto';
+import { NotFoundError, ObjectId, UserModel, db } from 'hydrooj';
 import {
-    awardTypesColl, peopleColl, seedAwardTypesIfEmpty, getConfig, setConfig,
+    awardTypesColl, importBatchesColl, peopleColl, seedAwardTypesIfEmpty, getConfig, setConfig,
 } from './db';
 import type {
-    Award, AwardType, LeaderboardRow, PersonRecord,
+    Award, AwardType, ImportBatch, LeaderboardRow, PersonRecord,
 } from './types';
 
 const studentsColl = db.collection<any>('userbind.students');
@@ -140,6 +141,8 @@ export interface BatchImportRow {
     liveRank?: number;
     schoolRank?: number;
     teammates?: string[];
+    /** 可选姓名列 — createMissing 自动建档时必需（PLAN §5）。 */
+    realName?: string;
 }
 
 export interface BatchImportReport {
@@ -147,54 +150,200 @@ export interface BatchImportReport {
     notFound: string[];   // studentId for which no student doc exists
     unknownType: string[];  // award type key not found
     errors: Array<{ line: number; reason: string }>;
+    /** createMissing 开启时自动建档的学生数。 */
+    createdStudents: number;
+    /** 本次导入创建的批次 ID（用于审计/回滚）。 */
+    batchId?: string;
 }
 
 /**
- * Parse a TSV / line-based batch import:
+ * 荣誉榜是 system-domain 单域插件：listLeaderboard 的 UserModel.getList、
+ * gplt store 查询都硬编 'system'。导入的学生/学校查询必须同域，否则从
+ * 子域操作会静默建重复档案（对抗性审查 #3）。
+ */
+export const RANKBOARD_DOMAIN = 'system';
+
+export interface BatchImportOptions {
+    /** 未匹配学号自动在 userbind 建档（需 TSV 带姓名列 + 指定学校）。 */
+    createMissing?: boolean;
+    schoolId?: ObjectId;
+}
+
+function batchContentHash(rows: BatchImportRow[]): string {
+    // Normalized, order-sensitive hash — the same TSV re-pasted verbatim
+    // hits the same hash; reordering rows is treated as a different batch.
+    // realName 不参与（它只影响建档、不影响奖项内容——补姓名列重贴同一批
+    // 奖不应绕过幂等拒绝）。
+    const normalized = rows.map(({ realName, ...rest }) => rest);
+    return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+}
+
+/**
+ * TSV batch import (PLAN 2026-07-02 §5/§6):
  *
- *   studentId TAB awardType TAB contest TAB date TAB liveRank TAB schoolRank TAB teammates(comma-sep)
+ *   studentId TAB awardType TAB contest TAB date TAB liveRank TAB schoolRank TAB team TAB teammates(comma-sep) TAB 姓名(可选)
  *
- * Returns the per-row outcomes for the admin preview UI.
+ * Every run is recorded as an ImportBatch; identical content (same hash,
+ * not rolled back) is rejected — the old path pushed duplicate awards on
+ * every re-run. Awards carry `importBatchId` for one-click rollback.
+ * With `createMissing`, rows whose 学号 has no student record get a record
+ * created via userbind's importStudents (full validation reused) first.
  */
 export async function importAwardsBatch(
     rows: BatchImportRow[],
     actor: number,
+    opts: BatchImportOptions = {},
 ): Promise<BatchImportReport> {
-    const report: BatchImportReport = { ok: 0, notFound: [], unknownType: [], errors: [] };
+    const domainId = RANKBOARD_DOMAIN;
+    const report: BatchImportReport = {
+        ok: 0, notFound: [], unknownType: [], errors: [], createdStudents: 0,
+    };
+    const contentHash = batchContentHash(rows);
+    const batchId = new ObjectId();
+
+    // 批次文档先落库（pending，okCount=0）再逐行导入：中途崩溃时已入库的
+    // 奖项仍带 batchId、批次可见可回滚，contentHash 也占位挡住重导。
+    // 配合 partial unique index，并发双提交同内容时第二个 insert 直接
+    // E11000，check-then-insert 的竞态窗口关闭。
+    const dup = await importBatchesColl.findOne({ contentHash, rolledBackAt: { $exists: false } });
+    if (dup) {
+        report.errors.push({
+            line: 0,
+            reason: `相同内容的批次已于 ${dup.createdAt.toISOString().slice(0, 16)} 导入过（批次 ${dup._id}）；如需重新导入请先回滚该批次`,
+        });
+        return report;
+    }
+    const batchDoc: ImportBatch = {
+        _id: batchId,
+        actor,
+        createdAt: new Date(),
+        source: 'tsv',
+        contentHash,
+        rowCount: rows.length,
+        okCount: 0,
+        createdStudents: 0,
+        report: { ok: 0, notFound: [], unknownType: [], errors: [] },
+    };
+    try {
+        await importBatchesColl.insertOne(batchDoc as any);
+    } catch (e: any) {
+        if (e?.code === 11000) {
+            report.errors.push({ line: 0, reason: '相同内容的批次刚刚已被导入（并发提交），本次已跳过' });
+            return report;
+        }
+        throw e;
+    }
+
     const types = await listAwardTypes({ includeHidden: true });
     const typeKeys = new Set(types.map((t) => t.key));
 
-    for (const [idx, row] of rows.entries()) {
-        if (!row.studentId || !row.type) {
-            report.errors.push({ line: idx + 1, reason: 'missing studentId or type' });
-            continue;
+    try {
+        // createMissing 预处理：把查不到档案且带姓名的行先批量建档，复用
+        // userbind 的 importStudents（校验/查重/自动绑定全在里面）。
+        if (opts.createMissing && opts.schoolId) {
+            const userbind = (global as any).Hydro?.model?.userbind;
+            if (userbind?.importStudents) {
+                const missing: Array<{ studentId: string; realName: string }> = [];
+                const seen = new Set<string>();
+                for (const row of rows) {
+                    if (!row.studentId || !row.realName || seen.has(row.studentId)) continue;
+                    seen.add(row.studentId);
+                    const exists = await studentsColl.findOne({ domainId, studentId: row.studentId });
+                    if (!exists) missing.push({ studentId: row.studentId, realName: row.realName.trim() });
+                }
+                if (missing.length > 0) {
+                    const r = await userbind.importStudents(domainId, opts.schoolId, missing, actor);
+                    report.createdStudents = r?.inserted ?? 0;
+                }
+            }
         }
-        if (!typeKeys.has(row.type)) {
-            report.unknownType.push(row.type);
-            continue;
+
+        for (const [idx, row] of rows.entries()) {
+            if (!row.studentId || !row.type) {
+                report.errors.push({ line: idx + 1, reason: 'missing studentId or type' });
+                continue;
+            }
+            if (!typeKeys.has(row.type)) {
+                report.unknownType.push(row.type);
+                continue;
+            }
+            const student = await studentsColl.findOne({ domainId, studentId: row.studentId });
+            if (!student) {
+                report.notFound.push(row.studentId);
+                continue;
+            }
+            const award: Award = {
+                type: row.type,
+                contest: row.contest,
+                date: row.date,
+                team: row.team,
+                liveRank: row.liveRank,
+                schoolRank: row.schoolRank,
+                teammates: row.teammates,
+                importBatchId: batchId,
+            };
+            // Ensure a person row exists, then push the award.
+            const personId = (await createPerson({
+                studentDocId: student._id, createdBy: actor,
+            }))._id;
+            await addAward(personId, award);
+            report.ok++;
         }
-        const student = await studentsColl.findOne({ studentId: row.studentId });
-        if (!student) {
-            report.notFound.push(row.studentId);
-            continue;
+    } catch (e) {
+        // importStudents 抛异常（如学校不存在）或中途 mongo 故障：若没落任何
+        // 数据就删掉占位批次（否则 contentHash 被永久占用、同 TSV 无法重导），
+        // 然后把异常抛给上层（对抗性审查 G3/焦点 B）。已落部分奖项则保留批次
+        // 供回滚。
+        if (report.ok === 0 && report.createdStudents === 0) {
+            await importBatchesColl.deleteOne({ _id: batchId }).catch(() => { /* best-effort */ });
         }
-        const award: Award = {
-            type: row.type,
-            contest: row.contest,
-            date: row.date,
-            team: row.team,
-            liveRank: row.liveRank,
-            schoolRank: row.schoolRank,
-            teammates: row.teammates,
-        };
-        // Ensure a person row exists, then push the award.
-        const personId = (await createPerson({
-            studentDocId: student._id, createdBy: actor,
-        }))._id;
-        await addAward(personId, award);
-        report.ok++;
+        throw e;
     }
+
+    if (report.ok === 0 && report.createdStudents === 0) {
+        // 没落任何数据 → 删掉占位批次，释放 contentHash 让修正后的重导通过。
+        await importBatchesColl.deleteOne({ _id: batchId });
+        return report;
+    }
+    await importBatchesColl.updateOne({ _id: batchId }, {
+        $set: {
+            okCount: report.ok,
+            createdStudents: report.createdStudents,
+            report: {
+                ok: report.ok,
+                notFound: report.notFound,
+                unknownType: report.unknownType,
+                errors: report.errors,
+            },
+        },
+    });
+    report.batchId = String(batchId);
     return report;
+}
+
+/** 批次列表（审计视图），新→旧。 */
+export async function listImportBatches(limit = 50): Promise<ImportBatch[]> {
+    return await importBatchesColl.find({}).sort({ createdAt: -1 }).limit(limit).toArray();
+}
+
+/**
+ * 回滚一个导入批次：从所有 people 的 awards 数组里 pull 掉带该 batchId 的
+ * 奖项，标记批次 rolledBackAt。批次导入时自动建的 person 行若因此变空，
+ * 保留不删（人工加入的空档案与之无法区分；空行不计分、admin 可手动删）。
+ */
+export async function rollbackImportBatch(batchId: ObjectId, actor: number): Promise<{ pulled: number }> {
+    const batch = await importBatchesColl.findOne({ _id: batchId });
+    if (!batch) throw new NotFoundError('ImportBatch');
+    if (batch.rolledBackAt) return { pulled: 0 };
+    const res = await peopleColl.updateMany(
+        { 'awards.importBatchId': batchId },
+        { $pull: { awards: { importBatchId: batchId } } as any, $set: { updatedAt: new Date() } },
+    );
+    await importBatchesColl.updateOne(
+        { _id: batchId },
+        { $set: { rolledBackAt: new Date(), rolledBackBy: actor } },
+    );
+    return { pulled: res.modifiedCount };
 }
 
 /* ─── scoring + leaderboard ─── */
@@ -339,6 +488,7 @@ export async function listLeaderboard(): Promise<LeaderboardRow[]> {
                 schoolName: school?.name || '—',
                 groupNames,
                 boundUserId: student.boundUserId,
+                enrollmentYear: student.enrollmentYear ?? null,
             } : {
                 _id: person.studentDocId,
                 studentId: '—',
@@ -347,6 +497,7 @@ export async function listLeaderboard(): Promise<LeaderboardRow[]> {
                 schoolName: '—',
                 groupNames: [],
                 boundUserId: null,
+                enrollmentYear: null,
             },
             user: udoc ? {
                 uname: udoc.uname,
@@ -371,6 +522,168 @@ export async function listLeaderboard(): Promise<LeaderboardRow[]> {
         r.rank = lastRank;
     });
     return rows;
+}
+
+/**
+ * 画廊内联上传（PLAN §7）：把一张已上传的图片 URL 挂到指定奖项上。
+ * 用 $addToSet 原子追加（并发两位教师传图不会互相覆盖）；`expectType`
+ * 非空时作为写条件（`awards.<i>.type` 必须匹配），把 TOCTOU 校验做成
+ * 原子写——错位/回滚导致 index 指向别的奖时 matched=0，返回 null 让上层
+ * 回 409（对抗性审查 G8）。
+ */
+export async function addAwardImage(
+    personId: ObjectId, awardIndex: number, url: string, setCover = false, expectType?: string,
+): Promise<string[] | null> {
+    const filter: Record<string, unknown> = { _id: personId };
+    if (expectType) filter[`awards.${awardIndex}.type`] = expectType;
+    const res = await peopleColl.updateOne(filter as any, {
+        $addToSet: { [`awards.${awardIndex}.imageUrls`]: url } as any,
+        $set: { updatedAt: new Date() },
+    });
+    if (!res.matchedCount) return null;
+    // 读回最新数组；setCover 时再把封面指到该 url（单独一次写，非关键路径）。
+    const person = await peopleColl.findOne({ _id: personId });
+    const imageUrls = person?.awards?.[awardIndex]?.imageUrls || [];
+    if (setCover) {
+        const ci = imageUrls.indexOf(url);
+        if (ci >= 0) await peopleColl.updateOne({ _id: personId }, { $set: { [`awards.${awardIndex}.coverIndex`]: ci } as any });
+    }
+    return imageUrls;
+}
+
+/* ─── 荣誉照片墙 (PLAN 2026-07-02 §7) ─── */
+
+export interface GalleryMember {
+    personId: string;
+    realName: string;
+    studentId: string;
+    /** 该成员对应奖项在其 awards 数组中的下标 — 图片上传的写入目标。 */
+    awardIndex: number;
+    /** 天梯赛个人数字分（store 覆盖后），仅 ladder 卡片有意义。 */
+    score?: number;
+}
+
+export interface GalleryCard {
+    kind: 'ladder' | 'icpc';
+    year: number | null;
+    /** ladder = 奖项类型名（天梯赛-团队一等奖）；icpc = 比赛名。 */
+    title: string;
+    typeKey: string;
+    typeName: string;
+    team: string | null;
+    contest: string | null;
+    members: GalleryMember[];
+    imageUrls: string[];
+    coverIndex: number;
+    /** 上传照片时写入哪条奖项（组内第一个成员的对应奖项）。 */
+    uploadTarget: { personId: string; awardIndex: number };
+}
+
+/**
+ * 按年聚合获奖卡片：天梯赛 = 团队奖按 (year, type, team) 去重合并成员；
+ * ICPC/CCPC = 按 (year, contest, team) 一队一卡。年份读取时派生
+ * `gpltYear ?? parseInt(date)`（生产数据 ICPC/CCPC 100% 有 date，天梯有
+ * gpltYear），两者皆缺进 year=null 分组。照片取组内所有成员奖项的并集。
+ */
+export async function buildGallery(): Promise<{ years: Array<{ year: number | null; ladder: GalleryCard[]; icpc: GalleryCard[] }> }> {
+    const [people, awardTypes] = await Promise.all([
+        peopleColl.find({}).toArray(),
+        listAwardTypes({ includeHidden: true }),
+    ]);
+    await applyGpltStoreScores(people);
+    const typeMap = new Map(awardTypes.map((t) => [t.key, t]));
+
+    const studentIds = people.map((p) => p.studentDocId);
+    const students = studentIds.length
+        ? await studentsColl.find({ _id: { $in: studentIds } }).toArray()
+        : [];
+    const studentMap = new Map<string, any>(students.map((s) => [String(s._id), s]));
+
+    const awardYear = (a: Award): number | null => {
+        if (a.gpltYear) return a.gpltYear;
+        const y = a.date ? Number.parseInt(String(a.date).slice(0, 4), 10) : NaN;
+        return Number.isInteger(y) && y >= 2000 && y <= 2100 ? y : gpltYearFromContest(a.contest);
+    };
+
+    const cards = new Map<string, GalleryCard>();
+    // 记录哪些卡片的封面来自奖项上显式设置的 coverIndex——显式封面一旦
+    // 选定就不再被后续奖项的默认首图覆盖。
+    const coverExplicit = new Set<string>();
+    for (const p of people) {
+        const student = studentMap.get(String(p.studentDocId));
+        (p.awards || []).forEach((a, awardIndex) => {
+            const isLadderTeam = String(a.type).startsWith('ladder_team');
+            const isIcpc = /^(icpc|ccpc)/.test(String(a.type));
+            if (!isLadderTeam && !isIcpc) return;
+            const year = awardYear(a);
+            const t = typeMap.get(a.type);
+            // ICPC key 必须含奖级（a.type）：同场比赛里 team 都为空的金奖队和
+            // 铜奖队成员否则会混进同一张卡（对抗性审查 #5）。
+            const key = isLadderTeam
+                ? `L|${year}|${a.type}|${a.team || ''}`
+                : `I|${year}|${a.contest || ''}|${a.type}|${a.team || ''}`;
+            let card = cards.get(key);
+            if (!card) {
+                card = {
+                    kind: isLadderTeam ? 'ladder' : 'icpc',
+                    year,
+                    title: isLadderTeam ? (t?.name || a.type) : (a.contest || t?.name || a.type),
+                    typeKey: a.type,
+                    typeName: t?.name || a.type,
+                    team: a.team || null,
+                    contest: a.contest || null,
+                    members: [],
+                    imageUrls: [],
+                    coverIndex: 0,
+                    uploadTarget: { personId: String(p._id), awardIndex },
+                };
+                cards.set(key, card);
+            }
+            card.members.push({
+                personId: String(p._id),
+                realName: student?.realName || '（档案已删）',
+                studentId: student?.studentId || '—',
+                awardIndex,
+                ...(isLadderTeam && a.score != null ? { score: a.score } : {}),
+            });
+            const explicitCover = a.coverIndex != null;
+            for (const [i, url] of (a.imageUrls || []).entries()) {
+                const isThisAwardCover = i === (a.coverIndex ?? 0);
+                const dupIndex = card.imageUrls.indexOf(url);
+                if (dupIndex < 0) card.imageUrls.push(url);
+                const urlIndex = dupIndex < 0 ? card.imageUrls.length - 1 : dupIndex;
+                // 封面优先级：显式 coverIndex > 卡片第一张图。显式封面选定后
+                // 不被后续奖项的默认首图覆盖；即便封面图与已有图重复（dedupe
+                // 跳过 push），仍按其在卡片里的下标记录封面（对抗性审查 #4）。
+                if (isThisAwardCover && !coverExplicit.has(key) && (explicitCover || urlIndex === 0)) {
+                    card.coverIndex = urlIndex;
+                    if (explicitCover) coverExplicit.add(key);
+                }
+            }
+        });
+    }
+
+    const byYear = new Map<string, { year: number | null; ladder: GalleryCard[]; icpc: GalleryCard[] }>();
+    for (const card of cards.values()) {
+        const yk = card.year == null ? 'unknown' : String(card.year);
+        let bucket = byYear.get(yk);
+        if (!bucket) {
+            bucket = { year: card.year, ladder: [], icpc: [] };
+            byYear.set(yk, bucket);
+        }
+        (card.kind === 'ladder' ? bucket.ladder : bucket.icpc).push(card);
+    }
+    const years = [...byYear.values()].sort((a, b) => {
+        if (a.year == null) return 1;
+        if (b.year == null) return -1;
+        return b.year - a.year;
+    });
+    for (const y of years) {
+        // 奖级高的排前面（order 小 = 奖级高），同级按队名稳定排序。
+        y.ladder.sort((a, b) => (typeMap.get(a.typeKey)?.order ?? 999) - (typeMap.get(b.typeKey)?.order ?? 999) || (a.team || '').localeCompare(b.team || ''));
+        y.icpc.sort((a, b) => (typeMap.get(a.typeKey)?.order ?? 999) - (typeMap.get(b.typeKey)?.order ?? 999) || (a.title || '').localeCompare(b.title || ''));
+    }
+    return { years };
 }
 
 export { getConfig, setConfig };

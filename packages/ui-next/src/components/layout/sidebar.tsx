@@ -1,5 +1,6 @@
 import {
   Award,
+  BookMarked,
   BookOpen,
   ClipboardList,
   Clock,
@@ -100,10 +101,18 @@ export function Sidebar({
       items: [
         { label: '首页', href: bs.urls.home, icon: Home, templates: ['main.html'] },
         { label: '公告', href: '/announce', icon: Megaphone, templates: ['announce_list.html', 'announce_detail.html'] },
-        { label: '题库', href: bs.urls.problems, icon: BookOpen, templates: ['problem_main.html', 'problem_detail.html', 'problem_submit.html', 'problem_hack.html', 'problem_edit.html', 'problem_config.html', 'problem_files.html', 'problem_solution.html', 'problem_statistics.html', 'problem_import.html', 'problem_import_fps.html'] },
+        // §4 题库白名单模式：无 bank 权限的学生不显示题库入口（服务端同步 302）。
+        ...(bs.user.canViewProblemBank !== false
+          ? [{ label: '题库', href: bs.urls.problems, icon: BookOpen, templates: ['problem_main.html', 'problem_detail.html', 'problem_submit.html', 'problem_hack.html', 'problem_edit.html', 'problem_config.html', 'problem_files.html', 'problem_solution.html', 'problem_statistics.html', 'problem_import.html', 'problem_import_fps.html'] }]
+          : []),
+        // 出题人工作台：题库对学生隐藏后，自己 own 的题从这里管理（§4）。
+        ...(bs.user.canCreateProblem && bs.user.canViewProblemBank === false
+          ? [{ label: '我的题目', href: '/problem/mine', icon: BookOpen, templates: ['problem_mine.html'] }]
+          : []),
         { label: '导图', href: '/mindmap', icon: Network, templates: ['mindmap_main.html'] },
         { label: '比赛', href: bs.urls.contests, icon: Trophy, templates: ['contest_main.html', 'contest_detail.html', 'contest_edit.html', 'contest_scoreboard.html', 'xcpcio_board.html', 'contest_manage.html', 'contest_problemlist.html', 'contest_user.html', 'contest_balloon.html', 'contest_clarification.html', 'contest_print.html'] },
         { label: '作业', href: bs.urls.homework, icon: ClipboardList, templates: ['homework_main.html', 'homework_detail.html', 'homework_edit.html', 'homework_files.html'] },
+        { label: '课程', href: '/course', icon: BookMarked, templates: ['course_main.html', 'course_detail.html', 'course_edit.html'] },
         { label: '训练', href: bs.urls.training, icon: GraduationCap, templates: ['training_main.html', 'training_detail.html', 'training_edit.html', 'training_files.html'] },
         { label: '任务', href: '/tasks', icon: ListChecks, templates: ['tasks_center.html', 'tasks_my.html', 'tasks_detail.html'] },
         { label: '验题', href: '/permits/inbox', icon: ShieldCheck, templates: ['my_verify_inbox.html'] },

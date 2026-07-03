@@ -91,7 +91,12 @@ export function TableAction({
     );
   }
 
-  if (formAction) {
+  // NOTE: 用 `!== undefined` 而非真值判断——`formAction=""` 是合法值（标准
+  // HTML 里空 action 表示"提交到当前 URL"）。旧的 `if (formAction)` 把空串
+  // 当 falsy，导致「通过 / 撤销 / 单人令牌」等按钮掉进下面的 no-op
+  // `type=button` 分支、点击毫无反应。想要纯按钮的调用方不传 formAction
+  // （undefined），仍走 onClick 分支。
+  if (formAction !== undefined) {
     return (
       <TableActionForm
         formAction={formAction}
@@ -139,7 +144,9 @@ function TableActionForm({
       <form
         ref={formRef}
         method="post"
-        action={formAction}
+        // 空串省略 action，等同于原生「提交到当前 URL」，避开 React 19 对
+        // 空字符串 action 的特殊处理，与页内正常工作的 <form method="post"> 一致。
+        action={formAction || undefined}
         className="inline-block"
         onSubmit={(e) => {
           if (confirm && !open) {

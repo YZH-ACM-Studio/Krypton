@@ -1560,7 +1560,24 @@ function CaseRow({ c, idx, fileSet, selected, onToggleSelect, onRemove, onUpdate
           </label>
           <label className="col-span-2 flex items-center gap-1.5">
             <Checkbox checked={!!c.hintPublic} onChange={() => onUpdate({ hintPublic: !c.hintPublic })} />
-            <span className="text-[10px] text-muted-foreground">对外公开（题库/训练显示；比赛进行中自动隐藏，赛后恢复）</span>
+            <span className="text-[10px] text-muted-foreground">提示对外公开（题库/训练显示；比赛进行中自动隐藏，赛后恢复）</span>
+          </label>
+          <label className="col-span-2 space-y-0.5">
+            <span className="text-[10px] text-muted-foreground">讲解视频链接（显示在评测详情该测试点旁）</span>
+            <input
+              type="url"
+              value={c.videoUrl || ''}
+              onChange={(e) => onUpdate({ videoUrl: e.target.value.trim() || undefined })}
+              placeholder="https://…（留空 = 无视频）"
+              className="w-full rounded border bg-transparent px-1.5 py-1 text-[11px] outline-none focus:border-primary"
+            />
+          </label>
+          <label className="col-span-2 flex items-center gap-1.5">
+            <Checkbox
+              checked={c.videoPublic ?? !!c.hintPublic}
+              onChange={() => onUpdate({ videoPublic: !(c.videoPublic ?? !!c.hintPublic) })}
+            />
+            <span className="text-[10px] text-muted-foreground">视频对外公开（未单独设置时跟随提示的公开状态）</span>
           </label>
         </div>
       ) : null}

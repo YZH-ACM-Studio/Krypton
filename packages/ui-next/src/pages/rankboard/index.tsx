@@ -281,6 +281,7 @@ export function RankBoardMainPage() {
 
   const [search, setSearch] = useState('');
   const [schoolFilter, setSchoolFilter] = useState<string>('all');
+  const [yearFilter, setYearFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set());
   const [openRow, setOpenRow] = useState<LeaderboardRow | null>(null);
 
@@ -295,10 +296,24 @@ export function RankBoardMainPage() {
     return Array.from(set.keys()).sort();
   }, [data.rows]);
 
+  // 年级（入学年）列表——来自 userbind 派生的 enrollmentYear（PLAN §5）。
+  const enrollmentYears = useMemo(() => {
+    const set = new Set<number>();
+    for (const r of data.rows) {
+      const y = (r.student as any).enrollmentYear;
+      if (y) set.add(y);
+    }
+    return [...set].sort((a, b) => b - a);
+  }, [data.rows]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return data.rows.filter((r) => {
       if (schoolFilter !== 'all' && r.student.schoolName !== schoolFilter) return false;
+      if (yearFilter !== 'all') {
+        const y = (r.student as any).enrollmentYear;
+        if (String(y ?? '') !== yearFilter) return false;
+      }
       if (typeFilter.size > 0) {
         const has = r.person.awards.some((a) => typeFilter.has(a.type));
         if (!has) return false;
@@ -309,7 +324,7 @@ export function RankBoardMainPage() {
       }
       return true;
     });
-  }, [data.rows, schoolFilter, typeFilter, search]);
+  }, [data.rows, schoolFilter, yearFilter, typeFilter, search]);
 
   const top3 = data.rows.slice(0, 3);
   // Rest of the list (rank >= 4) AFTER filter so top 3 are always shown.
@@ -331,6 +346,9 @@ export function RankBoardMainPage() {
         <span className="ml-3 text-xs text-muted-foreground">
           共 {data.rows.length} 人 · 基础分 {data.config.baseScore} · 衰减 {data.config.decayFactor}
         </span>
+        <Button asChild variant="outline" size="sm" className="ml-auto">
+          <a href="/rankboard/gallery">荣誉照片墙</a>
+        </Button>
       </header>
 
       {/* Top 3 podium */}
@@ -362,6 +380,15 @@ export function RankBoardMainPage() {
             options={[
               { value: 'all', label: '全部学校' },
               ...schools.map((s) => ({ value: s, label: s })),
+            ]}
+          />
+          <SimpleSelect
+            value={yearFilter}
+            onValueChange={setYearFilter}
+            className="w-auto min-w-[8rem]"
+            options={[
+              { value: 'all', label: '全部年级' },
+              ...enrollmentYears.map((y) => ({ value: String(y), label: `${y} 级` })),
             ]}
           />
           <details className="flex-1">

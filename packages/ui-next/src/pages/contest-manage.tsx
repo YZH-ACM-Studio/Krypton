@@ -387,12 +387,19 @@ export function ContestEditPage() {
   const schoolCatalog: ScopeOption[] = (data.scopeSchools || []).map((s: any) => ({
     _id: String(s._id), name: s.name,
   }));
-  const groupCatalog: ScopeOption[] = (data.scopeGroups || []).map((g: any) => {
-    const parent = (data.scopeSchools || []).find((s: any) => String(s._id) === String(g.schoolId));
-    return { _id: String(g._id), name: g.name, schoolName: parent?.name };
-  });
   const initialSchoolIds: string[] = (tdoc.participantSchoolIds || []).map((id: any) => String(id));
   const initialGroupIds: string[] = (tdoc.participantGroupIds || []).map((id: any) => String(id));
+  // 已归档组不进常规选择器（PLAN §9）；但已被本比赛引用的历史值保留可解析。
+  const groupCatalog: ScopeOption[] = (data.scopeGroups || [])
+    .filter((g: any) => !g.archivedAt || initialGroupIds.includes(String(g._id)))
+    .map((g: any) => {
+      const parent = (data.scopeSchools || []).find((s: any) => String(s._id) === String(g.schoolId));
+      return {
+        _id: String(g._id),
+        name: g.archivedAt ? `${g.name}（已归档）` : g.name,
+        schoolName: parent?.name,
+      };
+    });
   const [schoolValue, setSchoolValue] = useState<ScopeOption[]>(
     initialSchoolIds.map((id) => schoolCatalog.find((s) => s._id === id) || { _id: id, name: id }),
   );
@@ -1042,7 +1049,8 @@ export function ContestManagePage() {
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
   const [selectedPublic, setSelectedPublic] = useState<Set<string>>(new Set());
   const [selectedPrivate, setSelectedPrivate] = useState<Set<string>>(new Set());
-  const [activeManageTab, setActiveManageTab] = useState<'score' | 'public' | 'private'>('score');
+  const [activeManageTab, setActiveManageTab] = useState<'score' | 'stats' | 'public' | 'private'>('score');
+  const submissionStats: R | null = data.submissionStats || null;
 
   const toggleContestFile = (selected: Set<string>, setSelected: (next: Set<string>) => void, name: string) => {
     const next = new Set(selected);
@@ -1167,13 +1175,14 @@ export function ContestManagePage() {
 
       <ContestManagementChrome tdoc={tdoc} active="overview">
         <div className="space-y-4">
-          <MiniTabs
+          <MiniTabs<'score' | 'stats' | 'public' | 'private'>
             value={activeManageTab}
             onValueChange={setActiveManageTab}
             items={[
-              { value: 'score', label: '题目分值', count: pids.length, icon: ListChecks },
-              { value: 'public', label: '公开文件', count: files.length, icon: FolderOpen },
-              { value: 'private', label: '私有材料', count: privateFiles.length, icon: ShieldCheck },
+              { value: 'score' as const, label: '题目分值', count: pids.length, icon: ListChecks },
+              ...(submissionStats ? [{ value: 'stats' as const, label: '提交统计', count: submissionStats.total || 0, icon: Clock }] : []),
+              { value: 'public' as const, label: '公开文件', count: files.length, icon: FolderOpen },
+              { value: 'private' as const, label: '私有材料', count: privateFiles.length, icon: ShieldCheck },
             ]}
             size="md"
             aria-label="比赛管理功能"
@@ -1219,6 +1228,96 @@ export function ContestManagePage() {
                 ) : (
                   <p className="p-6 text-center text-sm text-muted-foreground">该比赛还没有题目</p>
                 )}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {activeManageTab === 'stats' && submissionStats ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">提交统计</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-2 sm:grid-cols-4">
+                  {[
+                    ['总提交', submissionStats.total ?? 0],
+                    ['AC 数', submissionStats.accepted ?? 0],
+                    ['提交人数', submissionStats.participants ?? 0],
+                    ['人均提交', submissionStats.participants ? (submissionStats.total / submissionStats.participants).toFixed(1) : '—'],
+                  ].map(([label, value]) => (
+                    <div key={String(label)} className="rounded-md border bg-muted/20 px-3 py-2">
+                      <div className="text-[11px] text-muted-foreground">{label}</div>
+                      <div className="font-mono text-sm font-medium">{value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {(submissionStats.byProblem || []).length > 0 ? (
+                  <div>
+                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">按题分布</div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-16 text-center">#</TableHead>
+                          <TableHead>题目</TableHead>
+                          <TableHead className="w-24 text-right">提交</TableHead>
+                          <TableHead className="w-24 text-right">AC</TableHead>
+                          <TableHead className="w-40">AC 率</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(submissionStats.byProblem as R[]).map((row) => {
+                          const idx = pids.indexOf(row.pid);
+                          const p = pdict[String(row.pid)] || {};
+                          const rate = row.total ? row.accepted / row.total : 0;
+                          return (
+                            <TableRow key={String(row.pid)}>
+                              <TableCell className="text-center font-mono font-semibold">
+                                {idx >= 0 ? getAlphabeticId(idx) : '—'}
+                              </TableCell>
+                              <TableCell className="text-sm">{p.title || `P${row.pid}`}</TableCell>
+                              <TableCell className="text-right font-mono">{row.total}</TableCell>
+                              <TableCell className="text-right font-mono">{row.accepted}</TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                                    <div className="h-full rounded-full bg-primary" style={{ width: `${Math.round(rate * 100)}%` }} />
+                                  </div>
+                                  <span className="w-10 text-right font-mono text-[11px] text-muted-foreground">
+                                    {Math.round(rate * 100)}%
+                                  </span>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : null}
+
+                {(submissionStats.byHour || []).length > 0 ? (
+                  <div>
+                    <div className="mb-1.5 text-xs font-medium text-muted-foreground">按小时提交</div>
+                    <div className="space-y-1">
+                      {(() => {
+                        const rows: R[] = submissionStats.byHour;
+                        const max = Math.max(...rows.map((r) => r.count), 1);
+                        return rows.map((r) => (
+                          <div key={r.hour} className="flex items-center gap-2">
+                            <span className="w-28 shrink-0 font-mono text-[11px] text-muted-foreground">
+                              {String(r.hour).replace('T', ' ')}:00
+                            </span>
+                            <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                              <div className="h-full rounded-full bg-primary/70" style={{ width: `${Math.round((r.count / max) * 100)}%` }} />
+                            </div>
+                            <span className="w-10 shrink-0 text-right font-mono text-[11px]">{r.count}</span>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           ) : null}

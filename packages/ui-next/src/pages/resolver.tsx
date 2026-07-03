@@ -3,11 +3,13 @@ import { GenericPage } from '@/pages/generic';
 import { AboutPage, WikiHelpPage } from '@/pages/wiki';
 import { KryptonHomePage } from '@/pages/home';
 import { ProblemsPage } from '@/pages/problems';
+import { ProblemMinePage } from '@/pages/problem-mine';
 import { ProblemDetailPage } from '@/pages/problem-detail';
 import { ProblemSubmitPage } from '@/pages/problem-submit';
 import { ProblemHackPage } from '@/pages/problem-hack';
 import { ContestsPage, ContestDetailPage, ContestScoreboardPage } from '@/pages/contests';
 import { TrainingPage, TrainingDetailPage } from '@/pages/training';
+import { CoursePage, CourseDetailPage, CourseEditPage } from '@/pages/course';
 import { HomeworkPage, HomeworkDetailPage } from '@/pages/homework';
 import { DiscussionsPage, DiscussionDetailPage } from '@/pages/discussions';
 import { RecordsPage, RecordDetailPage } from '@/pages/records';
@@ -99,10 +101,12 @@ import {
   AdminAnnounceEditorPage,
 } from '@/pages/announcement';
 import { RankBoardMainPage, RankBoardDetailPage } from '@/pages/rankboard';
+import { RankBoardGalleryPage } from '@/pages/rankboard/gallery';
 import {
   AdminRankBoardListPage, AdminAwardTypesPage, AdminRankBoardPersonPage,
 } from '@/pages/rankboard/admin';
 import { MindmapPage } from '@/pages/mindmap';
+import { AdminAuthTokenPage } from '@/pages/authtoken';
 
 type PageComponent = React.ComponentType;
 
@@ -114,6 +118,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
 
   // Problems
   'problem_main.html': ProblemsPage,
+  'problem_mine.html': ProblemMinePage,
   'problem_detail.html': ProblemDetailPage,
   'problem_submit.html': ProblemSubmitPage,
   'problem_hack.html': ProblemHackPage,
@@ -145,6 +150,9 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'homework_files.html': HomeworkFilesPage,
 
   // Training
+  'course_main.html': CoursePage,
+  'course_detail.html': CourseDetailPage,
+  'course_edit.html': CourseEditPage,
   'training_main.html': TrainingPage,
   'training_detail.html': TrainingDetailPage,
   'training_edit.html': TrainingEditPage,
@@ -278,6 +286,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
 
   // krypton-rankboard
   'rankboard_main.html': RankBoardMainPage,
+  'rankboard_gallery.html': RankBoardGalleryPage,
   'rankboard_detail.html': RankBoardDetailPage,
   'admin_rankboard.html': AdminRankBoardListPage,
   'admin_rankboard_awards.html': AdminAwardTypesPage,
@@ -285,6 +294,9 @@ const PAGE_MAP: Record<string, PageComponent> = {
 
   // krypton-mindmap
   'mindmap_main.html': MindmapPage,
+
+  // auth-token admin (Krypton access tokens)
+  'admin_authtoken.html': AdminAuthTokenPage,
 };
 
 export function PageResolver() {

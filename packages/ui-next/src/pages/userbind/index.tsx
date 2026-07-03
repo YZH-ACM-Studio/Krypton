@@ -468,26 +468,38 @@ export function AdminUserbindSchoolDetailPage() {
 
 export function AdminUserbindGroupsPage() {
   const data = useBootstrap().page.data as {
-    groups: Array<{ _id: string; name: string; schoolId: string }>;
+    groups: Array<{ _id: string; name: string; schoolId: string; archivedAt?: string }>;
     schools: Array<{ _id: string; name: string }>;
   };
   const schoolNameById = new Map(data.schools.map((s) => [s._id, s.name]));
   const [createOpen, setCreateOpen] = useState(false);
+  // 归档（软删除）：默认隐藏已归档组；只有已归档的组才能永久删除（PLAN §9）。
+  const [showArchived, setShowArchived] = useState(false);
+  const archivedCount = data.groups.filter((g) => g.archivedAt).length;
+  const visibleGroups = showArchived ? data.groups : data.groups.filter((g) => !g.archivedAt);
   return (
     <AdminPage
       title="班级 / 队伍（用户组）"
       description="学校下的学生分组 — 课程班级 / 校队 / 训练队等。"
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       actions={(
-        <Button
-          onClick={() => setCreateOpen(true)}
-          disabled={data.schools.length === 0}
-          title={data.schools.length === 0 ? '请先创建学校' : undefined}
-          className="gap-1"
-        >
-          <Plus className="size-3.5" />
-          新建用户组
-        </Button>
+        <div className="flex items-center gap-3">
+          {archivedCount > 0 ? (
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Checkbox checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+              显示已归档 ({archivedCount})
+            </label>
+          ) : null}
+          <Button
+            onClick={() => setCreateOpen(true)}
+            disabled={data.schools.length === 0}
+            title={data.schools.length === 0 ? '请先创建学校' : undefined}
+            className="gap-1"
+          >
+            <Plus className="size-3.5" />
+            新建用户组
+          </Button>
+        </div>
       )}
     >
       <Card>
@@ -497,27 +509,60 @@ export function AdminUserbindGroupsPage() {
               <TableRow>
                 <TableHead className="pl-5">名称</TableHead>
                 <TableHead>所属学校</TableHead>
-                <TableHead className="w-32">操作</TableHead>
+                <TableHead className="w-56">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.groups.map((g) => (
-                <TableRow key={g._id}>
-                  <TableCell className="pl-5 font-medium">{g.name}</TableCell>
+              {visibleGroups.map((g) => (
+                <TableRow key={g._id} className={g.archivedAt ? 'opacity-60' : undefined}>
+                  <TableCell className="pl-5 font-medium">
+                    {g.name}
+                    {g.archivedAt ? (
+                      <Badge variant="outline" className="ml-2 text-[10px] text-muted-foreground">已归档</Badge>
+                    ) : null}
+                  </TableCell>
                   <TableCell className="text-sm text-muted-foreground">{schoolNameById.get(g.schoolId) || g.schoolId}</TableCell>
                   <TableCell>
                     <TableActions>
                       <TableAction href={`/admin/userbind/groups/${g._id}`}>查看</TableAction>
+                      {g.archivedAt ? (
+                        <>
+                          <TableAction
+                            formAction="/admin/userbind/groups"
+                            hidden={{ operation: 'unarchive', groupId: g._id }}
+                          >
+                            恢复
+                          </TableAction>
+                          <TableAction
+                            variant="destructive"
+                            formAction="/admin/userbind/groups"
+                            hidden={{ operation: 'delete', groupId: g._id }}
+                            confirm={`确认永久删除用户组「${g.name}」？该操作无法恢复。要求：组内无成员且未被任务/课程引用。`}
+                          >
+                            永久删除
+                          </TableAction>
+                        </>
+                      ) : (
+                        <TableAction
+                          formAction="/admin/userbind/groups"
+                          hidden={{ operation: 'archive', groupId: g._id }}
+                          confirm={`归档用户组「${g.name}」？成员关系保留，可随时恢复；归档后不再出现在选择器中。`}
+                        >
+                          归档
+                        </TableAction>
+                      )}
                     </TableActions>
                   </TableCell>
                 </TableRow>
               ))}
-              {data.groups.length === 0 && (
+              {visibleGroups.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
                     {data.schools.length === 0
                       ? '请先在「学校」页创建一个学校，再回来创建用户组。'
-                      : '暂无用户组，点击右上角「新建用户组」开始创建。'}
+                      : data.groups.length > 0
+                        ? '全部用户组均已归档，勾选右上角「显示已归档」查看。'
+                        : '暂无用户组，点击右上角「新建用户组」开始创建。'}
                   </TableCell>
                 </TableRow>
               )}
@@ -606,7 +651,7 @@ function CreateGroupDialog({
 
 export function AdminUserbindGroupDetailPage() {
   const data = useBootstrap().page.data as {
-    group: { _id: string; name: string };
+    group: { _id: string; name: string; archivedAt?: string };
     school: { _id: string; name: string } | null;
     members: Array<{
       _id: string;
@@ -632,8 +677,18 @@ export function AdminUserbindGroupDetailPage() {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const activeTab = data.tab || 'overview';
   const groupHref = `/admin/userbind/groups/${data.group._id}`;
+  const isArchived = !!data.group.archivedAt;
   return (
-    <AdminPage title={`用户组 - ${data.group.name}`} description={data.school?.name} requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
+    <AdminPage
+      title={(
+        <span className="flex items-center gap-2">
+          {`用户组 - ${data.group.name}`}
+          {isArchived ? <Badge variant="outline" className="text-[10px] text-muted-foreground">已归档</Badge> : null}
+        </span>
+      )}
+      description={isArchived ? `${data.school?.name || ''}（已归档：不可添加成员/生成邀请，可移除成员；清空后可在列表页永久删除）` : data.school?.name}
+      requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
+    >
       <div className="flex flex-col gap-4">
         <MiniTabs
           value={activeTab}
@@ -642,7 +697,8 @@ export function AdminUserbindGroupDetailPage() {
           items={[
             { value: 'overview', label: '总览', icon: LinkIcon, href: `${groupHref}?tab=overview` },
             { value: 'members', label: '人员', count: memberTotal, icon: Users, href: `${groupHref}?tab=members` },
-            { value: 'add', label: '添加人员', icon: UserPlus, href: `${groupHref}?tab=add` },
+            // 归档组不可扩员（PLAN §9）——移除成员仍可用
+            ...(isArchived ? [] : [{ value: 'add', label: '添加人员', icon: UserPlus, href: `${groupHref}?tab=add` }]),
           ]}
         />
 
@@ -682,11 +738,15 @@ export function AdminUserbindGroupDetailPage() {
               <CardHeader className="px-5 pb-3 pt-5">
                 <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-base">
                   <span className="flex items-center gap-2"><LinkIcon className="size-4" />用户组邀请链接</span>
-                  <form method="post" className="flex flex-wrap items-end gap-2">
-                    <input type="hidden" name="operation" value="generateLink" />
-                    <Input name="ttlDays" type="number" placeholder="有效天数（留空=永久）" className="w-[180px]" />
-                    <Button type="submit" size="sm">生成新链接</Button>
-                  </form>
+                  {isArchived ? (
+                    <span className="text-xs font-normal text-muted-foreground">已归档：不可生成新邀请，既有链接已失效</span>
+                  ) : (
+                    <form method="post" className="flex flex-wrap items-end gap-2">
+                      <input type="hidden" name="operation" value="generateLink" />
+                      <Input name="ttlDays" type="number" placeholder="有效天数（留空=永久）" className="w-[180px]" />
+                      <Button type="submit" size="sm">生成新链接</Button>
+                    </form>
+                  )}
                 </CardTitle>
               </CardHeader>
               <CardContent className="px-5 pb-5">
@@ -1020,7 +1080,8 @@ export function AdminUserbindStudentsImportPage() {
                 placeholder="选择用户组"
                 options={[
                   { value: '', label: '选择用户组' },
-                  ...data.groups.map((g) => ({ value: g._id, label: g.name })),
+                  // 已归档组不可作为导入目标（PLAN §9）
+                  ...data.groups.filter((g: any) => !g.archivedAt).map((g) => ({ value: g._id, label: g.name })),
                 ]}
               />
             </FormField>

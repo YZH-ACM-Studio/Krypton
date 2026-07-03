@@ -37,6 +37,7 @@ export function setStatus(domainId: string, tid: ObjectId, uid: number, $set: an
 export function add(
     domainId: string, title: string, content: string,
     owner: number, dag: TrainingNode[] = [], description = '', pin = 0,
+    extra: Partial<TrainingDoc> = {},
 ) {
     return document.add(domainId, content, owner, document.TYPE_TRAINING, null, null, null, {
         dag,
@@ -44,6 +45,8 @@ export function add(
         description,
         attend: 0,
         pin,
+        // Krypton 课程模块（§10）：kind/courseGroupIds/term 等课程专属字段。
+        ...extra,
     });
 }
 

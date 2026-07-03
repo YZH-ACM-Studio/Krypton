@@ -253,6 +253,11 @@ export interface TrainingNode {
     title: string;
     requireNids: number[];
     pids: number[];
+    /**
+     * Krypton 课程模块（PLAN 2026-07-02 §10）：章节引用的比赛/作业 tid 列表
+     * （引用制——比赛在比赛模块独立创建，章节只存 tid）。仅 course 用。
+     */
+    tids?: ObjectId[];
 }
 
 export interface Tdoc extends Document {
@@ -365,6 +370,16 @@ export interface TrainingDoc extends Omit<Tdoc, 'docType'> {
     description: string;
     pin?: number;
     dag: TrainingNode[];
+    /**
+     * Krypton 课程模块（PLAN 2026-07-02 §10）：`kind` 区分「训练」（题集
+     * 容器，缺省）与「课程」（教师主导教学，含章节+比赛+班级范围）。同
+     * docType 40，训练列表查询排除 course，存量零迁移。
+     */
+    kind?: 'training' | 'course';
+    /** 课程可见范围：绑定的 userbind 班级 id（空 = 全域可见）。仅 course。 */
+    courseGroupIds?: ObjectId[];
+    /** 课程学期等元信息（自由文本），仅展示用。仅 course。 */
+    term?: string;
 }
 
 export interface DomainDoc extends Record<string, any> {
@@ -472,6 +487,81 @@ export interface TokenDoc {
     updateAt: Date;
     expireAt: Date;
     [key: string]: any;
+}
+
+/**
+ * Per-channel attribute constraints for an auth token. Each consuming plugin
+ * interprets the keys relevant to its channel (e.g. krypton-userbind reads
+ * `schools`/`years`, krypton-tasks reads `scoreLevels`). Loose by design so a
+ * new channel can add keys without a schema migration. See lib/auth-token.ts.
+ */
+export interface ScopeFilters {
+    /** userbind schoolId hex strings the token may touch. */
+    schools?: string[];
+    /** enrollmentYear cohorts the token may touch. */
+    years?: number[];
+    /** PAT/GPLT/CSP level keys the token may enter scores for. */
+    scoreLevels?: string[];
+    [key: string]: unknown;
+}
+
+/**
+ * A user-bound API access token ("kat" = Krypton Access Token). The plaintext
+ * is shown once at issue and never persisted — only its SHA-256 `hash` is
+ * stored. `uid: null` means a pure service token (vigil-style, channel-only).
+ * See lib/auth-token.ts for the lifecycle + resolution logic.
+ */
+export interface AuthTokenDoc {
+    _id: ObjectId;
+    /** SHA-256 hex of the presented token. Unique. */
+    hash: string;
+    /** Non-secret prefix (e.g. `kat_AbCd…`) for identifying the token in lists. */
+    display: string;
+    domainId: string;
+    /** Bound Hydro user, or null for a pure service token. */
+    uid: number | null;
+    /** Endpoint channels this token may reach. */
+    channels: string[];
+    /** Permission-bitmask cap (decimal string; bigint is not BSON-native). null = PERM_ALL. */
+    scopeMask: string | null;
+    /** Per-channel attribute filters. */
+    scopeFilters: ScopeFilters;
+    label: string;
+    createdBy: number;
+    createdAt: Date;
+    lastUsedAt: Date | null;
+    /** null = never expires; a past date is reaped by the TTL index. */
+    expiresAt: Date | null;
+    revoked: boolean;
+}
+
+/**
+ * One problem imported by the crawler tool. Dedups re-crawls (unique on
+ * (domainId, sourceUrl)) and carries the external key (cid + problemId) so the
+ * testdata-align step can match a contest's testdata zip back to the problem.
+ * See handler/crawler.ts + docs/PLAN-2026-06-11-crawler-tool.md.
+ */
+export interface CrawlerImportDoc {
+    _id: ObjectId;
+    domainId: string;
+    /** Created problem's docId. */
+    docId: number;
+    /** Created problem's pid (may be ''). */
+    pid: string;
+    /** Source site, e.g. 'hdu' | 'pta'. */
+    source: string;
+    /** Dedup key. */
+    sourceUrl: string;
+    /** Contest id for testdata matching (null if N/A). */
+    cid: number | null;
+    /** Problem number/letter within the contest, for testdata matching. */
+    problemId: string | null;
+    /** Crawled limits, applied to config.yaml when testdata is attached. */
+    timeLimit: string;
+    memoryLimit: string;
+    createdBy: number;
+    createdAt: Date;
+    updatedAt?: Date;
 }
 
 export interface OplogDoc extends Record<string, any> {
@@ -633,6 +723,8 @@ declare module './service/db' {
         check: System;
         message: MessageDoc;
         token: TokenDoc;
+        'authtoken.tokens': AuthTokenDoc;
+        'crawler.imported': CrawlerImportDoc;
         status: any;
         oauth: OauthMap;
         system: System;

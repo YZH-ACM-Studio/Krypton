@@ -54,6 +54,41 @@ export interface Award {
     imageUrls?: string[];
     /** Index into imageUrls for the cover image; default 0. */
     coverIndex?: number;
+    /**
+     * Back-link to the import batch that created this award
+     * (PLAN 2026-07-02 §6) — enables audit and one-click rollback.
+     * Absent on manually-entered / pre-batch awards.
+     */
+    importBatchId?: ObjectId;
+}
+
+/**
+ * One TSV import run (PLAN 2026-07-02 §6). `contentHash` de-duplicates
+ * re-imports of identical content (the old import path pushed duplicate
+ * awards on every re-run); `rolledBackAt` marks a batch whose awards have
+ * been pulled back out.
+ */
+export interface ImportBatch {
+    _id: ObjectId;
+    actor: number;
+    createdAt: Date;
+    source: 'tsv';
+    /** sha256 over the normalized row array. */
+    contentHash: string;
+    rowCount: number;
+    okCount: number;
+    /** 自动建档的学生数（createMissing 开启时）。 */
+    createdStudents: number;
+    report: BatchImportReportSummary;
+    rolledBackAt?: Date;
+    rolledBackBy?: number;
+}
+
+export interface BatchImportReportSummary {
+    ok: number;
+    notFound: string[];
+    unknownType: string[];
+    errors: Array<{ line: number; reason: string }>;
 }
 
 /**
@@ -107,6 +142,8 @@ export interface LeaderboardRow {
         schoolName: string;
         groupNames: string[];
         boundUserId: number | null;
+        /** 入学年（userbind 派生），荣誉榜按年级筛选用；档案缺失时 null。 */
+        enrollmentYear: number | null;
     };
     user: {
         uname: string;

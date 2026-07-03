@@ -147,8 +147,17 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             langs,
             statusTexts: STATUS_TEXTS,
         };
-        if (this.user.hasPriv(PRIV.PRIV_VIEW_JUDGE_STATISTICS) && stat) {
-            this.response.body.statistics = await record.stat(allDomain ? undefined : domainId);
+        if (stat) {
+            // Contest scope (PLAN 2026-07-02 §8): owner/teacher only — a
+            // student (incl. the vigil exam shell) never satisfies this, so
+            // the exam-mode record list DOM is unchanged for them.
+            if (tid && this.tdoc && (this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST))) {
+                this.response.body.statistics = await record.stat(domainId, tid);
+                this.response.body.statisticsScope = 'contest';
+            } else if (this.user.hasPriv(PRIV.PRIV_VIEW_JUDGE_STATISTICS)) {
+                this.response.body.statistics = await record.stat(allDomain ? undefined : domainId);
+                this.response.body.statisticsScope = allDomain ? 'all' : 'domain';
+            }
         }
     }
 }
@@ -252,8 +261,17 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
                     const normalized = normalizeSubtasks(parsed.subtasks || [], (s: string) => s, parsed.time, parsed.memory, true);
                     for (const st of normalized) {
                         for (const c of (st.cases || []) as any[]) {
-                            if (c?.hintPublic && (c.hint || c.videoUrl)) {
-                                testHints[`${st.id}-${c.id}`] = { hint: c.hint, videoUrl: c.videoUrl };
+                            if (!c) continue;
+                            // Hint and video have independent publish flags;
+                            // videoPublic falls back to hintPublic when unset
+                            // so pre-existing configs keep their behavior.
+                            const showHint = c.hintPublic && c.hint;
+                            const showVideo = (c.videoPublic ?? c.hintPublic) && c.videoUrl;
+                            if (showHint || showVideo) {
+                                testHints[`${st.id}-${c.id}`] = {
+                                    ...(showHint ? { hint: c.hint } : {}),
+                                    ...(showVideo ? { videoUrl: c.videoUrl } : {}),
+                                };
                             }
                         }
                     }

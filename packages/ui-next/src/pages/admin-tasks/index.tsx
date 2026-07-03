@@ -97,7 +97,21 @@ interface TaskDoc {
 }
 
 interface SchoolRef { _id: string; name: string }
-interface GroupRef { _id: string; schoolId: string; name: string }
+interface GroupRef { _id: string; schoolId: string; name: string; archivedAt?: string }
+
+/**
+ * 用户组下拉选项：常规选择器过滤已归档组（PLAN 2026-07-02 §9）；
+ * 当前已选中的历史值保留并标注「已归档」，保证旧任务的引用仍可解析。
+ */
+function groupSelectOptions(userGroups: GroupRef[], schools: SchoolRef[], selected?: string) {
+  return userGroups
+    .filter((g) => !g.archivedAt || g._id === selected)
+    .map((g) => {
+      const s = schools.find((s2) => s2._id === g.schoolId);
+      const base = `${s ? `${s.name} / ` : ''}${g.name}`;
+      return { value: g._id, label: g.archivedAt ? `${base}（已归档）` : base };
+    });
+}
 interface ContestRef { _id: string; title: string; beginAt?: string; rule?: string }
 interface HomeworkRef { _id: string; title: string; beginAt?: string }
 interface TrainingRef { _id: string; title: string }
@@ -538,10 +552,7 @@ export function AdminTasksEditPage() {
                     placeholder="— 选择 —"
                     options={[
                       { value: '', label: '— 选择 —' },
-                      ...data.userGroups.map((g) => {
-                        const s = data.schools.find((s2) => s2._id === g.schoolId);
-                        return { value: g._id, label: `${s ? `${s.name} / ` : ''}${g.name}` };
-                      }),
+                      ...groupSelectOptions(data.userGroups, data.schools, accessTargetId),
                     ]}
                   />
                 </FormField>
@@ -916,10 +927,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
           placeholder="— 选择用户组 —"
           options={[
             { value: '', label: '— 选择用户组 —' },
-            ...userGroups.map((g) => {
-              const s = schools.find((sc) => sc._id === g.schoolId);
-              return { value: g._id, label: `${s ? `${s.name} / ` : ''}${g.name}` };
-            }),
+            ...groupSelectOptions(userGroups, schools, value || ''),
           ]}
         />
       </FormField>
@@ -1015,10 +1023,7 @@ export function AdminTasksAssignPage() {
                   placeholder="— 选择 —"
                   options={[
                     { value: '', label: '— 选择 —' },
-                    ...data.userGroups.map((g) => {
-                      const s = data.schools.find((s2) => s2._id === g.schoolId);
-                      return { value: g._id, label: `${s ? `${s.name} / ` : ''}${g.name}` };
-                    }),
+                    ...groupSelectOptions(data.userGroups, data.schools, targetId),
                   ]}
                 />
               </FormField>

@@ -91,11 +91,31 @@ export const PERM = {
     PERM_CREATE_TASK: 1n << 72n,
     PERM_MANAGE_TASKS: 1n << 73n,
 
+    // Krypton: problem bank listing (the /p page). Problem *detail* access is
+    // still governed by canViewBy; this only gates the bank browsing UI.
+    PERM_VIEW_PROBLEM_BANK: 1n << 74n,
+
+    // Krypton: rankboard (荣誉榜). IMPORT = data ops (import awards, edit
+    // persons, upload photos); MANAGE = structural ops (award types, scoring
+    // config, deletes).
+    PERM_RANKBOARD_IMPORT: 1n << 75n,
+    PERM_RANKBOARD_MANAGE: 1n << 76n,
+
+    // Krypton: userbind student-record data ops (import students, manage
+    // group membership). Structural ops (delete school/group) stay admin.
+    PERM_USERBIND_MANAGE_STUDENTS: 1n << 77n,
+
+    // Krypton: course module (docType 40 with kind='course').
+    PERM_CREATE_COURSE: 1n << 78n,
+    PERM_EDIT_COURSE: 1n << 79n,
+
     // Placeholder
     PERM_ALL: -1n,
     PERM_BASIC: 0n,
     PERM_DEFAULT: 0n,
     PERM_ADMIN: -1n,
+    PERM_STUDENT: 0n,
+    PERM_TEACHER: 0n,
 
     PERM_NEVER: 1n << 60n,
 };
@@ -161,6 +181,40 @@ PERM.PERM_DEFAULT = PERM.PERM_VIEW
     | PERM.PERM_VIEW_RECORD;
 
 PERM.PERM_ADMIN = PERM.PERM_ALL;
+
+// Krypton four-tier roles (see docs/PLAN-2026-07-02-teacher-tasklist.md §1).
+//
+// 学生 — PERM_DEFAULT minus training creation (courses/trainings are authored
+// by teachers; problem bank browsing is intentionally NOT granted — the bank
+// page is teacher+ only, students reach problems via 导图/训练/比赛).
+// NOTE: not wired into BUILTIN_ROLES — the production `default` role is
+// tightened by an explicit role write at deploy time (PLAN §14), so upstream
+// domains keep vanilla PERM_DEFAULT semantics until then.
+PERM.PERM_STUDENT = PERM.PERM_DEFAULT & ~PERM.PERM_CREATE_TRAINING;
+
+// 教师 — everything a student has, plus authoring (problems / contests /
+// homework / courses), student-data ops, rankboard data import and reading
+// student submissions. Structural / destructive ops stay with admin.
+// Deliberately NOT granted: PERM_READ_PROBLEM_DATA (owning a problem already
+// covers downloading its own testdata — the global bit would let any teacher
+// pull another teacher's unpublished contest data).
+PERM.PERM_TEACHER = PERM.PERM_DEFAULT
+    | PERM.PERM_CREATE_PROBLEM
+    | PERM.PERM_VIEW_PROBLEM_HIDDEN
+    | PERM.PERM_VIEW_PROBLEM_BANK
+    | PERM.PERM_CREATE_CONTEST
+    | PERM.PERM_VIEW_HIDDEN_CONTEST
+    | PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD
+    | PERM.PERM_CREATE_HOMEWORK
+    | PERM.PERM_VIEW_HIDDEN_HOMEWORK
+    | PERM.PERM_VIEW_HOMEWORK_HIDDEN_SCOREBOARD
+    | PERM.PERM_CREATE_TRAINING
+    | PERM.PERM_CREATE_COURSE
+    | PERM.PERM_READ_RECORD_CODE
+    | PERM.PERM_REJUDGE_PROBLEM
+    | PERM.PERM_CREATE_TASK
+    | PERM.PERM_RANKBOARD_IMPORT
+    | PERM.PERM_USERBIND_MANAGE_STUDENTS;
 
 export const PRIV = {
     PRIV_NONE: 0,

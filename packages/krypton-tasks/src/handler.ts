@@ -30,8 +30,8 @@
  *   POST /admin/tasks/settings
  */
 import {
-    Context, DocumentModel, Handler, NotFoundError, ObjectId, OplogModel,
-    param, PRIV, ProblemModel, Types, UserModel, ValidationError,
+    Context, DocumentModel, ForbiddenError, Handler, NotFoundError, ObjectId, OplogModel,
+    param, PRIV, ProblemModel, requireAuthToken, Types, UserModel, ValidationError,
 } from 'hydrooj';
 import { userBindModel } from '@hydrooj/krypton-userbind';
 import { canCreateTask, canManageAllTasks, canModifyTask } from './auth';
@@ -1405,9 +1405,249 @@ class AdminSettingsHandler extends Handler {
     }
 }
 
+// ─── Token-gated scores API (auth-token channel `scores`) ────────────────────
+//
+// Powers the desktop toolkit's score-entry tool. Auth = the `scores` channel on
+// a user-bound access token (minted by an admin in /admin/authtoken); the data
+// scope = the token's `scopeFilters.years` (attribute scope — a scoped token can
+// read/write ONLY its allowed years). Full Hydro-admin is NOT required: an admin
+// delegates narrow score-entry by issuing a token with channels:['scores'] +
+// scopeFilters:{years:[…]}. Currently covers GPLT (天梯赛); PAT/CSP can be added
+// as sibling routes the same way. This is the first plugin consumer of the
+// auth-token system (validates the plugin-api export) + of scopeFilters.
+// Shared base for the token-gated /api/scores/* endpoints: bound-user check +
+// year-scope parsing + student-identity resolution. GPLT/PAT carry a year so
+// they honor the token's year scope; CSP has no year (see CspScoresApiHandler).
+abstract class ScoresApiBase extends Handler {
+    noCheckPermView = true;
+    scopeYears: number[] | null = null;
+
+    async prepare() {
+        const { doc, scopeFilters } = await requireAuthToken(this, 'scores');
+        // Scores carry createdBy/updatedBy; a pure service token (no bound user)
+        // must not author them.
+        if (doc.uid == null) throw new ForbiddenError('录入分数需要绑定用户的令牌');
+        const ys = scopeFilters.years;
+        this.scopeYears = Array.isArray(ys)
+            ? ys.filter((y): y is number => Number.isInteger(y))
+            : null; // null = unscoped (no year constraint)
+    }
+
+    /** Whether this token may read/write `year`. */
+    protected yearAllowed(year: number): boolean {
+        return this.scopeYears === null || this.scopeYears.includes(year);
+    }
+
+    /** Resolve studentDocId → {studentId, realName} for a result set. */
+    protected async studentDict(domainId: string, docs: any[]) {
+        const ids = Array.from(new Set(docs.map((s) => String(s.studentDocId))))
+            .map((s) => new ObjectId(s));
+        const dict: Record<string, { studentId: string; realName: string }> = {};
+        await Promise.all(ids.map(async (sid) => {
+            const st = await userBindModel.getStudent(domainId, sid);
+            if (st) dict[String(sid)] = { studentId: st.studentId, realName: st.realName };
+        }));
+        return dict;
+    }
+}
+
+class ScoresApiHandler extends ScoresApiBase {
+    @param('year', Types.Int, true)
+    @param('level', Types.String, true)
+    async get({ domainId }: { domainId: string }, year = 0, level = '') {
+        const filter: any = { domainId };
+        if (level && GPLT_LEVELS_OK.includes(level as GpltLevel)) filter.level = level;
+        if (year) {
+            if (!this.yearAllowed(year)) {
+                this.response.body = { domainId, scopeYears: this.scopeYears, scores: [] };
+                return;
+            }
+            filter.year = year;
+        } else if (this.scopeYears) {
+            filter.year = { $in: this.scopeYears };
+        }
+        // `any[]` matches AdminScoresHandler — the `db.collection<T>` wrapper here
+        // doesn't propagate T through `.find().toArray()` (pre-existing quirk).
+        const docs: any[] = await gpltScoreColl.find(filter)
+            .sort({ year: -1, studentDocId: 1 }).limit(500).toArray();
+        const dict = await this.studentDict(domainId, docs);
+        this.response.body = {
+            domainId,
+            scopeYears: this.scopeYears,
+            scores: docs.map((d) => ({
+                id: d._id.toHexString(),
+                studentId: dict[String(d.studentDocId)]?.studentId || '',
+                realName: dict[String(d.studentDocId)]?.realName || '',
+                level: d.level,
+                year: d.year,
+                score: d.score,
+                rank: d.rank,
+            })),
+        };
+    }
+
+    @param('studentId', Types.String)
+    @param('level', Types.String)
+    @param('year', Types.Int)
+    @param('score', Types.Float)
+    @param('rank', Types.Int, true)
+    async postUpsert(
+        { domainId }: { domainId: string },
+        studentId: string, level: string, year: number, score: number, rank: number,
+    ) {
+        if (!GPLT_LEVELS_OK.includes(level as GpltLevel)) throw new ValidationError('level');
+        if (!this.yearAllowed(year)) throw new ForbiddenError(`令牌无权录入 ${year} 年的分数`);
+        const student = await findStudentDoc(domainId, studentId);
+        if (!student) {
+            throw new ValidationError('studentId', null, `学号 ${studentId}: 未找到学生档案(或跨校重名)`);
+        }
+        const settings = await taskModel.getDomainSettings(domainId);
+        const safe = clampScore(score, settings.maxGpltScore);
+        await gpltScoreColl.updateOne(
+            { domainId, studentDocId: student._id, level: level as GpltLevel, year },
+            {
+                $set: { score: safe, rank: rank || null, updatedAt: new Date(), updatedBy: this.user._id },
+                $setOnInsert: { _id: new ObjectId(), createdAt: new Date(), createdBy: this.user._id },
+            },
+            { upsert: true },
+        );
+        await OplogModel.log(this as any, 'scores.gplt.upsert', {
+            worker: this.user.uname, studentId, level, year, score: safe, rank: rank || null,
+        });
+        this.response.body = { ok: true };
+    }
+}
+
+// PAT (机试) — keyed by (level, year, season). Year-scoped like GPLT.
+class PatScoresApiHandler extends ScoresApiBase {
+    @param('year', Types.Int, true)
+    @param('level', Types.String, true)
+    @param('season', Types.String, true)
+    async get({ domainId }: { domainId: string }, year = 0, level = '', season = '') {
+        const filter: any = { domainId };
+        if (level && PAT_LEVELS_OK.includes(level as PatLevel)) filter.level = level;
+        if (season && PAT_SEASONS_OK.includes(season as PatSeason)) filter.season = season;
+        if (year) {
+            if (!this.yearAllowed(year)) {
+                this.response.body = { domainId, scopeYears: this.scopeYears, scores: [] };
+                return;
+            }
+            filter.year = year;
+        } else if (this.scopeYears) {
+            filter.year = { $in: this.scopeYears };
+        }
+        const docs: any[] = await patScoreColl.find(filter)
+            .sort({ year: -1, season: 1, studentDocId: 1 }).limit(500).toArray();
+        const dict = await this.studentDict(domainId, docs);
+        this.response.body = {
+            domainId,
+            scopeYears: this.scopeYears,
+            scores: docs.map((d) => ({
+                id: d._id.toHexString(),
+                studentId: dict[String(d.studentDocId)]?.studentId || '',
+                realName: dict[String(d.studentDocId)]?.realName || '',
+                level: d.level,
+                year: d.year,
+                season: d.season,
+                score: d.score,
+            })),
+        };
+    }
+
+    @param('studentId', Types.String)
+    @param('level', Types.String)
+    @param('year', Types.Int)
+    @param('season', Types.String)
+    @param('score', Types.Float)
+    async postUpsert(
+        { domainId }: { domainId: string },
+        studentId: string, level: string, year: number, season: string, score: number,
+    ) {
+        if (!PAT_LEVELS_OK.includes(level as PatLevel)) throw new ValidationError('level');
+        if (!PAT_SEASONS_OK.includes(season as PatSeason)) throw new ValidationError('season');
+        if (!this.yearAllowed(year)) throw new ForbiddenError(`令牌无权录入 ${year} 年的分数`);
+        const student = await findStudentDoc(domainId, studentId);
+        if (!student) {
+            throw new ValidationError('studentId', null, `学号 ${studentId}: 未找到学生档案(或跨校重名)`);
+        }
+        const settings = await taskModel.getDomainSettings(domainId);
+        const safe = clampScore(score, settings.maxPatScore);
+        await patScoreColl.updateOne(
+            { domainId, studentDocId: student._id, level: level as PatLevel, year, season: season as PatSeason },
+            {
+                $set: { score: safe, updatedAt: new Date(), updatedBy: this.user._id },
+                $setOnInsert: { _id: new ObjectId(), createdAt: new Date(), createdBy: this.user._id },
+            },
+            { upsert: true },
+        );
+        await OplogModel.log(this as any, 'scores.pat.upsert', {
+            worker: this.user.uname, studentId, level, year, season, score: safe,
+        });
+        this.response.body = { ok: true };
+    }
+}
+
+// CSP (认证) — keyed by `round` only; the doc has NO year, so the token's
+// year scope cannot constrain it. Any bound-user `scores` token may read/write
+// CSP (the year-scope simply has nothing to filter). scopeYears is still echoed
+// for client display.
+class CspScoresApiHandler extends ScoresApiBase {
+    @param('round', Types.Int, true)
+    async get({ domainId }: { domainId: string }, round = 0) {
+        const filter: any = { domainId };
+        if (round) filter.round = round;
+        const docs: any[] = await cspScoreColl.find(filter)
+            .sort({ round: -1, studentDocId: 1 }).limit(500).toArray();
+        const dict = await this.studentDict(domainId, docs);
+        this.response.body = {
+            domainId,
+            scopeYears: this.scopeYears,
+            scores: docs.map((d) => ({
+                id: d._id.toHexString(),
+                studentId: dict[String(d.studentDocId)]?.studentId || '',
+                realName: dict[String(d.studentDocId)]?.realName || '',
+                round: d.round,
+                score: d.score,
+            })),
+        };
+    }
+
+    @param('studentId', Types.String)
+    @param('round', Types.Int)
+    @param('score', Types.Float)
+    async postUpsert(
+        { domainId }: { domainId: string },
+        studentId: string, round: number, score: number,
+    ) {
+        if (!round || round < 1) throw new ValidationError('round', null, '认证次数无效');
+        const student = await findStudentDoc(domainId, studentId);
+        if (!student) {
+            throw new ValidationError('studentId', null, `学号 ${studentId}: 未找到学生档案(或跨校重名)`);
+        }
+        const settings = await taskModel.getDomainSettings(domainId);
+        const safe = clampScore(score, settings.maxCspScore);
+        await cspScoreColl.updateOne(
+            { domainId, studentDocId: student._id, round },
+            {
+                $set: { score: safe, updatedAt: new Date(), updatedBy: this.user._id },
+                $setOnInsert: { _id: new ObjectId(), createdAt: new Date(), createdBy: this.user._id },
+            },
+            { upsert: true },
+        );
+        await OplogModel.log(this as any, 'scores.csp.upsert', {
+            worker: this.user.uname, studentId, round, score: safe,
+        });
+        this.response.body = { ok: true };
+    }
+}
+
 // ─── Route registration ──────────────────────────────────────────────────
 
 export function applyHandlers(ctx: Context) {
+    // Token-gated (auth-token channel `scores`); no PRIV gate — prepare() enforces.
+    ctx.Route('scores_api_gplt', '/api/scores/gplt', ScoresApiHandler);
+    ctx.Route('scores_api_pat', '/api/scores/pat', PatScoresApiHandler);
+    ctx.Route('scores_api_csp', '/api/scores/csp', CspScoresApiHandler);
     // User-facing
     ctx.Route('tasks_center', '/tasks', TaskCenterHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('tasks_my', '/tasks/my', TaskMyHandler, PRIV.PRIV_USER_PROFILE);

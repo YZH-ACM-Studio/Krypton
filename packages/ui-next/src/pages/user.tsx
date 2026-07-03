@@ -53,12 +53,22 @@ export function UserDetailPage() {
   const submitCount = Number(udoc.nSubmit ?? 0);
   const lastActive = sdoc?.updateAt || udoc.loginat;
 
+  // 真实身份（krypton-userbind 注入）：绑定状态所有人可见；姓名/学号仅登录
+  // 用户可见（服务端过滤，未登录时字段不下发）。有绑定档案时它是唯一真源，
+  // 用户自填的 studentId/school 不再展示（防止两个学号打架）。
+  const binding: R | null = data.studentBinding || null;
+  const isBound = !!binding?.bound;
+
   const contactItems = [
     { label: '邮箱', value: udoc.mail, icon: Mail },
     { label: 'QQ', value: udoc.qq, icon: MessageSquare },
     { label: '微信', value: udoc.wechat, icon: MessageSquare },
-    { label: '学号', value: udoc.studentId, icon: Hash },
-    { label: '学校', value: udoc.school, icon: UserIcon },
+    ...(isBound ? [
+      { label: '学号', value: binding.studentId, icon: Hash },
+    ] : [
+      { label: '学号', value: udoc.studentId, icon: Hash },
+      { label: '学校', value: udoc.school, icon: UserIcon },
+    ]),
   ].filter((it) => it.value);
 
   // Top tag histogram — normalise widths from the largest count
@@ -84,12 +94,24 @@ export function UserDetailPage() {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <h1 className="text-2xl font-bold truncate">{name}</h1>
-                {udoc.displayName ? (
+                {isBound && binding.realName ? (
+                  <p className="text-sm text-muted-foreground">
+                    {binding.realName}
+                    {binding.studentId ? <span className="ml-1.5 font-mono">{binding.studentId}</span> : null}
+                  </p>
+                ) : udoc.displayName ? (
                   <p className="text-sm text-muted-foreground">{udoc.displayName}</p>
                 ) : null}
                 <div className="mt-2 flex flex-wrap justify-center gap-1.5 sm:justify-start">
                   {udoc.role ? <Badge variant="outline" className="text-[10px]">{udoc.role}</Badge> : null}
-                  {udoc.school ? <Badge variant="secondary" className="text-[10px]">{udoc.school}</Badge> : null}
+                  {binding ? (
+                    isBound ? (
+                      <Badge className="border-transparent bg-green-600/15 text-[10px] text-green-700 dark:text-green-400">已绑定</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground">未绑定</Badge>
+                    )
+                  ) : null}
+                  {!isBound && udoc.school ? <Badge variant="secondary" className="text-[10px]">{udoc.school}</Badge> : null}
                   <Badge variant="outline" className="text-[10px] font-mono">UID {udoc._id ?? '?'}</Badge>
                 </div>
               </div>

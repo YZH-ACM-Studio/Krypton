@@ -80,6 +80,12 @@ export interface ImportBatch {
     /** 自动建档的学生数（createMissing 开启时）。 */
     createdStudents: number;
     report: BatchImportReportSummary;
+    /**
+     * 始终存在的回滚标记——partial unique 索引用它（MongoDB partial index
+     * 不支持 `$exists:false`，必须用等值 `{rolledBack:false}`）。`rolledBackAt`
+     * 保留作时间戳。
+     */
+    rolledBack: boolean;
     rolledBackAt?: Date;
     rolledBackBy?: number;
 }

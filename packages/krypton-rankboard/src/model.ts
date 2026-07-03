@@ -205,7 +205,7 @@ export async function importAwardsBatch(
     // 奖项仍带 batchId、批次可见可回滚，contentHash 也占位挡住重导。
     // 配合 partial unique index，并发双提交同内容时第二个 insert 直接
     // E11000，check-then-insert 的竞态窗口关闭。
-    const dup = await importBatchesColl.findOne({ contentHash, rolledBackAt: { $exists: false } });
+    const dup = await importBatchesColl.findOne({ contentHash, rolledBack: false });
     if (dup) {
         report.errors.push({
             line: 0,
@@ -223,6 +223,7 @@ export async function importAwardsBatch(
         okCount: 0,
         createdStudents: 0,
         report: { ok: 0, notFound: [], unknownType: [], errors: [] },
+        rolledBack: false,
     };
     try {
         await importBatchesColl.insertOne(batchDoc as any);
@@ -341,7 +342,7 @@ export async function rollbackImportBatch(batchId: ObjectId, actor: number): Pro
     );
     await importBatchesColl.updateOne(
         { _id: batchId },
-        { $set: { rolledBackAt: new Date(), rolledBackBy: actor } },
+        { $set: { rolledBack: true, rolledBackAt: new Date(), rolledBackBy: actor } },
     );
     return { pulled: res.modifiedCount };
 }

@@ -19,9 +19,11 @@ export async function ensureIndexes(): Promise<void> {
         configColl.createIndex({ _id: 1 }),
         // 未回滚批次的 contentHash 唯一——把 check-then-insert 的并发竞态
         // 关死（第二个同内容 insert 直接 E11000）；已回滚批次不占位。
+        // partial index 只支持等值，故用布尔 `rolledBack:false` 而非
+        // `rolledBackAt $exists`（后者内部转 $not，partial index 不允许）。
         importBatchesColl.createIndex(
             { contentHash: 1 },
-            { unique: true, partialFilterExpression: { rolledBackAt: { $exists: false } } },
+            { unique: true, partialFilterExpression: { rolledBack: false } },
         ),
         importBatchesColl.createIndex({ createdAt: -1 }),
     ]);

@@ -521,9 +521,25 @@ export function TrainingDetailPage() {
                             <span className="truncate text-sm font-medium">{p.title || '未命名'}</span>
                           </div>
                           <div className="ml-5 mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
-                            <span>通过率 {p.nSubmit ? Math.round((p.nAccept / p.nSubmit) * 100) : 0}%</span>
-                            <span>·</span>
-                            <span>{p.nAccept || 0}/{p.nSubmit || 0}</span>
+                            {p.origStat ? (
+                              <>
+                                <span>
+                                  赛时 {p.origStat.accepted}/{p.origStat.submitted}
+                                  {' '}({p.origStat.submitted > 0 ? Math.round((p.origStat.accepted / p.origStat.submitted) * 100) : 0}%)
+                                </span>
+                                <span>·</span>
+                                <span>
+                                  本站 {p.nAccept || 0}/{p.nSubmit || 0}
+                                  {' '}({p.nSubmit ? Math.round((p.nAccept / p.nSubmit) * 100) : 0}%)
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span>通过率 {p.nSubmit ? Math.round((p.nAccept / p.nSubmit) * 100) : 0}%</span>
+                                <span>·</span>
+                                <span>{p.nAccept || 0}/{p.nSubmit || 0}</span>
+                              </>
+                            )}
                           </div>
                         </div>
                         {accepted

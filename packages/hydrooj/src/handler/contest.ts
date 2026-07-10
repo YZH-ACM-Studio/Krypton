@@ -370,7 +370,58 @@ export class ContestPrintHandler extends ContestDetailBaseHandler {
     }
 }
 
+/**
+ * 本场每题实时通过统计（PLAN 2026-07 P1.4，仅 rule=acm）。
+ * 双口径：按人（acUsers/triedUsers）主显 + 按提交（acSubmits/totalSubmits）tooltip。
+ * 30s 内存缓存——生产 record 全量 8.7 万，单次聚合毫秒级，缓存只为挡住刷新风暴。
+ */
+interface ContestLiveStat {
+    acUsers: number;
+    triedUsers: number;
+    acSubmits: number;
+    totalSubmits: number;
+}
+const liveStatsCache = new Map<string, { at: number, data: Record<string, ContestLiveStat> }>();
+
+async function getContestLiveStats(domainId: string, tid: ObjectId, pids: number[]) {
+    const key = `${domainId}/${tid.toHexString()}`;
+    const hit = liveStatsCache.get(key);
+    if (hit && Date.now() - hit.at < 30 * 1000) return hit.data;
+    const rows = await record.coll.aggregate([
+        { $match: { domainId, contest: tid, pid: { $in: pids } } },
+        {
+            $group: {
+                _id: { pid: '$pid', uid: '$uid' },
+                subs: { $sum: 1 },
+                acSubs: { $sum: { $cond: [{ $eq: ['$status', STATUS.STATUS_ACCEPTED] }, 1, 0] } },
+            },
+        },
+        {
+            $group: {
+                _id: '$_id.pid',
+                triedUsers: { $sum: 1 },
+                acUsers: { $sum: { $cond: [{ $gt: ['$acSubs', 0] }, 1, 0] } },
+                totalSubmits: { $sum: '$subs' },
+                acSubmits: { $sum: '$acSubs' },
+            },
+        },
+    ], { maxTimeMS: 5000 }).toArray();
+    const data: Record<string, ContestLiveStat> = {};
+    for (const r of rows as any[]) {
+        data[String(r._id)] = {
+            acUsers: r.acUsers, triedUsers: r.triedUsers, acSubmits: r.acSubmits, totalSubmits: r.totalSubmits,
+        };
+    }
+    // 简单容量上限：缓存按需重建，别让长期在线进程无界增长。
+    if (liveStatsCache.size > 200) liveStatsCache.clear();
+    liveStatsCache.set(key, { at: Date.now(), data });
+    return data;
+}
+
 export class ContestProblemListHandler extends ContestDetailBaseHandler {
+    /** 考试壳（exam-mode）子类置 false——本场热度数据不进考试客户端 payload。 */
+    protected liveStatsEnabled = true;
+
     @param('tid', Types.ObjectId)
     async prepare(domainId: string, tid: ObjectId) {
         if (contest.RULES[this.tdoc.rule].hidden) throw new ContestNotFoundError(domainId, tid);
@@ -388,6 +439,11 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
         this.response.body = {
             pdict, psdict: {}, udict, rdict: {}, tdoc: this.tdoc, tcdocs,
         };
+        // P1.4：仅 ACM 下发本场每题统计；上方两道 throw（未开赛/未报名且未结束）
+        // 已保证可见性门槛（与题目可见同 gate）。
+        if (this.liveStatsEnabled && this.tdoc.rule === 'acm') {
+            this.response.body.liveStats = await getContestLiveStats(domainId, tid, this.tdoc.pids);
+        }
         this.response.template = 'contest_problemlist.html';
         this.response.body.showScore = Object.values(this.tdoc.score || {}).some((i) => i && i !== 100);
         if (!this.tsdoc) return;

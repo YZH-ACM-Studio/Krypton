@@ -101,6 +101,12 @@ export class ProblemModel {
         ...ProblemModel.PROJECTION_LIST,
         'content', 'html', 'data', 'config', 'additional_file',
         'reference', 'maintainer',
+        // 原赛通过率：只进 PUBLIC 不进 LIST——RecordDetailHandler 等以
+        // PROJECTION_LIST 取 pdoc 的路径在比赛进行中会原样回传 pdoc，
+        // 放进 LIST 会把难度提示漏给赛中考生（对抗审查发现）。
+        // 消费点（训练详情/题目详情）都走 PUBLIC；比赛/考试上下文的
+        // 剥离见 handler/problem.ts 与 handler/paper.ts。
+        'origStat',
     ];
 
     static default = {

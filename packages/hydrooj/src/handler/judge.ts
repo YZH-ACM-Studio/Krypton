@@ -13,6 +13,7 @@ import {
     BadRequestError, FileLimitExceededError, ForbiddenError, ProblemIsReferencedError, ValidationError,
 } from '../error';
 import { RecordDoc, Task } from '../interface';
+import { mergeSubjectiveScores, parseProblemConfigObject } from '../lib/problem-config';
 import { Logger } from '../logger';
 import * as builtin from '../model/builtin';
 import { PERM, STATUS } from '../model/builtin';
@@ -120,6 +121,25 @@ export class JudgeResultCallbackContext {
 
     static async postJudge(rdoc: RecordDoc, context?: JudgeResultCallbackContext) {
         if (rdoc.contest?.toString().startsWith('0'.repeat(23))) return;
+        // Rev.12：重判会把 score/status 重置为纯自动判分——若记录已有主观题
+        // 人工分（rdoc.subjective），以新自动分为 baseScore 合并回去，
+        // 人工评分不因 rejudge 丢失（lib/problem-config.ts mergeSubjectiveScores）。
+        if (rdoc.subjective?.scores && Object.keys(rdoc.subjective.scores).length) {
+            try {
+                const rawPdoc = await problem.get(rdoc.domainId, rdoc.pid, undefined, true);
+                const merged = mergeSubjectiveScores(rdoc, parseProblemConfigObject(rawPdoc));
+                if (merged) {
+                    await record.update(rdoc.domainId, rdoc._id, {
+                        score: merged.score, status: merged.status, subjective: merged.subjective,
+                    } as any);
+                    rdoc.score = merged.score;
+                    rdoc.status = merged.status;
+                    rdoc.subjective = merged.subjective;
+                }
+            } catch (e: any) {
+                logger.warn('subjective merge failed for %s: %s', rdoc._id, e?.message);
+            }
+        }
         const accept = rdoc.status === builtin.STATUS.STATUS_ACCEPTED;
         const updated = await problem.updateStatus(rdoc.domainId, rdoc.pid, rdoc.uid, rdoc._id, rdoc.status, rdoc.score);
         if (rdoc.contest) await contest.updateStatus(rdoc.domainId, rdoc.contest, rdoc.uid, rdoc._id, rdoc.pid, rdoc);
@@ -131,7 +151,9 @@ export class JudgeResultCallbackContext {
         const pdoc = (accept && updated)
             ? await problem.inc(rdoc.domainId, rdoc.pid, 'nAccept', 1)
             : await problem.get(rdoc.domainId, rdoc.pid, undefined, true);
-        if (pdoc && isNormalSubmission) {
+        // STATUS_SHORT_TEXTS 无 WAITING 等键——含主观题的待阅记录不计入
+        // 题目 stats，防止 `stats.undefined` 污染（对抗审查 MINOR）。
+        if (pdoc && isNormalSubmission && builtin.STATUS_SHORT_TEXTS[rdoc.status]) {
             await Promise.all([
                 problem.inc(pdoc.domainId, pdoc.docId, `stats.${builtin.STATUS_SHORT_TEXTS[rdoc.status]}`, 1),
                 problem.inc(pdoc.domainId, pdoc.docId, `stats.s${Math.floor(rdoc.score)}`, 1),

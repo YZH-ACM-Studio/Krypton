@@ -1,112 +1,116 @@
 import { useBootstrap } from '@/lib/bootstrap';
-import { GenericPage } from '@/pages/generic';
-import { AboutPage, WikiHelpPage } from '@/pages/wiki';
-import { KryptonHomePage } from '@/pages/home';
-import { ProblemsPage } from '@/pages/problems';
-import { ProblemMinePage } from '@/pages/problem-mine';
-import { ProblemDetailPage } from '@/pages/problem-detail';
-import { ProblemSubmitPage } from '@/pages/problem-submit';
-import { ProblemHackPage } from '@/pages/problem-hack';
-import { ContestsPage, ContestDetailPage, ContestScoreboardPage } from '@/pages/contests';
-import { TrainingPage, TrainingDetailPage } from '@/pages/training';
-import { CoursePage, CourseDetailPage, CourseEditPage } from '@/pages/course';
-import { HomeworkPage, HomeworkDetailPage } from '@/pages/homework';
-import { DiscussionsPage, DiscussionDetailPage } from '@/pages/discussions';
-import { RecordsPage, RecordDetailPage } from '@/pages/records';
-import { RankingPage } from '@/pages/ranking';
-import { BlogDetailPage, BlogEditPage, BlogMainPage } from '@/pages/blog';
-import { FpsImportPage, TelegramLoginPage, XcpcioBoardPage } from '@/pages/plugin-pages';
-import {
-  LoginPage, RegisterPage, LogoutPage, LostPasswordPage,
-  RegisterMailSentPage, LostPasswordMailSentPage, LostPasswordWithCodePage,
-  UserDeletePendingPage, ChangeMailSentPage,
-} from '@/pages/auth';
-import { UserDetailPage } from '@/pages/user';
-import { UserAccountPage } from '@/pages/user-account';
-import { SudoPage, SudoRedirectPage } from '@/pages/sudo';
-import { ProblemEditPage } from '@/pages/problem-edit';
-import {
-  ProblemConfigPage, ProblemFilesPage, ProblemSolutionPage,
-  ProblemStatisticsPage, ProblemImportPage,
-} from '@/pages/problem-manage';
-import {
-  ContestEditPage, ContestManagePage, ContestProblemListPage,
-  ContestUserPage, ContestBalloonPage, ContestClarificationPage,
-  ContestPrintPage,
-} from '@/pages/contest-manage';
-import { HomeworkEditPage, HomeworkFilesPage } from '@/pages/homework-manage';
-import { TrainingEditPage, TrainingFilesPage } from '@/pages/training-manage';
-import { DiscussionCreatePage, DiscussionEditPage } from '@/pages/discussion-manage';
 import { DomainDashboardPage, ManageDashboardPage, StatusPage } from '@/pages/admin';
 import {
+  AdminTasksAssignPage,
+  AdminTasksCandidatesPage,
+  AdminTasksEditPage,
+  AdminTasksListPage,
+  AdminTasksScoresPage,
+  AdminTasksSettingsPage,
+  AdminTasksStatsPage,
+} from '@/pages/admin-tasks';
+import {
+  AdminAnnounceCategoriesPage,
+  AdminAnnounceEditorPage,
+  AdminAnnounceListPage, AnnounceDetailPage,
+  AnnounceListPage } from '@/pages/announcement';
+import {
+  ChangeMailSentPage,
+  LoginPage, LogoutPage, LostPasswordMailSentPage, LostPasswordPage,
+  LostPasswordWithCodePage,
+  RegisterMailSentPage, RegisterPage, UserDeletePendingPage } from '@/pages/auth';
+import { AdminAuthTokenPage } from '@/pages/authtoken';
+import { BlogDetailPage, BlogEditPage, BlogMainPage } from '@/pages/blog';
+import { ClientRequiredNoticePage } from '@/pages/client-required-notice';
+import {
+  ContestBalloonPage, ContestClarificationPage,
+  ContestEditPage, ContestManagePage, ContestPrintPage,
+  ContestProblemListPage,
+  ContestUserPage } from '@/pages/contest-manage';
+import { ContestDetailPage, ContestScoreboardPage, ContestsPage } from '@/pages/contests';
+import { CourseDetailPage, CourseEditPage, CoursePage } from '@/pages/course';
+import { DiscussionCreatePage, DiscussionEditPage } from '@/pages/discussion-manage';
+import { DiscussionDetailPage, DiscussionsPage } from '@/pages/discussions';
+import {
   DomainEditPage,
-  DomainUserPage,
+  DomainGroupPage,
   DomainPermissionPage,
   DomainRolePage,
-  DomainGroupPage,
+  DomainUserPage,
 } from '@/pages/domain-manage';
 import {
-  DomainCreatePage, DomainJoinPage, DomainJoinApplicationsPage,
   ContestModePage,
-} from '@/pages/domain-misc';
+  DomainCreatePage, DomainJoinApplicationsPage,
+  DomainJoinPage } from '@/pages/domain-misc';
+import { BsodPage, ErrorPage } from '@/pages/error';
+import { ExamContestPage } from '@/pages/exam-mode/contest';
+import { ExamModeHomePage } from '@/pages/exam-mode/index';
+import { ExamPaperPage } from '@/pages/exam-mode/paper';
+import { ContestWorkspacePage } from '@/pages/exam-mode/workspace';
+import { GenericPage } from '@/pages/generic';
+import { KryptonHomePage } from '@/pages/home';
+import { HomeworkDetailPage, HomeworkPage } from '@/pages/homework';
+import { HomeworkEditPage, HomeworkFilesPage } from '@/pages/homework-manage';
+import { MindmapPage } from '@/pages/mindmap';
+import { DomainsPage } from '@/pages/misc';
+import { PaperCenterPage } from '@/pages/paper-center';
+import { PaperCenterEditPage } from '@/pages/paper-center-edit';
+import { PaperCenterGradingPage } from '@/pages/paper-center-grading';
+import { MyVerifyInboxPage } from '@/pages/permits/inbox';
+import { FpsImportPage, TelegramLoginPage, XcpcioBoardPage } from '@/pages/plugin-pages';
+import { ProblemDetailPage } from '@/pages/problem-detail';
+import { ProblemEditPage } from '@/pages/problem-edit';
+import { ProblemHackPage } from '@/pages/problem-hack';
 import {
-  ManageSettingPage,
+  ProblemConfigPage, ProblemFilesPage, ProblemImportPage,
+  ProblemSolutionPage,
+  ProblemStatisticsPage } from '@/pages/problem-manage';
+import { ProblemMinePage } from '@/pages/problem-mine';
+import { ProblemSubmitPage } from '@/pages/problem-submit';
+import { ProblemsPage } from '@/pages/problems';
+import { RankBoardDetailPage, RankBoardMainPage } from '@/pages/rankboard';
+import {
+  AdminAwardTypesPage, AdminRankBoardListPage, AdminRankBoardPersonPage,
+} from '@/pages/rankboard/admin';
+import { RankBoardGalleryPage } from '@/pages/rankboard/gallery';
+import { RankingPage } from '@/pages/ranking';
+import { RealPassManagePage } from '@/pages/realpass-manage';
+import { RecordDetailPage, RecordsPage } from '@/pages/records';
+import { SpikeWebViewProbePage } from '@/pages/spike-webview';
+import { SudoPage, SudoRedirectPage } from '@/pages/sudo';
+import {
   ManageConfigPage,
   ManageScriptPage,
+  ManageSettingPage,
   ManageUserImportPage,
   ManageUserPrivPage,
 } from '@/pages/system-manage';
-import { DomainsPage } from '@/pages/misc';
-import { ErrorPage, BsodPage } from '@/pages/error';
+import { TaskCenterPage, TaskDetailPage, TaskMyPage } from '@/pages/tasks';
+import { TrainingDetailPage, TrainingPage } from '@/pages/training';
+import { TrainingEditPage, TrainingFilesPage } from '@/pages/training-manage';
+import { UserDetailPage } from '@/pages/user';
+import { UserAccountPage } from '@/pages/user-account';
 import {
-  AdminUserbindOverviewPage,
-  AdminUserbindSchoolsPage,
-  AdminUserbindSchoolDetailPage,
-  AdminUserbindGroupsPage,
   AdminUserbindGroupDetailPage,
-  AdminUserbindStudentsPage,
-  AdminUserbindStudentsImportPage,
-  AdminUserbindTokensPage,
+  AdminUserbindGroupsPage,
+  AdminUserbindOverviewPage,
   AdminUserbindRequestsPage,
-  UserBindPage,
+  AdminUserbindSchoolDetailPage,
+  AdminUserbindSchoolsPage,
+  AdminUserbindStudentsImportPage,
+  AdminUserbindStudentsPage,
+  AdminUserbindTokensPage,
   UserBindApplicationsPage,
-  UserBindLandingPage,
-  UserBindSuccessPage,
   UserBindClaimPage,
+  UserBindLandingPage,
+  UserBindPage,
+  UserBindSuccessPage,
 } from '@/pages/userbind';
-import { SpikeWebViewProbePage } from '@/pages/spike-webview';
-import { ExamModeHomePage } from '@/pages/exam-mode/index';
-import { ExamContestPage } from '@/pages/exam-mode/contest';
-import { ExamPaperPage } from '@/pages/exam-mode/paper';
-import { ContestWorkspacePage } from '@/pages/exam-mode/workspace';
-import { ClientRequiredNoticePage } from '@/pages/client-required-notice';
 import {
-  AdminVigilOverviewPage,
   AdminVigilExamDetailPage,
+  AdminVigilOverviewPage,
 } from '@/pages/vigil';
-import { TaskCenterPage, TaskMyPage, TaskDetailPage } from '@/pages/tasks';
-import { MyVerifyInboxPage } from '@/pages/permits/inbox';
-import {
-  AdminTasksListPage,
-  AdminTasksEditPage,
-  AdminTasksAssignPage,
-  AdminTasksStatsPage,
-  AdminTasksCandidatesPage,
-  AdminTasksScoresPage,
-  AdminTasksSettingsPage,
-} from '@/pages/admin-tasks';
-import {
-  AnnounceListPage, AnnounceDetailPage,
-  AdminAnnounceListPage, AdminAnnounceCategoriesPage,
-  AdminAnnounceEditorPage,
-} from '@/pages/announcement';
-import { RankBoardMainPage, RankBoardDetailPage } from '@/pages/rankboard';
-import { RankBoardGalleryPage } from '@/pages/rankboard/gallery';
-import {
-  AdminRankBoardListPage, AdminAwardTypesPage, AdminRankBoardPersonPage,
-} from '@/pages/rankboard/admin';
-import { MindmapPage } from '@/pages/mindmap';
-import { AdminAuthTokenPage } from '@/pages/authtoken';
+import { AboutPage, WikiHelpPage } from '@/pages/wiki';
 
 type PageComponent = React.ComponentType;
 
@@ -219,6 +223,10 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'manage_config.html': ManageConfigPage,
   'manage_user_import.html': ManageUserImportPage,
   'manage_user_priv.html': ManageUserPrivPage,
+  'manage_realpass.html': RealPassManagePage,
+  'paper_center.html': PaperCenterPage,
+  'paper_center_edit.html': PaperCenterEditPage,
+  'paper_center_grading.html': PaperCenterGradingPage,
 
   // Misc
   'status.html': StatusPage,

@@ -10,26 +10,24 @@
  *
  * Server provides: tdoc, pdict, cells, broadcasts, scoreboard, allowSubmitByKind, etc.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ChevronLeft, ChevronRight, Lock, PanelLeftClose, PanelLeftOpen, Save, Send,
+import { Lock, PanelLeftClose, PanelLeftOpen, Save, Send,
 } from 'lucide-react';
-import { useBootstrap } from '@/lib/bootstrap';
-import { cn } from '@/lib/cn';
-import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { SimpleSelect } from '@/components/ui/select';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ExamDetailShell, type ExamSection, useExamSection } from '@/components/layout/exam-shell';
 import { MarkdownView } from '@/components/markdown-renderer';
-import { ExamDetailShell, useExamSection, type ExamSection } from '@/components/layout/exam-shell';
 import {
-  BlankRenderer, CellCard, CellNavigator, Countdown, FillProgramRenderer,
-  groupCellsByKind, KIND_LABELS, MiniTabBar, MultiChoiceRenderer, PaperStatusPill,
-  SingleChoiceRenderer, type CellStatus, type PaperCell, type QuestionKind,
-} from '@/components/paper/paper-shell';
+  BlankRenderer, CellCard, CellNavigator, type CellStatus, Countdown, FillProgramRenderer,
+  groupCellsByKind, KIND_LABELS, MiniTabBar, MultiChoiceRenderer, type PaperCell, PaperStatusPill,
+  type QuestionKind,
+  SingleChoiceRenderer } from '@/components/paper/paper-shell';
 import { RegionEditor } from '@/components/paper/region-editor';
 import {
   AnnouncementsSection, OverviewSection, RankingSection,
 } from '@/components/paper/sections';
+import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { SimpleSelect } from '@/components/ui/select';
+import { useBootstrap } from '@/lib/bootstrap';
 
 interface PdocLike {
   docId: number;
@@ -41,7 +39,7 @@ interface PdocLike {
     template?: {
       lang: string;
       source: string;
-      regions: Array<{ id: string; start: { line: number; col: number }; end: { line: number; col: number }; prompt?: string }>;
+      regions: Array<{ id: string, start: { line: number, col: number }, end: { line: number, col: number }, prompt?: string }>;
       sourceHash: string;
     };
     langs?: string[];
@@ -91,9 +89,9 @@ export function ExamPaperPage() {
     cells: PaperCell[];
     now: number;
     inWindow: boolean;
-    owner: { uid: number; uname: string } | null;
-    broadcasts: Array<{ _id: string; content: string; createdAt: string }>;
-    scoreboard: Array<{ rank: number; uid: number; uname: string; realName?: string; studentId?: string; score: number }>;
+    owner: { uid: number, uname: string } | null;
+    broadcasts: Array<{ _id: string, content: string, createdAt: string }>;
+    scoreboard: Array<{ rank: number, uid: number, uname: string, realName?: string, studentId?: string, score: number }>;
     showScoreboard: boolean;
     allowSubmitByKind: boolean;
   };
@@ -300,7 +298,7 @@ function ProblemsSection({
       body: form.toString(),
     });
     if (!res.ok) {
-      alert('保存失败：' + res.statusText);
+      alert(`保存失败：${res.statusText}`);
       return;
     }
     setDrafts((prev) => ({
@@ -325,7 +323,7 @@ function ProblemsSection({
       body: form.toString(),
     });
     if (!res.ok) {
-      alert('提交本类失败：' + res.statusText);
+      alert(`提交本类失败：${res.statusText}`);
       return;
     }
     const body = await res.json();
@@ -336,13 +334,11 @@ function ProblemsSection({
       const judgeMap = body.judgeResults || {};
       for (const [pidStr, results] of Object.entries(judgeMap)) {
         const pid = Number(pidStr);
-        if (next[pid]) {
-          next[pid] = {
-            ...next[pid],
-            judgeResult: { ...(next[pid].judgeResult || {}), ...(results as any) },
-            lockedKinds: [...(next[pid].lockedKinds || []), activeKind],
-          };
-        }
+        next[pid] &&= {
+          ...next[pid],
+          judgeResult: { ...(next[pid].judgeResult || {}), ...(results as any) },
+          lockedKinds: [...(next[pid].lockedKinds || []), activeKind],
+        };
       }
       return next;
     });
@@ -352,18 +348,18 @@ function ProblemsSection({
     await saveDraftForPid(pid);
     const res = await fetch(`/paper/${tid}/submit-code/${pid}`, { method: 'POST' });
     if (!res.ok) {
-      alert('提交失败：' + res.statusText);
+      alert(`提交失败：${res.statusText}`);
       return;
     }
     const { rid } = await res.json();
-    alert('已提交评测，评测记录 ID: ' + rid);
+    alert(`已提交评测，评测记录 ID: ${rid}`);
   };
 
   const finalize = async () => {
     if (!window.confirm('确认交卷？交卷后将不能再编辑答案。')) return;
     const res = await fetch(`/paper/${tid}/finalize`, { method: 'POST' });
     if (!res.ok) {
-      alert('交卷失败：' + res.statusText);
+      alert(`交卷失败：${res.statusText}`);
       return;
     }
     const { count } = await res.json();
@@ -564,6 +560,7 @@ function CellEditor({
       )}
       {cell.kind === 'single' && (
         <SingleChoiceRenderer
+          name={`paper-${cell.pid}-${cell.questionKey}`}
           value={(draft.answers[cell.questionKey!] as string) || null}
           options={options}
           onChange={onAnswerChange}
@@ -591,6 +588,19 @@ function CellEditor({
           onChange={onAnswerChange}
           disabled={isLocked}
         />
+      )}
+      {cell.kind === 'subjective' && (
+        <div className="space-y-1.5">
+          <textarea
+            value={(draft.answers[cell.questionKey!] as string) || ''}
+            onChange={(e) => onAnswerChange(e.target.value)}
+            disabled={isLocked}
+            rows={6}
+            className="w-full rounded-md border bg-background p-3 text-sm disabled:opacity-60"
+            placeholder="在此作答（主观题）"
+          />
+          <p className="text-[11px] text-muted-foreground">本题为主观题，交卷后由老师人工评分。</p>
+        </div>
       )}
       {cell.kind === 'fill_function' && pdoc.config.template && (
         <RegionEditor

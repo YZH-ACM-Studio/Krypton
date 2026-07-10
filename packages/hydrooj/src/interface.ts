@@ -8,6 +8,7 @@ import type {
     FileInfo, RecordJudgeInfo, RecordPayload,
 } from '@hydrooj/common/types';
 import type { Context } from './context';
+import type { ClientQuestion } from './lib/problem-config';
 import type { PrintTaskStatus } from './model/contest';
 import type { DocStatusType } from './model/document';
 import type { OauthMap } from './model/oauth';
@@ -154,6 +155,14 @@ export interface ProblemConfig {
     subType?: string;
     target?: string;
     hackable?: boolean;
+    /**
+     * 客观题的学生端题目描述符（**无标准答案**），parseConfig 对
+     * type=objective 生成——普通题目页/比赛/homework 的结构化
+     * 渲染器消费（PLAN 2026-07 P3.2 Rev.11）。
+     */
+    questions?: ClientQuestion[];
+    /** 客观题选项（questionKey → 选项文本），与 questions[].choices 同源。 */
+    options?: Record<string, string[]>;
 }
 
 export type Content = string | Record<string, string>;
@@ -183,6 +192,18 @@ declare module './model/problem' {
         html?: boolean;
         stats?: any;
         difficulty?: number;
+        /**
+         * 赛时通过率（原赛通过数据）：题目在原始比赛（牛客/杭电等外站）
+         * 当时的通过/提交数。来源：real_pass_percent 老插件数据一次性迁移
+         * + /manage/realpass 手动录入。比赛/考试进行中会在题面剥离
+         * （见 handler/problem.ts 的 contest-mode strip）。
+         */
+        origStat?: {
+            accepted: number;
+            submitted: number;
+            updatedBy: number;
+            updatedAt: Date;
+        };
         sort?: string;
         reference?: {
             domainId: string;

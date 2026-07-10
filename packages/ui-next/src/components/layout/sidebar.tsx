@@ -1,5 +1,6 @@
 import {
   Award,
+  BarChart3,
   BookMarked,
   BookOpen,
   ClipboardList,
@@ -8,30 +9,31 @@ import {
   Home,
   LayoutDashboard,
   ListChecks,
+  type LucideIcon,
   Medal,
   Megaphone,
   MessageSquare,
   Network,
+  NotebookPen,
   ShieldAlert,
   ShieldCheck,
   Swords,
   Trophy,
   Wrench,
   X,
-  type LucideIcon,
 } from 'lucide-react';
-import { useBootstrap } from '@/lib/bootstrap';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { cn } from '@/lib/cn';
-import { canSeeAdminAffordance } from '@/lib/perms';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useBootstrap } from '@/lib/bootstrap';
+import { cn } from '@/lib/cn';
+import { canSeeAdminAffordance } from '@/lib/perms';
 
 interface NavItem {
   label: string;
@@ -109,6 +111,10 @@ export function Sidebar({
         ...(bs.user.canCreateProblem && bs.user.canViewProblemBank === false
           ? [{ label: '我的题目', href: '/problem/mine', icon: BookOpen, templates: ['problem_mine.html'] }]
           : []),
+        // 出卷中心：教师/管理员（PERM_CREATE_PROBLEM，服务端同 gate）。
+        ...(bs.user.canCreateProblem
+          ? [{ label: '出卷中心', href: '/paper-center', icon: NotebookPen, templates: ['paper_center.html', 'paper_center_edit.html'] }]
+          : []),
         { label: '导图', href: '/mindmap', icon: Network, templates: ['mindmap_main.html'] },
         { label: '比赛', href: bs.urls.contests, icon: Trophy, templates: ['contest_main.html', 'contest_detail.html', 'contest_edit.html', 'contest_scoreboard.html', 'xcpcio_board.html', 'contest_manage.html', 'contest_problemlist.html', 'contest_user.html', 'contest_balloon.html', 'contest_clarification.html', 'contest_print.html'] },
         { label: '作业', href: bs.urls.homework, icon: ClipboardList, templates: ['homework_main.html', 'homework_detail.html', 'homework_edit.html', 'homework_files.html'] },
@@ -145,6 +151,12 @@ export function Sidebar({
             'admin_vigil_sessions.html', 'admin_vigil_events.html',
             'admin_vigil_exam_detail.html',
           ],
+        });
+        adminItems.push({
+          label: '赛时通过率',
+          href: '/manage/realpass',
+          icon: BarChart3,
+          templates: ['manage_realpass.html'],
         });
         adminItems.push({
           label: '系统',

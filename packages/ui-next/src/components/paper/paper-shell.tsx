@@ -4,15 +4,15 @@
  *
  * The paper UI is fully controlled by parent state.
  */
-import { useEffect, useState, type ReactNode } from 'react';
-import { Check, Clock, Lock, Minus, X as XIcon, AlertCircle } from 'lucide-react';
-import { cn } from '@/lib/cn';
+import { AlertCircle, Check, Clock, Lock, Minus, X as XIcon } from 'lucide-react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
-import { Checkbox } from '@/components/ui/checkbox';
+import { cn } from '@/lib/cn';
 
-export type QuestionKind = 'single' | 'multi' | 'blank' | 'fill_program' | 'fill_function' | 'default' | 'submit_answer';
+export type QuestionKind = 'single' | 'multi' | 'blank' | 'fill_program' | 'subjective' | 'fill_function' | 'default' | 'submit_answer';
 
 export interface PaperCell {
   pid: number;
@@ -30,6 +30,7 @@ export const KIND_LABELS: Record<QuestionKind, string> = {
   multi: '多选',
   blank: '填空',
   fill_program: '程序填空',
+  subjective: '主观题',
   fill_function: '函数题',
   default: '编程',
   submit_answer: '提交答案',
@@ -40,6 +41,7 @@ const KIND_SHORT: Record<QuestionKind, string> = {
   multi: '多',
   blank: '填',
   fill_program: '程',
+  subjective: '主',
   fill_function: '函',
   default: '编',
   submit_answer: '答',
@@ -55,7 +57,7 @@ export function groupCellsByKind(cells: PaperCell[]): Map<QuestionKind, PaperCel
   return map;
 }
 
-const KIND_ORDER: QuestionKind[] = ['single', 'multi', 'blank', 'fill_program', 'fill_function', 'default', 'submit_answer'];
+const KIND_ORDER: QuestionKind[] = ['single', 'multi', 'blank', 'fill_program', 'subjective', 'fill_function', 'default', 'submit_answer'];
 
 // ─── Mini Tab Bar (horizontal, lives at top of sub-sidebar) ──────────────
 //
@@ -129,10 +131,10 @@ export function StatusButton({
   const base = 'relative flex aspect-square w-full items-center justify-center rounded-md text-xs font-semibold transition-colors';
   const palette: Record<CellStatus, string> = {
     unanswered: 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
-    answered:   'bg-sky-500/15 text-sky-700 hover:bg-sky-500/25 dark:text-sky-300',
-    correct:    'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25 dark:text-emerald-300',
-    wrong:      'bg-rose-500/15 text-rose-700 hover:bg-rose-500/25 dark:text-rose-300',
-    partial:    'bg-amber-500/15 text-amber-700 hover:bg-amber-500/25 dark:text-amber-300',
+    answered: 'bg-sky-500/15 text-sky-700 hover:bg-sky-500/25 dark:text-sky-300',
+    correct: 'bg-emerald-500/15 text-emerald-700 hover:bg-emerald-500/25 dark:text-emerald-300',
+    wrong: 'bg-rose-500/15 text-rose-700 hover:bg-rose-500/25 dark:text-rose-300',
+    partial: 'bg-amber-500/15 text-amber-700 hover:bg-amber-500/25 dark:text-amber-300',
   };
   return (
     <button
@@ -149,7 +151,7 @@ export function StatusButton({
   );
 }
 
-function CellStatusIcon({ status, fallback }: { status: CellStatus; fallback: string }) {
+function CellStatusIcon({ status, fallback }: { status: CellStatus, fallback: string }) {
   if (status === 'correct') return <Check className="size-4" strokeWidth={3} />;
   if (status === 'wrong') return <XIcon className="size-4" strokeWidth={3} />;
   if (status === 'partial') return <Minus className="size-4" strokeWidth={3} />;
@@ -160,12 +162,14 @@ function CellStatusIcon({ status, fallback }: { status: CellStatus; fallback: st
 // ─── Single / Multi / Blank renderers ────────────────────────────────────
 
 export function SingleChoiceRenderer({
-  value, options, onChange, disabled,
+  value, options, onChange, disabled, name,
 }: {
   value: string | null;
   options: string[];
   onChange: (next: string) => void;
   disabled?: boolean;
+  /** radio group 名——同页多道单选题时必须传（默认值保持既有考试页 DOM 不变） */
+  name?: string;
 }) {
   return (
     <div className="space-y-2">
@@ -173,15 +177,17 @@ export function SingleChoiceRenderer({
         const letter = String.fromCharCode(65 + i);
         const checked = value === letter;
         return (
-          <label key={letter} className={cn(
-            'flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors',
-            checked && 'border-primary bg-primary/5',
-            !checked && 'hover:bg-accent/50',
-            disabled && 'cursor-not-allowed opacity-60',
-          )}>
+          <label
+            key={letter}
+            className={cn(
+              'flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors',
+              checked && 'border-primary bg-primary/5',
+              !checked && 'hover:bg-accent/50',
+              disabled && 'cursor-not-allowed opacity-60',
+            )}>
             <input
               type="radio"
-              name="single-choice"
+              name={name || 'single-choice'}
               checked={checked}
               disabled={disabled}
               onChange={() => onChange(letter)}
@@ -211,12 +217,14 @@ export function MultiChoiceRenderer({
         const letter = String.fromCharCode(65 + i);
         const checked = set.has(letter);
         return (
-          <label key={letter} className={cn(
-            'flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors',
-            checked && 'border-primary bg-primary/5',
-            !checked && 'hover:bg-accent/50',
-            disabled && 'cursor-not-allowed opacity-60',
-          )}>
+          <label
+            key={letter}
+            className={cn(
+              'flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm transition-colors',
+              checked && 'border-primary bg-primary/5',
+              !checked && 'hover:bg-accent/50',
+              disabled && 'cursor-not-allowed opacity-60',
+            )}>
             <Checkbox
               checked={checked}
               disabled={disabled}
@@ -226,7 +234,7 @@ export function MultiChoiceRenderer({
                 else next.delete(letter);
                 onChange(Array.from(next).sort());
               }}
-             />
+            />
             <span className="font-mono text-xs text-muted-foreground">{letter}.</span>
             <span className="flex-1">{opt}</span>
           </label>
@@ -277,7 +285,7 @@ export function FillProgramRenderer({
 
 // ─── Countdown ────────────────────────────────────────────────────────────
 
-export function Countdown({ endAt, onExpire }: { endAt: number; onExpire?: () => void }) {
+export function Countdown({ endAt, onExpire }: { endAt: number, onExpire?: () => void }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const i = setInterval(() => setNow(Date.now()), 1000);
@@ -315,7 +323,7 @@ export function Countdown({ endAt, onExpire }: { endAt: number; onExpire?: () =>
 
 // ─── Status pill ─────────────────────────────────────────────────────────
 
-export function PaperStatusPill({ dirtyCount, saving }: { dirtyCount: number; saving?: boolean }) {
+export function PaperStatusPill({ dirtyCount, saving }: { dirtyCount: number, saving?: boolean }) {
   if (saving) {
     return <span className="flex items-center gap-1 text-xs text-muted-foreground"><AlertCircle className="size-3.5" />保存中…</span>;
   }

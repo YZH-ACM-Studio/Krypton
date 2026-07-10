@@ -23,10 +23,19 @@ import record from '../model/record';
 import system from '../model/system';
 
 const CHANNEL = 'judge';
-/** Statuses that mean "not yet finished" — the judge queue. */
-const PENDING = [
-    STATUS.STATUS_WAITING, STATUS.STATUS_JUDGING, STATUS.STATUS_COMPILING, STATUS.STATUS_FETCHED,
-];
+/**
+ * 真·排队等待判题的 WAITING 过滤（Rev.12）：含主观题的记录判完后停在
+ * STATUS_WAITING「待人工评分」，但它已判完（judgeAt 非空）——不属于判题
+ * 队列，更不能进 stuck 清单（否则管理员按"卡死"批量重判会冲掉人工分）。
+ * 真排队记录的 judgeAt 为 null/缺失（record.add 不设、record.reset 置 null）。
+ */
+const QUEUED_WAITING = { status: STATUS.STATUS_WAITING, judgeAt: null };
+const PENDING_QUERY = {
+    $or: [
+        { status: { $in: [STATUS.STATUS_JUDGING, STATUS.STATUS_COMPILING, STATUS.STATUS_FETCHED] } },
+        QUEUED_WAITING,
+    ],
+};
 /** A pending record older than this (minutes) is considered stuck. */
 const STUCK_MIN = 10;
 /** Safety cap on one rejudge batch. */
@@ -39,8 +48,10 @@ function judgeDomain(): string {
     return typeof d === 'string' && d ? d : 'system';
 }
 
-/** ObjectId whose embedded timestamp is `minutesAgo` in the past (zero low bytes),
- * for `_id < cutoff` "submitted before" comparisons. */
+/**
+ * ObjectId whose embedded timestamp is `minutesAgo` in the past (zero low bytes),
+ * for `_id < cutoff` "submitted before" comparisons.
+ */
 function cutoffOid(minutesAgo: number): ObjectId {
     return ObjectId.createFromTime(Math.floor(Date.now() / 1000) - minutesAgo * 60);
 }
@@ -66,11 +77,11 @@ class JudgeQueueHandler extends JudgeApiHandler {
         this.checkPerm(PERM.PERM_REJUDGE_PROBLEM);
         const domainId = judgeDomain();
         const [waiting, judging, compiling, fetched, oldest, pulse] = await Promise.all([
-            record.count(domainId, { status: STATUS.STATUS_WAITING }),
+            record.count(domainId, QUEUED_WAITING),
             record.count(domainId, { status: STATUS.STATUS_JUDGING }),
             record.count(domainId, { status: STATUS.STATUS_COMPILING }),
             record.count(domainId, { status: STATUS.STATUS_FETCHED }),
-            record.getMulti(domainId, { status: { $in: PENDING } })
+            record.getMulti(domainId, PENDING_QUERY)
                 .project({ _id: 1 }).sort({ _id: 1 }).limit(1).toArray(),
             record.stat(domainId),
         ]);
@@ -93,7 +104,7 @@ class JudgeStuckHandler extends JudgeApiHandler {
         const domainId = judgeDomain();
         const cutoff = cutoffOid(STUCK_MIN);
         const rdocs = await record.getMulti(domainId, {
-            status: { $in: PENDING },
+            ...PENDING_QUERY,
             _id: { $lt: cutoff },
         }).project({ _id: 1, pid: 1, uid: 1, status: 1, lang: 1 }).sort({ _id: 1 }).limit(STUCK_LIMIT).toArray();
         this.response.body = {
@@ -152,7 +163,10 @@ class JudgeRejudgeHandler extends JudgeApiHandler {
         if (Number.isSafeInteger(uid)) { query.uid = uid; hasSelector = true; }
         if (Number.isSafeInteger(status)) { query.status = status; hasSelector = true; }
         if (stuckOnly === true) {
-            query.status = { $in: PENDING };
+            // 与 stuck 清单同口径：已判完的「待人工评分」记录（WAITING 且
+            // judgeAt 非空）绝不进批量重判，否则人工分被冲掉（Rev.12）。
+            delete query.status;
+            query.$or = PENDING_QUERY.$or;
             query._id = { ...(query._id || {}), $lt: cutoffOid(STUCK_MIN) };
             hasSelector = true;
         }

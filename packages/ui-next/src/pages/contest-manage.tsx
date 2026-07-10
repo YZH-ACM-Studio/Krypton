@@ -8,6 +8,7 @@ import { motion } from 'motion/react';
 import {
   ArrowLeft,
   CheckCircle2,
+  ClipboardCheck,
   Clock,
   Copy,
   Download,
@@ -239,25 +240,30 @@ function contestProblemUrl(bs: ReturnType<typeof useBootstrap>, tdoc: R, pid: st
   return `${problemUrl}?tid=${encodeURIComponent(contestId(tdoc))}`;
 }
 
-function managementItems(tdoc: R, contestUrl: string): Array<{
-  key: ManagementSection | 'scoreboard' | 'records' | 'code';
+type ManagementItem = {
+  key: ManagementSection | 'scoreboard' | 'records' | 'code' | 'grading';
   label: string;
   href: string;
   icon: typeof LayoutDashboard;
   show?: boolean;
-}> {
+};
+
+function managementItems(tdoc: R, contestUrl: string): ManagementItem[] {
   const isACM = tdoc.rule === 'acm';
-  return [
+  const items: ManagementItem[] = [
     { key: 'overview', label: '概览与文件', href: `${contestUrl}/management`, icon: LayoutDashboard },
     { key: 'edit', label: '编辑比赛', href: `${contestUrl}/edit`, icon: Settings },
     { key: 'users', label: '参赛选手', href: `${contestUrl}/user`, icon: Users },
     { key: 'clarification', label: '答疑管理', href: `${contestUrl}/clarification`, icon: MessageSquare },
+    // Rev.12：主观题阅卷（页面内自会提示"本场无可批阅题目"）
+    { key: 'grading', label: '主观题阅卷', href: `/paper-center/grading/${encodeURIComponent(contestId(tdoc))}`, icon: ClipboardCheck },
     { key: 'balloon', label: '气球分发', href: `${contestUrl}/balloon`, icon: Trophy, show: isACM },
     { key: 'print', label: '打印服务', href: `${contestUrl}/print`, icon: Printer, show: !!tdoc.allowPrint },
     { key: 'scoreboard', label: '排行榜', href: `${contestUrl}/scoreboard`, icon: Trophy },
     { key: 'records', label: '全部提交', href: `/record?tid=${encodeURIComponent(contestId(tdoc))}`, icon: Send },
     { key: 'code', label: '导出代码', href: `${contestUrl}/code`, icon: Download },
-  ].filter((item) => item.show !== false);
+  ];
+  return items.filter((item) => item.show !== false);
 }
 
 function ContestManagementChrome({
@@ -1352,6 +1358,8 @@ export function ContestProblemListPage() {
     ? String(urls.record).replace('__RID__', rid)
     : replaceRouteTokens(bs.urls.recordDetail, { RID: rid });
   const showScore = data.showScore;
+  // P1.4：本场每题通过统计（仅 ACM；考试壳 examMode 下后端不下发、前端也不渲染——红线1）。
+  const liveStats: Record<string, R> | null = tdoc.rule === 'acm' && !data.examMode && data.liveStats ? data.liveStats : null;
   const [workspaceTab, setWorkspaceTab] = useState<'problems' | 'submissions' | 'clarifications'>('problems');
 
   return (
@@ -1391,12 +1399,14 @@ export function ContestProblemListPage() {
               <TableRow>
                 <TableHead className="w-16 text-center">#</TableHead>
                 <TableHead>题目</TableHead>
+                {liveStats && <TableHead className="w-32 text-right">本场通过</TableHead>}
                 {showScore && <TableHead className="w-20 text-right">分值</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
               {pids.map((pid, idx) => {
                 const p = pdict[String(pid)] || {};
+                const ls = liveStats?.[String(pid)];
                 return (
                   <TableRow key={String(pid)}>
                     <TableCell className="text-center font-mono font-semibold">{getAlphabeticId(idx)}</TableCell>
@@ -1405,6 +1415,15 @@ export function ContestProblemListPage() {
                         {p.title || `P${pid}`}
                       </a>
                     </TableCell>
+                    {liveStats && (
+                      <TableCell
+                        className="text-right font-mono text-xs text-muted-foreground"
+                        title={`AC 提交 ${ls?.acSubmits ?? 0} / 总提交 ${ls?.totalSubmits ?? 0}`}
+                      >
+                        <span className={ls?.acUsers ? 'text-green-600 dark:text-green-400' : ''}>{ls?.acUsers ?? 0}</span>
+                        /{ls?.triedUsers ?? 0} 人
+                      </TableCell>
+                    )}
                     {showScore && (
                       <TableCell className="text-right font-mono text-sm">{tdoc.score?.[pid] || 100}</TableCell>
                     )}

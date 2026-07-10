@@ -1,6 +1,5 @@
-import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } from 'react';
-import { motion } from 'motion/react';
 import {
+  BarChart3,
   BookOpen,
   CheckCircle2,
   ChevronRight,
@@ -20,19 +19,20 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
+import { motion } from 'motion/react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getLangEntry, getStatus, KryptonIDE, type RecordEntry } from '@/components/krypton-ide';
+import { MarkdownView } from '@/components/markdown-renderer';
+import { ObjectiveAnswerPanel, type ObjectiveClientQuestion } from '@/components/objective-answer-panel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs-compound';
-import { MarkdownView } from '@/components/markdown-renderer';
-import { KryptonIDE, type RecordEntry, getStatus, getLangEntry } from '@/components/krypton-ide';
 import { useRecordSocket } from '@/hooks/use-record-socket';
 import { useBootstrap } from '@/lib/bootstrap';
-import { replaceRouteTokens } from '@/lib/format';
-import { extractSamples, type SampleCase } from '@/lib/samples';
 import { cn } from '@/lib/cn';
+import { replaceRouteTokens } from '@/lib/format';
+import { extractSamples } from '@/lib/samples';
 
 type R = Record<string, any>;
 
@@ -41,20 +41,22 @@ type R = Record<string, any>;
 /* ------------------------------------------------------------------ */
 
 function statusBadge(status: number | undefined) {
-  if (status === 1)
+  if (status === 1) {
     return (
       <Badge className="gap-1 bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20">
         <CheckCircle2 className="size-3" />
         已通过
       </Badge>
     );
-  if (status === 2)
+  }
+  if (status === 2) {
     return (
       <Badge variant="destructive" className="gap-1">
         <XCircle className="size-3" />
         未通过
       </Badge>
     );
+  }
   return null;
 }
 
@@ -92,7 +94,7 @@ function normalizeId(value: unknown): string {
 function objectIdTimestamp(value: unknown): number | null {
   const id = normalizeId(value);
   if (!/^[0-9a-f]{24}$/i.test(id)) return null;
-  return parseInt(id.slice(0, 8), 16) * 1000;
+  return Number.parseInt(id.slice(0, 8), 16) * 1000;
 }
 
 function dateTimestamp(value: unknown): number | null {
@@ -162,6 +164,11 @@ function recordEntryFromRdoc(rdoc: R, recordDetailRoute: string): RecordEntry | 
       ?? dateTimestamp(rdoc.submitAt ?? rdoc.judgeAt ?? rdoc.timestamp)
       ?? Date.now(),
   };
+}
+
+function origStatChipValue(os: { accepted: number, submitted: number }) {
+  const rate = os.submitted > 0 ? Math.round((os.accepted / os.submitted) * 100) : 0;
+  return `${os.accepted}/${os.submitted} (${rate}%)`;
 }
 
 function difficultyBadge(d: number | undefined) {
@@ -335,7 +342,7 @@ function ResizableSplit({
 /*  Info bar — dense row of stats                                      */
 /* ------------------------------------------------------------------ */
 
-function InfoChip({ icon: Icon, label, value }: { icon: any; label: string; value: React.ReactNode }) {
+function InfoChip({ icon: Icon, label, value }: { icon: any, label: string, value: React.ReactNode }) {
   return (
     <div className="flex items-center gap-1.5 text-xs">
       <Icon className="size-3.5 text-muted-foreground" />
@@ -359,7 +366,7 @@ function langLabel(id: string): string {
 interface LangGroup {
   family: string;
   familyLabel: string;
-  variants: { id: string; suffix: string; fullLabel: string }[];
+  variants: { id: string, suffix: string, fullLabel: string }[];
 }
 
 /**
@@ -557,9 +564,9 @@ function parseConfigTimeMS(input: any): number | null {
   if (input == null) return null;
   if (typeof input === 'number' && Number.isFinite(input)) return input;
   const s = String(input).trim().toLowerCase();
-  const m = s.match(/^(-?\d*\.?\d+)\s*(ms|s)?$/);
+  const m = s.match(/^(-?(?:\d+(?:\.\d+)?|\.\d+))\s*(ms|s)?$/);
   if (!m) return null;
-  const v = parseFloat(m[1]);
+  const v = Number.parseFloat(m[1]);
   if (!Number.isFinite(v)) return null;
   return (m[2] === 'ms' || !m[2]) ? Math.round(v) : Math.round(v * 1000);
 }
@@ -568,9 +575,9 @@ function parseConfigMemoryMB(input: any): number | null {
   if (input == null) return null;
   if (typeof input === 'number' && Number.isFinite(input)) return input;
   const s = String(input).trim().toLowerCase();
-  const m = s.match(/^(-?\d*\.?\d+)\s*(b|k|kb|m|mb|g|gb)?$/);
+  const m = s.match(/^(-?(?:\d+(?:\.\d+)?|\.\d+))\s*([bkmg]|kb|mb|gb)?$/);
   if (!m) return null;
-  const v = parseFloat(m[1]);
+  const v = Number.parseFloat(m[1]);
   if (!Number.isFinite(v)) return null;
   const u = m[2] || 'mb';
   if (u === 'b') return v / (1024 * 1024);
@@ -651,6 +658,12 @@ export function ProblemDetailPage() {
   const contestQS = tid ? `?tid=${tid}` : '';
   const submitUrl = `${problemUrl}/submit${contestQS}`;
   const problemCanPretest = config.type === 'default' || config.type === undefined || config.type == null;
+  // 客观题结构化作答（PLAN P3.2 Rev.11）：服务端 parseConfig 对
+  // type=objective 下发无答案的 questions 描述符，走面板作答提交。
+  const objectiveQuestions: ObjectiveClientQuestion[] = (config.type === 'objective' && Array.isArray(config.questions))
+    ? config.questions : [];
+  const isObjective = objectiveQuestions.length > 0;
+  const objectiveDraftKey = `objective-draft:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pdoc.docId || pid}${tid ? `@${tid}` : ''}`;
   const ideCacheKey = `${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pid}`;
   const preferredLang = bs.locale?.startsWith('zh') ? 'zh' : 'en';
   // `samples` is still needed for the IDE/pretest panel even though the
@@ -806,6 +819,13 @@ export function ProblemDetailPage() {
                   <InfoChip icon={Send} label="提交" value={nSubmit} />
                   <InfoChip icon={CheckCircle2} label="通过" value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>} />
                   <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} />
+                  {!inContest && pdoc.origStat ? (
+                    <InfoChip
+                      icon={BarChart3}
+                      label="赛时通过率"
+                      value={origStatChipValue(pdoc.origStat)}
+                    />
+                  ) : null}
                 </div>
 
                 {/* Limits */}
@@ -886,7 +906,7 @@ export function ProblemDetailPage() {
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-1.5">{getLangEntry(r.lang).label}</td>
                                   <td className="px-3 py-1.5 text-right font-mono tabular-nums">
-                                    {r.score != null ? r.score : '—'}
+                                    {r.score ?? '—'}
                                   </td>
                                   <td className="px-3 py-1.5 text-right font-mono tabular-nums">
                                     {r.time != null ? `${r.time} ms` : '—'}
@@ -998,10 +1018,13 @@ export function ProblemDetailPage() {
           )}
         </div>
         <div className="flex shrink-0 gap-2">
-          <Button size="sm" variant="default" className="gap-1" onClick={() => setIdeMode(true)}>
-            <Code2 className="size-3.5" />
-            IDE 模式
-          </Button>
+          {/* 客观题在下方面板作答，IDE 模式无意义 */}
+          {!isObjective ? (
+            <Button size="sm" variant="default" className="gap-1" onClick={() => setIdeMode(true)}>
+              <Code2 className="size-3.5" />
+              IDE 模式
+            </Button>
+          ) : null}
           {!examMode?.enabled ? <Button asChild size="sm" variant="outline">
             <a href={submitUrl}>
               <Send className="mr-1 size-3.5" />
@@ -1024,6 +1047,13 @@ export function ProblemDetailPage() {
         <InfoChip icon={Send} label="提交" value={nSubmit} />
         <InfoChip icon={CheckCircle2} label="通过" value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>} />
         <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} />
+        {!inContest && pdoc.origStat ? (
+          <InfoChip
+            icon={BarChart3}
+            label="赛时通过率"
+            value={origStatChipValue(pdoc.origStat)}
+          />
+        ) : null}
         {!inContest ? <InfoChip icon={User} label="出题人" value={udoc.uname || `UID ${udoc._id || '?'}`} /> : null}
         {showExternals && solutionCount > 0 && <InfoChip icon={BookOpen} label="题解" value={solutionCount} />}
         {showExternals && discussionCount > 0 && <InfoChip icon={MessageSquare} label="讨论" value={discussionCount} />}
@@ -1039,6 +1069,14 @@ export function ProblemDetailPage() {
               <MarkdownView content={content} preferredLang={preferredLang} />
             </CardContent>
           </Card>
+          {isObjective ? (
+            <ObjectiveAnswerPanel
+              questions={objectiveQuestions}
+              submitUrl={submitUrl}
+              storageKey={objectiveDraftKey}
+              signedIn={!!bs.user?.signedIn}
+            />
+          ) : null}
           {showExternals && solutionCount > 0 ? (
             <Card>
               <CardContent className="flex items-center justify-between gap-3 p-4 text-sm">

@@ -23,16 +23,36 @@ export enum ProblemType {
  *  - single string with whitespace → 'blank'
  *
  * 'fill_program' is always explicit (PRD §1.1).
+ *
+ * 'subjective'（Rev.12）：主观题——判题器记 0 分置 STATUS_WAITING，
+ * 由比赛「阅卷」人工给分后重算总分回写。
  */
-export type QuestionKind = 'single' | 'multi' | 'blank' | 'fill_program';
+export type QuestionKind = 'single' | 'multi' | 'blank' | 'fill_program' | 'subjective';
 
 /**
  * `Objective.config.answers[key]` shape. Backward-compatible with the legacy
  * `[stdAns, score]` tuple; new code can use the 3-tuple to attach kind + prompt.
  */
+/**
+ * meta 键名 canonical 为 `kind`（PLAN 2026-07 P3.2）；`type` 是早期
+ * problem-type-editor 写入的 legacy 别名，读取端做 `kind ?? type` 兜底。
+ * `choices` 与 `ProblemConfigFile.options[key]` 双写（考试页现行消费点是
+ * options，编辑器保存时两处同步）。
+ */
 export type AnswerEntry =
     | [string | string[], number]
-    | [string | string[], number, { kind?: QuestionKind; prompt?: string }];
+    | [string | string[], number, {
+        kind?: QuestionKind;
+        prompt?: string;
+        /** @deprecated legacy alias of `kind` (early editor versions) */
+        type?: QuestionKind;
+        choices?: string[];
+        /**
+         * UI 呈现变体（Rev.12）：'truefalse' = 判断题（single 的预设，
+         * choices 锁定「正确/错误」）。判题/统计不区分，仅编辑器回读用。
+         */
+        presentation?: string;
+    }];
 
 /**
  * Fill-function problem template — see PRD §1.7.
@@ -53,8 +73,8 @@ export interface FillFunctionTemplate {
 export interface FillRegion {
     /** Stable identifier chosen by the teacher (e.g. 'r1', 'main_logic'). */
     id: string;
-    start: { line: number; col: number };
-    end: { line: number; col: number };
+    start: { line: number, col: number };
+    end: { line: number, col: number };
     /** Optional prompt shown above the editable area in the student UI. */
     prompt?: string;
 }
@@ -115,6 +135,11 @@ export interface ProblemConfigFile {
     judge_extra_files?: string[];
     detail?: DetailType | boolean;
     answers?: Record<string, AnswerEntry>;
+    /**
+     * 客观题选项：questionKey → 选项文本数组（A/B/C… 按下标映射）。
+     * 与 answers[key][2].choices 双写；考试页/结构化渲染器消费此处。
+     */
+    options?: Record<string, string[]>;
     /** When `type === 'fill_function'`, the template source and editable regions. */
     template?: FillFunctionTemplate;
     redirect?: string;
@@ -179,6 +204,17 @@ export interface RecordPayload extends RecordJudgeInfo {
     contest?: string;
 
     files?: Record<string, string>;
+    /**
+     * 主观题人工评分（Rev.12，比赛「阅卷」写入）：
+     * scores = questionKey → 得分；baseScore = 自动判分部分（首次给分时
+     * 从当时 rdoc.score 快照，重算总分 = baseScore + Σscores）。
+     */
+    subjective?: {
+        scores: Record<string, number>;
+        baseScore: number;
+        gradedBy: number;
+        gradedAt: Date;
+    };
 }
 
 export interface JudgeRequest extends Omit<RecordPayload, 'testCases'> {

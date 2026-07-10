@@ -3,6 +3,7 @@ import { normalizeSubtasks, ProblemConfigFile, readSubtasksFromFiles } from '@hy
 import { readYamlCases } from '@hydrooj/common/cases';
 import { parseMemoryMB, parseTimeMS } from '@hydrooj/utils';
 import type { ProblemConfig } from '../interface';
+import { clientQuestions } from './problem-config';
 
 export async function parseConfig(config: string | ProblemConfigFile = {}, files: string[]) {
     const cfg: ProblemConfigFile = typeof config === 'string'
@@ -37,6 +38,14 @@ export async function parseConfig(config: string | ProblemConfigFile = {}, files
     }
     if (cfg.subType) result.subType = cfg.subType;
     if (cfg.target) result.target = cfg.target;
+    if (result.type === 'objective') {
+        // 学生端结构化渲染用的题目描述符（**无标准答案**，PLAN P3.2 Rev.11）；
+        // options 兼容既有考试页消费点 pdoc.config.options[questionKey]。
+        result.questions = clientQuestions(cfg);
+        const options: Record<string, string[]> = {};
+        for (const q of result.questions) if (q.choices) options[q.key] = q.choices;
+        if (Object.keys(options).length) result.options = options;
+    }
     result.count ||= Math.sum(readSubtasksFromFiles(files, cfg).map((i) => i.cases.length));
     if (cfg.subtasks?.length) {
         for (const subtask of normalizeSubtasks(cfg.subtasks as any || [], (i) => i, cfg.time, cfg.memory)) {

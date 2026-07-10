@@ -3,42 +3,43 @@
  * difficulty, visibility, PID, with sidebar navigation and delete.
  */
 
-import { useEffect, useRef, useState, useCallback, type FormEvent } from 'react';
-import { motion } from 'motion/react';
 import {
+  BarChart3,
   ChevronRight,
+  Download,
   Eye,
   EyeOff,
-  Lock,
-  Save,
-  Tag,
   FileText,
-  Trash2,
   Flag,
-  Send,
-  Lightbulb,
   FolderOpen,
-  BarChart3,
+  Lightbulb,
+  Lock,
+  NotebookPen,
   Pencil,
+  Save,
+  Send,
   Settings,
-  Download,
+  Tag,
+  Trash2,
 } from 'lucide-react';
+import { motion } from 'motion/react';
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { MarkdownEditor } from '@/components/markdown-renderer';
-import { Checkbox } from '@/components/ui/checkbox';
-import { SimpleSelect } from '@/components/ui/select';
 import { MultiSelect } from '@/components/ui/multi-select';
+import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
-import { replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
+import { replaceRouteTokens } from '@/lib/format';
 import { downloadProblemPackage } from '@/lib/problem-package';
 import {
   buildConfigYaml, CommunicationEditor, FillFunctionEditor, InteractiveEditor,
-  ObjectiveEditor, parseConfigYaml, type ProblemType, type ProblemTypeState,
+  parseConfigYaml, type ProblemType, type ProblemTypeState,
   SubmitAnswerEditor, TypePicker,
 } from '@/pages/problem-type-editor';
 
@@ -66,7 +67,7 @@ const DIFFICULTY_OPTIONS = [
 
 /* ---------- Sidebar navigation ---------- */
 
-function ProblemSidebar({ pid: _pid, problemUrl, active }: { pid: string; problemUrl: string; active: string }) {
+function ProblemSidebar({ pid: _pid, problemUrl, active }: { pid: string, problemUrl: string, active: string }) {
   const nav = [
     { key: 'detail', icon: Flag, label: '查看题目', href: problemUrl },
     { key: 'submit', icon: Send, label: '提交', href: `${problemUrl}/submit` },
@@ -118,7 +119,7 @@ function ProblemSidebar({ pid: _pid, problemUrl, active }: { pid: string; proble
 
 /* ---------- Additional files sidebar section ---------- */
 
-function AdditionalFilesSidebar({ files, problemUrl }: { files: R[]; problemUrl: string }) {
+function AdditionalFilesSidebar({ files, problemUrl }: { files: R[], problemUrl: string }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -164,10 +165,10 @@ interface UserOption {
   avatarUrl?: string;
 }
 
-function PermitsPanel({ pid, pdocId, hidden }: { pid: string; pdocId: number; hidden: boolean }) {
+function PermitsPanel({ pid, pdocId, hidden }: { pid: string, pdocId: number, hidden: boolean }) {
   const bs = useBootstrap();
   const [permits, setPermits] = useState<PermitRow[]>([]);
-  const [udict, setUdict] = useState<Record<string, { _id: number; uname: string }>>({});
+  const [udict, setUdict] = useState<Record<string, { _id: number, uname: string }>>({});
   const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(false);
   const [selectedUsers, setSelectedUsers] = useState<UserOption[]>([]);
@@ -301,10 +302,12 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string; pdocId: number; hi
         )}
       </CardContent>
 
-      <Dialog open={open} onOpenChange={(v) => {
-        setOpen(v);
-        if (!v) setInviteError('');
-      }}>
+      <Dialog
+        open={open}
+        onOpenChange={(v) => {
+          setOpen(v);
+          if (!v) setInviteError('');
+        }}>
         <DialogContent className="w-full overflow-visible sm:w-[560px]" onClose={() => setOpen(false)}>
           <DialogHeader>
             <DialogTitle>邀请验题人</DialogTitle>
@@ -402,13 +405,21 @@ export function ProblemEditPage() {
   // Delete confirmation
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  // Problem-type state — loaded from config.yaml on mount, persisted on save.
-  // For /p/create the pdoc has no docId so we can't read config; default state.
-  const [typeState, setTypeState] = useState<ProblemTypeState>({
+  // Problem-type state（Rev.12）：raw config 由编辑页 handler 直接下发
+  // （data.configRaw），不再 fetch 文件下载路由——那条路对缺失文件不返回
+  // 404，新题/无 config 题的类型编辑永远初始化失败。
+  const configRaw: string | undefined = typeof data.configRaw === 'string' ? data.configRaw : undefined;
+  const [typeState, setTypeState] = useState<ProblemTypeState>(() => ({
     type: 'default', objective: [],
     template: '', expectedAnswer: '', interactor: '', manager: '',
-  });
-  const [configYamlRaw, setConfigYamlRaw] = useState<string>('');
+    ...(configRaw ? parseConfigYaml(configRaw) : {}),
+  }));
+  const [configYamlRaw] = useState<string>(configRaw || '');
+  // configRaw 缺失（老缓存 bundle / 异常响应）时保存流程跳过 config.yaml
+  // 写入——空白编辑器状态覆盖会把 answers/cases 清成 type:default（M2）。
+  const configLoaded = configRaw !== undefined;
+  // 客观题一律去出卷中心编辑（Rev.12）：本页隐藏类型编辑、跳过 config 写入。
+  const isObjectiveProblem = /^\s*['"]?type['"]?\s*:\s*['"]?objective['"]?\s*(?:#.*)?$/m.test(configRaw || '');
   const isCreate = !pdoc.docId;
   const problemId = pdoc.docId ? String(pdoc.docId) : '';
   // ProblemDetailUrl-style API for the file endpoints.
@@ -444,23 +455,17 @@ export function ProblemEditPage() {
     }
   }, [additionalFiles, draftContent, isCreate, pdoc, problemUrl, testdataFiles]);
 
-  useEffect(() => {
-    if (!problemId || !pid) return;
-    // Pull existing config.yaml so the type-specific editor reflects what's on testdata.
-    fetch(`${problemUrl}/file/config.yaml?type=testdata`, { method: 'GET' })
-      .then((r) => (r.ok ? r.text() : ''))
-      .then((text) => {
-        if (!text) return;
-        setConfigYamlRaw(text);
-        setTypeState((prev) => ({ ...prev, ...parseConfigYaml(text) }));
-      })
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [problemId, pid]);
-
   const setType = useCallback((next: ProblemType) => {
+    // 客观题 → 其他类型：保存时会删除全部 answers/options，先确认。
+    // confirm 必须在 setState updater 之外（updater 需纯函数，StrictMode 会双调用）。
+    if (typeState.type === 'objective' && next !== 'objective' && typeState.objective.length > 0) {
+      // eslint-disable-next-line no-alert
+      if (!window.confirm(`切换题型后保存将删除现有 ${typeState.objective.length} 道小题的题干与答案，确认切换？`)) {
+        return;
+      }
+    }
     setTypeState((prev) => ({ ...prev, type: next }));
-  }, []);
+  }, [typeState.type, typeState.objective.length]);
 
   const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
     // For brand-new problems we have no pid yet — let the form submit
@@ -476,18 +481,27 @@ export function ProblemEditPage() {
       body: new URLSearchParams(fd as any),
     });
     // 2) Write the type-specific config.yaml as a testdata file.
-    if (filesBase) {
+    //    configLoaded=false（数据缺失）时绝不重写——空白状态覆盖会把
+    //    服务器上的 answers/cases 清成 type:default（对抗审查 M2）。
+    //    客观题（Rev.12）由出卷中心编辑器管理 config，本页永不触碰。
+    if (filesBase && configLoaded && !isObjectiveProblem) {
       const yamlText = buildConfigYaml(typeState, configYamlRaw);
       const cfgForm = new FormData();
       cfgForm.append('type', 'testdata');
       cfgForm.append('filename', 'config.yaml');
       cfgForm.append('file', new Blob([yamlText], { type: 'text/yaml' }), 'config.yaml');
-      await fetch(filesBase, { method: 'POST', body: cfgForm }).catch(() => {});
+      const cfgRes = await fetch(filesBase, { method: 'POST', body: cfgForm }).catch(() => null);
+      if (!cfgRes || !cfgRes.ok) {
+        alert('题目基本信息已保存，但评测配置（config.yaml）写入失败——题型/答案改动未生效，请重试保存。');
+        return;
+      }
+    } else if (filesBase && !configLoaded && !isObjectiveProblem) {
+      alert('评测配置（config.yaml）数据缺失，本次保存已跳过题型/答案写入（防止覆盖服务器数据）。基本信息正常保存；请刷新页面重试。');
     }
     if (editRes.ok || editRes.redirected) {
       window.location.assign(problemUrl);
     } else {
-      alert('保存失败：' + editRes.statusText);
+      alert(`保存失败：${editRes.statusText}`);
     }
   };
 
@@ -590,7 +604,7 @@ export function ProblemEditPage() {
                       <Checkbox
                         name="hidden"
                         defaultChecked={!!pdoc.hidden}
-                       />
+                      />
                       <span className="flex items-center gap-1 text-sm">
                         {pdoc.hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
                         隐藏题目
@@ -600,7 +614,7 @@ export function ProblemEditPage() {
                       <Checkbox
                         name="lockHidden"
                         defaultChecked={!!(pdoc as any).lockHidden}
-                       />
+                      />
                       <span className="flex items-center gap-1 text-sm">
                         <Lock className="size-3.5" />
                         锁定隐藏（比赛结束后不自动公开）
@@ -639,15 +653,22 @@ export function ProblemEditPage() {
               </CardContent>
             </Card>
 
-            {/* Type picker (visible in both create + edit) */}
-            <TypePicker value={typeState.type} onChange={setType} />
-
-            {/* Type-specific editor — only when we have a pid to attach config.yaml to */}
-            {!isCreate && typeState.type === 'objective' && (
-              <ObjectiveEditor
-                questions={typeState.objective}
-                onChange={(next) => setTypeState((prev) => ({ ...prev, objective: next }))}
-              />
+            {/* 客观题（Rev.12）：题型/小题/答案在出卷中心独立编辑器维护 */}
+            {isObjectiveProblem ? (
+              <Card className="border-primary/40 bg-primary/5">
+                <CardContent className="flex flex-wrap items-center gap-3 p-4">
+                  <NotebookPen className="size-4 shrink-0 text-primary" />
+                  <p className="min-w-0 flex-1 text-sm">
+                    此题为<span className="font-medium">客观题</span>——小题、选项与标准答案请在出卷中心编辑器维护；本页仅可修改标题、题号、标签、可见性等基本信息。
+                  </p>
+                  <Button asChild size="sm">
+                    <a href={`/paper-center/${pdoc.docId}/edit`}>去出卷中心编辑 →</a>
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              /* Type picker (visible in both create + edit)；客观题选项已移除 */
+              <TypePicker value={typeState.type} onChange={setType} />
             )}
             {!isCreate && typeState.type === 'fill_function' && (
               <FillFunctionEditor

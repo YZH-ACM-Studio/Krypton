@@ -9,23 +9,22 @@
  *
  * See PRD §1.6 for submission semantics, §1.8 for the API list.
  */
-import { ObjectId } from 'mongodb';
 import yaml from 'js-yaml';
+import { ObjectId } from 'mongodb';
 import {
-    Context, Handler, NotFoundError, OplogModel, param, PERM,
-    PermissionError, PRIV, route, Types, UserModel, ValidationError,
-} from 'hydrooj';
-import {
-    PaperDraftModel, ProblemModel, problemFingerprint, spliceFillFunction,
-    questionKindMap,
-} from 'hydrooj';
+    clientProblemConfig,
+    Context, Handler, NotFoundError, OplogModel, PaperDraftModel, param,
+    parseProblemConfigObject, PERM,
+    PermissionError, PRIV, problemFingerprint, ProblemModel, questionKindMap,
+    route,
+    Types, UserModel, ValidationError } from 'hydrooj';
+import { ContestClientFinishedError } from '../error';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
 import * as document from '../model/document';
 import * as record from '../model/record';
-import { ContestClientFinishedError } from '../error';
 import { closeSessionOnVigil } from '../service/vigil-bridge';
-import { ContestProblemListHandler, ContestPrintHandler, ContestScoreboardHandler } from './contest';
+import { ContestPrintHandler, ContestProblemListHandler, ContestScoreboardHandler } from './contest';
 import { DiscussionDetailHandler } from './discussion';
 import { ProblemDetailHandler } from './problem';
 import { RecordDetailHandler } from './record';
@@ -67,6 +66,15 @@ function absolutizeProblemFileUrls(handler: Handler, content: string, pdoc: any,
     return out;
 }
 
+/**
+ * pdoc.config 统一解析（见 lib/problem-config.ts parseProblemConfigObject）。
+ * 此前 `typeof pdoc.config === 'object'` 的判断对字符串永远为 false，
+ * objective/fill_function 的 cells 构建与 finalize 分流在生产从未生效
+ * （PLAN P3.2 修复）。完整对象含标准答案，**只许服务端用**；发给
+ * 客户端一律经 clientProblemConfig 净化。
+ */
+const parsedProblemConfig = parseProblemConfigObject;
+
 class PaperBaseHandler extends Handler {
     tdoc: any;
     tid: ObjectId;
@@ -90,7 +98,7 @@ class PaperBaseHandler extends Handler {
         const sid = vg?.clientSessionKeyFromSession
             ? vg.clientSessionKeyFromSession((this as any).session)
             : ((this as any).session?.sessionId || (this as any).session?._id || '');
-        const hasClientSession = !isAdminBypass && !!sid && vg?.isValidClientSessionForContest
+        const hasClientSession = !isAdminBypass && sid && vg?.isValidClientSessionForContest
             ? await vg.isValidClientSessionForContest(sid, domainId, tid, this.user._id)
             : false;
 
@@ -149,9 +157,26 @@ class PaperBaseHandler extends Handler {
             if (typeof pdoc.content === 'string') {
                 pdoc.content = absolutizeProblemFileUrls(this, pdoc.content, pdoc, this.tdoc.docId);
             }
+            // 考试上下文不得下发原赛通过率（难度提示）——public 投影会带上它。
+            delete pdoc.origStat;
+            // 统一解析为完整 config 对象（服务端内部用；含标准答案）。
+            pdoc.config = parsedProblemConfig(pdoc);
             pdict[pid] = pdoc;
         }));
         return pdict;
+    }
+
+    /**
+     * pdict 的客户端安全版：config 换成净化子集。原始 config 含
+     * answers（标准答案），一旦考试里挂客观题会把答案直接发给考生
+     * —— 任何 response.body 里的 pdict 必须走这里。
+     */
+    sanitizePdictForClient(pdict: Record<number, any>): Record<number, any> {
+        const out: Record<number, any> = {};
+        for (const [pid, pdoc] of Object.entries(pdict)) {
+            out[pid] = { ...pdoc, config: clientProblemConfig(pdoc.config) };
+        }
+        return out;
     }
 
     isInWindow(): boolean {
@@ -196,9 +221,11 @@ function examModeContext(tdoc: any, section: ExamModeSection, contentTemplate: s
     };
 }
 
-/** Resolve the student record for the current viewer, injected so the exam
- *  top bar can render `学号 + 姓名` next to the avatar. */
-async function resolveExamModeStudent(handler: any, domainId: string): Promise<{ studentId: string; realName: string } | null> {
+/**
+ * Resolve the student record for the current viewer, injected so the exam
+ *  top bar can render `学号 + 姓名` next to the avatar.
+ */
+async function resolveExamModeStudent(handler: any, domainId: string): Promise<{ studentId: string, realName: string } | null> {
     const uid = handler?.user?._id;
     if (!uid) return null;
     const userbind = (global as any).Hydro?.model?.userbind;
@@ -303,12 +330,14 @@ async function gradeObjectiveDraft(
 ): Promise<Record<string, 'correct' | 'wrong' | 'partial'>> {
     const draft = await PaperDraftModel.getDraft(domainId, tid, pid, uid);
     if (!draft) return {};
-    const config = typeof pdoc.config === 'object' ? pdoc.config : null;
+    const config = parsedProblemConfig(pdoc);
     const answers = config?.answers || {};
     const kinds = questionKindMap(answers);
     const results: Record<string, 'correct' | 'wrong' | 'partial'> = {};
     for (const [key, kind] of Object.entries(kinds)) {
         if (kindFilter && kind !== kindFilter) continue;
+        // 主观题（Rev.12）不做即时判分——由比赛「阅卷」人工给分。
+        if (kind === 'subjective') continue;
         const studentAnswer = draft.answers?.[key];
         results[key] = gradeObjective(answers[key], studentAnswer);
     }
@@ -334,7 +363,7 @@ class PaperLayoutHandler extends PaperBaseHandler {
         for (const pid of this.tdoc.pids as number[]) {
             const pdoc = pdict[pid];
             if (!pdoc) continue;
-            const config = typeof pdoc.config === 'object' ? pdoc.config : null;
+            const config = pdoc.config; // getProblemDict 已解析为完整对象
             const type = config?.type || 'default';
             if (type === 'objective') {
                 const kinds = questionKindMap(config?.answers);
@@ -382,7 +411,7 @@ class PaperLayoutHandler extends PaperBaseHandler {
         // Scoreboard (best-effort).
         const allowRealtime = !!this.tdoc.realtimeScoreboard;
         const showScoreboard = !this.isInWindow() || allowRealtime;
-        let scoreboard: Array<{ rank: number; uid: number; uname: string; realName?: string; studentId?: string; score: number }> = [];
+        let scoreboard: Array<{ rank: number, uid: number, uname: string, realName?: string, studentId?: string, score: number }> = [];
         if (showScoreboard) {
             try {
                 const tsdocs = await (contest as any).getMultiStatus(domainId, { docId: this.tid })
@@ -407,7 +436,7 @@ class PaperLayoutHandler extends PaperBaseHandler {
         this.response.template = 'exam_paper.html';
         this.response.body = {
             tdoc: this.tdoc,
-            pdict,
+            pdict: this.sanitizePdictForClient(pdict),
             cells,
             now: Date.now(),
             inWindow: this.isInWindow(),
@@ -431,8 +460,7 @@ class PaperDraftListHandler extends PaperBaseHandler {
         for (const draft of drafts) {
             const pdoc = pdict[draft.pid];
             if (!pdoc) continue;
-            const config = typeof pdoc.config === 'object' ? pdoc.config : null;
-            const currentFp = problemFingerprint(config);
+            const currentFp = problemFingerprint(pdoc.config); // getProblemDict 已解析
             staleness[draft.pid] = currentFp !== draft.problemFingerprint;
         }
 
@@ -467,7 +495,10 @@ class PaperDraftUpsertHandler extends PaperBaseHandler {
         if (!(this.tdoc.pids as number[]).includes(pid)) {
             throw new ValidationError('pid', null, 'Problem is not part of this contest');
         }
-        const pdoc = await ProblemModel.get(this.tdoc.domainId, pid);
+        // rawConfig=true + 自行解析：与 getProblemDict/finalize 的指纹口径
+        // 一致（默认投影拿到的是 parseConfig 净化摘要，不含 answers，
+        // 指纹永远对不上 —— 既有 bug，PLAN P3.2 一并修复）。
+        const pdoc = await ProblemModel.get(this.tdoc.domainId, pid, undefined, true);
         if (!pdoc) throw new NotFoundError('Problem');
 
         let parsedAnswers: Record<string, string | string[]> | undefined;
@@ -482,7 +513,7 @@ class PaperDraftUpsertHandler extends PaperBaseHandler {
             }
         }
 
-        const config = typeof pdoc.config === 'object' ? pdoc.config : null;
+        const config = parsedProblemConfig(pdoc);
         const fp = problemFingerprint(config);
         const draft = await PaperDraftModel.upsertDraft(domainId, this.tid, pid, this.user._id, {
             answers: parsedAnswers,
@@ -499,7 +530,7 @@ class PaperDraftUpsertHandler extends PaperBaseHandler {
 class PaperLockKindHandler extends PaperBaseHandler {
     @param('kind', Types.Name)
     async post({ domainId }: { domainId: string }, kind: string) {
-        if (!['single', 'multi', 'blank', 'fill_program'].includes(kind)) {
+        if (!['single', 'multi', 'blank', 'fill_program', 'subjective'].includes(kind)) {
             throw new ValidationError('kind');
         }
         if (!this.isInWindow()) throw new ValidationError('contest', null, 'Contest not in active window');
@@ -517,7 +548,7 @@ class PaperLockKindHandler extends PaperBaseHandler {
         for (const pid of this.tdoc.pids as number[]) {
             const pdoc = pdict[pid];
             if (!pdoc) continue;
-            const cfg = typeof pdoc.config === 'object' ? pdoc.config : null;
+            const cfg = pdoc.config; // getProblemDict 已解析
             if (cfg?.type !== 'objective') continue;
             const results = await gradeObjectiveDraft(domainId, this.tid, this.user._id, pid, pdoc, kind);
             if (Object.keys(results).length > 0) aggregateResults[pid] = results;
@@ -533,9 +564,9 @@ class PaperSubmitCodeHandler extends PaperBaseHandler {
     @param('pid', Types.UnsignedInt)
     async post({ domainId }: { domainId: string }, pid: number) {
         if (!this.isInWindow()) throw new ValidationError('contest', null, 'Contest not in active window');
-        const pdoc = await ProblemModel.get(this.tdoc.domainId, pid);
+        const pdoc = await ProblemModel.get(this.tdoc.domainId, pid, undefined, true);
         if (!pdoc) throw new NotFoundError('Problem');
-        const config = typeof pdoc.config === 'object' ? pdoc.config : null;
+        const config = parsedProblemConfig(pdoc);
         const type = config?.type || 'default';
         if (!['default', 'fill_function'].includes(type)) {
             throw new ValidationError('type', null, 'Only default and fill_function problems support immediate submit');
@@ -563,7 +594,7 @@ export async function finalizePaperForUser(
     domainId: string,
     tid: ObjectId,
     uid: number,
-    options: { tdoc?: any; meta?: any } = {},
+    options: { tdoc?: any, meta?: any } = {},
 ): Promise<ObjectId[]> {
     const tdoc = options.tdoc || await contest.get(domainId, tid);
     if (!tdoc) throw new NotFoundError('Contest');
@@ -582,7 +613,7 @@ export async function finalizePaperForUser(
     for (const draft of drafts) {
         const pdoc = pdict[draft.pid];
         if (!pdoc) continue;
-        const config = typeof pdoc.config === 'object' ? pdoc.config : null;
+        const config = parsedProblemConfig(pdoc);
         const type = config?.type || 'default';
 
         if (type === 'objective') {
@@ -764,6 +795,10 @@ class ExamModeEntryHandler extends Handler {
                 if (typeof pdoc.content === 'string') {
                     pdoc.content = absolutizeProblemFileUrls(this, pdoc.content, pdoc, tdoc.docId);
                 }
+                // 考试上下文不得下发原赛通过率（难度提示）。
+                delete pdoc.origStat;
+                // 净化 config：原始 YAML 串含标准答案，不下发。
+                pdoc.config = clientProblemConfig(parsedProblemConfig(pdoc));
                 pdict[pid] = pdoc;
             }));
         }
@@ -794,6 +829,9 @@ function bounceIfNotStarted(handler: any, tdoc: any, tid: ObjectId): boolean {
 }
 
 class ExamModeProblemListHandler extends ContestProblemListHandler {
+    // 考试壳不下发本场热度统计（P1.4 红线：exam-mode payload/DOM 不变）。
+    protected liveStatsEnabled = false;
+
     @param('tid', Types.ObjectId)
     async get(domainId: string, tid: ObjectId) {
         const { previewMode, tsdoc } = await ensureExamModeAccess(this, domainId, tid, this.tdoc);
@@ -805,6 +843,9 @@ class ExamModeProblemListHandler extends ContestProblemListHandler {
 }
 
 class ExamModeAnnouncementsHandler extends ContestProblemListHandler {
+    // 同 ExamModeProblemListHandler：考试壳不带本场热度统计。
+    protected liveStatsEnabled = false;
+
     @param('tid', Types.ObjectId)
     async get(domainId: string, tid: ObjectId) {
         const { previewMode, tsdoc } = await ensureExamModeAccess(this, domainId, tid, this.tdoc);
@@ -838,7 +879,7 @@ class ExamModeProblemDetailHandler extends ProblemDetailHandler {
 
     @param('tid', Types.ObjectId)
     async get(domainId: string, tid: ObjectId) {
-        if (this.response.redirect) return;  // _prepare already bounced.
+        if (this.response.redirect) return; // _prepare already bounced.
         await super.get(domainId, tid, false);
         // super.get() rewrote file:// attachments to a *relative* ./<docId>/file/
         // path that breaks under the deep /exam-mode/:tid/problem/:pid URL (and

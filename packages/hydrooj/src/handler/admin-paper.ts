@@ -12,13 +12,13 @@
  *     session required).
  */
 import { ObjectId } from 'mongodb';
-import yaml from 'js-yaml';
 import {
     Context, Handler, NotFoundError, OplogModel, param, PRIV, Types,
-    ValidationError, PaperDraftModel, ProblemModel,
+    ValidationError,
 } from 'hydrooj';
 import * as contest from '../model/contest';
 import * as record from '../model/record';
+import { finalizePaperForUser } from './paper';
 
 class AdminPaperHandler extends Handler {
     async prepare() {
@@ -77,41 +77,14 @@ class ForceSubmitHandler extends AdminPaperHandler {
     ) {
         const tdoc = await contest.get(domainId, tid);
         if (!tdoc) throw new NotFoundError('Contest');
-        const drafts = await PaperDraftModel.getDraftsForUser(domainId, tid, uid);
-        const pdocs: Record<number, any> = {};
-        await Promise.all((tdoc.pids as number[]).map(async (pid) => {
-            const pdoc = await ProblemModel.get(domainId, pid);
-            if (pdoc) pdocs[pid] = pdoc;
-        }));
-
-        const rids: ObjectId[] = [];
-        for (const draft of drafts) {
-            const pdoc = pdocs[draft.pid];
-            if (!pdoc) continue;
-            const config = typeof pdoc.config === 'object' ? pdoc.config : null;
-            const type = config?.type || 'default';
-            const meta = { proctorForced: true, forcedBy: this.user._id };
-            if (type === 'objective') {
-                const yamlBody = yaml.dump(draft.answers || {});
-                rids.push(await record.add(domainId, draft.pid, uid, '_', yamlBody, true,
-                    { contest: tid, type: 'judge', meta } as any));
-            } else if (type === 'fill_function') {
-                const codeBody = draft.code || JSON.stringify(draft.answers || {});
-                const lang = draft.lang || config?.template?.lang || 'cpp';
-                rids.push(await record.add(domainId, draft.pid, uid, lang, codeBody, true,
-                    { contest: tid, type: 'judge', meta } as any));
-            } else if (type === 'default' && draft.code) {
-                const lang = draft.lang || config?.langs?.[0] || 'cpp';
-                rids.push(await record.add(domainId, draft.pid, uid, lang, draft.code, true,
-                    { contest: tid, type: 'judge', meta } as any));
-            } else if (type === 'submit_answer') {
-                rids.push(await record.add(domainId, draft.pid, uid, '_', draft.code || '', true,
-                    { contest: tid, type: 'judge', meta } as any));
-            }
-        }
-        for (const rid of rids) {
-            await contest.updateStatus(domainId, tid, uid, rid, 0);
-        }
+        // 复用 finalize 主路径（PLAN P3.2）：此前这里是它的复制品，且
+        // config 用 `typeof === 'object'` 老判断（对字符串 config 恒 false，
+        // objective/fill_function 分流失效）。finalizePaperForUser 已统一
+        // raw+parse、附带 objective draft 判分与 contest.updateStatus。
+        const rids = await finalizePaperForUser(domainId, tid, uid, {
+            tdoc,
+            meta: { proctorForced: true, forcedBy: this.user._id },
+        });
         await OplogModel.log(this, 'paper.force_submit', { tid, uid, count: rids.length });
         this.response.body = { ok: true, rids, count: rids.length };
     }

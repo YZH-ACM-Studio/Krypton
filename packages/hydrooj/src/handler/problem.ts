@@ -342,6 +342,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             delete this.pdoc.nSubmit;
             delete this.pdoc.difficulty;
             delete this.pdoc.stats;
+            delete this.pdoc.origStat;
         } else if (!problem.canViewBy(this.pdoc, this.user)) {
             throw new PermissionError(PERM.PERM_VIEW_PROBLEM_HIDDEN);
         }
@@ -648,6 +649,12 @@ export class ProblemEditHandler extends ProblemManageHandler {
         this.response.body.testdata = sortFiles(this.pdoc.data || []);
         this.response.body.additional_file = sortFiles(this.pdoc.additional_file || []);
         this.response.body.statementLangs = this.ctx.i18n.langs(false);
+        // 原始 config YAML（本页 gated by ProblemManageHandler）：前端类型
+        // 编辑器直接从页面数据初始化。此前前端 fetch 文件下载路由读取——
+        // 该路由对缺失文件不返回 404（照签跳转链接），新题/无 config 题的
+        // 类型编辑永远初始化失败（Rev.12 bug 修复）。
+        const rawPdoc = await problem.get(this.pdoc.domainId, this.pdoc.docId, ['config'] as any, true);
+        this.response.body.configRaw = typeof rawPdoc?.config === 'string' ? rawPdoc.config : '';
         this.response.template = 'problem_edit.html';
     }
 

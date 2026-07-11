@@ -8,10 +8,17 @@ import {
     Context, Handler, NotFoundError, ObjectId, OplogModel, param, PRIV,
     Types, UserModel, ValidationError,
 } from 'hydrooj';
-import { userBindModel } from './model';
 import {
-    bindTokensColl, schoolsColl, studentsColl, userGroupsColl, bindingRequestsColl,
+    bindingRequestsColl,
+    bindTokensColl,
+    schoolsColl,
+    studentsColl,
+    userGroupsColl,
 } from './db';
+import { userBindModel } from './model';
+import type { ParsedStudentFilterQuery } from './student-filter';
+import { parseStudentFilterQuery } from './student-filter';
+import { parseAdminStudentFilters } from './student-filter-http';
 
 // ─── Admin handlers ───────────────────────────────────────────────────────
 
@@ -28,6 +35,7 @@ async function buildSchoolDetailData(
         tab?: string;
         studentQuery?: string;
         studentPage?: number;
+        studentFilters?: ParsedStudentFilterQuery;
         groupQuery?: string;
         groupPage?: number;
         importQuery?: string;
@@ -42,6 +50,7 @@ async function buildSchoolDetailData(
     const studentPage = Math.max(1, options.studentPage || 1);
     const groupPage = Math.max(1, options.groupPage || 1);
     const studentQuery = (options.studentQuery || '').trim();
+    const studentFilters = options.studentFilters || parseStudentFilterQuery({});
     const groupQuery = (options.groupQuery || '').trim();
     const importQuery = (options.importQuery || '').trim();
     const tab = ['students', 'import', 'groups', 'links'].includes(options.tab || '')
@@ -53,11 +62,16 @@ async function buildSchoolDetailData(
         userBindModel.listStudents(domainId, {
             schoolId,
             query: studentQuery,
+            enrollmentYear: studentFilters.enrollmentYear,
+            bindingStatus: studentFilters.bindingStatus,
+            timeField: studentFilters.timeField,
+            from: studentFilters.from,
+            to: studentFilters.to,
             limit: studentLimit,
             skip: (studentPage - 1) * studentLimit,
         }),
         userBindModel.listInviteTokens(domainId, { schoolId, kind: 'school' }),
-        studentsColl.aggregate<{ _id: ObjectId; count: number }>([
+        studentsColl.aggregate<{ _id: ObjectId, count: number }>([
             { $match: { domainId, schoolId } },
             { $unwind: '$groupIds' },
             { $group: { _id: '$groupIds', count: { $sum: 1 } } },
@@ -92,6 +106,7 @@ async function buildSchoolDetailData(
         studentPage,
         studentLimit,
         studentQuery,
+        studentFilters: studentFilters.values,
         schoolTokens,
         importSearchResults,
         importQ: importQuery,
@@ -161,6 +176,11 @@ class AdminSchoolDetailHandler extends UserbindAdminHandler {
     @param('schoolId', Types.ObjectId)
     @param('tab', Types.String, true)
     @param('q', Types.String, true)
+    @param('enrollmentYear', Types.String, true)
+    @param('bindingStatus', Types.String, true)
+    @param('timeField', Types.String, true)
+    @param('from', Types.String, true)
+    @param('to', Types.String, true)
     @param('page', Types.PositiveInt, true)
     @param('groupQ', Types.String, true)
     @param('groupPage', Types.PositiveInt, true)
@@ -170,16 +190,25 @@ class AdminSchoolDetailHandler extends UserbindAdminHandler {
         schoolId: ObjectId,
         tab?: string,
         q?: string,
+        enrollmentYear?: string,
+        bindingStatus?: string,
+        timeField?: string,
+        from?: string,
+        to?: string,
         page = 1,
         groupQ?: string,
         groupPage = 1,
         importQ?: string,
     ) {
+        const studentFilters = parseAdminStudentFilters({
+            enrollmentYear, bindingStatus, timeField, from, to,
+        });
         this.response.template = 'admin_userbind_school_detail.html';
         this.response.body = await buildSchoolDetailData(domainId, schoolId, {
             tab,
             studentQuery: q,
             studentPage: page,
+            studentFilters,
             groupQuery: groupQ,
             groupPage,
             importQuery: importQ,
@@ -523,20 +552,41 @@ class AdminStudentsHandler extends UserbindAdminHandler {
     @param('schoolId', Types.ObjectId, true)
     @param('groupId', Types.ObjectId, true)
     @param('q', Types.String, true)
+    @param('enrollmentYear', Types.String, true)
+    @param('bindingStatus', Types.String, true)
+    @param('timeField', Types.String, true)
+    @param('from', Types.String, true)
+    @param('to', Types.String, true)
     @param('page', Types.PositiveInt, true)
     async get(
         { domainId }: { domainId: string },
-        schoolId?: ObjectId, groupId?: ObjectId, q?: string, page = 1,
+        schoolId?: ObjectId, groupId?: ObjectId, q?: string,
+        enrollmentYear?: string, bindingStatus?: string, timeField?: string,
+        from?: string, to?: string, page = 1,
     ) {
         const limit = 50;
+        const studentQuery = (q || '').trim();
+        const studentFilters = parseAdminStudentFilters({
+            enrollmentYear, bindingStatus, timeField, from, to,
+        });
         const { docs: students, total } = await userBindModel.listStudents(domainId, {
-            schoolId, groupId, query: q, limit, skip: (page - 1) * limit,
+            schoolId,
+            groupId,
+            query: studentQuery,
+            enrollmentYear: studentFilters.enrollmentYear,
+            bindingStatus: studentFilters.bindingStatus,
+            timeField: studentFilters.timeField,
+            from: studentFilters.from,
+            to: studentFilters.to,
+            limit,
+            skip: (page - 1) * limit,
         });
         const schools = await userBindModel.listSchools(domainId);
         this.response.template = 'admin_userbind_students.html';
         this.response.body = {
             students, total, page, pageSize: limit,
-            schools, filterSchoolId: schoolId, filterGroupId: groupId, q,
+            schools, filterSchoolId: schoolId, filterGroupId: groupId, q: studentQuery,
+            studentFilters: studentFilters.values,
         };
     }
 

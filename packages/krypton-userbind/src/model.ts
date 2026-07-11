@@ -6,7 +6,7 @@
  * and `claimTemporaryAccount` specifically — those are stable contracts.
  */
 import type { Filter } from 'mongodb';
-import { db, ObjectId, ValidationError, UserModel } from 'hydrooj';
+import { db, ObjectId, UserModel, ValidationError } from 'hydrooj';
 import {
     bindTokensColl,
     ensureIndexes,
@@ -14,10 +14,15 @@ import {
     studentsColl,
     userGroupsColl,
 } from './db';
+import type { ListStudentsFilter } from './student-filter';
+import {
+    escapeRegexLiteral,
+    listStudentsFromCollection,
+} from './student-filter';
 import type {
+    BindingRequest,
     BindToken,
     BindTokenKind,
-    BindingRequest,
     ImportConflictPolicy,
     ImportReport,
     ImportStudentReport,
@@ -32,14 +37,12 @@ import type {
     UserGroupBindToken,
 } from './types';
 
+export type { ListStudentsFilter } from './student-filter';
+
 export { ensureIndexes };
 
 function nowDate(): Date {
     return new Date();
-}
-
-function escapeRegexLiteral(input: string): string {
-    return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
@@ -779,41 +782,10 @@ export async function retryAutoBindStudentsInGroup(
     };
 }
 
-export interface ListStudentsFilter {
-    schoolId?: ObjectId;
-    groupId?: ObjectId;
-    boundOnly?: boolean;
-    unboundOnly?: boolean;
-    query?: string;
-    limit?: number;
-    skip?: number;
-}
-
 export async function listStudents(
     domainId: string, filter: ListStudentsFilter = {},
 ): Promise<{ docs: StudentRecord[]; total: number }> {
-    const mongoFilter: Filter<StudentRecord> = { domainId };
-    if (filter.schoolId) mongoFilter.schoolId = filter.schoolId;
-    if (filter.groupId) mongoFilter.groupIds = filter.groupId;
-    if (filter.boundOnly) mongoFilter.boundUserId = { $ne: null };
-    if (filter.unboundOnly) mongoFilter.boundUserId = null;
-    if (filter.query) {
-        const q = filter.query.trim();
-        if (q) {
-            mongoFilter.$or = [
-                { studentId: { $regex: q, $options: 'i' } },
-                { realName: { $regex: q, $options: 'i' } },
-            ];
-        }
-    }
-    const total = await studentsColl.countDocuments(mongoFilter);
-    const docs = await studentsColl
-        .find(mongoFilter)
-        .sort({ studentId: 1 })
-        .skip(filter.skip || 0)
-        .limit(filter.limit || 100)
-        .toArray();
-    return { docs, total };
+    return listStudentsFromCollection(studentsColl, domainId, filter);
 }
 
 export async function getStudent(domainId: string, id: ObjectId): Promise<StudentRecord | null> {

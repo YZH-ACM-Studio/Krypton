@@ -7,8 +7,8 @@
  */
 import { db } from 'hydrooj';
 import type {
-    BindToken,
     BindingRequest,
+    BindToken,
     School,
     StudentRecord,
     UserGroup,
@@ -42,6 +42,18 @@ export async function ensureIndexes(): Promise<void> {
         studentsColl.createIndex({ domainId: 1, boundUserId: 1 }),
         studentsColl.createIndex({ domainId: 1, groupIds: 1 }),
         studentsColl.createIndex({ domainId: 1, studentId: 1, realName: 1 }),
+        studentsColl.createIndex({
+            domainId: 1, schoolId: 1, enrollmentYear: 1, boundUserId: 1, createdAt: -1,
+        }),
+        studentsColl.createIndex({
+            domainId: 1, schoolId: 1, enrollmentYear: 1, boundUserId: 1, boundAt: -1,
+        }),
+        studentsColl.createIndex({
+            domainId: 1, enrollmentYear: 1, boundUserId: 1, createdAt: -1,
+        }),
+        studentsColl.createIndex({
+            domainId: 1, enrollmentYear: 1, boundUserId: 1, boundAt: -1,
+        }),
 
         bindTokensColl.createIndex({ domainId: 1, studentRecordId: 1 }),
         bindTokensColl.createIndex({ used: 1, expiresAt: 1 }),

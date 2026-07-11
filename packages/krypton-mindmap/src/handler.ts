@@ -6,20 +6,42 @@
  *   POST /admin/mindmap/nodes              AdminMutateNodes (create/update/delete/move/position)
  *   POST /admin/mindmap/config             AdminConfig (title / layoutDirection / reset)
  */
+import { Logger } from '@hydrooj/utils';
 import type { Context } from 'hydrooj';
 import {
-    Handler, NotFoundError, ObjectId, param, PRIV, PrivilegeError, Types,
+    ForbiddenError, Handler, ObjectId, param, PRIV, PrivilegeError, ProblemModel, Types,
 } from 'hydrooj';
 import { rebuildFromCategories } from './db';
 import {
     clearAllPositions,
-    createNode, deleteNodeRecursive, getConfig, getNode, listAllNodes,
+    createNode, deleteNodeRecursive, getConfig, listAllNodes,
     listProblemsForNode, moveNode, setConfig, setNodePosition, updateNode,
 } from './model';
+
+const logger = new Logger('krypton-mindmap.handler');
+
+function canExposeProblemMetadata(user: any, domainId: string): boolean {
+    try {
+        ProblemModel.assertProblemAclDomain(user, domainId);
+        return ProblemModel.canBrowseProblemBank(user);
+    } catch (error) {
+        logger.error(
+            'mindmap bootstrap ACL evaluation failed for domain=%s uid=%s: %s',
+            domainId,
+            user?._id ?? 'anonymous',
+            error instanceof Error ? error.stack || error.message : String(error),
+        );
+        return false;
+    }
+}
 
 class MindmapPage extends Handler {
     noCheckPermView = true;
     async get() {
+        const exposeProblemMetadata = canExposeProblemMetadata(
+            this.user as any,
+            String(this.domain?._id || ''),
+        );
         const [nodes, config] = await Promise.all([
             listAllNodes(),
             getConfig(),
@@ -30,6 +52,7 @@ class MindmapPage extends Handler {
                 ...n,
                 _id: String(n._id),
                 parentId: n.parentId ? String(n.parentId) : null,
+                ...(exposeProblemMetadata ? {} : { tags: [], problemIds: [] }),
             })),
             config: {
                 ...config,
@@ -42,8 +65,12 @@ class MindmapPage extends Handler {
 class ProblemsApi extends Handler {
     noCheckPermView = true;
     @param('nodeId', Types.ObjectId)
-    async get({ domainId }: { domainId: string }, nodeId: ObjectId) {
-        const problems = await listProblemsForNode(domainId, nodeId);
+    async get(_args: { domainId: string }, nodeId: ObjectId) {
+        const domainId = String(this.domain?._id);
+        ProblemModel.assertProblemAclDomain(this.user as any, domainId);
+        if (!ProblemModel.canBrowseProblemBank(this.user as any)) throw new ForbiddenError();
+        const scope = ProblemModel.buildProblemBankScope(this.user as any);
+        const problems = await listProblemsForNode(domainId, nodeId, scope);
         this.response.body = { problems };
     }
 }

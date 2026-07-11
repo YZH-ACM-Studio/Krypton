@@ -34,6 +34,9 @@ process.on('uncaughtException', logger.error);
 const HYDROPATH = [];
 const BUILTIN_ADDONS = [
     path.resolve(__dirname, '..'),
+    // Problem ACL state must be attached before any request-serving addon
+    // consumes ProblemModel's bank/maintenance capabilities.
+    path.resolve(__dirname, '..', '..', 'krypton-permits'),
     path.resolve(__dirname, '..', '..', 'ui-next'),
     path.resolve(__dirname, '..', '..', 'krypton-userbind'),
     path.resolve(__dirname, '..', '..', 'krypton-vigilguard'),

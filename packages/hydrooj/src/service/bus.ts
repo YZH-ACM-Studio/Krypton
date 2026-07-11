@@ -70,17 +70,17 @@ export interface EventMap {
     'problem/before-add': (domainId: string, content: string, owner: number, docId: number, doc: Partial<ProblemDoc>) => VoidReturn;
     'problem/add': (doc: Partial<ProblemDoc>, docId: number) => VoidReturn;
     'problem/before-edit': (doc: Partial<ProblemDoc>, $unset: OnlyFieldsOfType<ProblemDoc, any, true | '' | 1>) => VoidReturn;
-    'problem/edit': (doc: ProblemDoc) => VoidReturn;
-    'problem/before-del': (domainId: string, docId: number) => VoidReturn;
+    'problem/edit': (doc: ProblemDoc, writeClaimRequestId?: string) => VoidReturn;
+    'problem/before-del': (domainId: string, docId: number, writeClaimRequestId?: string) => VoidReturn;
     'problem/list': (query: Filter<ProblemDoc>, handler: any, sort?: string[]) => VoidReturn;
     'problem/get': (doc: ProblemDoc, handler: any) => VoidReturn;
     'problem/delete': (domainId: string, docId: number) => VoidReturn;
-    'problem/addTestdata': (domainId: string, docId: number, name: string, payload: Omit<FileInfo, '_id'>) => VoidReturn;
-    'problem/renameTestdata': (domainId: string, docId: number, name: string, newName: string) => VoidReturn;
-    'problem/delTestdata': (domainId: string, docId: number, name: string[]) => VoidReturn;
-    'problem/addAdditionalFile': (domainId: string, docId: number, name: string, payload: Omit<FileInfo, '_id'>) => VoidReturn;
-    'problem/renameAdditionalFile': (domainId: string, docId: number, name: string, newName: string) => VoidReturn;
-    'problem/delAdditionalFile': (domainId: string, docId: number, name: string[]) => VoidReturn;
+    'problem/addTestdata': (domainId: string, docId: number, name: string, payload: Omit<FileInfo, '_id'>, claim?: any) => VoidReturn;
+    'problem/renameTestdata': (domainId: string, docId: number, name: string, newName: string, claim?: any) => VoidReturn;
+    'problem/delTestdata': (domainId: string, docId: number, name: string[], claim?: any) => VoidReturn;
+    'problem/addAdditionalFile': (domainId: string, docId: number, name: string, payload: Omit<FileInfo, '_id'>, claim?: any) => VoidReturn;
+    'problem/renameAdditionalFile': (domainId: string, docId: number, name: string, newName: string, claim?: any) => VoidReturn;
+    'problem/delAdditionalFile': (domainId: string, docId: number, name: string[], claim?: any) => VoidReturn;
 
     'contest/before-add': (payload: Partial<Tdoc>) => VoidReturn;
     'contest/add': (payload: Partial<Tdoc>, id: ObjectId) => VoidReturn;

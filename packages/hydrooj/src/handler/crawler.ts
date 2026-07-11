@@ -19,15 +19,17 @@
 import yaml from 'js-yaml';
 import { ObjectId } from 'mongodb';
 import {
-    Context, Handler, OplogModel, param, PERM, Types,
+    Context, Handler, OplogModel, param, PERM, PermissionError, Types,
 } from 'hydrooj';
 import { ForbiddenError } from '../error';
 import { requireAuthToken } from '../lib/auth-token';
+import { Logger } from '../logger';
 import problem from '../model/problem';
 import db from '../service/db';
 
 const CHANNEL = 'crawler';
 const importColl = db.collection('crawler.imported');
+const logger = new Logger('crawler');
 
 function normTime(s: string): string {
     const t = String(s || '').replace(/\s/g, '').toLowerCase();
@@ -40,6 +42,57 @@ function normMemory(s: string): string {
 
 // ─── base: token gate (channel `crawler`, must be user-bound) ────────────────
 
+function denyProblemAcl(user: any) {
+    Object.assign(user, {
+        _permitPids: new Set<number>(),
+        _maintainedPids: new Set<number>(),
+        _aclFencedPids: new Set<number>(),
+        _problemAclDomainId: undefined,
+        _problemAclLoaded: false,
+    });
+}
+
+async function loadCrawlerProblemAcl(user: any, domainId: string): Promise<void> {
+    denyProblemAcl(user);
+    try {
+        const permits = (global.Hydro?.model as any)?.permits;
+        if (typeof permits?.loadAclForUser !== 'function') throw new Error('permits.loadAclForUser is unavailable');
+        const loaded = await permits.loadAclForUser(domainId, Number(user?._id) || 0);
+        if (!(loaded?.permitPids instanceof Set)
+            || !(loaded?.maintainedPids instanceof Set)
+            || !(loaded?.fencedPids instanceof Set)) {
+            throw new TypeError('permits.loadAclForUser returned an invalid ACL snapshot');
+        }
+        Object.assign(user, {
+            _permitPids: loaded.permitPids,
+            _maintainedPids: loaded.maintainedPids,
+            _aclFencedPids: loaded.fencedPids,
+            _problemAclDomainId: domainId,
+            _problemAclLoaded: true,
+        });
+        problem.assertProblemAclDomain(user, domainId);
+    } catch (error) {
+        denyProblemAcl(user);
+        logger.error(
+            'Crawler ACL preload failed domain=%s uid=%d error=%s',
+            domainId, Number(user?._id) || 0, error,
+        );
+        throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
+    }
+}
+
+async function requireMaintainedProblem(domainId: string, docId: number, user: any) {
+    // Token handlers replace the HTTP user after the normal handler/create
+    // preload. Reload here before every target write batch so fences/revokes
+    // that land during a long crawler request take effect before the next batch.
+    await loadCrawlerProblemAcl(user, domainId);
+    const pdoc = await problem.get(domainId, docId);
+    if (!pdoc || !problem.canMaintainProblem(user, pdoc)) {
+        throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
+    }
+    return pdoc;
+}
+
 class CrawlerApiHandler extends Handler {
     noCheckPermView = true;
     crawlerDomain = 'system';
@@ -49,6 +102,7 @@ class CrawlerApiHandler extends Handler {
         // Problems carry an owner; a pure service token (no bound user) must not import.
         if (doc.uid == null) throw new ForbiddenError('入库需要绑定用户的令牌');
         this.crawlerDomain = doc.domainId || 'system';
+        await loadCrawlerProblemAcl(this.user, this.crawlerDomain);
     }
 }
 
@@ -82,7 +136,8 @@ class CrawlerProblemHandler extends CrawlerApiHandler {
         const existing = await importColl.findOne({ domainId, sourceUrl: url });
         if (existing) {
             // re-crawl → refresh the statement in place (no duplicate)
-            await problem.edit(domainId, existing.docId, { title: t, content });
+            await requireMaintainedProblem(domainId, existing.docId, this.user);
+            await problem.editAuthorized(domainId, existing.docId, { title: t, content }, this.user);
             await importColl.updateOne(
                 { _id: existing._id },
                 { $set: { updatedAt: new Date(), timeLimit: timeLimit || '', memoryLimit: memoryLimit || '' } },
@@ -118,10 +173,19 @@ class CrawlerProblemHandler extends CrawlerApiHandler {
             // Lost a concurrent race on the same sourceUrl (unique index): drop the
             // duplicate problem we just created and return the winner's refreshed row.
             if (e?.code === 11000) {
-                await problem.del(domainId, docId).catch(() => { /* best-effort cleanup */ });
+                try {
+                    await problem.del(domainId, docId);
+                } catch (cleanupError) {
+                    logger.error(
+                        'Crawler duplicate cleanup failed domain=%s docId=%d error=%s',
+                        domainId, docId, cleanupError,
+                    );
+                    throw cleanupError;
+                }
                 const winner = await importColl.findOne({ domainId, sourceUrl: url });
                 if (winner) {
-                    await problem.edit(domainId, winner.docId, { title: t, content });
+                    await requireMaintainedProblem(domainId, winner.docId, this.user);
+                    await problem.editAuthorized(domainId, winner.docId, { title: t, content }, this.user);
                     this.response.body = { pid: winner.pid, docId: winner.docId, updated: true };
                     return;
                 }
@@ -162,6 +226,7 @@ class CrawlerTestdataHandler extends CrawlerApiHandler {
             const cases = rawCases.filter(
                 (c: any) => c && (String(c.input ?? '') !== '' || String(c.output ?? '') !== ''),
             );
+            // eslint-disable-next-line no-await-in-loop
             const rec = await importColl.findOne({
                 domainId,
                 cid: Number.isInteger(cid) ? cid : null,
@@ -176,30 +241,57 @@ class CrawlerTestdataHandler extends CrawlerApiHandler {
                 continue;
             }
             try {
-                // Clean replace: clear prior testdata so a re-run with fewer cases
-                // doesn't leave orphaned .in/.out files behind.
-                const cur = await problem.get(domainId, rec.docId, ['data']);
-                const oldNames = ((cur as any)?.data || []).map((d: any) => d.name).filter(Boolean);
-                if (oldNames.length) await problem.delTestdata(domainId, rec.docId, oldNames, this.user._id);
+                // eslint-disable-next-line no-await-in-loop
+                await requireMaintainedProblem(domainId, rec.docId, this.user);
                 const yamlCases: { input: string, output: string }[] = [];
-                for (let i = 0; i < cases.length; i++) {
-                    const inName = `${i + 1}.in`;
-                    const outName = `${i + 1}.out`;
-                    await problem.addTestdata(domainId, rec.docId, inName, String(cases[i]?.input ?? ''), this.user._id);
-                    await problem.addTestdata(domainId, rec.docId, outName, String(cases[i]?.output ?? ''), this.user._id);
-                    yamlCases.push({ input: inName, output: outName });
-                }
-                const config = {
-                    time: normTime(rec.timeLimit),
-                    memory: normMemory(rec.memoryLimit),
-                    subtasks: [{ score: 100, type: 'min', cases: yamlCases }],
-                };
-                await problem.addTestdata(domainId, rec.docId, 'config.yaml', yaml.dump(config), this.user._id);
-                await problem.edit(domainId, rec.docId, { hidden: false });
+                // eslint-disable-next-line no-await-in-loop
+                await problem.withAuthorizedWriteClaim(
+                    domainId,
+                    rec.docId,
+                    this.user,
+                    'crawler-testdata-replace',
+                    async (claim) => {
+                        const cur = await problem.get(domainId, rec.docId);
+                        if (!cur) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
+                        // Clean replace under one durable claim. Revocation cannot
+                        // interleave between storage, config mirror, and publish.
+                        const oldNames = ((cur as any).data || []).map((d: any) => d.name).filter(Boolean);
+                        if (oldNames.length) {
+                            await problem.delTestdataWithClaim(claim, oldNames, this.user._id);
+                        }
+                        for (let i = 0; i < cases.length; i++) {
+                            const inName = `${i + 1}.in`;
+                            const outName = `${i + 1}.out`;
+                            // eslint-disable-next-line no-await-in-loop
+                            await problem.addTestdataWithClaim(
+                                claim, inName, String(cases[i]?.input ?? ''), this.user._id,
+                            );
+                            // eslint-disable-next-line no-await-in-loop
+                            await problem.addTestdataWithClaim(
+                                claim, outName, String(cases[i]?.output ?? ''), this.user._id,
+                            );
+                            yamlCases.push({ input: inName, output: outName });
+                        }
+                        const config = {
+                            time: normTime(rec.timeLimit),
+                            memory: normMemory(rec.memoryLimit),
+                            subtasks: [{ score: 100, type: 'min', cases: yamlCases }],
+                        };
+                        await problem.addTestdataWithClaim(
+                            claim, 'config.yaml', yaml.dump(config), this.user._id,
+                        );
+                        await problem.editWithClaim(claim, { hidden: false });
+                    },
+                );
                 unhidden++;
                 results.push({ cid, problemId, docId: rec.docId, ok: true, cases: yamlCases.length });
             } catch (e: any) {
-                results.push({ cid, problemId, ok: false, error: e?.message || 'failed' });
+                results.push({
+                    cid,
+                    problemId,
+                    ok: false,
+                    error: e instanceof PermissionError ? 'not_found' : (e?.message || 'failed'),
+                });
             }
         }
         await OplogModel.log(this as any, 'crawler.testdata', {

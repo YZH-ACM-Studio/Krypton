@@ -1,52 +1,25 @@
+/* eslint-disable no-await-in-loop */
 /**
- * permitsModel — grant / revoke / list problem permits.
- *
- * Permission checks here are minimal — callers (handlers) do the auth, this
- * module is pure data. The one exception is `revoke` which refuses to delete
- * the row that belongs to the problem owner (a safety net).
- *
- * Idempotency:
- *   - `grant` upserts on `(domainId, pid, uid)` — a second call for the same
- *     user just updates the role / note / viaContest tag in place.
- *   - `grantBulk` (contest cascade) uses bulkWrite upsert. Each contest-pid
- *     row gets `viaContest=tid`. If a direct (non-contest) permit already
- *     exists for that user/pid, we DO NOT overwrite it — the direct grant
- *     wins, preserving its source-of-truth role.
+ * Public ACL model. `problem.permits` is the one active canonical row per
+ * (domainId,pid,uid); `problem.permitSources` retains direct plus every
+ * contest source independently. Every mutation is delegated to the durable
+ * fence coordinator in service.ts.
  */
-import type { Filter, ObjectId as ObjectIdType } from 'mongodb';
-import { db, NotFoundError, ObjectId } from 'hydrooj';
-import { permitsColl } from './db';
+import { ObjectId, type ObjectId as ObjectIdType } from 'hydrooj';
+import {
+    permitsColl,
+    permitSourcesColl,
+} from './db';
+import { canonicalActiveFilter, normalizeActiveCanonicalDoc } from './legacy-canonical';
+import { mongoAclRepository } from './repository';
+import { createAclService } from './service';
 import type { PermitDoc, PermitRole } from './types';
 
-// Hydro stores problems in the shared `document` collection with
-// `docType: 10` (TYPE_PROBLEM). We touch `maintainer[]` directly via this
-// collection rather than through `ProblemModel.edit` to avoid firing the
-// `problem/edit` bus event (which would re-trigger this plugin's own
-// `clearForProblem` hook, deleting the permit we just inserted).
-const documentColl = db.collection<any>('document');
-const TYPE_PROBLEM = 10;
+const aclService = createAclService(mongoAclRepository);
 
-/**
- * Mirror the new permits row into the legacy `pdoc.maintainer[]` array so
- * upstream hydro code (and any future hydro routes that only read the array)
- * stays consistent with our source-of-truth permits table.
- *
- * verifier role intentionally does NOT touch maintainer[] — verifiers are
- * read-only and must not inherit edit perms via the legacy field.
- */
-async function syncMaintainerField(
-    domainId: string, pid: number, uid: number, action: 'add' | 'remove',
-): Promise<void> {
-    const update = action === 'add'
-        ? { $addToSet: { maintainer: uid } }
-        : { $pull: { maintainer: uid } };
-    await documentColl.updateOne(
-        { domainId, docType: TYPE_PROBLEM, docId: pid },
-        update as any,
-    );
+function newRequestId(prefix: string, supplied?: string): string {
+    return supplied?.trim() || `${prefix}:${new ObjectId().toHexString()}`;
 }
-
-// ─── Single-row ops ───────────────────────────────────────────────────────
 
 export async function grant(
     domainId: string,
@@ -54,91 +27,128 @@ export async function grant(
     uid: number,
     role: PermitRole,
     grantedBy: number,
-    opts: { viaContest?: ObjectIdType; note?: string } = {},
+    opts: {
+        viaContest?: ObjectIdType;
+        note?: string;
+        requestId?: string;
+        writeClaimRequestId?: string;
+    } = {},
 ): Promise<PermitDoc> {
-    const now = new Date();
-    const $set: Partial<PermitDoc> = {
-        role,
-        grantedBy,
-        note: opts.note || '',
-    };
-    // viaContest is only set on initial insert; we don't downgrade a direct
-    // permit to a contest-tagged one if a re-grant happens.
-    const $setOnInsert: Partial<PermitDoc> = {
-        domainId,
-        pid,
-        uid,
-        grantedAt: now,
-        viaContest: opts.viaContest || null,
-    };
-    await permitsColl.updateOne(
-        { domainId, pid, uid },
-        { $set, $setOnInsert: { _id: new ObjectId(), ...$setOnInsert } },
-        { upsert: true },
-    );
-    if (role === 'maintainer') {
-        // Dual-write the legacy maintainer[] field. See `syncMaintainerField`.
-        await syncMaintainerField(domainId, pid, uid, 'add');
+    const requestId = newRequestId('grant', opts.requestId);
+    if (opts.viaContest) {
+        await aclService.grantContest(
+            domainId, pid, uid, role, grantedBy,
+            opts.viaContest.toHexString(), requestId, opts.note || '', opts.writeClaimRequestId,
+        );
+    } else {
+        await aclService.grantDirect(
+            domainId, pid, uid, role, grantedBy, requestId, opts.note || '', opts.writeClaimRequestId,
+        );
     }
-    return (await permitsColl.findOne({ domainId, pid, uid }))!;
+    const canonical = await permitsColl.findOne({
+        domainId, pid, uid, active: canonicalActiveFilter(),
+    });
+    if (!canonical) throw new Error(`canonical ACL missing after grant ${requestId}`);
+    return canonical;
 }
 
-/**
- * Revoke a permit by row id. Returns `false` if no row matched.
- *
- * If `requireOwner` is set, ensures the row is owned via the given source
- * (e.g. don't let a contest-revoke wipe a directly-granted permit).
- */
 export async function revoke(
     domainId: string,
     permitId: ObjectIdType,
-    opts: { requireOwner?: 'direct' | 'viaContest'; viaContest?: ObjectIdType } = {},
+    opts: {
+        requireOwner?: 'direct' | 'viaContest';
+        viaContest?: ObjectIdType;
+        requestId?: string;
+        actor?: number;
+        writeClaimRequestId?: string;
+    } = {},
 ): Promise<boolean> {
-    const filter: Filter<PermitDoc> = { domainId, _id: permitId };
-    if (opts.requireOwner === 'direct') filter.viaContest = null;
-    if (opts.requireOwner === 'viaContest' && opts.viaContest) {
-        filter.viaContest = opts.viaContest;
+    const canonical = await permitsColl.findOne({
+        domainId, _id: permitId, active: canonicalActiveFilter(),
+    });
+    if (!canonical) return false;
+    const requestId = newRequestId('revoke', opts.requestId);
+    if (opts.requireOwner) {
+        if (opts.requireOwner === 'viaContest' && !opts.viaContest) {
+            throw new Error('viaContest is required for contest-owned revoke');
+        }
+        const sources = (await mongoAclRepository.getSources({
+            domainId, pid: canonical.pid, uid: canonical.uid,
+        })).filter((source) => source.active === true);
+        if (sources.length) {
+            const sourceType = opts.requireOwner === 'direct' ? 'direct' : 'contest';
+            const sourceId = opts.requireOwner === 'direct'
+                ? 'direct'
+                : opts.viaContest!.toHexString();
+            return aclService.revokeSource(
+                domainId,
+                canonical.pid,
+                canonical.uid,
+                sourceType,
+                sourceId,
+                requestId,
+                opts.actor || 0,
+                opts.writeClaimRequestId,
+            );
+        }
+
+        // A production legacy canonical row has no source row yet. Preserve
+        // its original provenance read-only until the explicit repair command
+        // materializes that source; never reinterpret a contest grant as direct.
+        const legacyContestId = canonical.viaContest
+            ? (canonical.viaContest.toHexString?.() || String(canonical.viaContest))
+            : null;
+        const requestedContestId = opts.viaContest?.toHexString() || null;
+        if ((opts.requireOwner === 'direct' && legacyContestId)
+            || (opts.requireOwner === 'viaContest' && legacyContestId !== requestedContestId)) {
+            return false;
+        }
+        await aclService.revokePairs(
+            domainId,
+            [{ pid: canonical.pid, uid: canonical.uid }],
+            requestId,
+            opts.actor || 0,
+            opts.writeClaimRequestId,
+        );
+        return true;
     }
-    // Fetch first so we can mirror to maintainer[] on success.
-    const existing = await permitsColl.findOne(filter);
-    if (!existing) return false;
-    const res = await permitsColl.deleteOne({ _id: existing._id });
-    if (res.deletedCount === 1 && existing.role === 'maintainer') {
-        await syncMaintainerField(domainId, existing.pid, existing.uid, 'remove');
-    }
-    return res.deletedCount === 1;
+    await aclService.revokePairs(
+        domainId,
+        [{ pid: canonical.pid, uid: canonical.uid }],
+        requestId,
+        opts.actor || 0,
+        opts.writeClaimRequestId,
+    );
+    return true;
 }
 
-/** Revoke by (pid, uid) — used by per-problem UI when admin removes a user. */
 export async function revokeByPair(
     domainId: string,
     pid: number,
     uid: number,
+    opts: { requestId?: string, actor?: number, writeClaimRequestId?: string } = {},
 ): Promise<boolean> {
-    const existing = await permitsColl.findOne({ domainId, pid, uid });
-    if (!existing) return false;
-    const res = await permitsColl.deleteOne({ _id: existing._id });
-    if (res.deletedCount === 1 && existing.role === 'maintainer') {
-        await syncMaintainerField(domainId, pid, uid, 'remove');
-    }
-    return res.deletedCount === 1;
+    const sources = await mongoAclRepository.getSources({ domainId, pid, uid });
+    const canonical = await mongoAclRepository.getCanonical({ domainId, pid, uid });
+    if (!sources.length && !canonical) return false;
+    await aclService.revokePairs(
+        domainId, [{ pid, uid }], newRequestId('revoke-pair', opts.requestId), opts.actor || 0,
+        opts.writeClaimRequestId,
+    );
+    return true;
 }
 
-// ─── Bulk ops (contest cascade) ───────────────────────────────────────────
+export async function revokePairs(
+    domainId: string,
+    pairs: Array<{ pid: number, uid: number }>,
+    opts: { requestId?: string, actor?: number, writeClaimRequestId?: string } = {},
+): Promise<number> {
+    return aclService.revokePairs(
+        domainId, pairs, newRequestId('revoke-pairs', opts.requestId), opts.actor || 0,
+        opts.writeClaimRequestId,
+    );
+}
 
-/**
- * Grant `role` on every `pids` to `uid`, tagged with `viaContest`. Used when
- * adding a verifier to a contest.
- *
- * Per-pid behavior:
- *   - If no row exists → insert with `viaContest=tid`.
- *   - If a row exists with `viaContest=tid` (same contest) → no-op.
- *   - If a row exists with `viaContest=null` (direct grant) → leave alone.
- *     Direct grants outlive contest sync.
- *   - If a row exists with `viaContest=<other tid>` → leave alone (another
- *     contest already brought this user in). Removing the other contest's
- *     verifier list won't strip the user from this contest.
- */
 export async function grantBulkViaContest(
     domainId: string,
     pids: number[],
@@ -146,54 +156,48 @@ export async function grantBulkViaContest(
     role: PermitRole,
     grantedBy: number,
     viaContest: ObjectIdType,
+    opts: { requestId?: string, note?: string } = {},
 ): Promise<number> {
-    if (!pids.length) return 0;
-    const existing = await permitsColl
-        .find({ domainId, pid: { $in: pids }, uid })
-        .project({ pid: 1 })
-        .toArray();
-    const existingPids = new Set(existing.map((d) => d.pid));
-    const toCreate = pids.filter((p) => !existingPids.has(p));
-    if (!toCreate.length) return 0;
-    const now = new Date();
-    const docs: PermitDoc[] = toCreate.map((pid) => ({
-        _id: new ObjectId(),
-        domainId,
-        pid,
-        uid,
-        role,
-        grantedBy,
-        grantedAt: now,
-        viaContest,
-        note: '',
-    }));
-    await permitsColl.insertMany(docs);
-    return docs.length;
+    const base = newRequestId('contest-grant', opts.requestId);
+    const contestId = viaContest.toHexString();
+    const uniquePids = [...new Set(pids)].sort((a, b) => a - b);
+    for (const pid of uniquePids) {
+        await aclService.grantContest(
+            domainId, pid, uid, role, grantedBy, contestId,
+            `${base}:${pid}:${uid}`, opts.note || '',
+        );
+    }
+    return uniquePids.length;
 }
 
-/** Revoke all `viaContest=tid` permits for one user. */
 export async function revokeContestUser(
-    domainId: string, viaContest: ObjectIdType, uid: number,
+    domainId: string,
+    viaContest: ObjectIdType,
+    uid: number,
+    opts: { requestId?: string, actor?: number, writeClaimRequestId?: string } = {},
 ): Promise<number> {
-    const res = await permitsColl.deleteMany({ domainId, viaContest, uid });
-    return res.deletedCount || 0;
+    return aclService.revokeContestUser(
+        domainId,
+        viaContest.toHexString(),
+        uid,
+        newRequestId('contest-user-revoke', opts.requestId),
+        opts.actor || 0,
+    );
 }
 
-/** Revoke all `viaContest=tid` permits — e.g. when contest is opened/deleted. */
 export async function revokeContestAll(
-    domainId: string, viaContest: ObjectIdType,
+    domainId: string,
+    viaContest: ObjectIdType,
+    opts: { requestId?: string, actor?: number, writeClaimRequestId?: string } = {},
 ): Promise<number> {
-    const res = await permitsColl.deleteMany({ domainId, viaContest });
-    return res.deletedCount || 0;
+    return aclService.revokeContestAll(
+        domainId,
+        viaContest.toHexString(),
+        newRequestId('contest-revoke', opts.requestId),
+        opts.actor || 0,
+    );
 }
 
-/**
- * Sync contest verifier list against contest pids. Called when a contest's
- * pid list changes (add / remove problems).
- *   - For pids removed from contest: delete the contest-tagged permits for
- *     ALL contest verifiers on those pids.
- *   - For pids added: grant via `grantBulkViaContest` for each verifier.
- */
 export async function syncContestPids(
     domainId: string,
     viaContest: ObjectIdType,
@@ -202,97 +206,272 @@ export async function syncContestPids(
     verifiers: number[],
     role: PermitRole,
     grantedBy: number,
-): Promise<{ added: number; removed: number }> {
-    const oldSet = new Set(oldPids);
-    const newSet = new Set(newPids);
-    const removedPids = oldPids.filter((p) => !newSet.has(p));
-    const addedPids = newPids.filter((p) => !oldSet.has(p));
-    let removed = 0;
-    let added = 0;
-    if (removedPids.length && verifiers.length) {
-        const r = await permitsColl.deleteMany({
-            domainId,
-            viaContest,
-            pid: { $in: removedPids },
-            uid: { $in: verifiers },
-        });
-        removed += r.deletedCount || 0;
+    opts: { requestId?: string } = {},
+): Promise<{ added: number, removed: number }> {
+    return aclService.syncContestPids(
+        domainId,
+        viaContest.toHexString(),
+        oldPids,
+        newPids,
+        [...new Set(verifiers)].map((uid) => ({ uid, role })),
+        grantedBy,
+        newRequestId('contest-pid-sync', opts.requestId),
+    );
+}
+
+export async function syncContestCurrentPids(
+    domainId: string,
+    viaContest: ObjectIdType,
+    newPids: number[],
+    verifiers: number[],
+    grantedBy: number,
+    opts: { requestId?: string } = {},
+): Promise<{ added: number, removed: number }> {
+    const contestId = viaContest.toHexString();
+    const currentSources = await mongoAclRepository.listSourcesForContest(domainId, contestId);
+    const oldPids = [...new Set(currentSources.map((source) => source.pid))];
+    const users = [...new Set(verifiers)].map((uid) => ({
+        uid,
+        role: currentSources.some((source) => source.uid === uid && source.role === 'maintainer')
+            ? 'maintainer' as const
+            : 'verifier' as const,
+    }));
+    return aclService.syncContestPids(
+        domainId,
+        contestId,
+        oldPids,
+        newPids,
+        users,
+        grantedBy,
+        newRequestId('contest-current-pid-sync', opts.requestId),
+    );
+}
+
+export async function listForProblem(domainId: string, pid: number): Promise<PermitDoc[]> {
+    const rows = await permitsColl.find({
+        domainId, pid, active: canonicalActiveFilter(),
+    }).sort({ grantedAt: -1 }).toArray();
+    return rows.map((row) => normalizeActiveCanonicalDoc(row) as PermitDoc);
+}
+
+export async function listForUser(domainId: string, uid: number): Promise<PermitDoc[]> {
+    if (!uid) return [];
+    const { permitPids } = await aclService.loadUserAcl(domainId, uid);
+    if (!permitPids.size) return [];
+    return permitsColl.find({
+        domainId,
+        uid,
+        active: canonicalActiveFilter(),
+        pid: { $in: [...permitPids] },
+    }).sort({ grantedAt: -1 }).toArray()
+        .then((rows) => rows.map((row) => normalizeActiveCanonicalDoc(row) as PermitDoc));
+}
+
+export async function loadAclForUser(domainId: string, uid: number) {
+    if (!uid) {
+        return {
+            permitPids: new Set<number>(),
+            maintainedPids: new Set<number>(),
+            fencedPids: new Set<number>(),
+        };
     }
-    if (addedPids.length && verifiers.length) {
-        for (const uid of verifiers) {
-            added += await grantBulkViaContest(
-                domainId, addedPids, uid, role, grantedBy, viaContest,
-            );
-        }
-    }
-    return { added, removed };
+    return aclService.loadUserAcl(domainId, uid);
 }
 
-// ─── Read ops ─────────────────────────────────────────────────────────────
-
-export async function listForProblem(
-    domainId: string, pid: number,
-): Promise<PermitDoc[]> {
-    return permitsColl.find({ domainId, pid }).sort({ grantedAt: -1 }).toArray();
+export async function loadPermittedPidsFor(domainId: string, uid: number): Promise<Set<number>> {
+    return (await loadAclForUser(domainId, uid)).permitPids;
 }
 
-export async function listForUser(
-    domainId: string, uid: number,
-): Promise<PermitDoc[]> {
-    return permitsColl.find({ domainId, uid }).sort({ grantedAt: -1 }).toArray();
+export async function loadMaintainedPidsFor(domainId: string, uid: number): Promise<Set<number>> {
+    return (await loadAclForUser(domainId, uid)).maintainedPids;
 }
 
-/**
- * Pre-fetch the user's permitted pids for one domain. Returned as a Set
- * for O(1) `has` lookups inside the sync `canViewBy`. Called by request-
- * scoped pre-handler hooks; cached on the user object as `_permitPids`.
- */
-export async function loadPermittedPidsFor(
-    domainId: string, uid: number,
-): Promise<Set<number>> {
-    if (!uid) return new Set();
-    const docs = await permitsColl
-        .find({ domainId, uid })
-        .project({ pid: 1 })
-        .toArray();
-    return new Set(docs.map((d) => d.pid));
+export async function loadFencedPidsFor(domainId: string, uid: number): Promise<Set<number>> {
+    return (await loadAclForUser(domainId, uid)).fencedPids;
 }
 
-/**
- * Clear all permits for a problem — called when the problem transitions
- * from `hidden=true` to `hidden=false` and `lockHidden=false`. The problem
- * is now publicly visible, permits add no value.
- */
+export async function clearVerifiersForProblem(
+    domainId: string,
+    pid: number,
+    opts: { requestId?: string, actor?: number, writeClaimRequestId?: string } = {},
+): Promise<number> {
+    return aclService.clearVerifiersForProblem(
+        domainId, pid, newRequestId('publish-clear-verifiers', opts.requestId), opts.actor || 0,
+        opts.writeClaimRequestId,
+    );
+}
+
 export async function clearForProblem(
-    domainId: string, pid: number,
+    domainId: string,
+    pid: number,
+    opts: { requestId?: string, actor?: number, writeClaimRequestId?: string } = {},
 ): Promise<number> {
-    const res = await permitsColl.deleteMany({ domainId, pid });
-    return res.deletedCount || 0;
+    return aclService.clearForProblem(
+        domainId, pid, newRequestId('hard-delete-clear-acl', opts.requestId), opts.actor || 0,
+        opts.writeClaimRequestId,
+    );
 }
 
-/**
- * Aggregate counts by viaContest tag — drives the contest editor's
- * "currently invited verifiers" badge counts.
- */
 export async function countByContest(
-    domainId: string, viaContest: ObjectIdType,
+    domainId: string,
+    viaContest: ObjectIdType,
 ): Promise<number> {
-    return permitsColl.countDocuments({ domainId, viaContest });
+    return permitSourcesColl.countDocuments({
+        domainId,
+        sourceType: 'contest',
+        sourceId: viaContest.toHexString(),
+        active: true,
+    });
 }
 
-// ─── Exported model surface ───────────────────────────────────────────────
+export async function buildDriftReport(domainId: string) {
+    return aclService.buildDriftReport(domainId);
+}
+
+export async function repairLegacyMaintainerWithoutCanonical(
+    domainId: string,
+    pid: number,
+    uid: number,
+    strategy: 'grant-maintainer' | 'remove-legacy',
+    actor: number,
+    requestId: string,
+) {
+    if (strategy === 'grant-maintainer') {
+        return aclService.grantDirect(domainId, pid, uid, 'maintainer', actor, requestId);
+    }
+    return aclService.reconcilePair({ domainId, pid, uid }, requestId, actor);
+}
+
+export async function repairCanonicalMaintainerWithoutLegacy(
+    domainId: string, pid: number, uid: number, actor: number, requestId: string,
+) {
+    const sources = await mongoAclRepository.getSources({ domainId, pid, uid });
+    if (!sources.length) throw new Error('source/canonical conflict must be repaired first');
+    return aclService.reconcilePair({ domainId, pid, uid }, requestId, actor);
+}
+
+export async function repairVerifierInLegacy(
+    domainId: string, pid: number, uid: number, actor: number, requestId: string,
+) {
+    const sources = await mongoAclRepository.getSources({ domainId, pid, uid });
+    if (!sources.length) throw new Error('source/canonical conflict must be repaired first');
+    return aclService.reconcilePair({ domainId, pid, uid }, requestId, actor);
+}
+
+export async function repairSourceCanonicalConflict(
+    domainId: string,
+    pid: number,
+    uid: number,
+    strategy: 'reconcile-from-sources',
+    actor: number,
+    requestId: string,
+) {
+    if (strategy !== 'reconcile-from-sources') throw new Error(`unknown source repair strategy: ${strategy}`);
+    return aclService.reconcilePair({ domainId, pid, uid }, requestId, actor);
+}
+
+export async function repairLegacyCanonicalWithoutSource(
+    domainId: string,
+    pid: number,
+    uid: number,
+    actor: number,
+    requestId: string,
+) {
+    return aclService.repairLegacyCanonicalWithoutSource(
+        { domainId, pid, uid }, requestId, actor,
+    );
+}
+
+export async function repairOrphanProblemLock(
+    domainId: string,
+    pid: number,
+    uid: number,
+    expectedRequestId: string,
+) {
+    return aclService.repairOrphanProblemLock(
+        { domainId, pid, uid }, expectedRequestId,
+    );
+}
+
+export async function repairFenceWithoutProblemLock(
+    domainId: string,
+    pid: number,
+    uid: number,
+    expectedRequestId: string,
+) {
+    return aclService.repairFenceWithoutProblemLock(
+        { domainId, pid, uid }, expectedRequestId,
+    );
+}
+
+export async function repairErroredProblemWriteClaim(
+    domainId: string,
+    pid: number,
+    expectedRequestId: string,
+) {
+    return aclService.repairErroredProblemWriteClaim(domainId, pid, expectedRequestId);
+}
+
+export async function recoverActiveProblemWriteClaim(
+    domainId: string,
+    pid: number,
+    expectedRequestId: string,
+    confirmation: string,
+) {
+    return aclService.recoverActiveProblemWriteClaim(
+        domainId, pid, expectedRequestId, confirmation,
+    );
+}
+
+export async function repairAclMutation(
+    domainId: string,
+    pid: number,
+    uid: number,
+    expectedRequestId: string,
+) {
+    return aclService.repairAclMutation({ domainId, pid, uid }, expectedRequestId);
+}
+
+export async function resumeFence(
+    domainId: string, pid: number, uid: number, expectedRequestId?: string,
+) {
+    return aclService.resumeMarkersForPair({ domainId, pid, uid }, expectedRequestId);
+}
+
+export async function prepareProblemWriteClaim(domainId: string, pid: number): Promise<void> {
+    return aclService.prepareProblemWriteClaim(domainId, pid);
+}
 
 export const permitsModel = {
     grant,
     revoke,
     revokeByPair,
+    revokePairs,
     grantBulkViaContest,
     revokeContestUser,
     revokeContestAll,
     syncContestPids,
+    syncContestCurrentPids,
     listForProblem,
     listForUser,
+    loadAclForUser,
     loadPermittedPidsFor,
+    loadMaintainedPidsFor,
+    loadFencedPidsFor,
+    clearVerifiersForProblem,
     clearForProblem,
     countByContest,
+    buildDriftReport,
+    repairLegacyMaintainerWithoutCanonical,
+    repairCanonicalMaintainerWithoutLegacy,
+    repairVerifierInLegacy,
+    repairLegacyCanonicalWithoutSource,
+    repairSourceCanonicalConflict,
+    repairOrphanProblemLock,
+    repairFenceWithoutProblemLock,
+    repairErroredProblemWriteClaim,
+    recoverActiveProblemWriteClaim,
+    repairAclMutation,
+    resumeFence,
+    prepareProblemWriteClaim,
 };

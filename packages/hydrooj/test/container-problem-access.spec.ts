@@ -1,0 +1,389 @@
+import { expect } from 'chai';
+import { beforeEach, describe, it } from 'node:test';
+
+const Module = require('module');
+(global as any).Hydro ||= { model: {}, module: {} };
+
+const PERM = {
+    PERM_CREATE_COURSE: 1n,
+    PERM_EDIT_COURSE: 2n,
+    PERM_CREATE_TRAINING: 4n,
+    PERM_EDIT_TRAINING: 8n,
+    PERM_EDIT_TRAINING_SELF: 16n,
+    PERM_PIN_TRAINING: 32n,
+    PERM_VIEW_PROBLEM_HIDDEN: 64n,
+    PERM_EDIT_DOMAIN: 128n,
+    PERM_USERBIND_MANAGE_STUDENTS: 256n,
+    PERM_VIEW_USER_PRIVATE_INFO: 512n,
+    PERM_VIEW_TRAINING: 1024n,
+    PERM_VIEW_PROBLEM: 2048n,
+};
+const PRIV = { PRIV_EDIT_SYSTEM: 1, PRIV_USER_PROFILE: 2 };
+const STATUS = { STATUS_ACCEPTED: 1 };
+
+class TestPermissionError extends Error {
+    name = 'PermissionError';
+    status = 403;
+}
+
+class TestValidationError extends Error {
+    name = 'ValidationError';
+    status = 400;
+
+    constructor(...args: any[]) {
+        super(args.at(-1) instanceof Error ? args.at(-1).message : String(args.at(-1) || 'validation failed'));
+    }
+}
+
+class TestProblemNotFoundError extends Error {
+    name = 'ProblemNotFoundError';
+}
+
+const calls = {
+    add: [] as any[],
+    edit: [] as any[],
+    events: [] as string[],
+    containerGets: [] as any[],
+    get: [] as any[],
+    getList: [] as any[],
+    getViewableAuthorized: [] as any[],
+    selections: [] as any[],
+};
+let denySelection = false;
+let currentContainer: any;
+const problemDocs = new Map<number, any>();
+
+function problemDict(docs: any[]) {
+    return Object.fromEntries(docs.map((doc) => [doc.docId, doc]));
+}
+
+const problemStub = {
+    PROJECTION_PUBLIC: ['domainId', 'docId', 'pid', 'title', 'hidden', 'owner'],
+    assertProblemAclDomain(user: any, domainId: string) {
+        if (!user._problemAclLoaded || user._problemAclDomainId !== domainId) throw new TestPermissionError();
+    },
+    async get(domainId: string, rawPid: unknown) {
+        calls.events.push(`get:${String(rawPid)}`);
+        calls.get.push({ domainId, rawPid });
+        return problemDocs.get(Number(rawPid)) || null;
+    },
+    async getList(domainId: string, pids: number[], canViewHidden: number | boolean) {
+        calls.getList.push({ domainId, pids: [...pids], canViewHidden });
+        const docs = pids.map((pid) => problemDocs.get(pid)).filter(Boolean);
+        const visible = canViewHidden === true
+            ? docs
+            : docs.filter((doc) => !doc.hidden || doc.owner === canViewHidden);
+        return problemDict(visible);
+    },
+    async getListStatus() { return {}; },
+    canViewBy(pdoc: any, user: any) {
+        if (!user._problemAclLoaded || user._problemAclDomainId !== pdoc.domainId) return false;
+        if (user._aclFencedPids?.has(pdoc.docId)) return false;
+        if (!user.hasPerm(PERM.PERM_VIEW_PROBLEM)) return false;
+        return !pdoc.hidden
+            || pdoc.owner === user._id
+            || user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN)
+            || user._permitPids?.has(pdoc.docId);
+    },
+    async getViewableAuthorized(domainId: string, rawPid: unknown, user: any) {
+        calls.getViewableAuthorized.push({ domainId, rawPid });
+        const pdoc = problemDocs.get(Number(rawPid)) || null;
+        return pdoc && this.canViewBy(pdoc, user) ? pdoc : null;
+    },
+};
+
+const problemAccessStub = {
+    async assertProblemBankSelection(domainId: string, pids: number[], user: any, existingPids: number[]) {
+        calls.events.push(`selection:${pids.join(',')}`);
+        calls.selections.push({ domainId, pids: [...pids], user, existingPids: [...existingPids] });
+        if (denySelection) throw new TestPermissionError();
+    },
+};
+
+function getPids(dag: any[]) {
+    return Array.from(new Set(dag.flatMap((node) => node.pids || [])));
+}
+
+function cursor(rows: any[] = []) {
+    const value: any = {
+        limit() { return value; },
+        project() { return value; },
+        async toArray() { return rows; },
+    };
+    return value;
+}
+
+const trainingStub = {
+    getPids,
+    isDone: () => false,
+    isProgress: () => false,
+    isOpen: () => true,
+    isInvalid: () => false,
+    async get(domainId: string, tid: unknown) { calls.containerGets.push({ domainId, tid }); return currentContainer; },
+    async add(...args: any[]) { calls.add.push(args); return 'new-container'; },
+    async edit(...args: any[]) { calls.edit.push(args); },
+    async setStatus() { return {}; },
+    getMultiStatus() { return cursor(); },
+};
+
+const contestStub = {
+    async get() { return { docId: 'contest' }; },
+    getMulti() { return cursor(); },
+};
+
+const userStub = {
+    async getById() { return { _id: 7, uname: 'owner' }; },
+    async getListForRender() { return {}; },
+    async listGroup() { return []; },
+};
+
+function noopDecorator() {
+    return (_target: unknown, _key: string, descriptor: PropertyDescriptor) => descriptor;
+}
+
+class HandlerStub { }
+const serverStub = {
+    Handler: HandlerStub,
+    param: noopDecorator,
+    post: noopDecorator,
+    Types: new Proxy({}, { get: () => () => ({}) }),
+};
+
+const errors = {
+    FileLimitExceededError: class extends Error { },
+    FileUploadError: class extends Error { },
+    NotFoundError: class extends Error { },
+    ProblemNotFoundError: TestProblemNotFoundError,
+    ValidationError: TestValidationError,
+};
+
+const trainingRoutes: Record<string, any> = {};
+const courseRoutes: Record<string, any> = {};
+const originalLoad = Module._load;
+Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
+    const fromHandler = parent?.filename?.includes('/packages/hydrooj/src/handler/');
+    if (fromHandler && request === '../error') return errors;
+    if (fromHandler && request === '../model/builtin') return { PERM, PRIV, STATUS };
+    if (fromHandler && request === '../model/contest') return contestStub;
+    if (fromHandler && request === '../model/document') return { getMultiStatus: () => cursor(), TYPE_PROBLEM: 10 };
+    if (fromHandler && request === '../model/oplog') return { async log() { return undefined; } };
+    if (fromHandler && request === '../model/problem') return problemStub;
+    if (fromHandler && request === '../model/problem-access') return problemAccessStub;
+    if (fromHandler && request === '../model/storage') return {};
+    if (fromHandler && request === '../model/system') return { get: () => 1000 };
+    if (fromHandler && request === '../model/training') return trainingStub;
+    if (fromHandler && request === '../model/user') return userStub;
+    if (fromHandler && request === '../service/server') return serverStub;
+    return originalLoad.call(this, request, parent, isMain);
+};
+
+let trainingModule: typeof import('../src/handler/training');
+let courseModule: typeof import('../src/handler/course');
+try {
+    const trainingPath = require.resolve('../src/handler/training.ts');
+    const coursePath = require.resolve('../src/handler/course.ts');
+    delete require.cache[trainingPath];
+    delete require.cache[coursePath];
+    trainingModule = require(trainingPath);
+    courseModule = require(coursePath);
+} finally {
+    Module._load = originalLoad;
+}
+
+void trainingModule.apply({
+    Route(name: string, _path: string, HandlerClass: any) { trainingRoutes[name] = HandlerClass; },
+} as any);
+void courseModule.apply({
+    Route(name: string, _path: string, HandlerClass: any) { courseRoutes[name] = HandlerClass; },
+} as any);
+
+function makeUser(overrides: Record<string, unknown> = {}) {
+    const perms = new Set<bigint>([PERM.PERM_VIEW_PROBLEM, PERM.PERM_CREATE_TRAINING, PERM.PERM_CREATE_COURSE]);
+    return {
+        _id: 42,
+        _problemAclLoaded: true,
+        _problemAclDomainId: 'system',
+        _permitPids: new Set<number>(),
+        _maintainedPids: new Set<number>(),
+        _aclFencedPids: new Set<number>(),
+        timeZone: 'Asia/Shanghai',
+        hasPerm: (...wanted: bigint[]) => wanted.some((perm) => perms.has(perm)),
+        hasPriv: (wanted: number) => wanted === PRIV.PRIV_USER_PROFILE,
+        own: (doc: any) => doc?.owner === 42,
+        ...overrides,
+    } as any;
+}
+
+function makeHandler(HandlerClass: any, user = makeUser()) {
+    const handler = new HandlerClass();
+    Object.assign(handler, {
+        ctx: { parallel: async () => undefined, setting: { get: () => false } },
+        domain: { _id: 'system' },
+        response: { body: {} },
+        user,
+        url: () => '/target',
+        checkPerm: () => undefined,
+    });
+    return handler;
+}
+
+async function captureFailure(callback: () => Promise<unknown>) {
+    try {
+        await callback();
+        return null;
+    } catch (error) {
+        return error as Error;
+    }
+}
+
+beforeEach(() => {
+    calls.add.length = 0;
+    calls.edit.length = 0;
+    calls.events.length = 0;
+    calls.containerGets.length = 0;
+    calls.get.length = 0;
+    calls.getList.length = 0;
+    calls.getViewableAuthorized.length = 0;
+    calls.selections.length = 0;
+    denySelection = false;
+    problemDocs.clear();
+    currentContainer = null;
+});
+
+describe('training/course problem selection', () => {
+    it('training validates canonical scope before lookup and gives missing/out-of-scope the same error with zero writes', async () => {
+        const HandlerClass = trainingRoutes.training_create;
+        const run = async (hasDocument: boolean) => {
+            calls.events.length = 0;
+            calls.get.length = 0;
+            calls.add.length = 0;
+            if (hasDocument) problemDocs.set(77, { domainId: 'system', docId: 77, owner: 7, hidden: true });
+            else problemDocs.delete(77);
+            denySelection = true;
+            const handler = makeHandler(HandlerClass);
+            const error = await captureFailure(() => handler.post(
+                'forged', null, 'Training', 'Body',
+                JSON.stringify([{ _id: 1, title: 'N', requireNids: [], pids: [77] }]),
+                0, '',
+            ));
+            return error;
+        };
+        const missing = await run(false);
+        const unauthorized = await run(true);
+        expect(missing?.name).to.equal('PermissionError');
+        expect(unauthorized?.name).to.equal('PermissionError');
+        expect(calls.get).to.deep.equal([]);
+        expect(calls.add).to.deep.equal([]);
+        expect(calls.edit).to.deep.equal([]);
+    });
+
+    it('course validates canonical scope before lookup and gives missing/out-of-scope the same error with zero writes', async () => {
+        const HandlerClass = courseRoutes.course_create;
+        const run = async (hasDocument: boolean) => {
+            calls.events.length = 0;
+            calls.get.length = 0;
+            calls.add.length = 0;
+            if (hasDocument) problemDocs.set(88, { domainId: 'system', docId: 88, owner: 7, hidden: true });
+            else problemDocs.delete(88);
+            denySelection = true;
+            const handler = makeHandler(HandlerClass);
+            const error = await captureFailure(() => handler.post(
+                'forged', null, 'Course', 'Body',
+                JSON.stringify([{ _id: 1, title: 'C', pids: [88], tids: [] }]),
+                '', '', [],
+            ));
+            return error;
+        };
+        const missing = await run(false);
+        const unauthorized = await run(true);
+        expect(missing?.name).to.equal('PermissionError');
+        expect(unauthorized?.name).to.equal('PermissionError');
+        expect(calls.get).to.deep.equal([]);
+        expect(calls.add).to.deep.equal([]);
+        expect(calls.edit).to.deep.equal([]);
+    });
+
+    it('normalizes valid training/course problem ids to deduplicated numeric docIds', async () => {
+        problemDocs.set(11, { domainId: 'system', docId: 11, owner: 42, hidden: true });
+        const trainingHandler = makeHandler(trainingRoutes.training_create);
+        await trainingHandler.post(
+            'forged', null, 'Training', 'Body',
+            JSON.stringify([{ _id: 1, title: 'N', requireNids: [], pids: ['11', 11] }]),
+            0, '',
+        );
+        const courseHandler = makeHandler(courseRoutes.course_create);
+        await courseHandler.post(
+            'forged', null, 'Course', 'Body',
+            JSON.stringify([{ _id: 1, title: 'C', pids: ['11', 11], tids: [] }]),
+            '', '', [],
+        );
+        expect(calls.selections.map((call) => call.pids)).to.deep.equal([[11], [11]]);
+        expect(calls.add[0][4][0].pids).to.deep.equal([11]);
+        expect(calls.add[1][4][0].pids).to.deep.equal([11]);
+        expect(calls.get).to.deep.equal([]);
+    });
+
+    it('keeps unchanged grandfathered training references without a pre-scope lookup', async () => {
+        currentContainer = {
+            domainId: 'system', docId: 'training', owner: 42, pin: 0,
+            dag: [{ _id: 1, title: 'N', requireNids: [], pids: [11] }],
+        };
+        const handler = makeHandler(trainingRoutes.training_edit);
+        handler.tdoc = currentContainer;
+        await handler.post(
+            'forged', 'training', 'Training', 'Body',
+            JSON.stringify([{ _id: 1, title: 'N', requireNids: [], pids: ['11'] }]),
+            0, '',
+        );
+        expect(calls.selections[0].existingPids).to.deep.equal([11]);
+        expect(calls.get).to.deep.equal([]);
+        expect(calls.edit).to.have.length(1);
+    });
+});
+
+function registerReferencedProblemVisibilitySuite(
+    label: 'training' | 'course', routeMap: Record<string, any>, routeName: string,
+) {
+    describe(`${label} referenced problem visibility`, () => {
+        async function render(user: any) {
+            currentContainer = {
+                domainId: 'system', docId: 'container', owner: 7, kind: label === 'course' ? 'course' : undefined,
+                title: label, description: '', courseGroupIds: [],
+                dag: [{ _id: 1, title: 'N', requireNids: [], pids: [11], tids: [] }],
+            };
+            const handler = makeHandler(routeMap[routeName], user);
+            await handler.get('system', 'container');
+            return handler.response.body.pdict;
+        }
+
+        it('shows an active verifier the referenced hidden problem', async () => {
+            problemDocs.set(11, { domainId: 'system', docId: 11, owner: 7, hidden: true, title: 'Hidden' });
+            const user = makeUser({ _permitPids: new Set([11]) });
+            expect(await render(user)).to.have.property('11');
+        });
+
+        it('hides the referenced hidden problem immediately when fenced or revoked', async () => {
+            problemDocs.set(11, { domainId: 'system', docId: 11, owner: 7, hidden: true, title: 'Hidden' });
+            const fenced = makeUser({ _permitPids: new Set([11]), _aclFencedPids: new Set([11]) });
+            const revoked = makeUser({ _permitPids: new Set<number>() });
+            expect(await render(fenced)).not.to.have.property('11');
+            expect(await render(revoked)).not.to.have.property('11');
+        });
+
+        it('ignores a forged method domain and binds container/problem reads to the request domain', async () => {
+            problemDocs.set(11, { domainId: 'system', docId: 11, owner: 7, hidden: false, title: 'Public' });
+            currentContainer = {
+                domainId: 'system', docId: 'container', owner: 7, kind: label === 'course' ? 'course' : undefined,
+                title: label, description: '', courseGroupIds: [],
+                dag: [{ _id: 1, title: 'N', requireNids: [], pids: [11], tids: [] }],
+            };
+            const handler = makeHandler(routeMap[routeName], makeUser());
+            await handler.get('forged-domain', 'container');
+            expect(calls.containerGets.at(-1)?.domainId).to.equal('system');
+            expect(calls.getViewableAuthorized.at(-1)?.domainId).to.equal('system');
+        });
+    });
+}
+
+registerReferencedProblemVisibilitySuite('training', trainingRoutes, 'training_detail');
+registerReferencedProblemVisibilitySuite('course', courseRoutes, 'course_detail');

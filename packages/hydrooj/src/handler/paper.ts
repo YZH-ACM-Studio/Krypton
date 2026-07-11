@@ -80,9 +80,10 @@ class PaperBaseHandler extends Handler {
     tid: ObjectId;
 
     @param('tid', Types.ObjectId)
-    async _prepare(domainId: string, tid: ObjectId) {
+    async _prepare(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
         this.tid = tid;
-        this.tdoc = await contest.get(domainId, tid);
+        this.tdoc = await contest.get(authoritativeDomainId, tid);
         if (!this.tdoc) throw new NotFoundError('Contest');
         if (this.tdoc.rule !== 'exam') {
             throw new ValidationError('rule', null, 'Paper mode is only for exam-rule contests');
@@ -99,7 +100,7 @@ class PaperBaseHandler extends Handler {
             ? vg.clientSessionKeyFromSession((this as any).session)
             : ((this as any).session?.sessionId || (this as any).session?._id || '');
         const hasClientSession = !isAdminBypass && sid && vg?.isValidClientSessionForContest
-            ? await vg.isValidClientSessionForContest(sid, domainId, tid, this.user._id)
+            ? await vg.isValidClientSessionForContest(sid, authoritativeDomainId, tid, this.user._id)
             : false;
 
         if (!isAdminBypass && !hasAttendPerm && !hasClientSession) {
@@ -109,7 +110,7 @@ class PaperBaseHandler extends Handler {
         if (!isAdminBypass) {
             if (vg?.effectiveContestAccess) {
                 const result = await vg.effectiveContestAccess(
-                    domainId, this.tdoc, this.user._id, sid,
+                    authoritativeDomainId, this.tdoc, this.user._id, sid,
                 );
                 if (!result.ok) {
                     // Paper UI surfaces the friendly /client-required-notice
@@ -126,31 +127,32 @@ class PaperBaseHandler extends Handler {
             }
         }
 
-        let tsdoc = await contest.getStatus(domainId, tid, this.user._id);
+        let tsdoc = await contest.getStatus(authoritativeDomainId, tid, this.user._id);
         if (!isAdminBypass && contest.isClientRequired(this.tdoc) && contest.isClientFinished(tsdoc)) {
             throw new ContestClientFinishedError();
         }
         if (!isAdminBypass && contest.isOngoing(this.tdoc, tsdoc)) {
             if (!tsdoc?.attend) {
                 try {
-                    await contest.attend(domainId, tid, this.user._id, { subscribe: 1 });
+                    await contest.attend(authoritativeDomainId, tid, this.user._id, { subscribe: 1 });
                 } catch (e) {
-                    tsdoc = await contest.getStatus(domainId, tid, this.user._id);
+                    tsdoc = await contest.getStatus(authoritativeDomainId, tid, this.user._id);
                     if (!tsdoc?.attend) throw e;
                 }
-                tsdoc = await contest.getStatus(domainId, tid, this.user._id);
+                tsdoc = await contest.getStatus(authoritativeDomainId, tid, this.user._id);
             }
             if (tsdoc?.attend && !tsdoc.startAt) {
-                await contest.setStatus(domainId, tid, this.user._id, { startAt: new Date() });
+                await contest.setStatus(authoritativeDomainId, tid, this.user._id, { startAt: new Date() });
             }
         }
     }
 
     /** Resolve the contest's problem list to {pid, pdoc} map. */
     async getProblemDict(): Promise<Record<number, any>> {
+        const authoritativeDomainId = String(this.domain?._id);
         const pdict: Record<number, any> = {};
         await Promise.all((this.tdoc.pids as number[]).map(async (pid) => {
-            const pdoc = await ProblemModel.get(this.tdoc.domainId, pid, undefined, true);
+            const pdoc = await ProblemModel.get(authoritativeDomainId, pid, undefined, true);
             if (!pdoc) return;
             // Raw pdoc → file:// image attachments are never rewritten; make them
             // absolute so they load under the deep /exam-mode/:tid/... routes.
@@ -714,13 +716,14 @@ class ExamModeHomeHandler extends Handler {
      * The "normal" Qt Client flow never lands here — Vigil's
      * `/vigil-launch` redirects straight to `/exam-mode/:tid`.
      */
-    async get({ domainId }: { domainId: string }) {
+    async get(_args: { domainId?: string }) {
+        const authoritativeDomainId = String(this.domain?._id);
         const isAdmin = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
             || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
 
         let contests: any[] = [];
         if (isAdmin) {
-            const cursor = contest.getMulti(domainId, { vigilEnabled: true } as any)
+            const cursor = contest.getMulti(authoritativeDomainId, { vigilEnabled: true } as any)
                 .sort({ beginAt: -1 }).limit(50);
             const tdocs = await cursor.toArray();
             const now = Date.now();
@@ -769,10 +772,11 @@ class ExamModeEntryHandler extends Handler {
      * which already renders without the OJ sidebar.
      */
     @param('tid', Types.ObjectId)
-    async get(domainId: string, tid: ObjectId) {
-        const tdoc = await contest.get(domainId, tid);
+    async get(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        const tdoc = await contest.get(authoritativeDomainId, tid);
         if (!tdoc) throw new NotFoundError('Contest');
-        const { previewMode, isAdminBypass } = await ensureExamModeAccess(this, domainId, tid, tdoc);
+        const { previewMode, isAdminBypass } = await ensureExamModeAccess(this, authoritativeDomainId, tid, tdoc);
         if (tdoc.rule === 'exam') {
             this.response.redirect = this.url('paper_layout', { tid });
             return;
@@ -789,7 +793,7 @@ class ExamModeEntryHandler extends Handler {
         const pdict: Record<number, any> = {};
         if (!hideProblemsBeforeStart) {
             await Promise.all((tdoc.pids as number[] || []).map(async (pid) => {
-                const pdoc = await ProblemModel.get(tdoc.domainId, pid, undefined, true);
+                const pdoc = await ProblemModel.get(authoritativeDomainId, pid, undefined, true);
                 if (!pdoc) return;
                 // Absolutize file:// image attachments for the deep exam-mode route.
                 if (typeof pdoc.content === 'string') {
@@ -833,11 +837,12 @@ class ExamModeProblemListHandler extends ContestProblemListHandler {
     protected liveStatsEnabled = false;
 
     @param('tid', Types.ObjectId)
-    async get(domainId: string, tid: ObjectId) {
-        const { previewMode, tsdoc } = await ensureExamModeAccess(this, domainId, tid, this.tdoc);
+    async get(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        const { previewMode, tsdoc } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         this.tsdoc = tsdoc;
         if (bounceIfNotStarted(this, this.tdoc, tid)) return;
-        await super.get(domainId, tid);
+        await super.get(authoritativeDomainId, tid);
         await decorateExamMode(this, this.tdoc, 'problems', 'contest_problemlist.html', previewMode);
     }
 }
@@ -847,11 +852,12 @@ class ExamModeAnnouncementsHandler extends ContestProblemListHandler {
     protected liveStatsEnabled = false;
 
     @param('tid', Types.ObjectId)
-    async get(domainId: string, tid: ObjectId) {
-        const { previewMode, tsdoc } = await ensureExamModeAccess(this, domainId, tid, this.tdoc);
+    async get(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        const { previewMode, tsdoc } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         this.tsdoc = tsdoc;
         if (bounceIfNotStarted(this, this.tdoc, tid)) return;
-        await super.get(domainId, tid);
+        await super.get(authoritativeDomainId, tid);
         await decorateExamMode(this, this.tdoc, 'announcements', 'exam_announcements.html', previewMode);
     }
 }
@@ -859,9 +865,10 @@ class ExamModeAnnouncementsHandler extends ContestProblemListHandler {
 class ExamModeProblemDetailHandler extends ProblemDetailHandler {
     @route('pid', Types.ProblemId, true)
     @param('tid', Types.ObjectId)
-    async _prepare(domainId: string, pid: number | string, tid?: ObjectId) {
+    async _prepare(_domainId: string, pid: number | string, tid?: ObjectId) {
         if (!tid) throw new NotFoundError('Contest');
-        const { tsdoc } = await ensureExamModeAccess(this, domainId, tid, this.tdoc);
+        const authoritativeDomainId = this.authoritativeDomainId();
+        const { tsdoc } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         this.tsdoc = tsdoc;
         // If the student is *early* (auto-approved, walked in but the
         // contest start hasn't fired yet), `ProblemDetailHandler._prepare`
@@ -874,13 +881,14 @@ class ExamModeProblemDetailHandler extends ProblemDetailHandler {
             this.response.redirect = `/exam-mode/${tid.toHexString()}`;
             return;
         }
-        await super._prepare(domainId, pid, tid);
+        await super._prepare(authoritativeDomainId, pid, tid);
     }
 
     @param('tid', Types.ObjectId)
-    async get(domainId: string, tid: ObjectId) {
+    async get(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = this.authoritativeDomainId();
         if (this.response.redirect) return; // _prepare already bounced.
-        await super.get(domainId, tid, false);
+        await super.get(authoritativeDomainId, tid, false);
         // super.get() rewrote file:// attachments to a *relative* ./<docId>/file/
         // path that breaks under the deep /exam-mode/:tid/problem/:pid URL (and
         // JSON loads leave raw file://). Re-absolutize so problem images load.
@@ -888,7 +896,7 @@ class ExamModeProblemDetailHandler extends ProblemDetailHandler {
         if (pdoc && typeof pdoc.content === 'string') {
             pdoc.content = absolutizeProblemFileUrls(this, pdoc.content, pdoc, tid);
         }
-        const { previewMode } = await ensureExamModeAccess(this, domainId, tid, this.tdoc);
+        const { previewMode } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         await decorateExamMode(this, this.tdoc, 'problems', 'problem_detail.html', previewMode);
     }
 }
@@ -896,29 +904,31 @@ class ExamModeProblemDetailHandler extends ProblemDetailHandler {
 class ExamModeScoreboardHandler extends ContestScoreboardHandler {
     @param('tid', Types.ObjectId)
     @param('view', Types.String, true)
-    async get(domainId: string, tid: ObjectId, viewId = 'default') {
+    async get(_domainId: string, tid: ObjectId, viewId = 'default') {
+        const authoritativeDomainId = this.authoritativeDomainId();
         if (bounceIfNotStarted(this, this.tdoc, tid)) return;
-        await super.get(domainId, tid, viewId);
+        await super.get(authoritativeDomainId, tid, viewId);
         if (this.response.template !== 'contest_scoreboard.html') return;
-        const { previewMode } = await ensureExamModeAccess(this, domainId, tid, this.tdoc);
+        const { previewMode } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         await decorateExamMode(this, this.tdoc, 'ranking', 'contest_scoreboard.html', previewMode);
     }
 }
 
 class ExamModePrintHandler extends ContestPrintHandler {
     @param('tid', Types.ObjectId)
-    async prepare({ domainId }, tid: ObjectId) {
-        const { tsdoc } = await ensureExamModeAccess(this, domainId, tid, this.tdoc);
+    async prepare(_args: { domainId?: string }, tid: ObjectId) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        const { tsdoc } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         this.tsdoc = tsdoc;
         if (bounceIfNotStarted(this, this.tdoc, tid)) return;
-        await super.prepare({ domainId }, tid);
+        await super.prepare({ domainId: authoritativeDomainId }, tid);
     }
 
     async get() {
         if (this.response.redirect) return;
         await super.get();
         const tid = this.tdoc.docId;
-        const { previewMode } = await ensureExamModeAccess(this, this.tdoc.domainId, tid, this.tdoc);
+        const { previewMode } = await ensureExamModeAccess(this, this.authoritativeDomainId(), tid, this.tdoc);
         await decorateExamMode(this, this.tdoc, 'print', 'contest_print.html', previewMode);
     }
 }
@@ -927,12 +937,13 @@ class ExamModeRecordDetailHandler extends RecordDetailHandler {
     @param('rid', Types.ObjectId)
     @param('download', Types.Boolean)
     @param('rev', Types.ObjectId, true)
-    async get(domainId: string, rid: ObjectId, download = false, rev?: ObjectId) {
-        await super.get(domainId, rid, download, rev);
+    async get(_domainId: string, rid: ObjectId, download = false, rev?: ObjectId) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        await super.get(authoritativeDomainId, rid, download, rev);
         if (download) return;
         const tid = this.tdoc?.docId;
         if (!this.tdoc || !this.rdoc?.contest?.equals?.(tid)) throw new NotFoundError('Record');
-        const { previewMode } = await ensureExamModeAccess(this, domainId, tid, this.tdoc);
+        const { previewMode } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         await decorateExamMode(this, this.tdoc, 'problems', 'record_detail.html', previewMode);
     }
 }
@@ -941,28 +952,30 @@ class ExamModeDiscussionListHandler extends Handler {
     tdoc: any;
 
     @param('tid', Types.ObjectId)
-    async prepare(domainId: string, tid: ObjectId) {
+    async prepare(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         this.checkPerm(PERM.PERM_VIEW_DISCUSSION);
-        this.tdoc = await contest.get(domainId, tid);
+        this.tdoc = await contest.get(authoritativeDomainId, tid);
         if (!this.tdoc) throw new NotFoundError('Contest');
-        await ensureExamModeAccess(this, domainId, tid, this.tdoc);
+        await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
     }
 
     @param('tid', Types.ObjectId)
     @param('page', Types.PositiveInt, true)
-    async get(domainId: string, tid: ObjectId, page = 1) {
-        const vnode = await discussion.getVnode(domainId, document.TYPE_CONTEST, tid.toHexString(), this.user._id);
+    async get(_domainId: string, tid: ObjectId, page = 1) {
+        const authoritativeDomainId = String(this.domain?._id);
+        const vnode = await discussion.getVnode(authoritativeDomainId, document.TYPE_CONTEST, tid.toHexString(), this.user._id);
         const hidden = this.user.own(vnode) || this.user.hasPerm(PERM.PERM_EDIT_DISCUSSION) ? {} : { hidden: false };
         const [ddocs, dpcount] = await this.paginate(
-            discussion.getMulti(domainId, { parentType: document.TYPE_CONTEST, parentId: tid, ...hidden }),
+            discussion.getMulti(authoritativeDomainId, { parentType: document.TYPE_CONTEST, parentId: tid, ...hidden }),
             page,
             'discussion',
         );
         const uids = ddocs.map((ddoc) => ddoc.owner);
         if (vnode?.owner) uids.push(vnode.owner);
         const udict = uids.length
-            ? await UserModel.getListForRender(domainId, uids, this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO))
+            ? await UserModel.getListForRender(authoritativeDomainId, uids, this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO))
             : {};
         this.response.body = {
             ddocs,
@@ -983,13 +996,14 @@ class ExamModeDiscussionCreateHandler extends Handler {
     vnode: any;
 
     @param('tid', Types.ObjectId)
-    async prepare(domainId: string, tid: ObjectId) {
+    async prepare(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         this.checkPerm(PERM.PERM_CREATE_DISCUSSION);
-        this.tdoc = await contest.get(domainId, tid);
+        this.tdoc = await contest.get(authoritativeDomainId, tid);
         if (!this.tdoc) throw new NotFoundError('Contest');
-        await ensureExamModeAccess(this, domainId, tid, this.tdoc);
-        this.vnode = await discussion.getVnode(domainId, document.TYPE_CONTEST, tid.toHexString(), this.user._id);
+        await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
+        this.vnode = await discussion.getVnode(authoritativeDomainId, document.TYPE_CONTEST, tid.toHexString(), this.user._id);
     }
 
     async get() {
@@ -1002,12 +1016,13 @@ class ExamModeDiscussionCreateHandler extends Handler {
     @param('content', Types.Content)
     @param('highlight', Types.Boolean)
     @param('pin', Types.Boolean)
-    async post(domainId: string, tid: ObjectId, title: string, content: string, highlight = false, pin = false) {
+    async post(_domainId: string, tid: ObjectId, title: string, content: string, highlight = false, pin = false) {
+        const authoritativeDomainId = String(this.domain?._id);
         await this.limitRate('add_discussion', 3600, 60);
         if (highlight) this.checkPerm(PERM.PERM_HIGHLIGHT_DISCUSSION);
         if (pin) this.checkPerm(PERM.PERM_PIN_DISCUSSION);
         const did = await discussion.add(
-            domainId, document.TYPE_CONTEST, tid, this.user._id,
+            authoritativeDomainId, document.TYPE_CONTEST, tid, this.user._id,
             title, content, this.request.ip, highlight, pin, this.vnode?.hidden ?? false,
         );
         this.response.body = { did };
@@ -1019,10 +1034,11 @@ class ExamModeDiscussionDetailHandler extends DiscussionDetailHandler {
     tdoc: any;
 
     @param('tid', Types.ObjectId)
-    async prepare(domainId: string, tid: ObjectId) {
-        this.tdoc = await contest.get(domainId, tid);
+    async prepare(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        this.tdoc = await contest.get(authoritativeDomainId, tid);
         if (!this.tdoc) throw new NotFoundError('Contest');
-        await ensureExamModeAccess(this, domainId, tid, this.tdoc);
+        await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         if (this.ddoc?.parentType !== document.TYPE_CONTEST || !(this.ddoc.parentId as any)?.equals?.(tid)) {
             throw new NotFoundError('Discussion');
         }
@@ -1030,8 +1046,8 @@ class ExamModeDiscussionDetailHandler extends DiscussionDetailHandler {
 
     @param('did', Types.ObjectId)
     @param('page', Types.PositiveInt, true)
-    async get(domainId: string, did: ObjectId, page = 1) {
-        await super.get(domainId, did, page);
+    async get(_domainId: string, did: ObjectId, page = 1) {
+        await super.get(String(this.domain?._id), did, page);
         await decorateExamMode(this, this.tdoc, 'discussion', 'discussion_detail.html', false);
     }
 }

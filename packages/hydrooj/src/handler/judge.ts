@@ -16,7 +16,7 @@ import { RecordDoc, Task } from '../interface';
 import { mergeSubjectiveScores, parseProblemConfigObject } from '../lib/problem-config';
 import { Logger } from '../logger';
 import * as builtin from '../model/builtin';
-import { PERM, STATUS } from '../model/builtin';
+import { STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
 import domain from '../model/domain';
 import problem from '../model/problem';
@@ -254,27 +254,52 @@ export class JudgeFilesDownloadHandler extends Handler {
 
 export async function processJudgeFileCallback(rid: ObjectId, filename: string, filePath: string) {
     const rdoc = await record.get(rid);
-    const [pdoc, udoc] = await Promise.all([
-        problem.get(rdoc.domainId, rdoc.pid),
-        user.getById(rdoc.domainId, rdoc.uid),
-    ]);
-    if (!udoc.own(pdoc, PERM.PERM_EDIT_PROBLEM_SELF) && !udoc.hasPerm(PERM.PERM_EDIT_PROBLEM)) throw new ForbiddenError();
-    if (pdoc.reference) throw new ProblemIsReferencedError('edit files');
-    const stat = await fs.stat(filePath);
-    if ((pdoc.data?.length || 0)
-        + (pdoc.additional_file?.length || 0)
-        >= system.get('limit.problem_files_max')) {
-        throw new FileLimitExceededError('count');
+    // `/judge/upload` is a privileged callback, but the judger must not be
+    // allowed to turn an arbitrary ordinary/pretest/hack Record into delegated
+    // authority from that Record's owner. Only the sentinel written by
+    // RecordModel.add(..., { type: 'generate' }) is a generation callback.
+    if (!rdoc || String(rdoc.contest) !== String(record.RECORD_GENERATE)) {
+        throw new ForbiddenError();
     }
-    const size = Math.sum(
-        (pdoc.data || []).map((i) => i.size),
-        (pdoc.additional_file || []).map((i) => i.size),
-        stat.size,
+    const udoc = await user.getById(rdoc.domainId, rdoc.uid);
+    if (!udoc) throw new ForbiddenError();
+    let preflightError: unknown;
+    await problem.withAuthorizedWriteClaim(
+        rdoc.domainId,
+        rdoc.pid,
+        udoc,
+        'generate-testdata-callback',
+        async (claim) => {
+            try {
+                const pdoc = await problem.get(rdoc.domainId, rdoc.pid);
+                if (!pdoc) throw new ForbiddenError();
+                if (pdoc.reference) throw new ProblemIsReferencedError('edit files');
+                const stat = await fs.stat(filePath);
+                if ((pdoc.data?.length || 0)
+                    + (pdoc.additional_file?.length || 0)
+                    >= system.get('limit.problem_files_max')) {
+                    throw new FileLimitExceededError('count');
+                }
+                const size = Math.sum(
+                    (pdoc.data || []).map((i) => i.size),
+                    (pdoc.additional_file || []).map((i) => i.size),
+                    stat.size,
+                );
+                if (size >= system.get('limit.problem_files_max_size')) {
+                    throw new FileLimitExceededError('size');
+                }
+            } catch (error) {
+                // Preflight is read-only. Release the claim cleanly and throw
+                // after the critical section; write failures still retain ERROR.
+                preflightError = error;
+                return;
+            }
+            await problem.addTestdataWithClaim(
+                claim, sanitize(filename), fs.createReadStream(filePath), udoc._id,
+            );
+        },
     );
-    if (size >= system.get('limit.problem_files_max_size')) {
-        throw new FileLimitExceededError('size');
-    }
-    await problem.addTestdata(pdoc.domainId, pdoc.docId, sanitize(filename), fs.createReadStream(filePath), udoc._id);
+    if (preflightError) throw preflightError;
 }
 
 export class JudgeFileUpdateHandler extends Handler {

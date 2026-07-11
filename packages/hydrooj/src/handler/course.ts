@@ -13,17 +13,19 @@
 import assert from 'assert';
 import { escapeRegExp } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
-import { ProblemNotFoundError, ValidationError } from '../error';
+import { ValidationError } from '../error';
 import { TrainingDoc, TrainingNode } from '../interface';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as oplog from '../model/oplog';
 import problem from '../model/problem';
+import { assertProblemBankSelection } from '../model/problem-access';
 import * as training from '../model/training';
 import user from '../model/user';
 import {
     Handler, param, Types,
 } from '../service/server';
+import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-reference';
 
 /** 当前用户所属的 userbind 班级 id 集合（跨插件，缺失时空集）。 */
 async function userGroupIds(domainId: string, uid: number): Promise<Set<string>> {
@@ -56,16 +58,8 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
         for (const node of chapters) {
             assert(node._id, 'each chapter needs an _id');
             assert(node.title, 'each chapter needs a title');
-            const pids: number[] = Array.isArray(node.pids) ? node.pids : [];
+            const pids = normalizeProblemDocIds(Array.isArray(node.pids) ? node.pids : []);
             const rawTids: string[] = Array.isArray(node.tids) ? node.tids : [];
-            // 校验题目存在，规范化为 docId。
-            const normPids: number[] = [];
-            for (const p of pids) {
-                // eslint-disable-next-line no-await-in-loop
-                const pdoc = await problem.get(domainId, p);
-                if (!pdoc) throw new ProblemNotFoundError(domainId, p);
-                normPids.push(pdoc.docId);
-            }
             // 校验比赛存在。
             const tids: ObjectId[] = [];
             for (const t of rawTids) {
@@ -80,12 +74,12 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
                 _id: +node._id,
                 title: node.title,
                 requireNids: [], // 线性目录：无先修依赖
-                pids: Array.from(new Set(normPids)),
+                pids,
                 ...(tids.length ? { tids } : {}),
             });
         }
     } catch (e: any) {
-        throw new ValidationError('chapters', null, e instanceof ProblemNotFoundError ? e : e.message);
+        throw new ValidationError('chapters', null, e.message);
     }
     return parsed;
 }
@@ -135,7 +129,9 @@ class CourseMainHandler extends Handler {
 
 class CourseDetailHandler extends Handler {
     @param('tid', Types.ObjectId)
-    async get(domainId: string, tid: ObjectId) {
+    async get(_domainId: string, tid: ObjectId) {
+        const domainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, domainId);
         const tdoc = await training.get(domainId, tid);
         if (tdoc.kind !== 'course') throw new ValidationError('tid', null, 'Not a course');
         const canManage = this.user.own(tdoc)
@@ -149,14 +145,13 @@ class CourseDetailHandler extends Handler {
             }
         }
         const pids = training.getPids(tdoc.dag);
-        const canViewHidden = this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN) || this.user._id;
         // 解析章节引用的所有比赛。
         const allTids = Array.from(new Set<string>(
             tdoc.dag.flatMap((n) => (n.tids || []).map((t) => String(t))),
         )).map((s) => new ObjectId(s));
         const [udoc, pdict, psdict, ctdocs] = await Promise.all([
             user.getById(domainId, tdoc.owner),
-            problem.getList(domainId, pids, canViewHidden, false),
+            getVisibleReferencedProblems(domainId, pids, this.user),
             this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
                 ? problem.getListStatus(domainId, this.user._id, pids) : {},
             allTids.length
@@ -210,9 +205,11 @@ class CourseEditHandler extends Handler {
     tdoc: TrainingDoc;
 
     @param('tid', Types.ObjectId, true)
-    async prepare(domainId: string, tid: ObjectId) {
+    async prepare(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if (tid) {
-            this.tdoc = await training.get(domainId, tid);
+            this.tdoc = await training.get(authoritativeDomainId, tid);
             if (this.tdoc.kind !== 'course') throw new ValidationError('tid', null, 'Not a course');
             if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_COURSE);
         } else {
@@ -220,10 +217,12 @@ class CourseEditHandler extends Handler {
         }
     }
 
-    async get(domainId: string) {
+    async get(_domainId: string) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         // 提供可选比赛列表给编辑器挂章节。
         const groups = (global as any).Hydro?.model?.userbind?.listUserGroups
-            ? await (global as any).Hydro.model.userbind.listUserGroups(domainId) : [];
+            ? await (global as any).Hydro.model.userbind.listUserGroups(authoritativeDomainId) : [];
         this.response.template = 'course_edit.html';
         this.response.body = {
             page_name: this.tdoc ? 'course_edit' : 'course_create',
@@ -248,23 +247,28 @@ class CourseEditHandler extends Handler {
     @param('term', Types.String, true)
     @param('courseGroupIds', Types.CommaSeperatedArray, true)
     async post(
-        domainId: string, tid: ObjectId,
+        _domainId: string, tid: ObjectId,
         title: string, content: string, chaptersJson: string,
         description = '', term = '', courseGroupIds: string[] = [],
     ) {
-        const dag = await parseChaptersJson(domainId, chaptersJson);
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
+        const dag = await parseChaptersJson(authoritativeDomainId, chaptersJson);
+        const pids = training.getPids(dag);
+        const existingPids = training.getPids(this.tdoc?.dag || []);
+        await assertProblemBankSelection(authoritativeDomainId, pids, this.user, existingPids);
         const groupIds = (courseGroupIds || [])
             .map((s) => { try { return new ObjectId(s); } catch { return null; } })
             .filter((x): x is ObjectId => !!x);
         if (!tid) {
-            tid = await training.add(domainId, title, content, this.user._id, dag, description, 0, {
+            tid = await training.add(authoritativeDomainId, title, content, this.user._id, dag, description, 0, {
                 kind: 'course',
                 courseGroupIds: groupIds,
                 term,
             });
             await oplog.log(this, 'course.create', { tid, title });
         } else {
-            await training.edit(domainId, tid, {
+            await training.edit(authoritativeDomainId, tid, {
                 title, content, dag, description, term, courseGroupIds: groupIds,
             });
             await oplog.log(this, 'course.edit', { tid, title });

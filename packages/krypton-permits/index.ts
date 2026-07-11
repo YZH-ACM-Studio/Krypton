@@ -19,48 +19,50 @@
  * `packages/hydrooj/src/...` rather than here because they're tight
  * call-site changes.
  */
+import { Logger } from '@hydrooj/utils';
 import type { Context } from 'hydrooj';
+import { registerCommands } from './src/cli';
 import { ensureIndexes } from './src/db';
 import { applyHandlers } from './src/handler';
 import { attachHooks } from './src/hooks';
 import { migrationScripts } from './src/migration';
 import { permitsModel } from './src/model';
+import { preloadProblemAcl } from './src/preload';
 
-export * from './src/types';
+export { aclMutationFencesColl, permitsColl, permitSourcesColl } from './src/db';
 export { permitsModel } from './src/model';
-export { permitsColl } from './src/db';
+export * from './src/types';
 
-export function apply(ctx: Context) {
-    applyHandlers(ctx);
-    attachHooks(ctx);
+const logger = new Logger('krypton-permits');
 
-    ensureIndexes().catch((e) => {
-        console.error('[krypton-permits] ensureIndexes failed:', e);
-    });
+export async function apply(ctx: Context) {
+    // Index drift is an authorization-integrity failure. Do not register a
+    // partially functional plugin or let Cordis mark startup successful.
+    await ensureIndexes();
 
     if (global.Hydro?.model) (global.Hydro.model as any).permits = permitsModel;
+
+    applyHandlers(ctx);
+    attachHooks(ctx);
+    registerCommands(ctx);
 
     ctx.inject(['migration'], (c) => {
         c.migration.registerChannel('permits', migrationScripts);
     });
 
-    // Attach the user's permitted-pids set to `h.user._permitPids` on every
-    // HTTP request. Patched `ProblemModel.canViewBy` and `buildQuery` then
-    // honor permits transparently — no per-handler boilerplate needed.
-    //
-    // Cost: one tiny query per request (covered by the unique index, table
-    // is bounded to a few hundred rows in typical Krypton use). Anonymous
-    // users (_id === 0) skip the query.
+    // Load one coherent request-scoped ACL snapshot. Core access helpers only
+    // trust these sets when `_problemAclLoaded === true`.
     ctx.on('handler/create/http', async (h) => {
-        const uid = h.user?._id;
-        if (!uid || uid <= 1) return;
+        const user = h.user as any;
         const domainId = h.domain?._id;
-        if (!domainId) return;
-        try {
-            (h.user as any)._permitPids = await permitsModel.loadPermittedPidsFor(domainId, uid);
-        } catch {
-            // best-effort; on failure user just sees the legacy
-            // hidden-problem visibility rules.
-        }
+        await preloadProblemAcl(
+            user,
+            domainId,
+            (loadedDomainId, uid) => permitsModel.loadAclForUser(loadedDomainId, uid),
+            (error) => logger.error(
+                'ACL preload failed domain=%s uid=%d error=%s',
+                domainId, user?._id || 0, error,
+            ),
+        );
     });
 }

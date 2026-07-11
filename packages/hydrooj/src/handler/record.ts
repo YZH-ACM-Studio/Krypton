@@ -121,7 +121,7 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         // Admin extra column: 学号 / 姓名. Only populated when the viewer has
         // PRIV_EDIT_SYSTEM and krypton-userbind is loaded; otherwise the dict
         // stays empty and the UI hides the column.
-        let studentDict: Record<string, { studentId: string; realName: string }> = {};
+        let studentDict: Record<string, { studentId: string, realName: string }> = {};
         if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && global.Hydro?.model?.userbind?.findStudentsByUserIds) {
             const uids = Array.from(new Set(rdocs.map((r) => r.uid))).filter((u) => u && u > 1);
             const students = await global.Hydro.model.userbind.findStudentsByUserIds(domainId, uids);
@@ -213,9 +213,17 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             }
         }
 
-        // eslint-disable-next-line prefer-const
-        let [pdoc, self, udoc] = await Promise.all([
-            problem.get(rdoc.domainId, rdoc.pid, problem.PROJECTION_LIST.concat('config')),
+        if (this.tdoc) {
+            this.tsdoc = await contest.getStatus(domainId, this.tdoc.docId, this.user._id);
+        }
+        const requiresDirectProblemAccess = !this.tdoc || !this.tsdoc?.attend;
+        const [pdoc, self, udoc] = await Promise.all([
+            requiresDirectProblemAccess
+                ? problem.getViewableAuthorized(
+                    rdoc.domainId, rdoc.pid, this.user,
+                    problem.PROJECTION_LIST.concat('config'),
+                )
+                : problem.get(rdoc.domainId, rdoc.pid, problem.PROJECTION_LIST.concat('config')),
             problem.getStatus(domainId, rdoc.pid, this.user._id),
             user.getById(domainId, rdoc.uid),
         ]);
@@ -225,13 +233,12 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         canViewCode ||= this.user.hasPerm(PERM.PERM_READ_RECORD_CODE);
         canViewCode ||= this.user.hasPerm(PERM.PERM_READ_RECORD_CODE_ACCEPT) && self?.status === STATUS.STATUS_ACCEPTED;
         if (this.tdoc) {
-            this.tsdoc = await contest.getStatus(domainId, this.tdoc.docId, this.user._id);
             canViewCode ||= this.user.own(this.tdoc);
             if (this.tdoc.allowViewCode && contest.isDone(this.tdoc)) {
                 canViewCode ||= this.tsdoc?.attend;
             }
-            if (!this.tsdoc?.attend && pdoc && !problem.canViewBy(pdoc, this.user)) throw new PermissionError(PERM.PERM_VIEW_PROBLEM_HIDDEN);
-        } else if (pdoc && !problem.canViewBy(pdoc, this.user)) throw new PermissionError(PERM.PERM_VIEW_PROBLEM_HIDDEN);
+        }
+        if (!pdoc) throw new PermissionError(PERM.PERM_VIEW_PROBLEM_HIDDEN);
         if (!canViewCode) {
             rdoc.code = '';
             rdoc.files = {};
@@ -250,11 +257,17 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         // NOTE(MVP): does not yet block the "open the same problem from the bank
         // while attending an ongoing contest that contains it" bypass — left as
         // a follow-up; the practice problem is normally contest-hidden anyway.
-        const testHints: Record<string, { hint?: string; videoUrl?: string }> = {};
+        const testHints: Record<string, { hint?: string, videoUrl?: string }> = {};
         try {
             const inActiveContest = this.tdoc ? !contest.isDone(this.tdoc, this.tsdoc) : false;
             if (canViewDetail && !inActiveContest) {
-                const rawCfg = (await problem.get(rdoc.domainId, rdoc.pid, ['domainId', 'docId', 'config'], true))?.config;
+                const rawPdoc = requiresDirectProblemAccess
+                    ? await problem.getViewableAuthorized(
+                        rdoc.domainId, rdoc.pid, this.user,
+                        ['domainId', 'docId', 'config'], true,
+                    )
+                    : await problem.get(rdoc.domainId, rdoc.pid, ['domainId', 'docId', 'config'], true);
+                const rawCfg = rawPdoc?.config;
                 const cfgObj: any = typeof rawCfg === 'string' ? loadYaml(rawCfg) : rawCfg;
                 if (cfgObj && typeof cfgObj === 'object') {
                     const parsed: any = await readYamlCases(cfgObj);
@@ -427,13 +440,12 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
 
         let [udoc, pdoc] = await Promise.all([
             user.getById(this.args.domainId, rdoc.uid),
-            problem.get(rdoc.domainId, rdoc.pid),
+            rdoc.contest
+                ? problem.get(rdoc.domainId, rdoc.pid)
+                : problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user),
         ]);
         const tdoc = this.tid ? this.tdoc : null;
-        if (pdoc && !rdoc.contest) {
-            if (!problem.canViewBy(pdoc, this.user)) pdoc = null;
-            if (!this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) pdoc = null;
-        }
+        if (pdoc && !rdoc.contest && !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) pdoc = null;
         if (this.applyProjection && rdoc.contest?.toString() !== '0'.repeat(24)) rdoc = contest.applyProjection(tdoc, rdoc, this.user);
         if (this.pretest) {
             this.queueSend(rdoc._id.toHexString(), async () => ({ rdoc: omit(rdoc, ['code', 'input']) }));
@@ -484,8 +496,11 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
                 this.applyProjection = true;
             }
         }
+        const requiresDirectProblemAccess = !rdoc.contest || this.user._id !== rdoc.uid;
         const [pdoc, self] = await Promise.all([
-            problem.get(rdoc.domainId, rdoc.pid),
+            requiresDirectProblemAccess
+                ? problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user)
+                : problem.get(rdoc.domainId, rdoc.pid),
             problem.getStatus(domainId, rdoc.pid, this.user._id),
         ]);
 
@@ -494,9 +509,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
         this.canViewCode ||= this.user.hasPerm(PERM.PERM_READ_RECORD_CODE);
         this.canViewCode ||= this.user.hasPerm(PERM.PERM_READ_RECORD_CODE_ACCEPT) && self?.status === STATUS.STATUS_ACCEPTED;
 
-        if (!rdoc.contest || this.user._id !== rdoc.uid) {
-            if (!problem.canViewBy(pdoc, this.user)) throw new PermissionError(PERM.PERM_VIEW_PROBLEM_HIDDEN);
-        }
+        if (!pdoc) throw new PermissionError(PERM.PERM_VIEW_PROBLEM_HIDDEN);
 
         this.pdoc = pdoc;
         this.noTemplate = noTemplate;

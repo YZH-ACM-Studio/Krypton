@@ -476,13 +476,17 @@ class AdminTasksListHandler extends Handler {
     }
 
     @param('tid', Types.ObjectId)
-    async postClone({ domainId }: { domainId: string }, tid: ObjectId) {
-        const src = await taskModel.getTask(domainId, tid);
+    async postClone({ domainId: _domainId }: { domainId: string }, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        ProblemModel.assertProblemAclDomain(this.user as any, authoritativeDomainId);
+        const src = await taskModel.getTask(authoritativeDomainId, tid);
         if (!src) throw new NotFoundError('任务不存在');
         if (!canModifyTask(this.user as any, src)) {
             throw new ValidationError('tid', null, '无权复制');
         }
-        const newId = await taskModel.cloneTask(domainId, tid, this.user._id);
+        const problemIds = Array.from(collectTaskParamRefs(src.graph).problemIds);
+        await ProblemModel.assertProblemBankSelection(authoritativeDomainId, problemIds, this.user as any);
+        const newId = await taskModel.cloneTask(authoritativeDomainId, tid, this.user._id);
         await OplogModel.log(this, 'tasks.clone', { from: tid, to: newId });
         if (newId) this.response.redirect = this.url('admin_tasks_edit', { tid: newId });
         else this.response.redirect = this.url('admin_tasks');
@@ -501,7 +505,7 @@ class AdminTasksListHandler extends Handler {
     }
 }
 
-class AdminTasksEditHandler extends Handler {
+export class AdminTasksEditHandler extends Handler {
     async prepare() {
         if (!canCreateTask(this.user as any) && !canManageAllTasks(this.user as any)) {
             this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
@@ -509,10 +513,12 @@ class AdminTasksEditHandler extends Handler {
     }
 
     @param('tid', Types.ObjectId, true)
-    async get({ domainId }: { domainId: string }, tid?: ObjectId) {
+    async get({ domainId: _domainId }: { domainId: string }, tid?: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        ProblemModel.assertProblemAclDomain(this.user as any, authoritativeDomainId);
         let task: TaskDoc | null = null;
         if (tid) {
-            task = await taskModel.getTask(domainId, tid);
+            task = await taskModel.getTask(authoritativeDomainId, tid);
             if (!task) throw new NotFoundError('任务不存在');
             if (!canModifyTask(this.user as any, task)) {
                 throw new ValidationError('tid', null, '无权编辑');
@@ -522,15 +528,15 @@ class AdminTasksEditHandler extends Handler {
         // can use dropdowns (no manual ObjectId entry). Problems are too many
         // to bootstrap — see admin_tasks_api_problems for autocomplete.
         const [schools, userGroups, contestDocs, homeworkDocs, trainingDocs] = await Promise.all([
-            userBindModel.listSchools(domainId),
-            userBindModel.listUserGroups(domainId),
-            DocumentModel.coll.find({ domainId, docType: DocumentModel.TYPE_CONTEST })
+            userBindModel.listSchools(authoritativeDomainId),
+            userBindModel.listUserGroups(authoritativeDomainId),
+            DocumentModel.coll.find({ domainId: authoritativeDomainId, docType: DocumentModel.TYPE_CONTEST })
                 .project({ docId: 1, title: 1, beginAt: 1, rule: 1 })
                 .sort({ beginAt: -1 }).limit(500).toArray(),
-            DocumentModel.coll.find({ domainId, docType: DocumentModel.TYPE_CONTEST, rule: 'homework' })
+            DocumentModel.coll.find({ domainId: authoritativeDomainId, docType: DocumentModel.TYPE_CONTEST, rule: 'homework' })
                 .project({ docId: 1, title: 1, beginAt: 1 })
                 .sort({ beginAt: -1 }).limit(500).toArray(),
-            DocumentModel.coll.find({ domainId, docType: DocumentModel.TYPE_TRAINING })
+            DocumentModel.coll.find({ domainId: authoritativeDomainId, docType: DocumentModel.TYPE_TRAINING })
                 .project({ docId: 1, title: 1 })
                 .limit(500).toArray(),
         ]);
@@ -564,7 +570,7 @@ class AdminTasksEditHandler extends Handler {
     @param('admissionMode', Types.String, true)
     @param('quota', Types.Int, true)
     async post(
-        { domainId }: { domainId: string },
+        { domainId: _domainId }: { domainId: string },
         tid: ObjectId | undefined,
         title: string,
         description: string,
@@ -581,6 +587,8 @@ class AdminTasksEditHandler extends Handler {
         admissionMode: string,
         quota: number,
     ) {
+        const authoritativeDomainId = String(this.domain?._id);
+        ProblemModel.assertProblemAclDomain(this.user as any, authoritativeDomainId);
         const mode = parseAdmissionMode(admissionMode);
         const data: Partial<TaskDoc> = {
             title,
@@ -598,16 +606,21 @@ class AdminTasksEditHandler extends Handler {
             admissionMode: mode,
             quota: mode === 'quota' && quota && quota > 0 ? quota : null,
         };
+        const problemIds = Array.from(collectTaskParamRefs(data.graph as TaskGraph).problemIds);
         if (tid) {
-            const existing = await taskModel.getTask(domainId, tid);
+            const existing = await taskModel.getTask(authoritativeDomainId, tid);
             if (!existing) throw new NotFoundError('任务不存在');
             if (!canModifyTask(this.user as any, existing)) {
                 throw new ValidationError('tid', null, '无权编辑');
             }
+            const existingProblemIds = Array.from(collectTaskParamRefs(existing.graph).problemIds);
+            await ProblemModel.assertProblemBankSelection(
+                authoritativeDomainId, problemIds, this.user as any, existingProblemIds,
+            );
             // Audit task-level edits so we can correlate "condition tightened
             // on date X" with "user Y suddenly downgraded" later.
             await taskModel.writeAudit({
-                domainId, assignmentId: null, taskId: tid,
+                domainId: authoritativeDomainId, assignmentId: null, taskId: tid,
                 eventType: 'condition_change', adminUid: this.user._id,
                 before: {
                     graph: existing.graph,
@@ -617,11 +630,12 @@ class AdminTasksEditHandler extends Handler {
                 after: { graph: data.graph, admissionMode: data.admissionMode, quota: data.quota },
                 reason: '',
             });
-            await taskModel.updateTask(domainId, tid, data);
+            await taskModel.updateTask(authoritativeDomainId, tid, data);
             await OplogModel.log(this, 'tasks.update', { taskId: tid });
             this.response.redirect = this.url('admin_tasks');
         } else {
-            const newId = await taskModel.createTask(domainId, this.user._id, data);
+            await ProblemModel.assertProblemBankSelection(authoritativeDomainId, problemIds, this.user as any);
+            const newId = await taskModel.createTask(authoritativeDomainId, this.user._id, data);
             await OplogModel.log(this, 'tasks.create', { taskId: newId });
             this.response.redirect = this.url('admin_tasks');
         }
@@ -989,13 +1003,16 @@ class AdminTasksProblemSearchHandler extends Handler {
         if (!canCreateTask(this.user as any) && !canManageAllTasks(this.user as any)) {
             this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
         }
+        if (!ProblemModel.canBrowseProblemBank(this.user as any)) throw new ForbiddenError();
     }
 
     @param('q', Types.String, true)
     @param('limit', Types.Int, true)
-    async get({ domainId }: { domainId: string }, q: string, limit: number) {
+    async get({ domainId: _domainId }: { domainId: string }, q: string, limit: number) {
+        const authoritativeDomainId = String(this.domain?._id);
+        ProblemModel.assertProblemAclDomain(this.user as any, authoritativeDomainId);
         const cap = Math.min(50, Math.max(5, limit || 30));
-        const query: any = { domainId, hidden: { $ne: true } };
+        const businessQuery: any = {};
         const trimmed = (q || '').trim();
         if (trimmed) {
             // pid exact (numeric) → exact match wins; else case-insensitive title regex.
@@ -1006,12 +1023,15 @@ class AdminTasksProblemSearchHandler extends Handler {
                 title: { $regex: trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' },
             });
             orList.push({ pid: trimmed });
-            query.$or = orList;
+            businessQuery.$or = orList;
         }
+        const query: any = {
+            $and: [ProblemModel.buildProblemBankScope(this.user as any), businessQuery],
+        };
         // ProblemModel.getMulti returns a cursor sorted by `sort` ASC; for
         // search results we'd prefer docId ASC. Project only the picker-needed
         // fields to keep the response light.
-        const docs = await ProblemModel.getMulti(domainId, query, ['docId', 'pid', 'title'] as any)
+        const docs = await ProblemModel.getMulti(authoritativeDomainId, query, ['docId', 'pid', 'title'] as any)
             .sort({ docId: 1 }).limit(cap).toArray();
         this.response.body = {
             results: docs.map((d: any) => ({

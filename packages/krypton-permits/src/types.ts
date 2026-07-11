@@ -6,39 +6,45 @@
  *
  *   - Invite a peer to verify a single hidden problem before publishing,
  *     without granting view-all-hidden domain perms.
- *   - Bulk-grant verifiers across all problems of a hidden contest. Tagged
- *     with `viaContest` so cleanup is one query when the contest is opened
- *     / deleted / loses the user from its verifier list.
+ *   - Preserve direct and multiple contest grants independently, then derive
+ *     one active canonical role per user/problem pair.
  *
  * Two roles:
  *   - `verifier`  : read-only view of the problem (statement, data, records)
- *   - `maintainer`: read + edit (the old `pdoc.maintainer[]` is migrated into
- *                   permits rows with this role)
+ *   - `maintainer`: author-scope read + edit/publish/delete capability
  *
- * The legacy `pdoc.maintainer[]` array is kept on the doc for backward
- * compatibility (upstream hydro code reads it). The migration creates permit
- * rows mirroring the array; canViewBy is patched to check BOTH the legacy
- * array AND permits so we don't have to mutate the array on every change.
+ * `problem.permits.active` is the ACL authority when present. Production
+ * legacy rows that predate the field remain active unless it is explicitly
+ * `false`; compatibility reads never backfill those rows. The legacy
+ * `pdoc.maintainer[]` array is a compatibility mirror and never grants access
+ * by itself. Missing preload data and durable mutation fences fail closed.
  */
-import type { ObjectId } from 'mongodb';
+import type { ObjectId } from 'hydrooj';
+import type { AclMutationFence, PermitSource, ProblemAclMutationLock } from './coordinator';
+
+export const ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION =
+    'PROCESS_QUIESCED_AND_PARTIAL_WRITE_INSPECTED';
+
+export interface ProblemWriteClaimMarker {
+    requestId: string;
+    actor: number;
+    operation: string;
+    state: 'active' | 'error';
+    lastError: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+}
 
 /**
  * Two roles defined in the data model:
  *
  *   - `verifier`   : read-only access to a hidden problem.
- *   - `maintainer` : read-only access today (semantically equivalent to
- *                    verifier — for current Krypton OJ workflow); the
- *                    role tag is preserved so a future upgrade can grant
- *                    edit rights to maintainer holders without a schema
- *                    migration. The legacy `pdoc.maintainer[]` array is
- *                    dual-written when this role is granted so that
- *                    upstream hydro code (which reads the array for
- *                    visibility filtering) stays consistent.
+ *   - `maintainer` : read plus problem maintenance capability and inclusion
+ *                    in the author's problem-bank scope.
  *
- * UI today only exposes the `verifier` option in the invite dialog. Existing
- * `maintainer` rows from the legacy field migrate in at v1 and keep working
- * — they just don't gain extra edit privileges beyond what the verifier
- * role provides until that future upgrade ships.
+ * Direct sources outrank contest maintainers, which outrank contest
+ * verifiers. A direct verifier therefore intentionally overrides a contest
+ * maintainer until that direct source is removed.
  */
 export type PermitRole = 'verifier' | 'maintainer';
 
@@ -50,13 +56,15 @@ export interface PermitDoc {
     /** Recipient uid. */
     uid: number;
     role: PermitRole;
+    /** Missing is legacy-active; explicit false never grants access. */
+    active?: boolean;
     /** uid that issued the grant — author / domain admin / contest editor. */
     grantedBy: number;
     grantedAt: Date;
     /**
-     * Set when the permit was created via "contest verifier" bulk-grant.
-     * Cleanup queries use this tag to undo all permits granted via a single
-     * contest (when contest is opened / deleted / loses the user).
+     * Representative winning contest source for compatibility/display only.
+     * Cleanup always queries `problem.permitSources`, because multiple
+     * contest sources may coexist for one canonical pair.
      */
     viaContest: ObjectId | null;
     /** Optional admin note shown alongside the permit in the list UI. */
@@ -66,9 +74,17 @@ export interface PermitDoc {
 declare module 'hydrooj' {
     interface Collections {
         'problem.permits': PermitDoc;
+        'problem.permitSources': PermitSource & { _id: ObjectId };
+        'problem.aclMutationFences': AclMutationFence & { _id: ObjectId };
     }
 
     interface ProblemDoc {
+        /** Monotonic ACL/write linearization token; missing legacy value means 0. */
+        aclMutationRevision?: number;
+        /** Durable per-uid deny markers. Never TTL-expired or client-writable. */
+        aclMutationLocks?: Array<Omit<ProblemAclMutationLock, 'domainId' | 'pid'>>;
+        /** Global, durable write claim. ERROR markers require explicit repair. */
+        aclWriteClaim?: ProblemWriteClaimMarker;
         /**
          * If true, this problem is exempt from the contest-end "auto-unhide"
          * worker. Use for repeated-use private problems (题源题 / 套路题 /
@@ -81,7 +97,8 @@ declare module 'hydrooj' {
     interface Tdoc {
         /**
          * Contest verifier uids — purely for UI display + sync trigger. The
-         * real ACL lives in `problem.permits` with `viaContest = this._id`.
+         * active ACL is derived from persistent source rows into the canonical
+         * `problem.permits` row.
          */
         verifiers?: number[];
     }

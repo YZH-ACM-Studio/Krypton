@@ -3,12 +3,13 @@ import { escapeRegExp, pick } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import { sortFiles } from '@hydrooj/utils/lib/utils';
 import {
-    FileLimitExceededError, FileUploadError, NotFoundError, ProblemNotFoundError, ValidationError,
+    FileLimitExceededError, FileUploadError, NotFoundError, ValidationError,
 } from '../error';
 import { Tdoc, TrainingDoc } from '../interface';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as oplog from '../model/oplog';
 import problem from '../model/problem';
+import { assertProblemBankSelection } from '../model/problem-access';
 import storage from '../model/storage';
 import system from '../model/system';
 import * as training from '../model/training';
@@ -16,6 +17,7 @@ import user from '../model/user';
 import {
     Handler, param, post, Types,
 } from '../service/server';
+import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-reference';
 
 async function _parseDagJson(domainId: string, _dag: string): Promise<Tdoc['dag']> {
     const parsed = [];
@@ -34,25 +36,16 @@ async function _parseDagJson(domainId: string, _dag: string): Promise<Tdoc['dag'
             for (const nid of node.requireNids) {
                 assert(ids.has(nid), `required nid ${nid} not found`);
             }
-            const tasks = [];
-            for (const i in node.pids) {
-                tasks.push(problem.get(domainId, node.pids[i]).then((pdoc) => {
-                    if (!pdoc) throw new ProblemNotFoundError(domainId, node.pids[i]);
-                    node.pids[i] = pdoc.docId;
-                }));
-            }
-            // eslint-disable-next-line no-await-in-loop
-            await Promise.all(tasks);
             const newNode = {
                 _id: +node._id,
                 title: node.title,
                 requireNids: Array.from(new Set(node.requireNids)),
-                pids: Array.from(new Set(node.pids)),
+                pids: normalizeProblemDocIds(node.pids),
             };
             parsed.push(newNode);
         }
     } catch (e) {
-        throw new ValidationError('dag', null, e instanceof ProblemNotFoundError ? e : e.message);
+        throw new ValidationError('dag', null, e.message);
     }
     return parsed;
 }
@@ -116,7 +109,9 @@ class TrainingMainHandler extends Handler {
 class TrainingDetailHandler extends Handler {
     @param('tid', Types.ObjectId)
     @param('uid', Types.PositiveInt, true)
-    async get(domainId: string, tid: ObjectId, uid = this.user._id) {
+    async get(_domainId: string, tid: ObjectId, uid = this.user._id) {
+        const domainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, domainId);
         const tdoc = await training.get(domainId, tid);
         assertNotCourse(tdoc);
         await this.ctx.parallel('training/get', tdoc, this);
@@ -128,11 +123,10 @@ class TrainingDetailHandler extends Handler {
                 .project({ uid: 1 }).limit(500).toArray()).map((x) => +x.uid);
             shouldCompare = uid !== this.user._id;
         } else uid = this.user._id;
-        const canViewHidden = this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN) || this.user._id;
         const [udoc, udict, pdict] = await Promise.all([
             user.getById(domainId, tdoc.owner),
             user.getListForRender(domainId, enrollUsers, this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO)),
-            problem.getList(domainId, pids, canViewHidden, false),
+            getVisibleReferencedProblems(domainId, pids, this.user),
         ]);
         const missing = pids.filter((pid) => !pdict[pid]?.docId);
         const exist = pids.filter((pid) => pdict[pid]?.docId);
@@ -210,9 +204,11 @@ class TrainingEditHandler extends Handler {
     tdoc: TrainingDoc;
 
     @param('tid', Types.ObjectId, true)
-    async prepare(domainId: string, tid: ObjectId) {
+    async prepare(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if (tid) {
-            this.tdoc = await training.get(domainId, tid);
+            this.tdoc = await training.get(authoritativeDomainId, tid);
             assertNotCourse(this.tdoc);
             if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_TRAINING);
             else this.checkPerm(PERM.PERM_EDIT_TRAINING_SELF);
@@ -235,18 +231,22 @@ class TrainingEditHandler extends Handler {
     @param('pin', Types.UnsignedInt)
     @param('description', Types.Content)
     async post(
-        domainId: string, tid: ObjectId,
+        _domainId: string, tid: ObjectId,
         title: string, content: string,
         _dag: string, pin = 0, description: string,
     ) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if ((!!this.tdoc?.pin) !== (!!pin)) this.checkPerm(PERM.PERM_PIN_TRAINING);
-        const dag = await _parseDagJson(domainId, _dag);
+        const dag = await _parseDagJson(authoritativeDomainId, _dag);
         const pids = training.getPids(dag);
         assert(pids.length, new ValidationError('dag', null, 'Please specify at least one problem'));
+        const existingPids = training.getPids(this.tdoc?.dag || []);
+        await assertProblemBankSelection(authoritativeDomainId, pids, this.user, existingPids);
         if (!tid) {
-            tid = await training.add(domainId, title, content, this.user._id, dag, description, pin);
+            tid = await training.add(authoritativeDomainId, title, content, this.user._id, dag, description, pin);
         } else {
-            await training.edit(domainId, tid, {
+            await training.edit(authoritativeDomainId, tid, {
                 title, content, dag, description, pin,
             });
         }

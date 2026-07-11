@@ -19,15 +19,17 @@
  */
 import yaml from 'js-yaml';
 import {
-    Context, Handler, OplogModel, param, PERM, Types,
+    Context, Handler, OplogModel, param, PERM, PermissionError, Types,
 } from 'hydrooj';
 import { requireAuthToken } from '../lib/auth-token';
+import { Logger } from '../logger';
 import * as document from '../model/document';
 import problem from '../model/problem';
 import system from '../model/system';
 
 const CHANNEL = 'tagger';
 const MAX_APPLY_ITEMS = 1000;
+const logger = new Logger('tagger');
 // retag can touch the whole library; cap how many per-problem before/after rows
 // we embed in a single oplog document so it can never approach mongo's 16MB
 // limit. The full affectedDocIds list (compact) is always logged.
@@ -37,6 +39,44 @@ const OPLOG_CHANGE_CAP = 500;
 function taggerDomain(): string {
     const d = system.get(`serviceToken.${CHANNEL}.domain`);
     return typeof d === 'string' && d ? d : 'system';
+}
+
+function denyProblemAcl(user: any) {
+    Object.assign(user, {
+        _permitPids: new Set<number>(),
+        _maintainedPids: new Set<number>(),
+        _aclFencedPids: new Set<number>(),
+        _problemAclDomainId: undefined,
+        _problemAclLoaded: false,
+    });
+}
+
+async function loadTaggerProblemAcl(user: any, domainId: string): Promise<void> {
+    denyProblemAcl(user);
+    try {
+        const permits = (global.Hydro?.model as any)?.permits;
+        if (typeof permits?.loadAclForUser !== 'function') throw new Error('permits.loadAclForUser is unavailable');
+        const loaded = await permits.loadAclForUser(domainId, Number(user?._id) || 0);
+        if (!(loaded?.permitPids instanceof Set)
+            || !(loaded?.maintainedPids instanceof Set)
+            || !(loaded?.fencedPids instanceof Set)) {
+            throw new TypeError('permits.loadAclForUser returned an invalid ACL snapshot');
+        }
+        Object.assign(user, {
+            _permitPids: loaded.permitPids,
+            _maintainedPids: loaded.maintainedPids,
+            _aclFencedPids: loaded.fencedPids,
+            _problemAclDomainId: domainId,
+            _problemAclLoaded: true,
+        });
+    } catch (error) {
+        denyProblemAcl(user);
+        logger.error(
+            'Tagger ACL preload failed domain=%s uid=%d error=%s',
+            domainId, Number(user?._id) || 0, error,
+        );
+        throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
+    }
 }
 
 /** trim / drop-empty / dedup / fold fullwidth comma. Accepts string[] or "a,b，c". */
@@ -57,7 +97,11 @@ function normalizeTags(input: any): string[] {
 function readCategories(): Record<string, string[]> {
     let raw: any = system.get('problem.categories');
     if (typeof raw === 'string') {
-        try { raw = yaml.load(raw); } catch { raw = null; }
+        try {
+            raw = yaml.load(raw);
+        } catch {
+            raw = null;
+        }
     }
     const out: Record<string, string[]> = {};
     if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
@@ -70,16 +114,23 @@ function readCategories(): Record<string, string[]> {
     return out;
 }
 
-/** Parse a problem `config` (YAML string or object) into audit-relevant facts.
+/**
+ * Parse a problem `config` (YAML string or object) into audit-relevant facts.
+ *
  * No config at all = default judging, treated as OK. Present-but-unparseable
- * is the actionable signal (`ok=false`). */
-function auditConfig(raw: any): { ok: boolean; time: string | null; memory: string | null; scoreSum: number | null } {
+ * is the actionable signal (`ok=false`).
+ */
+function auditConfig(raw: any): { ok: boolean, time: string | null, memory: string | null, scoreSum: number | null } {
     if (raw === undefined || raw === null || raw === '') {
         return { ok: true, time: null, memory: null, scoreSum: null };
     }
     let cfg: any = raw;
     if (typeof raw === 'string') {
-        try { cfg = yaml.load(raw); } catch { return { ok: false, time: null, memory: null, scoreSum: null }; }
+        try {
+            cfg = yaml.load(raw);
+        } catch {
+            return { ok: false, time: null, memory: null, scoreSum: null };
+        }
     }
     if (!cfg || typeof cfg !== 'object') return { ok: false, time: null, memory: null, scoreSum: null };
     const time = cfg.time != null ? String(cfg.time) : null;
@@ -111,9 +162,29 @@ class TaggerApiHandler extends Handler {
         // Validates the token + binds `this.user` to the token's Hydro user
         // (capped by scopeMask), so the per-method `checkPerm` calls below run
         // against that user. Throws AuthTokenRejectedError (403 + JSON) on failure.
-        await requireAuthToken(this, CHANNEL);
+        const { doc } = await requireAuthToken(this, CHANNEL);
+        const domainId = taggerDomain();
+        if (doc.domainId !== domainId) {
+            denyProblemAcl(this.user);
+            logger.error(
+                'Tagger token domain mismatch configured=%s token=%s uid=%d',
+                domainId, doc.domainId, Number(this.user?._id) || 0,
+            );
+            throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
+        }
+        await loadTaggerProblemAcl(this.user, domainId);
         // oplog reads "张三 renamed X→Y" via the bound user's uname.
         this.workerLabel = this.user.uname || `uid:${this.user._id}`;
+    }
+
+    async problemBankScope() {
+        const domainId = taggerDomain();
+        const aclUser = this.user as any;
+        await problem.refreshProblemAcl(aclUser, domainId);
+        if (aclUser._problemAclDomainId !== domainId || !problem.canBrowseProblemBank(aclUser)) {
+            throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
+        }
+        return problem.buildProblemBankScope(aclUser);
     }
 }
 
@@ -121,10 +192,13 @@ class TaggerApiHandler extends Handler {
 
 class TaggerProblemsHandler extends TaggerApiHandler {
     async get() {
+        const scope = await this.problemBankScope();
         this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
         const pdocs = await problem.getMulti(
-            domainId, { hidden: { $ne: true } }, ['docId', 'pid', 'title', 'tag'],
+            domainId,
+            { $and: [scope, { hidden: { $ne: true } }] },
+            ['docId', 'pid', 'title', 'tag'],
         ).toArray();
         this.response.body = {
             domainId,
@@ -142,10 +216,17 @@ class TaggerProblemsHandler extends TaggerApiHandler {
 
 class TaggerVocabHandler extends TaggerApiHandler {
     async get() {
+        const scope = await this.problemBankScope();
         this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
         const agg = await document.coll.aggregate([
-            { $match: { domainId, docType: document.TYPE_PROBLEM, hidden: { $ne: true } } },
+            {
+                $match: {
+                    domainId,
+                    docType: document.TYPE_PROBLEM,
+                    $and: [scope, { hidden: { $ne: true } }],
+                },
+            },
             { $unwind: '$tag' },
             { $group: { _id: '$tag', count: { $sum: 1 } } },
         ]).toArray();
@@ -165,12 +246,13 @@ class TaggerVocabHandler extends TaggerApiHandler {
 
 class TaggerAuditHandler extends TaggerApiHandler {
     async get() {
-        // Returns HIDDEN problems too (the 假上线 check needs the flag), so it must
-        // require hidden-view rights — consistent with every other read path.
+        // Returns HIDDEN problems too (the 假上线 check needs the flag). The
+        // canonical author scope restricts those rows to owned/maintained docs;
+        // a global hidden-view permission must not widen the problem bank.
+        const scope = await this.problemBankScope();
         this.checkPerm(PERM.PERM_VIEW_PROBLEM);
-        this.checkPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN);
         const domainId = taggerDomain();
-        const pdocs = await problem.getMulti(domainId, {}, [
+        const pdocs = await problem.getMulti(domainId, scope, [
             'docId', 'pid', 'title', 'tag', 'hidden', 'difficulty', 'nSubmit', 'nAccept', 'config', 'data',
         ]).toArray();
         this.response.body = {
@@ -230,13 +312,23 @@ class TaggerApplyHandler extends TaggerApiHandler {
             if (hasTag) patch.tag = normalizeTags(item.tag);
             if (hasTitle) {
                 const title = String(item.title).trim();
-                if (!title) { results.push({ docId, ok: false, error: 'empty_title' }); continue; }
+                if (!title) {
+                    results.push({ docId, ok: false, error: 'empty_title' });
+                    continue;
+                }
                 patch.title = title;
             }
             try {
-                const old = await problem.get(domainId, docId, ['docId', 'pid', 'tag', 'title']);
-                if (!old) { results.push({ docId, ok: false, error: 'not_found' }); continue; }
-                await problem.edit(domainId, docId, patch);
+                // eslint-disable-next-line no-await-in-loop
+                const old = await problem.get(
+                    domainId, docId, ['domainId', 'docId', 'pid', 'owner', 'tag', 'title'],
+                );
+                if (!old || !problem.canMaintainProblem(this.user as any, old)) {
+                    results.push({ docId, ok: false, error: 'not_found' });
+                    continue;
+                }
+                // eslint-disable-next-line no-await-in-loop
+                await problem.editAuthorized(domainId, docId, patch, this.user as any);
                 changes.push({
                     docId,
                     pid: old.pid,
@@ -267,6 +359,7 @@ class TaggerRetagHandler extends TaggerApiHandler {
     @param('to', Types.Any, true)
     @param('dryRun', Types.Any, true)
     async post(_args: any, from: any, to: any, dryRun: any) {
+        const scope = await this.problemBankScope();
         this.checkPerm(PERM.PERM_EDIT_PROBLEM);
         const fromTags = normalizeTags(from);
         if (!fromTags.length) {
@@ -286,7 +379,9 @@ class TaggerRetagHandler extends TaggerApiHandler {
         const fromSet = new Set(fromTags);
 
         const pdocs = await problem.getMulti(
-            domainId, { tag: { $in: fromTags }, hidden: { $ne: true } }, ['docId', 'pid', 'tag'],
+            domainId,
+            { $and: [scope, { tag: { $in: fromTags }, hidden: { $ne: true } }] },
+            ['domainId', 'docId', 'pid', 'owner', 'tag'],
         ).toArray();
         const affectedDocIds = pdocs.map((p) => p.docId);
 
@@ -302,10 +397,17 @@ class TaggerRetagHandler extends TaggerApiHandler {
             const kept = before.filter((t) => !fromSet.has(t));
             const after = toTag && !kept.includes(toTag) ? [...kept, toTag] : kept;
             try {
-                await problem.edit(domainId, p.docId, { tag: after });
+                // eslint-disable-next-line no-await-in-loop
+                await problem.editAuthorized(domainId, p.docId, { tag: after }, this.user as any);
                 changes.push({ docId: p.docId, pid: p.pid, before, after });
                 edited++;
-            } catch { /* skip individual failures; reported via count mismatch */ }
+            } catch (error) {
+                logger.error(
+                    'Tagger retag edit failed domain=%s docId=%d uid=%d error=%s',
+                    domainId, p.docId, Number(this.user?._id) || 0, error,
+                );
+                throw error;
+            }
         }
         await OplogModel.log(this as any, 'tagger.retag', {
             worker: this.workerLabel, domainId, from: fromTags, to: toTag, count: edited,

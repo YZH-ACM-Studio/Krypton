@@ -36,6 +36,14 @@ import { camelCase, md5 } from '../utils';
 export class HomeHandler extends Handler {
     uids = new Set<number>();
 
+    private problemAccessDomain(requestedDomainId: string): string | null {
+        const currentDomainId = String(this.domain?._id || '');
+        const aclUser = this.user as any;
+        if (!currentDomainId || String(requestedDomainId) !== currentDomainId) return null;
+        if (aclUser._problemAclLoaded !== true || aclUser._problemAclDomainId !== currentDomainId) return null;
+        return currentDomainId;
+    }
+
     collectUser(uids: number[]) {
         for (const uid of uids) this.uids.add(uid);
     }
@@ -119,23 +127,35 @@ export class HomeHandler extends Handler {
     }
 
     async getStarredProblems(domainId: string, limit = 50) {
-        if (!this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) return [[], {}];
-        const psdocs = await ProblemModel.getMultiStatus(domainId, { uid: this.user._id, star: true })
+        const currentDomainId = this.problemAccessDomain(domainId);
+        if (!currentDomainId || !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) return [[], {}];
+        const psdocs = await ProblemModel.getMultiStatus(currentDomainId, { uid: this.user._id, star: true })
             .sort('_id', 1).limit(limit).toArray();
-        const pdict = await ProblemModel.getList(
-            domainId, psdocs.map((pdoc) => pdoc.docId),
-            this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN) || this.user._id, false,
-        );
-        const pdocs = Object.keys(pdict).filter((i) => +i).map((i) => pdict[i]);
+        const pdocs = [];
+        for (const psdoc of psdocs) {
+            // eslint-disable-next-line no-await-in-loop
+            const pdoc = await ProblemModel.getViewableAuthorized(
+                currentDomainId, psdoc.docId, this.user as any,
+            );
+            if (pdoc) pdocs.push(pdoc);
+        }
         return [pdocs];
     }
 
     async getRecentProblems(domainId: string, limit = 10) {
-        if (!this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) return [[], {}];
-        const pdocs = await ProblemModel.getMulti(domainId, { hidden: false })
+        const currentDomainId = this.problemAccessDomain(domainId);
+        if (!currentDomainId
+            || !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)
+            || !ProblemModel.canBrowseProblemBank(this.user as any)) return [[], {}];
+        const pdocs = await ProblemModel.getMulti(currentDomainId, {
+            $and: [
+                ProblemModel.buildProblemBankScope(this.user as any),
+                { hidden: false },
+            ],
+        })
             .sort({ _id: -1 }).limit(limit).toArray();
         const psdict = this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
-            ? await ProblemModel.getListStatus(domainId, this.user._id, pdocs.map((pdoc) => pdoc.docId))
+            ? await ProblemModel.getListStatus(currentDomainId, this.user._id, pdocs.map((pdoc) => pdoc.docId))
             : {};
         return [pdocs, psdict];
     }

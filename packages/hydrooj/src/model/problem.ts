@@ -13,7 +13,9 @@ import {
     extractZip, Logger, size, streamToBuffer,
 } from '@hydrooj/utils/lib/utils';
 import { Context } from '../context';
-import { FileUploadError, NotFoundError, ProblemNotFoundError, ValidationError } from '../error';
+import {
+    FileUploadError, NotFoundError, PermissionError, ProblemNotFoundError, ValidationError,
+} from '../error';
 import type {
     Document, ProblemDict, ProblemStatusDoc, User,
 } from '../interface';
@@ -27,6 +29,24 @@ import { buildProjection } from '../utils';
 import { PERM, STATUS } from './builtin';
 import * as document from './document';
 import DomainModel from './domain';
+import type { ProblemAclUser, ProblemWriteClaim } from './problem-access';
+import {
+    acquireProblemWriteClaim,
+    assertProblemAclDomain as assertProblemAclDomainAccess,
+    assertProblemBankSelection as assertProblemBankSelectionAccess,
+    buildProblemBankScope as buildProblemBankScopeAccess,
+    canBrowseProblemBank as canBrowseProblemBankAccess,
+    canMaintainProblem as canMaintainProblemAccess,
+    canViewProblem,
+    clearProblemWriteClaim,
+    commitProblemWriteClaimUpdate,
+    isProblemBankAdmin as isProblemBankAdminAccess,
+    markProblemWriteClaimError,
+    PROBLEM_ACL_INTERNAL_FIELDS,
+    readStableMaintainableProblem,
+    readStableViewableProblem,
+    refreshProblemAcl as refreshProblemAclAccess,
+} from './problem-access';
 import RecordModel from './record';
 import SolutionModel from './solution';
 import storage from './storage';
@@ -108,6 +128,39 @@ export class ProblemModel {
         // 剥离见 handler/problem.ts 与 handler/paper.ts。
         'origStat',
     ];
+
+    static isProblemBankAdmin(user: ProblemAclUser) {
+        return isProblemBankAdminAccess(user);
+    }
+
+    static assertProblemAclDomain(user: ProblemAclUser, authoritativeDomainId: string) {
+        return assertProblemAclDomainAccess(user, authoritativeDomainId);
+    }
+
+    static canBrowseProblemBank(user: ProblemAclUser) {
+        return canBrowseProblemBankAccess(user);
+    }
+
+    static refreshProblemAcl(user: ProblemAclUser, authoritativeDomainId: string) {
+        return refreshProblemAclAccess(user, authoritativeDomainId);
+    }
+
+    static buildProblemBankScope(user: ProblemAclUser) {
+        return buildProblemBankScopeAccess(user);
+    }
+
+    static canMaintainProblem(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canMaintainProblemAccess(user, pdoc);
+    }
+
+    static assertProblemBankSelection(
+        domainId: string,
+        pids: number[],
+        user: ProblemAclUser,
+        grandfatheredPids: number[] = [],
+    ) {
+        return assertProblemBankSelectionAccess(domainId, pids, user, grandfatheredPids);
+    }
 
     static default = {
         _id: new ObjectId(),
@@ -215,6 +268,103 @@ export class ProblemModel {
         return res;
     }
 
+    /**
+     * Direct-problem read whose authorization is linearized against ACL
+     * mutation locks and revisions. Container-authorized reads intentionally
+     * continue to use `get`: their authorization belongs to the container.
+     */
+    static async getViewableAuthorized(
+        domainId: string,
+        pid: string | number,
+        user: User & ProblemAclUser,
+        projection: Projection<ProblemDoc> = ProblemModel.PROJECTION_PUBLIC,
+        rawConfig = false,
+    ): Promise<ProblemDoc | null> {
+        const requestedFields = new Set<string>(projection as string[]);
+        const authorizationFields = ['domainId', 'docId', 'owner', 'hidden'] as Field[];
+        const readProjection = Array.from(new Set([
+            ...(projection as Field[]),
+            ...authorizationFields,
+            ...Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[],
+        ])) as Projection<ProblemDoc>;
+
+        const read = async (filter?: Filter<ProblemDoc>) => {
+            if (!filter) return ProblemModel.get(domainId, pid, readProjection, rawConfig);
+            const [res] = await document.getMulti(domainId, document.TYPE_PROBLEM, filter)
+                .project<ProblemDoc>(buildProjection(readProjection)).limit(1).toArray();
+            if (!res) return null;
+            try {
+                if (!rawConfig && readProjection.includes('config')) {
+                    res.config = await parseConfig(
+                        res.config as string | ProblemConfigFile,
+                        res.data?.map((i) => i.name) || [],
+                    );
+                }
+            } catch (e) {
+                res.config = `Cannot parse: ${e.message}`;
+            }
+            return res;
+        };
+
+        const pdoc = await readStableViewableProblem(domainId, user, read);
+        if (!pdoc) return null;
+        for (const field of authorizationFields) {
+            if (!requestedFields.has(field)) delete (pdoc as any)[field];
+        }
+        return pdoc;
+    }
+
+    /**
+     * Maintainer-only read linearized against the current persistent ACL.
+     * Raw config is loaded only by the final revision-guarded read, never
+     * trusted from request preload or from a container-authorized statement.
+     */
+    static async getMaintainableAuthorized(
+        domainId: string,
+        pid: string | number,
+        user: User & ProblemAclUser,
+        projection: Projection<ProblemDoc> = ProblemModel.PROJECTION_PUBLIC,
+        rawConfig = false,
+    ): Promise<ProblemDoc | null> {
+        const requestedFields = new Set<string>(projection as string[]);
+        const authorizationFields = ['domainId', 'docId', 'owner'] as Field[];
+        const identityProjection = Array.from(new Set([
+            ...authorizationFields,
+            ...Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[],
+        ])) as Projection<ProblemDoc>;
+        const readProjection = Array.from(new Set([
+            ...(projection as Field[]),
+            ...identityProjection,
+        ])) as Projection<ProblemDoc>;
+
+        const read = async (filter?: Filter<ProblemDoc>) => {
+            // The first read establishes identity/revision only. Sensitive raw
+            // fields are fetched solely by the conditional final read below.
+            if (!filter) return ProblemModel.get(domainId, pid, identityProjection, true);
+            const [res] = await document.getMulti(domainId, document.TYPE_PROBLEM, filter)
+                .project<ProblemDoc>(buildProjection(readProjection)).limit(1).toArray();
+            if (!res) return null;
+            try {
+                if (!rawConfig && readProjection.includes('config')) {
+                    res.config = await parseConfig(
+                        res.config as string | ProblemConfigFile,
+                        res.data?.map((i) => i.name) || [],
+                    );
+                }
+            } catch (e) {
+                res.config = `Cannot parse: ${e.message}`;
+            }
+            return res;
+        };
+
+        const pdoc = await readStableMaintainableProblem(domainId, user, read);
+        if (!pdoc) return null;
+        for (const field of authorizationFields) {
+            if (!requestedFields.has(field)) delete (pdoc as any)[field];
+        }
+        return pdoc;
+    }
+
     static getMulti(domainId: string, query: Filter<ProblemDoc>, projection = ProblemModel.PROJECTION_LIST) {
         return document.getMulti(domainId, document.TYPE_PROBLEM, query, projection).sort({ sort: 1 });
     }
@@ -253,6 +403,134 @@ export class ProblemModel {
         const result = await document.set(domainId, document.TYPE_PROBLEM, _id, $set, $unset);
         await bus.emit('problem/edit', result);
         return result;
+    }
+
+    static async beginAuthorizedWriteClaim(
+        domainId: string,
+        _id: number,
+        user: ProblemAclUser,
+        operation: string,
+        options: { requestId?: string, selfRevokeUid?: number } = {},
+    ): Promise<ProblemWriteClaim> {
+        try {
+            const prepareProblemWriteClaim = (global.Hydro?.model as any)?.permits?.prepareProblemWriteClaim;
+            if (typeof prepareProblemWriteClaim !== 'function') {
+                throw new TypeError('permits.prepareProblemWriteClaim is unavailable');
+            }
+            await prepareProblemWriteClaim(domainId, _id);
+        } catch (error) {
+            logger.error(
+                'Problem write-claim preflight failed domain=%s pid=%d uid=%d operation=%s error=%o',
+                domainId, _id, user._id, operation, error,
+            );
+            const denied = new PermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
+            Object.defineProperty(denied, 'cause', { value: error, configurable: true });
+            throw denied;
+        }
+        await ProblemModel.refreshProblemAcl(user, domainId);
+        const authorizedPdoc = await document.get(
+            domainId,
+            document.TYPE_PROBLEM,
+            _id,
+            [
+                'domainId', 'docType', 'docId', 'owner', 'maintainer',
+                'aclMutationRevision', 'aclMutationLocks', 'aclWriteClaim',
+            ] as any,
+        );
+        if (!authorizedPdoc) throw new PermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
+        const requestId = options.requestId?.trim()
+            || `problem-write:${operation}:${domainId}:${_id}:${new ObjectId().toHexString()}`;
+        const claim = await acquireProblemWriteClaim(user, authorizedPdoc, requestId, operation, {
+            selfRevokeUid: options.selfRevokeUid,
+        });
+        if (!claim) {
+            throw new PermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
+        }
+        return claim;
+    }
+
+    static async withAuthorizedWriteClaim<T>(
+        domainId: string,
+        _id: number,
+        user: ProblemAclUser,
+        operation: string,
+        work: (claim: ProblemWriteClaim) => Promise<T>,
+        options: { requestId?: string, selfRevokeUid?: number } = {},
+    ): Promise<T> {
+        const claim = await ProblemModel.beginAuthorizedWriteClaim(domainId, _id, user, operation, options);
+        try {
+            const result = await work(claim);
+            if (!await clearProblemWriteClaim(claim)) {
+                throw new Error(`problem write claim ownership lost before clear: ${claim.requestId}`);
+            }
+            return result;
+        } catch (error) {
+            let marked = false;
+            try {
+                marked = await markProblemWriteClaimError(claim, error);
+            } catch (markerError) {
+                logger.error(
+                    'Problem write failed and ERROR marker write also failed domain=%s pid=%d requestId=%s error=%s markerError=%s',
+                    domainId, _id, claim.requestId, error, markerError,
+                );
+                throw new Error(
+                    `problem write failed and ERROR marker could not be persisted: ${claim.requestId}`,
+                    { cause: error },
+                );
+            }
+            logger.error(
+                'Problem write failed; durable claim retained domain=%s pid=%d actor=%d operation=%s requestId=%s marked=%s error=%s',
+                domainId, _id, claim.actor, operation, claim.requestId, marked, error,
+            );
+            if (!marked) {
+                throw new Error(
+                    `problem write claim vanished before ERROR marker: ${claim.requestId}`,
+                    { cause: error },
+                );
+            }
+            throw error;
+        }
+    }
+
+    static async editWithClaim(
+        claim: ProblemWriteClaim,
+        $set: Partial<ProblemDoc>,
+        requestedUnset: Record<string, unknown> = {},
+    ): Promise<ProblemDoc> {
+        const domainId = claim.domainId;
+        const _id = claim.pid;
+
+        const delpid = $set.pid === '';
+        const ddoc = await DomainModel.get(domainId);
+        const $unset = { ...requestedUnset, ...(delpid ? { pid: '' } : {}) };
+        if (delpid) {
+            delete $set.pid;
+            $set.sort = sortable(`P${_id}`, ddoc.namespaces);
+        } else if ($set.pid) {
+            $set.sort = sortable($set.pid, ddoc.namespaces);
+        }
+        await bus.parallel('problem/before-edit', $set, $unset);
+        const result = await commitProblemWriteClaimUpdate(claim, $set, $unset);
+        if (!result) throw new Error(`problem write claim ownership lost during edit: ${claim.requestId}`);
+        await bus.emit('problem/edit', result, claim.requestId);
+        return result;
+    }
+
+    /** HTTP/service-token metadata write entrypoint. */
+    static async editAuthorized(
+        domainId: string,
+        _id: number,
+        $set: Partial<ProblemDoc>,
+        user: ProblemAclUser,
+        requestedUnset: Record<string, unknown> = {},
+    ): Promise<ProblemDoc> {
+        return ProblemModel.withAuthorizedWriteClaim(
+            domainId,
+            _id,
+            user,
+            'metadata-edit',
+            (claim) => ProblemModel.editWithClaim(claim, $set, requestedUnset),
+        );
     }
 
     static async copy(domainId: string, _id: number, target: string, pid?: string, hidden?: boolean) {
@@ -295,6 +573,61 @@ export class ProblemModel {
             bus.parallel('problem/delete', domainId, docId),
         ]);
         return !!res[0][0].deletedCount;
+    }
+
+    /** HTTP hard-delete entrypoint. The ProblemDoc delete itself owns the claim token. */
+    static async delAuthorized(
+        domainId: string,
+        docId: number,
+        user: ProblemAclUser,
+        options: { requestId?: string } = {},
+    ) {
+        const claim = await ProblemModel.beginAuthorizedWriteClaim(
+            domainId, docId, user, 'hard-delete', options,
+        );
+        try {
+            await bus.parallel('problem/before-del', domainId, docId, claim.requestId);
+            await Promise.all([
+                document.deleteMultiStatus(domainId, document.TYPE_PROBLEM, { docId }),
+                storage.list(`problem/${domainId}/${docId}/`)
+                    .then((items) => storage.del(items.map((item) => `problem/${domainId}/${docId}/${item.name}`))),
+                bus.parallel('problem/delete', domainId, docId),
+            ]);
+            const result = await document.coll.deleteOne({
+                domainId,
+                docType: document.TYPE_PROBLEM,
+                docId,
+                'aclWriteClaim.requestId': claim.requestId,
+                'aclWriteClaim.actor': claim.actor,
+                'aclWriteClaim.state': 'active',
+            });
+            if (result.deletedCount !== 1) {
+                throw new Error(`problem write claim ownership lost before hard delete: ${claim.requestId}`);
+            }
+            return true;
+        } catch (error) {
+            let marked = false;
+            try {
+                marked = await markProblemWriteClaimError(claim, error);
+            } catch (markerError) {
+                logger.error(
+                    'Hard delete failed and ERROR marker write also failed domain=%s pid=%d requestId=%s error=%s markerError=%s',
+                    domainId, docId, claim.requestId, error, markerError,
+                );
+                throw new Error(
+                    `hard delete failed and ERROR marker could not be persisted: ${claim.requestId}`,
+                    { cause: error },
+                );
+            }
+            logger.error(
+                'Hard delete failed; durable claim retained domain=%s pid=%d actor=%d requestId=%s marked=%s error=%s',
+                domainId, docId, claim.actor, claim.requestId, marked, error,
+            );
+            if (!marked) {
+                throw new Error(`hard-delete claim vanished before ERROR marker: ${claim.requestId}`, { cause: error });
+            }
+            throw error;
+        }
     }
 
     static async addTestdata(domainId: string, pid: number, name: string, f: Readable | Buffer | string, operator = 1) {
@@ -379,6 +712,145 @@ export class ProblemModel {
         await bus.emit('problem/delAdditionalFile', domainId, pid, names);
     }
 
+    private static async getClaimedProblemFiles(
+        claim: ProblemWriteClaim,
+        key: 'data' | 'additional_file',
+    ): Promise<any[]> {
+        const doc = await document.coll.findOne({
+            domainId: claim.domainId,
+            docType: document.TYPE_PROBLEM,
+            docId: claim.pid,
+            'aclWriteClaim.requestId': claim.requestId,
+            'aclWriteClaim.actor': claim.actor,
+            'aclWriteClaim.state': 'active',
+        }, { projection: { [key]: 1 } });
+        if (!doc) throw new Error(`problem write claim ownership lost before file operation: ${claim.requestId}`);
+        return Array.isArray(doc[key]) ? doc[key] : [];
+    }
+
+    static async addTestdataWithClaim(
+        claim: ProblemWriteClaim,
+        name: string,
+        f: Readable | Buffer | string,
+        operator = 1,
+    ) {
+        name = name.trim();
+        if (!name) throw new ValidationError('name');
+        const current = await ProblemModel.getClaimedProblemFiles(claim, 'data');
+        await storage.put(`problem/${claim.domainId}/${claim.pid}/testdata/${name}`, f, operator);
+        const meta = await storage.getMeta(`problem/${claim.domainId}/${claim.pid}/testdata/${name}`);
+        if (!meta) throw new FileUploadError();
+        const payload = { name, ...pick(meta, ['size', 'lastModified', 'etag']) } as any;
+        payload.lastModified ||= new Date();
+        const next = current.filter((item) => item.name !== name);
+        next.push({ _id: name, ...payload });
+        if (!await commitProblemWriteClaimUpdate(claim, { data: next } as any)) {
+            throw new Error(`problem write claim ownership lost after testdata upload: ${claim.requestId}`);
+        }
+        await bus.emit('problem/addTestdata', claim.domainId, claim.pid, name, payload, claim);
+    }
+
+    static async renameTestdataWithClaim(
+        claim: ProblemWriteClaim,
+        file: string,
+        newName: string,
+        operator = 1,
+    ) {
+        if (file === newName) return;
+        const current = await ProblemModel.getClaimedProblemFiles(claim, 'data');
+        if (current.some((item) => item.name === newName)) {
+            await storage.del([`problem/${claim.domainId}/${claim.pid}/testdata/${newName}`], operator);
+        }
+        await storage.rename(
+            `problem/${claim.domainId}/${claim.pid}/testdata/${file}`,
+            `problem/${claim.domainId}/${claim.pid}/testdata/${newName}`,
+            operator,
+        );
+        const next = current.filter((item) => item.name !== newName).map((item) => (
+            item.name === file ? { ...item, _id: newName, name: newName, lastModified: new Date() } : item
+        ));
+        if (!await commitProblemWriteClaimUpdate(claim, { data: next } as any)) {
+            throw new Error(`problem write claim ownership lost after testdata rename: ${claim.requestId}`);
+        }
+        await bus.emit('problem/renameTestdata', claim.domainId, claim.pid, file, newName, claim);
+    }
+
+    static async delTestdataWithClaim(
+        claim: ProblemWriteClaim,
+        name: string | string[],
+        operator = 1,
+    ) {
+        const names = name instanceof Array ? name : [name];
+        const current = await ProblemModel.getClaimedProblemFiles(claim, 'data');
+        await storage.del(names.map((item) => `problem/${claim.domainId}/${claim.pid}/testdata/${item}`), operator);
+        if (!await commitProblemWriteClaimUpdate(
+            claim,
+            { data: current.filter((item) => !names.includes(item.name)) } as any,
+        )) throw new Error(`problem write claim ownership lost after testdata delete: ${claim.requestId}`);
+        await bus.emit('problem/delTestdata', claim.domainId, claim.pid, names, claim);
+    }
+
+    static async addAdditionalFileWithClaim(
+        claim: ProblemWriteClaim,
+        name: string,
+        f: Readable | Buffer | string,
+        operator = 1,
+    ) {
+        name = name.trim();
+        if (!name) throw new ValidationError('name');
+        const current = await ProblemModel.getClaimedProblemFiles(claim, 'additional_file');
+        await storage.put(`problem/${claim.domainId}/${claim.pid}/additional_file/${name}`, f, operator);
+        const meta = await storage.getMeta(`problem/${claim.domainId}/${claim.pid}/additional_file/${name}`);
+        if (!meta) throw new FileUploadError();
+        const payload = { name, ...pick(meta, ['size', 'lastModified', 'etag']) } as any;
+        const next = current.filter((item) => item.name !== name);
+        next.push({ _id: name, ...payload });
+        if (!await commitProblemWriteClaimUpdate(claim, { additional_file: next } as any)) {
+            throw new Error(`problem write claim ownership lost after additional-file upload: ${claim.requestId}`);
+        }
+        await bus.emit('problem/addAdditionalFile', claim.domainId, claim.pid, name, payload, claim);
+    }
+
+    static async renameAdditionalFileWithClaim(
+        claim: ProblemWriteClaim,
+        file: string,
+        newName: string,
+        operator = 1,
+    ) {
+        if (file === newName) return;
+        const current = await ProblemModel.getClaimedProblemFiles(claim, 'additional_file');
+        if (current.some((item) => item.name === newName)) {
+            await storage.del([`problem/${claim.domainId}/${claim.pid}/additional_file/${newName}`], operator);
+        }
+        await storage.rename(
+            `problem/${claim.domainId}/${claim.pid}/additional_file/${file}`,
+            `problem/${claim.domainId}/${claim.pid}/additional_file/${newName}`,
+            operator,
+        );
+        const next = current.filter((item) => item.name !== newName).map((item) => (
+            item.name === file ? { ...item, _id: newName, name: newName, lastModified: new Date() } : item
+        ));
+        if (!await commitProblemWriteClaimUpdate(claim, { additional_file: next } as any)) {
+            throw new Error(`problem write claim ownership lost after additional-file rename: ${claim.requestId}`);
+        }
+        await bus.emit('problem/renameAdditionalFile', claim.domainId, claim.pid, file, newName, claim);
+    }
+
+    static async delAdditionalFileWithClaim(
+        claim: ProblemWriteClaim,
+        name: MaybeArray<string>,
+        operator = 1,
+    ) {
+        const names = name instanceof Array ? name : [name];
+        const current = await ProblemModel.getClaimedProblemFiles(claim, 'additional_file');
+        await storage.del(names.map((item) => `problem/${claim.domainId}/${claim.pid}/additional_file/${item}`), operator);
+        if (!await commitProblemWriteClaimUpdate(
+            claim,
+            { additional_file: current.filter((item) => !names.includes(item.name)) } as any,
+        )) throw new Error(`problem write claim ownership lost after additional-file delete: ${claim.requestId}`);
+        await bus.emit('problem/delAdditionalFile', claim.domainId, claim.pid, names, claim);
+    }
+
     static async random(domainId: string, query: Filter<ProblemDoc>) {
         const pcount = await document.count(domainId, document.TYPE_PROBLEM, query);
         if (!pcount) return null;
@@ -399,7 +871,7 @@ export class ProblemModel {
         let pdocs = await document.getMulti(domainId, document.TYPE_PROBLEM, q)
             .project<ProblemDoc>(projectionExpr).toArray();
         if (canViewHidden !== true) {
-            pdocs = pdocs.filter((i) => i.owner === canViewHidden || i.maintainer?.includes(canViewHidden as any) || !i.hidden);
+            pdocs = pdocs.filter((i) => i.owner === canViewHidden || !i.hidden);
         }
         await Promise.all(pdocs.map(async (pdoc) => {
             if (projection.includes('config')) {
@@ -462,18 +934,8 @@ export class ProblemModel {
         return document.setStatus(domainId, document.TYPE_PROBLEM, pid, uid, { star });
     }
 
-    static canViewBy(pdoc: ProblemDoc, udoc: User & { _permitPids?: Set<number> }) {
-        if (!udoc.hasPerm(PERM.PERM_VIEW_PROBLEM)) return false;
-        if (udoc.own(pdoc)) return true;
-        if (udoc.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN)) return true;
-        if (!pdoc.hidden) return true;
-        // Legacy maintainer field (was inconsistent — checked by getList
-        // but not by canViewBy; Krypton fix to align behavior).
-        if (pdoc.maintainer?.includes(udoc._id)) return true;
-        // krypton-permits: per-problem verifier/maintainer grant. Set
-        // populated by handlers via `attachUserPermits` before calling.
-        if (udoc._permitPids?.has(pdoc.docId)) return true;
-        return false;
+    static canViewBy(pdoc: ProblemDoc, udoc: User & ProblemAclUser) {
+        return canViewProblem(udoc, pdoc);
     }
 
     static async import(domainId: string, filepath: string, options: ProblemImportOptions = {}) {
@@ -756,22 +1218,28 @@ export class ProblemModel {
 }
 
 export function apply(ctx: Context) {
-    ctx.on('problem/addTestdata', async (domainId, docId, name) => {
+    ctx.on('problem/addTestdata', async (domainId, docId, name, _payload, claim?: ProblemWriteClaim) => {
         if (!['config.yaml', 'config.yml', 'Config.yaml', 'Config.yml'].includes(name)) return;
         const buf = await storage.get(`problem/${domainId}/${docId}/testdata/${name}`);
-        await ProblemModel.edit(domainId, docId, { config: (await streamToBuffer(buf)).toString() });
+        const update = { config: (await streamToBuffer(buf)).toString() };
+        if (claim) await ProblemModel.editWithClaim(claim, update);
+        else await ProblemModel.edit(domainId, docId, update);
     });
-    ctx.on('problem/delTestdata', async (domainId, docId, names) => {
+    ctx.on('problem/delTestdata', async (domainId, docId, names, claim?: ProblemWriteClaim) => {
         if (!names.includes('config.yaml')) return;
-        await ProblemModel.edit(domainId, docId, { config: '' });
+        if (claim) await ProblemModel.editWithClaim(claim, { config: '' });
+        else await ProblemModel.edit(domainId, docId, { config: '' });
     });
-    ctx.on('problem/renameTestdata', async (domainId, docId, file, newName) => {
+    ctx.on('problem/renameTestdata', async (domainId, docId, file, newName, claim?: ProblemWriteClaim) => {
         if (['config.yaml', 'config.yml', 'Config.yaml', 'Config.yml'].includes(file)) {
-            await ProblemModel.edit(domainId, docId, { config: '' });
+            if (claim) await ProblemModel.editWithClaim(claim, { config: '' });
+            else await ProblemModel.edit(domainId, docId, { config: '' });
         }
         if (['config.yaml', 'config.yml', 'Config.yaml', 'Config.yml'].includes(newName)) {
             const buf = await storage.get(`problem/${domainId}/${docId}/testdata/${newName}`);
-            await ProblemModel.edit(domainId, docId, { config: (await streamToBuffer(buf)).toString() });
+            const update = { config: (await streamToBuffer(buf)).toString() };
+            if (claim) await ProblemModel.editWithClaim(claim, update);
+            else await ProblemModel.edit(domainId, docId, update);
         }
     });
 }

@@ -22,6 +22,7 @@ import * as document from '../model/document';
 import message from '../model/message';
 import * as oplog from '../model/oplog';
 import problem from '../model/problem';
+import { assertProblemBankSelection } from '../model/problem-access';
 import record from '../model/record';
 import ScheduleModel from '../model/schedule';
 import storage from '../model/storage';
@@ -35,6 +36,22 @@ function parseProblemDocIds(input: string) {
     const pids = tokens.map((i) => Number(i));
     if (!pids.every((i) => Number.isSafeInteger(i) && i > 0)) throw new ValidationError('pids');
     return pids;
+}
+
+async function assertCanMaintainAutoHiddenProblems(domainId: string, pids: number[], actor: any) {
+    const uniquePids = Array.from(new Set(pids));
+    const pdict = await problem.getList(
+        domainId, uniquePids, true, false, problem.PROJECTION_PUBLIC, true,
+    );
+    const pdocs = uniquePids.map((pid) => pdict[pid]).filter(Boolean);
+    // Evaluate every existing target before deciding, so Promise.all below can
+    // never begin a partially authorized hide batch. Missing and unauthorized
+    // references intentionally collapse to the same capability error.
+    let allMaintainable = pdocs.length === uniquePids.length;
+    for (const pdoc of pdocs) {
+        if (!problem.canMaintainProblem(actor, pdoc)) allMaintainable = false;
+    }
+    if (!allMaintainable) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
 }
 
 function parseStringList(value: any): string[] {
@@ -56,9 +73,10 @@ export class ContestListHandler extends Handler {
     @param('group', Types.Name, true)
     @param('page', Types.PositiveInt, true)
     @param('q', Types.String, true)
-    async get(domainId: string, rule = '', group = '', page = 1, q = '') {
+    async get(_domainId: string, rule = '', group = '', page = 1, q = '') {
+        const authoritativeDomainId = String(this.domain?._id);
         if (rule && contest.RULES[rule].hidden) throw new BadRequestError();
-        const groups = (await user.listGroup(domainId, this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST) ? undefined : this.user._id))
+        const groups = (await user.listGroup(authoritativeDomainId, this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST) ? undefined : this.user._id))
             .map((i) => i.name);
         if (group && !groups.includes(group)) throw new NotAssignedError(group);
         const rules = Object.keys(contest.RULES).filter((i) => !contest.RULES[i].hidden);
@@ -80,14 +98,14 @@ export class ContestListHandler extends Handler {
             ...q ? { title: { $regex } } : {},
         };
         await this.ctx.parallel('contest/list', filter, this);
-        const cursor = contest.getMulti(domainId, filter).sort({ endAt: -1, beginAt: -1, _id: -1 });
+        const cursor = contest.getMulti(authoritativeDomainId, filter).sort({ endAt: -1, beginAt: -1, _id: -1 });
         let qs = rule ? `rule=${rule}` : '';
         if (group) qs += qs ? `&group=${group}` : `group=${group}`;
         if (q) qs += `${qs ? '&' : ''}q=${encodeURIComponent(q)}`;
         const [tdocs, tpcount] = await this.paginate(cursor, page, 'contest');
         const tids = [];
         for (const tdoc of tdocs) tids.push(tdoc.docId);
-        const tsdict = await contest.getListStatus(domainId, this.user._id, tids);
+        const tsdict = await contest.getListStatus(authoritativeDomainId, this.user._id, tids);
         const groupsFilter = groups.filter((i) => !Number.isSafeInteger(+i));
         this.response.template = 'contest_main.html';
         this.response.body = {
@@ -100,15 +118,20 @@ export class ContestDetailBaseHandler extends Handler {
     tdoc?: Tdoc;
     tsdoc?: any;
 
+    protected authoritativeDomainId(): string {
+        return String(this.domain?._id);
+    }
+
     @param('tid', Types.ObjectId, true)
-    async __prepare(domainId: string, tid: ObjectId) {
+    async __prepare(_domainId: string, tid: ObjectId) {
         if (!tid) return; // ProblemDetailHandler also extends from ContestDetailBaseHandler
+        const authoritativeDomainId = String(this.domain?._id);
         [this.tdoc, this.tsdoc] = await Promise.all([
-            contest.get(domainId, tid),
-            contest.getStatus(domainId, tid, this.user._id),
+            contest.get(authoritativeDomainId, tid),
+            contest.getStatus(authoritativeDomainId, tid, this.user._id),
         ]);
         if (this.tdoc.assign?.length && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)) {
-            const groups = await user.listGroup(domainId, this.user._id);
+            const groups = await user.listGroup(authoritativeDomainId, this.user._id);
             if (!new Set(this.tdoc.assign).intersection(new Set(groups.map((i) => i.name))).size) {
                 throw new NotAssignedError('contest', tid);
             }
@@ -149,7 +172,7 @@ export class ContestDetailBaseHandler extends Handler {
                     ? vg.clientSessionKeyFromSession((this as any).session)
                     : ((this as any).session?.sessionId || (this as any).session?._id || '');
                 const result = await vg.effectiveContestAccess(
-                    domainId, this.tdoc, this.user._id, sid,
+                    authoritativeDomainId, this.tdoc, this.user._id, sid,
                 );
                 if (!result.ok) {
                     if (result.reason === 'scope_miss') {
@@ -173,7 +196,7 @@ export class ContestDetailBaseHandler extends Handler {
     }
 
     @param('tid', Types.ObjectId, true)
-    async after(domainId: string, tid: ObjectId) {
+    async after(_domainId: string, tid: ObjectId) {
         if (!tid || this.tdoc.rule === 'homework') return;
         if (this.request.json || !this.response.template) return;
         const pdoc = 'pdoc' in this ? (this as any).pdoc : {};
@@ -217,12 +240,13 @@ export class ContestDetailBaseHandler extends Handler {
 
 export class ContestDetailHandler extends ContestDetailBaseHandler {
     @param('tid', Types.ObjectId)
-    async prepare(domainId: string, tid: ObjectId) {
-        if (contest.RULES[this.tdoc.rule].hidden) throw new ContestNotFoundError(domainId, tid);
+    async prepare(_domainId: string, tid: ObjectId) {
+        if (contest.RULES[this.tdoc.rule].hidden) throw new ContestNotFoundError(this.authoritativeDomainId(), tid);
     }
 
     @param('tid', Types.ObjectId)
-    async get(domainId: string, tid: ObjectId) {
+    async get(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = this.authoritativeDomainId();
         this.response.template = 'contest_detail.html';
         // Load contest problem dict so the new UI can render the problem table
         // inline. Older Hydro split this across /contest/:tid (description) and
@@ -237,10 +261,10 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
             || this.user.own(this.tdoc)
             || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
         const [udict, pdict] = await Promise.all([
-            user.getList(domainId, [this.tdoc.owner]),
+            user.getList(authoritativeDomainId, [this.tdoc.owner]),
             canPeekProblems
                 ? problem.getList(
-                    domainId, this.tdoc.pids, true, true,
+                    authoritativeDomainId, this.tdoc.pids, true, true,
                     // PROJECTION_CONTEST_LIST omits nSubmit/nAccept/difficulty/tag —
                     // include them so the detail page can show real pass/submit
                     // counts in its problem table.
@@ -269,29 +293,32 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
 
     @param('tid', Types.ObjectId)
     @param('code', Types.String, true)
-    async postAttend(domainId: string, tid: ObjectId, code = '') {
+    async postAttend(_domainId: string, tid: ObjectId, code = '') {
+        const authoritativeDomainId = this.authoritativeDomainId();
         this.checkPerm(PERM.PERM_ATTEND_CONTEST);
         if (contest.isDone(this.tdoc)) throw new ContestNotLiveError(tid);
         if (this.tdoc._code && code !== this.tdoc._code) throw new InvalidTokenError('Contest Invitation', code);
-        await contest.attend(domainId, tid, this.user._id, { subscribe: 1 });
+        await contest.attend(authoritativeDomainId, tid, this.user._id, { subscribe: 1 });
         this.back();
     }
 
     @param('tid', Types.ObjectId)
     @param('subscribe', Types.Boolean)
-    async postSubscribe(domainId: string, tid: ObjectId, subscribe = false) {
-        if (!this.tsdoc?.attend) throw new ContestNotAttendedError(domainId, tid);
-        await contest.setStatus(domainId, tid, this.user._id, { subscribe: subscribe ? 1 : 0 });
+    async postSubscribe(_domainId: string, tid: ObjectId, subscribe = false) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        if (!this.tsdoc?.attend) throw new ContestNotAttendedError(authoritativeDomainId, tid);
+        await contest.setStatus(authoritativeDomainId, tid, this.user._id, { subscribe: subscribe ? 1 : 0 });
         this.back();
     }
 }
 
 export class ContestPrintHandler extends ContestDetailBaseHandler {
     @param('tid', Types.ObjectId)
-    async prepare({ domainId }, tid: ObjectId) {
+    async prepare(_args: { domainId?: string }, tid: ObjectId) {
+        const authoritativeDomainId = this.authoritativeDomainId();
         if (!this.tdoc?.allowPrint) throw new NotFoundError();
         if (!this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST) && !this.tsdoc?.attend) {
-            throw new ContestNotAttendedError(domainId, tid);
+            throw new ContestNotAttendedError(authoritativeDomainId, tid);
         }
     }
 
@@ -321,9 +348,10 @@ export class ContestPrintHandler extends ContestDetailBaseHandler {
     @param('tid', Types.ObjectId)
     @param('title', Types.Title, true)
     @param('content', Types.Content, true)
-    async postPrint(domainId: string, tid: ObjectId, title = '', content = '') {
-        if (!this.tsdoc?.attend) throw new ContestNotAttendedError(domainId, tid);
-        if (!contest.isOngoing(this.tdoc, this.tsdoc)) throw new ContestNotLiveError(domainId, tid);
+    async postPrint(_domainId: string, tid: ObjectId, title = '', content = '') {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        if (!this.tsdoc?.attend) throw new ContestNotAttendedError(authoritativeDomainId, tid);
+        if (!contest.isOngoing(this.tdoc, this.tsdoc)) throw new ContestNotLiveError(authoritativeDomainId, tid);
         await this.limitRate('add_print', 3600, 60);
         if (this.request.files?.file) {
             const file = this.request.files.file;
@@ -332,38 +360,41 @@ export class ContestPrintHandler extends ContestDetailBaseHandler {
             title ||= file.originalFilename || 'file';
         }
         if (!content) throw new ValidationError('content');
-        await contest.addPrintTask(domainId, tid, this.user._id, title, content);
+        await contest.addPrintTask(authoritativeDomainId, tid, this.user._id, title, content);
         this.back();
     }
 
     @param('tid', Types.ObjectId)
-    async postGetPrintTask(domainId: string, tid: ObjectId) {
+    async postGetPrintTask(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = this.authoritativeDomainId();
         const isContestAdmin = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
-        const tasks = await contest.getMultiPrintTask(domainId, tid, isContestAdmin ? {} : { owner: this.user._id })
+        const tasks = await contest.getMultiPrintTask(authoritativeDomainId, tid, isContestAdmin ? {} : { owner: this.user._id })
             .project({ _id: 1, title: 1, owner: 1, status: 1 }).sort({ _id: 1 }).toArray();
         const uids = Array.from(new Set(tasks.map((i) => i.owner)));
-        const udict = await user.getListForRender(domainId, uids, this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO));
+        const udict = await user.getListForRender(authoritativeDomainId, uids, this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO));
         this.response.body = { tasks, udict };
     }
 
     @param('tid', Types.ObjectId)
-    async postAllocatePrintTask(domainId: string, tid: ObjectId) {
+    async postAllocatePrintTask(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = this.authoritativeDomainId();
         if (!this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
             throw new PermissionError(PERM.PERM_EDIT_CONTEST);
         }
-        const task = await contest.allocatePrintTask(domainId, tid);
-        const udoc = task ? await user.getById(domainId, task.owner) : null;
+        const task = await contest.allocatePrintTask(authoritativeDomainId, tid);
+        const udoc = task ? await user.getById(authoritativeDomainId, task.owner) : null;
         this.response.body = { task, udoc };
     }
 
     @param('tid', Types.ObjectId)
     @param('taskId', Types.ObjectId)
     @param('status', Types.Range(['printed', 'pending']))
-    async postUpdatePrintTask(domainId: string, tid: ObjectId, taskId: ObjectId, status: 'printed' | 'pending') {
+    async postUpdatePrintTask(_domainId: string, tid: ObjectId, taskId: ObjectId, status: 'printed' | 'pending') {
+        const authoritativeDomainId = this.authoritativeDomainId();
         if (!this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
             throw new PermissionError(PERM.PERM_EDIT_CONTEST);
         }
-        await contest.updatePrintTask(domainId, tid, taskId, {
+        await contest.updatePrintTask(authoritativeDomainId, tid, taskId, {
             status: status === 'printed' ? contest.PrintTaskStatus.printed : contest.PrintTaskStatus.pending,
         });
         this.response.body = { success: true };
@@ -423,18 +454,19 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
     protected liveStatsEnabled = true;
 
     @param('tid', Types.ObjectId)
-    async prepare(domainId: string, tid: ObjectId) {
-        if (contest.RULES[this.tdoc.rule].hidden) throw new ContestNotFoundError(domainId, tid);
+    async prepare(_domainId: string, tid: ObjectId) {
+        if (contest.RULES[this.tdoc.rule].hidden) throw new ContestNotFoundError(this.authoritativeDomainId(), tid);
     }
 
     @param('tid', Types.ObjectId)
-    async get(domainId: string, tid: ObjectId) {
-        if (contest.isNotStarted(this.tdoc)) throw new ContestNotLiveError(domainId, tid);
-        if (!this.tsdoc?.attend && !contest.isDone(this.tdoc)) throw new ContestNotAttendedError(domainId, tid);
+    async get(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        if (contest.isNotStarted(this.tdoc)) throw new ContestNotLiveError(authoritativeDomainId, tid);
+        if (!this.tsdoc?.attend && !contest.isDone(this.tdoc)) throw new ContestNotAttendedError(authoritativeDomainId, tid);
         const [pdict, udict, tcdocs] = await Promise.all([
-            problem.getList(domainId, this.tdoc.pids, true, true, problem.PROJECTION_CONTEST_LIST),
-            user.getList(domainId, [this.tdoc.owner, this.user._id]),
-            contest.getMultiClarification(domainId, tid, this.user._id),
+            problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, problem.PROJECTION_CONTEST_LIST),
+            user.getList(authoritativeDomainId, [this.tdoc.owner, this.user._id]),
+            contest.getMultiClarification(authoritativeDomainId, tid, this.user._id),
         ]);
         this.response.body = {
             pdict, psdict: {}, udict, rdict: {}, tdoc: this.tdoc, tcdocs,
@@ -442,13 +474,13 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
         // P1.4：仅 ACM 下发本场每题统计；上方两道 throw（未开赛/未报名且未结束）
         // 已保证可见性门槛（与题目可见同 gate）。
         if (this.liveStatsEnabled && this.tdoc.rule === 'acm') {
-            this.response.body.liveStats = await getContestLiveStats(domainId, tid, this.tdoc.pids);
+            this.response.body.liveStats = await getContestLiveStats(authoritativeDomainId, tid, this.tdoc.pids);
         }
         this.response.template = 'contest_problemlist.html';
         this.response.body.showScore = Object.values(this.tdoc.score || {}).some((i) => i && i !== 100);
         if (!this.tsdoc) return;
         if (this.tsdoc.attend && !this.tsdoc.startAt && contest.isOngoing(this.tdoc)) {
-            await contest.setStatus(domainId, tid, this.user._id, { startAt: new Date() });
+            await contest.setStatus(authoritativeDomainId, tid, this.user._id, { startAt: new Date() });
             this.tsdoc.startAt = new Date();
         }
         this.response.body.tsdoc = this.tsdocAsPublic();
@@ -458,7 +490,7 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
         this.response.body.canViewRecord = canViewRecord;
         const rids = psdocs.map((i) => i.rid);
         if (contest.isDone(this.tdoc) && canViewRecord) {
-            const correction = await problem.getListStatus(domainId, this.user._id, this.tdoc.pids);
+            const correction = await problem.getListStatus(authoritativeDomainId, this.user._id, this.tdoc.pids);
             for (const pid in correction) {
                 if (this.tsdoc.detail?.[pid]?.rid === correction[pid].rid) delete correction[pid];
             }
@@ -467,8 +499,8 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
         }
         [this.response.body.rdict, this.response.body.rdocs] = canViewRecord
             ? await Promise.all([
-                record.getList(domainId, rids),
-                record.getMulti(domainId, { contest: tid, uid: this.user._id })
+                record.getList(authoritativeDomainId, rids),
+                record.getMulti(authoritativeDomainId, { contest: tid, uid: this.user._id })
                     .sort({ _id: -1 }).toArray(),
             ])
             : [Object.fromEntries(psdocs.map((i) => [i.rid, { _id: i.rid }])), []];
@@ -486,11 +518,12 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
     @param('tid', Types.ObjectId)
     @param('content', Types.Content)
     @param('subject', Types.Int)
-    async postClarification(domainId: string, tid: ObjectId, content: string, subject: number) {
-        if (!this.tsdoc?.attend) throw new ContestNotAttendedError(domainId, tid);
-        if (!contest.isOngoing(this.tdoc)) throw new ContestNotLiveError(domainId, tid);
+    async postClarification(_domainId: string, tid: ObjectId, content: string, subject: number) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        if (!this.tsdoc?.attend) throw new ContestNotAttendedError(authoritativeDomainId, tid);
+        if (!contest.isOngoing(this.tdoc)) throw new ContestNotLiveError(authoritativeDomainId, tid);
         await this.limitRate('add_discussion', 3600, 60);
-        await contest.addClarification(domainId, tid, this.user._id, content, this.request.ip, subject);
+        await contest.addClarification(authoritativeDomainId, tid, this.user._id, content, this.request.ip, subject);
         if (!this.user.own(this.tdoc)) {
             await message.send(1, (this.tdoc.maintainer || []).concat(this.tdoc.owner), JSON.stringify({
                 message: 'Contest {0} has a new clarification about {1}, please go to contest clarifications page to reply.',
@@ -506,18 +539,22 @@ export class ContestEditHandler extends Handler {
     tdoc: Tdoc;
 
     @param('tid', Types.ObjectId, true)
-    async prepare(domainId: string, tid: ObjectId) {
+    async prepare(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if (tid) {
-            this.tdoc = await contest.get(domainId, tid);
-            if (!this.tdoc) throw new ContestNotFoundError(domainId, tid);
-            if (contest.RULES[this.tdoc.rule].hidden) throw new ContestNotFoundError(domainId, tid);
+            this.tdoc = await contest.get(authoritativeDomainId, tid);
+            if (!this.tdoc) throw new ContestNotFoundError(authoritativeDomainId, tid);
+            if (contest.RULES[this.tdoc.rule].hidden) throw new ContestNotFoundError(authoritativeDomainId, tid);
             if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_CONTEST);
             else this.checkPerm(PERM.PERM_EDIT_CONTEST_SELF);
         } else this.checkPerm(PERM.PERM_CREATE_CONTEST);
     }
 
     @param('tid', Types.ObjectId, true)
-    async get(domainId: string, tid: ObjectId) {
+    async get(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         this.response.template = 'contest_edit.html';
         const rules = {};
         for (const i in contest.RULES) {
@@ -537,8 +574,8 @@ export class ContestEditHandler extends Handler {
         let scopeGroups: any[] = [];
         try {
             const userbind = (global as any).Hydro?.model?.userbind;
-            if (userbind?.listSchools) scopeSchools = await userbind.listSchools(domainId);
-            if (userbind?.listUserGroups) scopeGroups = await userbind.listUserGroups(domainId);
+            if (userbind?.listSchools) scopeSchools = await userbind.listSchools(authoritativeDomainId);
+            if (userbind?.listUserGroups) scopeGroups = await userbind.listUserGroups(authoritativeDomainId);
         } catch { /* best-effort */ }
 
         this.response.body = {
@@ -601,7 +638,7 @@ export class ContestEditHandler extends Handler {
     @param('participantSchoolIds', Types.CommaSeperatedArray, true)
     @param('participantGroupIds', Types.CommaSeperatedArray, true)
     async postUpdate(
-        domainId: string, tid: ObjectId, beginAtDate: string, beginAtTime: string, duration: number,
+        _domainId: string, tid: ObjectId, beginAtDate: string, beginAtTime: string, duration: number,
         title: string, content: string, rule: string, _pids: string, rated = false,
         _code = '', autoHide = false, assign: string[] = [], lock: number = null,
         contestDuration: number = null, maintainer: number[] = [], allowViewCode = false, allowPrint = false,
@@ -629,6 +666,8 @@ export class ContestEditHandler extends Handler {
         participantSchoolIds: string[] = [],
         participantGroupIds: string[] = [],
     ) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if (!Object.keys(contest.RULES).includes(rule) || contest.RULES[rule].hidden) throw new ValidationError('rule');
         if (autoHide) this.checkPerm(PERM.PERM_EDIT_PROBLEM);
         const pids = parseProblemDocIds(_pids);
@@ -639,26 +678,32 @@ export class ContestEditHandler extends Handler {
         const beginAt = beginAtMoment.toDate();
         const lockAt = lock ? moment(endAt).add(-lock, 'minutes').toDate() : null;
         if (lockAt && contestDuration) throw new ValidationError('lockAt', 'duration');
-        await problem.getList(domainId, pids, this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN) || this.user._id, true);
+        await assertProblemBankSelection(authoritativeDomainId, pids, this.user, this.tdoc?.pids);
+        if (autoHide) await assertCanMaintainAutoHiddenProblems(authoritativeDomainId, pids, this.user);
         if (tid) {
-            await contest.edit(domainId, tid, {
+            await contest.edit(authoritativeDomainId, tid, {
                 title, content, rule, beginAt, endAt, pids, rated, duration: contestDuration,
             });
             if (this.tdoc.beginAt !== beginAt || this.tdoc.endAt !== endAt
                 || diffArray(this.tdoc.pids, pids) || this.tdoc.rule !== rule
                 || lockAt !== this.tdoc.lockAt) {
-                await contest.recalcStatus(domainId, this.tdoc.docId);
+                await contest.recalcStatus(authoritativeDomainId, this.tdoc.docId);
             }
         } else {
-            tid = await contest.add(domainId, title, content, this.user._id, rule, beginAt, endAt, pids, rated, { duration: contestDuration });
+            tid = await contest.add(authoritativeDomainId, title, content, this.user._id, rule, beginAt, endAt, pids, rated, { duration: contestDuration });
         }
         const task = {
-            type: 'schedule', subType: 'contest', domainId, tid,
+            type: 'schedule', subType: 'contest', domainId: authoritativeDomainId, tid,
         };
         await ScheduleModel.deleteMany(task);
         const operation = [];
         if (Date.now() <= endAt.getTime() && autoHide) {
-            await Promise.all(pids.map((pid) => problem.edit(domainId, pid, { hidden: true })));
+            await Promise.all(pids.map((pid) => problem.editAuthorized(
+                authoritativeDomainId,
+                pid,
+                { hidden: true },
+                this.user,
+            )));
             operation.push('unhide');
         }
         if (operation.length) {
@@ -714,7 +759,7 @@ export class ContestEditHandler extends Handler {
             ? participantGroupIds.map((s) => new ObjectId(s.trim())).filter(Boolean)
             : [];
 
-        await contest.edit(domainId, tid, {
+        await contest.edit(authoritativeDomainId, tid, {
             assign, _code, autoHide, lockAt, maintainer, allowViewCode, allowPrint, keepScoreboardHidden, langs,
             vigilEnabled, entryMode, approvalMode, lockdownMode, networkLockdownMode,
             networkLockdownFailurePolicy, networkWhitelistHosts: networkHosts,
@@ -735,7 +780,8 @@ export class ContestEditHandler extends Handler {
     }
 
     @param('tid', Types.ObjectId)
-    async postDelete(domainId: string, tid: ObjectId) {
+    async postDelete(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
         if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_CONTEST);
 
         // ── Krypton: block delete while Vigil client sessions are active ─
@@ -749,7 +795,7 @@ export class ContestEditHandler extends Handler {
         if (this.tdoc?.vigilEnabled) {
             const vg = (global as any).Hydro?.model?.vigilguard;
             if (vg?.listActiveSessionsForContest) {
-                const active = await vg.listActiveSessionsForContest(domainId, tid);
+                const active = await vg.listActiveSessionsForContest(authoritativeDomainId, tid);
                 if (active.length) {
                     throw new BadRequestError(
                         `Cannot delete this contest: ${active.length} Vigil client session(s) are still active.`
@@ -760,18 +806,24 @@ export class ContestEditHandler extends Handler {
         }
 
         const [ddocs] = await Promise.all([
-            discussion.getMulti(domainId, { parentType: document.TYPE_CONTEST, parentId: tid }).project({ _id: 1 }).toArray(),
-            contest.del(domainId, tid),
+            discussion.getMulti(authoritativeDomainId, { parentType: document.TYPE_CONTEST, parentId: tid }).project({ _id: 1 }).toArray(),
+            contest.del(authoritativeDomainId, tid),
         ]);
-        const tasks: any[] = ddocs.map((i) => discussion.del(domainId, i._id));
+        const tasks: any[] = ddocs.map((i) => discussion.del(authoritativeDomainId, i._id));
         await Promise.all(tasks.concat([
-            record.updateMulti(domainId, { domainId, contest: tid }, undefined, undefined, { contest: '' }),
+            record.updateMulti(
+                authoritativeDomainId,
+                { domainId: authoritativeDomainId, contest: tid },
+                undefined,
+                undefined,
+                { contest: '' },
+            ),
             ScheduleModel.deleteMany({
-                type: 'schedule', subType: 'contest', domainId, tid,
+                type: 'schedule', subType: 'contest', domainId: authoritativeDomainId, tid,
             }),
             storage.del(
-                (this.tdoc.files?.map((i) => `contest/${domainId}/${tid}/public/${i.name}`) || [])
-                    .concat(this.tdoc.privateFiles?.map((i) => `contest/${domainId}/${tid}/private/${i.name}`) || []),
+                (this.tdoc.files?.map((i) => `contest/${authoritativeDomainId}/${tid}/public/${i.name}`) || [])
+                    .concat(this.tdoc.privateFiles?.map((i) => `contest/${authoritativeDomainId}/${tid}/private/${i.name}`) || []),
                 this.user._id,
             ),
         ]));
@@ -788,14 +840,15 @@ export class ContestManagementBaseHandler extends ContestDetailBaseHandler {
 export class ContestCodeHandler extends Handler {
     @param('tid', Types.ObjectId)
     @param('all', Types.Boolean)
-    async get(domainId: string, tid: ObjectId, all: boolean) {
+    async get(_domainId: string, tid: ObjectId, all: boolean) {
+        const authoritativeDomainId = String(this.domain?._id);
         await this.limitRate('contest_code', 60, 10);
-        const [tdoc, tsdocs] = await contest.getAndListStatus(domainId, tid);
+        const [tdoc, tsdocs] = await contest.getAndListStatus(authoritativeDomainId, tid);
         if (!this.user.own(tdoc)) {
             if (!this.user.hasPriv(PRIV.PRIV_READ_RECORD_CODE)) {
                 this.checkPerm(PERM.PERM_READ_RECORD_CODE);
             }
-            if (!contest.isDone(tdoc)) throw new ContestNotEndedError(domainId, tid);
+            if (!contest.isDone(tdoc)) throw new ContestNotEndedError(authoritativeDomainId, tid);
         }
         if (!contest.canShowRecord.call(this, tdoc as any, true)) {
             throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
@@ -817,7 +870,7 @@ export class ContestCodeHandler extends Handler {
             }
         }
         const zip = new ZipWriter(new BlobWriter('application/zip'), { bufferedWrite: true });
-        const rdocs = await record.getMulti(domainId, {
+        const rdocs = await record.getMulti(authoritativeDomainId, {
             _id: { $in: Array.from(Object.keys(rnames)).map((id) => new ObjectId(id)) },
         }).toArray();
         await Promise.all(rdocs.map(async (rdoc) => {
@@ -840,15 +893,16 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
     @param('tid', Types.ObjectId)
     @param('d', Types.Range(['public', 'private']), true)
     @param('sidebar', Types.Boolean)
-    async get(domainId: string, tid: ObjectId, d?: string, sidebar?: boolean) {
+    async get(_domainId: string, tid: ObjectId, d?: string, sidebar?: boolean) {
+        const authoritativeDomainId = this.authoritativeDomainId();
         // 本场提交统计（PLAN 2026-07-02 §8）：总量/AC/参与人数 + 按题分布 +
         // 按小时曲线。本 handler 已由 ContestManagementBaseHandler 限定
         // own || PERM_EDIT_CONTEST，学生不可达。聚合失败不阻塞页面。
         let submissionStats: any = null;
         try {
-            const scope = { domainId, contest: tid };
+            const scope = { domainId: authoritativeDomainId, contest: tid };
             const [overall, byProblem, byHour] = await Promise.all([
-                record.stat(domainId, tid),
+                record.stat(authoritativeDomainId, tid),
                 record.coll.aggregate([
                     { $match: scope },
                     {
@@ -890,8 +944,8 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
         this.response.body = {
             tdoc: this.tdoc,
             tsdoc: this.tsdoc,
-            owner_udoc: await user.getById(domainId, this.tdoc.owner),
-            pdict: await problem.getList(domainId, this.tdoc.pids, true, true, [...problem.PROJECTION_CONTEST_LIST, 'tag']),
+            owner_udoc: await user.getById(authoritativeDomainId, this.tdoc.owner),
+            pdict: await problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, [...problem.PROJECTION_CONTEST_LIST, 'tag']),
             files: sortFiles(this.tdoc.files || []),
             privateFiles: sortFiles(this.tdoc.privateFiles || []),
             urlForFile: (filename: string, type: string) => this.url('contest_file_download', { tid, filename, type }),
@@ -911,7 +965,8 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
     @param('tid', Types.ObjectId)
     @post('filename', Types.Filename, true)
     @post('type', Types.Range(['private', 'public']), true)
-    async postUploadFile(domainId: string, tid: ObjectId, filename: string, type: 'private' | 'public' = 'private') {
+    async postUploadFile(_domainId: string, tid: ObjectId, filename: string, type: 'private' | 'public' = 'private') {
+        const authoritativeDomainId = this.authoritativeDomainId();
         const allFiles = [...(this.tdoc.files || []), ...(this.tdoc.privateFiles || [])];
         if (allFiles.length >= this.ctx.setting.get('limit.contest_files')) {
             throw new FileLimitExceededError('count');
@@ -922,13 +977,13 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
             throw new FileLimitExceededError('size');
         }
         filename ||= file.originalFilename || randomstring(16);
-        const target = `contest/${domainId}/${tid}/${type}/${filename}`;
+        const target = `contest/${authoritativeDomainId}/${tid}/${type}/${filename}`;
         await storage.put(target, file.filepath, this.user._id);
         const meta = await storage.getMeta(target);
         const payload = { _id: filename, name: filename, ...pick(meta, ['size', 'lastModified', 'etag']) };
         if (!meta) throw new FileUploadError();
         const updateList = (files: FileInfo[], newFile: FileInfo) => (files || []).filter((i) => i._id !== newFile._id).concat(newFile);
-        await contest.edit(domainId, tid, {
+        await contest.edit(authoritativeDomainId, tid, {
             files: type === 'private' ? this.tdoc.files : updateList(this.tdoc.files, payload),
             privateFiles: type === 'private' ? updateList(this.tdoc.privateFiles, payload) : this.tdoc.privateFiles,
         });
@@ -938,10 +993,11 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
     @param('tid', Types.ObjectId)
     @post('files', Types.ArrayOf(Types.Filename))
     @post('type', Types.Range(['public', 'private']), true)
-    async postDeleteFiles(domainId: string, tid: ObjectId, files: string[], type = 'private') {
+    async postDeleteFiles(_domainId: string, tid: ObjectId, files: string[], type = 'private') {
+        const authoritativeDomainId = this.authoritativeDomainId();
         await Promise.all([
-            storage.del(files.map((t) => `contest/${domainId}/${tid}/${type}/${t}`), this.user._id),
-            contest.edit(domainId, tid, type === 'private'
+            storage.del(files.map((t) => `contest/${authoritativeDomainId}/${tid}/${type}/${t}`), this.user._id),
+            contest.edit(authoritativeDomainId, tid, type === 'private'
                 ? { privateFiles: this.tdoc.privateFiles?.filter((i) => !files.includes(i.name)) }
                 : { files: this.tdoc.files?.filter((i) => !files.includes(i.name)) },
             ),
@@ -951,28 +1007,30 @@ export class ContestManagementHandler extends ContestManagementBaseHandler {
 
     @param('pid', Types.PositiveInt)
     @param('score', Types.PositiveInt)
-    async postSetScore(domainId: string, pid: number, score: number) {
+    async postSetScore(_domainId: string, pid: number, score: number) {
+        const authoritativeDomainId = this.authoritativeDomainId();
         if (!this.tdoc.pids.includes(pid)) throw new ValidationError('pid');
         this.tdoc.score ||= {};
         this.tdoc.score[pid] = score;
-        await contest.edit(domainId, this.tdoc.docId, { score: this.tdoc.score });
-        await contest.recalcStatus(domainId, this.tdoc.docId);
+        await contest.edit(authoritativeDomainId, this.tdoc.docId, { score: this.tdoc.score });
+        await contest.recalcStatus(authoritativeDomainId, this.tdoc.docId);
         this.back();
     }
 }
 
 class ContestClarificationHandler extends ContestManagementBaseHandler {
     @param('tid', Types.ObjectId)
-    async get(domainId: string, tid: ObjectId) {
-        const tcdocs = await contest.getMultiClarification(domainId, tid);
+    async get(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        const tcdocs = await contest.getMultiClarification(authoritativeDomainId, tid);
         this.response.body = {
             tdoc: this.tdoc,
             tsdoc: this.tsdoc,
-            owner_udoc: await user.getById(domainId, this.tdoc.owner),
-            pdict: await problem.getList(domainId, this.tdoc.pids, true, true, [...problem.PROJECTION_CONTEST_LIST, 'tag']),
+            owner_udoc: await user.getById(authoritativeDomainId, this.tdoc.owner),
+            pdict: await problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, [...problem.PROJECTION_CONTEST_LIST, 'tag']),
             tcdocs,
             udict: await user.getListForRender(
-                domainId, tcdocs.map((i) => i.owner),
+                authoritativeDomainId, tcdocs.map((i) => i.owner),
                 this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO),
             ),
         };
@@ -984,11 +1042,12 @@ class ContestClarificationHandler extends ContestManagementBaseHandler {
     @param('content', Types.Content)
     @param('did', Types.ObjectId, true)
     @param('subject', Types.Int, true)
-    async postClarification(domainId: string, tid: ObjectId, content: string, did: ObjectId, subject = 0) {
+    async postClarification(_domainId: string, tid: ObjectId, content: string, did: ObjectId, subject = 0) {
+        const authoritativeDomainId = this.authoritativeDomainId();
         if (did) {
-            const tcdoc = await contest.getClarification(domainId, did);
+            const tcdoc = await contest.getClarification(authoritativeDomainId, did);
             await Promise.all([
-                contest.addClarificationReply(domainId, did, 0, content, this.request.ip),
+                contest.addClarificationReply(authoritativeDomainId, did, 0, content, this.request.ip),
                 message.send(1, tcdoc.owner, JSON.stringify({
                     message: 'Contest {0} jury replied to your clarification, please go to contest page to view.',
                     params: [this.tdoc.title],
@@ -996,11 +1055,11 @@ class ContestClarificationHandler extends ContestManagementBaseHandler {
                 }), message.FLAG_I18N | message.FLAG_ALERT),
             ]);
         } else {
-            const tsdocs = await contest.getMultiStatus(domainId, { docId: tid, subscribe: 1 }).toArray();
+            const tsdocs = await contest.getMultiStatus(authoritativeDomainId, { docId: tid, subscribe: 1 }).toArray();
             const uids = Array.from<number>(new Set(tsdocs.map((tsdoc) => tsdoc.uid)));
             const flag = contest.isOngoing(this.tdoc) ? message.FLAG_ALERT : message.FLAG_UNREAD;
             await Promise.all([
-                contest.addClarification(domainId, tid, 0, content, this.request.ip, subject),
+                contest.addClarification(authoritativeDomainId, tid, 0, content, this.request.ip, subject),
                 message.send(1, uids, JSON.stringify({
                     message: 'Broadcast message from contest {0}:\n{1}',
                     params: [this.tdoc.title, content],
@@ -1017,17 +1076,18 @@ export class ContestFileDownloadHandler extends ContestDetailBaseHandler {
     @param('filename', Types.Filename)
     @param('noDisposition', Types.Boolean)
     @param('type', Types.Range(['public', 'private']), true)
-    async get(domainId: string, tid: ObjectId, filename: string, noDisposition = false, type = 'private') {
+    async get(_domainId: string, tid: ObjectId, filename: string, noDisposition = false, type = 'private') {
+        const authoritativeDomainId = this.authoritativeDomainId();
         if (contest.RULES[this.tdoc.rule].hidden && !contest.RULES[this.tdoc.rule].features?.includes('download')) {
-            throw new ContestNotFoundError(domainId, tid);
+            throw new ContestNotFoundError(authoritativeDomainId, tid);
         }
         if (type === 'private' && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
-            if (!this.tsdoc?.attend) throw new ContestNotAttendedError(domainId, tid);
-            if (!contest.isOngoing(this.tdoc) && !contest.isDone(this.tdoc)) throw new ContestNotLiveError(domainId, tid);
-            if (!this.tsdoc.startAt) await contest.setStatus(domainId, tid, this.user._id, { startAt: new Date() });
+            if (!this.tsdoc?.attend) throw new ContestNotAttendedError(authoritativeDomainId, tid);
+            if (!contest.isOngoing(this.tdoc) && !contest.isDone(this.tdoc)) throw new ContestNotLiveError(authoritativeDomainId, tid);
+            if (!this.tsdoc.startAt) await contest.setStatus(authoritativeDomainId, tid, this.user._id, { startAt: new Date() });
         }
         this.response.addHeader('Cache-Control', 'public');
-        const target = `contest/${domainId}/${tid}/${type}/${filename}`;
+        const target = `contest/${authoritativeDomainId}/${tid}/${type}/${filename}`;
         const file = await storage.getMeta(target);
         await oplog.log(this, 'download.file.contest', {
             target,
@@ -1041,15 +1101,16 @@ export class ContestFileDownloadHandler extends ContestDetailBaseHandler {
 
 export class ContestUserHandler extends ContestManagementBaseHandler {
     @param('tid', Types.ObjectId)
-    async get(domainId: string, tid: ObjectId) {
-        const tsdocs = await contest.getMultiStatus(domainId, { docId: tid }).project({
+    async get(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        const tsdocs = await contest.getMultiStatus(authoritativeDomainId, { docId: tid }).project({
             uid: 1, attend: 1, startAt: 1, unrank: 1,
         }).toArray();
         for (const tsdoc of tsdocs) {
             tsdoc.endAt = (this.tdoc.duration && tsdoc.startAt) ? moment(tsdoc.startAt).add(this.tdoc.duration, 'hours').toDate() : null;
         }
         const udict = await user.getListForRender(
-            domainId, [this.tdoc.owner, ...tsdocs.map((i) => i.uid)],
+            authoritativeDomainId, [this.tdoc.owner, ...tsdocs.map((i) => i.uid)],
             this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO),
         );
         this.response.body = { tdoc: this.tdoc, tsdocs, udict };
@@ -1060,17 +1121,19 @@ export class ContestUserHandler extends ContestManagementBaseHandler {
     @param('tid', Types.ObjectId)
     @param('uids', Types.NumericArray)
     @param('unrank', Types.Boolean)
-    async postAddUser(domainId: string, tid: ObjectId, uids: number[], unrank = false) {
-        await Promise.all(uids.map((uid) => contest.attend(domainId, tid, uid, { unrank })));
+    async postAddUser(_domainId: string, tid: ObjectId, uids: number[], unrank = false) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        await Promise.all(uids.map((uid) => contest.attend(authoritativeDomainId, tid, uid, { unrank })));
         this.back();
     }
 
     @param('tid', Types.ObjectId)
     @param('uid', Types.PositiveInt)
-    async postRank(domainId: string, tid: ObjectId, uid: number) {
-        const tsdoc = await contest.getStatus(domainId, tid, uid);
+    async postRank(_domainId: string, tid: ObjectId, uid: number) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        const tsdoc = await contest.getStatus(authoritativeDomainId, tid, uid);
         if (!tsdoc) throw new ContestNotAttendedError(uid);
-        await contest.setStatus(domainId, tid, uid, { unrank: !tsdoc.unrank });
+        await contest.setStatus(authoritativeDomainId, tid, uid, { unrank: !tsdoc.unrank });
         this.back();
     }
 }
@@ -1078,8 +1141,9 @@ export class ContestUserHandler extends ContestManagementBaseHandler {
 export class ContestBalloonHandler extends ContestManagementBaseHandler {
     @param('tid', Types.ObjectId)
     @param('todo', Types.Boolean)
-    async get(domainId: string, tid: ObjectId, todo = false) {
-        const bdocs = await contest.getMultiBalloon(domainId, tid, {
+    async get(_domainId: string, tid: ObjectId, todo = false) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        const bdocs = await contest.getMultiBalloon(authoritativeDomainId, tid, {
             ...todo ? { sent: { $exists: false } } : {},
             ...(!this.tdoc.lockAt || this.user.hasPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD))
                 ? {} : { _id: { $lt: Time.getObjectID(this.tdoc.lockAt) } },
@@ -1088,10 +1152,10 @@ export class ContestBalloonHandler extends ContestManagementBaseHandler {
         this.response.body = {
             tdoc: this.tdoc,
             tsdoc: this.tsdoc,
-            owner_udoc: await user.getById(domainId, this.tdoc.owner),
-            pdict: await problem.getList(domainId, this.tdoc.pids, true, true, problem.PROJECTION_CONTEST_LIST),
+            owner_udoc: await user.getById(authoritativeDomainId, this.tdoc.owner),
+            pdict: await problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, problem.PROJECTION_CONTEST_LIST),
             bdocs,
-            udict: await user.getListForRender(domainId, uids, this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO)),
+            udict: await user.getListForRender(authoritativeDomainId, uids, this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO)),
         };
         this.response.pjax = 'partials/contest_balloon.html';
         this.response.template = 'contest_balloon.html';
@@ -1099,7 +1163,8 @@ export class ContestBalloonHandler extends ContestManagementBaseHandler {
 
     @param('tid', Types.ObjectId)
     @param('color', Types.Content)
-    async postSetColor(domainId: string, tid: ObjectId, color: string) {
+    async postSetColor(_domainId: string, tid: ObjectId, color: string) {
+        const authoritativeDomainId = this.authoritativeDomainId();
         const config = yaml.load(color);
         if (typeof config !== 'object') throw new ValidationError('color');
         const balloon = {};
@@ -1107,17 +1172,18 @@ export class ContestBalloonHandler extends ContestManagementBaseHandler {
             if (!config[pid]) throw new ValidationError('color');
             balloon[pid] = config[pid.toString()];
         }
-        await contest.edit(domainId, tid, { balloon });
+        await contest.edit(authoritativeDomainId, tid, { balloon });
         this.back();
     }
 
     @param('tid', Types.ObjectId)
     @param('balloon', Types.ObjectId)
-    async postDone(domainId: string, tid: ObjectId, bid: ObjectId) {
-        const balloon = await contest.getBalloon(domainId, tid, bid);
+    async postDone(_domainId: string, tid: ObjectId, bid: ObjectId) {
+        const authoritativeDomainId = this.authoritativeDomainId();
+        const balloon = await contest.getBalloon(authoritativeDomainId, tid, bid);
         if (!balloon) throw new ValidationError('balloon');
         if (balloon.sent) throw new ValidationError('Balloon already sent');
-        await contest.updateBalloon(domainId, tid, bid, { sent: this.user._id, sentAt: new Date() });
+        await contest.updateBalloon(authoritativeDomainId, tid, bid, { sent: this.user._id, sentAt: new Date() });
         this.back();
     }
 }
@@ -1142,13 +1208,14 @@ export interface ScoreboardView<T extends { [key: string]: keyof BuiltinInput | 
 export class ContestScoreboardHandler extends ContestDetailBaseHandler {
     @param('tid', Types.ObjectId)
     @param('view', Types.String, true)
-    async get(domainId: string, tid: ObjectId, viewId = 'default') {
+    async get(_domainId: string, tid: ObjectId, viewId = 'default') {
+        const authoritativeDomainId = this.authoritativeDomainId();
         if (contest.RULES[this.tdoc.rule].hidden && !contest.RULES[this.tdoc.rule].features?.includes('scoreboard')) {
-            throw new ContestNotFoundError(domainId, tid);
+            throw new ContestNotFoundError(authoritativeDomainId, tid);
         }
         if (!this.user.own(this.tdoc)) {
             if (!contest.canShowScoreboard.call(this, this.tdoc, true)) throw new ContestScoreboardHiddenError(tid);
-            if (contest.isNotStarted(this.tdoc)) throw new ContestNotLiveError(domainId, tid);
+            if (contest.isNotStarted(this.tdoc)) throw new ContestNotLiveError(authoritativeDomainId, tid);
         }
         const view = this.ctx.scoreboard.getView(viewId);
         if (!view) throw new NotFoundError(`View ${viewId} not found`);
@@ -1158,7 +1225,7 @@ export class ContestScoreboardHandler extends ContestDetailBaseHandler {
             groups: async () => {
                 const allGroups = (this.user.hasPerm(PERM.PERM_EDIT_CONTEST_SELF) && this.user.own(this.tdoc))
                     || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
-                return await user.listGroup(domainId, allGroups ? undefined : this.user._id);
+                return await user.listGroup(authoritativeDomainId, allGroups ? undefined : this.user._id);
             },
         };
         for (const key in view.args) {
@@ -1180,10 +1247,11 @@ export class ContestScoreboardHandler extends ContestDetailBaseHandler {
     }
 
     @param('tid', Types.ObjectId)
-    async postUnlock(domainId: string, tid: ObjectId) {
+    async postUnlock(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = this.authoritativeDomainId();
         if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_CONTEST);
-        if (!contest.isDone(this.tdoc)) throw new ContestNotEndedError(domainId, tid);
-        await contest.unlockScoreboard(domainId, tid);
+        if (!contest.isDone(this.tdoc)) throw new ContestNotEndedError(authoritativeDomainId, tid);
+        await contest.unlockScoreboard(authoritativeDomainId, tid);
         this.back();
     }
 }

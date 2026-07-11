@@ -11,6 +11,7 @@ import { PERM } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
 import problem from '../model/problem';
+import { assertProblemBankSelection } from '../model/problem-access';
 import record from '../model/record';
 import storage from '../model/storage';
 import system from '../model/system';
@@ -41,12 +42,13 @@ class HomeworkMainHandler extends Handler {
     @param('group', Types.Name, true)
     @param('page', Types.PositiveInt, true)
     @param('q', Types.String, true)
-    async get(domainId: string, group = '', page = 1, q = '') {
-        const groups = (await user.listGroup(domainId, this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_HOMEWORK) ? undefined : this.user._id))
+    async get(_domainId: string, group = '', page = 1, q = '') {
+        const authoritativeDomainId = String(this.domain?._id);
+        const groups = (await user.listGroup(authoritativeDomainId, this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_HOMEWORK) ? undefined : this.user._id))
             .map((i) => i.name);
         if (group && !groups.includes(group)) throw new NotAssignedError(group);
         const escaped = escapeRegExp(q.toLowerCase());
-        const cursor = contest.getMulti(domainId, {
+        const cursor = contest.getMulti(authoritativeDomainId, {
             rule: 'homework',
             ...this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_HOMEWORK) && !group
                 ? {}
@@ -87,9 +89,10 @@ class HomeworkDetailHandler extends Handler {
     tdoc: Tdoc;
 
     @param('tid', Types.ObjectId)
-    async prepare(domainId: string, tid: ObjectId) {
-        this.tdoc = await contest.get(domainId, tid);
-        if (this.tdoc.rule !== 'homework') throw new ContestNotFoundError(domainId, tid);
+    async prepare(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        this.tdoc = await contest.get(authoritativeDomainId, tid);
+        if (this.tdoc.rule !== 'homework') throw new ContestNotFoundError(authoritativeDomainId, tid);
         if (this.tdoc.assign?.length && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_HOMEWORK)) {
             if (!new Set(this.tdoc.assign).intersection(new Set(this.user.group)).size) {
                 throw new NotAssignedError('homework', this.tdoc.docId);
@@ -99,18 +102,19 @@ class HomeworkDetailHandler extends Handler {
 
     @param('tid', Types.ObjectId)
     @param('page', Types.PositiveInt, true)
-    async get(domainId: string, tid: ObjectId, page = 1) {
-        const tsdoc = await contest.getStatus(domainId, tid, this.user._id);
-        if (this.tdoc.rule !== 'homework') throw new ContestNotFoundError(domainId, tid);
+    async get(_domainId: string, tid: ObjectId, page = 1) {
+        const authoritativeDomainId = String(this.domain?._id);
+        const tsdoc = await contest.getStatus(authoritativeDomainId, tid, this.user._id);
+        if (this.tdoc.rule !== 'homework') throw new ContestNotFoundError(authoritativeDomainId, tid);
         // discussion
         const [ddocs, dpcount, dcount] = await this.paginate(
-            discussion.getMulti(domainId, { parentType: this.tdoc.docType, parentId: this.tdoc.docId }),
+            discussion.getMulti(authoritativeDomainId, { parentType: this.tdoc.docType, parentId: this.tdoc.docId }),
             page,
             'discussion',
         );
         const uids = ddocs.map((ddoc) => ddoc.owner);
         uids.push(this.tdoc.owner);
-        const udict = await user.getList(domainId, uids);
+        const udict = await user.getList(authoritativeDomainId, uids);
         this.response.template = 'homework_detail.html';
         this.response.body = {
             tdoc: this.tdoc, tsdoc, udict, ddocs, page, dpcount, dcount,
@@ -123,12 +127,12 @@ class HomeworkDetailHandler extends Handler {
             && !this.user.own(this.tdoc)
             && !this.user.hasPerm(PERM.PERM_VIEW_HOMEWORK_HIDDEN_SCOREBOARD)
         ) return;
-        const pdict = await problem.getList(domainId, this.tdoc.pids, true, true, problem.PROJECTION_CONTEST_LIST);
+        const pdict = await problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, problem.PROJECTION_CONTEST_LIST);
         const psdict = {};
         let rdict = {};
         if (tsdoc) {
             if (tsdoc.attend && !tsdoc.startAt && contest.isOngoing(this.tdoc)) {
-                await contest.setStatus(domainId, tid, this.user._id, { startAt: new Date() });
+                await contest.setStatus(authoritativeDomainId, tid, this.user._id, { startAt: new Date() });
                 tsdoc.startAt = new Date();
             }
             const valid = (tsdoc.journal || []).filter((p) => this.tdoc.pids.includes(p.pid));
@@ -137,24 +141,27 @@ class HomeworkDetailHandler extends Handler {
                 rdict[pdetail.rid] = { _id: pdetail.rid };
             }
             if (contest.canShowSelfRecord.call(this, this.tdoc) && valid.length) {
-                rdict = await record.getList(domainId, valid.map((pdetail) => pdetail.rid));
+                rdict = await record.getList(authoritativeDomainId, valid.map((pdetail) => pdetail.rid));
             }
         }
         Object.assign(this.response.body, { pdict, psdict, rdict });
     }
 
-    async postAttend({ domainId }) {
+    async postAttend(_args: { domainId?: string }) {
+        const authoritativeDomainId = String(this.domain?._id);
         this.checkPerm(PERM.PERM_ATTEND_HOMEWORK);
         if (contest.isDone(this.tdoc)) throw new HomeworkNotLiveError(this.tdoc.docId);
-        await contest.attend(domainId, this.tdoc.docId, this.user._id);
+        await contest.attend(authoritativeDomainId, this.tdoc.docId, this.user._id);
         this.back();
     }
 }
 
 class HomeworkEditHandler extends Handler {
     @param('tid', Types.ObjectId, true)
-    async get(domainId: string, tid: ObjectId) {
-        const tdoc = tid ? await contest.get(domainId, tid) : null;
+    async get(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
+        const tdoc = tid ? await contest.get(authoritativeDomainId, tid) : null;
         if (!tid) this.checkPerm(PERM.PERM_CREATE_HOMEWORK);
         else if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_HOMEWORK);
         else this.checkPerm(PERM.PERM_EDIT_HOMEWORK_SELF);
@@ -198,13 +205,15 @@ class HomeworkEditHandler extends Handler {
     @param('assign', Types.CommaSeperatedArray, true)
     @param('langs', Types.CommaSeperatedArray, true)
     async postUpdate(
-        domainId: string, tid: ObjectId, beginAtDate: string, beginAtTime: string,
+        _domainId: string, tid: ObjectId, beginAtDate: string, beginAtTime: string,
         penaltySinceDate: string, penaltySinceTime: string, extensionDays: number,
         penaltyRules: PenaltyRules, title: string, content: string, _pids: string, rated = false,
         maintainer: number[] = [], assign: string[] = [], langs: string[] = [],
     ) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         const pids = parseProblemDocIds(_pids);
-        const tdoc = tid ? await contest.get(domainId, tid) : null;
+        const tdoc = tid ? await contest.get(authoritativeDomainId, tid) : null;
         if (!tid) this.checkPerm(PERM.PERM_CREATE_HOMEWORK);
         else if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_HOMEWORK);
         else this.checkPerm(PERM.PERM_EDIT_HOMEWORK_SELF);
@@ -215,13 +224,13 @@ class HomeworkEditHandler extends Handler {
         const endAt = penaltySince.clone().add(extensionDays, 'days');
         if (beginAt.isSameOrAfter(penaltySince)) throw new ValidationError('endAtDate', 'endAtTime');
         if (penaltySince.isAfter(endAt)) throw new ValidationError('extensionDays');
-        await problem.getList(domainId, pids, this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN) || this.user._id, true);
+        await assertProblemBankSelection(authoritativeDomainId, pids, this.user, tdoc?.pids);
         if (!tid) {
-            tid = await contest.add(domainId, title, content, this.user._id,
+            tid = await contest.add(authoritativeDomainId, title, content, this.user._id,
                 'homework', beginAt.toDate(), endAt.toDate(), pids, rated,
                 { penaltySince: penaltySince.toDate(), penaltyRules, assign });
         } else {
-            await contest.edit(domainId, tid, {
+            await contest.edit(authoritativeDomainId, tid, {
                 title,
                 content,
                 beginAt: beginAt.toDate(),
@@ -238,7 +247,7 @@ class HomeworkEditHandler extends Handler {
                 || tdoc.endAt !== endAt.toDate()
                 || tdoc.penaltySince !== penaltySince.toDate()
                 || tdoc.pids.sort().join(' ') !== pids.sort().join(' ')) {
-                await contest.recalcStatus(domainId, tdoc.docId);
+                await contest.recalcStatus(authoritativeDomainId, tdoc.docId);
             }
         }
         this.response.body = { tid };
@@ -246,13 +255,23 @@ class HomeworkEditHandler extends Handler {
     }
 
     @param('tid', Types.ObjectId)
-    async postDelete(domainId: string, tid: ObjectId) {
-        const tdoc = await contest.get(domainId, tid);
+    async postDelete(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        const tdoc = await contest.get(authoritativeDomainId, tid);
         if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_HOMEWORK);
         await Promise.all([
-            record.updateMulti(domainId, { domainId, contest: tid }, undefined, undefined, { contest: '' }),
-            contest.del(domainId, tid),
-            storage.del(tdoc.files?.map((i) => `contest/${domainId}/${tid}/public/${i.name}`) || [], this.user._id),
+            record.updateMulti(
+                authoritativeDomainId,
+                { domainId: authoritativeDomainId, contest: tid },
+                undefined,
+                undefined,
+                { contest: '' },
+            ),
+            contest.del(authoritativeDomainId, tid),
+            storage.del(
+                tdoc.files?.map((i) => `contest/${authoritativeDomainId}/${tid}/public/${i.name}`) || [],
+                this.user._id,
+            ),
         ]);
         this.response.redirect = this.url('homework_main');
     }
@@ -262,19 +281,21 @@ export class HomeworkFilesHandler extends Handler {
     tdoc: Tdoc;
 
     @param('tid', Types.ObjectId)
-    async prepare(domainId: string, tid: ObjectId) {
-        this.tdoc = await contest.get(domainId, tid);
+    async prepare(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        this.tdoc = await contest.get(authoritativeDomainId, tid);
         if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_HOMEWORK);
         else this.checkPerm(PERM.PERM_EDIT_HOMEWORK_SELF);
     }
 
     @param('tid', Types.ObjectId)
-    async get(domainId: string, tid: ObjectId) {
+    async get(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
         if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_HOMEWORK);
         this.response.body = {
             tdoc: this.tdoc,
-            tsdoc: await contest.getStatus(domainId, this.tdoc.docId, this.user._id),
-            udoc: await user.getById(domainId, this.tdoc.owner),
+            tsdoc: await contest.getStatus(authoritativeDomainId, this.tdoc.docId, this.user._id),
+            udoc: await user.getById(authoritativeDomainId, this.tdoc.owner),
             files: sortFiles(this.tdoc.files || []),
             urlForFile: (filename: string) => this.url('homework_file_download', { tid, filename, type: 'public' }),
         };
@@ -284,7 +305,8 @@ export class HomeworkFilesHandler extends Handler {
 
     @param('tid', Types.ObjectId)
     @post('filename', Types.Filename, true)
-    async postUploadFile(domainId: string, tid: ObjectId, filename: string) {
+    async postUploadFile(_domainId: string, tid: ObjectId, filename: string) {
+        const authoritativeDomainId = String(this.domain?._id);
         if ((this.tdoc.files?.length || 0) >= system.get('limit.contest_files')) {
             throw new FileLimitExceededError('count');
         }
@@ -294,20 +316,21 @@ export class HomeworkFilesHandler extends Handler {
         if (size >= system.get('limit.contest_files_size')) {
             throw new FileLimitExceededError('size');
         }
-        await storage.put(`contest/${domainId}/${tid}/public/${filename}`, file.filepath, this.user._id);
-        const meta = await storage.getMeta(`contest/${domainId}/${tid}/public/${filename}`);
+        await storage.put(`contest/${authoritativeDomainId}/${tid}/public/${filename}`, file.filepath, this.user._id);
+        const meta = await storage.getMeta(`contest/${authoritativeDomainId}/${tid}/public/${filename}`);
         const payload = { _id: filename, name: filename, ...pick(meta, ['size', 'lastModified', 'etag']) };
         if (!meta) throw new FileUploadError();
-        await contest.edit(domainId, tid, { files: [...(this.tdoc.files || []), payload] });
+        await contest.edit(authoritativeDomainId, tid, { files: [...(this.tdoc.files || []), payload] });
         this.back();
     }
 
     @param('tid', Types.ObjectId)
     @post('files', Types.ArrayOf(Types.Filename))
-    async postDeleteFiles(domainId: string, tid: ObjectId, files: string[]) {
+    async postDeleteFiles(_domainId: string, tid: ObjectId, files: string[]) {
+        const authoritativeDomainId = String(this.domain?._id);
         await Promise.all([
-            storage.del(files.map((t) => `contest/${domainId}/${tid}/public/${t}`), this.user._id),
-            contest.edit(domainId, tid, { files: this.tdoc.files.filter((i) => !files.includes(i.name)) }),
+            storage.del(files.map((t) => `contest/${authoritativeDomainId}/${tid}/public/${t}`), this.user._id),
+            contest.edit(authoritativeDomainId, tid, { files: this.tdoc.files.filter((i) => !files.includes(i.name)) }),
         ]);
         this.back();
     }

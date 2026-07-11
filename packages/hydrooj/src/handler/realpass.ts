@@ -19,7 +19,6 @@ import { escapeRegExp } from 'lodash';
 import {
     Context, db, Handler, OplogModel, param, PRIV, Types, ValidationError,
 } from 'hydrooj';
-import * as document from '../model/document';
 import problem from '../model/problem';
 
 const PROJ_RESOLVE = ['docId', 'pid', 'title'] as any[];
@@ -114,7 +113,12 @@ class RealPassManageHandler extends Handler {
             throw new ValidationError('target', null, `docId 与 pid 双命中不同题（docId→#${r.byDocId} / pid→#${r.byPid}），请改用明确的 pid`);
         }
         if (r.status !== 'ok') throw new ValidationError('target', null, `未找到题目：${target}`);
-        await problem.edit(domainId, r.docId!, { origStat: buildOrigStat(accepted, submitted, this.user._id) } as any);
+        await problem.editAuthorized(
+            domainId,
+            r.docId!,
+            { origStat: buildOrigStat(accepted, submitted, this.user._id) } as any,
+            this.user,
+        );
         await OplogModel.log(this as any, 'realpass.set', {
             docId: r.docId, pid: r.pid, accepted, submitted,
         });
@@ -125,12 +129,10 @@ class RealPassManageHandler extends Handler {
 
     @param('docId', Types.UnsignedInt)
     async postRemove(domainId: string, docId: number) {
-        // document.set 是 upsert 语义——先验证题目存在，否则会插入一条
-        // 只有 {domainId, docType, docId} 的残缺题目文档（对抗审查发现）。
+        // 先验证题目存在，随后由 ACL revision 条件写完成原子删除。
         const exists = await problem.getMulti(domainId, { docId }, PROJ_RESOLVE).limit(1).toArray();
         if (!exists[0]) throw new ValidationError('docId', null, `题目不存在：#${docId}`);
-        // $unset 走 document.set（不触发 problem/edit 事件——origStat 不进 ES 索引，无需重索引）。
-        await document.set(domainId, document.TYPE_PROBLEM, docId, {}, { origStat: '' } as any);
+        await problem.editAuthorized(domainId, docId, {}, this.user, { origStat: '' });
         await OplogModel.log(this as any, 'realpass.remove', { docId });
         this.response.body = { ok: true, docId };
     }
@@ -189,7 +191,12 @@ class RealPassManageHandler extends Handler {
         if (commit) {
             for (const r of okRows) {
                 // eslint-disable-next-line no-await-in-loop
-                await problem.edit(domainId, r.docId!, { origStat: buildOrigStat(r.accepted!, r.submitted!, this.user._id) } as any);
+                await problem.editAuthorized(
+                    domainId,
+                    r.docId!,
+                    { origStat: buildOrigStat(r.accepted!, r.submitted!, this.user._id) } as any,
+                    this.user,
+                );
             }
             await OplogModel.log(this as any, 'realpass.batch', {
                 total: rows.length,

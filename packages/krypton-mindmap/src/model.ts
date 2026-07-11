@@ -1,4 +1,5 @@
 import { ObjectId, db } from 'hydrooj';
+import type { Filter } from 'mongodb';
 import { configColl, getConfig, nodesColl, setConfig } from './db';
 import type { MindmapNode } from './types';
 
@@ -122,11 +123,10 @@ function difficultyOf(p: { nSubmit?: number; nAccept?: number }): number {
 }
 
 export async function listProblemsForNode(
-    domainId: string, nodeId: ObjectId | string,
+    domainId: string, nodeId: ObjectId | string, scope: Filter<any>,
 ): Promise<PanelProblem[]> {
     const node = await getNode(nodeId);
     if (!node) return [];
-    const filter: Record<string, unknown> = { docType: HYDRO_PROBLEM_DOCTYPE, domainId, hidden: { $ne: true } };
     const orClauses: any[] = [];
     if (node.tags && node.tags.length) orClauses.push({ tag: { $in: node.tags } });
     if (node.problemIds && node.problemIds.length) {
@@ -136,7 +136,17 @@ export async function listProblemsForNode(
         if (numericIds.length) orClauses.push({ docId: { $in: numericIds } });
     }
     if (!orClauses.length) return [];
-    Object.assign(filter, { $or: orClauses });
+    const filter = {
+        $and: [
+            scope,
+            {
+                docType: HYDRO_PROBLEM_DOCTYPE,
+                domainId,
+                hidden: { $ne: true },
+                $or: orClauses,
+            },
+        ],
+    };
     const docs = await documentColl.find(filter)
         .project({ pid: 1, docId: 1, title: 1, nSubmit: 1, nAccept: 1 })
         .limit(500)

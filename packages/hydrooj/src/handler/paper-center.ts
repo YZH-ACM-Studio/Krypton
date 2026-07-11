@@ -26,10 +26,11 @@ import {
 import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
 import problem from '../model/problem';
+import { buildProblemBankScope } from '../model/problem-access';
 import record from '../model/record';
 import user from '../model/user';
 
-const PROJ_LIST = ['_id', 'docId', 'pid', 'title', 'hidden', 'owner', 'maintainer', 'config'] as any[];
+const PROJ_LIST = ['_id', 'docId', 'pid', 'title', 'hidden', 'owner', 'maintainer'] as any[];
 
 /**
  * 匹配 config YAML 串里的题目类型行（客观题类 = objective + fill_function）。
@@ -80,29 +81,36 @@ function summarizeConfig(raw: unknown): KindSummary | null {
     }
 }
 
-class PaperCenterHandler extends Handler {
+export class PaperCenterHandler extends Handler {
     @param('page', Types.PositiveInt, true)
     @param('q', Types.String, true)
-    async get(domainId: string, page = 1, q = '') {
-        const query: any = { config: OBJECTIVE_CONFIG_RE };
-        const filters: any[] = [];
+    async get(_domainId: string, page = 1, q = '') {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
+        const query: any = {
+            $and: [buildProblemBankScope(this.user), { config: OBJECTIVE_CONFIG_RE }],
+        };
         if (q) {
             const re = new RegExp(escapeRegExp(q), 'i');
-            filters.push({ $or: [{ pid: re }, { title: re }] });
+            query.$and.push({ $or: [{ pid: re }, { title: re }] });
         }
-        if (!this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN)) {
-            // 对齐题库列表的 hidden 例外（handler/problem.ts buildQuery）：owner + maintainer。
-            filters.push({ $or: [{ hidden: false }, { owner: this.user._id }, { maintainer: this.user._id }] });
-        }
-        if (filters.length) query.$and = filters;
         const [pdocs, ppcount, pcount] = await this.paginate(
-            problem.getMulti(domainId, query, PROJ_LIST).sort({ docId: -1 }),
+            problem.getMulti(authoritativeDomainId, query, PROJ_LIST).sort({ docId: -1 }),
             page,
             20, // spec Rev.2：每页 ≤20，题型构成才允许当页逐题解析 raw config
         );
-        const udict = await user.getList(domainId, pdocs.map((p) => p.owner));
-        const rows = pdocs
-            .map((p) => ({
+        const stableConfigs = await Promise.all(pdocs.map((p) => problem.getMaintainableAuthorized(
+            authoritativeDomainId, p.docId, this.user, ['config'] as any, true,
+        )));
+        const udict = await user.getList(authoritativeDomainId, pdocs.map((p) => p.owner));
+        const rows = pdocs.flatMap((p, index) => {
+            const stable = stableConfigs[index];
+            if (!stable) return [];
+            const summary = summarizeConfig(stable.config);
+            // summary=null = regex 粗筛误命中（解析后并非客观题类），剔除。
+            // 极罕见；此时 pcount/分页会略微高估，骨架版接受。
+            if (!summary) return [];
+            return [{
                 docId: p.docId,
                 pid: p.pid,
                 title: p.title,
@@ -110,11 +118,9 @@ class PaperCenterHandler extends Handler {
                 owner: p.owner,
                 ownerName: udict[p.owner]?.uname || `UID ${p.owner}`,
                 createdAt: p._id?.getTimestamp?.() || null,
-                summary: summarizeConfig(p.config),
-            }))
-            // summary=null = regex 粗筛误命中（解析后并非客观题类），剔除。
-            // 极罕见；此时 pcount/分页会略微高估，骨架版接受。
-            .filter((r) => r.summary);
+                summary,
+            }];
+        });
         this.response.template = 'paper_center.html';
         this.response.body = {
             rows, page, ppcount, pcount, q,
@@ -175,7 +181,9 @@ function buildObjectiveConfigYaml(questions: EditorQuestion[], existingRaw: stri
         let answer: string | string[];
         if (q.kind === 'single' || q.kind === 'multi') {
             const choices = Array.isArray(q.choices) ? q.choices.map((c) => String(c ?? '')) : [];
-            if (choices.length < 2 || choices.length > LETTERS.length) throw new ValidationError('questions', null, `${label}选项数需在 2-${LETTERS.length} 之间`);
+            if (choices.length < 2 || choices.length > LETTERS.length) {
+                throw new ValidationError('questions', null, `${label}选项数需在 2-${LETTERS.length} 之间`);
+            }
             if (choices.some((c) => !c.trim())) throw new ValidationError('questions', null, `${label}存在空白选项`);
             const valid = new Set(choices.map((_, j) => LETTERS[j]));
             if (q.kind === 'single') {
@@ -214,19 +222,17 @@ function buildObjectiveConfigYaml(questions: EditorQuestion[], existingRaw: stri
     return yaml.dump(base);
 }
 
-function assertCanEditProblem(h: Handler, pdoc: any) {
-    if (!h.user.own(pdoc, PERM.PERM_EDIT_PROBLEM_SELF)) h.checkPerm(PERM.PERM_EDIT_PROBLEM);
-}
-
-class PaperCenterCreateHandler extends Handler {
+export class PaperCenterCreateHandler extends Handler {
     @param('title', Types.Title)
     @param('ptype', Types.Range(['objective', 'fill_function']))
-    async post(domainId: string, title: string, ptype: string) {
-        const docId = await problem.add(domainId, '', title, '', this.user._id, [], { hidden: true });
+    async post(_domainId: string, title: string, ptype: string) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
+        const docId = await problem.add(authoritativeDomainId, '', title, '', this.user._id, [], { hidden: true });
         const config = ptype === 'objective'
             ? yaml.dump({ type: 'objective', answers: {} })
             : yaml.dump({ type: 'fill_function' });
-        await problem.addTestdata(domainId, docId, 'config.yaml', Buffer.from(config), this.user._id);
+        await problem.addTestdata(authoritativeDomainId, docId, 'config.yaml', Buffer.from(config), this.user._id);
         await OplogModel.log(this, 'paperCenter.create', { docId, ptype });
         this.response.body = {
             ok: true,
@@ -238,15 +244,18 @@ class PaperCenterCreateHandler extends Handler {
     }
 }
 
-class PaperCenterEditHandler extends Handler {
+export class PaperCenterEditHandler extends Handler {
     pdoc: any;
 
     @param('docId', Types.UnsignedInt)
-    async _prepare(domainId: string, docId: number) {
+    async _prepare(_domainId: string, docId: number) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         // raw config（含标准答案）——本页 owner/教师 gated，不经净化。
-        this.pdoc = await problem.get(domainId, docId, undefined, true);
-        if (!this.pdoc) throw new NotFoundError('Problem');
-        assertCanEditProblem(this, this.pdoc);
+        this.pdoc = await problem.getMaintainableAuthorized(
+            authoritativeDomainId, docId, this.user, undefined, true,
+        );
+        if (!this.pdoc) throw new PermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
         const cfg = parseProblemConfigObject(this.pdoc);
         if (cfg?.type !== 'objective') {
             // 非客观题不归本编辑器管——比如函数题走 problem-edit。
@@ -276,8 +285,10 @@ class PaperCenterEditHandler extends Handler {
     @param('hidden', Types.Boolean)
     @param('questions', Types.Content)
     async post(
-        domainId: string, title: string, content = '', tagRaw = '', hidden = false, questionsRaw = '',
+        _domainId: string, title: string, content = '', tagRaw = '', hidden = false, questionsRaw = '',
     ) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         let questions: EditorQuestion[];
         try {
             questions = JSON.parse(questionsRaw);
@@ -295,10 +306,20 @@ class PaperCenterEditHandler extends Handler {
         }
         // 基本信息 + config 同步落库；addTestdata 的钩子会把 config.yaml
         // 镜像进 pdoc.config 并触发 problem/edit 事件（ES 重索引）。
-        await problem.edit(domainId, this.pdoc.docId, {
-            title, content, tag, hidden: !!hidden, html: false,
-        } as any);
-        await problem.addTestdata(domainId, this.pdoc.docId, 'config.yaml', Buffer.from(configYaml), this.user._id);
+        await problem.withAuthorizedWriteClaim(
+            authoritativeDomainId,
+            this.pdoc.docId,
+            this.user,
+            'paper-center-save',
+            async (claim) => {
+                await problem.editWithClaim(claim, {
+                    title, content, tag, hidden: !!hidden, html: false,
+                } as any);
+                await problem.addTestdataWithClaim(
+                    claim, 'config.yaml', Buffer.from(configYaml), this.user._id,
+                );
+            },
+        );
         await OplogModel.log(this, 'paperCenter.save', { docId: this.pdoc.docId, questionCount: questions.length });
         this.response.body = { ok: true, docId: this.pdoc.docId };
     }
@@ -310,21 +331,27 @@ function canGrade(h: Handler, pdoc: any): boolean {
     return pdoc.owner === h.user._id || h.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
 }
 
-class PaperCenterGradingHandler extends Handler {
+export class PaperCenterGradingHandler extends Handler {
     tdoc: any;
 
     @param('tid', Types.ObjectId)
-    async _prepare(domainId: string, tid: ObjectId) {
-        this.tdoc = await contest.get(domainId, tid);
+    async _prepare(_domainId: string, tid: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
+        this.tdoc = await contest.get(authoritativeDomainId, tid);
         if (!this.tdoc) throw new NotFoundError('Contest');
     }
 
     @param('pid', Types.UnsignedInt, true)
-    async get(domainId: string, pid = 0) {
+    async get(_domainId: string, pid = 0) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         // 本场含主观题、且当前用户可阅卷（题目 owner ∥ 站点管理员）的题目清单。
         const problems: Array<{ pid: number, title: string, keys: Record<string, { score: number, prompt: string }> }> = [];
         for (const p of (this.tdoc.pids as number[] || [])) {
-            const pdoc = await problem.get(domainId, p, undefined, true); // eslint-disable-line no-await-in-loop
+            const pdoc = await problem.getMaintainableAuthorized( // eslint-disable-line no-await-in-loop
+                authoritativeDomainId, p, this.user, undefined, true,
+            );
             if (!pdoc || !canGrade(this, pdoc)) continue;
             const keys = subjectiveKeysOf(parseProblemConfigObject(pdoc));
             if (Object.keys(keys).length) problems.push({ pid: p, title: pdoc.title, keys });
@@ -334,12 +361,12 @@ class PaperCenterGradingHandler extends Handler {
         if (pid && problems.some((p) => p.pid === pid)) {
             const keys = problems.find((p) => p.pid === pid)!.keys;
             // 每人最新一条本场提交（记录量=参赛人数级，全取内存去重）。
-            const rdocs = await record.getMulti(domainId, { contest: this.tdoc.docId, pid })
+            const rdocs = await record.getMulti(authoritativeDomainId, { contest: this.tdoc.docId, pid })
                 .sort({ _id: -1 }).limit(2000).toArray();
             const latestByUid = new Map<number, any>();
             for (const r of rdocs) if (!latestByUid.has(r.uid)) latestByUid.set(r.uid, r);
             const uids = Array.from(latestByUid.keys());
-            const udict = await user.getListForRender(domainId, uids, false).catch(() => ({} as any));
+            const udict = await user.getListForRender(authoritativeDomainId, uids, false).catch(() => ({} as any));
             body.rows = Array.from(latestByUid.values()).map((r) => {
                 let answers: Record<string, any> = {};
                 try {
@@ -378,14 +405,18 @@ class PaperCenterGradingHandler extends Handler {
 
     @param('rid', Types.ObjectId)
     @param('scores', Types.Content)
-    async post(domainId: string, rid: ObjectId, scoresRaw: string) {
-        const rdoc = await record.get(domainId, rid);
+    async post(_domainId: string, rid: ObjectId, scoresRaw: string) {
+        const authoritativeDomainId = String(this.domain?._id);
+        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
+        const rdoc = await record.get(authoritativeDomainId, rid);
         if (!rdoc) throw new NotFoundError('Record');
         if (String(rdoc.contest) !== String(this.tdoc.docId)) {
             throw new ValidationError('rid', null, '该提交不属于本场比赛');
         }
-        const pdoc = await problem.get(domainId, rdoc.pid, undefined, true);
-        if (!pdoc) throw new NotFoundError('Problem');
+        const pdoc = await problem.getMaintainableAuthorized(
+            authoritativeDomainId, rdoc.pid, this.user, undefined, true,
+        );
+        if (!pdoc) throw new PermissionError(PRIV.PRIV_EDIT_SYSTEM);
         if (!canGrade(this, pdoc)) throw new PermissionError(PRIV.PRIV_EDIT_SYSTEM);
         const cfg = parseProblemConfigObject(pdoc);
         const keys = subjectiveKeysOf(cfg);
@@ -436,7 +467,7 @@ class PaperCenterGradingHandler extends Handler {
             };
         });
 
-        const updated = await record.update(domainId, rid, {
+        const updated = await record.update(authoritativeDomainId, rid, {
             score: newScore,
             status: newStatus,
             testCases,
@@ -445,8 +476,11 @@ class PaperCenterGradingHandler extends Handler {
             },
         } as any);
         // 与判题完成路径（handler/judge.ts postJudge）同构地刷新题目/比赛状态。
-        await problem.updateStatus(domainId, rdoc.pid, rdoc.uid, rid, newStatus, newScore);
-        await contest.updateStatus(domainId, this.tdoc.docId, rdoc.uid, rid, rdoc.pid, updated || { ...rdoc, score: newScore, status: newStatus });
+        await problem.updateStatus(authoritativeDomainId, rdoc.pid, rdoc.uid, rid, newStatus, newScore);
+        await contest.updateStatus(
+            authoritativeDomainId, this.tdoc.docId, rdoc.uid, rid, rdoc.pid,
+            updated || { ...rdoc, score: newScore, status: newStatus },
+        );
         await OplogModel.log(this, 'paperCenter.grade', {
             tid: this.tdoc.docId, rid, pid: rdoc.pid, uid: rdoc.uid, scores: submitted, newScore, newStatus,
         });

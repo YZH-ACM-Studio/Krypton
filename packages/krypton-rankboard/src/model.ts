@@ -11,6 +11,12 @@ const studentsColl = db.collection<any>('userbind.students');
 const schoolsColl = db.collection<any>('userbind.schools');
 const userGroupsColl = db.collection<any>('userbind.user_groups');
 
+/**
+ * 荣誉榜是 system-domain 单域插件。Every identity join and write must
+ * resolve through this authoritative domain.
+ */
+export const RANKBOARD_DOMAIN = 'system';
+
 /* ─── award types ─── */
 
 export async function listAwardTypes(opts: { includeHidden?: boolean } = {}): Promise<AwardType[]> {
@@ -58,18 +64,55 @@ export async function deleteAwardType(key: string): Promise<{ ok: boolean; reaso
 
 /* ─── people ─── */
 
+function personObjectId(id: ObjectId | string): ObjectId {
+    return typeof id === 'string' ? new ObjectId(id) : id;
+}
+
+/** Bulk scope guard used by every list/batch path. */
+async function listScopedPeople(filter: Record<string, unknown> = {}): Promise<PersonRecord[]> {
+    const people = await peopleColl.find(filter as any).sort({ updatedAt: -1 }).toArray();
+    if (!people.length) return [];
+    const studentIds = people.map((person) => person.studentDocId);
+    const students = await studentsColl.find({
+        _id: { $in: studentIds },
+        domainId: RANKBOARD_DOMAIN,
+    }).toArray();
+    const validStudentIds = new Set(students.map((student: any) => String(student._id)));
+    return people.filter((person) => validStudentIds.has(String(person.studentDocId)));
+}
+
+/** Single-person scope guard shared by admin reads and every personId write. */
+async function getScopedPersonOrNull(id: ObjectId | string): Promise<PersonRecord | null> {
+    const _id = personObjectId(id);
+    const person = await peopleColl.findOne({ _id });
+    if (!person) return null;
+    const student = await studentsColl.findOne({
+        _id: person.studentDocId,
+        domainId: RANKBOARD_DOMAIN,
+    });
+    return student ? person : null;
+}
+
+async function requireScopedPerson(id: ObjectId | string): Promise<PersonRecord> {
+    const person = await getScopedPersonOrNull(id);
+    if (!person) throw new NotFoundError('person', String(id));
+    return person;
+}
+
 export async function listPeople(): Promise<PersonRecord[]> {
-    return await peopleColl.find({}).sort({ updatedAt: -1 }).toArray();
+    return await listScopedPeople();
 }
 
 export async function getPerson(id: ObjectId | string): Promise<PersonRecord | null> {
-    const _id = typeof id === 'string' ? new ObjectId(id) : id;
-    return await peopleColl.findOne({ _id });
+    return await getScopedPersonOrNull(id);
 }
 
 export async function getPersonByStudent(studentDocId: ObjectId | string): Promise<PersonRecord | null> {
-    const sid = typeof studentDocId === 'string' ? new ObjectId(studentDocId) : studentDocId;
-    return await peopleColl.findOne({ studentDocId: sid });
+    const sid = personObjectId(studentDocId);
+    const student = await studentsColl.findOne({ _id: sid, domainId: RANKBOARD_DOMAIN });
+    if (!student) return null;
+    const person = await peopleColl.findOne({ studentDocId: sid });
+    return person ? await getScopedPersonOrNull(person._id) : null;
 }
 
 export async function createPerson(input: {
@@ -79,6 +122,12 @@ export async function createPerson(input: {
     awards?: Award[];
 }): Promise<PersonRecord> {
     const sid = typeof input.studentDocId === 'string' ? new ObjectId(input.studentDocId) : input.studentDocId;
+    // Central invariant for every caller, including batch import: a rankboard
+    // person may only reference a userbind student that actually resolves in
+    // the system domain. Missing and outer-domain IDs intentionally share the
+    // same not-found response.
+    const student = await studentsColl.findOne({ _id: sid, domainId: RANKBOARD_DOMAIN });
+    if (!student) throw new NotFoundError('student', String(sid));
     const existing = await peopleColl.findOne({ studentDocId: sid });
     if (existing) return existing;
     const doc: PersonRecord = {
@@ -98,36 +147,43 @@ export async function updatePerson(
     id: ObjectId | string,
     patch: Partial<Pick<PersonRecord, 'awards' | 'employmentStatus'>>,
 ): Promise<void> {
-    const _id = typeof id === 'string' ? new ObjectId(id) : id;
-    await peopleColl.updateOne({ _id }, { $set: { ...patch, updatedAt: new Date() } });
+    const person = await requireScopedPerson(id);
+    await peopleColl.updateOne(
+        { _id: person._id, studentDocId: person.studentDocId },
+        { $set: { ...patch, updatedAt: new Date() } },
+    );
 }
 
 export async function deletePerson(id: ObjectId | string): Promise<void> {
-    const _id = typeof id === 'string' ? new ObjectId(id) : id;
-    await peopleColl.deleteOne({ _id });
+    const person = await requireScopedPerson(id);
+    await peopleColl.deleteOne({ _id: person._id, studentDocId: person.studentDocId });
 }
 
 export async function addAward(id: ObjectId | string, award: Award): Promise<void> {
-    const _id = typeof id === 'string' ? new ObjectId(id) : id;
+    const person = await requireScopedPerson(id);
     await peopleColl.updateOne(
-        { _id },
+        { _id: person._id, studentDocId: person.studentDocId },
         { $push: { awards: award } as any, $set: { updatedAt: new Date() } },
     );
 }
 
 export async function updateAwardAt(id: ObjectId | string, index: number, award: Award): Promise<void> {
-    const _id = typeof id === 'string' ? new ObjectId(id) : id;
+    const person = await requireScopedPerson(id);
     const setObj: Record<string, any> = { updatedAt: new Date() };
     setObj[`awards.${index}`] = award;
-    await peopleColl.updateOne({ _id }, { $set: setObj });
+    await peopleColl.updateOne(
+        { _id: person._id, studentDocId: person.studentDocId },
+        { $set: setObj },
+    );
 }
 
 export async function removeAwardAt(id: ObjectId | string, index: number): Promise<void> {
-    const _id = typeof id === 'string' ? new ObjectId(id) : id;
-    const person = await peopleColl.findOne({ _id });
-    if (!person) return;
+    const person = await requireScopedPerson(id);
     const next = (person.awards || []).filter((_, i) => i !== index);
-    await peopleColl.updateOne({ _id }, { $set: { awards: next, updatedAt: new Date() } });
+    await peopleColl.updateOne(
+        { _id: person._id, studentDocId: person.studentDocId },
+        { $set: { awards: next, updatedAt: new Date() } },
+    );
 }
 
 /* ─── batch import ─── */
@@ -155,13 +211,6 @@ export interface BatchImportReport {
     /** 本次导入创建的批次 ID（用于审计/回滚）。 */
     batchId?: string;
 }
-
-/**
- * 荣誉榜是 system-domain 单域插件：listLeaderboard 的 UserModel.getList、
- * gplt store 查询都硬编 'system'。导入的学生/学校查询必须同域，否则从
- * 子域操作会静默建重复档案（对抗性审查 #3）。
- */
-export const RANKBOARD_DOMAIN = 'system';
 
 export interface BatchImportOptions {
     /** 未匹配学号自动在 userbind 建档（需 TSV 带姓名列 + 指定学校）。 */
@@ -336,10 +385,14 @@ export async function rollbackImportBatch(batchId: ObjectId, actor: number): Pro
     const batch = await importBatchesColl.findOne({ _id: batchId });
     if (!batch) throw new NotFoundError('ImportBatch');
     if (batch.rolledBackAt) return { pulled: 0 };
-    const res = await peopleColl.updateMany(
-        { 'awards.importBatchId': batchId },
-        { $pull: { awards: { importBatchId: batchId } } as any, $set: { updatedAt: new Date() } },
-    );
+    const scopedPeople = await listScopedPeople({ 'awards.importBatchId': batchId });
+    const scopedPersonIds = scopedPeople.map((person) => person._id);
+    const res = scopedPersonIds.length
+        ? await peopleColl.updateMany(
+            { _id: { $in: scopedPersonIds }, 'awards.importBatchId': batchId },
+            { $pull: { awards: { importBatchId: batchId } } as any, $set: { updatedAt: new Date() } },
+        )
+        : { modifiedCount: 0 };
     await importBatchesColl.updateOne(
         { _id: batchId },
         { $set: { rolledBack: true, rolledBackAt: new Date(), rolledBackBy: actor } },
@@ -439,7 +492,10 @@ export async function listLeaderboard(): Promise<LeaderboardRow[]> {
     // Pull student + school + groups + udoc in bulk.
     const studentIds = people.map((p) => p.studentDocId);
     const students = studentIds.length
-        ? await studentsColl.find({ _id: { $in: studentIds } }).toArray()
+        ? await studentsColl.find({
+            _id: { $in: studentIds },
+            domainId: RANKBOARD_DOMAIN,
+        }).toArray()
         : [];
     const studentMap = new Map<string, any>(students.map((s) => [String(s._id), s]));
 
@@ -535,7 +591,11 @@ export async function listLeaderboard(): Promise<LeaderboardRow[]> {
 export async function addAwardImage(
     personId: ObjectId, awardIndex: number, url: string, setCover = false, expectType?: string,
 ): Promise<string[] | null> {
-    const filter: Record<string, unknown> = { _id: personId };
+    const scopedPerson = await requireScopedPerson(personId);
+    const filter: Record<string, unknown> = {
+        _id: scopedPerson._id,
+        studentDocId: scopedPerson.studentDocId,
+    };
     if (expectType) filter[`awards.${awardIndex}.type`] = expectType;
     const res = await peopleColl.updateOne(filter as any, {
         $addToSet: { [`awards.${awardIndex}.imageUrls`]: url } as any,
@@ -543,11 +603,17 @@ export async function addAwardImage(
     });
     if (!res.matchedCount) return null;
     // 读回最新数组；setCover 时再把封面指到该 url（单独一次写，非关键路径）。
-    const person = await peopleColl.findOne({ _id: personId });
+    const person = await getScopedPersonOrNull(scopedPerson._id);
     const imageUrls = person?.awards?.[awardIndex]?.imageUrls || [];
     if (setCover) {
         const ci = imageUrls.indexOf(url);
-        if (ci >= 0) await peopleColl.updateOne({ _id: personId }, { $set: { [`awards.${awardIndex}.coverIndex`]: ci } as any });
+        if (ci >= 0) {
+            await requireScopedPerson(scopedPerson._id);
+            await peopleColl.updateOne(
+                { _id: scopedPerson._id, studentDocId: scopedPerson.studentDocId },
+                { $set: { [`awards.${awardIndex}.coverIndex`]: ci } as any },
+            );
+        }
     }
     return imageUrls;
 }
@@ -588,7 +654,7 @@ export interface GalleryCard {
  */
 export async function buildGallery(): Promise<{ years: Array<{ year: number | null; ladder: GalleryCard[]; icpc: GalleryCard[] }> }> {
     const [people, awardTypes] = await Promise.all([
-        peopleColl.find({}).toArray(),
+        listPeople(),
         listAwardTypes({ includeHidden: true }),
     ]);
     await applyGpltStoreScores(people);
@@ -596,7 +662,10 @@ export async function buildGallery(): Promise<{ years: Array<{ year: number | nu
 
     const studentIds = people.map((p) => p.studentDocId);
     const students = studentIds.length
-        ? await studentsColl.find({ _id: { $in: studentIds } }).toArray()
+        ? await studentsColl.find({
+            _id: { $in: studentIds },
+            domainId: RANKBOARD_DOMAIN,
+        }).toArray()
         : [];
     const studentMap = new Map<string, any>(students.map((s) => [String(s._id), s]));
 

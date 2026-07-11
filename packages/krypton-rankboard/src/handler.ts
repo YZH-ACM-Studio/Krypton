@@ -4,24 +4,24 @@
  *   GET  /rankboard                         RankBoardMainHandler          (public)
  *   GET  /rankboard/:studentDocId           RankBoardDetailHandler        (public)
  *   GET  /admin/rankboard                   AdminRankBoardListHandler     (system admin)
- *   POST /admin/rankboard                   AdminRankBoardListHandler.post (add / delete / config / batch)
+ *   POST /admin/rankboard                   AdminRankBoardListHandler.postX (add / delete / config / batch)
  *   GET  /admin/rankboard/awards            AdminAwardTypesHandler        (system admin)
- *   POST /admin/rankboard/awards            AdminAwardTypesHandler.post   (upsert / delete)
+ *   POST /admin/rankboard/awards            AdminAwardTypesHandler.postX  (upsert / delete)
  *   GET  /admin/rankboard/people/:id        AdminPersonDetailHandler      (system admin)
- *   POST /admin/rankboard/people/:id        AdminPersonDetailHandler.post (save awards / upload image)
+ *   POST /admin/rankboard/people/:id        AdminPersonDetailHandler.postSave (save awards)
  */
 import type { Context } from 'hydrooj';
 import {
-    db, Handler, NotFoundError, ObjectId, param, PERM, PermissionError, PRIV,
+    BadRequestError, db, Handler, NotFoundError, ObjectId, param, PERM, PermissionError, PRIV,
     PrivilegeError, Types, UserModel, ValidationError,
 } from 'hydrooj';
-import {
-    addAward, addAwardImage, applyGpltStoreScores, buildGallery, createPerson, deleteAwardType,
-    deletePerson, getConfig, getPerson, importAwardsBatch, listAwardTypes, listImportBatches,
-    listLeaderboard, RANKBOARD_DOMAIN, removeAwardAt, rollbackImportBatch, setConfig,
-    updateAwardAt, updatePerson, upsertAwardType,
-} from './model';
 import type { BatchImportRow } from './model';
+import {
+    addAwardImage, applyGpltStoreScores, buildGallery, createPerson, deleteAwardType,
+    deletePerson, getConfig, getPerson, importAwardsBatch, listAwardTypes, listImportBatches,
+    listLeaderboard, RANKBOARD_DOMAIN, rollbackImportBatch, setConfig,
+    updatePerson, upsertAwardType,
+} from './model';
 import type { Award } from './types';
 
 const studentsColl = db.collection<any>('userbind.students');
@@ -101,41 +101,56 @@ class RankBoardDetailHandler extends Handler {
 class AdminBase extends Handler {
     /** true 表示是荣誉榜的合法域（system）或持全局 PRIV。 */
     private rankboardScopeOk(): boolean {
-        return this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || this.args.domainId === RANKBOARD_DOMAIN;
+        // `this.args` includes query/body fields and is therefore attacker
+        // controlled. Bind the singleton scope to the framework-resolved
+        // request domain instead; a missing domain fails closed.
+        return this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
+            || String(this.domain?._id ?? '') === RANKBOARD_DOMAIN;
+    }
+
+    protected canManageRankboard(): boolean {
+        if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return true;
+        return this.rankboardScopeOk() && this.user.hasPerm(PERM.PERM_RANKBOARD_MANAGE);
+    }
+
+    protected canImportRankboard(): boolean {
+        if (this.canManageRankboard()) return true;
+        return this.rankboardScopeOk() && this.user.hasPerm(PERM.PERM_RANKBOARD_IMPORT);
     }
 
     async prepare() {
         if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return;
-        if (this.rankboardScopeOk()
-            && (this.user.hasPerm(PERM.PERM_RANKBOARD_MANAGE) || this.user.hasPerm(PERM.PERM_RANKBOARD_IMPORT))) return;
+        if (this.canImportRankboard()) return;
         throw new PrivilegeError(PRIV.PRIV_EDIT_SYSTEM);
     }
 
     checkDataOp() {
         if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return;
-        if (this.rankboardScopeOk()
-            && (this.user.hasPerm(PERM.PERM_RANKBOARD_MANAGE) || this.user.hasPerm(PERM.PERM_RANKBOARD_IMPORT))) return;
+        if (this.canImportRankboard()) return;
         throw new PermissionError(PERM.PERM_RANKBOARD_IMPORT);
     }
 
     checkStructuralOp() {
         if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return;
-        if (this.rankboardScopeOk() && this.user.hasPerm(PERM.PERM_RANKBOARD_MANAGE)) return;
+        if (this.canManageRankboard()) return;
         throw new PermissionError(PERM.PERM_RANKBOARD_MANAGE);
     }
 }
 
 class AdminRankBoardListHandler extends AdminBase {
-    async get() {
-        const [rows, config, batches, schools] = await Promise.all([
-            listLeaderboard(),
-            getConfig(),
-            listImportBatches(),
-            schoolsColl.find({ domainId: RANKBOARD_DOMAIN }).toArray(),
-        ]);
-        this.response.template = 'admin_rankboard.html';
-        this.response.body = {
-            rows: rows.map((r) => ({
+    private async renderSection(
+        section: 'people' | 'import' | 'settings',
+        extra: Record<string, unknown> = {},
+    ) {
+        const body: Record<string, unknown> = {
+            section,
+            canImport: this.canImportRankboard(),
+            canManage: this.canManageRankboard(),
+            ...extra,
+        };
+        if (section === 'people') {
+            const rows = await listLeaderboard();
+            body.rows = rows.map((r) => ({
                 ...r,
                 student: {
                     ...r.student,
@@ -147,153 +162,150 @@ class AdminRankBoardListHandler extends AdminBase {
                     _id: String(r.person._id),
                     studentDocId: String(r.person.studentDocId),
                 },
-            })),
-            config,
-            batches: batches.map((b) => ({ ...b, _id: String(b._id) })),
-            schools: schools.map((s: any) => ({ _id: String(s._id), name: s.name })),
-            // 前端按此决定结构操作按钮（配置/删除/奖项类型）是否可见。
-            canManage: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || this.user.hasPerm(PERM.PERM_RANKBOARD_MANAGE),
-        };
+            }));
+        } else if (section === 'import') {
+            const [batches, schools] = await Promise.all([
+                listImportBatches(),
+                schoolsColl.find({ domainId: RANKBOARD_DOMAIN }).toArray(),
+            ]);
+            body.batches = batches.map((b) => ({ ...b, _id: String(b._id) }));
+            body.schools = schools.map((s: any) => ({ _id: String(s._id), name: s.name }));
+        } else {
+            body.config = await getConfig();
+        }
+        this.response.template = 'admin_rankboard.html';
+        this.response.body = body;
     }
 
-    @param('operation', Types.String)
-    @param('studentDocId', Types.ObjectId, true)
-    @param('personId', Types.ObjectId, true)
+    @param('section', Types.String, true)
+    async get(_ctx: any, requestedSection?: string) {
+        const section = requestedSection || 'people';
+        if (section !== 'people' && section !== 'import' && section !== 'settings') {
+            throw new BadRequestError('未知的荣誉管理分区');
+        }
+        if (section === 'settings') this.checkStructuralOp();
+        await this.renderSection(section);
+    }
+
+    @param('studentDocId', Types.ObjectId)
+    async postAdd(_ctx: any, studentDocId: ObjectId) {
+        this.checkDataOp();
+        const student = await studentsColl.findOne({
+            _id: studentDocId,
+            domainId: RANKBOARD_DOMAIN,
+        });
+        if (!student) throw new NotFoundError('student', String(studentDocId));
+        const person = await createPerson({
+            studentDocId, createdBy: this.user._id,
+        });
+        this.response.redirect = this.url('admin_rankboard_person', { id: String(person._id) });
+    }
+
+    @param('personId', Types.ObjectId)
+    async postDelete(_ctx: any, personId: ObjectId) {
+        this.checkStructuralOp();
+        await deletePerson(personId);
+        this.response.redirect = `${this.url('admin_rankboard')}?section=people`;
+    }
+
     @param('baseScore', Types.Float, true)
     @param('decayFactor', Types.Float, true)
-    @param('batchTsv', Types.Content, true)
+    async postConfig(_ctx: any, baseScore?: number, decayFactor?: number) {
+        this.checkStructuralOp();
+        if (baseScore != null || decayFactor != null) {
+            const current = await getConfig();
+            await setConfig({
+                baseScore: baseScore ?? current.baseScore,
+                decayFactor: decayFactor ?? current.decayFactor,
+            });
+        }
+        this.response.redirect = `${this.url('admin_rankboard')}?section=settings`;
+    }
+
+    @param('batchId', Types.ObjectId)
+    async postRollbackBatch(_ctx: any, batchId: ObjectId) {
+        this.checkDataOp();
+        const result = await rollbackImportBatch(batchId, this.user._id);
+        this.response.body = { rolledBack: result.pulled };
+        this.response.redirect = `${this.url('admin_rankboard')}?section=import`;
+    }
+
+    @param('batchTsv', Types.Content)
     @param('createMissing', Types.Boolean, true)
     @param('schoolId', Types.ObjectId, true)
-    @param('batchId', Types.ObjectId, true)
-    async post(
-        { domainId }: { domainId: string },
-        operation: string,
-        studentDocId?: ObjectId,
-        personId?: ObjectId,
-        baseScore?: number,
-        decayFactor?: number,
-        batchTsv?: string,
+    async postBatch(
+        _ctx: any,
+        batchTsv: string,
         createMissing?: boolean,
         schoolId?: ObjectId,
-        batchId?: ObjectId,
     ) {
-        switch (operation) {
-            case 'add': {
-                this.checkDataOp();
-                if (!studentDocId) throw new Error('studentDocId required');
-                const student = await studentsColl.findOne({ _id: studentDocId });
-                if (!student) throw new NotFoundError('student', String(studentDocId));
-                const person = await createPerson({
-                    studentDocId, createdBy: this.user._id,
-                });
-                this.response.redirect = this.url('admin_rankboard_person', { id: String(person._id) });
-                return;
-            }
-            case 'delete': {
-                this.checkStructuralOp();
-                if (!personId) throw new Error('personId required');
-                await deletePerson(personId);
-                break;
-            }
-            case 'config': {
-                this.checkStructuralOp();
-                if (baseScore == null && decayFactor == null) break;
-                const current = await getConfig();
-                await setConfig({
-                    baseScore: baseScore ?? current.baseScore,
-                    decayFactor: decayFactor ?? current.decayFactor,
-                });
-                break;
-            }
-            case 'rollbackBatch': {
-                this.checkDataOp();
-                if (!batchId) throw new Error('batchId required');
-                const r = await rollbackImportBatch(batchId, this.user._id);
-                this.response.body = { rolledBack: r.pulled };
-                break;
-            }
-            case 'batch': {
-                this.checkDataOp();
-                if (!batchTsv) throw new Error('batchTsv required');
-                // Radix Select 的 required 不可靠，空值提交会让 createMissing
-                // 静默失效——显式报错（对抗性审查 #11）。
-                if (createMissing && !schoolId) throw new ValidationError('schoolId', null, '开启自动建档时必须选择学校');
-                const rows: BatchImportRow[] = batchTsv
-                    .split('\n')
-                    .map((line) => line.trim())
-                    .filter(Boolean)
-                    .filter((line) => !line.startsWith('#'))
-                    .map((line) => {
-                        const parts = line.split('\t');
-                        return {
-                            studentId: (parts[0] || '').trim(),
-                            type: (parts[1] || '').trim(),
-                            contest: (parts[2] || '').trim() || undefined,
-                            date: (parts[3] || '').trim() || undefined,
-                            liveRank: parts[4] ? Number(parts[4]) || undefined : undefined,
-                            schoolRank: parts[5] ? Number(parts[5]) || undefined : undefined,
-                            team: (parts[6] || '').trim() || undefined,
-                            teammates: parts[7]
-                                ? parts[7].split(',').map((s) => s.trim()).filter(Boolean)
-                                : undefined,
-                            realName: (parts[8] || '').trim() || undefined,
-                        };
-                    });
-                const report = await importAwardsBatch(rows, this.user._id, {
-                    createMissing: !!createMissing, schoolId,
-                });
-                this.response.body = { report };
-                this.response.template = 'admin_rankboard.html';
-                // Reload data for the page
-                const fresh = await listLeaderboard();
-                this.response.body.rows = fresh.map((r) => ({
-                    ...r,
-                    student: { ...r.student, _id: String(r.student._id), schoolId: String(r.student.schoolId) },
-                    person: { ...r.person, _id: String(r.person._id), studentDocId: String(r.person.studentDocId) },
-                }));
-                this.response.body.config = await getConfig();
-                this.response.body.batches = (await listImportBatches()).map((b) => ({ ...b, _id: String(b._id) }));
-                this.response.body.schools = (await schoolsColl.find({ domainId: RANKBOARD_DOMAIN }).toArray()).map((s: any) => ({ _id: String(s._id), name: s.name }));
-                this.response.body.canManage = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || this.user.hasPerm(PERM.PERM_RANKBOARD_MANAGE);
-                return;
-            }
-            default:
-                throw new Error(`unknown operation: ${operation}`);
-        }
-        this.response.redirect = this.url('admin_rankboard');
+        this.checkDataOp();
+        // Radix Select 的 required 不可靠，空值提交会让 createMissing
+        // 静默失效——显式报错（对抗性审查 #11）。
+        if (createMissing && !schoolId) throw new ValidationError('schoolId', null, '开启自动建档时必须选择学校');
+        const rows: BatchImportRow[] = batchTsv
+            .split('\n')
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .filter((line) => !line.startsWith('#'))
+            .map((line) => {
+                const parts = line.split('\t');
+                return {
+                    studentId: (parts[0] || '').trim(),
+                    type: (parts[1] || '').trim(),
+                    contest: (parts[2] || '').trim() || undefined,
+                    date: (parts[3] || '').trim() || undefined,
+                    liveRank: parts[4] ? Number(parts[4]) || undefined : undefined,
+                    schoolRank: parts[5] ? Number(parts[5]) || undefined : undefined,
+                    team: (parts[6] || '').trim() || undefined,
+                    teammates: parts[7]
+                        ? parts[7].split(',').map((s) => s.trim()).filter(Boolean)
+                        : undefined,
+                    realName: (parts[8] || '').trim() || undefined,
+                };
+            });
+        const report = await importAwardsBatch(rows, this.user._id, {
+            createMissing: !!createMissing, schoolId,
+        });
+        await this.renderSection('import', { report });
     }
 }
 
 class AdminAwardTypesHandler extends AdminBase {
     async get() {
+        this.checkStructuralOp();
         const types = await listAwardTypes({ includeHidden: true });
         this.response.template = 'admin_rankboard_awards.html';
-        this.response.body = { types };
+        this.response.body = {
+            types,
+            canImport: this.canImportRankboard(),
+            canManage: this.canManageRankboard(),
+        };
     }
 
-    @param('operation', Types.String)
-    @param('key', Types.String, true)
-    @param('name', Types.String, true)
-    @param('weight', Types.Float, true)
+    @param('key', Types.String)
+    @param('name', Types.String)
+    @param('weight', Types.Float)
     @param('useRankDecay', Types.Boolean, true)
     @param('order', Types.Int, true)
     @param('hidden', Types.Boolean, true)
-    async post(
-        _ctx: any, operation: string,
-        key?: string, name?: string, weight?: number,
+    async postUpsert(
+        _ctx: any,
+        key: string, name: string, weight: number,
         useRankDecay?: boolean, order?: number, hidden?: boolean,
     ) {
         this.checkStructuralOp();
-        if (operation === 'upsert') {
-            if (!key || !name || weight == null) throw new Error('key/name/weight required');
-            await upsertAwardType({
-                key, name, weight, useRankDecay: !!useRankDecay,
-                order: order || 100, hidden,
-            });
-        } else if (operation === 'delete') {
-            if (!key) throw new Error('key required');
-            await deleteAwardType(key);
-        }
+        await upsertAwardType({
+            key, name, weight, useRankDecay: !!useRankDecay,
+            order: order || 100, hidden,
+        });
+        this.response.redirect = this.url('admin_rankboard_awards');
+    }
+
+    @param('key', Types.String)
+    async postDelete(_ctx: any, key: string) {
+        this.checkStructuralOp();
+        await deleteAwardType(key);
         this.response.redirect = this.url('admin_rankboard_awards');
     }
 }
@@ -321,31 +333,26 @@ class AdminPersonDetailHandler extends AdminBase {
                 schoolId: String(student.schoolId),
             } : null,
             types,
+            canImport: this.canImportRankboard(),
+            canManage: this.canManageRankboard(),
         };
     }
 
     @param('id', Types.ObjectId)
-    @param('operation', Types.String)
     @param('awards', Types.Content, true)
     @param('employmentStatus', Types.String, true)
-    async post(
-        _ctx: any, id: ObjectId, operation: string,
+    async postSave(
+        _ctx: any, id: ObjectId,
         awardsJson?: string, employmentStatus?: string,
     ) {
         this.checkDataOp();
-        if (operation === 'save') {
-            // JSON 往返会把 importBatchId 的 ObjectId 变成 string——存回前还原，
-            // 否则批次回滚的 $pull 匹配不到这些奖项。
-            const awards: Award[] = (awardsJson ? JSON.parse(awardsJson) : []).map((a: any) => ({
-                ...a,
-                ...(a.importBatchId ? { importBatchId: new ObjectId(a.importBatchId) } : {}),
-            }));
-            await updatePerson(id, { awards, employmentStatus });
-        } else if (operation === 'upload') {
-            // For now images are passed in via the `awards` JSON which includes
-            // imageUrls populated by the frontend after uploading separately
-            // through Hydro's file endpoints. (See P3 admin UI.)
-        }
+        // JSON 往返会把 importBatchId 的 ObjectId 变成 string——存回前还原，
+        // 否则批次回滚的 $pull 匹配不到这些奖项。
+        const awards: Award[] = (awardsJson ? JSON.parse(awardsJson) : []).map((a: any) => ({
+            ...a,
+            ...(a.importBatchId ? { importBatchId: new ObjectId(a.importBatchId) } : {}),
+        }));
+        await updatePerson(id, { awards, employmentStatus });
         this.response.redirect = this.url('admin_rankboard_person', { id: String(id) });
     }
 }
@@ -450,7 +457,9 @@ class RankBoardGalleryHandler extends Handler {
     // 荣誉榜是 system 全局单例——上传权限同样要锁定 system 域（G1 同源问题）。
     private canUpload(): boolean {
         if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return true;
-        if (this.args.domainId !== RANKBOARD_DOMAIN) return false;
+        // Query/body fields live in `this.args` and cannot define the request
+        // scope. Use the framework-resolved domain; missing context denies.
+        if (String(this.domain?._id ?? '') !== RANKBOARD_DOMAIN) return false;
         return this.user.hasPerm(PERM.PERM_RANKBOARD_IMPORT) || this.user.hasPerm(PERM.PERM_RANKBOARD_MANAGE);
     }
 

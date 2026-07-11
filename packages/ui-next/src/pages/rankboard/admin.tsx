@@ -736,6 +736,7 @@ function AwardTypeDialog({ type, onClose }: { type: AwardType | null; onClose: (
         <DialogHeader><DialogTitle>{isNew ? '新增奖项类型' : '编辑奖项类型'}</DialogTitle></DialogHeader>
         <form method="post" action="/admin/rankboard/awards" className="flex flex-col">
           <input type="hidden" name="operation" value="upsert" />
+          {!isNew && <input type="hidden" name="key" value={key} />}
           <div className="space-y-4 p-5">
             <FormRow columns={2}>
               <FormField label="Key" required htmlFor="aw-key">

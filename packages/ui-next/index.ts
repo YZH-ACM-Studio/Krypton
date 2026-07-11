@@ -1,9 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import c2k from 'koa2-connect';
-import { Context, PERM } from 'hydrooj';
+import {
+    Context, PERM, PRIV, ProblemModel,
+} from 'hydrooj';
 import { serializer } from '@hydrooj/framework';
 import type { ViteDevServer } from 'vite';
+import { resolveRankboardCapabilities } from './rankboard-capabilities';
 
 type ManifestChunk = {
     file: string;
@@ -86,6 +89,19 @@ function safeSystemGet(key: string): string {
     try {
         return (global as any).Hydro?.model?.system?.get?.(key) || '';
     } catch { return ''; }
+}
+
+export function resolveProblemBankCapability(
+    user: unknown,
+    onError: (error: unknown) => void,
+): boolean {
+    try {
+        if (!user) throw new Error('handler user is unavailable');
+        return ProblemModel.canBrowseProblemBank(user as any);
+    } catch (error) {
+        onError(error);
+        return false;
+    }
 }
 
 function escapeHtml(value: unknown) {
@@ -188,6 +204,28 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
     // by hydrooj when configured via system settings.
     const systemFooterHtml = safeSystemGet('ui-default.footer_extra_html');
     const domainFooterHtml = (domain?.ui?.footer_extra_html || '');
+    const rankboardCapabilities = resolveRankboardCapabilities({
+        user: context.handler?.user,
+        // Missing domain context is not assumed to be system: capabilities
+        // stay closed until the real request scope is available.
+        domainId: String(domain?._id || ''),
+        editSystemPriv: PRIV.PRIV_EDIT_SYSTEM,
+        importPerm: PERM.PERM_RANKBOARD_IMPORT,
+        managePerm: PERM.PERM_RANKBOARD_MANAGE,
+        onError(error) {
+            console.error('[ui-next] rankboard capability resolution failed:', error);
+        },
+    });
+    const problemBankCapability = resolveProblemBankCapability(
+        context.handler?.user,
+        (error) => {
+            console.error('[ui-next] problem bank capability resolution failed; denying navigation:', {
+                domainId: String(domain?._id || ''),
+                uid: Number(context.handler?.user?._id || 0),
+                templateName,
+            }, error);
+        },
+    );
 
     return {
         appName: 'Krypton',
@@ -212,18 +250,11 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
             pinnedDomains: currentUser.pinnedDomains || [],
             avatar: currentUser.avatar || '',
             avatarUrl: currentUser.avatarUrl || '',
-            // Krypton §4：侧边栏级 affordance（真正的强制在服务端 handler）。
-            // handler.user 是带 hasPerm 的 User 实例；缺失时放行以免误伤。
-            canViewProblemBank: (() => {
-                try {
-                    const u = context.handler?.user;
-                    if (!u?.hasPerm) return true;
-                    return !safeSystemGet('problem.hideBank') || !!u.hasPerm(PERM.PERM_VIEW_PROBLEM_BANK);
-                } catch { return true; }
-            })(),
-            canCreateProblem: (() => {
-                try { return !!context.handler?.user?.hasPerm?.(PERM.PERM_CREATE_PROBLEM); } catch { return false; }
-            })(),
+            // 仅用于前端 affordance；服务端枚举与写入仍独立强制。同一能力
+            // 解析失败时必须 fail closed，并由上面的结构化日志留下现场。
+            canBrowseProblemBank: problemBankCapability,
+            canImportRankboard: rankboardCapabilities.canImportRankboard,
+            canManageRankboard: rankboardCapabilities.canManageRankboard,
         },
         domain: {
             id: String(domain._id || 'system'),

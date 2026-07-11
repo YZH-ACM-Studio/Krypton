@@ -5,11 +5,11 @@
  *   admin_rankboard_awards.html    → AdminAwardTypesPage
  *   admin_rankboard_person.html    → AdminRankBoardPersonPage
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  Award as AwardIcon, FileSpreadsheet, Image as ImageIcon, Pencil, Plus, Save,
-  Search, Settings, Star, Trash2, Upload, X,
+  Image as ImageIcon, Pencil, Plus, Save, Search, Trash2, Upload, X,
 } from 'lucide-react';
+import { ModuleWorkspace, type ModuleWorkspaceNavItem } from '@/components/management/module-workspace';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,27 +20,45 @@ import { SimpleSelect } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
-import { uploadUserFile } from '@/lib/upload';
-import { AdminPage } from '@/components/admin/admin-page';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
-import { PRIV } from '@/lib/perms';
-import { registerAdminNavSection } from '@/lib/admin-nav-registry';
 import { cn } from '@/lib/cn';
+import { uploadUserFile } from '@/lib/upload';
 
-// Admin nav registration for rankboard section.
-// 前端只做登录级 gate（同 admin-tasks 先例）：教师走 PERM_RANKBOARD_IMPORT
-// 进入，真正的鉴权在后端 AdminBase.prepare / checkDataOp / checkStructuralOp。
-registerAdminNavSection({
-  key: 'rankboard',
-  label: '荣誉榜',
-  order: 36,
-  requiredPriv: PRIV.PRIV_USER_PROFILE,
-  items: [
-    { key: 'people', label: '人员', href: '/admin/rankboard', icon: AwardIcon, templateNames: ['admin_rankboard.html', 'admin_rankboard_person.html'] },
-    { key: 'awards', label: '奖项类型', href: '/admin/rankboard/awards', icon: Star, templateNames: ['admin_rankboard_awards.html'] },
-  ],
-});
+const RANKBOARD_WORKSPACE_NAV = [
+  {
+    key: 'people',
+    label: '人员',
+    href: '/admin/rankboard?section=people',
+    templateNames: ['admin_rankboard.html', 'admin_rankboard_person.html'],
+  },
+  {
+    key: 'import',
+    label: '批量导入',
+    href: '/admin/rankboard?section=import',
+    templateNames: ['admin_rankboard.html'],
+  },
+  {
+    key: 'awards',
+    label: '奖项类型',
+    href: '/admin/rankboard/awards',
+    templateNames: ['admin_rankboard_awards.html'],
+    manageOnly: true,
+  },
+  {
+    key: 'settings',
+    label: '计分设置',
+    href: '/admin/rankboard?section=settings',
+    templateNames: ['admin_rankboard.html'],
+    manageOnly: true,
+  },
+] satisfies readonly (ModuleWorkspaceNavItem & { manageOnly?: boolean })[];
+
+function rankboardWorkspaceNav(canManage: boolean): readonly ModuleWorkspaceNavItem[] {
+  return canManage
+    ? RANKBOARD_WORKSPACE_NAV
+    : RANKBOARD_WORKSPACE_NAV.filter((item) => !item.manageOnly);
+}
 
 interface AwardType {
   _id: string; key: string; name: string; weight: number;
@@ -60,8 +78,6 @@ function awardFields(typeKey: string) {
   const isICPC = /^icpc/i.test(typeKey);
   const isCCPC = /^ccpc/i.test(typeKey);
   const isLadderTeam = /^ladder_team/.test(typeKey);
-  const isLadderIndividual = /^ladder_individual/.test(typeKey);
-  const isLadder = isLadderTeam || isLadderIndividual;
   const isPAT = /^pat/i.test(typeKey);
   const hasTeam = isICPC || isCCPC || isLadderTeam;
   const hasTeammates = isICPC || isCCPC;
@@ -259,226 +275,263 @@ interface AdminRow {
 
 export function AdminRankBoardListPage() {
   const data = useBootstrap().page.data as {
-    rows: AdminRow[];
-    config: { baseScore: number; decayFactor: number };
+    section: 'people' | 'import' | 'settings';
+    rows?: AdminRow[];
+    config?: { baseScore: number, decayFactor: number };
     report?: any;
     batches?: Array<{
       _id: string; createdAt: string; okCount: number; rowCount: number;
       createdStudents?: number; rolledBackAt?: string;
     }>;
-    schools?: Array<{ _id: string; name: string }>;
-    canManage?: boolean;
+    schools?: Array<{ _id: string, name: string }>;
+    canImport: boolean;
+    canManage: boolean;
   };
   const [search, setSearch] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
-  const [configOpen, setConfigOpen] = useState(false);
-  const [batchesOpen, setBatchesOpen] = useState(false);
-  // 结构操作（计分参数/删除人员）仅管理员可见；教师只有数据操作（PLAN §1）。
-  const canManage = data.canManage !== false;
+  if (!data.canImport) throw new Error('Rankboard management capability is missing');
+  if (data.section === 'people' && !Array.isArray(data.rows)) {
+    throw new Error('Rankboard people data is missing');
+  }
+  if (data.section === 'import' && (!Array.isArray(data.batches) || !Array.isArray(data.schools))) {
+    throw new Error('Rankboard import data is missing');
+  }
+  if (data.section === 'settings' && !data.config) {
+    throw new Error('Rankboard settings data is missing');
+  }
+  const navItems = rankboardWorkspaceNav(data.canManage);
 
-  const filtered = data.rows.filter((r) => {
+  const filtered = (data.rows || []).filter((r) => {
     if (!search) return true;
     const q = search.trim().toLowerCase();
     return `${r.student.studentId} ${r.student.realName}`.toLowerCase().includes(q);
   });
 
+  const title = data.section === 'people'
+    ? '人员管理'
+    : data.section === 'import'
+      ? '批量导入'
+      : '计分设置';
+  const description = data.section === 'people'
+    ? '维护荣誉榜人员及其奖项记录。'
+    : data.section === 'import'
+      ? '批量录入奖项，并在同一处追踪或回滚导入批次。'
+      : '调整荣誉榜的全局计分参数。';
+
   return (
-    <AdminPage
-      title={(
-        <div className="flex items-center gap-2">
-          <AwardIcon className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">荣誉榜人员</h1>
-        </div>
-      )}
-      requiredPriv={PRIV.PRIV_USER_PROFILE}
-      actions={(
-        <div className="flex gap-2">
-          {canManage ? (
-            <Button variant="outline" onClick={() => setConfigOpen(true)} className="gap-1">
-              <Settings className="size-3.5" />
-              计分参数
-            </Button>
-          ) : null}
-          <Button variant="outline" onClick={() => setBatchesOpen(true)} className="gap-1">
-            <FileSpreadsheet className="size-3.5" />
-            导入批次 ({(data.batches || []).length})
-          </Button>
-          <Button variant="outline" onClick={() => setBatchOpen(true)} className="gap-1">
-            <Upload className="size-3.5" />
-            批量导入奖项
-          </Button>
-          <Button onClick={() => setAddOpen(true)} className="gap-1">
-            <Plus className="size-3.5" />
-            添加人员
-          </Button>
-        </div>
-      )}
+    <ModuleWorkspace
+      moduleTitle="荣誉管理"
+      title={title}
+      description={description}
+      navItems={navItems}
+      activeKey={data.section}
+      bypassPrivGate
+      actions={data.section === 'people' ? (
+        <Button onClick={() => setAddOpen(true)} className="gap-1">
+          <Plus className="size-3.5" />
+          添加人员
+        </Button>
+      ) : data.section === 'import' ? (
+        <Button onClick={() => setBatchOpen(true)} className="gap-1">
+          <Upload className="size-3.5" />
+          导入奖项
+        </Button>
+      ) : undefined}
     >
-      <Card>
-        <CardContent className="p-4">
-          <div className="relative max-w-xs">
-            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-8" placeholder="搜索学号 / 姓名…"
-              value={search} onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {data.report && (
-        <Card className="border-primary/30 bg-primary/5">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">批量导入结果</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1 text-xs">
-            <p>✅ 成功 {data.report.ok} 条{data.report.batchId ? `（批次 ${String(data.report.batchId).slice(-6)}，可在「导入批次」中回滚）` : ''}</p>
-            {data.report.createdStudents > 0 && (
-              <p>🆕 自动建档 {data.report.createdStudents} 名学生</p>
-            )}
-            {data.report.notFound?.length > 0 && (
-              <p>⚠️ 学号未找到：{data.report.notFound.join(', ')}</p>
-            )}
-            {data.report.unknownType?.length > 0 && (
-              <p>⚠️ 未知奖项类型：{Array.from(new Set(data.report.unknownType)).join(', ')}</p>
-            )}
-            {data.report.errors?.length > 0 && (
-              <div>
-                <p>❌ {data.report.errors.length} 行未导入：</p>
-                {data.report.errors.slice(0, 5).map((e: any, i: number) => (
-                  <p key={i} className="pl-4 text-muted-foreground">行 {e.line}: {e.reason}</p>
-                ))}
+      {data.section === 'people' ? (
+        <>
+          <Card>
+            <CardContent className="p-4">
+              <div className="relative max-w-xs">
+                <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  className="pl-8"
+                  placeholder="搜索学号 / 姓名…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
               </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardContent className="p-0">
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-14 pl-5">排名</TableHead>
+                    <TableHead>姓名</TableHead>
+                    <TableHead>学校 / 班级</TableHead>
+                    <TableHead className="w-20 text-right">总分</TableHead>
+                    <TableHead className="w-20 text-right">奖项数</TableHead>
+                    <TableHead className="w-32 pr-5 text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="py-12 text-center text-sm text-muted-foreground">
+                        暂无人员，使用页面主操作添加。
+                      </TableCell>
+                    </TableRow>
+                  ) : filtered.map((r) => (
+                    <TableRow key={r.person._id}>
+                      <TableCell className="pl-5 font-mono text-sm">#{r.rank}</TableCell>
+                      <TableCell>
+                        <p className="text-sm font-medium">{r.student.realName}</p>
+                        <p className="font-mono text-[11px] text-muted-foreground">{r.student.studentId}</p>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {r.student.schoolName}
+                        {r.student.groupNames[0] && ` · ${r.student.groupNames[0]}`}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">{r.totalScore.toFixed(1)}</TableCell>
+                      <TableCell className="text-right text-sm">{r.awardCount}</TableCell>
+                      <TableCell className="pr-5">
+                        <TableActions>
+                          <TableAction href={`/admin/rankboard/people/${r.person._id}`} icon={Pencil}>编辑</TableAction>
+                          {data.canManage ? (
+                            <TableAction
+                              formAction="/admin/rankboard"
+                              hidden={{ operation: 'delete', personId: r.person._id }}
+                              icon={Trash2}
+                              variant="destructive"
+                              confirm="确定从荣誉榜移除该人员？"
+                            >
+                              移除
+                            </TableAction>
+                          ) : null}
+                        </TableActions>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </>
+      ) : null}
+
+      {data.section === 'import' ? (
+        <>
+          {/* Defined below alongside the import-only supporting sections. */}
+          {/* eslint-disable-next-line ts/no-use-before-define */}
+          {data.report ? <ImportReport report={data.report} /> : null}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">导入说明</CardTitle>
+            </CardHeader>
+            <CardContent className="text-sm leading-6 text-muted-foreground">
+              使用 TSV 批量录入奖项；可选自动建立未匹配学生档案。每次提交都会形成可追踪、可回滚的独立批次。
+            </CardContent>
+          </Card>
+          {/* eslint-disable-next-line ts/no-use-before-define */}
+          <ImportBatchesSection batches={data.batches || []} />
+        </>
+      ) : null}
+
+      {data.section === 'settings' && data.config ? (
+        // eslint-disable-next-line ts/no-use-before-define
+        <RankboardSettingsSection config={data.config} />
+      ) : null}
+
+      {addOpen && <AddPersonDialog onClose={() => setAddOpen(false)} />}
+      {batchOpen && (
+        <BatchImportDialog
+          onClose={() => setBatchOpen(false)}
+          schools={data.schools || []}
+        />
+      )}
+    </ModuleWorkspace>
+  );
+}
+
+function ImportReport({ report }: { report: any }) {
+  return (
+    <Card className="border-primary/30 bg-primary/5">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">批量导入结果</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-1 text-xs">
+        <p>成功 {report.ok} 条{report.batchId ? `（批次 ${String(report.batchId).slice(-6)}，可在下方批次历史中回滚）` : ''}</p>
+        {report.createdStudents > 0 && <p>自动建档 {report.createdStudents} 名学生</p>}
+        {report.notFound?.length > 0 && <p>学号未找到：{report.notFound.join(', ')}</p>}
+        {report.unknownType?.length > 0 && (
+          <p>未知奖项类型：{Array.from(new Set(report.unknownType)).join(', ')}</p>
+        )}
+        {report.errors?.length > 0 && (
+          <div>
+            <p>{report.errors.length} 行未导入：</p>
+            {report.errors.slice(0, 5).map((error: any, index: number) => (
+              <p key={index} className="pl-4 text-muted-foreground">行 {error.line}: {error.reason}</p>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * 导入批次审计列表（PLAN §6）：每次 TSV 导入一条记录，可一键回滚。
+ * 批次历史和导入主任务同区呈现，危险操作贴近对应批次。
+ */
+function ImportBatchesSection({ batches }: {
+  batches: Array<{
+    _id: string; createdAt: string; okCount: number; rowCount: number;
+    createdStudents?: number; rolledBackAt?: string;
+  }>;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">批次历史</CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        {batches.length === 0 ? (
+          <p className="px-5 py-10 text-center text-sm text-muted-foreground">还没有导入批次。</p>
+        ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-14 pl-5">排名</TableHead>
-                <TableHead>姓名</TableHead>
-                <TableHead>学校 / 班级</TableHead>
-                <TableHead className="w-20 text-right">总分</TableHead>
-                <TableHead className="w-20 text-right">奖项数</TableHead>
-                <TableHead className="w-32 pr-5 text-right">操作</TableHead>
+                <TableHead className="pl-5">时间</TableHead>
+                <TableHead className="w-24 text-right">成功/总行</TableHead>
+                <TableHead className="w-20 text-right">建档</TableHead>
+                <TableHead className="w-24 text-center">状态</TableHead>
+                <TableHead className="w-24 pr-5 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-12 text-center text-sm text-muted-foreground">
-                    暂无人员，点击右上角添加。
+              {batches.map((batch) => (
+                <TableRow key={batch._id} className={batch.rolledBackAt ? 'opacity-60' : undefined}>
+                  <TableCell className="pl-5 font-mono text-xs">{String(batch.createdAt).replace('T', ' ').slice(0, 16)}</TableCell>
+                  <TableCell className="text-right font-mono text-xs">{batch.okCount}/{batch.rowCount}</TableCell>
+                  <TableCell className="text-right font-mono text-xs">{batch.createdStudents || 0}</TableCell>
+                  <TableCell className="text-center">
+                    {batch.rolledBackAt
+                      ? <Badge variant="outline" className="text-[10px] text-muted-foreground">已回滚</Badge>
+                      : <Badge variant="secondary" className="text-[10px]">生效中</Badge>}
                   </TableCell>
-                </TableRow>
-              ) : filtered.map((r) => (
-                <TableRow key={r.person._id}>
-                  <TableCell className="pl-5 font-mono text-sm">#{r.rank}</TableCell>
-                  <TableCell>
-                    <p className="text-sm font-medium">{r.student.realName}</p>
-                    <p className="font-mono text-[11px] text-muted-foreground">{r.student.studentId}</p>
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {r.student.schoolName}
-                    {r.student.groupNames[0] && ` · ${r.student.groupNames[0]}`}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-sm">{r.totalScore.toFixed(1)}</TableCell>
-                  <TableCell className="text-right text-sm">{r.awardCount}</TableCell>
-                  <TableCell className="pr-5">
-                    <TableActions>
-                      <TableAction href={`/admin/rankboard/people/${r.person._id}`} icon={Pencil}>编辑</TableAction>
-                      {canManage ? (
-                        <TableAction
-                          formAction="/admin/rankboard"
-                          hidden={{ operation: 'delete', personId: r.person._id }}
-                          icon={Trash2}
-                          variant="destructive"
-                          confirm="确定从荣誉榜移除该人员？"
-                        >
-                          移除
-                        </TableAction>
-                      ) : null}
-                    </TableActions>
+                  <TableCell className="pr-5 text-right">
+                    {!batch.rolledBackAt ? (
+                      <TableAction
+                        formAction="/admin/rankboard"
+                        hidden={{ operation: 'rollbackBatch', batchId: batch._id }}
+                        variant="destructive"
+                        confirm={`回滚该批次？将从所有人员移除该批次导入的 ${batch.okCount} 条奖项（自动建档的学生档案保留）。`}
+                      >
+                        回滚
+                      </TableAction>
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
-
-      {addOpen && <AddPersonDialog onClose={() => setAddOpen(false)} />}
-      {batchOpen && <BatchImportDialog onClose={() => setBatchOpen(false)} schools={data.schools || []} />}
-      {configOpen && <ConfigDialog config={data.config} onClose={() => setConfigOpen(false)} />}
-      {batchesOpen && <ImportBatchesDialog batches={data.batches || []} onClose={() => setBatchesOpen(false)} />}
-    </AdminPage>
-  );
-}
-
-/**
- * 导入批次审计列表（PLAN §6）：每次 TSV 导入一条记录，可一键回滚
- * （回滚 = 从所有人员奖项里拉掉该批次的奖项，批次标记已回滚）。
- */
-function ImportBatchesDialog({ batches, onClose }: {
-  batches: Array<{
-    _id: string; createdAt: string; okCount: number; rowCount: number;
-    createdStudents?: number; rolledBackAt?: string;
-  }>;
-  onClose: () => void;
-}) {
-  return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="w-full sm:w-[640px]" onClose={onClose}>
-        <DialogHeader><DialogTitle>导入批次</DialogTitle></DialogHeader>
-        <div className="p-5">
-          {batches.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">还没有导入批次。批量导入奖项后会在这里留档。</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>时间</TableHead>
-                  <TableHead className="w-24 text-right">成功/总行</TableHead>
-                  <TableHead className="w-20 text-right">建档</TableHead>
-                  <TableHead className="w-24 text-center">状态</TableHead>
-                  <TableHead className="w-24 text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {batches.map((b) => (
-                  <TableRow key={b._id} className={b.rolledBackAt ? 'opacity-60' : undefined}>
-                    <TableCell className="font-mono text-xs">{String(b.createdAt).replace('T', ' ').slice(0, 16)}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{b.okCount}/{b.rowCount}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">{b.createdStudents || 0}</TableCell>
-                    <TableCell className="text-center">
-                      {b.rolledBackAt
-                        ? <Badge variant="outline" className="text-[10px] text-muted-foreground">已回滚</Badge>
-                        : <Badge variant="secondary" className="text-[10px]">生效中</Badge>}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {!b.rolledBackAt ? (
-                        <TableAction
-                          formAction="/admin/rankboard"
-                          hidden={{ operation: 'rollbackBatch', batchId: b._id }}
-                          variant="destructive"
-                          confirm={`回滚该批次？将从所有人员移除该批次导入的 ${b.okCount} 条奖项（自动建档的学生档案保留）。`}
-                        >
-                          回滚
-                        </TableAction>
-                      ) : null}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -566,7 +619,10 @@ function BatchImportDialog({ onClose, schools }: {
               <p className="mt-2">空行和 # 开头的行会被跳过。每次导入记录为一个批次，可整批回滚；相同内容重复导入会被拒绝。</p>
             </div>
             <textarea
-              name="batchTsv" rows={12} spellCheck={false} required
+              name="batchTsv"
+              rows={12}
+              spellCheck={false}
+              required
               className="w-full rounded-md border bg-background p-3 font-mono text-xs"
               placeholder={'# 示例\n2023001\ticpc_gold\tICPC 北京站\t2025-04\t12\t1\t红蓝队\t张三,李四\t王五'}
             />
@@ -608,16 +664,18 @@ function BatchImportDialog({ onClose, schools }: {
   );
 }
 
-function ConfigDialog({
-  config, onClose,
-}: { config: { baseScore: number; decayFactor: number }; onClose: () => void }) {
+function RankboardSettingsSection({
+  config,
+}: { config: { baseScore: number; decayFactor: number } }) {
   return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="w-full sm:w-[440px]" onClose={onClose}>
-        <DialogHeader><DialogTitle>计分参数</DialogTitle></DialogHeader>
-        <form method="post" action="/admin/rankboard" className="flex flex-col">
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">计分参数</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form method="post" action="/admin/rankboard" className="max-w-xl space-y-5">
           <input type="hidden" name="operation" value="config" />
-          <div className="space-y-4 p-5">
+          <div className="space-y-4">
             <FormField label="基础分（baseScore）" htmlFor="cfg-base">
               <Input id="cfg-base" name="baseScore" type="number" step="any" defaultValue={config.baseScore} />
               <p className="mt-1 text-[11px] text-muted-foreground">所有奖项得分的乘数。默认 100。</p>
@@ -627,31 +685,34 @@ function ConfigDialog({
               <p className="mt-1 text-[11px] text-muted-foreground">对启用了 useRankDecay 的奖项：weight × decayFactor^(liveRank-1)。默认 0.5。</p>
             </FormField>
           </div>
-          <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
-            <Button type="button" variant="ghost" onClick={onClose}>取消</Button>
+          <div className="flex justify-end border-t pt-4">
             <Button type="submit">保存</Button>
           </div>
         </form>
-      </DialogContent>
-    </Dialog>
+      </CardContent>
+    </Card>
   );
 }
 
 /* ─────────────────────────── Award types ─────────────────────────── */
 
 export function AdminAwardTypesPage() {
-  const data = useBootstrap().page.data as { types: AwardType[] };
+  const data = useBootstrap().page.data as {
+    types: AwardType[];
+    canImport: boolean;
+    canManage: boolean;
+  };
   const [editing, setEditing] = useState<AwardType | null>(null);
   const [creating, setCreating] = useState(false);
+  if (!data.canManage) throw new Error('Rankboard structure capability is missing');
   return (
-    <AdminPage
-      title={(
-        <div className="flex items-center gap-2">
-          <Star className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">奖项类型</h1>
-        </div>
-      )}
-      requiredPriv={PRIV.PRIV_USER_PROFILE}
+    <ModuleWorkspace
+      moduleTitle="荣誉管理"
+      title="奖项类型"
+      description="维护奖项分类、权重和排名衰减规则。"
+      navItems={rankboardWorkspaceNav(data.canManage)}
+      activeKey="awards"
+      bypassPrivGate
       actions={(
         <Button onClick={() => setCreating(true)} className="gap-1">
           <Plus className="size-3.5" />
@@ -698,7 +759,8 @@ export function AdminAwardTypesPage() {
                       <TableAction
                         formAction="/admin/rankboard/awards"
                         hidden={{ operation: 'delete', key: t.key }}
-                        icon={Trash2} variant="destructive"
+                        icon={Trash2}
+                        variant="destructive"
                         confirm="确定删除？被引用的奖项类型会改为隐藏。"
                       >
                         删除
@@ -717,7 +779,7 @@ export function AdminAwardTypesPage() {
           onClose={() => { setEditing(null); setCreating(false); }}
         />
       )}
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -781,11 +843,13 @@ export function AdminRankBoardPersonPage() {
     person: PersonRecord;
     student: { _id: string; studentId: string; realName: string } | null;
     types: AwardType[];
+    canImport: boolean;
+    canManage: boolean;
   };
 
   const [awards, setAwards] = useState<Award[]>(data.person.awards || []);
   const [employmentStatus, setEmploymentStatus] = useState(data.person.employmentStatus || '');
-  const typeMap = useMemo(() => new Map(data.types.map((t) => [t.key, t])), [data.types]);
+  if (!data.canImport) throw new Error('Rankboard management capability is missing');
 
   const updateAward = (idx: number, patch: Partial<Award>) => {
     setAwards((prev) => prev.map((a, i) => (i === idx ? { ...a, ...patch } : a)));
@@ -810,17 +874,13 @@ export function AdminRankBoardPersonPage() {
   };
 
   return (
-    <AdminPage
-      title={(
-        <div className="flex items-center gap-2">
-          <AwardIcon className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">
-            编辑：{data.student?.realName || '（未找到学生档案）'}
-          </h1>
-        </div>
-      )}
+    <ModuleWorkspace
+      moduleTitle="荣誉管理"
+      title={`编辑：${data.student?.realName || '（未找到学生档案）'}`}
       description={data.student ? `${data.student.studentId}` : ''}
-      requiredPriv={PRIV.PRIV_USER_PROFILE}
+      navItems={rankboardWorkspaceNav(data.canManage)}
+      activeKey="people"
+      bypassPrivGate
     >
       <form method="post" action={`/admin/rankboard/people/${data.person._id}`} className="space-y-4">
         <input type="hidden" name="operation" value="save" />
@@ -852,8 +912,6 @@ export function AdminRankBoardPersonPage() {
             </Card>
           )}
           {awards.map((award, idx) => {
-            const type = typeMap.get(award.type);
-            const cover = award.imageUrls?.[award.coverIndex ?? 0];
             const fields = awardFields(award.type);
             return (
               <Card key={idx}>
@@ -982,7 +1040,7 @@ export function AdminRankBoardPersonPage() {
 
         <div className="flex justify-end gap-2">
           <Button type="button" variant="ghost" asChild>
-            <a href="/admin/rankboard">返回列表</a>
+            <a href="/admin/rankboard?section=people">返回列表</a>
           </Button>
           <Button type="submit" className="gap-1">
             <Save className="size-3.5" />
@@ -990,6 +1048,6 @@ export function AdminRankBoardPersonPage() {
           </Button>
         </div>
       </form>
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }

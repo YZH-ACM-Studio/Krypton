@@ -53,13 +53,12 @@ export interface KryptonUser {
   avatar?: string;
   /** Fully-resolved image URL (always populated for signed-in users). */
   avatarUrl?: string;
-  /**
-   * Krypton §4 侧边栏 affordance（服务端算好下发；真正的强制在后端）：
-   * 题库白名单模式开启且无 PERM_VIEW_PROBLEM_BANK 时为 false。
-   */
-  canViewProblemBank?: boolean;
-  /** 有 PERM_CREATE_PROBLEM——控制「我的题目」侧边栏入口。 */
-  canCreateProblem?: boolean;
+  /** 服务端统一算出的题库枚举能力；缺失/异常时服务端固定下发 false。 */
+  canBrowseProblemBank: boolean;
+  /** system 域荣誉数据维护能力；仅控制前端入口，服务端仍会鉴权。 */
+  canImportRankboard?: boolean;
+  /** system 域荣誉结构维护能力；MANAGE 蕴含 IMPORT。 */
+  canManageRankboard?: boolean;
 }
 
 export interface KryptonDomain {

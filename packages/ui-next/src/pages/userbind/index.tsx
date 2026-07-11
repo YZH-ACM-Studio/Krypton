@@ -1,53 +1,245 @@
 /**
  * krypton-userbind admin and student pages.
  *
- * All admin pages use the AdminPage container (auto registers in the admin
- * sidebar). All student pages render free-standing.
+ * Admin pages share the module workspace; student pages render free-standing.
  *
  * Pages register with the PAGE_MAP at module load (see import in resolver.tsx).
  */
-import { type ReactNode, useState } from 'react';
 import {
-  AlertCircle, Building2, ChevronRight, Copy, FileDown, GraduationCap, Inbox, KeyRound,
-  LinkIcon, ListChecks, Mail, Plus, RefreshCw, Search, ShieldCheck, UserCheck, Users, UserPlus,
+  AlertCircle, Building2, ChevronRight, Copy, GraduationCap, Inbox, KeyRound,
+  LinkIcon, ListChecks, Mail, Plus, RefreshCw, Search, ShieldCheck, UserCheck, UserPlus, Users,
 } from 'lucide-react';
-import { useBootstrap } from '@/lib/bootstrap';
-import { PRIV } from '@/lib/perms';
-import { registerAdminNavSection } from '@/lib/admin-nav-registry';
-import { AdminPage } from '@/components/admin/admin-page';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { type ReactNode, useState } from 'react';
+import { ModuleWorkspace, type ModuleWorkspaceNavItem } from '@/components/management/module-workspace';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Pagination } from '@/components/ui/pagination';
-import { FormField, FormRow, FormSection } from '@/components/ui/form';
-import { ImportResultPanel, RosterImporter, type ImportResult } from '@/components/userbind/roster-importer';
-import { DateTime } from '@/components/ui/datetime';
-import { MiniTabs } from '@/components/ui/mini-tabs';
-import { TableAction, TableActions } from '@/components/ui/table-actions';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import { DateTime } from '@/components/ui/datetime';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { FormField, FormRow, FormSection } from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { MiniTabs } from '@/components/ui/mini-tabs';
+import { Pagination } from '@/components/ui/pagination';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { TableAction, TableActions } from '@/components/ui/table-actions';
+import { type ImportResult, ImportResultPanel, RosterImporter } from '@/components/userbind/roster-importer';
+import { useBootstrap } from '@/lib/bootstrap';
+import { PRIV } from '@/lib/perms';
 
-// Register navigation entries for the admin sidebar — happens once at module load.
-// (overview was dropped; /admin/userbind still resolves server-side but doesn't
-// surface in the nav since the stats card duplicated info reachable elsewhere.)
-registerAdminNavSection({
-  key: 'userbind',
-  label: '用户绑定',
-  order: 30,
+const USERBIND_WORKSPACE_NAV = [
+  {
+    key: 'schools',
+    label: '学校',
+    href: '/admin/userbind/schools',
+    templateNames: ['admin_userbind_schools.html', 'admin_userbind_school_detail.html'],
+  },
+  {
+    key: 'groups',
+    label: '班级与队伍',
+    href: '/admin/userbind/groups',
+    templateNames: ['admin_userbind_groups.html', 'admin_userbind_group_detail.html'],
+  },
+  {
+    key: 'students',
+    label: '学生',
+    href: '/admin/userbind/students',
+    templateNames: ['admin_userbind_students.html'],
+  },
+  {
+    key: 'import',
+    label: '批量导入',
+    href: '/admin/userbind/students/import',
+    templateNames: ['admin_userbind_students_import.html'],
+  },
+  {
+    key: 'tokens',
+    label: '邀请令牌',
+    href: '/admin/userbind/tokens',
+    templateNames: ['admin_userbind_tokens.html'],
+  },
+  {
+    key: 'requests',
+    label: '绑定申请',
+    href: '/admin/userbind/requests',
+    templateNames: ['admin_userbind_requests.html'],
+  },
+] satisfies readonly ModuleWorkspaceNavItem[];
+
+const USERBIND_WORKSPACE_PROPS = {
+  moduleTitle: '用户绑定',
+  navItems: USERBIND_WORKSPACE_NAV,
   requiredPriv: PRIV.PRIV_EDIT_SYSTEM,
-  items: [
-    { key: 'schools', label: '学校', href: '/admin/userbind/schools', icon: Building2, templateNames: ['admin_userbind_schools.html', 'admin_userbind_school_detail.html'] },
-    { key: 'groups', label: '班级/队伍', href: '/admin/userbind/groups', icon: Users, templateNames: ['admin_userbind_groups.html', 'admin_userbind_group_detail.html'] },
-    { key: 'students', label: '学生', href: '/admin/userbind/students', icon: GraduationCap, templateNames: ['admin_userbind_students.html'] },
-    { key: 'import', label: '批量导入', href: '/admin/userbind/students/import', icon: UserPlus, templateNames: ['admin_userbind_students_import.html'] },
-    { key: 'tokens', label: '邀请令牌', href: '/admin/userbind/tokens', icon: KeyRound, templateNames: ['admin_userbind_tokens.html'] },
-    { key: 'requests', label: '绑定申请', href: '/admin/userbind/requests', icon: FileDown, templateNames: ['admin_userbind_requests.html'] },
-  ],
-});
+} as const;
+
+type StudentBindingStatus = 'all' | 'bound' | 'unbound';
+type StudentTimeField = 'boundAt' | 'createdAt';
+
+interface StudentFilterValues {
+  q: string;
+  enrollmentYear: string;
+  bindingStatus: StudentBindingStatus;
+  timeField: StudentTimeField;
+  from: string;
+  to: string;
+}
+
+interface StudentFilterBootstrapValues {
+  enrollmentYear?: string | number | null;
+  bindingStatus?: StudentBindingStatus | null;
+  timeField?: StudentTimeField | null;
+  from?: string | null;
+  to?: string | null;
+}
+
+function normalizeStudentFilterValues(
+  q: string | null | undefined,
+  filters: StudentFilterBootstrapValues | null | undefined,
+): StudentFilterValues {
+  return {
+    q: String(q || ''),
+    enrollmentYear: filters?.enrollmentYear == null ? '' : String(filters.enrollmentYear),
+    bindingStatus: filters?.bindingStatus === 'bound' || filters?.bindingStatus === 'unbound'
+      ? filters.bindingStatus
+      : 'all',
+    timeField: filters?.timeField === 'createdAt' ? 'createdAt' : 'boundAt',
+    from: String(filters?.from || ''),
+    to: String(filters?.to || ''),
+  };
+}
+
+function buildStudentFilterParams(
+  values: StudentFilterValues,
+  scope: { tab?: string, schoolId?: string | null, groupId?: string | null } = {},
+) {
+  const params = new URLSearchParams();
+  if (scope.tab) params.set('tab', scope.tab);
+  if (scope.schoolId) params.set('schoolId', scope.schoolId);
+  if (scope.groupId) params.set('groupId', scope.groupId);
+  params.set('q', values.q);
+  params.set('enrollmentYear', values.enrollmentYear);
+  params.set('bindingStatus', values.bindingStatus);
+  params.set('timeField', values.timeField);
+  params.set('from', values.from);
+  params.set('to', values.to);
+  return params;
+}
+
+function StudentFilterBar({
+  action,
+  values,
+  clearHref,
+  schools,
+  schoolId,
+  groupId,
+  preserveStudentsTab = false,
+}: {
+  action: string;
+  values: StudentFilterValues;
+  clearHref: string;
+  schools?: Array<{ _id: string, name: string }>;
+  schoolId?: string | null;
+  groupId?: string | null;
+  preserveStudentsTab?: boolean;
+}) {
+  const boundAtWithoutBoundRecords = values.bindingStatus === 'unbound'
+    && values.timeField === 'boundAt';
+  return (
+    <Card>
+      <CardContent className="space-y-3 p-5">
+        <form method="get" action={action} className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {preserveStudentsTab && <input type="hidden" name="tab" value="students" />}
+          {groupId && <input type="hidden" name="groupId" value={groupId} />}
+          {schools && (
+            <label className="space-y-1 text-xs font-medium text-muted-foreground">
+              学校
+              <SimpleSelect
+                name="schoolId"
+                defaultValue={schoolId || ''}
+                options={[
+                  { value: '', label: '所有学校' },
+                  ...schools.map((school) => ({ value: school._id, label: school.name })),
+                ]}
+              />
+            </label>
+          )}
+          <label className="space-y-1 text-xs font-medium text-muted-foreground">
+            学号或姓名
+            <Input name="q" defaultValue={values.q} placeholder="输入关键词" />
+          </label>
+          <label className="space-y-1 text-xs font-medium text-muted-foreground">
+            入学年
+            <Input
+              name="enrollmentYear"
+              defaultValue={values.enrollmentYear}
+              inputMode="numeric"
+              pattern="(?:19|20)\d{2}"
+              placeholder="如 2024"
+            />
+          </label>
+          <label className="space-y-1 text-xs font-medium text-muted-foreground">
+            绑定状态
+            <SimpleSelect
+              name="bindingStatus"
+              defaultValue={values.bindingStatus}
+              options={[
+                { value: 'all', label: '全部' },
+                { value: 'bound', label: '已绑定' },
+                { value: 'unbound', label: '未绑定' },
+              ]}
+            />
+          </label>
+          <label className="space-y-1 text-xs font-medium text-muted-foreground">
+            时间字段
+            <SimpleSelect
+              name="timeField"
+              defaultValue={values.timeField}
+              options={[
+                { value: 'boundAt', label: '绑定时间' },
+                { value: 'createdAt', label: '建档时间' },
+              ]}
+            />
+          </label>
+          <label className="space-y-1 text-xs font-medium text-muted-foreground">
+            开始日期
+            <Input name="from" type="date" defaultValue={values.from} />
+          </label>
+          <label className="space-y-1 text-xs font-medium text-muted-foreground">
+            结束日期
+            <Input name="to" type="date" defaultValue={values.to} />
+          </label>
+          <div className="flex items-end gap-2">
+            <Button type="submit" className="gap-1">
+              <Search className="size-3.5" />筛选
+            </Button>
+            <Button asChild type="button" variant="outline">
+              <a href={clearHref}>清空</a>
+            </Button>
+          </div>
+        </form>
+        {boundAtWithoutBoundRecords && (
+          <p className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+            <AlertCircle className="size-3.5 shrink-0" />
+            未绑定记录没有绑定时间；设置日期范围后结果会为空，可改用建档时间筛选。
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function StudentListEmptyState({ clearHref }: { clearHref: string }) {
+  return (
+    <div className="flex flex-col items-center gap-3 py-2">
+      <span>没有符合当前条件的学生，请调整或清空筛选。</span>
+      <Button asChild size="sm" variant="outline">
+        <a href={clearHref}>清空筛选</a>
+      </Button>
+    </div>
+  );
+}
 
 // ─── Admin: Overview ──────────────────────────────────────────────────────
 
@@ -62,7 +254,12 @@ export function AdminUserbindOverviewPage() {
     { label: '待审申请', value: data.pendingRequests, href: '/admin/userbind/requests', icon: Inbox },
   ];
   return (
-    <AdminPage title="用户绑定" description="学校、用户组、学生记录和绑定流程的管理面板。" requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
+    <ModuleWorkspace
+      {...USERBIND_WORKSPACE_PROPS}
+      title="管理总览"
+      description="学校、用户组、学生记录和绑定流程的管理面板。"
+      activeKey="schools"
+    >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((s) => (
           <a key={s.label} href={s.href}>
@@ -80,7 +277,7 @@ export function AdminUserbindOverviewPage() {
           </a>
         ))}
       </div>
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -92,7 +289,8 @@ export function AdminUserbindSchoolsPage() {
   const [createOpen, setCreateOpen] = useState(false);
 
   return (
-    <AdminPage
+    <ModuleWorkspace
+      {...USERBIND_WORKSPACE_PROPS}
       title="学校"
       actions={(
         <Button onClick={() => setCreateOpen(true)} className="gap-1">
@@ -100,7 +298,6 @@ export function AdminUserbindSchoolsPage() {
           新建学校
         </Button>
       )}
-      requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
     >
       <Card>
         <CardContent className="p-0">
@@ -140,7 +337,7 @@ export function AdminUserbindSchoolsPage() {
       </Card>
 
       <CreateSchoolDialog open={createOpen} onClose={() => setCreateOpen(false)} />
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -297,11 +494,20 @@ export function AdminUserbindSchoolDetailPage() {
     groupPage: number;
     groupLimit: number;
     groupQuery: string;
-    students: Array<{ _id: string; studentId: string; realName: string; boundUserId: number | null }>;
+    students: Array<{
+      _id: string;
+      studentId: string;
+      realName: string;
+      boundUserId?: number | null;
+      enrollmentYear?: number | null;
+      createdAt?: string | null;
+      boundAt?: string | null;
+    }>;
     studentTotal: number;
     studentPage: number;
     studentLimit: number;
     studentQuery: string;
+    studentFilters?: StudentFilterBootstrapValues;
     schoolTokens: Array<{ _id: string; createdAt: string; expiresAt: string | null }>;
     importSearchResults: Array<{ _id: string; studentId: string; realName: string; boundUserId: number | null }>;
     importQ: string;
@@ -313,8 +519,16 @@ export function AdminUserbindSchoolDetailPage() {
   const studentPage = data.studentPage || 1;
   const studentLimit = data.studentLimit || 50;
   const studentPageCount = Math.max(1, Math.ceil((data.studentTotal || 0) / studentLimit));
+  const studentFilterValues = normalizeStudentFilterValues(data.studentQuery, data.studentFilters);
+  const schoolStudentsHref = `/admin/userbind/schools/${data.school._id}`;
+  const schoolStudentsClearHref = `${schoolStudentsHref}?tab=students`;
+  const studentPaginationParams = buildStudentFilterParams(
+    studentFilterValues,
+    { tab: 'students' },
+  );
+  const studentPaginationBaseUrl = `${schoolStudentsHref}?${studentPaginationParams.toString()}`;
   return (
-    <AdminPage title={`学校 - ${data.school.name}`} requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
+    <ModuleWorkspace {...USERBIND_WORKSPACE_PROPS} title={`学校 - ${data.school.name}`}>
       <MiniTabs
         items={[
           { value: 'students', label: '学生', count: data.studentTotal || 0, icon: GraduationCap, href: `/admin/userbind/schools/${data.school._id}?tab=students` },
@@ -326,62 +540,71 @@ export function AdminUserbindSchoolDetailPage() {
       />
 
       {activeTab === 'students' && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-base">
-              <span>学生 ({data.studentTotal})</span>
-              <form method="get" action={`/admin/userbind/schools/${data.school._id}`} className="flex gap-2">
-                <input type="hidden" name="tab" value="students" />
-                <Input name="q" defaultValue={data.studentQuery || ''} placeholder="搜索学号 / 姓名" className="w-56" />
-                <Button type="submit" variant="outline" className="gap-1">
-                  <Search className="size-3.5" />搜索
-                </Button>
-              </form>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="pl-5">学号</TableHead>
-                  <TableHead>姓名</TableHead>
-                  <TableHead className="w-32">绑定状态</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.students.map((s) => (
-                  <TableRow key={s._id}>
-                    <TableCell className="pl-5 font-mono text-sm">{s.studentId}</TableCell>
-                    <TableCell>{s.realName}</TableCell>
-                    <TableCell>
-                      {s.boundUserId ? (
-                        <Badge variant="secondary">已绑定 UID {s.boundUserId}</Badge>
-                      ) : (
-                        <Badge variant="outline">未绑定</Badge>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {data.students.length === 0 && (
+        <div className="space-y-4">
+          <StudentFilterBar
+            action={schoolStudentsHref}
+            values={studentFilterValues}
+            clearHref={`/admin/userbind/schools/${data.school._id}?tab=students`}
+            preserveStudentsTab
+          />
+          <Card>
+            <CardHeader className="px-5 pb-3 pt-5">
+              <CardTitle className="text-base">学生 ({data.studentTotal})</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell colSpan={3} className="py-8 text-center text-sm text-muted-foreground">
-                      {data.studentQuery ? `没有匹配「${data.studentQuery}」的学生` : '暂无学生。使用「导入」页添加。'}
-                    </TableCell>
+                    <TableHead className="pl-5">学号</TableHead>
+                    <TableHead>姓名</TableHead>
+                    <TableHead className="w-24">入学年</TableHead>
+                    <TableHead className="w-40">绑定状态</TableHead>
+                    <TableHead className="w-40">建档时间</TableHead>
+                    <TableHead className="w-40">绑定时间</TableHead>
                   </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-          {studentPageCount > 1 && (
-            <div className="flex justify-center border-t px-5 py-3">
-              <Pagination
-                current={studentPage}
-                total={studentPageCount}
-                baseUrl={`/admin/userbind/schools/${data.school._id}?tab=students&q=${encodeURIComponent(data.studentQuery || '')}&`}
-              />
-            </div>
-          )}
-        </Card>
+                </TableHeader>
+                <TableBody>
+                  {data.students.map((s) => (
+                    <TableRow key={s._id}>
+                      <TableCell className="pl-5 font-mono text-sm">{s.studentId}</TableCell>
+                      <TableCell>{s.realName}</TableCell>
+                      <TableCell>{s.enrollmentYear || <span className="text-muted-foreground">—</span>}</TableCell>
+                      <TableCell>
+                        {s.boundUserId && s.boundUserId > 0 ? (
+                          <Badge variant="secondary">已绑定 UID {s.boundUserId}</Badge>
+                        ) : (
+                          <Badge variant="outline">未绑定</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        <DateTime value={s.createdAt} />
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        <DateTime value={s.boundAt} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {data.students.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                        <StudentListEmptyState clearHref={schoolStudentsClearHref} />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+            {studentPageCount > 1 && (
+              <div className="flex justify-center border-t px-5 py-3">
+                <Pagination
+                  current={studentPage}
+                  total={studentPageCount}
+                  baseUrl={studentPaginationBaseUrl}
+                />
+              </div>
+            )}
+          </Card>
+        </div>
       )}
 
       {activeTab === 'import' && (
@@ -460,7 +683,7 @@ export function AdminUserbindSchoolDetailPage() {
           </CardContent>
         </Card>
       )}
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -478,10 +701,10 @@ export function AdminUserbindGroupsPage() {
   const archivedCount = data.groups.filter((g) => g.archivedAt).length;
   const visibleGroups = showArchived ? data.groups : data.groups.filter((g) => !g.archivedAt);
   return (
-    <AdminPage
+    <ModuleWorkspace
+      {...USERBIND_WORKSPACE_PROPS}
       title="班级 / 队伍（用户组）"
       description="学校下的学生分组 — 课程班级 / 校队 / 训练队等。"
-      requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       actions={(
         <div className="flex items-center gap-3">
           {archivedCount > 0 ? (
@@ -576,7 +799,7 @@ export function AdminUserbindGroupsPage() {
         onClose={() => setCreateOpen(false)}
         schools={data.schools}
       />
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -679,7 +902,8 @@ export function AdminUserbindGroupDetailPage() {
   const groupHref = `/admin/userbind/groups/${data.group._id}`;
   const isArchived = !!data.group.archivedAt;
   return (
-    <AdminPage
+    <ModuleWorkspace
+      {...USERBIND_WORKSPACE_PROPS}
       title={(
         <span className="flex items-center gap-2">
           {`用户组 - ${data.group.name}`}
@@ -687,7 +911,6 @@ export function AdminUserbindGroupDetailPage() {
         </span>
       )}
       description={isArchived ? `${data.school?.name || ''}（已归档：不可添加成员/生成邀请，可移除成员；清空后可在列表页永久删除）` : data.school?.name}
-      requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
     >
       <div className="flex flex-col gap-4">
         <MiniTabs
@@ -883,7 +1106,7 @@ export function AdminUserbindGroupDetailPage() {
           </>
         )}
       </div>
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -893,42 +1116,38 @@ export function AdminUserbindStudentsPage() {
   const data = useBootstrap().page.data as {
     students: Array<{
       _id: string; studentId: string; realName: string;
-      boundUserId: number | null; schoolId: string;
-      enrollmentYear: number | null;
+      boundUserId?: number | null; schoolId: string;
+      enrollmentYear?: number | null;
+      createdAt?: string | null;
+      boundAt?: string | null;
     }>;
     total: number; page: number; pageSize: number;
     schools: Array<{ _id: string; name: string }>;
     filterSchoolId: string | null;
     filterGroupId: string | null;
     q: string | null;
+    studentFilters?: StudentFilterBootstrapValues;
   };
   const page = data.page || 1;
   const pageSize = data.pageSize || 50;
   const pageCount = Math.max(1, Math.ceil((data.total || 0) / pageSize));
-  const baseParams = new URLSearchParams();
-  if (data.filterSchoolId) baseParams.set('schoolId', data.filterSchoolId);
-  if (data.filterGroupId) baseParams.set('groupId', data.filterGroupId);
-  if (data.q) baseParams.set('q', data.q);
-  const paginationBaseUrl = `/admin/userbind/students${baseParams.toString() ? `?${baseParams}` : ''}`;
+  const filterValues = normalizeStudentFilterValues(data.q, data.studentFilters);
+  const baseParams = buildStudentFilterParams(filterValues, {
+    schoolId: data.filterSchoolId,
+    groupId: data.filterGroupId,
+  });
+  const paginationBaseUrl = `/admin/userbind/students?${baseParams.toString()}`;
+  const clearHref = '/admin/userbind/students';
   return (
-    <AdminPage title="学生记录" description={`共 ${data.total} 条`} requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
-      <Card>
-        <CardContent className="p-5">
-          <form method="get" className="flex flex-wrap gap-3">
-            <SimpleSelect
-              name="schoolId"
-              defaultValue={data.filterSchoolId || ''}
-              className="w-auto min-w-[10rem]"
-              options={[
-                { value: '', label: '所有学校' },
-                ...data.schools.map((s) => ({ value: s._id, label: s.name })),
-              ]}
-            />
-            <Input name="q" defaultValue={data.q || ''} placeholder="搜索学号 / 姓名" className="max-w-xs" />
-            <Button type="submit">筛选</Button>
-          </form>
-        </CardContent>
-      </Card>
+    <ModuleWorkspace {...USERBIND_WORKSPACE_PROPS} title="学生记录" description={`共 ${data.total} 条`}>
+      <StudentFilterBar
+        action="/admin/userbind/students"
+        values={filterValues}
+        clearHref={clearHref}
+        schools={data.schools}
+        schoolId={data.filterSchoolId}
+        groupId={data.filterGroupId}
+      />
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -938,6 +1157,8 @@ export function AdminUserbindStudentsPage() {
                 <TableHead>姓名</TableHead>
                 <TableHead className="w-32">入学年</TableHead>
                 <TableHead className="w-40">绑定状态</TableHead>
+                <TableHead className="w-40">建档时间</TableHead>
+                <TableHead className="w-40">绑定时间</TableHead>
                 <TableHead className="w-32">操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -956,11 +1177,17 @@ export function AdminUserbindStudentsPage() {
                     )}
                   </TableCell>
                   <TableCell>
-                    {s.boundUserId ? (
+                    {s.boundUserId && s.boundUserId > 0 ? (
                       <Badge variant="secondary">已绑定 UID {s.boundUserId}</Badge>
                     ) : (
                       <Badge variant="outline">未绑定</Badge>
                     )}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    <DateTime value={s.createdAt} />
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    <DateTime value={s.boundAt} />
                   </TableCell>
                   <TableCell>
                     {!s.boundUserId && (
@@ -977,8 +1204,8 @@ export function AdminUserbindStudentsPage() {
               ))}
               {data.students.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
-                    {data.q ? `没有匹配「${data.q}」的学生` : '暂无学生记录。'}
+                  <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+                    <StudentListEmptyState clearHref={clearHref} />
                   </TableCell>
                 </TableRow>
               )}
@@ -991,7 +1218,7 @@ export function AdminUserbindStudentsPage() {
           </div>
         )}
       </Card>
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -1008,7 +1235,7 @@ export function AdminUserbindStudentsImportPage() {
   const [groupId, setGroupId] = useState('');
 
   return (
-    <AdminPage title="批量导入学生" requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
+    <ModuleWorkspace {...USERBIND_WORKSPACE_PROPS} title="批量导入学生">
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">导入格式与校验规则</CardTitle>
@@ -1100,7 +1327,7 @@ export function AdminUserbindStudentsImportPage() {
       />
 
       {data.report && <ImportResultPanel report={{ ...data.report, preflightInvalid: data.preflightInvalid || [] }} />}
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -1123,7 +1350,7 @@ export function AdminUserbindTokensPage() {
   };
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   return (
-    <AdminPage title="邀请令牌" requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
+    <ModuleWorkspace {...USERBIND_WORKSPACE_PROPS} title="邀请令牌">
       <Card>
         <CardContent className="p-5">
           <div className="flex items-center gap-3">
@@ -1208,7 +1435,7 @@ export function AdminUserbindTokensPage() {
           </Table>
         </CardContent>
       </Card>
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -1227,7 +1454,7 @@ export function AdminUserbindRequestsPage() {
     schoolMap: Record<string, string>;
   };
   return (
-    <AdminPage title="绑定申请" description={`共 ${data.total} 条`} requiredPriv={PRIV.PRIV_EDIT_SYSTEM}>
+    <ModuleWorkspace {...USERBIND_WORKSPACE_PROPS} title="绑定申请" description={`共 ${data.total} 条`}>
       <Card>
         <CardContent className="p-5">
           <MiniTabs
@@ -1328,7 +1555,7 @@ export function AdminUserbindRequestsPage() {
           </Table>
         </CardContent>
       </Card>
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 

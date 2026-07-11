@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   Swords,
   Trophy,
+  UserRoundCog,
   Wrench,
   X,
 } from 'lucide-react';
@@ -103,17 +104,23 @@ export function Sidebar({
       items: [
         { label: '首页', href: bs.urls.home, icon: Home, templates: ['main.html'] },
         { label: '公告', href: '/announce', icon: Megaphone, templates: ['announce_list.html', 'announce_detail.html'] },
-        // §4 题库白名单模式：无 bank 权限的学生不显示题库入口（服务端同步 302）。
-        ...(bs.user.canViewProblemBank !== false
-          ? [{ label: '题库', href: bs.urls.problems, icon: BookOpen, templates: ['problem_main.html', 'problem_detail.html', 'problem_submit.html', 'problem_hack.html', 'problem_edit.html', 'problem_config.html', 'problem_files.html', 'problem_solution.html', 'problem_statistics.html', 'problem_import.html', 'problem_import_fps.html'] }]
-          : []),
-        // 出题人工作台：题库对学生隐藏后，自己 own 的题从这里管理（§4）。
-        ...(bs.user.canCreateProblem && bs.user.canViewProblemBank === false
-          ? [{ label: '我的题目', href: '/problem/mine', icon: BookOpen, templates: ['problem_mine.html'] }]
-          : []),
-        // 出卷中心：教师/管理员（PERM_CREATE_PROBLEM，服务端同 gate）。
-        ...(bs.user.canCreateProblem
-          ? [{ label: '出卷中心', href: '/paper-center', icon: NotebookPen, templates: ['paper_center.html', 'paper_center_edit.html'] }]
+        // P2.11：三个题库枚举入口只消费服务端的唯一 capability。具体题详情、
+        // 比赛/作业/训练入口始终保留；导航隐藏不是服务端授权边界。
+        ...(bs.user.canBrowseProblemBank
+          ? [
+            {
+              label: '题库',
+              href: bs.urls.problems,
+              icon: BookOpen,
+              templates: [
+                'problem_main.html', 'problem_detail.html', 'problem_submit.html', 'problem_hack.html',
+                'problem_edit.html', 'problem_config.html', 'problem_files.html', 'problem_solution.html',
+                'problem_statistics.html', 'problem_import.html', 'problem_import_fps.html',
+              ],
+            },
+            { label: '我的题目', href: '/problem/mine', icon: BookOpen, templates: ['problem_mine.html'] },
+            { label: '出卷中心', href: '/paper-center', icon: NotebookPen, templates: ['paper_center.html', 'paper_center_edit.html'] },
+          ]
           : []),
         { label: '导图', href: '/mindmap', icon: Network, templates: ['mindmap_main.html'] },
         { label: '比赛', href: bs.urls.contests, icon: Trophy, templates: ['contest_main.html', 'contest_detail.html', 'contest_edit.html', 'contest_scoreboard.html', 'xcpcio_board.html', 'contest_manage.html', 'contest_problemlist.html', 'contest_user.html', 'contest_balloon.html', 'contest_clarification.html', 'contest_print.html'] },
@@ -141,7 +148,31 @@ export function Sidebar({
           templates: ['domain_dashboard.html', 'domain_edit.html', 'domain_user.html', 'domain_user_raw.html', 'domain_permission.html', 'domain_role.html', 'domain_group.html', 'domain_join_applications.html'],
         });
       }
+      if (bs.user.canImportRankboard || bs.user.canManageRankboard) {
+        adminItems.push({
+          label: '荣誉管理',
+          href: '/admin/rankboard?section=people',
+          icon: Award,
+          templates: ['admin_rankboard.html', 'admin_rankboard_person.html', 'admin_rankboard_awards.html'],
+        });
+      }
       if (canSeeAdminAffordance(userCtx, 'systemAdmin')) {
+        adminItems.push({
+          label: '用户绑定',
+          href: '/admin/userbind/schools',
+          icon: UserRoundCog,
+          templates: [
+            'admin_userbind_overview.html',
+            'admin_userbind_schools.html',
+            'admin_userbind_school_detail.html',
+            'admin_userbind_groups.html',
+            'admin_userbind_group_detail.html',
+            'admin_userbind_students.html',
+            'admin_userbind_students_import.html',
+            'admin_userbind_tokens.html',
+            'admin_userbind_requests.html',
+          ],
+        });
         adminItems.push({
           label: '反作弊',
           href: '/admin/vigil',

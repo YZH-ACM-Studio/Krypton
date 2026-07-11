@@ -65,7 +65,6 @@ export function DomainDashboardPage() {
               { label: '权限设置', href: '/domain/permission' },
               { label: '角色管理', href: '/domain/role' },
               { label: '域权限用户组', href: '/domain/group', hint: 'Hydro 自带，按 UID 分组授权' },
-              { label: '学生 / 班级 / 学校（用户绑定）', href: '/admin/userbind', hint: 'Krypton 扩展' },
               { label: '反作弊后台', href: '/admin/vigil' },
               { label: '任务系统', href: '/admin/tasks' },
             ].map((link) => (

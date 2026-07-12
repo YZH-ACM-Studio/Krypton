@@ -3,6 +3,7 @@ export type CourseRecord = Record<string, any>;
 export interface CourseChapter {
   _id: number;
   title: string;
+  content: string;
   pids: number[];
   tids: string[];
   progress: number;
@@ -13,6 +14,7 @@ export interface CourseChapter {
 export interface ChapterDraft {
   _id: number;
   title: string;
+  content: string;
   pids: string[];
   tids: string;
 }

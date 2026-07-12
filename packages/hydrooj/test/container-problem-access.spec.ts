@@ -293,6 +293,39 @@ describe('P3.8 course workspace capabilities', () => {
     });
 });
 
+describe('P3.5 course chapter content', () => {
+    it('persists chapter markdown and serializes it back to the editor', async () => {
+        const markdown = '# 指针\n\n```c\nint *p;\n```';
+        const createHandler = makeHandler(courseRoutes.course_create);
+        await createHandler.post(
+            'forged-domain', null, 'Course', 'Overview',
+            JSON.stringify([{ _id: 1, title: 'Pointers', content: markdown, pids: [], tids: [] }]),
+            '', '', [],
+        );
+        expect(calls.add.at(-1)[4][0].content).to.equal(markdown);
+
+        const editHandler = makeHandler(courseRoutes.course_edit);
+        editHandler.tdoc = {
+            docId: 'course', kind: 'course', title: 'Course', content: 'Overview',
+            description: '', courseGroupIds: [], dag: [calls.add.at(-1)[4][0]],
+        };
+        await editHandler.get('forged-domain');
+        const chapters = JSON.parse(editHandler.response.body.chapters);
+        expect(chapters[0].content).to.equal(markdown);
+    });
+
+    it('rejects non-string chapter content before writing', async () => {
+        const handler = makeHandler(courseRoutes.course_create);
+        const error = await captureFailure(() => handler.post(
+            'forged-domain', null, 'Course', 'Overview',
+            JSON.stringify([{ _id: 1, title: 'Pointers', content: { nested: true }, pids: [], tids: [] }]),
+            '', '', [],
+        ));
+        expect(error?.name).to.equal('ValidationError');
+        expect(calls.add).to.have.length(0);
+    });
+});
+
 describe('training/course problem selection', () => {
     it('training validates canonical scope before lookup and gives missing/out-of-scope the same error with zero writes', async () => {
         const HandlerClass = trainingRoutes.training_create;

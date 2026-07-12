@@ -172,15 +172,21 @@ export function CourseDetailPage() {
               </section>
             ) : null}
 
-            <div data-course-slot="chapterContent" />
+            {activeChapter.content ? (
+              <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title" className="max-w-3xl">
+                <h3 id="chapter-content-title" className="mb-3 text-xs font-semibold text-muted-foreground">章节讲义</h3>
+                <MarkdownView content={activeChapter.content} preferredLang={bs.locale} />
+              </section>
+            ) : <div data-course-slot="chapterContent" />}
             <ProblemList chapter={activeChapter} problems={data.pdict || {}} />
             <ContestList chapter={activeChapter} contests={data.cdict || {}} />
             <div data-course-slot="files" />
             <div data-course-slot="quiz" />
 
-            {!course.content && !activeChapter.pids.length && !activeChapter.tids.length ? (
-              <section className="border-y border-border/70 py-12 text-center text-sm text-muted-foreground">本章暂无内容。</section>
-            ) : null}
+            {!course.content && !activeChapter.content
+              && !activeChapter.pids.length && !activeChapter.tids.length ? (
+                <section className="border-y border-border/70 py-12 text-center text-sm text-muted-foreground">本章暂无内容。</section>
+              ) : null}
           </article>
         </div>
       )}

@@ -58,6 +58,9 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
         for (const node of chapters) {
             assert(node._id, 'each chapter needs an _id');
             assert(node.title, 'each chapter needs a title');
+            if (node.content !== undefined && typeof node.content !== 'string') {
+                throw new ValidationError('chapters', null, `章节 ${node._id} 的讲义必须是字符串`);
+            }
             const pids = normalizeProblemDocIds(Array.isArray(node.pids) ? node.pids : []);
             const rawTids: string[] = Array.isArray(node.tids) ? node.tids : [];
             // 校验比赛存在。
@@ -77,6 +80,7 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
             parsed.push({
                 _id: +node._id,
                 title: node.title,
+                ...(node.content ? { content: node.content } : {}),
                 requireNids: [], // 线性目录：无先修依赖
                 pids,
                 ...(tids.length ? { tids } : {}),
@@ -190,6 +194,7 @@ class CourseDetailHandler extends Handler {
             return {
                 _id: node._id,
                 title: node.title,
+                content: node.content || '',
                 pids: node.pids,
                 tids: (node.tids || []).map((t) => String(t)),
                 progress: total ? Math.floor(100 * (done / total)) : 100,
@@ -250,7 +255,11 @@ class CourseEditHandler extends Handler {
             this.response.body.tdoc = this.tdoc;
             this.response.body.chapters = JSON.stringify(
                 this.tdoc.dag.map((n) => ({
-                    _id: n._id, title: n.title, pids: n.pids, tids: (n.tids || []).map((t) => String(t)),
+                    _id: n._id,
+                    title: n.title,
+                    content: n.content || '',
+                    pids: n.pids,
+                    tids: (n.tids || []).map((t) => String(t)),
                 })),
                 null, 2,
             );

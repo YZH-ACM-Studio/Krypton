@@ -282,6 +282,7 @@ export type PenaltyRules = Dictionary<number>;
 export interface TrainingNode {
     _id: number;
     title: string;
+    content?: string;
     requireNids: number[];
     pids: number[];
     /**

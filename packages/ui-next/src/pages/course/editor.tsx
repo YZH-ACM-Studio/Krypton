@@ -33,6 +33,7 @@ function initialChapterDrafts(serialized?: string): ChapterDraft[] {
   return parsed.map((chapter) => ({
     _id: Number(chapter._id),
     title: String(chapter.title || ''),
+    content: String(chapter.content || ''),
     pids: Array.isArray(chapter.pids) ? chapter.pids.map(String) : [],
     tids: Array.isArray(chapter.tids) ? chapter.tids.map(String).join(',') : '',
   }));
@@ -51,7 +52,9 @@ export function CourseEditPage() {
   const tid = String(course.docId || course._id || '');
   const parsedChapters = useMemo(() => initialChapterDrafts(data.chapters), [data.chapters]);
   const [chapters, setChapters] = useState<ChapterDraft[]>(
-    parsedChapters.length ? parsedChapters : [{ _id: 1, title: '第一章', pids: [], tids: '' }],
+    parsedChapters.length
+      ? parsedChapters
+      : [{ _id: 1, title: '第一章', content: '', pids: [], tids: '' }],
   );
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(
     new Set((course.courseGroupIds || []).map(String)),
@@ -86,6 +89,7 @@ export function CourseEditPage() {
     setChapters((current) => [...current, {
       _id: chapterId,
       title: `第 ${current.length + 1} 章`,
+      content: '',
       pids: [],
       tids: '',
     }]);
@@ -118,6 +122,7 @@ export function CourseEditPage() {
   const chaptersJson = JSON.stringify(chapters.map((chapter) => ({
     _id: chapter._id,
     title: chapter.title,
+    ...(chapter.content ? { content: chapter.content } : {}),
     pids: chapter.pids,
     tids: chapter.tids.split(',').map((value) => value.trim()).filter(Boolean),
   })));
@@ -230,7 +235,18 @@ export function CourseEditPage() {
             />
           </label>
 
-          <div data-course-slot="chapterContent" />
+          <section data-course-slot="chapterContent" className="space-y-2" aria-labelledby="chapter-content-title">
+            <div>
+              <h3 id="chapter-content-title" className="text-sm font-medium">章节讲义</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">支持 Markdown、代码块与图片。</p>
+            </div>
+            <MarkdownEditor
+              key={activeChapter._id}
+              value={activeChapter.content}
+              onChange={(content) => updateChapter(activeChapter._id, { content })}
+              minHeight={240}
+            />
+          </section>
 
           <section className="space-y-2" aria-labelledby="chapter-problems-title">
             <div>

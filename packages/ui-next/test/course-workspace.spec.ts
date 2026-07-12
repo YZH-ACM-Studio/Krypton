@@ -38,4 +38,14 @@ describe('P3.8 course workspace', () => {
         expect(detail).to.include('const activeChapter = chapters.find');
         expect(detail).to.not.include('chapters.map((ch');
     });
+
+    it('edits and renders chapter markdown through the chapterContent slot', () => {
+        const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
+        const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
+        expect(editor).to.include('key={activeChapter._id}');
+        expect(editor).to.include('value={activeChapter.content}');
+        expect(editor).to.include('{ content }');
+        expect(detail).to.include('content={activeChapter.content}');
+        expect(detail).to.include('!course.content && !activeChapter.content');
+    });
 });

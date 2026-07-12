@@ -136,8 +136,15 @@ class CrawlerProblemHandler extends CrawlerApiHandler {
         const existing = await importColl.findOne({ domainId, sourceUrl: url });
         if (existing) {
             // re-crawl → refresh the statement in place (no duplicate)
-            await requireMaintainedProblem(domainId, existing.docId, this.user);
-            await problem.editAuthorized(domainId, existing.docId, { title: t, content }, this.user);
+            const pdoc = await requireMaintainedProblem(domainId, existing.docId, this.user);
+            await problem.editAuthorized(
+                domainId,
+                existing.docId,
+                { title: t, content },
+                this.user,
+                {},
+                { expectedStructureRevision: pdoc.structureRevision },
+            );
             await importColl.updateOne(
                 { _id: existing._id },
                 { $set: { updatedAt: new Date(), timeLimit: timeLimit || '', memoryLimit: memoryLimit || '' } },
@@ -153,7 +160,10 @@ class CrawlerProblemHandler extends CrawlerApiHandler {
         // Create HIDDEN atomically (no judge testdata yet). Passing meta.hidden
         // avoids a create-visible-then-flip window that would briefly publish +
         // ES-index the problem (and leave it permanently visible if the flip threw).
-        const docId = await problem.add(domainId, realPid, t, content, this.user._id, [], { hidden: true });
+        const docId = await problem.add(domainId, realPid, t, content, this.user._id, [], {
+            hidden: true,
+            problemKind: 'programming',
+        });
         try {
             await importColl.insertOne({
                 _id: new ObjectId(),
@@ -184,8 +194,15 @@ class CrawlerProblemHandler extends CrawlerApiHandler {
                 }
                 const winner = await importColl.findOne({ domainId, sourceUrl: url });
                 if (winner) {
-                    await requireMaintainedProblem(domainId, winner.docId, this.user);
-                    await problem.editAuthorized(domainId, winner.docId, { title: t, content }, this.user);
+                    const pdoc = await requireMaintainedProblem(domainId, winner.docId, this.user);
+                    await problem.editAuthorized(
+                        domainId,
+                        winner.docId,
+                        { title: t, content },
+                        this.user,
+                        {},
+                        { expectedStructureRevision: pdoc.structureRevision },
+                    );
                     this.response.body = { pid: winner.pid, docId: winner.docId, updated: true };
                     return;
                 }
@@ -245,7 +262,7 @@ class CrawlerTestdataHandler extends CrawlerApiHandler {
                 await requireMaintainedProblem(domainId, rec.docId, this.user);
                 const yamlCases: { input: string, output: string }[] = [];
                 // eslint-disable-next-line no-await-in-loop
-                await problem.withAuthorizedWriteClaim(
+                await problem.withAuthorizedStructuralWriteClaim(
                     domainId,
                     rec.docId,
                     this.user,

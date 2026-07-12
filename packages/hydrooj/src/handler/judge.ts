@@ -264,7 +264,7 @@ export async function processJudgeFileCallback(rid: ObjectId, filename: string, 
     const udoc = await user.getById(rdoc.domainId, rdoc.uid);
     if (!udoc) throw new ForbiddenError();
     let preflightError: unknown;
-    await problem.withAuthorizedWriteClaim(
+    await problem.withAuthorizedStructuralWriteClaim(
         rdoc.domainId,
         rdoc.pid,
         udoc,

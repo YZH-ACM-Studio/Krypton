@@ -5,6 +5,7 @@ import {
     ObjectId, OnlyFieldsOfType, PushOperator, UpdateFilter,
 } from 'mongodb';
 import { ProblemConfigFile, STATUS_TEXTS } from '@hydrooj/common';
+import { Logger } from '@hydrooj/utils';
 import { Context } from '../context';
 import { ProblemNotFoundError } from '../error';
 import { JudgeMeta, RecordDoc } from '../interface';
@@ -17,6 +18,8 @@ import MessageModel from './message';
 import problem from './problem';
 import SystemModel from './system';
 import task from './task';
+
+const logger = new Logger('record');
 
 export default class RecordModel {
     static coll = db.collection('record');
@@ -179,7 +182,17 @@ export default class RecordModel {
         } else if (args.type === 'generate') {
             data.contest = RecordModel.RECORD_GENERATE;
         }
-        const res = await RecordModel.coll.insertOne(data);
+        if (args.type !== 'generate') await problem.claimStructureLockForSubmission(domainId, pid);
+        let res;
+        try {
+            res = await RecordModel.coll.insertOne(data);
+        } catch (error) {
+            logger.error(
+                'Record insert failed after conservative structure lock domain=%s pid=%d uid=%d rid=%s error=%o',
+                domainId, pid, uid, data._id, error,
+            );
+            throw error;
+        }
         bus.broadcast('record/change', data);
         if (addTask) {
             const priority = await RecordModel.submissionPriority(uid, args.type === 'pretest' ? -20 : (isContest ? 50 : 0));

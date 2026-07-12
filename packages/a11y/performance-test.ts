@@ -160,8 +160,12 @@ int main(){
 };
 
 export async function startPerformanceTest(args: { enable5: boolean }, report) {
-    const docId = (await ProblemModel.get('system', 'PTEST'))?.docId
-        || await ProblemModel.add('system', 'PTEST', 'Performance Test', 'test only', 1, [], { hidden: true });
+    const templateDocId = (await ProblemModel.get('system', 'PTEST'))?.docId
+        || await ProblemModel.add('system', 'PTEST', 'Performance Test', 'test only', 1, [], {
+            hidden: true,
+            problemKind: 'programming',
+        });
+    const docId = await ProblemModel.copy('system', templateDocId, 'system', undefined, true);
     await ProblemModel.addTestdata('system', docId, '1.in', Buffer.from('1'));
     await ProblemModel.addTestdata('system', docId, '1.out', Buffer.from(''));
     await ProblemModel.addTestdata('system', docId, 'config.yaml', Buffer.from(yaml.dump({

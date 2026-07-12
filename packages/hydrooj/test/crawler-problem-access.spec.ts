@@ -95,6 +95,15 @@ const problemStub = {
         calls.events.push(`claim:${operation}:${docId}`);
         return work({ domainId, pid: docId, actor: user._id, requestId: `claim-${docId}` });
     },
+    async withAuthorizedStructuralWriteClaim(
+        domainId: string,
+        docId: number,
+        user: any,
+        operation: string,
+        work: (claim: any) => Promise<any>,
+    ) {
+        return problemStub.withAuthorizedWriteClaim(domainId, docId, user, operation, work);
+    },
     async add(...args: any[]) {
         calls.events.push('add');
         calls.adds.push(args);

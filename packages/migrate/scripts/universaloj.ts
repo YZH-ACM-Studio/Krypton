@@ -218,7 +218,10 @@ export async function run({
             }
             if (!pidMap[pdoc.id]) {
                 const content = await query(`SELECT * FROM \`problems_contents\` WHERE \`id\` = ${pdoc.id}`);
-                const pid = await ProblemModel.add(domainId, `P${pdoc.id}`, pdoc.title, content[0].statement_md || '', 1);
+                const pid = await ProblemModel.add(
+                    domainId, `P${pdoc.id}`, pdoc.title, content[0].statement_md || '', 1, [],
+                    { problemKind: 'programming' },
+                );
                 pidMap[pdoc.id] = pid;
             }
             const [permissions, tags] = await Promise.all([

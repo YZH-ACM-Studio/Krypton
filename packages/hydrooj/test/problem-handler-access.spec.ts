@@ -101,6 +101,10 @@ const problemStub = {
         calls.add.push(args);
         return 7;
     },
+    async createProblemByKind(_kind: string, ...args: any[]) {
+        calls.add.push(args);
+        return 7;
+    },
     async addAdditionalFile(...args: any[]) {
         calls.renameFile.push(args);
     },
@@ -144,6 +148,15 @@ const problemStub = {
         calls.claims.push({ domainId, pid, user, operation });
         if (!claimAllowed) throw new TestPermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
         return work({ domainId, pid, operation, requestId: 'test-claim' });
+    },
+    async withAuthorizedStructuralWriteClaim(
+        domainId: string,
+        pid: number,
+        user: any,
+        operation: string,
+        work: (claim: any) => Promise<any>,
+    ) {
+        return problemStub.withAuthorizedWriteClaim(domainId, pid, user, operation, work);
     },
     async inc(...args: any[]) {
         calls.inc.push(args);

@@ -197,6 +197,7 @@ export async function ensureIndexes(): Promise<void> {
         await createAndVerifyIndexes(permitsColl, canonicalIndexes, {
             allowLegacyCanonicalPair: true,
             allowLegacyViaContestPartial: true,
+            allowMissingNamespace: true,
         });
         await createAndVerifyIndexes(permitSourcesColl, sourceIndexes, { allowMissingNamespace: true });
         await createAndVerifyIndexes(aclMutationFencesColl, fenceIndexes, { allowMissingNamespace: true });

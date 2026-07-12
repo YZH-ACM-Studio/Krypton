@@ -210,6 +210,7 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string, pdocId: number, hi
   }, [bs.domain?.id]);
 
   async function revoke(permitId: string) {
+    // eslint-disable-next-line no-alert
     if (!confirm('确定撤销该权限？')) return;
     const fd = new FormData();
     fd.set('permitId', permitId);
@@ -421,7 +422,6 @@ export function ProblemEditPage() {
   // 客观题一律去出卷中心编辑（Rev.12）：本页隐藏类型编辑、跳过 config 写入。
   const isObjectiveProblem = /^\s*['"]?type['"]?\s*:\s*['"]?objective['"]?\s*(?:#.*)?$/m.test(configRaw || '');
   const isCreate = !pdoc.docId;
-  const problemId = pdoc.docId ? String(pdoc.docId) : '';
   // ProblemDetailUrl-style API for the file endpoints.
   const filesBase = pdoc.docId ? `${problemUrl}/files` : '';
 
@@ -480,6 +480,11 @@ export function ProblemEditPage() {
       method: 'POST',
       body: new URLSearchParams(fd as any),
     });
+    if (!editRes.ok) {
+      // eslint-disable-next-line no-alert
+      alert(editRes.status === 409 ? '题目已变更或已锁定，请重新载入。' : `保存失败：${editRes.statusText}`);
+      return;
+    }
     // 2) Write the type-specific config.yaml as a testdata file.
     //    configLoaded=false（数据缺失）时绝不重写——空白状态覆盖会把
     //    服务器上的 answers/cases 清成 type:default（对抗审查 M2）。
@@ -492,17 +497,15 @@ export function ProblemEditPage() {
       cfgForm.append('file', new Blob([yamlText], { type: 'text/yaml' }), 'config.yaml');
       const cfgRes = await fetch(filesBase, { method: 'POST', body: cfgForm }).catch(() => null);
       if (!cfgRes || !cfgRes.ok) {
+        // eslint-disable-next-line no-alert
         alert('题目基本信息已保存，但评测配置（config.yaml）写入失败——题型/答案改动未生效，请重试保存。');
         return;
       }
     } else if (filesBase && !configLoaded && !isObjectiveProblem) {
+      // eslint-disable-next-line no-alert
       alert('评测配置（config.yaml）数据缺失，本次保存已跳过题型/答案写入（防止覆盖服务器数据）。基本信息正常保存；请刷新页面重试。');
     }
-    if (editRes.ok || editRes.redirected) {
-      window.location.assign(problemUrl);
-    } else {
-      alert(`保存失败：${editRes.statusText}`);
-    }
+    window.location.assign(problemUrl);
   };
 
   return (
@@ -537,6 +540,13 @@ export function ProblemEditPage() {
           </div>
 
           <form ref={formRef} method="post" onSubmit={handleSave} className="space-y-4">
+            {!isCreate && pdoc.problemKind && pdoc.structureRevision && (
+              <input
+                type="hidden"
+                name="expectedStructureRevision"
+                value={String(pdoc.structureRevision)}
+              />
+            )}
             {/* Title + PID row */}
             <Card>
               <CardContent className="p-4 space-y-4">

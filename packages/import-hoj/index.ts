@@ -50,7 +50,7 @@ class ImportHojHandler extends Handler {
                 if (!await isValidPid(pdoc.problemId)) pdoc.display_id = null;
                 const pid = await ProblemModel.add(
                     domainId, pdoc.display_id, pdoc.title, buildContent(content, 'markdown'),
-                    this.user._id, doc.tags || [],
+                    this.user._id, doc.tags || [], { problemKind: 'programming' },
                 );
                 const config: ProblemConfigFile = {
                     time: `${pdoc.timeLimit}ms`,

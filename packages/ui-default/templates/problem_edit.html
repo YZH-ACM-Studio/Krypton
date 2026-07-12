@@ -5,6 +5,9 @@
     <div class="section">
       <div class="section__body">
         <form method="post">
+          {% if pdoc['problemKind'] and pdoc['structureRevision'] %}
+            <input type="hidden" name="expectedStructureRevision" value="{{ pdoc['structureRevision'] }}">
+          {% endif %}
           <div class="row">
             <div class="medium-3 columns">
               <label>

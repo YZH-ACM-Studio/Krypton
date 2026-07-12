@@ -1,6 +1,7 @@
 export * from './datetime';
 export * from './lang';
 export * from './permission';
+export * from './problem-kind';
 export * from './status';
 export * from './subtask';
 export * from './types';

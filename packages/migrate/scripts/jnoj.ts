@@ -269,7 +269,8 @@ export async function run({
                 const tags = pdoc.tags?.split(',')?.map((i) => i.trim())?.filter((i) => i);
                 if (pdoc.source) tags.push(...pdoc.source.split(' ').map((i) => i.trim()).filter((i) => i));
                 const pid = await ProblemModel.add(
-                    domainId, `P${pdoc.id}`, pdoc.title, content, 1, tags, { hidden: pdoc.status === 1 },
+                    domainId, `P${pdoc.id}`, pdoc.title, content, 1, tags,
+                    { hidden: pdoc.status === 1, problemKind: 'programming' },
                 );
                 if (!markdown) await ProblemModel.edit(domainId, pid, { html: true });
                 pidMap[pdoc.id] = pid;

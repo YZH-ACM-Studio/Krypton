@@ -128,6 +128,11 @@ export class ProblemMainHandler extends Handler {
     @param('sort', Types.Range(['default', 'recent']), true)
     async get(_domainId: string, page = 1, q = '', limit: number, pjax = false, quick = false, sortStrategy = 'default') {
         const domainId = String(this.domain?._id);
+        if (!problem.canBrowseProblemBank(this.user)) {
+            if (quick || this.request.json) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
+            this.response.redirect = this.url('training_main');
+            return;
+        }
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
         if (!problem.canBrowseProblemBank(this.user)) {
@@ -329,6 +334,10 @@ export class ProblemRandomHandler extends Handler {
     @param('q', Types.Content, true)
     async get(_domainId: string, qs = '') {
         const domainId = String(this.domain?._id);
+        if (!problem.canBrowseProblemBank(this.user)) {
+            this.response.redirect = this.url('training_main');
+            return;
+        }
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
         if (!problem.canBrowseProblemBank(this.user)) {
@@ -715,10 +724,11 @@ export class ProblemEditHandler extends ProblemManageHandler {
     @post('tag', Types.Content, true, null, parseCategory)
     @post('difficulty', Types.PositiveInt, (i) => +i <= 10, true)
     @post('lockHidden', Types.Boolean, true)
+    @post('expectedStructureRevision', Types.PositiveInt, true)
     async post(
         _domainId: string, pid: string | number, title: string, content: string,
         newPid: string | number = '', hidden = false, tag: string[] = [], difficulty = 0,
-        lockHidden = false,
+        lockHidden = false, expectedStructureRevision?: number,
     ) {
         const domainId = this.pdoc.domainId;
         if (typeof newPid !== 'string') newPid = `P${newPid}`;
@@ -727,7 +737,14 @@ export class ProblemEditHandler extends ProblemManageHandler {
             title, content, pid: newPid, hidden, tag: tag ?? [], difficulty, html: false,
             lockHidden: !!lockHidden,
         };
-        const pdoc = await problem.editAuthorized(domainId, this.pdoc.docId, $update, this.user);
+        const pdoc = await problem.editAuthorized(
+            domainId,
+            this.pdoc.docId,
+            $update,
+            this.user,
+            {},
+            { expectedStructureRevision },
+        );
         this.response.redirect = this.url('problem_detail', { pid: newPid || pdoc.docId });
     }
 }
@@ -813,6 +830,9 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     @post('type', Types.Range(['testdata', 'additional_file']), true)
     async postUploadFile(_domainId: string, filename: string, type = 'testdata') {
         const domainId = this.pdoc.domainId;
+        if (this.pdoc.problemKind && this.pdoc.problemKind !== 'programming' && type === 'testdata') {
+            throw new ValidationError('type', null, '结构化题不接受 testdata/config.yaml 文件写入');
+        }
         const file = this.request.files.file;
         if (!file) throw new ValidationError('file');
         filename ||= file.originalFilename || randomstring(16);
@@ -862,7 +882,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
                 throw new FileLimitExceededError('size');
             }
         }
-        await problem.withAuthorizedWriteClaim(
+        await problem.withAuthorizedStructuralWriteClaim(
             domainId,
             this.pdoc.docId,
             this.user,
@@ -885,10 +905,18 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     @post('files', Types.ArrayOf(Types.Filename))
     @post('newNames', Types.ArrayOf(Types.Filename))
     @post('type', Types.Range(['testdata', 'additional_file']), true)
-    async postRenameFiles(_domainId: string, files: string[], newNames: string[], type = 'testdata') {
+    async postRenameFiles(
+        _domainId: string,
+        files: string[],
+        newNames: string[],
+        type = 'testdata',
+    ) {
         const domainId = this.pdoc.domainId;
+        if (this.pdoc.problemKind && this.pdoc.problemKind !== 'programming' && type === 'testdata') {
+            throw new ValidationError('type', null, '结构化题不接受 testdata/config.yaml 文件写入');
+        }
         if (files.length !== newNames.length) throw new ValidationError('files', 'newNames');
-        await problem.withAuthorizedWriteClaim(
+        await problem.withAuthorizedStructuralWriteClaim(
             domainId,
             this.pdoc.docId,
             this.user,
@@ -914,7 +942,10 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     @post('type', Types.Range(['testdata', 'additional_file']), true)
     async postDeleteFiles(_domainId: string, files: string[], type = 'testdata') {
         const domainId = this.pdoc.domainId;
-        await problem.withAuthorizedWriteClaim(
+        if (this.pdoc.problemKind && this.pdoc.problemKind !== 'programming' && type === 'testdata') {
+            throw new ValidationError('type', null, '结构化题不接受 testdata/config.yaml 文件写入');
+        }
+        await problem.withAuthorizedStructuralWriteClaim(
             domainId,
             this.pdoc.docId,
             this.user,
@@ -1178,6 +1209,10 @@ export class ProblemMineHandler extends Handler {
     @param('page', Types.PositiveInt, true)
     async get(_domainId: string, page = 1) {
         const domainId = String(this.domain?._id);
+        if (!problem.canBrowseProblemBank(this.user)) {
+            this.response.redirect = this.url('training_main');
+            return;
+        }
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
         if (!problem.canBrowseProblemBank(this.user)) {
@@ -1222,14 +1257,16 @@ export class ProblemCreateHandler extends Handler {
     @post('tag', Types.Content, true, null, parseCategory)
     async post(
         _domainId: string, title: string, content: string, pid: string | number = '',
-        hidden = false, difficulty = 0, tag: string[] = [],
+        _hidden = false, difficulty = 0, tag: string[] = [],
     ) {
         const domainId = String(this.domain?._id);
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
         if (typeof pid !== 'string') pid = `P${pid}`;
         if (pid && await problem.get(domainId, pid)) throw new ProblemAlreadyExistError(pid);
-        const docId = await problem.add(domainId, pid, title, content, this.user._id, tag ?? [], { hidden, difficulty });
+        const docId = await problem.createProblemByKind(
+            'programming', domainId, pid, title, content, this.user._id, tag ?? [], { difficulty },
+        );
         const files = new Set(Array.from(content.matchAll(/file:\/\/([\w-]+\.[a-zA-Z0-9]+)/g)).map((i) => i[1]));
         const tasks = [];
         for (const file of files) {
@@ -1242,7 +1279,7 @@ export class ProblemCreateHandler extends Handler {
             }
         }
         await Promise.all(tasks);
-        this.response.body = { pid: pid || docId };
+        this.response.body = { pid: pid || docId, hidden: true, problemKind: 'programming', structureRevision: 1 };
         this.response.redirect = this.url('problem_files', { pid: pid || docId });
     }
 }

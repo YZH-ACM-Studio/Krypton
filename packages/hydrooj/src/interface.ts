@@ -189,6 +189,7 @@ declare module './model/problem' {
         data: FileInfo[];
         additional_file: FileInfo[];
         hidden?: boolean;
+        lockHidden?: boolean;
         html?: boolean;
         stats?: any;
         difficulty?: number;
@@ -209,6 +210,15 @@ declare module './model/problem' {
             domainId: string;
             pid: number;
         };
+
+        /** Missing only on legacy problems, where it means programming. */
+        problemKind?: import('@hydrooj/common').ProblemKind;
+        structureRevision?: number;
+        structureLockedAt?: Date;
+        structureLockReason?: 'first_submission' | 'container_started';
+        archivedAt?: Date;
+        archivedBy?: number;
+        archiveReason?: string;
 
         /** string (errormsg) */
         config: string | ProblemConfig;

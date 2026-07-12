@@ -29,11 +29,12 @@ describe('App', () => {
         console.log('Application inited in %d ms', Date.now() - init);
     }, { timeout: 30000 });
 
-    const routes = ['/', '/p', '/contest', '/homework', '/user/1', '/training'];
+    const routes = ['/', '/contest', '/homework', '/user/1', '/training'];
     for (const route of routes) {
         // eslint-disable-next-line ts/no-loop-func
         it(`GET ${route}`, () => agent.get(route).expect(200));
     }
+    it('GET /p redirects users without problem-bank access', () => agent.get('/p').expect(302));
 
     it('API user', async () => {
         await agent.get('/api/user?args={"id":1}&projection=uname').expect({ uname: 'Hydro' });

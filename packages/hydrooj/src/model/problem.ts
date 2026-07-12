@@ -8,13 +8,16 @@ import fs from 'fs-extra';
 import yaml from 'js-yaml';
 import { keyBy, pick } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
-import { ProblemConfigFile, ProblemType } from '@hydrooj/common';
+import {
+    parseProblemKind, ProblemConfigFile, type ProblemKind, ProblemType,
+} from '@hydrooj/common';
 import {
     extractZip, Logger, size, streamToBuffer,
 } from '@hydrooj/utils/lib/utils';
 import { Context } from '../context';
 import {
-    FileUploadError, NotFoundError, PermissionError, ProblemNotFoundError, ValidationError,
+    FileUploadError, NotFoundError, PermissionError, ProblemIsReferencedError,
+    ProblemNotFoundError, ProblemStructureConflictError, ValidationError,
 } from '../error';
 import type {
     Document, ProblemDict, ProblemStatusDoc, User,
@@ -29,6 +32,7 @@ import { buildProjection } from '../utils';
 import { PERM, STATUS } from './builtin';
 import * as document from './document';
 import DomainModel from './domain';
+import * as OplogModel from './oplog';
 import type { ProblemAclUser, ProblemWriteClaim } from './problem-access';
 import {
     acquireProblemWriteClaim,
@@ -47,6 +51,14 @@ import {
     readStableViewableProblem,
     refreshProblemAcl as refreshProblemAclAccess,
 } from './problem-access';
+import {
+    assertStructureRevision,
+    findProblemReferences,
+    hasStartedProblemContainer,
+    normalizeStructuredProblemConfig,
+    PROBLEM_STRUCTURAL_FIELDS,
+    problemReferenceCount,
+} from './problem-lifecycle';
 import RecordModel from './record';
 import SolutionModel from './solution';
 import storage from './storage';
@@ -60,6 +72,24 @@ function sortable(source: string, namespaces: Record<string, string>) {
     const [namespace, pid] = source.includes('-') ? source.split('-') : ['default', source];
     return ((namespaces ? `${namespaces[namespace]}-` : '') + pid)
         .replace(/(\d+)/g, (str) => (str.length >= 6 ? str : ('0'.repeat(6 - str.length) + str)));
+}
+
+function isStructuralPatch($set: Record<string, unknown>, $unset: Record<string, unknown> = {}) {
+    return [...Object.keys($set), ...Object.keys($unset)]
+        .some((field) => PROBLEM_STRUCTURAL_FIELDS.has(field));
+}
+
+function revisionClaimFilter(claim: ProblemWriteClaim, expectedStructureRevision: number) {
+    return {
+        domainId: claim.domainId,
+        docType: document.TYPE_PROBLEM,
+        docId: claim.pid,
+        'aclWriteClaim.requestId': claim.requestId,
+        'aclWriteClaim.actor': claim.actor,
+        'aclWriteClaim.state': 'active',
+        structureRevision: expectedStructureRevision,
+        structureLockedAt: { $exists: false },
+    };
 }
 
 function findOverrideContent(dir: string, base: string) {
@@ -93,6 +123,7 @@ interface ProblemCreateOptions {
     difficulty?: number;
     hidden?: boolean;
     reference?: { domainId: string, pid: number };
+    problemKind: ProblemKind;
 }
 
 const PROJECTION_BASE: Field[] = [
@@ -108,7 +139,8 @@ export class ProblemModel {
     static PROJECTION_LIST: Field[] = [
         ...PROJECTION_BASE,
         'nSubmit', 'nAccept', 'difficulty', 'tag', 'hidden',
-        'stats',
+        'stats', 'problemKind', 'structureRevision', 'structureLockedAt',
+        'structureLockReason', 'archivedAt', 'archivedBy', 'archiveReason',
     ];
 
     static PROJECTION_CONTEST_DETAIL: Field[] = [
@@ -206,7 +238,7 @@ export class ProblemModel {
 
     static async add(
         domainId: string, pid: string = '', title: string, content: string, owner: number,
-        tag: string[] = [], meta: ProblemCreateOptions = {},
+        tag: string[] = [], meta: ProblemCreateOptions = {} as ProblemCreateOptions,
     ) {
         const [doc] = await ProblemModel.getMulti(domainId, {})
             .withReadPreference('primary')
@@ -222,13 +254,16 @@ export class ProblemModel {
     static async addWithId(
         domainId: string, docId: number, pid: string = '', title: string,
         content: string, owner: number, tag: string[] = [],
-        meta: ProblemCreateOptions = {},
+        meta: ProblemCreateOptions = {} as ProblemCreateOptions,
     ) {
         const ddoc = await DomainModel.get(domainId);
+        const problemKind = parseProblemKind(meta?.problemKind);
         const args: Partial<ProblemDoc> = {
             title,
             tag,
-            hidden: meta.hidden || false,
+            hidden: true,
+            problemKind,
+            structureRevision: 1,
             nSubmit: 0,
             nAccept: 0,
             sort: sortable(pid || `P${docId}`, ddoc?.namespaces),
@@ -245,7 +280,155 @@ export class ProblemModel {
         args.docType = document.TYPE_PROBLEM;
         args.domainId = domainId;
         await bus.emit('problem/add', args, result);
+        await OplogModel.add({
+            type: 'problem.create',
+            domainId,
+            operator: owner,
+            problemId: result,
+            problemKind,
+            revision: 1,
+            changedFields: ['title', 'content', 'tag', 'hidden', 'problemKind'],
+            time: new Date(),
+        } as any);
         return result;
+    }
+
+    static createProblemByKind(
+        kind: ProblemKind,
+        domainId: string,
+        pid: string,
+        title: string,
+        content: string,
+        owner: number,
+        tag: string[] = [],
+        options: Omit<ProblemCreateOptions, 'problemKind'> = {},
+    ) {
+        return ProblemModel.add(domainId, pid, title, content, owner, tag, {
+            ...options,
+            problemKind: parseProblemKind(kind),
+        });
+    }
+
+    private static async materializeStartedContainerLock(domainId: string, pid: number): Promise<boolean> {
+        if (!await hasStartedProblemContainer(domainId, pid)) return false;
+        const now = new Date();
+        await document.coll.updateOne({
+            domainId,
+            docType: document.TYPE_PROBLEM,
+            docId: pid,
+            problemKind: { $exists: true },
+            structureLockedAt: { $exists: false },
+        }, {
+            $set: {
+                structureLockedAt: now,
+                structureLockReason: 'container_started',
+            },
+            $inc: { structureRevision: 1 },
+        });
+        return true;
+    }
+
+    static async claimStructureLockForSubmission(domainId: string, pid: number): Promise<void> {
+        const pdoc = await document.coll.findOne({
+            domainId, docType: document.TYPE_PROBLEM, docId: pid,
+        }, { projection: { problemKind: 1, structureRevision: 1, structureLockedAt: 1 } });
+        if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
+        if (pdoc.problemKind === undefined || pdoc.structureLockedAt) return;
+        parseProblemKind(pdoc.problemKind);
+        assertStructureRevision(pdoc.structureRevision);
+        const now = new Date();
+        const result = await document.coll.updateOne({
+            domainId,
+            docType: document.TYPE_PROBLEM,
+            docId: pid,
+            structureRevision: pdoc.structureRevision,
+            structureLockedAt: { $exists: false },
+            aclWriteClaim: { $exists: false },
+        }, {
+            $set: {
+                structureLockedAt: now,
+                structureLockReason: 'first_submission',
+            },
+            $inc: { structureRevision: 1 },
+        });
+        if (result.matchedCount === 1) return;
+        const current = await document.coll.findOne({
+            domainId, docType: document.TYPE_PROBLEM, docId: pid,
+        }, { projection: { structureLockedAt: 1 } });
+        if (!current?.structureLockedAt) throw new ProblemStructureConflictError(pid);
+    }
+
+    static async saveStructuredProblem(input: {
+        domainId: string;
+        pid: number;
+        actor: number;
+        user: ProblemAclUser;
+        expectedStructureRevision: number;
+        problemKind: ProblemKind;
+        content: string;
+        config: unknown;
+    }): Promise<ProblemDoc> {
+        const problemKind = parseProblemKind(input.problemKind);
+        const config = normalizeStructuredProblemConfig(problemKind, input.config);
+        const result = await ProblemModel.editAuthorized(
+            input.domainId,
+            input.pid,
+            { content: input.content, config, problemKind } as any,
+            input.user,
+            {},
+            { expectedStructureRevision: input.expectedStructureRevision },
+        );
+        await OplogModel.add({
+            type: 'problem.structure.save',
+            domainId: input.domainId,
+            operator: input.actor,
+            problemId: input.pid,
+            problemKind,
+            revision: result.structureRevision,
+            changedFields: ['content', 'config'],
+            time: new Date(),
+        } as any);
+        return result;
+    }
+
+    static async archiveProblem(
+        domainId: string,
+        pid: number,
+        actor: number,
+        reason: string,
+        user: ProblemAclUser,
+    ): Promise<ProblemDoc> {
+        const archiveReason = reason.trim();
+        if (!archiveReason) throw new ValidationError('reason');
+        const result = await ProblemModel.editAuthorized(domainId, pid, {
+            hidden: true,
+            archivedAt: new Date(),
+            archivedBy: actor,
+            archiveReason,
+        }, user);
+        await OplogModel.add({
+            type: 'problem.archive', domainId, operator: actor, problemId: pid,
+            changedFields: ['hidden', 'archivedAt', 'archivedBy', 'archiveReason'],
+            time: new Date(),
+        } as any);
+        return result;
+    }
+
+    static findProblemReferences(domainId: string, pid: number, publicPid?: string) {
+        return findProblemReferences(domainId, pid, publicPid);
+    }
+
+    private static async assertNoProblemReferences(domainId: string, pid: number, publicPid?: string) {
+        let report;
+        try {
+            report = await ProblemModel.findProblemReferences(domainId, pid, publicPid);
+        } catch (error) {
+            logger.error('Hard delete reference scan failed domain=%s pid=%d error=%o', domainId, pid, error);
+            throw error;
+        }
+        if (!problemReferenceCount(report)) return;
+        logger.warn('Hard delete rejected domain=%s pid=%d references=%o', domainId, pid, report);
+        throw new ProblemIsReferencedError('delete');
     }
 
     static async get(
@@ -389,7 +572,12 @@ export class ProblemModel {
         return document.getMultiStatus(domainId, document.TYPE_PROBLEM, query);
     }
 
-    static async edit(domainId: string, _id: number, $set: Partial<ProblemDoc>): Promise<ProblemDoc> {
+    static async edit(
+        domainId: string,
+        _id: number,
+        $set: Partial<ProblemDoc>,
+        options: { expectedStructureRevision?: number, skipStructureGuard?: boolean } = {},
+    ): Promise<ProblemDoc> {
         const delpid = $set.pid === '';
         const ddoc = await DomainModel.get(domainId);
         const $unset = delpid ? { pid: '' } : {};
@@ -400,7 +588,41 @@ export class ProblemModel {
             $set.sort = sortable($set.pid, ddoc.namespaces);
         }
         await bus.parallel('problem/before-edit', $set, $unset);
-        const result = await document.set(domainId, document.TYPE_PROBLEM, _id, $set, $unset);
+        const current = await document.coll.findOne({
+            domainId, docType: document.TYPE_PROBLEM, docId: _id,
+        }, { projection: {
+            content: 1, problemKind: 1, structureRevision: 1, structureLockedAt: 1, archivedAt: 1,
+        } });
+        if (!current) throw new ProblemNotFoundError(domainId, _id);
+        if (current.archivedAt && $set.hidden === false) throw new ValidationError('hidden');
+        if ($set.content === current.content) delete $set.content;
+        let result: ProblemDoc | null;
+        if (current.problemKind !== undefined && isStructuralPatch($set as any, $unset)
+            && !options.skipStructureGuard) {
+            const expectedRevision = options.expectedStructureRevision ?? current.structureRevision;
+            assertStructureRevision(expectedRevision);
+            parseProblemKind(current.problemKind);
+            if ($set.problemKind !== undefined && $set.problemKind !== current.problemKind) {
+                throw new ValidationError('problemKind');
+            }
+            if (current.structureLockedAt || await ProblemModel.materializeStartedContainerLock(domainId, _id)) {
+                throw new ProblemStructureConflictError(_id);
+            }
+            result = await document.coll.findOneAndUpdate({
+                domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: _id,
+                structureRevision: expectedRevision,
+                structureLockedAt: { $exists: false },
+            }, {
+                $set,
+                ...(Object.keys($unset).length ? { $unset } : {}),
+                $inc: { structureRevision: 1 },
+            }, { returnDocument: 'after' });
+            if (!result) throw new ProblemStructureConflictError(_id);
+        } else {
+            result = await document.set(domainId, document.TYPE_PROBLEM, _id, $set, $unset);
+        }
         await bus.emit('problem/edit', result);
         return result;
     }
@@ -465,6 +687,16 @@ export class ProblemModel {
             }
             return result;
         } catch (error) {
+            if (error instanceof ValidationError
+                || error instanceof ProblemStructureConflictError
+                || error instanceof ProblemIsReferencedError) {
+                if (!await clearProblemWriteClaim(claim)) {
+                    throw new Error(`problem write claim ownership lost after rejected request: ${claim.requestId}`, {
+                        cause: error,
+                    });
+                }
+                throw error;
+            }
             let marked = false;
             try {
                 marked = await markProblemWriteClaimError(claim, error);
@@ -492,10 +724,82 @@ export class ProblemModel {
         }
     }
 
+    static async withAuthorizedStructuralWriteClaim<T>(
+        domainId: string,
+        pid: number,
+        user: ProblemAclUser,
+        operation: string,
+        work: (claim: ProblemWriteClaim) => Promise<T>,
+    ): Promise<T> {
+        return ProblemModel.withAuthorizedWriteClaim(domainId, pid, user, operation, async (claim) => {
+            const current = await document.coll.findOne({
+                domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: pid,
+                'aclWriteClaim.requestId': claim.requestId,
+                'aclWriteClaim.actor': claim.actor,
+                'aclWriteClaim.state': 'active',
+            }, { projection: { problemKind: 1, structureRevision: 1, structureLockedAt: 1, archivedAt: 1 } });
+            if (!current) throw new Error(`problem write claim ownership lost before ${operation}: ${claim.requestId}`);
+            if (current.problemKind === undefined) return work(claim);
+            const expectedRevision = current.structureRevision;
+            assertStructureRevision(expectedRevision);
+            parseProblemKind(current.problemKind);
+            if (current.archivedAt || current.structureLockedAt
+                || await ProblemModel.materializeStartedContainerLock(domainId, pid)) {
+                throw new ProblemStructureConflictError(pid);
+            }
+            const result = await work(claim);
+            const bumped = await document.coll.updateOne(
+                revisionClaimFilter(claim, expectedRevision),
+                { $inc: { structureRevision: 1 } },
+            );
+            if (bumped.matchedCount !== 1) throw new ProblemStructureConflictError(pid);
+            return result;
+        });
+    }
+
+    private static async assertDirectStructureWritable(
+        domainId: string,
+        pid: number,
+        testdata = false,
+    ): Promise<boolean> {
+        const pdoc = await document.coll.findOne({
+            domainId, docType: document.TYPE_PROBLEM, docId: pid,
+        }, { projection: { problemKind: 1, structureLockedAt: 1, archivedAt: 1 } });
+        if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
+        if (pdoc.problemKind === undefined) return false;
+        const problemKind = parseProblemKind(pdoc.problemKind);
+        if (testdata && problemKind !== 'programming') {
+            throw new ValidationError('problemKind', null, '结构化题不接受 testdata/config.yaml 文件写入');
+        }
+        if (pdoc.archivedAt || pdoc.structureLockedAt
+            || await ProblemModel.materializeStartedContainerLock(domainId, pid)) {
+            throw new ProblemStructureConflictError(pid);
+        }
+        return true;
+    }
+
+    private static async bumpDirectStructureRevision(domainId: string, pid: number): Promise<void> {
+        const result = await document.coll.updateOne({
+            domainId,
+            docType: document.TYPE_PROBLEM,
+            docId: pid,
+            problemKind: { $exists: true },
+            structureLockedAt: { $exists: false },
+        }, { $inc: { structureRevision: 1 } });
+        if (result.matchedCount !== 1) throw new ProblemStructureConflictError(pid);
+    }
+
     static async editWithClaim(
         claim: ProblemWriteClaim,
         $set: Partial<ProblemDoc>,
         requestedUnset: Record<string, unknown> = {},
+        options: {
+            expectedStructureRevision?: number;
+            requireExpectedStructureRevision?: boolean;
+            skipStructureGuard?: boolean;
+        } = {},
     ): Promise<ProblemDoc> {
         const domainId = claim.domainId;
         const _id = claim.pid;
@@ -510,7 +814,46 @@ export class ProblemModel {
             $set.sort = sortable($set.pid, ddoc.namespaces);
         }
         await bus.parallel('problem/before-edit', $set, $unset);
-        const result = await commitProblemWriteClaimUpdate(claim, $set, $unset);
+        const current = await document.coll.findOne({
+            domainId,
+            docType: document.TYPE_PROBLEM,
+            docId: _id,
+            'aclWriteClaim.requestId': claim.requestId,
+            'aclWriteClaim.actor': claim.actor,
+            'aclWriteClaim.state': 'active',
+        }, { projection: {
+            content: 1, problemKind: 1, structureRevision: 1, structureLockedAt: 1, archivedAt: 1,
+        } });
+        if (!current) throw new Error(`problem write claim ownership lost before edit: ${claim.requestId}`);
+        if (current.archivedAt && $set.hidden === false) throw new ValidationError('hidden');
+        if ($set.content === current.content) delete $set.content;
+        let result: ProblemDoc | null;
+        if (current.problemKind !== undefined && isStructuralPatch($set as any, $unset)
+            && !options.skipStructureGuard) {
+            if (options.requireExpectedStructureRevision) {
+                assertStructureRevision(options.expectedStructureRevision);
+            }
+            const expectedRevision = options.expectedStructureRevision ?? current.structureRevision;
+            assertStructureRevision(expectedRevision);
+            parseProblemKind(current.problemKind);
+            if ($set.problemKind !== undefined && $set.problemKind !== current.problemKind) {
+                throw new ValidationError('problemKind');
+            }
+            if (current.structureLockedAt || await ProblemModel.materializeStartedContainerLock(domainId, _id)) {
+                throw new ProblemStructureConflictError(_id);
+            }
+            result = await document.coll.findOneAndUpdate(
+                revisionClaimFilter(claim, expectedRevision),
+                {
+                    $set,
+                    ...(Object.keys($unset).length ? { $unset } : {}),
+                    $inc: { structureRevision: 1 },
+                },
+                { returnDocument: 'after' },
+            );
+        } else {
+            result = await commitProblemWriteClaimUpdate(claim, $set, $unset);
+        }
         if (!result) throw new Error(`problem write claim ownership lost during edit: ${claim.requestId}`);
         await bus.emit('problem/edit', result, claim.requestId);
         return result;
@@ -523,28 +866,67 @@ export class ProblemModel {
         $set: Partial<ProblemDoc>,
         user: ProblemAclUser,
         requestedUnset: Record<string, unknown> = {},
+        options: { expectedStructureRevision?: number } = {},
     ): Promise<ProblemDoc> {
         return ProblemModel.withAuthorizedWriteClaim(
             domainId,
             _id,
             user,
             'metadata-edit',
-            (claim) => ProblemModel.editWithClaim(claim, $set, requestedUnset),
+            (claim) => ProblemModel.editWithClaim(claim, $set, requestedUnset, {
+                ...options,
+                requireExpectedStructureRevision: true,
+            }),
         );
     }
 
-    static async copy(domainId: string, _id: number, target: string, pid?: string, hidden?: boolean) {
-        const original = await ProblemModel.get(domainId, _id);
+    static async copy(domainId: string, _id: number, target: string, pid?: string, _hidden?: boolean) {
+        const original = await ProblemModel.get(domainId, _id, ProblemModel.PROJECTION_PUBLIC, true);
         if (!original) throw new ProblemNotFoundError(domainId, _id);
         if (original.reference) throw new ValidationError('reference');
         if (pid && (/^[0-9]+$/.test(pid) || await ProblemModel.get(target, pid))) pid = '';
         if (!pid && original.pid && !await ProblemModel.get(target, original.pid)) pid = original.pid;
-        const $set = { hidden: hidden || original.hidden, reference: { domainId, pid: _id } } as any;
-        if (typeof original.difficulty === 'number') $set.difficulty = original.difficulty;
-        return await ProblemModel.add(
-            target, pid, original.title, original.content,
-            original.owner, original.tag, $set,
+        const problemKind = original.problemKind === undefined
+            ? 'programming'
+            : parseProblemKind(original.problemKind);
+        const cloneId = await ProblemModel.createProblemByKind(
+            problemKind,
+            target,
+            pid || '',
+            original.title,
+            original.content,
+            original.owner,
+            original.tag,
+            { difficulty: original.difficulty },
         );
+        const sourcePrefix = `problem/${domainId}/${_id}/`;
+        const targetPrefix = `problem/${target}/${cloneId}/`;
+        try {
+            const files = await storage.list(sourcePrefix);
+            for (const file of files) {
+                // Cloning is rare and deliberately synchronous. A copy error is
+                // surfaced with the exact file instead of scheduled for replay.
+                await storage.copy(file.path, `${targetPrefix}${file.name}`);
+            }
+            await document.set(target, document.TYPE_PROBLEM, cloneId, {
+                config: original.config,
+                data: original.data || [],
+                additional_file: original.additional_file || [],
+                html: !!original.html,
+            });
+        } catch (error) {
+            logger.error(
+                'Problem clone failed domain=%s pid=%d target=%s cloneId=%d error=%o',
+                domainId, _id, target, cloneId, error,
+            );
+            throw error;
+        }
+        await OplogModel.add({
+            type: 'problem.clone', domainId: target, operator: original.owner,
+            problemId: cloneId, sourceDomainId: domainId, sourceProblemId: _id,
+            problemKind, revision: 1, changedFields: ['all'], time: new Date(),
+        } as any);
+        return cloneId;
     }
 
     static push<T extends ArrayKeys<ProblemDoc>>(domainId: string, _id: number, key: ArrayKeys<ProblemDoc>, value: ProblemDoc[T][0]) {
@@ -564,6 +946,9 @@ export class ProblemModel {
     }
 
     static async del(domainId: string, docId: number) {
+        const pdoc = await ProblemModel.get(domainId, docId, ['docId', 'pid'] as any, true);
+        if (!pdoc) return false;
+        await ProblemModel.assertNoProblemReferences(domainId, docId, pdoc.pid);
         await bus.parallel('problem/before-del', domainId, docId);
         const res = await Promise.all([
             document.deleteOne(domainId, document.TYPE_PROBLEM, docId),
@@ -582,6 +967,9 @@ export class ProblemModel {
         user: ProblemAclUser,
         options: { requestId?: string } = {},
     ) {
+        const pdoc = await ProblemModel.get(domainId, docId, ['docId', 'pid'] as any, true);
+        if (!pdoc) throw new ProblemNotFoundError(domainId, docId);
+        await ProblemModel.assertNoProblemReferences(domainId, docId, pdoc.pid);
         const claim = await ProblemModel.beginAuthorizedWriteClaim(
             domainId, docId, user, 'hard-delete', options,
         );
@@ -631,6 +1019,7 @@ export class ProblemModel {
     }
 
     static async addTestdata(domainId: string, pid: number, name: string, f: Readable | Buffer | string, operator = 1) {
+        const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid, true);
         name = name.trim();
         if (!name) throw new ValidationError('name');
         const [[, fileinfo]] = await Promise.all([
@@ -644,10 +1033,12 @@ export class ProblemModel {
         if (!fileinfo) await ProblemModel.push(domainId, pid, 'data', { _id: name, ...payload });
         else await document.setSub(domainId, document.TYPE_PROBLEM, pid, 'data', name, payload);
         await bus.emit('problem/addTestdata', domainId, pid, name, payload);
+        if (revisionManaged) await ProblemModel.bumpDirectStructureRevision(domainId, pid);
     }
 
     static async renameTestdata(domainId: string, pid: number, file: string, newName: string, operator = 1) {
         if (file === newName) return;
+        const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid, true);
         const [, sdoc] = await document.getSub(domainId, document.TYPE_PROBLEM, pid, 'data', newName);
         if (sdoc) await ProblemModel.delTestdata(domainId, pid, newName);
         const payload = { _id: newName, name: newName, lastModified: new Date() };
@@ -660,21 +1051,25 @@ export class ProblemModel {
             document.setSub(domainId, document.TYPE_PROBLEM, pid, 'data', file, payload),
         ]);
         await bus.emit('problem/renameTestdata', domainId, pid, file, newName);
+        if (revisionManaged) await ProblemModel.bumpDirectStructureRevision(domainId, pid);
     }
 
     static async delTestdata(domainId: string, pid: number, name: string | string[], operator = 1) {
+        const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid, true);
         const names = (name instanceof Array) ? name : [name];
         await Promise.all([
             storage.del(names.map((t) => `problem/${domainId}/${pid}/testdata/${t}`), operator),
             ProblemModel.pull(domainId, pid, 'data', names),
         ]);
         await bus.emit('problem/delTestdata', domainId, pid, names);
+        if (revisionManaged) await ProblemModel.bumpDirectStructureRevision(domainId, pid);
     }
 
     static async addAdditionalFile(
         domainId: string, pid: number, name: string,
         f: Readable | Buffer | string, operator = 1, skipUpload = false,
     ) {
+        const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid);
         name = name.trim();
         const [[, fileinfo]] = await Promise.all([
             document.getSub(domainId, document.TYPE_PROBLEM, pid, 'additional_file', name),
@@ -685,10 +1080,12 @@ export class ProblemModel {
         if (!fileinfo) await ProblemModel.push(domainId, pid, 'additional_file', { _id: name, ...payload });
         else await document.setSub(domainId, document.TYPE_PROBLEM, pid, 'additional_file', name, payload);
         await bus.emit('problem/addAdditionalFile', domainId, pid, name, payload);
+        if (revisionManaged) await ProblemModel.bumpDirectStructureRevision(domainId, pid);
     }
 
     static async renameAdditionalFile(domainId: string, pid: number, file: string, newName: string, operator = 1) {
         if (file === newName) return;
+        const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid);
         const [, sdoc] = await document.getSub(domainId, document.TYPE_PROBLEM, pid, 'additional_file', newName);
         if (sdoc) await ProblemModel.delAdditionalFile(domainId, pid, newName);
         const payload = { _id: newName, name: newName, lastModified: new Date() };
@@ -701,15 +1098,18 @@ export class ProblemModel {
             document.setSub(domainId, document.TYPE_PROBLEM, pid, 'additional_file', file, payload),
         ]);
         await bus.emit('problem/renameAdditionalFile', domainId, pid, file, newName);
+        if (revisionManaged) await ProblemModel.bumpDirectStructureRevision(domainId, pid);
     }
 
     static async delAdditionalFile(domainId: string, pid: number, name: MaybeArray<string>, operator = 1) {
+        const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid);
         const names = (name instanceof Array) ? name : [name];
         await Promise.all([
             storage.del(names.map((t) => `problem/${domainId}/${pid}/additional_file/${t}`), operator),
             ProblemModel.pull(domainId, pid, 'additional_file', names),
         ]);
         await bus.emit('problem/delAdditionalFile', domainId, pid, names);
+        if (revisionManaged) await ProblemModel.bumpDirectStructureRevision(domainId, pid);
     }
 
     private static async getClaimedProblemFiles(
@@ -723,8 +1123,11 @@ export class ProblemModel {
             'aclWriteClaim.requestId': claim.requestId,
             'aclWriteClaim.actor': claim.actor,
             'aclWriteClaim.state': 'active',
-        }, { projection: { [key]: 1 } });
+        }, { projection: { [key]: 1, problemKind: 1 } });
         if (!doc) throw new Error(`problem write claim ownership lost before file operation: ${claim.requestId}`);
+        if (key === 'data' && doc.problemKind !== undefined && parseProblemKind(doc.problemKind) !== 'programming') {
+            throw new ValidationError('problemKind', null, '结构化题不接受 testdata/config.yaml 文件写入');
+        }
         return Array.isArray(doc[key]) ? doc[key] : [];
     }
 
@@ -989,6 +1392,9 @@ export class ProblemModel {
                     if (process.env.HYDRO_CLI) logger.error(`Invalid problem.yaml ${i}`);
                     continue;
                 }
+                if (pdoc.problemKind !== undefined && parseProblemKind(pdoc.problemKind) !== 'programming') {
+                    throw new ValidationError('problemKind', null, '结构化题导入将在对应题型任务中开放');
+                }
                 let pid = pdoc.pid;
                 let overridePid = null;
 
@@ -1046,7 +1452,7 @@ export class ProblemModel {
                     try {
                         config = yaml.load(await fs.readFile(path.join(tmpdir, i, 'testdata/config.yaml'), 'utf-8'));
                     } catch (e) {
-                        // TODO: report this as a warning
+                        throw new ValidationError('config', null, `Invalid testdata/config.yaml: ${e.message}`);
                     }
                 }
                 if (await fs.exists(path.join(tmpdir, i, 'domjudge-problem.ini'))) {
@@ -1067,6 +1473,9 @@ export class ProblemModel {
                     config.memory = (pdoc as any).limits.memory ? `${(pdoc as any).limits.memory}m` : config.memory || undefined;
                     configChanged = true;
                 }
+                const overrideDoc = overridePid
+                    ? await ProblemModel.get(domainId, overridePid, ['structureRevision'] as any, true)
+                    : null;
                 const docId = overridePid
                     ? (await ProblemModel.edit(domainId, overridePid, {
                         title: title.trim(),
@@ -1074,10 +1483,14 @@ export class ProblemModel {
                         tag,
                         difficulty: pdoc.difficulty,
                         ...(options.hidden ? { hidden: true } : {}),
-                    })).docId
+                    }, { expectedStructureRevision: overrideDoc?.structureRevision })).docId
                     : await ProblemModel.add(
                         domainId, pid, title.trim(), overrideContent || pdoc.content?.toString() || 'No content',
-                        operator || pdoc.owner, tag, { hidden: options.hidden || pdoc.hidden, difficulty: pdoc.difficulty },
+                        operator || pdoc.owner, tag, {
+                            hidden: options.hidden || pdoc.hidden,
+                            difficulty: pdoc.difficulty,
+                            problemKind: 'programming',
+                        },
                     );
                 // TODO delete unused file when updating pdoc
                 for (const [f, loc] of await getFiles('testdata', 'attachments', 'generators', 'include')) {
@@ -1222,24 +1635,24 @@ export function apply(ctx: Context) {
         if (!['config.yaml', 'config.yml', 'Config.yaml', 'Config.yml'].includes(name)) return;
         const buf = await storage.get(`problem/${domainId}/${docId}/testdata/${name}`);
         const update = { config: (await streamToBuffer(buf)).toString() };
-        if (claim) await ProblemModel.editWithClaim(claim, update);
-        else await ProblemModel.edit(domainId, docId, update);
+        if (claim) await ProblemModel.editWithClaim(claim, update, {}, { skipStructureGuard: true });
+        else await ProblemModel.edit(domainId, docId, update, { skipStructureGuard: true });
     });
     ctx.on('problem/delTestdata', async (domainId, docId, names, claim?: ProblemWriteClaim) => {
         if (!names.includes('config.yaml')) return;
-        if (claim) await ProblemModel.editWithClaim(claim, { config: '' });
-        else await ProblemModel.edit(domainId, docId, { config: '' });
+        if (claim) await ProblemModel.editWithClaim(claim, { config: '' }, {}, { skipStructureGuard: true });
+        else await ProblemModel.edit(domainId, docId, { config: '' }, { skipStructureGuard: true });
     });
     ctx.on('problem/renameTestdata', async (domainId, docId, file, newName, claim?: ProblemWriteClaim) => {
         if (['config.yaml', 'config.yml', 'Config.yaml', 'Config.yml'].includes(file)) {
-            if (claim) await ProblemModel.editWithClaim(claim, { config: '' });
-            else await ProblemModel.edit(domainId, docId, { config: '' });
+            if (claim) await ProblemModel.editWithClaim(claim, { config: '' }, {}, { skipStructureGuard: true });
+            else await ProblemModel.edit(domainId, docId, { config: '' }, { skipStructureGuard: true });
         }
         if (['config.yaml', 'config.yml', 'Config.yaml', 'Config.yml'].includes(newName)) {
             const buf = await storage.get(`problem/${domainId}/${docId}/testdata/${newName}`);
             const update = { config: (await streamToBuffer(buf)).toString() };
-            if (claim) await ProblemModel.editWithClaim(claim, update);
-            else await ProblemModel.edit(domainId, docId, update);
+            if (claim) await ProblemModel.editWithClaim(claim, update, {}, { skipStructureGuard: true });
+            else await ProblemModel.edit(domainId, docId, update, { skipStructureGuard: true });
         }
     });
 }

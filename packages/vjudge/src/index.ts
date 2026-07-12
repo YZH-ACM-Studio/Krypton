@@ -102,7 +102,9 @@ class AccountService {
                 try {
                     const res = await this.api.getProblem(pid, meta);
                     if (!res) continue;
-                    const docId = await ProblemModel.add(domainId, targetPid, res.title, res.content, 1, res.tag);
+                    const docId = await ProblemModel.add(
+                        domainId, targetPid, res.title, res.content, 1, res.tag, { problemKind: 'programming' },
+                    );
                     if (res.difficulty) await ProblemModel.edit(domainId, docId, { difficulty: res.difficulty });
                     for (const key in res.files) {
                         await ProblemModel.addAdditionalFile(domainId, docId, key, res.files[key]);

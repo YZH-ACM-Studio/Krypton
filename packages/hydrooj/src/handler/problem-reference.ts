@@ -27,3 +27,6 @@ export async function getVisibleReferencedProblems(domainId: string, pids: numbe
     }
     return visible;
 }
+
+/** This helper lives in handler/ and is therefore discovered by Hydro's loader. */
+export function apply() { }

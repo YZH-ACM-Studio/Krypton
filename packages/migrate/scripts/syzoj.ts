@@ -227,7 +227,10 @@ export async function run({
                     else problemAdditionalFile[`P${pdoc.id}`].push({ fromPid: pid, filename });
                     content = content.replace(origialPath, `file://${filename}`);
                 }
-                const pid = await ProblemModel.add(domainId, `P${pdoc.id}`, pdoc.title, content, uidMap[pdoc.user_id] || 1);
+                const pid = await ProblemModel.add(
+                    domainId, `P${pdoc.id}`, pdoc.title, content, uidMap[pdoc.user_id] || 1, [],
+                    { problemKind: 'programming' },
+                );
                 pidMap[pdoc.id] = pid;
             }
             const tags = await query(`SELECT * FROM \`problem_tag_map\` WHERE \`problem_id\` = ${pdoc.id}`);

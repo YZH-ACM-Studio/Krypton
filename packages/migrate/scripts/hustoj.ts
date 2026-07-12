@@ -227,7 +227,7 @@ export async function run({
                     domainId, `P${pdoc.problem_id}`,
                     pdoc.title, content,
                     1, pdoc.source?.trim().length ? pdoc.source.split(' ').map((i) => i.trim()).filter((i) => i) : [],
-                    { hidden: pdoc.defunct === 'Y' },
+                    { hidden: pdoc.defunct === 'Y', problemKind: 'programming' },
                 );
                 if (!markdown) await ProblemModel.edit(domainId, pid, { html: true });
                 pidMap[pdoc.problem_id] = pid;

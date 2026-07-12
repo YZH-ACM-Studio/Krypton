@@ -90,7 +90,9 @@ int main() {
 export default async function apply() {
     if (process.env.CI) return;
     await DomainModel.edit('system', { bulletin });
-    const docId = await ProblemModel.add('system', 'P1000', 'A+B Problem', defaultProblem, 1, ['系统测试']);
+    const docId = await ProblemModel.add(
+        'system', 'P1000', 'A+B Problem', defaultProblem, 1, ['系统测试'], { problemKind: 'programming' },
+    );
     // This might fail so we are doing it asynchronously.
     Promise.all(
         Object.keys(testdatas).map(

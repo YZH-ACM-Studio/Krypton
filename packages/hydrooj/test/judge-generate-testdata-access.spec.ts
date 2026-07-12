@@ -53,6 +53,15 @@ const problemStub = {
         if (!claimAllowed) throw new ForbiddenError('revoke won');
         return work({ domainId, pid, actor: user._id, requestId: 'generate-callback' });
     },
+    async withAuthorizedStructuralWriteClaim(
+        domainId: string,
+        pid: number,
+        user: any,
+        operation: string,
+        work: (claim: any) => Promise<any>,
+    ) {
+        return problemStub.withAuthorizedWriteClaim(domainId, pid, user, operation, work);
+    },
     async addTestdataWithClaim(claim: any, ...args: any[]) {
         calls.add.push({ claim, args });
     },

@@ -820,7 +820,7 @@ describe('P2.11 problem selection assertion', () => {
             query: {
                 $and: [
                     buildProblemBankScope(user),
-                    { docId: { $in: [20] } },
+                    { docId: { $in: [20] }, archivedAt: { $exists: false } },
                 ],
             },
         }]);

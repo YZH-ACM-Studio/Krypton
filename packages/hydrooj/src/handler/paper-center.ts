@@ -228,7 +228,10 @@ export class PaperCenterCreateHandler extends Handler {
     async post(_domainId: string, title: string, ptype: string) {
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
-        const docId = await problem.add(authoritativeDomainId, '', title, '', this.user._id, [], { hidden: true });
+        const docId = await problem.add(authoritativeDomainId, '', title, '', this.user._id, [], {
+            hidden: true,
+            problemKind: 'programming',
+        });
         const config = ptype === 'objective'
             ? yaml.dump({ type: 'objective', answers: {} })
             : yaml.dump({ type: 'fill_function' });

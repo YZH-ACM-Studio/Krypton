@@ -473,7 +473,7 @@ export async function assertProblemBankSelection(
     const count = await document.count(domainId, document.TYPE_PROBLEM, {
         $and: [
             buildProblemBankScope(user),
-            { docId: { $in: added } },
+            { docId: { $in: added }, archivedAt: { $exists: false } },
         ],
     });
     if (count !== added.length) throw selectionDenied();

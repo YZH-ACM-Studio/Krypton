@@ -39,7 +39,9 @@ class FpsProblemImportHandler extends Handler {
             }
             const title = decodeHTML(p.title.join(' '));
             const tags = _.filter(p.source, (i: string) => i.trim()).flatMap((i) => i.split(' ')).filter((i) => i);
-            const pid = await ProblemModel.add(domainId, null, title, content, this.user._id, tags);
+            const pid = await ProblemModel.add(
+                domainId, null, title, content, this.user._id, tags, { problemKind: 'programming' },
+            );
             const tasks: Promise<any>[] = [ProblemModel.addTestdata(domainId, pid, 'config.yaml', Buffer.from(yaml.dump(config)))];
             if (!markdown) tasks.push(ProblemModel.edit(domainId, pid, { html: true }));
             const addTestdata = (node: any, index: string, ext: string) => {

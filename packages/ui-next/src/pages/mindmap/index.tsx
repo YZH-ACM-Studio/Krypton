@@ -9,28 +9,29 @@
  *     for tags / problemIds / color editing; double-click rename;
  *     Enter = add child, Tab = add sibling, Delete = remove.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Background, BackgroundVariant, Controls, Handle, Position, ReactFlow,
-  ReactFlowProvider, applyNodeChanges, addEdge,
-  type Edge, type Node as RFNode, type NodeChange, type OnConnect,
-} from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+
+import {
+  addEdge,
+  applyNodeChanges, Background, BackgroundVariant, Controls, type Edge, Handle, type Node as RFNode, type NodeChange, type OnConnect,
+  Position, ReactFlow,
+  ReactFlowProvider } from '@xyflow/react';
 import ELK from 'elkjs/lib/elk.bundled.js';
 import {
-  ChevronDown, ChevronRight, ChevronUp, Edit3, Network, Plus, RefreshCw, Save, Search,
+  ChevronDown, ChevronRight, Edit3, Network, Plus, RefreshCw, Save, Search,
   Sparkles, Trash2, X,
 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
-import { PRIV } from '@/lib/perms';
 import { cn } from '@/lib/cn';
+import { PRIV } from '@/lib/perms';
 import { useColorMode } from '@/lib/use-color-mode';
 
 interface MindmapNode {
@@ -39,7 +40,7 @@ interface MindmapNode {
   topic: string;
   description?: string;
   color?: string;
-  position?: { x: number; y: number };
+  position?: { x: number, y: number };
   tags: string[];
   problemIds: string[];
   order: number;
@@ -139,7 +140,7 @@ function MindmapNodeComponent({ data }: { data: NodeData }) {
 
 const NODE_TYPES = { mindmap: MindmapNodeComponent };
 
-interface LayoutResult { nodes: RFNode<NodeData>[]; edges: Edge[] }
+interface LayoutResult { nodes: RFNode<NodeData>[], edges: Edge[] }
 
 /**
  * Compute a subset of `raw` nodes to actually render — anything whose
@@ -150,7 +151,7 @@ interface LayoutResult { nodes: RFNode<NodeData>[]; edges: Edge[] }
 function visibleSubset(
   raw: MindmapNode[],
   collapsed: ReadonlySet<string>,
-): { visible: MindmapNode[]; children: Record<string, string[]> } {
+): { visible: MindmapNode[], children: Record<string, string[]> } {
   const children: Record<string, string[]> = {};
   for (const n of raw) {
     if (n.parentId) {
@@ -262,7 +263,7 @@ async function computeLayout(
 
   // Anchor root at (0,0). For each subtree, find the laid-out root position
   // and translate all of that subtree's nodes by (-rootX, -rootY).
-  const positions = new Map<string, { x: number; y: number }>();
+  const positions = new Map<string, { x: number, y: number }>();
   positions.set(rootId, { x: 0, y: 0 });
   function ingest(layouted: any, ids: Set<string>) {
     if (!layouted?.children) return;
@@ -369,18 +370,16 @@ function MindmapInner() {
   const [problemSort, setProblemSort] = useState<'pid' | 'difficulty' | 'accept'>('pid');
 
   // Collapsed = the user can only see the root and its direct children by
-  // default. Every level-1 (root's direct children, i.e. the "categories")
-  // starts collapsed so its level-2 leaves are hidden until the user
-  // expands. Deeper levels are also collapsed by inheritance because once
-  // their parent (a level-1 category) is collapsed the whole subtree is
-  // invisible anyway.
+  // default. 初始把**所有有子节点的节点（root 除外）**都置为折叠——只折
+  // level-1 的旧实现对 ≥3 层的树是"点开一级分类整棵子树全涌出来"
+  // （level-2/3 从未进过折叠集合），多级树（P2.1）下无法逐层展开。
   const [collapsedNodes, setCollapsedNodes] = useState<Set<string>>(() => {
     const rootId = initialData.config.rootNodeId;
     if (!rootId) return new Set();
-    const level1 = initialData.nodes
-      .filter((n) => n.parentId === rootId)
-      .map((n) => n._id);
-    return new Set(level1);
+    const hasChildren = new Set(initialData.nodes.map((n) => n.parentId).filter(Boolean));
+    return new Set(initialData.nodes
+      .filter((n) => n._id !== rootId && hasChildren.has(n._id))
+      .map((n) => n._id));
   });
 
   const toggleCollapse = useCallback((id: string) => {
@@ -478,7 +477,8 @@ function MindmapInner() {
               </Button>
               {editMode && (
                 <Button
-                  size="sm" variant="outline"
+                  size="sm"
+                  variant="outline"
                   onClick={async () => {
                     if (!confirm('重置所有节点的手动位置覆盖？')) return;
                     const form = new URLSearchParams();
@@ -548,8 +548,10 @@ function MindmapInner() {
                 <div className="relative">
                   <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
-                    className="h-8 pl-8 text-xs" placeholder="搜索题号 / 标题"
-                    value={problemSearch} onChange={(e) => setProblemSearch(e.target.value)}
+                    className="h-8 pl-8 text-xs"
+                    placeholder="搜索题号 / 标题"
+                    value={problemSearch}
+                    onChange={(e) => setProblemSearch(e.target.value)}
                   />
                 </div>
                 <MiniTabs
@@ -703,7 +705,8 @@ function NodeEditorDrawer({
         <div>
           <label className="mb-1 block text-xs font-medium">描述（hover 显示）</label>
           <textarea
-            value={description} onChange={(e) => setDescription(e.target.value)}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
             rows={2}
             className="w-full rounded-md border bg-background p-2 text-sm"
           />

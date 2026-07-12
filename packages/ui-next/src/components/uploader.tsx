@@ -9,16 +9,17 @@
  *   - `FileUploader`: drag-drop pool for multiple files (testdata,
  *     attachments). Renders our own progress bars.
  */
-import {
-  useCallback, useEffect, useMemo, useRef, useState,
-} from 'react';
+/* eslint-disable ts/no-use-before-define -- primary flows precede their local helper components */
 import Uppy from '@uppy/core';
 import XHRUpload from '@uppy/xhr-upload';
 import { Crop, Loader2, Upload, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  useCallback, useEffect, useRef, useState,
+} from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/cn';
 import { makeInitials } from '@/lib/format';
 
@@ -148,7 +149,12 @@ export function AvatarUpload({
             {currentUrl ? <AvatarImage src={currentUrl} alt={uname} /> : null}
             <AvatarFallback className="text-2xl">{makeInitials(uname || '?')}</AvatarFallback>
           </Avatar>
-          <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+          <span
+            className={cn(
+              'absolute inset-0 flex items-center justify-center bg-black/40 text-xs font-medium text-white opacity-0',
+              'transition-opacity group-hover:opacity-100',
+            )}
+          >
             <Upload className="mr-1 size-3.5" />
             更换
           </span>
@@ -231,7 +237,14 @@ function CropPanel({ srcUrl, outputSize, busy, onCancel, onConfirm }: {
   const [loaded, setLoaded] = useState(false);
   const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
   const [crop, setCrop] = useState({ x: 0, y: 0, size: 0 });
-  const dragRef = useRef<{ mode: 'move' | 'resize' | null; sx: number; sy: number; cx: number; cy: number; cs: number }>({ mode: null, sx: 0, sy: 0, cx: 0, cy: 0, cs: 0 });
+  const dragRef = useRef<{
+    mode: 'move' | 'resize' | null;
+    sx: number;
+    sy: number;
+    cx: number;
+    cy: number;
+    cs: number;
+  }>({ mode: null, sx: 0, sy: 0, cx: 0, cy: 0, cs: 0 });
 
   useEffect(() => {
     if (!imgRef.current || !loaded) return;
@@ -376,7 +389,10 @@ function ProviderPicker({ endpoint, onClose, onSubmitted }: {
   const [err, setErr] = useState<string | null>(null);
 
   const handleSubmit = async () => {
-    if (!value.trim()) { setErr('值不能为空'); return; }
+    if (!value.trim()) {
+      setErr('值不能为空');
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
@@ -435,12 +451,14 @@ export interface FileUploaderProps {
   fieldName?: string;
   /** Extra form fields that should accompany the upload */
   meta?: Record<string, string>;
-  /** File size cap (default 64MB) */
-  maxFileSize?: number;
-  /** Maximum number of files in one batch */
-  maxFiles?: number;
+  /** File size cap (default 64MB, null defers to the server) */
+  maxFileSize?: number | null;
+  /** Maximum number of files in one batch (null defers to the server) */
+  maxFiles?: number | null;
   /** Maximum number of simultaneous XHR uploads (defaults to Uppy's 5) */
   uploadConcurrency?: number;
+  /** Whether Uppy may retry failed requests automatically (default true) */
+  retryOnFailure?: boolean;
   /** Allowed mime types (e.g. `['image/*']`) */
   accept?: string[];
   /** Called after each successful upload */
@@ -450,14 +468,14 @@ export interface FileUploaderProps {
   className?: string;
 }
 
-type Pending = {
+interface Pending {
   id: string;
   name: string;
   size: number;
   progress: number;
   status: 'queued' | 'uploading' | 'done' | 'failed';
   error?: string;
-};
+}
 
 export function FileUploader({
   endpoint,
@@ -466,6 +484,7 @@ export function FileUploader({
   maxFileSize = 64 * 1024 * 1024,
   maxFiles = 50,
   uploadConcurrency = 5,
+  retryOnFailure = true,
   accept,
   onUploaded,
   onBatchComplete,
@@ -474,6 +493,7 @@ export function FileUploader({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<Pending[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [ingestError, setIngestError] = useState('');
 
   const uppyRef = useRef<Uppy | null>(null);
 
@@ -491,10 +511,23 @@ export function FileUploader({
       fieldName,
       method: 'POST',
       limit: uploadConcurrency,
+      shouldRetry: retryOnFailure ? undefined : () => false,
       formData: true,
       withCredentials: true,
       allowedMetaFields: true,
       getResponseData: () => ({}),
+      onAfterResponse: (xhr) => {
+        if (xhr.status < 400) return;
+        const fallback = `上传失败：HTTP ${xhr.status}`;
+        try {
+          const body = JSON.parse(xhr.responseText);
+          const message = body?.error?.message || body?.message || body?.error;
+          throw new Error(typeof message === 'string' ? message : fallback);
+        } catch (error) {
+          if (error instanceof SyntaxError) throw new Error(fallback);
+          throw error;
+        }
+      },
     });
     uppy.on('file-added', (file) => {
       setItems((prev) => [...prev, {
@@ -511,16 +544,30 @@ export function FileUploader({
       if (file?.name) onUploaded?.(file.name);
     });
     uppy.on('upload-error', (file, error) => {
-      setItems((prev) => prev.map((it) => it.id === file?.id ? { ...it, status: 'failed', error: error?.message } : it));
+      const message = error?.message || '上传失败';
+      if (!file) {
+        setIngestError(message);
+        return;
+      }
+      setItems((prev) => prev.map((it) => it.id === file.id ? { ...it, status: 'failed', error: message } : it));
     });
-    uppy.on('complete', () => { onBatchComplete?.(); });
+    uppy.on('complete', (result) => {
+      if (!result.failed?.length) {
+        onBatchComplete?.();
+        return;
+      }
+      if (!retryOnFailure) {
+        for (const file of result.failed) uppy.removeFile(file.id);
+      }
+    });
     uppyRef.current = uppy;
   }
 
   const ingest = useCallback((files: FileList | File[]) => {
     const uppy = uppyRef.current;
     if (!uppy) return;
-    Array.from(files).forEach((f) => {
+    setIngestError('');
+    for (const f of Array.from(files)) {
       try {
         const id = uppy.addFile({
           name: f.name,
@@ -539,9 +586,15 @@ export function FileUploader({
           filename: f.name,
           ...(meta || {}),
         });
-      } catch { /* ignore (e.g. dup id, type restriction) */ }
+      } catch (error) {
+        console.error('File rejected before upload', { filename: f.name, error });
+        setIngestError(error instanceof Error ? error.message : `${f.name} 无法加入上传队列`);
+      }
+    }
+    void uppy.upload().catch((error) => {
+      console.error('File upload batch failed', error);
+      setIngestError(error instanceof Error ? error.message : '上传批次失败');
     });
-    void uppy.upload().catch(() => { /* upload-error updates per-file state */ });
   }, [meta]);
 
   const onDrop = (e: React.DragEvent) => {
@@ -552,20 +605,30 @@ export function FileUploader({
 
   return (
     <div className={cn('space-y-2', className)}>
-      <div
+      <button
+        type="button"
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         onClick={() => fileInputRef.current?.click()}
         className={cn(
-          'flex flex-col items-center justify-center gap-1.5 rounded-md border border-dashed bg-muted/10 px-4 py-6 text-xs text-muted-foreground transition-colors cursor-pointer',
+          'flex w-full cursor-pointer flex-col items-center justify-center gap-1.5 rounded-md border border-dashed',
+          'bg-muted/10 px-4 py-6 text-xs text-muted-foreground transition-colors',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
           dragOver && 'border-primary bg-primary/5 text-foreground',
         )}
       >
         <Upload className="size-4" />
-        <p>拖拽文件到此处，或点击选择</p>
-        <p className="text-[10px]">最大 {Math.round(maxFileSize / (1024 * 1024))}MB · 最多 {maxFiles} 个</p>
-      </div>
+        <span>拖拽文件到此处，或点击选择</span>
+        <span className="text-[10px]">
+          {maxFileSize === null && maxFiles === null
+            ? '文件大小与数量以服务器限制为准'
+            : [
+              maxFileSize === null ? null : `最大 ${Math.round(maxFileSize / (1024 * 1024))}MB`,
+              maxFiles === null ? null : `最多 ${maxFiles} 个`,
+            ].filter(Boolean).join(' · ')}
+        </span>
+      </button>
       <input
         ref={fileInputRef}
         type="file"
@@ -578,8 +641,10 @@ export function FileUploader({
         }}
       />
 
+      {ingestError ? <p role="alert" className="text-xs text-destructive">{ingestError}</p> : null}
+
       {items.length ? (
-        <ul className="space-y-1">
+        <ul aria-label="上传进度" className="space-y-1">
           {items.map((it) => (
             <li key={it.id} className="flex items-center gap-2 rounded border bg-card px-2 py-1.5 text-xs">
               <span className="truncate flex-1 font-mono">{it.name}</span>
@@ -587,9 +652,18 @@ export function FileUploader({
               {it.status === 'done' ? (
                 <Badge variant="default" className="text-[9px]">已上传</Badge>
               ) : it.status === 'failed' ? (
-                <Badge variant="destructive" className="text-[9px]" title={it.error}>失败</Badge>
+                <span role="alert" className="max-w-56 text-right text-destructive">
+                  {it.error || '上传失败'}
+                </span>
               ) : (
-                <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
+                <div
+                  role="progressbar"
+                  aria-label={`${it.name} 上传进度`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={it.progress}
+                  className="h-1.5 w-20 overflow-hidden rounded-full bg-muted"
+                >
                   <div
                     className="h-full bg-primary transition-all"
                     style={{ width: `${it.progress}%` }}

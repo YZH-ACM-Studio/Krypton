@@ -110,11 +110,12 @@ const CHECKER_TYPES_NEEDING_FILE: CheckerType[] = ['lemon', 'syzoj', 'testlib', 
 /*  Top-level page                                                    */
 /* ────────────────────────────────────────────────────────────────── */
 
-export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml }: {
+export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml, embedded = false }: {
   problemUrl: string;
   pdoc: R;
   files: R[];
   initialYaml: string;
+  embedded?: boolean;
 }) {
   // --- state ---
   const [yamlText, setYamlText] = useState(initialYaml);
@@ -124,8 +125,11 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml }: {
   const [viewMode, setViewMode] = useState<'visual' | 'yaml'>('visual');
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState('');
+  const [dirty, setDirty] = useState(false);
   const [draggedItem, setDraggedItem] = useState<DraggedItem | null>(null);
   const lastSource = useRef<'form' | 'yaml'>('form');
+  const editVersion = useRef(0);
   const [mobileTab, setMobileTab] = useState<'files' | 'cases' | 'subtasks'>('files');
   // File being edited in the modal — null = closed.
   const [editingFile, setEditingFile] = useState<R | null>(null);
@@ -162,6 +166,10 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml }: {
   // --- yaml → form sync (debounced) ---
   const onYamlChange = useCallback((next: string) => {
     lastSource.current = 'yaml';
+    editVersion.current += 1;
+    setDirty(true);
+    setSaveError('');
+    setSaveMsg(null);
     setYamlText(next);
     const parsed = parseJudgeConfig(next);
     if (parsed.error) {
@@ -174,8 +182,22 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml }: {
 
   const updateConfig = useCallback((mut: (c: JudgeConfig) => JudgeConfig) => {
     lastSource.current = 'form';
+    editVersion.current += 1;
+    setDirty(true);
+    setSaveError('');
+    setSaveMsg(null);
     setConfig((c) => mut(c));
   }, []);
+
+  useEffect(() => {
+    const warnBeforeLeave = (event: BeforeUnloadEvent) => {
+      if (!dirty) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeLeave);
+    return () => window.removeEventListener('beforeunload', warnBeforeLeave);
+  }, [dirty]);
 
   // --- validation ---
   const issues = useMemo(() => validateConfig(config, fileSet), [config, fileSet]);
@@ -184,7 +206,9 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml }: {
 
   // --- save ---
   const handleSave = useCallback(async () => {
+    const savedVersion = editVersion.current;
     setSaving(true);
+    setSaveError('');
     setSaveMsg(null);
     try {
       const currentYaml = lastSource.current === 'form'
@@ -202,14 +226,17 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml }: {
         headers: { Accept: 'application/json' },
       });
       if (res.ok) {
+        if (editVersion.current === savedVersion) setDirty(false);
         setSaveMsg('已保存');
         setTimeout(() => setSaveMsg(null), 1800);
       } else {
         const data = await res.json().catch(() => ({}));
-        setSaveMsg(data?.error || '保存失败');
+        const message = data?.error?.message || data?.message || data?.error;
+        setSaveError(typeof message === 'string' ? message : `保存失败：HTTP ${res.status}`);
       }
     } catch (e: any) {
-      setSaveMsg(e?.message || '保存失败');
+      console.error('Failed to save problem judge config', e);
+      setSaveError(e?.message || '保存失败');
     } finally {
       setSaving(false);
     }
@@ -327,34 +354,53 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml }: {
       // AppShell topbar (3rem) + main padding (varies) + this page's
       // breathing room; everything below the kanban (sticky footer) is
       // outside this motion.div but still inside the main ScrollArea.
-      className="flex h-[calc(100dvh-5rem)] min-h-[520px] flex-col gap-4 sm:h-[calc(100dvh-6rem)] xl:h-[calc(100dvh-7rem)]"
+      className={embedded
+        ? 'flex h-[calc(100dvh-13rem)] min-h-[560px] flex-col gap-4'
+        : 'flex h-[calc(100dvh-5rem)] min-h-[520px] flex-col gap-4 sm:h-[calc(100dvh-6rem)] xl:h-[calc(100dvh-7rem)]'}
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
     >
       {/* Header */}
-      <div className="flex shrink-0 items-center gap-3">
-        <Button asChild variant="ghost" size="icon">
-          <a href={problemUrl}><ArrowLeft className="size-4" /></a>
-        </Button>
-        <div className="flex-1">
-          <h1 className="text-xl font-semibold">评测配置</h1>
-          <p className="text-sm text-muted-foreground">{pdoc.title || pdoc.pid || '题目'}</p>
-        </div>
-        <div className="flex items-center gap-2">
+      <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-center">
+        {!embedded ? (
+          <>
+            <Button asChild variant="ghost" size="icon">
+              <a href={problemUrl}><ArrowLeft className="size-4" /></a>
+            </Button>
+            <div className="flex-1">
+              <h1 className="text-xl font-semibold">评测配置</h1>
+              <p className="text-sm text-muted-foreground">{pdoc.title || pdoc.pid || '题目'}</p>
+            </div>
+          </>
+        ) : <div className="flex-1"><h2 className="text-base font-semibold">评测配置</h2></div>}
+        <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+          <span aria-live="polite" className="text-xs text-muted-foreground">
+            {saving ? '保存中' : saveError ? '保存失败' : dirty ? '有未保存修改' : saveMsg || '已载入服务器版本'}
+          </span>
           {errorCount > 0 ? (
             <Badge variant="destructive" className="gap-1"><AlertTriangle className="size-3" />{errorCount} 错误</Badge>
           ) : warnCount > 0 ? (
-            <Badge variant="outline" className="gap-1 border-amber-400 text-amber-600 dark:text-amber-400"><AlertTriangle className="size-3" />{warnCount} 警告</Badge>
+            <Badge variant="outline" className="gap-1 border-amber-400 text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="size-3" />{warnCount} 警告
+            </Badge>
           ) : (
-            <Badge variant="outline" className="gap-1 border-green-500 text-green-600 dark:text-green-400"><CheckCircle2 className="size-3" />OK</Badge>
+            <Badge variant="outline" className="gap-1 border-green-500 text-green-600 dark:text-green-400">
+              <CheckCircle2 className="size-3" />OK
+            </Badge>
           )}
           <Button onClick={handleSave} disabled={saving} className="gap-1.5">
             <Save className="size-3.5" />
-            {saving ? '保存中…' : saveMsg ?? '保存'}
+            {saving ? '保存中…' : dirty ? '保存修改' : '保存'}
           </Button>
         </div>
       </div>
+
+      {saveError ? (
+        <p role="alert" className="shrink-0 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          {saveError}
+        </p>
+      ) : null}
 
       {/* View-mode tabs: 可视化 vs 原始 YAML (双向同步保留) */}
       <div className="flex shrink-0 items-center justify-between gap-3">
@@ -1259,8 +1305,10 @@ function FilesColumn({ files, usedInPairs, problemUrl, addCase, onOpenFile }: {
               endpoint={`${problemUrl}/files`}
               fieldName="file"
               meta={{ type: 'testdata' }}
-              maxFileSize={256 * 1024 * 1024}
-              maxFiles={200}
+              maxFileSize={null}
+              maxFiles={null}
+              uploadConcurrency={1}
+              retryOnFailure={false}
               onBatchComplete={() => {
                 // Refresh so the new files appear in the pool
                 setTimeout(() => window.location.reload(), 600);

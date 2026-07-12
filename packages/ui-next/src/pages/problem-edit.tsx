@@ -4,27 +4,21 @@
  */
 
 import {
-  BarChart3,
-  ChevronRight,
+  AlertCircle,
+  CheckCircle2,
   Download,
   Eye,
   EyeOff,
   FileText,
-  Flag,
-  FolderOpen,
-  Lightbulb,
+  Loader2,
   Lock,
-  NotebookPen,
-  Pencil,
   Save,
-  Send,
-  Settings,
   Tag,
   Trash2,
 } from 'lucide-react';
-import { motion } from 'motion/react';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
+import { ProblemEditorWorkspace } from '@/components/problem-editor-workspace';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -34,22 +28,10 @@ import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
-import { cn } from '@/lib/cn';
 import { replaceRouteTokens } from '@/lib/format';
 import { downloadProblemPackage } from '@/lib/problem-package';
-import {
-  buildConfigYaml, CommunicationEditor, FillFunctionEditor, InteractiveEditor,
-  parseConfigYaml, type ProblemType, type ProblemTypeState,
-  SubmitAnswerEditor, TypePicker,
-} from '@/pages/problem-type-editor';
 
 type R = Record<string, any>;
-
-function formatSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
-}
 
 const DIFFICULTY_OPTIONS = [
   { value: '', label: '未评定' },
@@ -64,86 +46,6 @@ const DIFFICULTY_OPTIONS = [
   { value: 9, label: 'NOI+/CTSC' },
   { value: 10, label: 'CTSC/IOI' },
 ];
-
-/* ---------- Sidebar navigation ---------- */
-
-function ProblemSidebar({ pid: _pid, problemUrl, active }: { pid: string, problemUrl: string, active: string }) {
-  const nav = [
-    { key: 'detail', icon: Flag, label: '查看题目', href: problemUrl },
-    { key: 'submit', icon: Send, label: '提交', href: `${problemUrl}/submit` },
-    { key: 'solution', icon: Lightbulb, label: '题解', href: `${problemUrl}/solution` },
-    { key: 'files', icon: FolderOpen, label: '文件', href: `${problemUrl}/files` },
-    { key: 'statistics', icon: BarChart3, label: '统计', href: `${problemUrl}/statistics` },
-  ];
-  const editNav = [
-    { key: 'edit', icon: Pencil, label: '编辑', href: `${problemUrl}/edit` },
-    { key: 'config', icon: Settings, label: '评测配置', href: `${problemUrl}/config` },
-  ];
-
-  return (
-    <nav className="space-y-1">
-      {nav.map((item) => (
-        <a
-          key={item.key}
-          href={item.href}
-          className={cn(
-            'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
-            active === item.key
-              ? 'bg-primary/10 text-primary font-medium'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-          )}
-        >
-          <item.icon className="size-4" />
-          {item.label}
-        </a>
-      ))}
-      <div className="my-2 border-t" />
-      {editNav.map((item) => (
-        <a
-          key={item.key}
-          href={item.href}
-          className={cn(
-            'flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
-            active === item.key
-              ? 'bg-primary/10 text-primary font-medium'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-          )}
-        >
-          <item.icon className="size-4" />
-          {item.label}
-        </a>
-      ))}
-    </nav>
-  );
-}
-
-/* ---------- Additional files sidebar section ---------- */
-
-function AdditionalFilesSidebar({ files, problemUrl }: { files: R[], problemUrl: string }) {
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">附加文件</h3>
-        <a href={`${problemUrl}/files`} className="text-xs text-primary hover:underline">管理</a>
-      </div>
-      {files.length > 0 ? (
-        <div className="space-y-1">
-          {files.slice(0, 10).map((f) => (
-            <div key={f.name} className="flex items-center justify-between text-xs">
-              <span className="truncate font-mono text-muted-foreground" title={f.name}>{f.name}</span>
-              <span className="ml-2 shrink-0 text-muted-foreground/60">{formatSize(f.size || 0)}</span>
-            </div>
-          ))}
-          {files.length > 10 && (
-            <p className="text-xs text-muted-foreground">+{files.length - 10} 个文件</p>
-          )}
-        </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">暂无附加文件</p>
-      )}
-    </div>
-  );
-}
 
 /* ---------- Permits panel ---------- */
 
@@ -170,6 +72,7 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string, pdocId: number, hi
   const [permits, setPermits] = useState<PermitRow[]>([]);
   const [udict, setUdict] = useState<Record<string, { _id: number, uname: string }>>({});
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [open, setOpen] = useState(false);
   const [selectedUsers, setSelectedUsers] = useState<UserOption[]>([]);
   const [inviteBusy, setInviteBusy] = useState(false);
@@ -177,14 +80,20 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string, pdocId: number, hi
   const apiPid = String(pdocId || pid);
 
   const refresh = useCallback(async () => {
+    setLoadError('');
     try {
       const r = await fetch(`/p/${apiPid}/permits`, { credentials: 'include', headers: { Accept: 'application/json' } });
-      if (!r.ok) return;
+      if (!r.ok) throw new Error(`权限列表加载失败：HTTP ${r.status}`);
       const j = await r.json();
+      if (!Array.isArray(j?.permits)) throw new Error('权限列表响应格式错误');
       setPermits(j.permits || []);
       setUdict(j.udict || {});
       setLoaded(true);
-    } catch { /* ignore */ }
+    } catch (error) {
+      console.error('Failed to load problem permits', error);
+      setLoadError(error instanceof Error ? error.message : '权限列表加载失败');
+      setLoaded(true);
+    }
   }, [apiPid]);
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -269,6 +178,10 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string, pdocId: number, hi
         {!hidden ? (
           <p className="text-xs text-muted-foreground">
             题目当前不是隐藏状态，无需邀请验题人。把题目设为「隐藏」并保存后即可邀请。
+          </p>
+        ) : loadError ? (
+          <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            {loadError}
           </p>
         ) : !loaded ? (
           <p className="text-xs text-muted-foreground">加载中…</p>
@@ -389,6 +302,8 @@ export function ProblemEditPage() {
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const additionalFiles: R[] = data.additional_file || [];
   const testdataFiles: R[] = data.testdata || pdoc.data || [];
+  const isCreate = !pdoc.docId;
+  const filesBase = pdoc.docId ? `${problemUrl}/files` : '';
 
   const rawContent = pdoc.content || '';
   const contentValue = typeof rawContent === 'string' || (rawContent && typeof rawContent === 'object' && !Array.isArray(rawContent))
@@ -397,33 +312,31 @@ export function ProblemEditPage() {
   const [draftContent, setDraftContent] = useState<string | R>(contentValue);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState('');
+  const [saveState, setSaveState] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState('');
   const formRef = useRef<HTMLFormElement>(null);
+  const editVersion = useRef(0);
+  const allowNavigation = useRef(false);
 
-  // Tag input
   const tags: string[] = pdoc.tag || [];
   const [tagInput, setTagInput] = useState(tags.join(', '));
-
-  // Delete confirmation
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  // Problem-type state（Rev.12）：raw config 由编辑页 handler 直接下发
-  // （data.configRaw），不再 fetch 文件下载路由——那条路对缺失文件不返回
-  // 404，新题/无 config 题的类型编辑永远初始化失败。
-  const configRaw: string | undefined = typeof data.configRaw === 'string' ? data.configRaw : undefined;
-  const [typeState, setTypeState] = useState<ProblemTypeState>(() => ({
-    type: 'default', objective: [],
-    template: '', expectedAnswer: '', interactor: '', manager: '',
-    ...(configRaw ? parseConfigYaml(configRaw) : {}),
-  }));
-  const [configYamlRaw] = useState<string>(configRaw || '');
-  // configRaw 缺失（老缓存 bundle / 异常响应）时保存流程跳过 config.yaml
-  // 写入——空白编辑器状态覆盖会把 answers/cases 清成 type:default（M2）。
-  const configLoaded = configRaw !== undefined;
-  // 客观题一律去出卷中心编辑（Rev.12）：本页隐藏类型编辑、跳过 config 写入。
-  const isObjectiveProblem = /^\s*['"]?type['"]?\s*:\s*['"]?objective['"]?\s*(?:#.*)?$/m.test(configRaw || '');
-  const isCreate = !pdoc.docId;
-  // ProblemDetailUrl-style API for the file endpoints.
-  const filesBase = pdoc.docId ? `${problemUrl}/files` : '';
+  useEffect(() => {
+    const warnBeforeLeave = (event: BeforeUnloadEvent) => {
+      if (allowNavigation.current || !['dirty', 'saving', 'error'].includes(saveState)) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeLeave);
+    return () => window.removeEventListener('beforeunload', warnBeforeLeave);
+  }, [saveState]);
+
+  const markDirty = useCallback(() => {
+    editVersion.current += 1;
+    setSaveError('');
+    setSaveState((current) => current === 'saving' ? current : 'dirty');
+  }, []);
 
   const handleDownloadPackage = useCallback(async () => {
     if (isCreate || !problemUrl) return;
@@ -455,322 +368,250 @@ export function ProblemEditPage() {
     }
   }, [additionalFiles, draftContent, isCreate, pdoc, problemUrl, testdataFiles]);
 
-  const setType = useCallback((next: ProblemType) => {
-    // 客观题 → 其他类型：保存时会删除全部 answers/options，先确认。
-    // confirm 必须在 setState updater 之外（updater 需纯函数，StrictMode 会双调用）。
-    if (typeState.type === 'objective' && next !== 'objective' && typeState.objective.length > 0) {
-      // eslint-disable-next-line no-alert
-      if (!window.confirm(`切换题型后保存将删除现有 ${typeState.objective.length} 道小题的题干与答案，确认切换？`)) {
-        return;
-      }
-    }
-    setTypeState((prev) => ({ ...prev, type: next }));
-  }, [typeState.type, typeState.objective.length]);
-
   const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
-    // For brand-new problems we have no pid yet — let the form submit
-    // natively so Hydro creates it. The user can come back and edit the
-    // type after the initial create lands.
-    if (isCreate) return; // submit natively
-    e.preventDefault();
-    const form = e.currentTarget;
-    const fd = new FormData(form);
-    // 1) Regular edit POST.
-    const editRes = await fetch(form.action || window.location.pathname, {
-      method: 'POST',
-      body: new URLSearchParams(fd as any),
-    });
-    if (!editRes.ok) {
-      // eslint-disable-next-line no-alert
-      alert(editRes.status === 409 ? '题目已变更或已锁定，请重新载入。' : `保存失败：${editRes.statusText}`);
+    const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    if (isCreate || submitter?.value === 'delete') {
+      allowNavigation.current = true;
+      setSaveState('saving');
       return;
     }
-    // 2) Write the type-specific config.yaml as a testdata file.
-    //    configLoaded=false（数据缺失）时绝不重写——空白状态覆盖会把
-    //    服务器上的 answers/cases 清成 type:default（对抗审查 M2）。
-    //    客观题（Rev.12）由出卷中心编辑器管理 config，本页永不触碰。
-    if (filesBase && configLoaded && !isObjectiveProblem) {
-      const yamlText = buildConfigYaml(typeState, configYamlRaw);
-      const cfgForm = new FormData();
-      cfgForm.append('type', 'testdata');
-      cfgForm.append('filename', 'config.yaml');
-      cfgForm.append('file', new Blob([yamlText], { type: 'text/yaml' }), 'config.yaml');
-      const cfgRes = await fetch(filesBase, { method: 'POST', body: cfgForm }).catch(() => null);
-      if (!cfgRes || !cfgRes.ok) {
-        // eslint-disable-next-line no-alert
-        alert('题目基本信息已保存，但评测配置（config.yaml）写入失败——题型/答案改动未生效，请重试保存。');
-        return;
+    e.preventDefault();
+    setSaveError('');
+    setSaveState('saving');
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const savedVersion = editVersion.current;
+    try {
+      const editRes = await fetch(form.action || window.location.pathname, {
+        method: 'POST',
+        body: new URLSearchParams(fd as any),
+        headers: { Accept: 'application/json' },
+      });
+      if (!editRes.ok) {
+        let message = editRes.status === 409
+          ? '题目已被其他操作修改或锁定，请刷新后重试。'
+          : `保存失败：HTTP ${editRes.status}`;
+        try {
+          const body = await editRes.json();
+          const serverMessage = body?.error?.message || body?.message || body?.error;
+          if (typeof serverMessage === 'string') message = serverMessage;
+        } catch {
+          const body = await editRes.text().catch(() => '');
+          if (body) message = body.slice(0, 180);
+        }
+        throw new Error(message);
       }
-    } else if (filesBase && !configLoaded && !isObjectiveProblem) {
-      // eslint-disable-next-line no-alert
-      alert('评测配置（config.yaml）数据缺失，本次保存已跳过题型/答案写入（防止覆盖服务器数据）。基本信息正常保存；请刷新页面重试。');
+      if (editVersion.current === savedVersion) {
+        allowNavigation.current = true;
+        setSaveState('saved');
+        window.location.assign(problemUrl);
+      } else {
+        setSaveState('dirty');
+      }
+    } catch (error) {
+      console.error('Failed to save programming problem metadata', error);
+      setSaveError(error instanceof Error ? error.message : '保存失败');
+      setSaveState('error');
     }
-    window.location.assign(problemUrl);
   };
 
+  const status = (
+    <span aria-live="polite" className="inline-flex min-h-9 items-center gap-1.5 text-xs text-muted-foreground">
+      {saveState === 'saving' ? <><Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" />保存中</> : null}
+      {saveState === 'dirty' ? <><span className="size-1.5 rounded-full bg-amber-500" />有未保存修改</> : null}
+      {saveState === 'saved' ? <><CheckCircle2 className="size-3.5 text-emerald-600" />已保存</> : null}
+      {saveState === 'error' ? <><AlertCircle className="size-3.5 text-destructive" />保存失败</> : null}
+      {saveState === 'idle' && !isCreate ? '已载入服务器版本' : null}
+    </span>
+  );
+
+  const actions = (
+    <>
+      {!isCreate ? (
+        <Button type="button" size="sm" variant="outline" onClick={handleDownloadPackage} disabled={downloading}>
+          <Download className="mr-1 size-3.5" />
+          {downloading ? '打包中…' : '打包下载'}
+        </Button>
+      ) : null}
+      <Button type="submit" form="programming-problem-form" size="sm" className="gap-1.5" disabled={saveState === 'saving'}>
+        {saveState === 'saving' ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Save className="size-3.5" />}
+        {isCreate ? '创建题目' : '保存修改'}
+      </Button>
+    </>
+  );
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
+    <ProblemEditorWorkspace
+      page="edit"
+      problemUrl={problemUrl}
+      title={pdoc.title || '新建编程题'}
+      pid={String(pid)}
+      isCreate={isCreate}
+      status={status}
+      actions={actions}
     >
-      {/* Breadcrumb */}
-      <div className="mb-4 flex items-center gap-1.5 text-xs text-muted-foreground">
-        <a href={bs.urls.problems} className="hover:text-primary">题库</a>
-        <ChevronRight className="size-3" />
-        <a href={problemUrl} className="font-mono hover:text-primary">{pid}</a>
-        <ChevronRight className="size-3" />
-        <span>编辑</span>
-      </div>
+      <div className="space-y-6">
+        {downloadError ? (
+          <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            打包下载失败：{downloadError}
+          </p>
+        ) : null}
+        {saveError ? (
+          <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+            {saveError}
+          </p>
+        ) : null}
 
-      <div className="flex gap-6">
-        {/* Left: main form */}
-        <div className="min-w-0 flex-1 space-y-4">
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-semibold">编辑题目</h1>
-            {!isCreate && (
-              <div className="flex items-center gap-2">
-                {downloadError && <span className="text-xs text-destructive">{downloadError}</span>}
-                <Button type="button" size="sm" variant="outline" onClick={handleDownloadPackage} disabled={downloading}>
-                  <Download className="mr-1 size-3.5" />
-                  {downloading ? '打包中…' : '打包下载'}
-                </Button>
-              </div>
-            )}
-          </div>
+        <form
+          id="programming-problem-form"
+          ref={formRef}
+          method="post"
+          onSubmit={handleSave}
+          onChange={markDirty}
+          className="space-y-6"
+        >
+          {!isCreate && pdoc.problemKind && pdoc.structureRevision ? (
+            <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision)} />
+          ) : null}
 
-          <form ref={formRef} method="post" onSubmit={handleSave} className="space-y-4">
-            {!isCreate && pdoc.problemKind && pdoc.structureRevision && (
-              <input
-                type="hidden"
-                name="expectedStructureRevision"
-                value={String(pdoc.structureRevision)}
-              />
-            )}
-            {/* Title + PID row */}
-            <Card>
-              <CardContent className="p-4 space-y-4">
-                <div className="grid gap-4 sm:grid-cols-[1fr_200px]">
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium" htmlFor="edit-title">标题</label>
-                    <Input
-                      id="edit-title"
-                      name="title"
-                      defaultValue={pdoc.title || ''}
-                      placeholder="题目标题"
-                      required
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium" htmlFor="edit-pid">题目编号</label>
-                    <Input
-                      id="edit-pid"
-                      name="pid"
-                      defaultValue={typeof pid === 'string' ? pid : ''}
-                      placeholder="如 P1001"
-                      pattern="^(?:[a-z0-9]{1,10}-)?[a-zA-Z][a-zA-Z0-9]*$"
-                    />
-                  </div>
+          <section id="basic" aria-labelledby="basic-heading" className="scroll-mt-44 rounded-2xl border border-border/70 bg-card/30">
+            <header className="border-b border-border/60 px-5 py-4">
+              <h2 id="basic-heading" className="text-base font-semibold tracking-tight">基本信息</h2>
+              <p className="mt-1 text-sm text-muted-foreground">设置题目在题库中的识别信息，不影响评测数据。</p>
+            </header>
+            <div className="space-y-5 p-5">
+              <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_13rem]">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium" htmlFor="edit-title">标题</label>
+                  <Input id="edit-title" name="title" defaultValue={pdoc.title || ''} placeholder="题目标题" required />
                 </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium" htmlFor="edit-pid">题目编号</label>
+                  <Input
+                    id="edit-pid"
+                    name="pid"
+                    defaultValue={typeof pid === 'string' ? pid : ''}
+                    placeholder="如 P1001"
+                    pattern="^(?:[a-z0-9]{1,10}-)?[a-zA-Z][a-zA-Z0-9]*$"
+                  />
+                </div>
+              </div>
 
-                {/* Tags */}
+              <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_13rem]">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium" htmlFor="edit-tag">
-                    <Tag className="mr-1 inline-block size-3.5" />
-                    标签
+                    <Tag className="mr-1 inline-block size-3.5" />标签
                   </label>
                   <Input
                     id="edit-tag"
                     name="tag"
                     value={tagInput}
-                    onChange={(e) => setTagInput(e.target.value)}
+                    onChange={(event) => setTagInput(event.target.value)}
                     placeholder="用逗号分隔，如：模拟, 数学, 贪心"
                   />
-                  {tagInput && (
+                  {tagInput ? (
                     <div className="flex flex-wrap gap-1 pt-1">
-                      {tagInput.split(',').map((t) => t.trim()).filter(Boolean).map((t) => (
-                        <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>
+                      {tagInput.split(',').map((tag) => tag.trim()).filter(Boolean).map((tag) => (
+                        <Badge key={tag} variant="secondary" className="text-[10px]">{tag}</Badge>
                       ))}
                     </div>
-                  )}
+                  ) : null}
                 </div>
-
-                {/* Difficulty + Hidden */}
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium" htmlFor="edit-difficulty">难度</label>
-                    <SimpleSelect
-                      id="edit-difficulty"
-                      name="difficulty"
-                      defaultValue={String(pdoc.difficulty || '')}
-                      options={DIFFICULTY_OPTIONS.map((opt) => ({
-                        value: String(opt.value),
-                        label: opt.label,
-                      }))}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5 pb-2">
-                    <label className="inline-flex cursor-pointer items-center gap-2">
-                      <Checkbox
-                        name="hidden"
-                        defaultChecked={!!pdoc.hidden}
-                      />
-                      <span className="flex items-center gap-1 text-sm">
-                        {pdoc.hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                        隐藏题目
-                      </span>
-                    </label>
-                    <label className="inline-flex cursor-pointer items-center gap-2">
-                      <Checkbox
-                        name="lockHidden"
-                        defaultChecked={!!(pdoc as any).lockHidden}
-                      />
-                      <span className="flex items-center gap-1 text-sm">
-                        <Lock className="size-3.5" />
-                        锁定隐藏（比赛结束后不自动公开）
-                      </span>
-                    </label>
-                  </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium" htmlFor="edit-difficulty">难度</label>
+                  <SimpleSelect
+                    id="edit-difficulty"
+                    name="difficulty"
+                    defaultValue={String(pdoc.difficulty || '')}
+                    options={DIFFICULTY_OPTIONS.map((option) => ({ value: String(option.value), label: option.label }))}
+                  />
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
+          </section>
 
-            {/* Content editor */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <FileText className="size-4" />
-                  题面内容
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-4 pt-0">
-                <MarkdownEditor
-                  name="content"
-                  value={contentValue}
-                  onChange={setDraftContent}
-                  minHeight={400}
-                  pasteUpload={filesBase ? {
-                    endpoint: filesBase,
-                    meta: { type: 'additional_file' },
-                    makeUrl: (filename) => `file://${filename}`,
-                  } : undefined}
-                  previewFileUrl={(filename, original) => {
-                    const queryIndex = original.indexOf('?');
-                    const query = queryIndex >= 0 ? original.slice(queryIndex) : '';
-                    return `${problemUrl}/file/${encodeURIComponent(filename)}${query}`;
-                  }}
-                />
-              </CardContent>
-            </Card>
-
-            {/* 客观题（Rev.12）：题型/小题/答案在出卷中心独立编辑器维护 */}
-            {isObjectiveProblem ? (
-              <Card className="border-primary/40 bg-primary/5">
-                <CardContent className="flex flex-wrap items-center gap-3 p-4">
-                  <NotebookPen className="size-4 shrink-0 text-primary" />
-                  <p className="min-w-0 flex-1 text-sm">
-                    此题为<span className="font-medium">客观题</span>——小题、选项与标准答案请在出卷中心编辑器维护；本页仅可修改标题、题号、标签、可见性等基本信息。
-                  </p>
-                  <Button asChild size="sm">
-                    <a href={`/paper-center/${pdoc.docId}/edit`}>去出卷中心编辑 →</a>
-                  </Button>
-                </CardContent>
-              </Card>
-            ) : (
-              /* Type picker (visible in both create + edit)；客观题选项已移除 */
-              <TypePicker value={typeState.type} onChange={setType} />
-            )}
-            {!isCreate && typeState.type === 'fill_function' && (
-              <FillFunctionEditor
-                template={typeState.template}
-                onChange={(t) => setTypeState((prev) => ({ ...prev, template: t }))}
-              />
-            )}
-            {!isCreate && typeState.type === 'submit_answer' && (
-              <SubmitAnswerEditor
-                expectedAnswer={typeState.expectedAnswer}
-                onChange={(t) => setTypeState((prev) => ({ ...prev, expectedAnswer: t }))}
-              />
-            )}
-            {!isCreate && typeState.type === 'interactive' && (
-              <InteractiveEditor
-                interactor={typeState.interactor}
-                onChange={(t) => setTypeState((prev) => ({ ...prev, interactor: t }))}
-              />
-            )}
-            {!isCreate && typeState.type === 'communication' && (
-              <CommunicationEditor
-                manager={typeState.manager}
-                onChange={(t) => setTypeState((prev) => ({ ...prev, manager: t }))}
-              />
-            )}
-            {isCreate && typeState.type !== 'default' && (
-              <Card className="border-amber-500/40 bg-amber-500/5">
-                <CardContent className="p-3 text-xs text-amber-700 dark:text-amber-300">
-                  题目类型的可视化字段（选项、答案、模板代码）将在创建后于编辑页填写。
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Submit / Delete */}
-            <div className="flex items-center justify-between">
+          <section id="statement" aria-labelledby="statement-heading" className="scroll-mt-44 rounded-2xl border border-border/70 bg-card/30">
+            <header className="flex items-start gap-3 border-b border-border/60 px-5 py-4">
+              <FileText className="mt-0.5 size-4 text-muted-foreground" aria-hidden="true" />
               <div>
+                <h2 id="statement-heading" className="text-base font-semibold tracking-tight">题面</h2>
+                <p className="mt-1 text-sm text-muted-foreground">Markdown 内容；粘贴图片继续使用现有附加文件 API。</p>
+              </div>
+            </header>
+            <div className="p-5">
+              <MarkdownEditor
+                name="content"
+                value={draftContent}
+                onChange={(value) => {
+                  setDraftContent(value);
+                  markDirty();
+                }}
+                minHeight={440}
+                pasteUpload={filesBase ? {
+                  endpoint: filesBase,
+                  meta: { type: 'additional_file' },
+                  makeUrl: (filename) => `file://${filename}`,
+                } : undefined}
+                previewFileUrl={(filename, original) => {
+                  const queryIndex = original.indexOf('?');
+                  const query = queryIndex >= 0 ? original.slice(queryIndex) : '';
+                  return `${problemUrl}/file/${encodeURIComponent(filename)}${query}`;
+                }}
+              />
+            </div>
+          </section>
+
+          <section id="permissions" aria-labelledby="permissions-heading" className="scroll-mt-44 rounded-2xl border border-border/70 bg-card/30">
+            <header className="border-b border-border/60 px-5 py-4">
+              <h2 id="permissions-heading" className="text-base font-semibold tracking-tight">权限与可见性</h2>
+              <p className="mt-1 text-sm text-muted-foreground">新题固定以隐藏状态创建；发布与维护权限沿用现有模型。</p>
+            </header>
+            <div className="grid gap-4 p-5 sm:grid-cols-2">
+              <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-muted/45 px-3">
+                <Checkbox name="hidden" defaultChecked={isCreate || !!pdoc.hidden} disabled={isCreate} />
+                <span className="flex items-center gap-1.5 text-sm">
+                  {isCreate || pdoc.hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                  {isCreate ? '创建后保持隐藏' : '隐藏题目'}
+                </span>
+              </label>
+              <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-muted/45 px-3">
+                <Checkbox name="lockHidden" defaultChecked={!!pdoc.lockHidden} />
+                <span className="flex items-center gap-1.5 text-sm">
+                  <Lock className="size-3.5" />锁定隐藏（比赛结束后不自动公开）
+                </span>
+              </label>
+            </div>
+          </section>
+
+          {!isCreate ? (
+            <section aria-labelledby="danger-heading" className="rounded-2xl border border-destructive/25 bg-destructive/[0.025] p-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 id="danger-heading" className="text-sm font-semibold text-destructive">危险操作</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">删除将同时移除题目文件、提交记录和讨论。</p>
+                </div>
                 {!showDeleteConfirm ? (
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => setShowDeleteConfirm(true)}
-                  >
-                    <Trash2 className="mr-1 size-3.5" />
-                    删除题目
+                  <Button type="button" variant="destructive" size="sm" onClick={() => setShowDeleteConfirm(true)}>
+                    <Trash2 className="mr-1 size-3.5" />删除题目
                   </Button>
                 ) : (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-destructive">确定删除？所有文件、提交和讨论都将被删除。</span>
-                    <Button
-                      type="submit"
-                      name="operation"
-                      value="delete"
-                      variant="destructive"
-                      size="sm"
-                    >
-                      确认删除
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowDeleteConfirm(false)}
-                    >
-                      取消
-                    </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-destructive">确认永久删除？</span>
+                    <Button type="submit" name="operation" value="delete" variant="destructive" size="sm">确认删除</Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setShowDeleteConfirm(false)}>取消</Button>
                   </div>
                 )}
               </div>
-              <Button type="submit" className="gap-1.5">
-                <Save className="size-3.5" />
-                保存修改
-              </Button>
-            </div>
-          </form>
+            </section>
+          ) : null}
+        </form>
 
-          {/* Permits panel — out of the main form so its own POSTs don't
-              compete with the problem-edit submit. Only meaningful when
-              the problem is hidden. */}
-          <PermitsPanel pid={String(pid)} pdocId={pdoc.docId} hidden={!!pdoc.hidden} />
-        </div>
-
-        {/* Right sidebar */}
-        <div className="hidden w-56 shrink-0 lg:block">
-          <div className="sticky top-20 space-y-6">
-            <ProblemSidebar pid={String(pid)} problemUrl={problemUrl} active="edit" />
-            <div className="border-t pt-4">
-              <AdditionalFilesSidebar files={additionalFiles} problemUrl={problemUrl} />
-            </div>
+        {!isCreate ? (
+          <div id="maintainers" className="scroll-mt-44">
+            <PermitsPanel pid={String(pid)} pdocId={pdoc.docId} hidden={!!pdoc.hidden} />
           </div>
-        </div>
+        ) : null}
       </div>
-    </motion.div>
+    </ProblemEditorWorkspace>
   );
 }

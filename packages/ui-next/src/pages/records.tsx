@@ -33,6 +33,7 @@ const STATUS_MAP: Record<number, { label: string; color: string }> = {
   9: { label: 'Canceled', color: 'text-gray-500' },
   10: { label: 'Unknown Error', color: 'text-red-600 dark:text-red-400' },
   11: { label: 'Hacked', color: 'text-red-600 dark:text-red-400' },
+  12: { label: '人工已评分', color: 'text-green-600 dark:text-green-400' },
   20: { label: 'Running', color: 'text-blue-500' },
   21: { label: 'Compiling', color: 'text-blue-500' },
   22: { label: 'Fetched', color: 'text-blue-500' },

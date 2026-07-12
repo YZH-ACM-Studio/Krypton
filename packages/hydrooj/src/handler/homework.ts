@@ -7,7 +7,7 @@ import {
     ContestNotFoundError, FileLimitExceededError, FileUploadError, HomeworkNotLiveError, NotAssignedError, ValidationError,
 } from '../error';
 import { PenaltyRules, Tdoc } from '../interface';
-import { PERM } from '../model/builtin';
+import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
 import problem from '../model/problem';
@@ -118,6 +118,7 @@ class HomeworkDetailHandler extends Handler {
         this.response.template = 'homework_detail.html';
         this.response.body = {
             tdoc: this.tdoc, tsdoc, udict, ddocs, page, dpcount, dcount,
+            canGradeSubjective: this.tdoc.owner === this.user._id || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
         };
         this.response.body.tdoc.content = this.response.body.tdoc.content
             .replace(/\(file:\/\//g, `(./${this.tdoc.docId}/file/public/`)

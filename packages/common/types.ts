@@ -24,8 +24,8 @@ export enum ProblemType {
  *
  * 'fill_program' is always explicit (PRD §1.1).
  *
- * 'subjective'（Rev.12）：主观题——判题器记 0 分置 STATUS_WAITING，
- * 由比赛「阅卷」人工给分后重算总分回写。
+ * 'subjective'：独立主观题的学生端输入描述；提交不进入自动判题器，
+ * Record 直接进入人工待评状态。
  */
 export type QuestionKind = 'single' | 'multi' | 'blank' | 'fill_program' | 'subjective';
 
@@ -227,17 +227,15 @@ export interface RecordPayload extends RecordJudgeInfo {
     contest?: string;
 
     files?: Record<string, string>;
-    /**
-     * 主观题人工评分（Rev.12，比赛「阅卷」写入）：
-     * scores = questionKey → 得分；baseScore = 自动判分部分（首次给分时
-     * 从当时 rdoc.score 快照，重算总分 = baseScore + Σscores）。
-     */
-    subjective?: {
-        scores: Record<string, number>;
-        baseScore: number;
+    manualGrade?: {
+        score: number;
+        maxScore: number;
+        comment?: string;
         gradedBy: number;
         gradedAt: Date;
+        revision: number;
     };
+    manualPending?: true;
 }
 
 export interface JudgeRequest extends Omit<RecordPayload, 'testCases'> {

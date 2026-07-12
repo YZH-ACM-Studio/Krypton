@@ -11,7 +11,7 @@ import sanitize from 'sanitize-filename';
 import Schema from 'schemastery';
 import {
     BASIC_OBJECTIVE_KIND, type BasicObjectiveKind, effectiveProblemKind,
-    isBasicObjectiveKind, problemKindToSlug,
+    isBasicObjectiveKind, PROBLEM_KIND_TO_SLUG, problemKindToSlug,
 } from '@hydrooj/common';
 import parser from '@hydrooj/utils/lib/search';
 import { randomstring, sortFiles, streamToBuffer } from '@hydrooj/utils/lib/utils';
@@ -31,6 +31,7 @@ import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
 import domain from '../model/domain';
+import { markManualPending } from '../model/manual-grade';
 import * as oplog from '../model/oplog';
 import problem from '../model/problem';
 import record from '../model/record';
@@ -52,6 +53,11 @@ const BASIC_OBJECTIVE_TEMPLATES: Record<BasicObjectiveKind, string> = {
     [BASIC_OBJECTIVE_KIND.trueFalse]: 'problem_edit_true_false.html',
     [BASIC_OBJECTIVE_KIND.blank]: 'problem_edit_blank.html',
 };
+const SUBJECTIVE_KIND = PROBLEM_KIND_TO_SLUG.subjective;
+
+function isDedicatedStructuredEditorKind(kind: ReturnType<typeof effectiveProblemKind>) {
+    return isBasicObjectiveKind(kind) || kind === SUBJECTIVE_KIND;
+}
 
 function defaultBasicObjectiveConfig(kind: BasicObjectiveKind): Record<string, unknown> {
     if (kind === BASIC_OBJECTIVE_KIND.single) return { main: { options: ['', ''], answerIndex: 0 } };
@@ -475,6 +481,8 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 : !this.tsdoc?.attend ? 'view'
                     : !contest.isDone(this.tdoc) ? 'contest'
                         : problem.canViewBy(this.pdoc, this.user) ? 'correction' : 'none',
+            canPreviewSubjective: effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND
+                && problem.canMaintainProblem(this.user, this.pdoc),
         };
         if (this.tdoc && this.tsdoc) {
             const fields = ['attend', 'startAt'];
@@ -545,6 +553,8 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             contest: { $nin: [record.RECORD_GENERATE, record.RECORD_PRETEST] },
             status: { $ne: STATUS.STATUS_CANCELED },
             'files.hack': { $exists: false },
+            manualPending: { $ne: true },
+            manualGrade: { $exists: false },
         }).project({ _id: 1, contest: 1 }).toArray();
         if (rdocs.length) {
             const priority = await record.submissionPriority(this.user._id, -10000 - rdocs.length * 5 - 50);
@@ -576,6 +586,10 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
     @param('tid', Types.ObjectId, true)
     async prepare(_domainId: string, tid?: ObjectId) {
         if (tid && !contest.isOngoing(this.tdoc, this.tsdoc)) throw new ContestNotLiveError(this.tdoc.docId);
+        if (effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND
+            && (!tid || !this.tdoc || !['exam', 'homework', 'oi'].includes(this.tdoc.rule))) {
+            throw new ValidationError('rule', null, '主观题仅允许在 exam、homework 或 oi 容器中提交');
+        }
         if (typeof this.pdoc.config === 'string') throw new ProblemConfigError();
         if (this.pdoc.config.langs && !this.pdoc.config.langs.length) throw new ProblemConfigError();
     }
@@ -601,6 +615,10 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
     async post(_domainId: string, lang: string, code: string, pretest = false, input: string[] = [], tid?: ObjectId) {
         const domainId = this.pdoc.domainId;
         const config = this.pdoc.config;
+        const isSubjective = effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND;
+        if (isSubjective && (pretest || !tid || !this.tdoc || !['exam', 'homework', 'oi'].includes(this.tdoc.rule))) {
+            throw new ValidationError('rule', null, '主观题仅允许在 exam、homework 或 oi 容器中提交');
+        }
         if (typeof config === 'string' || config === null) throw new ProblemConfigError();
         if (['submit_answer', 'objective'].includes(config.type)) {
             lang = '_';
@@ -636,19 +654,29 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
                 files.code = `${this.user._id}/${id}#${file.originalFilename}`;
             }
         } else {
-            code = code.replace(/\r\n/g, '\n');
+            if (!isSubjective) code = code.replace(/\r\n/g, '\n');
             if (code.length > lengthLimit) throw new ValidationError('code');
         }
         const rid = await record.add(
             domainId, this.pdoc.docId, this.user._id, lang, code, true,
-            pretest ? { input, type: 'pretest' } : { contest: tid, files, type: 'judge' },
+            pretest ? { input, type: 'pretest' }
+                : { contest: tid, files, type: isSubjective ? 'manual' : 'judge' },
         );
         if (!pretest) {
-            await Promise.all([
+            const updates: Promise<unknown>[] = [
                 problem.inc(domainId, this.pdoc.docId, 'nSubmit', 1),
                 domain.incUserInDomain(domainId, this.user._id, 'nSubmit'),
-                tid && contest.updateStatus(domainId, tid, this.user._id, rid, this.pdoc.docId),
-            ]);
+            ];
+            if (isSubjective) {
+                updates.push(markManualPending({
+                    domainId,
+                    tid,
+                    pid: this.pdoc.docId,
+                    uid: this.user._id,
+                    rid,
+                }));
+            } else if (tid) updates.push(contest.updateStatus(domainId, tid, this.user._id, rid, this.pdoc.docId));
+            await Promise.all(updates);
         }
         if (tid && !pretest && !contest.canShowSelfRecord.call(this, this.tdoc)) {
             this.response.body = { tid };
@@ -744,12 +772,14 @@ export class ProblemEditHandler extends ProblemManageHandler {
             this.user, this.pdoc, ['config'] as any, true,
         );
         const problemKind = effectiveProblemKind(this.pdoc);
-        if (isBasicObjectiveKind(problemKind)) {
+        if (isDedicatedStructuredEditorKind(problemKind)) {
             const config = parseProblemConfigObject(rawPdoc);
             if (!config?.main) throw new ValidationError('config', null, '结构化题缺少 main 配置');
             this.response.body.editorProblemKind = problemKind;
             this.response.body.structuredConfig = { main: config.main };
-            this.response.template = BASIC_OBJECTIVE_TEMPLATES[problemKind];
+            this.response.template = problemKind === SUBJECTIVE_KIND
+                ? 'problem_edit_subjective.html'
+                : BASIC_OBJECTIVE_TEMPLATES[problemKind];
             return;
         }
         this.response.body.configRaw = typeof rawPdoc?.config === 'string' ? rawPdoc.config : '';
@@ -777,7 +807,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
         const domainId = this.pdoc.domainId;
         const problemKind = effectiveProblemKind(this.pdoc);
         if (metadataOnly) {
-            if (!isBasicObjectiveKind(problemKind)
+            if (!isDedicatedStructuredEditorKind(problemKind)
                 || content !== undefined || newPid !== undefined || difficulty !== undefined
                 || lockHidden !== undefined || expectedStructureRevision !== undefined
                 || editorProblemKind || structuredConfig) {
@@ -795,13 +825,14 @@ export class ProblemEditHandler extends ProblemManageHandler {
             return;
         }
         if (content === undefined) throw new ValidationError('content');
-        if (typeof newPid !== 'string') newPid = `P${newPid}`;
+        if (newPid === undefined) newPid = this.pdoc.pid || '';
+        else if (typeof newPid !== 'string') newPid = `P${newPid}`;
         if (newPid !== this.pdoc.pid && await problem.get(domainId, newPid)) throw new ProblemAlreadyExistError(newPid);
         const $update: Partial<ProblemDoc> = {
             title, content, pid: newPid, hidden, tag: tag ?? [], difficulty: difficulty ?? 0, html: false,
             lockHidden: !!lockHidden,
         };
-        if (isBasicObjectiveKind(problemKind)) {
+        if (isDedicatedStructuredEditorKind(problemKind)) {
             if (editorProblemKind !== problemKind) throw new ValidationError('editorProblemKind');
             if (!structuredConfig) throw new ValidationError('structuredConfig');
             const pdoc = await problem.saveStructuredProblem({
@@ -831,15 +862,21 @@ export class ProblemEditHandler extends ProblemManageHandler {
     }
 }
 
-abstract class BasicObjectiveCreateHandler extends Handler {
-    abstract problemKind: BasicObjectiveKind;
+type DedicatedStructuredEditorKind = BasicObjectiveKind | typeof SUBJECTIVE_KIND;
+
+abstract class DedicatedStructuredCreateHandler extends Handler {
+    abstract problemKind: DedicatedStructuredEditorKind;
 
     async get() {
-        this.response.template = BASIC_OBJECTIVE_TEMPLATES[this.problemKind];
+        this.response.template = this.problemKind === SUBJECTIVE_KIND
+            ? 'problem_edit_subjective.html'
+            : BASIC_OBJECTIVE_TEMPLATES[this.problemKind];
         this.response.body = {
             page_name: `problem_create_${this.problemKind}`,
             editorProblemKind: this.problemKind,
-            structuredConfig: defaultBasicObjectiveConfig(this.problemKind),
+            structuredConfig: this.problemKind === SUBJECTIVE_KIND
+                ? { main: { gradingInstructions: '' } }
+                : defaultBasicObjectiveConfig(this.problemKind),
             pdoc: { hidden: true, problemKind: this.problemKind },
         };
     }
@@ -886,17 +923,21 @@ abstract class BasicObjectiveCreateHandler extends Handler {
     }
 }
 
-export class ProblemCreateSingleHandler extends BasicObjectiveCreateHandler {
+export class ProblemCreateSingleHandler extends DedicatedStructuredCreateHandler {
     problemKind = BASIC_OBJECTIVE_KIND.single;
 }
-export class ProblemCreateMultiHandler extends BasicObjectiveCreateHandler {
+export class ProblemCreateMultiHandler extends DedicatedStructuredCreateHandler {
     problemKind = BASIC_OBJECTIVE_KIND.multi;
 }
-export class ProblemCreateTrueFalseHandler extends BasicObjectiveCreateHandler {
+export class ProblemCreateTrueFalseHandler extends DedicatedStructuredCreateHandler {
     problemKind = BASIC_OBJECTIVE_KIND.trueFalse;
 }
-export class ProblemCreateBlankHandler extends BasicObjectiveCreateHandler {
+export class ProblemCreateBlankHandler extends DedicatedStructuredCreateHandler {
     problemKind = BASIC_OBJECTIVE_KIND.blank;
+}
+
+export class ProblemCreateSubjectiveHandler extends DedicatedStructuredCreateHandler {
+    problemKind = SUBJECTIVE_KIND;
 }
 
 export class ProblemConfigHandler extends ProblemManageHandler {
@@ -1525,6 +1566,10 @@ export async function apply(ctx: Context) {
     ctx.Route(
         'problem_create_blank', `/problem/create/${problemKindToSlug(BASIC_OBJECTIVE_KIND.blank)}`,
         ProblemCreateBlankHandler, PERM.PERM_CREATE_PROBLEM,
+    );
+    ctx.Route(
+        'problem_create_subjective', `/problem/create/${problemKindToSlug(SUBJECTIVE_KIND)}`,
+        ProblemCreateSubjectiveHandler, PERM.PERM_CREATE_PROBLEM,
     );
     await ctx.inject(['api'], ({ api }) => {
         api.provide(ProblemApi);

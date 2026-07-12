@@ -52,6 +52,7 @@ import {
 } from '@/lib/multi-select-presets';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
+import { isSystemAdmin } from '@/lib/perms';
 
 type R = Record<string, any>;
 
@@ -248,15 +249,17 @@ type ManagementItem = {
   show?: boolean;
 };
 
-function managementItems(tdoc: R, contestUrl: string): ManagementItem[] {
+function managementItems(tdoc: R, contestUrl: string, canGradeSubjective: boolean): ManagementItem[] {
   const isACM = tdoc.rule === 'acm';
   const items: ManagementItem[] = [
     { key: 'overview', label: '概览与文件', href: `${contestUrl}/management`, icon: LayoutDashboard },
     { key: 'edit', label: '编辑比赛', href: `${contestUrl}/edit`, icon: Settings },
     { key: 'users', label: '参赛选手', href: `${contestUrl}/user`, icon: Users },
     { key: 'clarification', label: '答疑管理', href: `${contestUrl}/clarification`, icon: MessageSquare },
-    // Rev.12：主观题阅卷（页面内自会提示"本场无可批阅题目"）
-    { key: 'grading', label: '主观题阅卷', href: `/paper-center/grading/${encodeURIComponent(contestId(tdoc))}`, icon: ClipboardCheck },
+    {
+      key: 'grading', label: '主观题阅卷', href: `/manage/grading/${encodeURIComponent(contestId(tdoc))}`,
+      icon: ClipboardCheck, show: canGradeSubjective,
+    },
     { key: 'balloon', label: '气球分发', href: `${contestUrl}/balloon`, icon: Trophy, show: isACM },
     { key: 'print', label: '打印服务', href: `${contestUrl}/print`, icon: Printer, show: !!tdoc.allowPrint },
     { key: 'scoreboard', label: '排行榜', href: `${contestUrl}/scoreboard`, icon: Trophy },
@@ -279,7 +282,9 @@ function ContestManagementChrome({
   const tid = contestId(tdoc);
   if (!tid) return <>{children}</>;
   const contestUrl = contestDetailUrl(bs, tdoc);
-  const items = managementItems(tdoc, contestUrl);
+  const canGradeSubjective = ['exam', 'homework', 'oi'].includes(String(tdoc.rule))
+    && (Number(tdoc.owner) === bs.user.id || isSystemAdmin(bs.user.priv));
+  const items = managementItems(tdoc, contestUrl, canGradeSubjective);
   return (
     <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
       <aside className="space-y-3">

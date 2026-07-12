@@ -7,7 +7,7 @@ import {
 import { ProblemConfigFile, STATUS_TEXTS } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
 import { Context } from '../context';
-import { ProblemNotFoundError } from '../error';
+import { ProblemNotFoundError, ValidationError } from '../error';
 import { JudgeMeta, RecordDoc } from '../interface';
 import { parseProblemConfigObject } from '../lib/problem-config';
 import db from '../service/db';
@@ -46,10 +46,10 @@ export default class RecordModel {
     static async submissionPriority(uid: number, base: number = 0) {
         const timeRecent = await RecordModel.coll
             .find({ _id: { $gte: Time.getObjectID(moment().add(-30, 'minutes')) }, uid, rejudged: { $ne: true } })
-            .project({ time: 1, status: 1 }).toArray();
+            .project({ time: 1, status: 1, manualPending: 1 }).toArray();
         const pending = timeRecent.filter((i) => [
             STATUS.STATUS_WAITING, STATUS.STATUS_FETCHED, STATUS.STATUS_COMPILING, STATUS.STATUS_JUDGING,
-        ].includes(i.status)).length;
+        ].includes(i.status) && !i.manualPending).length;
         return Math.max(base - 10000, base - (pending * 1000 + 1) * (sum(timeRecent.map((i) => i.time || 0)) / 10000 + 1));
     }
 
@@ -101,6 +101,9 @@ export default class RecordModel {
             rdocs = await RecordModel.getMulti(domainId, { _id: { $in: _rids } }, { readPreference: 'primary' }).toArray();
         } else rdocs = [rids];
         if (!rdocs.length) return null;
+        if (rdocs.some((rdoc) => rdoc.manualPending || rdoc.manualGrade)) {
+            throw new ValidationError('rid', null, '人工阅卷记录不能进入自动评测队列');
+        }
         let source = `${domainId}/${rdocs[0].pid}`;
         let [pdoc] = await Promise.all([
             problem.get(domainId, rdocs[0].pid, undefined, true),
@@ -148,7 +151,7 @@ export default class RecordModel {
             input?: string[];
             files?: Record<string, string>;
             hackTarget?: ObjectId;
-            type: 'judge' | 'rejudge' | 'pretest' | 'hack' | 'generate';
+            type: 'judge' | 'rejudge' | 'pretest' | 'hack' | 'generate' | 'manual';
             notify?: boolean;
         } = { type: 'judge' },
     ) {
@@ -175,7 +178,13 @@ export default class RecordModel {
         if (args.files) data.files = args.files;
         if (args.hackTarget) data.hackTarget = args.hackTarget;
         if (args.notify) data.notify = true;
-        if (args.type === 'rejudge') {
+        if (args.type === 'manual') {
+            if (!args.contest) throw new ValidationError('contest');
+            data.lang = '_';
+            data.manualPending = true;
+            data.judgeAt = new Date();
+            addTask = false;
+        } else if (args.type === 'rejudge') {
             args.type = 'judge';
             data.rejudged = true;
         } else if (args.type === 'pretest') {
@@ -258,6 +267,11 @@ export default class RecordModel {
 
     static async reset(domainId: string, rid: MaybeArray<ObjectId>, isRejudge: boolean) {
         const rids = Array.isArray(rid) ? rid : [rid];
+        const manual = await RecordModel.coll.findOne({
+            _id: { $in: rids },
+            $or: [{ manualPending: true }, { manualGrade: { $exists: true } }],
+        }, { projection: { _id: 1 } });
+        if (manual) throw new ValidationError('rid', null, '人工阅卷记录不能重判');
         const upd: any = {
             score: 0,
             status: STATUS.STATUS_WAITING,

@@ -663,6 +663,8 @@ export function ProblemDetailPage() {
   const objectiveQuestions: ObjectiveClientQuestion[] = (config.type === 'objective' && Array.isArray(config.questions))
     ? config.questions : [];
   const isObjective = objectiveQuestions.length > 0;
+  const isSubjective = pdoc.problemKind === 'subjective';
+  const canPreviewSubjective = !!data.canPreviewSubjective;
   const objectiveDraftKey = `objective-draft:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pdoc.docId || pid}${tid ? `@${tid}` : ''}`;
   const ideCacheKey = `${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pid}`;
   const preferredLang = bs.locale?.startsWith('zh') ? 'zh' : 'en';
@@ -1069,12 +1071,13 @@ export function ProblemDetailPage() {
               <MarkdownView content={content} preferredLang={preferredLang} />
             </CardContent>
           </Card>
-          {isObjective ? (
+          {isObjective && (!isSubjective || inContest || canPreviewSubjective) ? (
             <ObjectiveAnswerPanel
               questions={objectiveQuestions}
               submitUrl={submitUrl}
               storageKey={objectiveDraftKey}
               signedIn={!!bs.user?.signedIn}
+              previewOnly={isSubjective && !inContest}
             />
           ) : null}
           {showExternals && solutionCount > 0 ? (

@@ -118,6 +118,17 @@ function normalizeBasicObjective(kind: ProblemKind, main: Record<string, unknown
             answers: { main: [main.answer, 100, { kind: 'blank' }] },
         };
     }
+    if (kind === 'subjective') {
+        if (main.gradingInstructions !== undefined && typeof main.gradingInstructions !== 'string') {
+            throw new ValidationError('config', null, '阅卷说明必须是文本');
+        }
+        const gradingInstructions = String(main.gradingInstructions || '').trim();
+        return {
+            type: 'objective', score: 100,
+            main: { ...(gradingInstructions ? { gradingInstructions } : {}) },
+            answers: { main: ['', 100, { kind: 'subjective' }] },
+        };
+    }
     const options = normalizeOptions(main.options);
     if (!Array.isArray(main.answerIndexes) || !main.answerIndexes.length
         || main.answerIndexes.some((index) => !Number.isSafeInteger(index)
@@ -161,7 +172,7 @@ export function normalizeStructuredProblemConfig(
         throw new ValidationError('config', null, '共享测试数据尚未实现');
     }
     assertNoSecondaryStatement(config);
-    if (['single', 'multi', 'true_false', 'blank'].includes(kind)) {
+    if (['single', 'multi', 'true_false', 'blank', 'subjective'].includes(kind)) {
         if (!isPlainObject(config.main)) throw new ValidationError('config', null, 'main 必须是对象');
         return normalizeBasicObjective(kind, config.main);
     }

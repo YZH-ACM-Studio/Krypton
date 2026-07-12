@@ -1417,6 +1417,42 @@ export class ProblemModel {
         return !!res;
     }
 
+    static async updateManualStatusLatest(
+        domainId: string, pid: number, uid: number,
+        rid: ObjectId, status: number, score: number,
+    ) {
+        const res = await document.collStatus.findOneAndUpdate(
+            {
+                domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: pid,
+                uid,
+                $or: [{ rid: { $exists: false } }, { rid: { $lt: rid } }, { rid }],
+            },
+            { $set: { rid, status, score } },
+            { upsert: true, returnDocument: 'after' },
+        );
+        return !!res;
+    }
+
+    static async updateManualGradeStatus(
+        domainId: string, pid: number, uid: number,
+        latestRid: ObjectId, score: number,
+    ) {
+        const res = await document.collStatus.findOneAndUpdate(
+            {
+                domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: pid,
+                uid,
+                rid: latestRid,
+            },
+            { $set: { rid: latestRid, status: STATUS.STATUS_MANUAL_GRADED, score } },
+            { returnDocument: 'after' },
+        );
+        return !!res;
+    }
+
     static async incStatus(
         domainId: string, pid: number, uid: number,
         key: NumberKeys<ProblemStatusDoc>, count: number,

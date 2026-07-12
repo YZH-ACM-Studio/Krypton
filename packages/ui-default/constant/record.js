@@ -14,6 +14,7 @@ export const STATUS_CODES = {
   [STATUS.STATUS_SYSTEM_ERROR]: 'fail',
   [STATUS.STATUS_CANCELED]: 'ignored',
   [STATUS.STATUS_ETC]: 'fail',
+  [STATUS.STATUS_MANUAL_GRADED]: 'pass',
   [STATUS.STATUS_JUDGING]: 'progress',
   [STATUS.STATUS_COMPILING]: 'progress',
   [STATUS.STATTUS_FETCHED]: 'progress',

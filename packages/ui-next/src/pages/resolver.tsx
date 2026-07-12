@@ -55,10 +55,10 @@ import { KryptonHomePage } from '@/pages/home';
 import { HomeworkDetailPage, HomeworkPage } from '@/pages/homework';
 import { HomeworkEditPage, HomeworkFilesPage } from '@/pages/homework-manage';
 import { MindmapPage } from '@/pages/mindmap';
+import { ManualGradingPage } from '@/pages/manual-grading';
 import { DomainsPage } from '@/pages/misc';
 import { PaperCenterPage } from '@/pages/paper-center';
 import { PaperCenterEditPage } from '@/pages/paper-center-edit';
-import { PaperCenterGradingPage } from '@/pages/paper-center-grading';
 import { MyVerifyInboxPage } from '@/pages/permits/inbox';
 import { FpsImportPage, TelegramLoginPage, XcpcioBoardPage } from '@/pages/plugin-pages';
 import { ProblemDetailPage } from '@/pages/problem-detail';
@@ -80,6 +80,7 @@ import { RankingPage } from '@/pages/ranking';
 import { RealPassManagePage } from '@/pages/realpass-manage';
 import { RecordDetailPage, RecordsPage } from '@/pages/records';
 import { SpikeWebViewProbePage } from '@/pages/spike-webview';
+import { SubjectiveProblemEditorPage } from '@/pages/subjective-editor';
 import { SudoPage, SudoRedirectPage } from '@/pages/sudo';
 import {
   ManageConfigPage,
@@ -134,6 +135,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'problem_edit_multi.html': MultiProblemEditorPage,
   'problem_edit_true_false.html': TrueFalseProblemEditorPage,
   'problem_edit_blank.html': BlankProblemEditorPage,
+  'problem_edit_subjective.html': SubjectiveProblemEditorPage,
   'problem_config.html': ProblemConfigPage,
   'problem_files.html': ProblemFilesPage,
   'problem_solution.html': ProblemSolutionPage,
@@ -157,6 +159,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   // Homework
   'homework_main.html': HomeworkPage,
   'homework_detail.html': HomeworkDetailPage,
+  'manual_grading.html': ManualGradingPage,
   'homework_edit.html': HomeworkEditPage,
   'homework_files.html': HomeworkFilesPage,
 
@@ -233,7 +236,6 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'manage_realpass.html': RealPassManagePage,
   'paper_center.html': PaperCenterPage,
   'paper_center_edit.html': PaperCenterEditPage,
-  'paper_center_grading.html': PaperCenterGradingPage,
 
   // Misc
   'status.html': StatusPage,

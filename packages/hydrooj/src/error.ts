@@ -60,6 +60,10 @@ export const ProblemStructureConflictError = Err(
     'ProblemStructureConflictError', UserFacingError,
     'Problem {0} has changed or its structure is locked. Reload and try again.', 409,
 );
+export const ManualGradeConflictError = Err(
+    'ManualGradeConflictError', UserFacingError,
+    'The submission or grade has changed. Reload the grading workspace and try again.', 409,
+);
 export const ProblemNotAllowPretestError = Err('ProblemNotAllowPretestError', ForbiddenError, 'Pretesting is not supported for {0}.');
 export const ProblemNotAllowLanguageError = Err('ProblemNotAllowSubmitError', ForbiddenError, 'This language is not allowed to submit.');
 export const ProblemNotAllowCopyError = Err('ProblemNotAllowCopyError', ForbiddenError, 'You are not allowed to copy this problem from {0} to {1}.');

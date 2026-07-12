@@ -4,30 +4,24 @@
  *   GET  /paper-center                 列表（题号/标题/题型构成/创建时间 + 搜索）
  *   POST /paper-center/create          弹标题框创建（objective / fill_function）
  *   GET/POST /paper-center/:docId/edit 客观题独立编辑器（Rev.12：不再走 problem-edit）
- *   GET/POST /paper-center/grading/:tid 比赛主观题阅卷（列表 + 给分）
  *
  * 权限：路由级 PERM_CREATE_PROBLEM（管理员 + 教师）；编辑 = 题目 owner
  * （PERM_EDIT_PROBLEM_SELF）或 PERM_EDIT_PROBLEM（对齐 ProblemManageHandler）；
- * 阅卷 = 题目 owner 或站点管理员（PRIV_EDIT_SYSTEM）。
  *
  * canonical config 由服务端生成（客户端只发结构化 questions JSON），
  * 客户端永远拿不到"直接写任意 YAML"的口子。
  */
 import yaml from 'js-yaml';
 import { escapeRegExp } from 'lodash';
-import { ObjectId } from 'mongodb';
-import { STATUS } from '@hydrooj/common';
 import {
-    Context, Handler, NotFoundError, OplogModel, param, PermissionError, Types, ValidationError,
+    Context, Handler, OplogModel, param, PermissionError, Types, ValidationError,
 } from 'hydrooj';
 import {
-    parseProblemConfigObject, questionKindMap, subjectiveKeysOf,
+    parseProblemConfigObject, questionKindMap,
 } from '../lib/problem-config';
-import { PERM, PRIV } from '../model/builtin';
-import * as contest from '../model/contest';
+import { PERM } from '../model/builtin';
 import problem from '../model/problem';
 import { buildProblemBankScope } from '../model/problem-access';
-import record from '../model/record';
 import user from '../model/user';
 
 const PROJ_LIST = ['_id', 'docId', 'pid', 'title', 'hidden', 'owner', 'maintainer'] as any[];
@@ -130,7 +124,7 @@ export class PaperCenterHandler extends Handler {
 
 // ─── Rev.12：创建 / 独立编辑器 / 阅卷 ─────────────────────────────────────
 
-const QUESTION_KINDS = ['single', 'multi', 'blank', 'fill_program', 'subjective'] as const;
+const QUESTION_KINDS = ['single', 'multi', 'blank', 'fill_program'] as const;
 type EditorKind = typeof QUESTION_KINDS[number];
 
 interface EditorQuestion {
@@ -198,10 +192,6 @@ function buildObjectiveConfigYaml(questions: EditorQuestion[], existingRaw: stri
             }
             meta.choices = choices;
             options[key] = choices;
-        } else if (q.kind === 'subjective') {
-            // 主观题无标准答案；判题器见 kind 记 0 分待人工。
-            answer = '';
-            if (score <= 0) throw new ValidationError('questions', null, `${label}（主观题）分值必须大于 0`);
         } else {
             // blank / fill_program：单字符串答案（blank v1 约束，PLAN P3.2）
             answer = Array.isArray(q.answer) ? String(q.answer[0] ?? '') : String(q.answer ?? '');
@@ -328,174 +318,8 @@ export class PaperCenterEditHandler extends Handler {
     }
 }
 
-// ─── 阅卷（主观题人工给分，按比赛）────────────────────────────────────────
-
-function canGrade(h: Handler, pdoc: any): boolean {
-    return pdoc.owner === h.user._id || h.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
-}
-
-export class PaperCenterGradingHandler extends Handler {
-    tdoc: any;
-
-    @param('tid', Types.ObjectId)
-    async _prepare(_domainId: string, tid: ObjectId) {
-        const authoritativeDomainId = String(this.domain?._id);
-        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
-        this.tdoc = await contest.get(authoritativeDomainId, tid);
-        if (!this.tdoc) throw new NotFoundError('Contest');
-    }
-
-    @param('pid', Types.UnsignedInt, true)
-    async get(_domainId: string, pid = 0) {
-        const authoritativeDomainId = String(this.domain?._id);
-        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
-        // 本场含主观题、且当前用户可阅卷（题目 owner ∥ 站点管理员）的题目清单。
-        const problems: Array<{ pid: number, title: string, keys: Record<string, { score: number, prompt: string }> }> = [];
-        for (const p of (this.tdoc.pids as number[] || [])) {
-            const pdoc = await problem.getMaintainableAuthorized( // eslint-disable-line no-await-in-loop
-                authoritativeDomainId, p, this.user, undefined, true,
-            );
-            if (!pdoc || !canGrade(this, pdoc)) continue;
-            const keys = subjectiveKeysOf(parseProblemConfigObject(pdoc));
-            if (Object.keys(keys).length) problems.push({ pid: p, title: pdoc.title, keys });
-        }
-        this.response.template = 'paper_center_grading.html';
-        const body: any = { tdoc: { docId: this.tdoc.docId, title: this.tdoc.title }, problems };
-        if (pid && problems.some((p) => p.pid === pid)) {
-            const keys = problems.find((p) => p.pid === pid)!.keys;
-            // 每人最新一条本场提交（记录量=参赛人数级，全取内存去重）。
-            const rdocs = await record.getMulti(authoritativeDomainId, { contest: this.tdoc.docId, pid })
-                .sort({ _id: -1 }).limit(2000).toArray();
-            const latestByUid = new Map<number, any>();
-            for (const r of rdocs) if (!latestByUid.has(r.uid)) latestByUid.set(r.uid, r);
-            const uids = Array.from(latestByUid.keys());
-            const udict = await user.getListForRender(authoritativeDomainId, uids, false).catch(() => ({} as any));
-            body.rows = Array.from(latestByUid.values()).map((r) => {
-                let answers: Record<string, any> = {};
-                try {
-                    // rdoc.code 是学生可控输入：客观题答案本应只有几 KB，
-                    // 超长的一律不解析（防 YAML 解析拖垮事件循环，红线 5/坑 22 同类）。
-                    const code = typeof r.code === 'string' ? r.code : '';
-                    if (code.length <= 65536) {
-                        const parsed = yaml.load(code);
-                        if (parsed && typeof parsed === 'object') answers = parsed as any;
-                    }
-                } catch { /* 答案不可解析 → 空 */ }
-                const subjectiveAnswers: Record<string, string> = {};
-                for (const k of Object.keys(keys)) {
-                    const v = (answers as any)[k];
-                    subjectiveAnswers[k] = v === undefined || v === null ? '' : (Array.isArray(v) ? v.join('\n') : String(v));
-                }
-                const u = (udict as any)[r.uid] || {};
-                return {
-                    rid: String(r._id),
-                    uid: r.uid,
-                    uname: u.uname || `UID ${r.uid}`,
-                    realName: u.realName,
-                    studentId: u.studentId,
-                    submittedAt: r._id.getTimestamp(),
-                    status: r.status,
-                    score: r.score || 0,
-                    answers: subjectiveAnswers,
-                    manualScores: r.subjective?.scores || {},
-                    gradedBy: r.subjective?.gradedBy,
-                };
-            });
-            body.pid = pid;
-        }
-        this.response.body = body;
-    }
-
-    @param('rid', Types.ObjectId)
-    @param('scores', Types.Content)
-    async post(_domainId: string, rid: ObjectId, scoresRaw: string) {
-        const authoritativeDomainId = String(this.domain?._id);
-        problem.assertProblemAclDomain(this.user, authoritativeDomainId);
-        const rdoc = await record.get(authoritativeDomainId, rid);
-        if (!rdoc) throw new NotFoundError('Record');
-        if (String(rdoc.contest) !== String(this.tdoc.docId)) {
-            throw new ValidationError('rid', null, '该提交不属于本场比赛');
-        }
-        const pdoc = await problem.getMaintainableAuthorized(
-            authoritativeDomainId, rdoc.pid, this.user, undefined, true,
-        );
-        if (!pdoc) throw new PermissionError(PRIV.PRIV_EDIT_SYSTEM);
-        if (!canGrade(this, pdoc)) throw new PermissionError(PRIV.PRIV_EDIT_SYSTEM);
-        const cfg = parseProblemConfigObject(pdoc);
-        const keys = subjectiveKeysOf(cfg);
-        if (!Object.keys(keys).length) throw new ValidationError('rid', null, '该题没有主观题小题');
-
-        let submitted: Record<string, number>;
-        try {
-            submitted = JSON.parse(scoresRaw);
-            if (!submitted || typeof submitted !== 'object' || Array.isArray(submitted)) throw new Error('bad');
-        } catch {
-            throw new ValidationError('scores', null, 'scores 不是合法 JSON 对象');
-        }
-        for (const [k, v] of Object.entries(submitted)) {
-            if (!keys[k]) throw new ValidationError('scores', null, `"${k}" 不是主观题题号`);
-            const n = Number(v);
-            if (!Number.isFinite(n) || n < 0 || n > keys[k].score) {
-                throw new ValidationError('scores', null, `第 ${k} 题分数需在 0-${keys[k].score} 之间`);
-            }
-        }
-
-        const prev = rdoc.subjective;
-        const baseScore = prev?.baseScore ?? (rdoc.score || 0);
-        const newScores: Record<string, number> = { ...(prev?.scores || {}) };
-        for (const [k, v] of Object.entries(submitted)) newScores[k] = Number(v);
-        const manualSum = Object.values(newScores).reduce((s, v) => s + v, 0);
-        const newScore = baseScore + manualSum;
-        const allGraded = Object.keys(keys).every((k) => newScores[k] !== undefined);
-        // 满分口径：全部小题分值合计（自动 + 主观）。
-        let totalFull = 0;
-        for (const entry of Object.values(cfg.answers || {})) {
-            if (Array.isArray(entry)) totalFull += Number(entry[1]) || 0;
-        }
-        const newStatus = allGraded
-            ? (newScore >= totalFull ? STATUS.STATUS_ACCEPTED : STATUS.STATUS_WRONG_ANSWER)
-            : STATUS.STATUS_WAITING;
-
-        // 回写判题明细，让记录页每题显示人工分。
-        const testCases = (rdoc.testCases || []).map((c: any) => {
-            const key = Object.keys(keys).find((k) => Number(k.split('-')[0]) === c.subtaskId);
-            if (!key || newScores[key] === undefined) return c;
-            const v = newScores[key];
-            const max = keys[key].score;
-            return {
-                ...c,
-                score: v,
-                status: v >= max ? STATUS.STATUS_ACCEPTED : STATUS.STATUS_WRONG_ANSWER,
-                message: `人工评分：${v}/${max}`,
-            };
-        });
-
-        const updated = await record.update(authoritativeDomainId, rid, {
-            score: newScore,
-            status: newStatus,
-            testCases,
-            subjective: {
-                scores: newScores, baseScore, gradedBy: this.user._id, gradedAt: new Date(),
-            },
-        } as any);
-        // 与判题完成路径（handler/judge.ts postJudge）同构地刷新题目/比赛状态。
-        await problem.updateStatus(authoritativeDomainId, rdoc.pid, rdoc.uid, rid, newStatus, newScore);
-        await contest.updateStatus(
-            authoritativeDomainId, this.tdoc.docId, rdoc.uid, rid, rdoc.pid,
-            updated || { ...rdoc, score: newScore, status: newStatus },
-        );
-        await OplogModel.log(this, 'paperCenter.grade', {
-            tid: this.tdoc.docId, rid, pid: rdoc.pid, uid: rdoc.uid, scores: submitted, newScore, newStatus,
-        });
-        this.response.body = {
-            ok: true, rid: String(rid), score: newScore, status: newStatus, allGraded,
-        };
-    }
-}
-
 export async function apply(ctx: Context) {
     ctx.Route('paper_center', '/paper-center', PaperCenterHandler, PERM.PERM_CREATE_PROBLEM);
     ctx.Route('paper_center_create', '/paper-center/create', PaperCenterCreateHandler, PERM.PERM_CREATE_PROBLEM);
     ctx.Route('paper_center_edit', '/paper-center/:docId/edit', PaperCenterEditHandler, PERM.PERM_CREATE_PROBLEM);
-    ctx.Route('paper_center_grading', '/paper-center/grading/:tid', PaperCenterGradingHandler, PERM.PERM_CREATE_PROBLEM);
 }

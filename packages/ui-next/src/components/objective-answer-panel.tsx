@@ -108,12 +108,13 @@ function LetterFallback({
 }
 
 export function ObjectiveAnswerPanel({
-  questions, submitUrl, storageKey, signedIn,
+  questions, submitUrl, storageKey, signedIn, previewOnly = false,
 }: {
   questions: ObjectiveClientQuestion[];
   submitUrl: string;
   storageKey: string;
   signedIn: boolean;
+  previewOnly?: boolean;
 }) {
   const [answers, setAnswers] = useState<AnswerMap>(() => loadDraft(storageKey));
   const [submitting, setSubmitting] = useState(false);
@@ -163,7 +164,12 @@ export function ObjectiveAnswerPanel({
       const res = await fetch(submitUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ lang: '_', code: YAML.stringify(payload) }),
+        body: JSON.stringify({
+          lang: '_',
+          code: questions.length === 1 && questions[0].kind === 'subjective'
+            ? String(payload[questions[0].key] || '')
+            : YAML.stringify(payload),
+        }),
         credentials: 'same-origin',
       });
       const data = await res.json().catch(() => null);
@@ -183,7 +189,7 @@ export function ObjectiveAnswerPanel({
     <Card>
       <CardContent className="space-y-4 p-4 sm:p-6">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-sm font-semibold">在线作答</h2>
+          <h2 className="text-sm font-semibold">{previewOnly ? '答题框预览' : '在线作答'}</h2>
           <span className="text-xs text-muted-foreground">
             共 {questions.length} 题 · {totalScore} 分 · 已答 {answeredCount}/{questions.length}
           </span>
@@ -212,7 +218,7 @@ export function ObjectiveAnswerPanel({
                     value={(answers[q.key] as string) || null}
                     options={q.choices}
                     onChange={(v) => set(q.key, v)}
-                    disabled={submitting}
+                    disabled={submitting || previewOnly}
                   />
                 ) : (
                   <LetterFallback kind="single" value={answers[q.key] || ''} onChange={(v) => set(q.key, v)} />
@@ -224,7 +230,7 @@ export function ObjectiveAnswerPanel({
                     value={(answers[q.key] as string[]) || []}
                     options={q.choices}
                     onChange={(v) => set(q.key, v)}
-                    disabled={submitting}
+                    disabled={submitting || previewOnly}
                   />
                 ) : (
                   <LetterFallback kind="multi" value={answers[q.key] || []} onChange={(v) => set(q.key, v)} />
@@ -249,7 +255,7 @@ export function ObjectiveAnswerPanel({
                   <textarea
                     value={(answers[q.key] as string) || ''}
                     onChange={(e) => set(q.key, e.target.value)}
-                    disabled={submitting}
+                    disabled={submitting || previewOnly}
                     rows={6}
                     className="w-full rounded-md border bg-background p-3 text-sm disabled:opacity-60"
                     placeholder="在此作答（主观题）"
@@ -272,11 +278,17 @@ export function ObjectiveAnswerPanel({
         ) : null}
 
         <div className="flex items-center justify-end gap-3 border-t pt-4">
-          <span className="text-xs text-muted-foreground">草稿已自动保存在本机，提交后以评测记录为准。</span>
-          <Button onClick={submit} disabled={submitting || !signedIn} className="gap-1.5">
-            {submitting ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-            {signedIn ? '提交答案' : '登录后可提交'}
-          </Button>
+          {previewOnly ? (
+            <span className="text-xs text-muted-foreground">只读预览；主观题不能从独立题目页提交。</span>
+          ) : (
+            <>
+              <span className="text-xs text-muted-foreground">草稿已自动保存在本机，提交后以评测记录为准。</span>
+              <Button onClick={submit} disabled={submitting || !signedIn} className="gap-1.5">
+                {submitting ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                {signedIn ? '提交答案' : '登录后可提交'}
+              </Button>
+            </>
+          )}
         </div>
       </CardContent>
     </Card>

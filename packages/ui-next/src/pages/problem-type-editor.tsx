@@ -46,7 +46,7 @@ export const PROBLEM_TYPES: Array<{ key: ProblemType, label: string, desc: strin
   { key: 'communication', label: '通信题', desc: '多个进程通过函数调用通信', icon: FileQuestion },
 ];
 
-export type ObjectiveSubKind = 'single' | 'multi' | 'blank' | 'fill_program' | 'subjective';
+export type ObjectiveSubKind = 'single' | 'multi' | 'blank' | 'fill_program';
 
 /** 编辑器 UI 的展示题型：在 kind 之上叠加「判断」伪题型（single 预设）。 */
 export type DisplayKind = ObjectiveSubKind | 'truefalse';
@@ -64,7 +64,6 @@ export interface ObjectiveQuestion {
    *                 （全对满分/子集半分），blank v1 明确不支持多个可接受答案
    *                 （PLAN 2026-07 P3.2）
    *   fill_program: answer is a single string (expected program output)
-   *   subjective:   answer 恒空串（Rev.12，人工评分）
    */
   answer: string | string[];
   score: number;
@@ -91,8 +90,6 @@ export function newQuestionOf(display: DisplayKind, key: string): ObjectiveQuest
       return { key, kind: 'blank', prompt: '', choices: [], answer: '', score: 5 };
     case 'fill_program':
       return { key, kind: 'fill_program', prompt: '', choices: [], answer: '', score: 5 };
-    case 'subjective':
-      return { key, kind: 'subjective', prompt: '', choices: [], answer: '', score: 10 };
     case 'single':
     default:
       return { key, kind: 'single', prompt: '', choices: ['', '', '', ''], answer: 'A', score: 5 };
@@ -168,7 +165,6 @@ const ADD_KINDS: Array<{ display: DisplayKind, label: string }> = [
   { display: 'truefalse', label: '判断' },
   { display: 'blank', label: '填空' },
   { display: 'fill_program', label: '程序填空' },
-  { display: 'subjective', label: '主观题' },
 ];
 
 export function ObjectiveEditor({
@@ -282,10 +278,6 @@ function ObjectiveQuestionCard({
       next.kind = 'fill_program';
       next.choices = [];
       next.answer = typeof question.answer === 'string' ? question.answer : '';
-    } else if (nextDisplay === 'subjective') {
-      next.kind = 'subjective';
-      next.choices = [];
-      next.answer = '';
     }
     onUpdate(next);
   };
@@ -351,7 +343,6 @@ function ObjectiveQuestionCard({
             { value: 'truefalse', label: '判断' },
             { value: 'blank', label: '填空' },
             { value: 'fill_program', label: '程序填空' },
-            { value: 'subjective', label: '主观题' },
           ]}
         />
 
@@ -405,12 +396,6 @@ function ObjectiveQuestionCard({
             onAnswerChange={(answer) => onUpdate({ answer })}
             reactId={reactId}
           />
-        )}
-
-        {question.kind === 'subjective' && (
-          <p className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-            主观题没有标准答案——学生提交后记录停在「等待中」，你在比赛管理的「阅卷」里逐份给分（0 ~ 本题分值）。
-          </p>
         )}
 
         {question.kind === 'blank' && (
@@ -559,7 +544,7 @@ function ChoiceList({
 /* ─── Objective live preview（复用 paper-shell 学生端 renderer）────── */
 
 const KIND_LABEL: Record<DisplayKind, string> = {
-  single: '单选', multi: '多选', truefalse: '判断', blank: '填空', fill_program: '程序填空', subjective: '主观题',
+  single: '单选', multi: '多选', truefalse: '判断', blank: '填空', fill_program: '程序填空',
 };
 
 export function ObjectivePreview({ questions }: { questions: ObjectiveQuestion[] }) {
@@ -615,18 +600,6 @@ export function ObjectivePreview({ questions }: { questions: ObjectiveQuestion[]
                   value={(answers[q.key] as string) || ''}
                   onChange={(v) => set(q.key, v)}
                 />
-              )}
-              {q.kind === 'subjective' && (
-                <div className="space-y-1.5">
-                  <textarea
-                    value={(answers[q.key] as string) || ''}
-                    onChange={(e) => set(q.key, e.target.value)}
-                    rows={4}
-                    className="w-full rounded-md border bg-background p-3 text-sm"
-                    placeholder="在此作答（主观题）"
-                  />
-                  <p className="text-[11px] text-muted-foreground">主观题由老师人工评分。</p>
-                </div>
               )}
             </div>
           </div>
@@ -761,9 +734,8 @@ export function buildConfigYaml(state: ProblemTypeState, existingYaml: string = 
       // canonical meta 键名 = kind（PLAN P3.2 归一，旧 type 键读取端兜底）
       const meta: any = { kind: q.kind, prompt: q.prompt };
       if (q.presentation) meta.presentation = q.presentation;
-      // blank v1 强制单字符串（判题器把数组按多选集合判）；主观题答案恒空
-      const answer = q.kind === 'subjective' ? ''
-        : (q.kind === 'blank' && Array.isArray(q.answer) ? (q.answer[0] || '') : q.answer);
+      // blank v1 强制单字符串（判题器把数组按多选集合判）
+      const answer = q.kind === 'blank' && Array.isArray(q.answer) ? (q.answer[0] || '') : q.answer;
       if (q.kind === 'single' || q.kind === 'multi') {
         meta.choices = q.choices;
         // 双写 config.options[key]——考试页/结构化渲染器的现行消费点

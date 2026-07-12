@@ -11,6 +11,7 @@ export enum STATUS {
     STATUS_CANCELED = 9,
     STATUS_ETC = 10,
     STATUS_HACKED = 11,
+    STATUS_MANUAL_GRADED = 12,
     STATUS_JUDGING = 20,
     STATUS_COMPILING = 21,
     STATUS_FETCHED = 22,
@@ -33,6 +34,7 @@ export const STATUS_TEXTS: Record<STATUS, string> = {
     [STATUS.STATUS_CANCELED]: 'Cancelled',
     [STATUS.STATUS_ETC]: 'Unknown Error',
     [STATUS.STATUS_HACKED]: 'Hacked',
+    [STATUS.STATUS_MANUAL_GRADED]: 'Manual Graded',
     [STATUS.STATUS_JUDGING]: 'Running',
     [STATUS.STATUS_COMPILING]: 'Compiling',
     [STATUS.STATUS_FETCHED]: 'Fetched',
@@ -53,6 +55,7 @@ export const STATUS_SHORT_TEXTS: Partial<Record<STATUS, string>> = {
     [STATUS.STATUS_SYSTEM_ERROR]: 'SE',
     [STATUS.STATUS_CANCELED]: 'IGN',
     [STATUS.STATUS_HACKED]: 'HK',
+    [STATUS.STATUS_MANUAL_GRADED]: 'MG',
     [STATUS.STATUS_IGNORED]: 'IGN',
     [STATUS.STATUS_FORMAT_ERROR]: 'FE',
 };
@@ -70,6 +73,7 @@ export const STATUS_CODES: Record<STATUS, string> = {
     [STATUS.STATUS_CANCELED]: 'ignored',
     [STATUS.STATUS_ETC]: 'fail',
     [STATUS.STATUS_HACKED]: 'fail',
+    [STATUS.STATUS_MANUAL_GRADED]: 'pass',
     [STATUS.STATUS_JUDGING]: 'progress',
     [STATUS.STATUS_COMPILING]: 'progress',
     [STATUS.STATUS_FETCHED]: 'progress',
@@ -87,6 +91,7 @@ export const NORMAL_STATUS: STATUS[] = [
     STATUS.STATUS_OUTPUT_LIMIT_EXCEEDED,
     STATUS.STATUS_RUNTIME_ERROR,
     STATUS.STATUS_COMPILE_ERROR,
+    STATUS.STATUS_MANUAL_GRADED,
 ];
 
 export function getScoreColor(score: number | string): string {

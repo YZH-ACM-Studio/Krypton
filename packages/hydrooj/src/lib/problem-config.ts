@@ -8,7 +8,6 @@ import yaml from 'js-yaml';
 import type {
     AnswerEntry, FillFunctionTemplate, FillRegion, QuestionKind,
 } from '@hydrooj/common';
-import { STATUS } from '@hydrooj/common';
 
 /**
  * pdoc.config 在库里是 YAML 字符串（与 testdata config.yaml 镜像）。
@@ -168,58 +167,6 @@ export function clientProblemConfig(config: any): any {
     if (config.type === 'fill_function' && config.template) out.template = config.template;
     if (config.subType) out.subType = config.subType;
     return out;
-}
-
-/** 主观题 key → {score 满分, prompt}（Rev.12 阅卷/判后合分共用）。 */
-export function subjectiveKeysOf(cfg: any): Record<string, { score: number, prompt: string }> {
-    const out: Record<string, { score: number, prompt: string }> = {};
-    if (cfg?.type !== 'objective' || !cfg.answers || typeof cfg.answers !== 'object') return out;
-    for (const [key, entry] of Object.entries(cfg.answers)) {
-        if (!Array.isArray(entry)) continue;
-        try {
-            const { score, meta } = unpackAnswerEntry(entry as any);
-            if (meta.kind === 'subjective') out[key] = { score: Number(score) || 0, prompt: meta.prompt || '' };
-        } catch { continue; }
-    }
-    return out;
-}
-
-/**
- * 判题完成后合并已有人工评分（Rev.12，MAJOR-1 修复）：重判/rejudge 会把
- * score/status 重置为纯自动部分，若 record 上已有人工分（rdoc.subjective），
- * 这里以**新的自动分为 baseScore** 重算总分与状态——人工分在重判后不丢，
- * 且 baseScore 永远跟随最新自动判分（顺带修 stale baseScore）。
- * 返回 null 表示无需合并。
- */
-export function mergeSubjectiveScores(rdoc: {
-    score?: number;
-    status?: number;
-    subjective?: { scores: Record<string, number>, baseScore: number, gradedBy: number, gradedAt: Date };
-}, cfg: any): { score: number, status: number, subjective: NonNullable<typeof rdoc.subjective> } | null {
-    const scores = rdoc.subjective?.scores;
-    if (!scores || !Object.keys(scores).length) return null;
-    const keys = subjectiveKeysOf(cfg);
-    if (!Object.keys(keys).length) return null;
-    const baseScore = rdoc.score || 0;
-    let manualSum = 0;
-    for (const [k, v] of Object.entries(scores)) {
-        // 只合并仍存在的主观题 key（题目改配置后残留的旧 key 忽略）
-        if (keys[k]) manualSum += Math.min(Number(v) || 0, keys[k].score);
-    }
-    const newScore = baseScore + manualSum;
-    const allGraded = Object.keys(keys).every((k) => scores[k] !== undefined);
-    let totalFull = 0;
-    for (const entry of Object.values(cfg.answers || {})) {
-        if (Array.isArray(entry)) totalFull += Number(entry[1]) || 0;
-    }
-    const status = allGraded
-        ? (newScore >= totalFull ? STATUS.STATUS_ACCEPTED : STATUS.STATUS_WRONG_ANSWER)
-        : STATUS.STATUS_WAITING;
-    return {
-        score: newScore,
-        status,
-        subjective: { ...rdoc.subjective!, baseScore },
-    };
 }
 
 // ─── FillFunction region splicing ─────────────────────────────────────────

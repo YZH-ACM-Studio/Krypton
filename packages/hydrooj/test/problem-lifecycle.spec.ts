@@ -137,6 +137,20 @@ describe('P2.12 minimal problem lifecycle', () => {
         }
     });
 
+    it('normalizes a single subjective problem without an automatic answer', () => {
+        expect(lifecycle.normalizeStructuredProblemConfig('subjective', {
+            main: { gradingInstructions: 'Award for reasoning.' },
+        })).to.deep.equal({
+            type: 'objective',
+            score: 100,
+            main: { gradingInstructions: 'Award for reasoning.' },
+            answers: { main: ['', 100, { kind: 'subjective' }] },
+        });
+        expect(() => lifecycle.normalizeStructuredProblemConfig('subjective', {
+            main: { gradingInstructions: 42 },
+        })).to.throw(TestValidationError);
+    });
+
     it('runs the fixed reference scan and reports every reference class', async () => {
         counts.set('document:30:', 1);
         counts.set('document:40:', 2);

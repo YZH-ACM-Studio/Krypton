@@ -314,6 +314,7 @@ const STATUS_MAP: Record<number, StatusDisplay> = {
   9: { label: '已取消', className: 'text-muted-foreground' },
   10: { label: '未知错误', className: 'text-red-500' },
   11: { label: 'Hacked', className: 'text-red-500' },
+  12: { label: '人工已评分', className: 'text-green-500' },
   20: { label: '评测中…', className: 'text-blue-500' },
   21: { label: '编译中…', className: 'text-blue-500' },
   22: { label: '等待中…', className: 'text-muted-foreground' },

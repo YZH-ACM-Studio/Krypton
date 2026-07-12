@@ -29,10 +29,6 @@ export async function judge({
     }
     let totalScore = 0;
     let totalStatus = 0;
-    // 主观题（meta.kind='subjective'，Rev.12）：判题器不评分，记 0 分 +
-    // STATUS_WAITING；整条记录停在 Waiting，由比赛「阅卷」人工给分后
-    // 重算 score/status 回写（handler/paper-center.ts）。
-    let hasSubjective = false;
     const subtasks = {};
     if (!Object.keys(config.answers).length) throw new FormatError('Invalid standard answer.');
     for (const key in config.answers) {
@@ -59,11 +55,6 @@ export async function judge({
                 },
             });
         };
-        if (Array.isArray(ansInfo) && (ansInfo as any)[2]?.kind === 'subjective') {
-            hasSubjective = true;
-            report(STATUS.STATUS_WAITING, 0, '待人工评分');
-            continue;
-        }
         if (!answers[key]) {
             report(STATUS.STATUS_WRONG_ANSWER, 0, 'No answer');
             continue;
@@ -79,8 +70,7 @@ export async function judge({
         else report(STATUS.STATUS_ACCEPTED, +ansInfo[usrAns] || 0, 'Correct');
     }
     end({
-        // 含主观题 → 整条记录停在 Waiting（客观部分的分先计入 score）。
-        status: hasSubjective ? STATUS.STATUS_WAITING : totalStatus,
+        status: totalStatus,
         score: totalScore,
         time: 0,
         memory: 0,

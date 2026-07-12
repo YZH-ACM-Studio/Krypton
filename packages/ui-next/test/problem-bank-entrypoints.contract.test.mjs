@@ -14,6 +14,7 @@ const uiServer = read('packages/ui-next/index.ts');
 const bootstrap = read('packages/ui-next/src/lib/bootstrap.tsx');
 const sidebar = read('packages/ui-next/src/components/layout/sidebar.tsx');
 const paperCenter = read('packages/hydrooj/src/handler/paper-center.ts');
+const manualGrading = read('packages/hydrooj/src/handler/manual-grading.ts');
 const contest = read('packages/hydrooj/src/handler/contest.ts');
 const homework = read('packages/hydrooj/src/handler/homework.ts');
 const training = read('packages/hydrooj/src/handler/training.ts');
@@ -77,7 +78,7 @@ test('paper-center list and editing use the canonical scope and maintenance capa
     assertBefore(create, 'assertProblemAclDomain', 'problem.add(', 'paper-center create');
     assert.match(create, /problem\.add\(authoritativeDomainId/);
 
-    const edit = methodBody(paperCenter, 'class PaperCenterEditHandler', '// ─── 阅卷');
+    const edit = methodBody(paperCenter, 'class PaperCenterEditHandler', 'export async function apply');
     assertBefore(edit, 'assertProblemAclDomain', 'problem.getMaintainableAuthorized(', 'paper-center edit read');
     assert.match(edit, /problem\.getMaintainableAuthorized\(\s*authoritativeDomainId/);
     assert.match(edit, /problem\.withAuthorizedWriteClaim\(\s*authoritativeDomainId/);
@@ -85,20 +86,20 @@ test('paper-center list and editing use the canonical scope and maintenance capa
     assert.match(edit, /problem\.addTestdataWithClaim\(\s*claim/);
 });
 
-test('paper-center grading rejects forged method domains before every domain-sensitive operation', () => {
-    const grading = methodBody(paperCenter, 'export class PaperCenterGradingHandler', 'export async function apply');
-    assertBefore(grading, 'assertProblemAclDomain', 'contest.get(', 'paper-center grading prepare');
+test('manual grading derives the authoritative domain before every domain-sensitive operation', () => {
+    const grading = methodBody(manualGrading, 'export class ManualGradingHandler', 'export async function apply');
+    assertBefore(grading, 'const domainId = String(this.domain?._id)', 'contest.get(', 'manual grading prepare');
     for (const call of [
-        'contest.get(authoritativeDomainId',
-        'record.getMulti(authoritativeDomainId',
-        'user.getListForRender(authoritativeDomainId',
-        'record.get(authoritativeDomainId',
-        'record.update(authoritativeDomainId',
-        'problem.updateStatus(authoritativeDomainId',
-    ]) assert.match(grading, new RegExp(call.replace(/[.(]/g, '\\$&')));
-    assert.match(grading, /problem\.getMaintainableAuthorized\(\s*authoritativeDomainId/);
-    assert.match(grading, /contest\.updateStatus\(\s*authoritativeDomainId/);
-    assert.doesNotMatch(grading, /(?:contest|problem|record|user)\.[A-Za-z]+\(domainId/);
+        'contest.get(domainId',
+        'problem.get(domainId',
+        'record.getMulti(domainId',
+        'user.getListForRender(domainId',
+        'gradeLatestManualRecord({',
+    ]) assert.ok(grading.includes(call), `manual grading must use authoritative domain at ${call}`);
+    assert.match(grading, /this\.tdoc\.owner !== this\.user\._id/);
+    assert.match(grading, /this\.user\.hasPriv\(PRIV\.PRIV_EDIT_SYSTEM\)/);
+    assert.match(grading, /domainId:\s*String\(this\.domain\?\._id\)/);
+    assert.doesNotMatch(grading, /(?:contest|problem|record|user)\.[A-Za-z]+\(_domainId/);
 });
 
 test('tasks problem search is capability-gated and pushes the canonical scope into Mongo', () => {

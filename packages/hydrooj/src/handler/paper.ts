@@ -11,7 +11,7 @@
  */
 import yaml from 'js-yaml';
 import { ObjectId } from 'mongodb';
-import { gradeObjectiveAnswer } from '@hydrooj/common';
+import { effectiveProblemKind, gradeObjectiveAnswer } from '@hydrooj/common';
 import {
     clientProblemConfig,
     Context, Handler, NotFoundError, OplogModel, PaperDraftModel, param,
@@ -23,6 +23,7 @@ import { ContestClientFinishedError } from '../error';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
 import * as document from '../model/document';
+import { markManualPending } from '../model/manual-grade';
 import * as record from '../model/record';
 import { closeSessionOnVigil } from '../service/vigil-bridge';
 import { ContestPrintHandler, ContestProblemListHandler, ContestScoreboardHandler } from './contest';
@@ -591,6 +592,7 @@ export async function finalizePaperForUser(
     }));
 
     const rids: ObjectId[] = [];
+    const manualRids = new Set<string>();
     const recordMeta = options.meta ? { meta: options.meta } : {};
 
     for (const draft of drafts) {
@@ -600,13 +602,21 @@ export async function finalizePaperForUser(
         const type = config?.type || 'default';
 
         if (type === 'objective') {
-            await gradeObjectiveDraft(domainId, tid, uid, draft.pid, pdoc);
-
-            const yamlBody = yaml.dump(draft.answers || {});
+            const isSubjective = effectiveProblemKind(pdoc) === 'subjective';
+            if (!isSubjective) await gradeObjectiveDraft(domainId, tid, uid, draft.pid, pdoc);
+            const rawSubjectiveAnswer = draft.answers?.main;
+            if (isSubjective && rawSubjectiveAnswer !== undefined && typeof rawSubjectiveAnswer !== 'string') {
+                throw new ValidationError('answer', null, '主观题答案必须是文本');
+            }
+            const code = isSubjective ? (rawSubjectiveAnswer || '') : yaml.dump(draft.answers || {});
             const rid = await record.add(
-                domainId, draft.pid, uid, '_', yamlBody, true,
-                { contest: tid, type: 'judge', ...recordMeta } as any,
+                domainId, draft.pid, uid, '_', code, true,
+                { contest: tid, type: isSubjective ? 'manual' : 'judge', ...recordMeta } as any,
             );
+            if (isSubjective) {
+                manualRids.add(String(rid));
+                await markManualPending({ domainId, tid, pid: draft.pid, uid, rid });
+            }
             rids.push(rid);
         } else if (type === 'fill_function') {
             const codeBody = draft.code || JSON.stringify(draft.answers || {});
@@ -635,6 +645,7 @@ export async function finalizePaperForUser(
     }
 
     for (const rid of rids) {
+        if (manualRids.has(String(rid))) continue;
         await contest.updateStatus(domainId, tid, uid, rid, 0);
     }
     return rids;

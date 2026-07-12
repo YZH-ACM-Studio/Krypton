@@ -9,12 +9,14 @@ const originalLoad = Module._load;
 
 let problemConfig: unknown;
 const queuedTasks: any[] = [];
+const insertedRecords: any[] = [];
 
 const collectionStub = {
     countDocuments: async () => 0,
     distinct: async () => [],
     estimatedDocumentCount: async () => 0,
     find: () => ({ project() { return this; }, toArray: async () => [] }),
+    insertOne: async (doc: any) => { insertedRecords.push(doc); return { insertedId: doc._id }; },
 };
 
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
@@ -22,7 +24,9 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '@hydrooj/common') return { STATUS_TEXTS: {} };
     if (request === '@hydrooj/utils') return { Logger: class { error() {} } };
     if (request === '../context') return { Context: class {} };
-    if (request === '../error') return { ProblemNotFoundError: class extends Error {} };
+    if (request === '../error') {
+        return { ProblemNotFoundError: class extends Error {}, ValidationError: class extends Error {} };
+    }
     if (request === '../lib/problem-config') return { parseProblemConfigObject };
     if (request === '../service/db') return { collection: () => collectionStub, ensureIndexes: async () => undefined };
     if (request === '../utils') {
@@ -32,11 +36,12 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             Time: {},
         };
     }
-    if (request === './builtin') return { STATUS: {} };
+    if (request === './builtin') return { STATUS: { STATUS_WAITING: 0 } };
     if (request === './domain') return { get: async () => ({ isTrusted: true }) };
     if (request === './message') return {};
     if (request === './problem') {
         return {
+            claimStructureLockForSubmission: async () => undefined,
             get: async () => ({
                 domainId: 'system', docId: 7, owner: 1, reference: null,
                 data: ['1.in', '1.out'], config: problemConfig,
@@ -56,6 +61,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
 let recordModel: typeof import('../src/model/record').default;
 try {
     (global as any).Hydro = { model: {} };
+    (global as any).bus = { broadcast() {} };
     delete require.cache[recordPath];
     recordModel = require(recordPath).default;
 } finally {
@@ -65,6 +71,7 @@ try {
 beforeEach(() => {
     problemConfig = undefined;
     queuedTasks.length = 0;
+    insertedRecords.length = 0;
 });
 
 describe('record judge problem config', () => {
@@ -96,6 +103,21 @@ describe('record judge problem config', () => {
         }
         expect(error).to.be.instanceOf(Error);
         expect((error as Error).message).to.include('Cannot parse problem config');
+        expect(queuedTasks).to.deep.equal([]);
+    });
+
+    it('inserts a manual submission as already-judged waiting without enqueueing a task', async () => {
+        const before = new Date();
+        await recordModel.add(
+            'system', 7, 42, '_', 'answer\r\nkept', true,
+            { contest: new ObjectId(), type: 'manual' },
+        );
+        expect(insertedRecords).to.have.length(1);
+        expect(insertedRecords[0]).to.include({
+            status: 0, code: 'answer\r\nkept', manualPending: true,
+        });
+        expect(insertedRecords[0].judgeAt).to.be.instanceOf(Date);
+        expect(insertedRecords[0].judgeAt.getTime()).to.be.at.least(before.getTime());
         expect(queuedTasks).to.deep.equal([]);
     });
 });

@@ -50,6 +50,7 @@ const calls = {
     getMulti: [] as any[],
     inc: [] as any[],
     maintain: [] as any[],
+    manualStatus: [] as any[],
     provider: [] as any[],
     random: [] as any[],
     refresh: [] as any[],
@@ -58,6 +59,7 @@ const calls = {
     status: [] as any[],
     structuredMetadataSaves: [] as any[],
     structuredSaves: [] as any[],
+    contestUpdates: [] as any[],
     storageGet: [] as any[],
     storageGetMeta: [] as any[],
     storageSign: [] as any[],
@@ -186,6 +188,10 @@ const problemStub = {
         calls.structuredMetadataSaves.push(input);
         return { domainId: input.domainId, docId: input.pid, structureRevision: 5 };
     },
+    async updateManualStatusLatest(...args: any[]) {
+        calls.manualStatus.push(args);
+        return true;
+    },
     async renameAdditionalFile(...args: any[]) {
         calls.renameFile.push(args);
     },
@@ -221,7 +227,10 @@ const serverStub = {
 const systemStub = { get: () => false };
 const builtinStub = { PERM, PRIV, STATUS: {} };
 const contestHandlerStub = { ContestDetailBaseHandler: class { } };
-const emptyModel = {};
+const emptyModel = {
+    async updateStatus(...args: any[]) { calls.contestUpdates.push(args); },
+    canShowSelfRecord() { return true; },
+};
 const discussionStub = { count: async () => 0 };
 const domainStub = {
     async get() { return { _id: 'system' }; },
@@ -261,6 +270,14 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../model/oplog') return oplogStub;
     if (request === '../model/discussion') return discussionStub;
     if (request === '../model/domain') return domainStub;
+    if (request === '../model/manual-grade') {
+        return {
+            async markManualPending(input: any) {
+                calls.manualStatus.push(input);
+                calls.contestUpdates.push(input);
+            },
+        };
+    }
     if (request === '../model/record') return recordStub;
     if (request === '../model/setting') return settingStub;
     if (request === '../model/solution') return solutionStub;
@@ -282,6 +299,7 @@ const {
     ProblemApi,
     ProblemCreateHandler,
     ProblemCreateSingleHandler,
+    ProblemCreateSubjectiveHandler,
     ProblemDetailHandler,
     ProblemEditHandler,
     ProblemConfigHandler,
@@ -548,6 +566,47 @@ describe('P3.9 basic objective HTTP boundaries', () => {
         expect(handler.response.template).to.equal('problem_edit_blank.html');
         expect(handler.response.body.structuredConfig).to.deep.equal({ main: { answer: 'Case' } });
         expect(handler.response.body.structuredConfig).not.to.have.property('answers');
+    });
+});
+
+describe('P3.10 subjective problem HTTP boundaries', () => {
+    it('creates a hidden subjective problem through its fixed-kind route', async () => {
+        const handler = makeHandler(ProblemCreateSubjectiveHandler, {});
+        await handler.post(
+            'forged', 'Essay', 'Explain why.', '', 0, ['reasoning'], 'subjective',
+            JSON.stringify({ main: { gradingInstructions: 'Look for invariants.' } }),
+        );
+        expect(createKinds.at(-1)).to.equal('subjective');
+        expect(calls.add.at(-1)[6].structuredConfig).to.deep.equal({
+            main: { gradingInstructions: 'Look for invariants.' },
+        });
+        expect(handler.response.body.hidden).to.equal(true);
+    });
+
+    it('rejects subjective submission outside an allowed scoring container', async () => {
+        const handler = makeHandler(ProblemSubmitHandler, {});
+        handler.pdoc = {
+            domainId: 'system', docId: 7, problemKind: 'subjective', config: { type: 'objective' },
+        };
+        handler.tdoc = { docId: 'contest', rule: 'acm' };
+        const error = await captureFailure(() => handler.post(
+            'forged', '_', 'answer', false, [], 'contest' as any,
+        ));
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.recordAdd).to.deep.equal([]);
+    });
+
+    it('stores the raw answer as a manual pending record in homework', async () => {
+        const handler = makeHandler(ProblemSubmitHandler, {});
+        handler.pdoc = {
+            domainId: 'system', docId: 7, problemKind: 'subjective', config: { type: 'objective' },
+        };
+        handler.tdoc = { docId: 'homework', rule: 'homework' };
+        await handler.post('forged', '_', 'line one\r\nline two', false, [], 'homework' as any);
+        expect(calls.recordAdd.at(-1)[4]).to.equal('line one\r\nline two');
+        expect(calls.recordAdd.at(-1)[6]).to.deep.include({ contest: 'homework', type: 'manual' });
+        expect(calls.manualStatus).to.have.length(1);
+        expect(calls.contestUpdates).to.have.length(1);
     });
 });
 

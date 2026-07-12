@@ -144,6 +144,8 @@ class JudgeRejudgeHandler extends JudgeApiHandler {
             contest: { $nin: [record.RECORD_GENERATE, record.RECORD_PRETEST] },
             status: { $ne: STATUS.STATUS_CANCELED },
             'files.hack': { $exists: false },
+            manualPending: { $ne: true },
+            manualGrade: { $exists: false },
         };
         let hasSelector = false;
         if (Array.isArray(rids) && rids.length) {

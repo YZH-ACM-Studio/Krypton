@@ -22,6 +22,10 @@ import type {
 const TYPE_PROBLEM = 10;
 const documentColl = db.collection<any>('document');
 
+function canonicalPairFilter(pair: AclPair) {
+    return { domainId: pair.domainId, pid: pair.pid, uid: pair.uid };
+}
+
 function sourceFromDoc(doc: any): PermitSource {
     return {
         domainId: doc.domainId,
@@ -116,17 +120,19 @@ export class MongoAclRepository implements AclServiceRepository {
     }
 
     async getCanonical(pair: AclPair): Promise<CanonicalPermit | null> {
-        const doc = await permitsColl.findOne({ ...pair, active: canonicalActiveFilter() }, this.options());
+        const doc = await permitsColl.findOne({
+            ...canonicalPairFilter(pair), active: canonicalActiveFilter(),
+        }, this.options());
         return doc ? canonicalFromDoc(doc) : null;
     }
 
     async getSources(pair: AclPair): Promise<PermitSource[]> {
-        const docs = await permitSourcesColl.find(pair, this.options()).toArray();
+        const docs = await permitSourcesColl.find(canonicalPairFilter(pair), this.options()).toArray();
         return docs.map(sourceFromDoc);
     }
 
     async getFence(pair: AclPair): Promise<AclMutationFence | null> {
-        const doc = await aclMutationFencesColl.findOne(pair, this.options());
+        const doc = await aclMutationFencesColl.findOne(canonicalPairFilter(pair), this.options());
         return doc ? fenceFromDoc(doc) : null;
     }
 
@@ -223,7 +229,7 @@ export class MongoAclRepository implements AclServiceRepository {
         patch: Partial<AclMutationFence>,
     ): Promise<void> {
         const result = await aclMutationFencesColl.updateOne(
-            { ...pair, requestId },
+            { ...canonicalPairFilter(pair), requestId },
             { $set: patch },
             this.options(),
         );
@@ -265,12 +271,13 @@ export class MongoAclRepository implements AclServiceRepository {
     }
 
     async writeCanonical(pair: AclPair, expected: CanonicalPermit | null): Promise<void> {
+        const filter = canonicalPairFilter(pair);
         if (!expected) {
-            await permitsColl.deleteOne(pair, this.options());
+            await permitsColl.deleteOne(filter, this.options());
             return;
         }
         await permitsColl.updateOne(
-            pair,
+            filter,
             {
                 $set: {
                     role: expected.role,
@@ -280,7 +287,7 @@ export class MongoAclRepository implements AclServiceRepository {
                     viaContest: expected.viaContest ? new ObjectId(expected.viaContest) : null,
                     note: expected.note,
                 },
-                $setOnInsert: { _id: new ObjectId(), ...pair },
+                $setOnInsert: { _id: new ObjectId(), ...filter },
             },
             { ...this.options(), upsert: true },
         );
@@ -310,7 +317,7 @@ export class MongoAclRepository implements AclServiceRepository {
 
     async deleteFence(pair: AclPair, requestId: string): Promise<void> {
         const result = await aclMutationFencesColl.deleteOne(
-            { ...pair, requestId },
+            { ...canonicalPairFilter(pair), requestId },
             this.options(),
         );
         if (result.deletedCount !== 1) {

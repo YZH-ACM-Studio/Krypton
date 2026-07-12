@@ -165,6 +165,39 @@ describe('ACL mutation coordinator', () => {
         expect(repo.sources.get(keyOf(pair))).to.have.lengthOf(1);
     });
 
+    it('passes only the canonical three-field pair to repository queries', async () => {
+        const pairMethods = new Set([
+            'getCanonical', 'getSources', 'getFence', 'getProblemAclMutationLock',
+            'clearProblemAclMutation', 'updateFence', 'writeCanonical', 'writeMirror',
+            'mirrorHas', 'deleteFence',
+        ]);
+        const strictRepo = new Proxy(repo, {
+            get(target, property, receiver) {
+                const value = Reflect.get(target, property, receiver);
+                if (typeof value !== 'function') return value;
+                if (!pairMethods.has(String(property))) return value.bind(target);
+                return (query: AclPair, ...args: unknown[]) => {
+                    expect(Object.keys(query).sort()).to.deep.equal(['domainId', 'pid', 'uid']);
+                    return value.call(target, query, ...args);
+                };
+            },
+        });
+        const strictCoordinator = createAclCoordinator(strictRepo, {
+            now: () => new Date('2026-07-11T00:00:00.000Z'),
+        });
+        const result = await strictCoordinator.mutate({
+            domainId: 'system',
+            pid: 77,
+            uid: 8,
+            requestId: 'strict-pair',
+            sourceType: 'direct',
+            sourceId: 'direct',
+            role: 'verifier',
+            grantedBy: 2,
+        });
+        expect(result?.role).to.equal('verifier');
+    });
+
     it('keeps a deny fence on failure and resumes the same requestId idempotently', async () => {
         const pair = { domainId: 'system', pid: 99, uid: 8 };
         repo.failOnceAt = 'mirror';

@@ -208,7 +208,7 @@ export function createAclCoordinator(
     const now = options.now || (() => new Date());
 
     async function createOrResumeFence(input: AclMutationInput): Promise<AclMutationFence> {
-        const pair: AclPair = input;
+        const pair: AclPair = { domainId: input.domainId, pid: input.pid, uid: input.uid };
         const intent: AclMutationIntent = {
             action: input.reconcileOnly ? 'reconcile' : 'set-source',
             sourceType: input.sourceType,
@@ -318,7 +318,7 @@ export function createAclCoordinator(
     }
 
     async function mutate(input: AclMutationInput): Promise<CanonicalPermit | null> {
-        const pair: AclPair = input;
+        const pair: AclPair = { domainId: input.domainId, pid: input.pid, uid: input.uid };
         let fence: AclMutationFence | null = null;
         try {
             fence = await createOrResumeFence(input);

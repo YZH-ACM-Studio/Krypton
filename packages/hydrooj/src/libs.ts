@@ -10,9 +10,7 @@ export * from './typeutils';
 export * from './utils';
 export { WebSocket, WebSocketServer } from '@hydrooj/framework';
 export { Filter, ObjectId } from 'mongodb';
-export {
-    _, ObjectID, Schema, superagent, Zip,
-};
+export { _, ObjectID, Schema, superagent, Zip };
 /** @deprecated Use ZipReader/ZipWriter instead */
 export const AdmZip = _AdmZip;
 export const definePlugin = <T = never>(args: {

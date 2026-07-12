@@ -1,7 +1,7 @@
 // https://github.com/waylonflinn/markdown-it-katex/blob/master/index.js
 import katex from 'katex';
 
-const limit = (typeof process !== 'undefined' && process.versions && process.versions.node) ? 50 : 1000;
+const limit = typeof process !== 'undefined' && process.versions && process.versions.node ? 50 : 1000;
 
 function isValidDelim(state, pos) {
   const max = state.posMax;
@@ -9,9 +9,8 @@ function isValidDelim(state, pos) {
   const nextChar = pos + 1 <= max ? state.src.charCodeAt(pos + 1) : -1;
   let canOpen = true;
   let canClose = true;
-  if (prevChar === 0x09
-    ||/* \t */ (nextChar >= 0x30/* "0" */ && nextChar <= 0x39/* "9" */)) canClose = false;
-  if (nextChar === 0x09/* \t */) canOpen = false;
+  if (prevChar === 0x09 || /* \t */ (nextChar >= 0x30 /* "0" */ && nextChar <= 0x39) /* "9" */) canClose = false;
+  if (nextChar === 0x09 /* \t */) canOpen = false;
   return {
     canOpen,
     canClose,
@@ -62,12 +61,7 @@ function inline(state, silent) {
 }
 
 function escapeHtml(unsafe) {
-  return unsafe
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+  return unsafe.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
 function block(state, start, end, silent) {
@@ -101,9 +95,10 @@ function block(state, start, end, silent) {
   state.line = next + 1;
   const token = state.push('math_block', 'math', 0);
   token.block = true;
-  token.content = (firstLine && firstLine.trim() ? `${firstLine}\n` : '')
-    + state.getLines(start + 1, next, state.tShift[start], true)
-    + (lastLine && lastLine.trim() ? lastLine : '');
+  token.content =
+    (firstLine && firstLine.trim() ? `${firstLine}\n` : '') +
+    state.getLines(start + 1, next, state.tShift[start], true) +
+    (lastLine && lastLine.trim() ? lastLine : '');
   token.map = [start, state.line];
   token.markup = '$$';
   return true;

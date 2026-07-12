@@ -7,10 +7,12 @@ import { PERM, PRIV } from './builtin';
 const logger = new Logger('homework-access');
 
 export function canBypassHomeworkAccess(user: any, tdoc?: Tdoc): boolean {
-    return !!(tdoc && user.own(tdoc))
-        || user.hasPerm(PERM.PERM_VIEW_HIDDEN_HOMEWORK)
-        || user.hasPerm(PERM.PERM_EDIT_HOMEWORK)
-        || user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+    return (
+        !!(tdoc && user.own(tdoc)) ||
+        user.hasPerm(PERM.PERM_VIEW_HIDDEN_HOMEWORK) ||
+        user.hasPerm(PERM.PERM_EDIT_HOMEWORK) ||
+        user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
+    );
 }
 
 export async function getHomeworkUserGroupIds(domainId: string, uid: number): Promise<Set<string>> {
@@ -39,8 +41,7 @@ export function homeworkParticipantScopeAllows(tdoc: Tdoc, groupIds: Set<string>
 
 export async function assertHomeworkAccess(domainId: string, tdoc: Tdoc, user: any): Promise<void> {
     if (canBypassHomeworkAccess(user, tdoc)) return;
-    if (tdoc.assign?.length
-        && !new Set(tdoc.assign).intersection(new Set(user.group || [])).size) {
+    if (tdoc.assign?.length && !new Set(tdoc.assign).intersection(new Set(user.group || [])).size) {
         throw new NotAssignedError('homework', tdoc.docId);
     }
     if (tdoc.participantScopeMode && tdoc.participantScopeMode !== 'none') {
@@ -51,11 +52,7 @@ export async function assertHomeworkAccess(domainId: string, tdoc: Tdoc, user: a
     }
 }
 
-export function buildHomeworkListAccessFilter(
-    uid: number,
-    legacyGroups: string[],
-    participantGroupIds: ObjectId[],
-): Filter<Tdoc> {
+export function buildHomeworkListAccessFilter(uid: number, legacyGroups: string[], participantGroupIds: ObjectId[]): Filter<Tdoc> {
     return {
         $or: [
             { maintainer: uid },

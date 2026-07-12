@@ -1,22 +1,16 @@
 import { ObjectId } from 'mongodb';
 import { effectiveProblemKind } from '@hydrooj/common';
 import { Context } from '../context';
-import {
-    NotFoundError, PermissionError, ValidationError,
-} from '../error';
+import { NotFoundError, PermissionError, ValidationError } from '../error';
 import type { Tdoc } from '../interface';
 import { parseProblemConfigObject } from '../lib/problem-config';
 import { PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
-import {
-    gradeLatestManualRecord, MANUAL_GRADE_RULES,
-} from '../model/manual-grade';
+import { gradeLatestManualRecord, MANUAL_GRADE_RULES } from '../model/manual-grade';
 import problem from '../model/problem';
 import record from '../model/record';
 import user from '../model/user';
-import {
-    Handler, param, Types,
-} from '../service/server';
+import { Handler, param, Types } from '../service/server';
 
 export class ManualGradingHandler extends Handler {
     tdoc: Tdoc;
@@ -36,9 +30,9 @@ export class ManualGradingHandler extends Handler {
     @param('uid', Types.UnsignedInt, true)
     async get(_domainId: string, pid = 0, uid = 0) {
         const domainId = String(this.domain?._id);
-        const pdocs = (await Promise.all((this.tdoc.pids || []).map((problemId) =>
-            problem.get(domainId, problemId, undefined, true))))
-            .filter((pdoc) => pdoc && effectiveProblemKind(pdoc) === 'subjective');
+        const pdocs = (await Promise.all((this.tdoc.pids || []).map((problemId) => problem.get(domainId, problemId, undefined, true)))).filter(
+            (pdoc) => pdoc && effectiveProblemKind(pdoc) === 'subjective',
+        );
         const problems = pdocs.map((pdoc) => ({
             pid: pdoc.docId,
             title: pdoc.title,
@@ -56,7 +50,7 @@ export class ManualGradingHandler extends Handler {
             const query: any = { contest: this.tdoc.docId, pid: selectedPid };
             if (uid) query.uid = uid;
             const rdocs = await record.getMulti(domainId, query).sort({ _id: -1 }).toArray();
-            const latestByUid = new Map<number, typeof rdocs[number]>();
+            const latestByUid = new Map<number, (typeof rdocs)[number]>();
             for (const rdoc of rdocs) if (!latestByUid.has(rdoc.uid)) latestByUid.set(rdoc.uid, rdoc);
             const udict = await user.getListForRender(domainId, [...latestByUid.keys()], false);
             body.rows = [...latestByUid.values()].map((rdoc) => ({
@@ -83,10 +77,7 @@ export class ManualGradingHandler extends Handler {
     @param('score', Types.Float)
     @param('comment', Types.Content, true)
     @param('reason', Types.Content, true)
-    async post(
-        _domainId: string, pid: number, uid: number, latestRid: ObjectId,
-        expectedRevision: number, score: number, comment = '', reason = '',
-    ) {
+    async post(_domainId: string, pid: number, uid: number, latestRid: ObjectId, expectedRevision: number, score: number, comment = '', reason = '') {
         const updated = await gradeLatestManualRecord({
             domainId: String(this.domain?._id),
             tid: this.tdoc.docId,

@@ -50,10 +50,12 @@ export function ChapterOutline({
               ) : null}
             </button>
             {onMove || onRemove ? (
-              <div className={cn(
-                'mr-1 flex shrink-0 items-center opacity-100',
-                'lg:opacity-0 lg:transition-opacity lg:group-hover:opacity-100 lg:group-focus-within:opacity-100',
-              )}>
+              <div
+                className={cn(
+                  'mr-1 flex shrink-0 items-center opacity-100',
+                  'lg:opacity-0 lg:transition-opacity lg:group-hover:opacity-100 lg:group-focus-within:opacity-100',
+                )}
+              >
                 {onMove ? (
                   <>
                     <Button
@@ -64,7 +66,9 @@ export function ChapterOutline({
                       disabled={index === 0}
                       onClick={() => onMove(chapter._id, -1)}
                       aria-label={`上移${chapter.title}`}
-                    ><ArrowUp className="size-3.5" /></Button>
+                    >
+                      <ArrowUp className="size-3.5" />
+                    </Button>
                     <Button
                       type="button"
                       variant="ghost"
@@ -73,7 +77,9 @@ export function ChapterOutline({
                       disabled={index === chapters.length - 1}
                       onClick={() => onMove(chapter._id, 1)}
                       aria-label={`下移${chapter.title}`}
-                    ><ArrowDown className="size-3.5" /></Button>
+                    >
+                      <ArrowDown className="size-3.5" />
+                    </Button>
                   </>
                 ) : null}
                 {onRemove ? (
@@ -85,7 +91,9 @@ export function ChapterOutline({
                     disabled={chapters.length === 1}
                     onClick={() => onRemove(chapter._id)}
                     aria-label={`删除${chapter.title}`}
-                  ><Trash2 className="size-3.5" /></Button>
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
                 ) : null}
               </div>
             ) : null}

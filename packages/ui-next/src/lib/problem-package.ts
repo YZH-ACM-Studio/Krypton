@@ -12,7 +12,14 @@ interface ProblemPackageOptions {
 }
 
 function cleanDownloadName(value: string) {
-  return value.replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_').replace(/\s+/g, ' ').trim() || 'problem';
+  return (
+    value
+      // Control characters are exactly what this filename boundary must strip.
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\\/:*?"<>|\x00-\x1F]+/g, '_')
+      .replace(/\s+/g, ' ')
+      .trim() || 'problem'
+  );
 }
 
 function problemFolder(pdoc: R) {
@@ -91,13 +98,7 @@ async function getFileLinks(problemUrl: string, files: string[], type: 'testdata
   return (data?.links || {}) as Record<string, string>;
 }
 
-export async function downloadProblemPackage({
-  pdoc,
-  problemUrl,
-  testdata = [],
-  additionalFiles = [],
-  content,
-}: ProblemPackageOptions) {
+export async function downloadProblemPackage({ pdoc, problemUrl, testdata = [], additionalFiles = [], content }: ProblemPackageOptions) {
   const folder = problemFolder(pdoc);
   const targets: ZipDownloadTarget[] = [
     { name: `${folder}/problem.yaml`, content: metadataYaml(pdoc) },

@@ -18,9 +18,7 @@
  */
 import { stringify as toCSV } from 'csv-stringify/sync';
 import { ObjectId } from 'mongodb';
-import {
-    Context, Handler, OplogModel, param, Types,
-} from 'hydrooj';
+import { Context, Handler, OplogModel, param, Types } from 'hydrooj';
 import type { ScoreboardConfig } from '../interface';
 import { requireAuthToken } from '../lib/auth-token';
 import * as contest from '../model/contest';
@@ -88,11 +86,22 @@ class ContestCloneHandler extends ContestApiHandler {
         }
         // New contest: same rule + problem set + statement, fresh window/owner.
         const newTid = await contest.add(
-            domainId, title, src.content || '', this.user._id,
-            src.rule, begin, end, Array.isArray(src.pids) ? src.pids : [], false,
+            domainId,
+            title,
+            src.content || '',
+            this.user._id,
+            src.rule,
+            begin,
+            end,
+            Array.isArray(src.pids) ? src.pids : [],
+            false,
         );
         await OplogModel.log(this as any, 'contest.clone', {
-            worker: this.workerLabel, domainId, from: tid.toHexString(), to: newTid.toHexString(), title,
+            worker: this.workerLabel,
+            domainId,
+            from: tid.toHexString(),
+            to: newTid.toHexString(),
+            title,
         });
         this.response.body = { tid: newTid.toHexString() };
     }
@@ -113,7 +122,10 @@ class ContestLockHandler extends ContestApiHandler {
         await contest.edit(domainId, tid, { lockAt, unlocked: false } as any);
         await contest.recalcStatus(domainId, tid);
         await OplogModel.log(this as any, 'contest.lock', {
-            worker: this.workerLabel, domainId, tid: tid.toHexString(), lockMinutes: m,
+            worker: this.workerLabel,
+            domainId,
+            tid: tid.toHexString(),
+            lockMinutes: m,
         });
         this.response.body = { ok: true };
     }
@@ -128,7 +140,9 @@ class ContestUnlockHandler extends ContestApiHandler {
         const domainId = contestDomain();
         await contest.unlockScoreboard(domainId, tid);
         await OplogModel.log(this as any, 'contest.unlock', {
-            worker: this.workerLabel, domainId, tid: tid.toHexString(),
+            worker: this.workerLabel,
+            domainId,
+            tid: tid.toHexString(),
         });
         this.response.body = { ok: true };
     }
@@ -149,7 +163,10 @@ class ContestScoreboardHandler extends ContestApiHandler {
         };
         // getScoreboard needs a Handler `this` (translate + perm checks).
         const [, rows] = await contest.getScoreboard.call(this, domainId, tid, config);
-        const csv = toCSV(rows.map((r) => r.map((c) => String(c.value))), { bom: true });
+        const csv = toCSV(
+            rows.map((r) => r.map((c) => String(c.value))),
+            { bom: true },
+        );
         this.response.body = { title: tdoc.title || '', csv };
     }
 }

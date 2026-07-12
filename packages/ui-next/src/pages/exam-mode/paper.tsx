@@ -10,19 +10,27 @@
  *
  * Server provides: tdoc, pdict, cells, broadcasts, scoreboard, allowSubmitByKind, etc.
  */
-import { Lock, PanelLeftClose, PanelLeftOpen, Save, Send,
-} from 'lucide-react';
+import { Lock, PanelLeftClose, PanelLeftOpen, Save, Send } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ExamDetailShell, type ExamSection, useExamSection } from '@/components/layout/exam-shell';
 import { MarkdownView } from '@/components/markdown-renderer';
 import {
-  BlankRenderer, CellCard, CellNavigator, type CellStatus, Countdown, FillProgramRenderer,
-  groupCellsByKind, KIND_LABELS, MiniTabBar, MultiChoiceRenderer, type PaperCell, PaperStatusPill,
+  BlankRenderer,
+  CellCard,
+  CellNavigator,
+  type CellStatus,
+  Countdown,
+  FillProgramRenderer,
+  groupCellsByKind,
+  KIND_LABELS,
+  MiniTabBar,
+  MultiChoiceRenderer,
+  type PaperCell,
+  PaperStatusPill,
   type QuestionKind,
-  SingleChoiceRenderer } from '@/components/paper/paper-shell';
-import {
-  AnnouncementsSection, OverviewSection, RankingSection,
-} from '@/components/paper/sections';
+  SingleChoiceRenderer,
+} from '@/components/paper/paper-shell';
+import { AnnouncementsSection, OverviewSection, RankingSection } from '@/components/paper/sections';
 import { StructuredRegionInputs } from '@/components/structured-region-inputs';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -39,7 +47,7 @@ interface PdocLike {
     answers?: Record<string, any>;
     template?: {
       lang: string;
-      regions: Array<{ id: string, prompt?: string }>;
+      regions: Array<{ id: string; prompt?: string }>;
     };
     langs?: string[];
     options?: Record<string, string[]>;
@@ -107,9 +115,9 @@ export function ExamPaperPage() {
     cells: PaperCell[];
     now: number;
     inWindow: boolean;
-    owner: { uid: number, uname: string } | null;
-    broadcasts: Array<{ _id: string, content: string, createdAt: string }>;
-    scoreboard: Array<{ rank: number, uid: number, uname: string, realName?: string, studentId?: string, score: number }>;
+    owner: { uid: number; uname: string } | null;
+    broadcasts: Array<{ _id: string; content: string; createdAt: string }>;
+    scoreboard: Array<{ rank: number; uid: number; uname: string; realName?: string; studentId?: string; score: number }>;
     showScoreboard: boolean;
     allowSubmitByKind: boolean;
   };
@@ -120,16 +128,18 @@ export function ExamPaperPage() {
   return (
     <ExamDetailShell
       title={tdoc.title}
-      subtitle={
-        <Countdown endAt={new Date(tdoc.endAt).getTime()} />
-      }
+      subtitle={<Countdown endAt={new Date(tdoc.endAt).getTime()} />}
       section={section as ExamSection}
       onSectionChange={(s) => setSection(s)}
     >
       {section === 'overview' && (
         <OverviewSection
           data={{
-            tdoc, cells, owner: data.owner, inWindow, now: data.now,
+            tdoc,
+            cells,
+            owner: data.owner,
+            inWindow,
+            now: data.now,
             signedInUser: {
               name: bs.user.name,
               studentId: (bs.user as any).studentId,
@@ -140,25 +150,10 @@ export function ExamPaperPage() {
         />
       )}
       {section === 'problems' && (
-        <ProblemsSection
-          tdoc={tdoc}
-          tid={tid}
-          pdict={pdict}
-          cells={cells}
-          inWindow={inWindow}
-          allowSubmitByKind={allowSubmitByKind}
-        />
+        <ProblemsSection tdoc={tdoc} tid={tid} pdict={pdict} cells={cells} inWindow={inWindow} allowSubmitByKind={allowSubmitByKind} />
       )}
-      {section === 'announcements' && (
-        <AnnouncementsSection broadcasts={broadcasts || []} />
-      )}
-      {section === 'ranking' && (
-        <RankingSection
-          scoreboard={scoreboard || []}
-          showScoreboard={showScoreboard}
-          signedInUid={bs.user.id}
-        />
-      )}
+      {section === 'announcements' && <AnnouncementsSection broadcasts={broadcasts || []} />}
+      {section === 'ranking' && <RankingSection scoreboard={scoreboard || []} showScoreboard={showScoreboard} signedInUid={bs.user.id} />}
     </ExamDetailShell>
   );
 }
@@ -166,7 +161,11 @@ export function ExamPaperPage() {
 // ─── Problems section — the meat of the exam UI ──────────────────────────
 
 function ProblemsSection({
-  tdoc, tid, pdict, cells, inWindow, allowSubmitByKind,
+  tid,
+  pdict,
+  cells,
+  inWindow,
+  allowSubmitByKind,
 }: {
   tdoc: TdocLike;
   tid: string;
@@ -175,12 +174,10 @@ function ProblemsSection({
   inWindow: boolean;
   allowSubmitByKind: boolean;
 }) {
-  const bs = useBootstrap();
-
   const groups = useMemo(() => groupCellsByKind(cells), [cells]);
   const kinds = useMemo(() => Array.from(groups.keys()), [groups]);
   const [activeKind, setActiveKind] = useState<QuestionKind | null>(kinds[0] ?? null);
-  const tabCells = activeKind ? (groups.get(activeKind) || []) : [];
+  const tabCells = activeKind ? groups.get(activeKind) || [] : [];
 
   const [drafts, setDrafts] = useState<Record<number, DraftState>>({});
   const [draftLoadState, setDraftLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -189,12 +186,18 @@ function ProblemsSection({
   const [saving, setSaving] = useState(false);
   const [activeCellIndex, setActiveCellIndex] = useState(0);
   const [collapsed, setCollapsed] = useState(() => {
-    try { return localStorage.getItem(SUBSIDEBAR_KEY) === '1'; } catch { return false; }
+    try {
+      return localStorage.getItem(SUBSIDEBAR_KEY) === '1';
+    } catch {
+      return false;
+    }
   });
   const toggleCollapsed = useCallback(() => {
     setCollapsed((p) => {
       const n = !p;
-      try { localStorage.setItem(SUBSIDEBAR_KEY, n ? '1' : '0'); } catch {}
+      try {
+        localStorage.setItem(SUBSIDEBAR_KEY, n ? '1' : '0');
+      } catch {}
       return n;
     });
   }, []);
@@ -225,7 +228,7 @@ function ProblemsSection({
         const map: Record<number, DraftState> = {};
         const locked = new Set<QuestionKind>();
         const recordStatus: Record<string, string> = res.recordStatus || {};
-        for (const d of (res.drafts || [])) {
+        for (const d of res.drafts || []) {
           map[d.pid] = {
             answers: d.answers || {},
             code: d.code,
@@ -238,7 +241,7 @@ function ProblemsSection({
             dirty: false,
             lastSavedAt: d.updatedAt ? new Date(d.updatedAt).getTime() : undefined,
           };
-          for (const k of (d.lockedKinds || [])) locked.add(k as QuestionKind);
+          for (const k of d.lockedKinds || []) locked.add(k as QuestionKind);
         }
         setDrafts(map);
         setLockedKinds(locked);
@@ -301,11 +304,13 @@ function ProblemsSection({
     setSaving(true);
     const pids = Array.from(new Set(tabCells.map((c) => c.pid)));
     try {
-      await Promise.all(pids.map(async (pid) => {
-        const draft = drafts[pid];
-        if (!draft?.dirty) return;
-        await saveDraftForPid(pid);
-      }));
+      await Promise.all(
+        pids.map(async (pid) => {
+          const draft = drafts[pid];
+          if (!draft?.dirty) return;
+          await saveDraftForPid(pid);
+        }),
+      );
       return true;
     } catch (error) {
       alert(error instanceof Error ? error.message : '保存失败');
@@ -352,11 +357,9 @@ function ProblemsSection({
     if (!activeKind) return;
     if (!allowSubmitByKind) return;
     if (!['single', 'multi', 'blank', 'fill_program'].includes(activeKind)) return;
-    if (!window.confirm(
-      `确认提交「${KIND_LABELS[activeKind]}」类的全部答案？提交后将立即批改并锁定该类，无法再修改。`,
-    )) return;
+    if (!window.confirm(`确认提交「${KIND_LABELS[activeKind]}」类的全部答案？提交后将立即批改并锁定该类，无法再修改。`)) return;
     // Save first to ensure latest state is on server.
-    if (!await saveCurrentTab()) return;
+    if (!(await saveCurrentTab())) return;
     const form = new URLSearchParams({ kind: activeKind });
     const res = await fetch(`/paper/${tid}/lock-kind`, {
       method: 'POST',
@@ -404,9 +407,11 @@ function ProblemsSection({
   const finalize = async () => {
     if (!window.confirm('确认交卷？交卷后将不能再编辑答案。')) return;
     try {
-      await Promise.all(Object.entries(drafts)
-        .filter(([, draft]) => draft.dirty)
-        .map(([pid]) => saveDraftForPid(Number(pid))));
+      await Promise.all(
+        Object.entries(drafts)
+          .filter(([, draft]) => draft.dirty)
+          .map(([pid]) => saveDraftForPid(Number(pid))),
+      );
     } catch (error) {
       alert(error instanceof Error ? error.message : '保存失败，未交卷');
       return;
@@ -436,11 +441,7 @@ function ProblemsSection({
   };
 
   if (!activeKind || tabCells.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center p-10 text-sm text-muted-foreground">
-        本场考试没有题目。
-      </div>
-    );
+    return <div className="flex h-full items-center justify-center p-10 text-sm text-muted-foreground">本场考试没有题目。</div>;
   }
 
   const isObjectiveTab = ['single', 'multi', 'blank', 'fill_program'].includes(activeKind);
@@ -470,15 +471,12 @@ function ProblemsSection({
           onClick={saveCurrentTab}
           disabled={!inWindow || !draftReady || saving || dirtyCountInTab === 0}
         >
-          <Save className="size-4" />保存
+          <Save className="size-4" />
+          保存
         </Button>
-        <Button
-          size="sm"
-          className="h-8 gap-1.5"
-          onClick={finalize}
-          disabled={!inWindow || !draftReady}
-        >
-          <Send className="size-4" />交卷
+        <Button size="sm" className="h-8 gap-1.5" onClick={finalize} disabled={!inWindow || !draftReady}>
+          <Send className="size-4" />
+          交卷
         </Button>
       </div>
 
@@ -497,40 +495,20 @@ function ProblemsSection({
         {/* Sub-sidebar */}
         {!collapsed && (
           <aside className="flex w-56 shrink-0 flex-col border-r bg-card/30">
-            <MiniTabBar
-              groups={groups}
-              current={activeKind}
-              onChange={switchKind}
-              lockedKinds={lockedKinds}
-            />
+            <MiniTabBar groups={groups} current={activeKind} onChange={switchKind} lockedKinds={lockedKinds} />
             <ScrollArea className="min-h-0 flex-1">
-              <CellNavigator
-                cells={tabCells}
-                activeIndex={activeCellIndex}
-                statuses={statuses}
-                onJump={jumpToCell}
-              />
+              <CellNavigator cells={tabCells} activeIndex={activeCellIndex} statuses={statuses} onJump={jumpToCell} />
             </ScrollArea>
             {/* Bottom: 提交本类 (only when contest config opens it) */}
             <div className="border-t bg-card/40 p-2.5">
               {showLockButton ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full gap-1.5"
-                  onClick={lockCurrentKind}
-                  disabled={!inWindow || !draftReady}
-                >
+                <Button variant="outline" size="sm" className="w-full gap-1.5" onClick={lockCurrentKind} disabled={!inWindow || !draftReady}>
                   <Lock className="size-4" />
                   提交「{KIND_LABELS[activeKind]}」
                 </Button>
               ) : (
                 <p className="text-center text-[11px] text-muted-foreground">
-                  {lockedKinds.has(activeKind)
-                    ? '该类已提交并锁定。'
-                    : isObjectiveTab
-                      ? '本场考试统一在交卷时批改。'
-                      : '编程题需逐题提交评测。'}
+                  {lockedKinds.has(activeKind) ? '该类已提交并锁定。' : isObjectiveTab ? '本场考试统一在交卷时批改。' : '编程题需逐题提交评测。'}
                 </p>
               )}
             </div>
@@ -538,10 +516,7 @@ function ProblemsSection({
         )}
 
         {/* Main scroll area */}
-        <ScrollArea
-          viewportRef={mainRef}
-          className="min-w-0 flex-1"
-        >
+        <ScrollArea viewportRef={mainRef} className="min-w-0 flex-1">
           <div className="space-y-5 p-6">
             {tabCells.map((cell, i) => (
               <div key={`${cell.pid}-${cell.questionKey ?? 'P'}-${i}`}>
@@ -568,9 +543,7 @@ function ProblemsSection({
                       regionContents: { ...(draft.regionContents || {}), [regionId]: content },
                     });
                   }}
-                  onSubmitProgramming={['default', ...COMPILED_REGION_KINDS].includes(cell.kind)
-                    ? () => submitProgramming(cell.pid)
-                    : undefined}
+                  onSubmitProgramming={['default', ...COMPILED_REGION_KINDS].includes(cell.kind) ? () => submitProgramming(cell.pid) : undefined}
                 />
               </div>
             ))}
@@ -584,8 +557,17 @@ function ProblemsSection({
 // ─── Per-cell editor switch ──────────────────────────────────────────────
 
 function CellEditor({
-  cell, cellIndex, pdoc, draft, status, locked, disabled,
-  onAnswerChange, onCodeChange, onRegionChange, onSubmitProgramming,
+  cell,
+  cellIndex,
+  pdoc,
+  draft,
+  status,
+  locked,
+  disabled,
+  onAnswerChange,
+  onCodeChange,
+  onRegionChange,
+  onSubmitProgramming,
 }: {
   cell: PaperCell;
   cellIndex: number;
@@ -600,9 +582,7 @@ function CellEditor({
   onSubmitProgramming?: () => void;
 }) {
   if (!pdoc) {
-    return (
-      <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">题目数据缺失</div>
-    );
+    return <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">题目数据缺失</div>;
   }
 
   const title = cell.questionKey ? `第 ${cell.questionKey} 题` : pdoc.title;
@@ -610,14 +590,7 @@ function CellEditor({
   const options = pdoc.config.options?.[cell.questionKey || ''] || ['选项 A', '选项 B', '选项 C', '选项 D'];
 
   return (
-    <CellCard
-      id={`cell-${cellIndex}`}
-      title={title}
-      score={cell.score}
-      prompt={cell.prompt}
-      locked={isLocked}
-      status={status}
-    >
+    <CellCard id={`cell-${cellIndex}`} title={title} score={cell.score} prompt={cell.prompt} locked={isLocked} status={status}>
       {pdoc.content && (
         <div className="prose prose-sm dark:prose-invert max-w-none">
           <MarkdownView content={pdoc.content} />
@@ -641,18 +614,10 @@ function CellEditor({
         />
       )}
       {cell.kind === 'blank' && (
-        <BlankRenderer
-          value={(draft.answers[cell.questionKey!] as string) || ''}
-          onChange={onAnswerChange}
-          disabled={isLocked}
-        />
+        <BlankRenderer value={(draft.answers[cell.questionKey!] as string) || ''} onChange={onAnswerChange} disabled={isLocked} />
       )}
       {cell.kind === 'fill_program' && !!cell.questionKey && (
-        <FillProgramRenderer
-          value={(draft.answers[cell.questionKey!] as string) || ''}
-          onChange={onAnswerChange}
-          disabled={isLocked}
-        />
+        <FillProgramRenderer value={(draft.answers[cell.questionKey!] as string) || ''} onChange={onAnswerChange} disabled={isLocked} />
       )}
       {cell.kind === 'subjective' && (
         <div className="space-y-1.5">
@@ -693,13 +658,14 @@ function CellEditor({
           <div className="flex items-center gap-2">
             <label className="text-xs text-muted-foreground">语言:</label>
             <SimpleSelect
-              value={draft.lang || (pdoc.config?.langs?.[0] || 'cpp')}
+              value={draft.lang || pdoc.config?.langs?.[0] || 'cpp'}
               onValueChange={(v) => onCodeChange(draft.code || '', v)}
               disabled={isLocked}
               size="sm"
               className="w-auto min-w-[6rem] text-xs"
               options={(pdoc.config?.langs || ['cpp', 'python', 'java']).map((l) => ({
-                value: l, label: l,
+                value: l,
+                label: l,
               }))}
             />
           </div>
@@ -707,13 +673,9 @@ function CellEditor({
       )}
       {onSubmitProgramming && (
         <div className="flex justify-end pt-1">
-          <Button
-            size="sm"
-            className="gap-1.5"
-            onClick={onSubmitProgramming}
-            disabled={isLocked}
-          >
-            <Send className="size-4" />提交评测
+          <Button size="sm" className="gap-1.5" onClick={onSubmitProgramming} disabled={isLocked}>
+            <Send className="size-4" />
+            提交评测
           </Button>
         </div>
       )}

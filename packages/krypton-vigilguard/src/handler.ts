@@ -8,22 +8,26 @@
  *                                            here.
  */
 import type { Context } from 'hydrooj';
-import {
-    Handler, NotFoundError, ObjectId, OplogModel, param, PRIV, Types,
-} from 'hydrooj';
+import { Handler, NotFoundError, ObjectId, OplogModel, param, PRIV, Types } from 'hydrooj';
 import * as contest from 'hydrooj/src/model/contest';
 import system from 'hydrooj/src/model/system';
 
 class ClientRequiredNoticeHandler extends Handler {
-    /** Anyone can see the notice — there's no useful information leak
-     *  here (just contest title + ETA). */
+    /**
+     * Anyone can see the notice — there's no useful information leak
+     *  here (just contest title + ETA).
+     */
     noCheckPermView = true;
 
     @param('tid', Types.ObjectId, true)
     async get(domainId: string, tid?: ObjectId) {
         let tdoc = null;
         if (tid) {
-            try { tdoc = await contest.get(domainId, tid); } catch { tdoc = null; }
+            try {
+                tdoc = await contest.get(domainId, tid);
+            } catch {
+                tdoc = null;
+            }
         }
         const window = tdoc ? contest.effectiveLockoutWindow(tdoc) : null;
         this.response.body = {
@@ -65,28 +69,17 @@ function networkFields(tdoc: any) {
     const defaultPolicy = system.get('vigil.networkLockFailurePolicy') || 'strict';
     return {
         networkLockdownMode: !!tdoc.networkLockdownMode,
-        networkLockdownFailurePolicy: tdoc.networkLockdownFailurePolicy
-            || (tdoc.networkLockdownMode ? defaultPolicy : 'off'),
-        networkWhitelistHosts: [
-            ...parseList(system.get('vigil.networkLockDefaultHosts')),
-            ...(tdoc.networkWhitelistHosts || []),
-        ],
-        networkWhitelistIps: [
-            ...parseList(system.get('vigil.networkLockDefaultIps')),
-            ...(tdoc.networkWhitelistIps || []),
-        ],
-        networkWhitelistPorts: [
-            ...parsePorts(system.get('vigil.networkLockDefaultPorts')),
-            ...(tdoc.networkWhitelistPorts || []),
-        ],
+        networkLockdownFailurePolicy: tdoc.networkLockdownFailurePolicy || (tdoc.networkLockdownMode ? defaultPolicy : 'off'),
+        networkWhitelistHosts: [...parseList(system.get('vigil.networkLockDefaultHosts')), ...(tdoc.networkWhitelistHosts || [])],
+        networkWhitelistIps: [...parseList(system.get('vigil.networkLockDefaultIps')), ...(tdoc.networkWhitelistIps || [])],
+        networkWhitelistPorts: [...parsePorts(system.get('vigil.networkLockDefaultPorts')), ...(tdoc.networkWhitelistPorts || [])],
     };
 }
 
 function mediaFields(tdoc: any) {
-    const processWhitelist = Array.from(new Set([
-        ...parseList(system.get('vigil.processWhitelistGlobal')),
-        ...parseList(tdoc.vigilProcessWhitelist),
-    ]));
+    const processWhitelist = Array.from(
+        new Set([...parseList(system.get('vigil.processWhitelistGlobal')), ...parseList(tdoc.vigilProcessWhitelist)]),
+    );
     return {
         liveEnabled: tdoc.liveEnabled !== false,
         recordEnabled: !!tdoc.recordEnabled,
@@ -102,7 +95,9 @@ function mediaFields(tdoc: any) {
  * and the operator wants to retry without re-editing the contest.
  */
 class VigilGuardResyncContestHandler extends Handler {
-    async prepare() { this.checkPriv(PRIV.PRIV_EDIT_SYSTEM); }
+    async prepare() {
+        this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
+    }
 
     @param('tid', Types.ObjectId)
     async post(domainId: string, tid: ObjectId) {
@@ -135,12 +130,16 @@ class VigilGuardResyncContestHandler extends Handler {
                 await vigilBridge().deleteExamFromVigil(tid.toString());
             }
             await OplogModel.log(this as any, 'vigilguard.resync', {
-                tid: tid.toString(), domainId, vigilEnabled: !!tdoc.vigilEnabled,
+                tid: tid.toString(),
+                domainId,
+                vigilEnabled: !!tdoc.vigilEnabled,
             });
             this.response.body = { ok: true, vigilEnabled: !!tdoc.vigilEnabled };
         } catch (e: any) {
             await OplogModel.log(this as any, 'vigilguard.resync_fail', {
-                tid: tid.toString(), domainId, error: e?.message || String(e),
+                tid: tid.toString(),
+                domainId,
+                error: e?.message || String(e),
             });
             this.response.status = 502;
             this.response.body = { ok: false, error: e?.message || String(e) };
@@ -150,10 +149,5 @@ class VigilGuardResyncContestHandler extends Handler {
 
 export function applyHandlers(ctx: Context) {
     ctx.Route('client_required_notice', '/client-required-notice', ClientRequiredNoticeHandler);
-    ctx.Route(
-        'vigilguard_resync',
-        '/api/admin/vigilguard/resync/:tid',
-        VigilGuardResyncContestHandler,
-        PRIV.PRIV_EDIT_SYSTEM,
-    );
+    ctx.Route('vigilguard_resync', '/api/admin/vigilguard/resync/:tid', VigilGuardResyncContestHandler, PRIV.PRIV_EDIT_SYSTEM);
 }

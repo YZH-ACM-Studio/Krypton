@@ -20,16 +20,23 @@
  *   - Category management: PRIV_EDIT_SYSTEM (system-wide list).
  */
 import type { Context } from 'hydrooj';
-import {
-    Handler, NotFoundError, ObjectId, param, PERM, PermissionError, PRIV,
-    PrivilegeError, Types,
-} from 'hydrooj';
+import { Handler, NotFoundError, ObjectId, param, PERM, PermissionError, PRIV, PrivilegeError, Types } from 'hydrooj';
 import {
     countUnreadForUser,
-    createAnnouncement, deleteAnnouncement, deleteCategory, getAnnouncement,
-    getCategory, incrementViews, listAnnouncements, listCategories,
-    listForHomepage, listUnreadForUser, markRead, reorderAnnouncements,
-    updateAnnouncement, upsertCategory,
+    createAnnouncement,
+    deleteAnnouncement,
+    deleteCategory,
+    getAnnouncement,
+    getCategory,
+    incrementViews,
+    listAnnouncements,
+    listCategories,
+    listForHomepage,
+    listUnreadForUser,
+    markRead,
+    reorderAnnouncements,
+    updateAnnouncement,
+    upsertCategory,
 } from './model';
 import type { AnnouncementDoc } from './types';
 import { isEffectivelyVisible } from './types';
@@ -68,12 +75,19 @@ class AnnounceListHandler extends Handler {
         const skip = (page - 1) * limit;
         const sortDir = sort === 'asc' ? 'asc' : 'desc';
         const { docs, total } = await listAnnouncements(domainId, {
-            forUser: true, category, skip, limit, sort: sortDir,
+            forUser: true,
+            category,
+            skip,
+            limit,
+            sort: sortDir,
         });
         const categories = await listCategories();
         this.response.template = 'announce_list.html';
         this.response.body = {
-            docs, total, page, limit,
+            docs,
+            total,
+            page,
+            limit,
             category: category || '',
             categories,
             sort: sortDir,
@@ -89,8 +103,7 @@ class AnnounceDetailHandler extends Handler {
         const doc = await getAnnouncement(aid);
         if (!doc) throw new NotFoundError('announcement', String(aid));
         // Non-admins can't see hidden / future / expired announcements.
-        const canSeeHidden = this.user.hasPerm(PERM.PERM_EDIT_DOMAIN)
-            || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        const canSeeHidden = this.user.hasPerm(PERM.PERM_EDIT_DOMAIN) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         if (!canSeeHidden && !isEffectivelyVisible(doc)) {
             throw new NotFoundError('announcement', String(aid));
         }
@@ -120,7 +133,8 @@ class AdminAnnounceListHandler extends Handler {
         const categories = await listCategories({ includeHidden: true });
         this.response.template = 'admin_announce_list.html';
         this.response.body = {
-            docs, categories,
+            docs,
+            categories,
             canEditGlobal: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
         };
     }
@@ -144,7 +158,7 @@ class AdminAnnounceListHandler extends Handler {
         publishAt?: string,
         unpublishAt?: string,
     ) {
-        const finalScope = (scope === 'global') ? 'global' : 'domain';
+        const finalScope = scope === 'global' ? 'global' : 'domain';
         ensureCanEditScope(this.user, finalScope);
         await createAnnouncement({
             title,
@@ -179,6 +193,7 @@ class AdminAnnounceCreateHandler extends Handler {
             throw new PermissionError(PERM.PERM_EDIT_DOMAIN);
         }
     }
+
     async get() {
         const categories = await listCategories();
         this.response.template = 'admin_announce_edit.html';
@@ -196,6 +211,7 @@ class AdminAnnounceEditHandler extends Handler {
             throw new PermissionError(PERM.PERM_EDIT_DOMAIN);
         }
     }
+
     @param('aid', Types.ObjectId)
     async get(_ctx: any, aid: ObjectId) {
         const doc = await getAnnouncement(aid);
@@ -273,14 +289,7 @@ class AdminCategoriesHandler extends Handler {
     @param('color', Types.String, true)
     @param('order', Types.Int, true)
     @param('hidden', Types.Boolean, true)
-    async postUpsert(
-        _ctx: any,
-        key?: string,
-        name?: string,
-        color?: string,
-        order?: number,
-        hidden?: boolean,
-    ) {
+    async postUpsert(_ctx: any, key?: string, name?: string, color?: string, order?: number, hidden?: boolean) {
         if (!key || !name || !color) throw new Error('key/name/color required');
         await upsertCategory({
             key,
@@ -307,10 +316,7 @@ class UnreadApiHandler extends Handler {
             this.response.body = { count: 0, docs: [] };
             return;
         }
-        const [docs, count] = await Promise.all([
-            listUnreadForUser(this.user._id, domainId, 20),
-            countUnreadForUser(this.user._id, domainId),
-        ]);
+        const [docs, count] = await Promise.all([listUnreadForUser(this.user._id, domainId, 20), countUnreadForUser(this.user._id, domainId)]);
         const categories = await listCategories();
         const catMap = Object.fromEntries(categories.map((c) => [c.key, c]));
         this.response.body = {

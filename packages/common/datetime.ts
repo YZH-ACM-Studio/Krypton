@@ -112,11 +112,7 @@ export function formatDate(input: DateInput, opts: Omit<FormatOptions, 'precisio
  *   formatRelative(new Date(Date.now() - 5*60_000))    // '5 分钟前'
  *   formatRelative(new Date(Date.now() + 3*86400_000)) // '3 天后'
  */
-export function formatRelative(
-    input: DateInput,
-    now: DateInput = new Date(),
-    opts: { fallback?: string } = {},
-): string {
+export function formatRelative(input: DateInput, now: DateInput = new Date(), opts: { fallback?: string } = {}): string {
     const d = parseDate(input);
     if (!d) return opts.fallback ?? '—';
     const n = parseDate(now) || new Date();
@@ -167,10 +163,7 @@ export function formatDateTimeWithRelative(
  *   formatDuration(90_000)                          // '1 分 30 秒'
  *   formatDuration({ from: tStart, to: tEnd })      // '2 小时 5 分'
  */
-export function formatDuration(
-    spec: number | { from: DateInput; to: DateInput },
-    opts: { fallback?: string } = {},
-): string {
+export function formatDuration(spec: number | { from: DateInput; to: DateInput }, opts: { fallback?: string } = {}): string {
     let ms: number;
     if (typeof spec === 'number') ms = spec;
     else {
@@ -203,9 +196,7 @@ export function isToday(target: DateInput, now: DateInput = new Date()): boolean
     if (!a || !b) return false;
     const aCst = shiftToCst(a);
     const bCst = shiftToCst(b);
-    return aCst.getUTCFullYear() === bCst.getUTCFullYear()
-        && aCst.getUTCMonth() === bCst.getUTCMonth()
-        && aCst.getUTCDate() === bCst.getUTCDate();
+    return aCst.getUTCFullYear() === bCst.getUTCFullYear() && aCst.getUTCMonth() === bCst.getUTCMonth() && aCst.getUTCDate() === bCst.getUTCDate();
 }
 
 /**

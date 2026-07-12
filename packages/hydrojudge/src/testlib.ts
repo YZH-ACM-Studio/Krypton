@@ -37,16 +37,20 @@ export function parse(output: string, fullscore: number, detail: DetailType) {
         message = rest;
         if (op === 'status') {
             const s = +val;
-            if ([
-                STATUS.STATUS_ACCEPTED,
-                STATUS.STATUS_WRONG_ANSWER,
-                STATUS.STATUS_COMPILE_ERROR,
-                STATUS.STATUS_RUNTIME_ERROR,
-                STATUS.STATUS_MEMORY_LIMIT_EXCEEDED,
-                STATUS.STATUS_TIME_LIMIT_EXCEEDED,
-                STATUS.STATUS_OUTPUT_LIMIT_EXCEEDED,
-                STATUS.STATUS_FORMAT_ERROR,
-            ].includes(s)) status = +val;
+            if (
+                [
+                    STATUS.STATUS_ACCEPTED,
+                    STATUS.STATUS_WRONG_ANSWER,
+                    STATUS.STATUS_COMPILE_ERROR,
+                    STATUS.STATUS_RUNTIME_ERROR,
+                    STATUS.STATUS_MEMORY_LIMIT_EXCEEDED,
+                    STATUS.STATUS_TIME_LIMIT_EXCEEDED,
+                    STATUS.STATUS_OUTPUT_LIMIT_EXCEEDED,
+                    STATUS.STATUS_FORMAT_ERROR,
+                ].includes(s)
+            ) {
+                status = +val;
+            }
         } else if (op === 'score') {
             score = +val;
         }

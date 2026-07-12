@@ -84,11 +84,7 @@ export interface AclRepository {
     beginProblemAclMutation(lock: ProblemAclMutationLock): Promise<ProblemAclMutationLock>;
     clearProblemAclMutation(pair: AclPair, requestId: string): Promise<void>;
     createFence(fence: AclMutationFence): Promise<void>;
-    updateFence(
-        pair: AclPair,
-        requestId: string,
-        patch: Partial<AclMutationFence>,
-    ): Promise<void>;
+    updateFence(pair: AclPair, requestId: string, patch: Partial<AclMutationFence>): Promise<void>;
     applySource(fence: AclMutationFence): Promise<void>;
     writeCanonical(pair: AclPair, expected: CanonicalPermit | null): Promise<void>;
     writeMirror(pair: AclPair, maintain: boolean): Promise<void>;
@@ -115,31 +111,27 @@ export class AclMutationConflictError extends AclMutationError {
     status = 409;
 
     constructor(pair: AclPair, requestId: string, activeRequestId: string) {
-        super(
-            `ACL pair is fenced by request ${activeRequestId}; request ${requestId} cannot proceed`,
-            pair,
-            requestId,
-        );
+        super(`ACL pair is fenced by request ${activeRequestId}; request ${requestId} cannot proceed`, pair, requestId);
         this.name = 'AclMutationConflictError';
     }
 }
 
 export function sameAclMutationIntent(a: AclMutationIntent, b: AclMutationIntent): boolean {
-    return (a.action || 'set-source') === (b.action || 'set-source')
-        && a.sourceType === b.sourceType
-        && a.sourceId === b.sourceId
-        && a.role === b.role
-        && a.grantedBy === b.grantedBy
-        && a.note === b.note;
+    return (
+        (a.action || 'set-source') === (b.action || 'set-source') &&
+        a.sourceType === b.sourceType &&
+        a.sourceId === b.sourceId &&
+        a.role === b.role &&
+        a.grantedBy === b.grantedBy &&
+        a.note === b.note
+    );
 }
 
 function sourceIdentity(source: Pick<PermitSource, 'sourceType' | 'sourceId'>): string {
     return `${source.sourceType}:${source.sourceId}`;
 }
 
-export function applyIntentToSources(
-    sources: PermitSource[], pair: AclPair, intent: AclMutationIntent, now: Date,
-): PermitSource[] {
+export function applyIntentToSources(sources: PermitSource[], pair: AclPair, intent: AclMutationIntent, now: Date): PermitSource[] {
     if (intent.action === 'reconcile') return sources.slice();
     const identity = `${intent.sourceType}:${intent.sourceId}`;
     const next = sources.filter((source) => sourceIdentity(source) !== identity);
@@ -164,13 +156,10 @@ function sourceRank(source: PermitSource): number {
     return 1;
 }
 
-export function deriveCanonicalPermit(
-    pair: AclPair, sources: PermitSource[],
-): CanonicalPermit | null {
+export function deriveCanonicalPermit(pair: AclPair, sources: PermitSource[]): CanonicalPermit | null {
     const selected = sources
         .filter((source) => source.active === true)
-        .sort((a, b) => sourceRank(b) - sourceRank(a)
-            || sourceIdentity(a).localeCompare(sourceIdentity(b)))[0];
+        .sort((a, b) => sourceRank(b) - sourceRank(a) || sourceIdentity(a).localeCompare(sourceIdentity(b)))[0];
     if (!selected) return null;
     return {
         ...pair,
@@ -183,28 +172,25 @@ export function deriveCanonicalPermit(
     };
 }
 
-function canonicalMatches(
-    actual: CanonicalPermit | null, expected: CanonicalPermit | null,
-): boolean {
+function canonicalMatches(actual: CanonicalPermit | null, expected: CanonicalPermit | null): boolean {
     if (!actual || !expected) return actual === expected;
-    return actual.domainId === expected.domainId
-        && actual.pid === expected.pid
-        && actual.uid === expected.uid
-        && actual.active === true
-        && actual.role === expected.role
-        && actual.grantedBy === expected.grantedBy
-        && actual.viaContest === expected.viaContest
-        && actual.note === expected.note;
+    return (
+        actual.domainId === expected.domainId &&
+        actual.pid === expected.pid &&
+        actual.uid === expected.uid &&
+        actual.active === true &&
+        actual.role === expected.role &&
+        actual.grantedBy === expected.grantedBy &&
+        actual.viaContest === expected.viaContest &&
+        actual.note === expected.note
+    );
 }
 
 function errorText(error: unknown): string {
     return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
-export function createAclCoordinator(
-    repo: AclRepository,
-    options: { now?: () => Date } = {},
-) {
+export function createAclCoordinator(repo: AclRepository, options: { now?: () => Date } = {}) {
     const now = options.now || (() => new Date());
 
     async function createOrResumeFence(input: AclMutationInput): Promise<AclMutationFence> {
@@ -217,29 +203,16 @@ export function createAclCoordinator(
             grantedBy: input.grantedBy,
             note: input.note || '',
         };
-        let [existing, problemLock] = await Promise.all([
-            repo.getFence(pair),
-            repo.getProblemAclMutationLock(pair),
-        ]);
-        const validateOwnerAndIntent = (
-            marker: Pick<AclMutationFence, 'requestId' | 'intent' | 'writeClaimRequestId'>,
-        ) => {
+        let [existing, problemLock] = await Promise.all([repo.getFence(pair), repo.getProblemAclMutationLock(pair)]);
+        const validateOwnerAndIntent = (marker: Pick<AclMutationFence, 'requestId' | 'intent' | 'writeClaimRequestId'>) => {
             if (marker.requestId !== input.requestId) {
                 throw new AclMutationConflictError(pair, input.requestId, marker.requestId);
             }
             if (!sameAclMutationIntent(marker.intent, intent)) {
-                throw new AclMutationError(
-                    `requestId ${input.requestId} was reused with a different ACL intent`,
-                    pair,
-                    input.requestId,
-                );
+                throw new AclMutationError(`requestId ${input.requestId} was reused with a different ACL intent`, pair, input.requestId);
             }
             if ((marker.writeClaimRequestId || null) !== (input.writeClaimRequestId || null)) {
-                throw new AclMutationError(
-                    `requestId ${input.requestId} was reused with a different problem write claim`,
-                    pair,
-                    input.requestId,
-                );
+                throw new AclMutationError(`requestId ${input.requestId} was reused with a different problem write claim`, pair, input.requestId);
             }
         };
         if (existing) validateOwnerAndIntent(existing);
@@ -254,15 +227,9 @@ export function createAclCoordinator(
                     lastError: null,
                 };
             } else {
-                const [canonical, sources] = await Promise.all([
-                    repo.getCanonical(pair),
-                    repo.getSources(pair),
-                ]);
+                const [canonical, sources] = await Promise.all([repo.getCanonical(pair), repo.getSources(pair)]);
                 const createdAt = now();
-                const target = deriveCanonicalPermit(
-                    pair,
-                    applyIntentToSources(sources, pair, intent, createdAt),
-                );
+                const target = deriveCanonicalPermit(pair, applyIntentToSources(sources, pair, intent, createdAt));
                 fence = {
                     ...pair,
                     requestId: input.requestId,
@@ -306,8 +273,7 @@ export function createAclCoordinator(
             return fence;
         } catch (error) {
             existing = await repo.getFence(pair);
-            if (existing?.requestId === input.requestId
-                && sameAclMutationIntent(existing.intent, intent)) {
+            if (existing?.requestId === input.requestId && sameAclMutationIntent(existing.intent, intent)) {
                 return existing;
             }
             if (existing) {
@@ -351,10 +317,7 @@ export function createAclCoordinator(
 
                 if (!completed.includes('verify')) {
                     expected = deriveCanonicalPermit(pair, await activeRepo.getSources(pair));
-                    const [actual, mirror] = await Promise.all([
-                        activeRepo.getCanonical(pair),
-                        activeRepo.mirrorHas(pair),
-                    ]);
+                    const [actual, mirror] = await Promise.all([activeRepo.getCanonical(pair), activeRepo.mirrorHas(pair)]);
                     if (!canonicalMatches(actual, expected)) {
                         throw new Error('canonical permit does not match active source precedence');
                     }
@@ -365,9 +328,7 @@ export function createAclCoordinator(
                 }
                 return expected;
             };
-            const expected = repo.withMutationTransaction
-                ? await repo.withMutationTransaction(runSteps)
-                : await runSteps(repo);
+            const expected = repo.withMutationTransaction ? await repo.withMutationTransaction(runSteps) : await runSteps(repo);
             // Verification is complete before either deny marker is cleared.
             // Clear the cross-collection fence first. If clearing the embedded
             // ProblemDoc lock fails, the remaining lock still blocks both ACL
@@ -392,12 +353,7 @@ export function createAclCoordinator(
                 }
             }
             if (error instanceof AclMutationError) throw error;
-            throw new AclMutationError(
-                `ACL mutation ${input.requestId} failed: ${errorText(error)}`,
-                pair,
-                input.requestId,
-                { cause: error },
-            );
+            throw new AclMutationError(`ACL mutation ${input.requestId} failed: ${errorText(error)}`, pair, input.requestId, { cause: error });
         }
     }
 

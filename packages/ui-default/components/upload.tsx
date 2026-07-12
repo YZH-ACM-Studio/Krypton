@@ -3,9 +3,7 @@ import $ from 'jquery';
 import React from 'react';
 import { Dialog } from 'vj/components/dialog/index';
 import Notification from 'vj/components/notification';
-import {
-  delay, i18n, pjax, request, tpl,
-} from 'vj/utils';
+import { delay, i18n, pjax, request, tpl } from 'vj/utils';
 
 function onBeforeUnload(e) {
   e.returnValue = '';
@@ -23,27 +21,39 @@ export default async function uploadFiles(endpoint = '', files: File[] | FileLis
   let uploadLabel = '';
   let fileProgress = 0;
   let uploadProgress = 0;
-  let render = () => { };
+  let render = () => {};
 
   function ProgressDialog() {
     const [, setRender] = React.useState(0);
     React.useEffect(() => {
       render = () => setRender((r) => r + 1);
     }, []);
-    return <MantineProvider>
-      <div
-        style={{
-          textAlign: 'center', marginBottom: '5px', color: 'gray', fontSize: 'small',
-        }}
-      >{uploadLabel}</div>
-      <Progress value={uploadProgress} />
-      <div
-        style={{
-          textAlign: 'center', margin: '5px 0', color: 'gray', fontSize: 'small',
-        }}
-      >{fileLabel}</div>
-      <Progress value={fileProgress} />
-    </MantineProvider>;
+    return (
+      <MantineProvider>
+        <div
+          style={{
+            textAlign: 'center',
+            marginBottom: '5px',
+            color: 'gray',
+            fontSize: 'small',
+          }}
+        >
+          {uploadLabel}
+        </div>
+        <Progress value={uploadProgress} />
+        <div
+          style={{
+            textAlign: 'center',
+            margin: '5px 0',
+            color: 'gray',
+            fontSize: 'small',
+          }}
+        >
+          {fileLabel}
+        </div>
+        <Progress value={fileProgress} />
+      </MantineProvider>
+    );
   }
 
   const dialog = new Dialog({
@@ -62,24 +72,28 @@ export default async function uploadFiles(endpoint = '', files: File[] | FileLis
       if (options.type) data.append('type', options.type);
       data.append('operation', 'upload_file');
       await request.postFile(endpoint, data, {
-        xhr() { // eslint-disable-line
+        xhr() {
           const xhr = new XMLHttpRequest();
           xhr.upload.addEventListener('loadstart', () => {
             uploadLabel = `[${+i + 1}/${files.length}] ${file.name} `;
-            uploadProgress = Math.round((+i + 1) / files.length * 100);
+            uploadProgress = Math.round(((+i + 1) / files.length) * 100);
             fileLabel = i18n('Uploading... ({0}%)', 0);
             fileProgress = 0;
             render();
           });
-          xhr.upload.addEventListener('progress', (e) => {
-            if (e.lengthComputable) {
-              const percentComplete = Math.round((e.loaded / e.total) * 100);
-              if (percentComplete === 100) fileLabel = i18n('Processing...');
-              else fileLabel = i18n('Uploading... ({0}%)', percentComplete);
-              fileProgress = percentComplete;
-              render();
-            }
-          }, false);
+          xhr.upload.addEventListener(
+            'progress',
+            (e) => {
+              if (e.lengthComputable) {
+                const percentComplete = Math.round((e.loaded / e.total) * 100);
+                if (percentComplete === 100) fileLabel = i18n('Processing...');
+                else fileLabel = i18n('Uploading... ({0}%)', percentComplete);
+                fileProgress = percentComplete;
+                render();
+              }
+            },
+            false,
+          );
           return xhr;
         },
       });

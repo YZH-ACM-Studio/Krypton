@@ -6,6 +6,7 @@
  *
  * Loaded as a built-in addon — see packages/hydrooj/src/loader.ts.
  */
+// Side-effect imports: register binding-path methods + export/import methods on userBindModel.
 import { Context } from 'hydrooj';
 import { registerCommands } from './src/cli';
 import { applyHandlers } from './src/handler';
@@ -16,8 +17,8 @@ import { migrationScripts } from './src/migration';
 import './src/binding';
 import './src/migrate-domain';
 
-export * from './src/types';
 export { userBindModel } from './src/model';
+export * from './src/types';
 
 export function apply(ctx: Context) {
     // Expose the model on `global.Hydro.model.userbind` so cross-plugin

@@ -30,20 +30,27 @@
  *   POST /admin/tasks/settings
  */
 import {
-    Context, DocumentModel, ForbiddenError, Handler, NotFoundError, ObjectId, OplogModel,
-    param, PRIV, ProblemModel, requireAuthToken, Types, UserModel, ValidationError,
+    Context,
+    DocumentModel,
+    ForbiddenError,
+    Handler,
+    NotFoundError,
+    ObjectId,
+    OplogModel,
+    param,
+    PRIV,
+    ProblemModel,
+    requireAuthToken,
+    Types,
+    UserModel,
+    ValidationError,
 } from 'hydrooj';
 import { userBindModel } from '@hydrooj/krypton-userbind';
 import { canCreateTask, canManageAllTasks, canModifyTask } from './auth';
-import {
-    cspScoreColl, gpltScoreColl, patScoreColl,
-} from './db';
+import { cspScoreColl, gpltScoreColl, patScoreColl } from './db';
 import { taskModel } from './model';
 import { presetSummaries } from './presets';
-import type {
-    AdmissionMode, GpltLevel, PatLevel,
-    PatSeason, TaskAccess, TaskDoc, TaskGraph, TaskGraphEdge, TaskGraphNode,
-} from './types';
+import type { AdmissionMode, GpltLevel, PatLevel, PatSeason, TaskAccess, TaskDoc, TaskGraph, TaskGraphEdge, TaskGraphNode } from './types';
 import { emptyTaskGraph } from './types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -69,7 +76,11 @@ function parsePosition(p: any): { x: number; y: number } {
 function parseTaskGraphJson(json: string): TaskGraph {
     if (!json) return emptyTaskGraph();
     let parsed: any;
-    try { parsed = JSON.parse(json); } catch { throw new ValidationError('graph', null, 'JSON 格式错误'); }
+    try {
+        parsed = JSON.parse(json);
+    } catch {
+        throw new ValidationError('graph', null, 'JSON 格式错误');
+    }
     if (!parsed || typeof parsed !== 'object') return emptyTaskGraph();
 
     const rawNodes = Array.isArray(parsed.nodes) ? parsed.nodes : [];
@@ -139,7 +150,11 @@ function parseAdmissionMode(s: string | undefined): AdmissionMode {
 function parseTaskAccessJson(json: string): TaskAccess {
     if (!json) return { type: 'public' };
     let parsed: any;
-    try { parsed = JSON.parse(json); } catch { return { type: 'public' }; }
+    try {
+        parsed = JSON.parse(json);
+    } catch {
+        return { type: 'public' };
+    }
     if (parsed?.type === 'user_group' && parsed.targetId) {
         return { type: 'user_group', targetId: new ObjectId(String(parsed.targetId)) };
     }
@@ -147,9 +162,7 @@ function parseTaskAccessJson(json: string): TaskAccess {
         return { type: 'school', targetId: new ObjectId(String(parsed.targetId)) };
     }
     if (parsed?.type === 'grade' && Array.isArray(parsed.years)) {
-        const years = parsed.years
-            .map((y: any) => +y)
-            .filter((y: number) => Number.isInteger(y) && y >= 1900 && y <= 2099);
+        const years = parsed.years.map((y: any) => +y).filter((y: number) => Number.isInteger(y) && y >= 1900 && y <= 2099);
         return { type: 'grade', years };
     }
     return { type: 'public' };
@@ -157,7 +170,11 @@ function parseTaskAccessJson(json: string): TaskAccess {
 
 function parseTagsCsv(csv?: string): string[] {
     if (!csv) return [];
-    return csv.split(/[,，;；\s]+/).map((s) => s.trim()).filter(Boolean).slice(0, 16);
+    return csv
+        .split(/[,，;；\s]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 16);
 }
 
 function parseCstDateTime(input?: string, boundary: 'start' | 'end' = 'start'): Date | null {
@@ -167,7 +184,7 @@ function parseCstDateTime(input?: string, boundary: 'start' | 'end' = 'start'): 
         const time = boundary === 'end' ? '23:59:59.999' : '00:00:00.000';
         return new Date(`${value}T${time}+08:00`);
     }
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/.test(value)) {
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/.test(value)) {
         const withSeconds = value.length === 16 ? `${value}:00` : value;
         return new Date(`${withSeconds}+08:00`);
     }
@@ -241,25 +258,35 @@ async function resolveTaskParamRefs(domainId: string, graph: TaskGraph) {
 
     const [contestDocs, homeworkDocs, trainingDocs, problems, schools, userGroups] = await Promise.all([
         contestIds.length
-            ? DocumentModel.coll.find({ domainId, docType: DocumentModel.TYPE_CONTEST, docId: { $in: contestIds } })
-                .project({ docId: 1, title: 1, beginAt: 1, rule: 1 }).toArray()
+            ? DocumentModel.coll
+                  .find({ domainId, docType: DocumentModel.TYPE_CONTEST, docId: { $in: contestIds } })
+                  .project({ docId: 1, title: 1, beginAt: 1, rule: 1 })
+                  .toArray()
             : Promise.resolve([]),
         homeworkIds.length
-            ? DocumentModel.coll.find({ domainId, docType: DocumentModel.TYPE_CONTEST, rule: 'homework', docId: { $in: homeworkIds } })
-                .project({ docId: 1, title: 1, beginAt: 1, rule: 1 }).toArray()
+            ? DocumentModel.coll
+                  .find({ domainId, docType: DocumentModel.TYPE_CONTEST, rule: 'homework', docId: { $in: homeworkIds } })
+                  .project({ docId: 1, title: 1, beginAt: 1, rule: 1 })
+                  .toArray()
             : Promise.resolve([]),
         trainingIds.length
-            ? DocumentModel.coll.find({ domainId, docType: DocumentModel.TYPE_TRAINING, docId: { $in: trainingIds } })
-                .project({ docId: 1, title: 1 }).toArray()
+            ? DocumentModel.coll
+                  .find({ domainId, docType: DocumentModel.TYPE_TRAINING, docId: { $in: trainingIds } })
+                  .project({ docId: 1, title: 1 })
+                  .toArray()
             : Promise.resolve([]),
-        Promise.all(Array.from(refs.problemIds).map(async (pid) => {
-            const pdoc = await ProblemModel.get(domainId, pid).catch(() => null);
-            return pdoc ? {
-                docId: pdoc.docId,
-                pid: (pdoc as any).pid,
-                title: pdoc.title,
-            } : null;
-        })),
+        Promise.all(
+            Array.from(refs.problemIds).map(async (pid) => {
+                const pdoc = await ProblemModel.get(domainId, pid).catch(() => null);
+                return pdoc
+                    ? {
+                          docId: pdoc.docId,
+                          pid: (pdoc as any).pid,
+                          title: pdoc.title,
+                      }
+                    : null;
+            }),
+        ),
         refs.schoolIds.size || refs.userGroupIds.size ? userBindModel.listSchools(domainId) : Promise.resolve([]),
         refs.userGroupIds.size ? userBindModel.listUserGroups(domainId) : Promise.resolve([]),
     ]);
@@ -319,9 +346,14 @@ async function loadAssignmentMap(
 ): Promise<Record<string, { _id: ObjectId; status: string; canCancel: boolean; assignedAt: Date }>> {
     const list = await taskModel.getUserAssignments(domainId, userId, { status: { $ne: 'cancelled' } });
     const out: Record<string, any> = {};
-    for (const a of list) out[a.taskId.toHexString()] = {
-        _id: a._id, status: a.status, canCancel: a.canCancel, assignedAt: a.assignedAt,
-    };
+    for (const a of list) {
+        out[a.taskId.toHexString()] = {
+            _id: a._id,
+            status: a.status,
+            canCancel: a.canCancel,
+            assignedAt: a.assignedAt,
+        };
+    }
     return out;
 }
 
@@ -350,7 +382,9 @@ class TaskMyHandler extends Handler {
             if (a.status === 'pending' && a.progressUpdatedAt === null) {
                 try {
                     await taskModel.checkTaskCompletion(domainId, a._id);
-                } catch { /* swallow per-row */ }
+                } catch {
+                    /* swallow per-row */
+                }
             }
         }
         const fresh = await taskModel.getUserAssignments(domainId, this.user._id);
@@ -376,18 +410,23 @@ class TaskDetailHandler extends Handler {
         const task = await taskModel.getTask(domainId, tid);
         if (!task) throw new NotFoundError('任务不存在');
         // Recompute current user's progress if any.
-        const myAssignment = await taskModel.getUserAssignments(domainId, this.user._id, {
-            taskId: tid, status: { $ne: 'cancelled' },
-        }).then((rs) => rs[0]);
+        const myAssignment = await taskModel
+            .getUserAssignments(domainId, this.user._id, {
+                taskId: tid,
+                status: { $ne: 'cancelled' },
+            })
+            .then((rs) => rs[0]);
         let progress: any = {};
         if (myAssignment) {
             const r = await taskModel.checkTaskCompletion(domainId, myAssignment._id);
             progress = r.progress;
         }
         const creator = await UserModel.getById(domainId, task.createdBy);
-        const assignmentCount = (await taskModel.getTaskAssignments(domainId, tid, {
-            status: { $ne: 'cancelled' },
-        })).length;
+        const assignmentCount = (
+            await taskModel.getTaskAssignments(domainId, tid, {
+                status: { $ne: 'cancelled' },
+            })
+        ).length;
         const paramRefs = await resolveTaskParamRefs(domainId, task.graph);
         // Resolve current user's enrollmentYear so the UI can highlight the
         // matching `by_grade` branch (read-only — has no effect on backend).
@@ -530,15 +569,23 @@ export class AdminTasksEditHandler extends Handler {
         const [schools, userGroups, contestDocs, homeworkDocs, trainingDocs] = await Promise.all([
             userBindModel.listSchools(authoritativeDomainId),
             userBindModel.listUserGroups(authoritativeDomainId),
-            DocumentModel.coll.find({ domainId: authoritativeDomainId, docType: DocumentModel.TYPE_CONTEST })
+            DocumentModel.coll
+                .find({ domainId: authoritativeDomainId, docType: DocumentModel.TYPE_CONTEST })
                 .project({ docId: 1, title: 1, beginAt: 1, rule: 1 })
-                .sort({ beginAt: -1 }).limit(500).toArray(),
-            DocumentModel.coll.find({ domainId: authoritativeDomainId, docType: DocumentModel.TYPE_CONTEST, rule: 'homework' })
+                .sort({ beginAt: -1 })
+                .limit(500)
+                .toArray(),
+            DocumentModel.coll
+                .find({ domainId: authoritativeDomainId, docType: DocumentModel.TYPE_CONTEST, rule: 'homework' })
                 .project({ docId: 1, title: 1, beginAt: 1 })
-                .sort({ beginAt: -1 }).limit(500).toArray(),
-            DocumentModel.coll.find({ domainId: authoritativeDomainId, docType: DocumentModel.TYPE_TRAINING })
+                .sort({ beginAt: -1 })
+                .limit(500)
+                .toArray(),
+            DocumentModel.coll
+                .find({ domainId: authoritativeDomainId, docType: DocumentModel.TYPE_TRAINING })
                 .project({ docId: 1, title: 1 })
-                .limit(500).toArray(),
+                .limit(500)
+                .toArray(),
         ]);
         const toRef = (d: any) => ({ _id: d.docId, title: d.title, beginAt: d.beginAt, rule: d.rule });
         this.response.template = 'admin_tasks_edit.html';
@@ -614,14 +661,15 @@ export class AdminTasksEditHandler extends Handler {
                 throw new ValidationError('tid', null, '无权编辑');
             }
             const existingProblemIds = Array.from(collectTaskParamRefs(existing.graph).problemIds);
-            await ProblemModel.assertProblemBankSelection(
-                authoritativeDomainId, problemIds, this.user as any, existingProblemIds,
-            );
+            await ProblemModel.assertProblemBankSelection(authoritativeDomainId, problemIds, this.user as any, existingProblemIds);
             // Audit task-level edits so we can correlate "condition tightened
             // on date X" with "user Y suddenly downgraded" later.
             await taskModel.writeAudit({
-                domainId: authoritativeDomainId, assignmentId: null, taskId: tid,
-                eventType: 'condition_change', adminUid: this.user._id,
+                domainId: authoritativeDomainId,
+                assignmentId: null,
+                taskId: tid,
+                eventType: 'condition_change',
+                adminUid: this.user._id,
                 before: {
                     graph: existing.graph,
                     admissionMode: existing.admissionMode,
@@ -663,7 +711,11 @@ class AdminTasksAssignHandler extends Handler {
         const userGroups = await userBindModel.listUserGroups(domainId);
         this.response.template = 'admin_tasks_assign.html';
         this.response.body = {
-            task, assignments, udict, schools, userGroups,
+            task,
+            assignments,
+            udict,
+            schools,
+            userGroups,
         };
     }
 
@@ -672,14 +724,7 @@ class AdminTasksAssignHandler extends Handler {
     @param('targetId', Types.String, true)
     @param('uid', Types.Int, true)
     @param('note', Types.String, true)
-    async postBatch(
-        { domainId }: { domainId: string },
-        tid: ObjectId,
-        scope: string,
-        targetId: string,
-        uid: number,
-        note: string,
-    ) {
+    async postBatch({ domainId }: { domainId: string }, tid: ObjectId, scope: string, targetId: string, uid: number, note: string) {
         const task = await taskModel.getTask(domainId, tid);
         if (!task) throw new NotFoundError('任务不存在');
         if (!canModifyTask(this.user as any, task)) {
@@ -690,13 +735,17 @@ class AdminTasksAssignHandler extends Handler {
         else if (scope === 'user_group' && targetId) {
             const gid = new ObjectId(targetId);
             const { docs } = await userBindModel.listStudents(domainId, {
-                groupId: gid, boundOnly: true, limit: 5000,
+                groupId: gid,
+                boundOnly: true,
+                limit: 5000,
             });
             uids = docs.map((s) => s.boundUserId!).filter(Boolean);
         } else if (scope === 'school' && targetId) {
             const sid = new ObjectId(targetId);
             const { docs } = await userBindModel.listStudents(domainId, {
-                schoolId: sid, boundOnly: true, limit: 5000,
+                schoolId: sid,
+                boundOnly: true,
+                limit: 5000,
             });
             uids = docs.map((s) => s.boundUserId!).filter(Boolean);
         }
@@ -705,7 +754,9 @@ class AdminTasksAssignHandler extends Handler {
             try {
                 await taskModel.assignTask(domainId, tid, u, this.user._id, note || '');
                 assigned++;
-            } catch { /* per-user errors swallowed; counted as skip */ }
+            } catch {
+                /* per-user errors swallowed; counted as skip */
+            }
         }
         await OplogModel.log(this, 'tasks.assign_batch', { taskId: tid, scope, count: assigned });
         this.response.redirect = this.url('admin_tasks_assign', { tid });
@@ -716,22 +767,13 @@ class AdminTasksAssignHandler extends Handler {
     @param('pointId', Types.String)
     @param('completed', Types.Boolean)
     @param('reason', Types.String, true)
-    async postOverride(
-        { domainId }: { domainId: string },
-        tid: ObjectId,
-        aid: ObjectId,
-        pointId: string,
-        completed: boolean,
-        reason: string,
-    ) {
+    async postOverride({ domainId }: { domainId: string }, tid: ObjectId, aid: ObjectId, pointId: string, completed: boolean, reason: string) {
         const task = await taskModel.getTask(domainId, tid);
         if (!task) throw new NotFoundError('任务不存在');
         if (!canModifyTask(this.user as any, task)) {
             throw new ValidationError('tid', null, '无权覆盖');
         }
-        await taskModel.overridePointCompletion(
-            domainId, aid, pointId, this.user._id, reason || '', completed,
-        );
+        await taskModel.overridePointCompletion(domainId, aid, pointId, this.user._id, reason || '', completed);
         await OplogModel.log(this, 'tasks.override', { aid, pointId, completed });
         this.response.redirect = this.url('admin_tasks_assign', { tid });
     }
@@ -764,9 +806,7 @@ class AdminTasksOverrideHandler extends Handler {
         if (!canModifyTask(this.user as any, task)) {
             throw new ValidationError('tid', null, '无权覆盖');
         }
-        await taskModel.overridePointCompletion(
-            domainId, aid, pointId, this.user._id, reason || '', completed,
-        );
+        await taskModel.overridePointCompletion(domainId, aid, pointId, this.user._id, reason || '', completed);
         await OplogModel.log(this, 'tasks.override', { aid, pointId, completed });
         this.response.redirect = safeLocalRedirect(redirect, this.url('admin_tasks_stats', { tid }));
     }
@@ -793,17 +833,18 @@ class AdminTasksStatsHandler extends Handler {
         // Recompute progress on the fly for the report (only pending ones; completed are frozen).
         for (const a of assignments) {
             if (a.status === 'pending' && a.progressUpdatedAt === null) {
-                try { await taskModel.checkTaskCompletion(domainId, a._id); } catch { /* */ }
+                try {
+                    await taskModel.checkTaskCompletion(domainId, a._id);
+                } catch {
+                    /* */
+                }
             }
         }
         const fresh = await taskModel.getTaskAssignments(domainId, tid, {
             status: { $ne: 'cancelled' },
         });
         const uids = fresh.map((a) => a.userId);
-        const [udict, studentByUid] = await Promise.all([
-            UserModel.getList(domainId, uids),
-            userBindModel.findStudentsByUserIds(domainId, uids),
-        ]);
+        const [udict, studentByUid] = await Promise.all([UserModel.getList(domainId, uids), userBindModel.findStudentsByUserIds(domainId, uids)]);
         const taskNodes = task.graph.nodes.filter((n) => n.type === 'task');
         if (format === 'csv') {
             const lines: string[] = ['uid,uname,studentId,realName,status,completedNodes,totalNodes,completedAt,note'];
@@ -811,17 +852,19 @@ class AdminTasksStatsHandler extends Handler {
                 const completedNodes = taskNodes.filter((n) => a.progress?.[n.id]?.completed).length;
                 const u = udict[a.userId];
                 const student = studentByUid[String(a.userId)];
-                lines.push([
-                    a.userId,
-                    JSON.stringify(u?.uname || ''),
-                    JSON.stringify(student?.studentId || ''),
-                    JSON.stringify(student?.realName || ''),
-                    a.status,
-                    completedNodes,
-                    taskNodes.length,
-                    a.completedAt ? a.completedAt.toISOString() : '',
-                    JSON.stringify(a.note || ''),
-                ].join(','));
+                lines.push(
+                    [
+                        a.userId,
+                        JSON.stringify(u?.uname || ''),
+                        JSON.stringify(student?.studentId || ''),
+                        JSON.stringify(student?.realName || ''),
+                        a.status,
+                        completedNodes,
+                        taskNodes.length,
+                        a.completedAt ? a.completedAt.toISOString() : '',
+                        JSON.stringify(a.note || ''),
+                    ].join(','),
+                );
             }
             this.response.type = 'text/csv; charset=utf-8';
             this.response.disposition = `attachment; filename="task-${tid}-stats.csv"`;
@@ -831,7 +874,12 @@ class AdminTasksStatsHandler extends Handler {
         const audit = await taskModel.listAuditForTask(domainId, tid, 50);
         this.response.template = 'admin_tasks_stats.html';
         this.response.body = {
-            task, assignments: fresh, udict, studentByUid, audit, presets: presetSummaries(),
+            task,
+            assignments: fresh,
+            udict,
+            studentByUid,
+            audit,
+            presets: presetSummaries(),
         };
     }
 
@@ -852,7 +900,9 @@ class AdminTasksStatsHandler extends Handler {
             try {
                 await taskModel.checkTaskCompletion(domainId, a._id, { force: true });
                 rechecked++;
-            } catch { /* per-row */ }
+            } catch {
+                /* per-row */
+            }
         }
         await OplogModel.log(this, 'tasks.recheckAll', { tid: tid.toHexString(), count: rechecked });
         this.response.redirect = this.url('admin_tasks_stats', { tid });
@@ -905,7 +955,9 @@ class AdminTasksCandidatesHandler extends Handler {
             userBindModel.listUserGroups(domainId),
         ]);
         const studentByUid: Record<number, any> = {};
-        uids.forEach((uid, i) => { if (students[i]) studentByUid[uid] = students[i]; });
+        uids.forEach((uid, i) => {
+            if (students[i]) studentByUid[uid] = students[i];
+        });
 
         const counts = {
             qualified: assignments.filter((a) => a.status === 'qualified').length,
@@ -933,8 +985,15 @@ class AdminTasksCandidatesHandler extends Handler {
     private parseAids(raw: string): ObjectId[] {
         if (!raw) return [];
         const out: ObjectId[] = [];
-        for (const s of raw.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean)) {
-            try { out.push(new ObjectId(s)); } catch { /* skip */ }
+        for (const s of raw
+            .split(/[\s,]+/)
+            .map((x) => x.trim())
+            .filter(Boolean)) {
+            try {
+                out.push(new ObjectId(s));
+            } catch {
+                /* skip */
+            }
         }
         return out;
     }
@@ -943,13 +1002,7 @@ class AdminTasksCandidatesHandler extends Handler {
     @param('operation', Types.String)
     @param('aids', Types.String)
     @param('note', Types.String, true)
-    async post(
-        { domainId }: { domainId: string },
-        tid: ObjectId,
-        operation: string,
-        aidsCsv: string,
-        note: string,
-    ) {
+    async post({ domainId }: { domainId: string }, tid: ObjectId, operation: string, aidsCsv: string, note: string) {
         const task = await taskModel.getTask(domainId, tid);
         if (!task) throw new NotFoundError('任务不存在');
         if (!canModifyTask(this.user as any, task)) {
@@ -1032,7 +1085,9 @@ class AdminTasksProblemSearchHandler extends Handler {
         // search results we'd prefer docId ASC. Project only the picker-needed
         // fields to keep the response light.
         const docs = await ProblemModel.getMulti(authoritativeDomainId, query, ['docId', 'pid', 'title'] as any)
-            .sort({ docId: 1 }).limit(cap).toArray();
+            .sort({ docId: 1 })
+            .limit(cap)
+            .toArray();
         this.response.body = {
             results: docs.map((d: any) => ({
                 docId: d.docId,
@@ -1071,22 +1126,27 @@ async function findStudentDoc(domainId: string, studentId: string) {
     return matches.length === 1 ? matches[0] : null;
 }
 
-function parseScoreImport(
-    text: string,
-    columns: string[],
-): { rows: Record<string, string>[]; errors: string[] } {
-    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+function parseScoreImport(text: string, columns: string[]): { rows: Record<string, string>[]; errors: string[] } {
+    const lines = text
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith('#'));
     const rows: Record<string, string>[] = [];
     const errors: string[] = [];
     lines.forEach((line, idx) => {
         const primaryDelimiter = /[,\t]/.test(line) ? /[,\t]/ : /\s+/;
-        const cells = line.split(primaryDelimiter).map((c) => c.trim()).filter(Boolean);
+        const cells = line
+            .split(primaryDelimiter)
+            .map((c) => c.trim())
+            .filter(Boolean);
         if (cells.length < columns.length) {
             errors.push(`第 ${idx + 1} 行: 字段数不足，需要 ${columns.length} 列`);
             return;
         }
         const row: Record<string, string> = {};
-        columns.forEach((col, i) => { row[col] = cells[i] || ''; });
+        columns.forEach((col, i) => {
+            row[col] = cells[i] || '';
+        });
         rows.push(row);
     });
     return { rows, errors };
@@ -1125,19 +1185,22 @@ class AdminScoresHandler extends Handler {
         // Scores are keyed by studentDocId — join student records for display
         // (学号/姓名/学校) plus bound OJ users for uname. Stay events remain
         // userId-keyed (not re-keyed), so collect their uids separately.
-        const studentDocIds = Array.from(new Set(scores.map((s) => String(s.studentDocId))))
-            .map((s) => new ObjectId(s));
+        const studentDocIds = Array.from(new Set(scores.map((s) => String(s.studentDocId)))).map((s) => new ObjectId(s));
         const studentDict: Record<string, any> = {};
         const boundUids: number[] = [];
-        await Promise.all(studentDocIds.map(async (sid) => {
-            const st = await userBindModel.getStudent(domainId, sid);
-            if (!st) return;
-            studentDict[String(sid)] = {
-                studentId: st.studentId, realName: st.realName,
-                schoolId: st.schoolId, boundUserId: st.boundUserId,
-            };
-            if (st.boundUserId) boundUids.push(st.boundUserId);
-        }));
+        await Promise.all(
+            studentDocIds.map(async (sid) => {
+                const st = await userBindModel.getStudent(domainId, sid);
+                if (!st) return;
+                studentDict[String(sid)] = {
+                    studentId: st.studentId,
+                    realName: st.realName,
+                    schoolId: st.schoolId,
+                    boundUserId: st.boundUserId,
+                };
+                if (st.boundUserId) boundUids.push(st.boundUserId);
+            }),
+        );
         const uids = Array.from(new Set([...boundUids, ...stayEvents.map((e) => e.userId)]));
         const udict = await UserModel.getList(domainId, uids);
         this.response.template = 'admin_tasks_scores.html';
@@ -1150,10 +1213,7 @@ class AdminScoresHandler extends Handler {
     @param('year', Types.Int)
     @param('season', Types.String)
     @param('score', Types.Float)
-    async postPat(
-        { domainId }: { domainId: string },
-        studentId: string, level: string, year: number, season: string, score: number,
-    ) {
+    async postPat({ domainId }: { domainId: string }, studentId: string, level: string, year: number, season: string, score: number) {
         if (!PAT_LEVELS_OK.includes(level as PatLevel)) throw new ValidationError('level');
         if (!PAT_SEASONS_OK.includes(season as PatSeason)) throw new ValidationError('season');
         const student = await findStudentDoc(domainId, studentId);
@@ -1194,7 +1254,7 @@ class AdminScoresHandler extends Handler {
                 rowErrors.push(`学号 ${r.studentId}: 等级无效 (advanced/basic)`);
                 continue;
             }
-            const score = parseFloat(r.score);
+            const score = Number.parseFloat(r.score);
             if (Number.isNaN(score) || score < 0 || score > settings.maxPatScore) {
                 rowErrors.push(`学号 ${r.studentId}: 分数无效 (0-${settings.maxPatScore})`);
                 continue;
@@ -1203,7 +1263,7 @@ class AdminScoresHandler extends Handler {
                 rowErrors.push(`学号 ${r.studentId}: 季节无效 (spring/summer/autumn/winter)`);
                 continue;
             }
-            const year = parseInt(r.year, 10);
+            const year = Number.parseInt(r.year, 10);
             if (!year) {
                 rowErrors.push(`学号 ${r.studentId}: 年份无效`);
                 continue;
@@ -1227,10 +1287,7 @@ class AdminScoresHandler extends Handler {
     @param('year', Types.Int)
     @param('score', Types.Float)
     @param('rank', Types.Int, true)
-    async postGplt(
-        { domainId }: { domainId: string },
-        studentId: string, level: string, year: number, score: number, rank: number,
-    ) {
+    async postGplt({ domainId }: { domainId: string }, studentId: string, level: string, year: number, score: number, rank: number) {
         if (!GPLT_LEVELS_OK.includes(level as GpltLevel)) throw new ValidationError('level');
         const student = await findStudentDoc(domainId, studentId);
         if (!student) throw new ValidationError('studentId', null, `学号 ${studentId}: 未找到学生档案`);
@@ -1262,11 +1319,20 @@ class AdminScoresHandler extends Handler {
         const rowErrors: string[] = [...errors];
         for (const r of rows) {
             const student = await findStudentDoc(domainId, r.studentId);
-            if (!student) { rowErrors.push(`学号 ${r.studentId}: 未找到学生档案`); continue; }
-            if (!GPLT_LEVELS_OK.includes(r.level as GpltLevel)) { rowErrors.push(`学号 ${r.studentId}: 级别无效 (school/national)`); continue; }
-            const year = parseInt(r.year, 10);
-            if (!year) { rowErrors.push(`学号 ${r.studentId}: 年份无效`); continue; }
-            const score = parseFloat(r.score);
+            if (!student) {
+                rowErrors.push(`学号 ${r.studentId}: 未找到学生档案`);
+                continue;
+            }
+            if (!GPLT_LEVELS_OK.includes(r.level as GpltLevel)) {
+                rowErrors.push(`学号 ${r.studentId}: 级别无效 (school/national)`);
+                continue;
+            }
+            const year = Number.parseInt(r.year, 10);
+            if (!year) {
+                rowErrors.push(`学号 ${r.studentId}: 年份无效`);
+                continue;
+            }
+            const score = Number.parseFloat(r.score);
             if (Number.isNaN(score) || score < 0 || score > settings.maxGpltScore) {
                 rowErrors.push(`学号 ${r.studentId}: 分数无效 (0-${settings.maxGpltScore})`);
                 continue;
@@ -1289,10 +1355,7 @@ class AdminScoresHandler extends Handler {
     @param('studentId', Types.String)
     @param('round', Types.Int)
     @param('score', Types.Float)
-    async postCsp(
-        { domainId }: { domainId: string },
-        studentId: string, round: number, score: number,
-    ) {
+    async postCsp({ domainId }: { domainId: string }, studentId: string, round: number, score: number) {
         if (!round || round < 1) throw new ValidationError('round', null, '认证次数无效');
         const student = await findStudentDoc(domainId, studentId);
         if (!student) throw new ValidationError('studentId', null, `学号 ${studentId}: 未找到学生档案`);
@@ -1324,10 +1387,16 @@ class AdminScoresHandler extends Handler {
         const rowErrors: string[] = [...errors];
         for (const r of rows) {
             const student = await findStudentDoc(domainId, r.studentId);
-            if (!student) { rowErrors.push(`学号 ${r.studentId}: 未找到学生档案`); continue; }
-            const round = parseInt(r.round, 10);
-            if (!round) { rowErrors.push(`学号 ${r.studentId}: 轮次无效`); continue; }
-            const score = parseFloat(r.score);
+            if (!student) {
+                rowErrors.push(`学号 ${r.studentId}: 未找到学生档案`);
+                continue;
+            }
+            const round = Number.parseInt(r.round, 10);
+            if (!round) {
+                rowErrors.push(`学号 ${r.studentId}: 轮次无效`);
+                continue;
+            }
+            const score = Number.parseFloat(r.score);
             if (Number.isNaN(score) || score < 0 || score > settings.maxCspScore) {
                 rowErrors.push(`学号 ${r.studentId}: 分数无效 (0-${settings.maxCspScore})`);
                 continue;
@@ -1357,34 +1426,25 @@ class AdminScoresHandler extends Handler {
     @param('studentId', Types.String)
     @param('realName', Types.String)
     @param('year', Types.Int)
-    async postStay(
-        { domainId }: { domainId: string },
-        schoolId: ObjectId, studentId: string, realName: string, year: number,
-    ) {
-        const r = await taskModel.addManualStayEvent(
-            domainId, schoolId, studentId.trim(), realName.trim(), year, this.user._id,
-        );
+    async postStay({ domainId }: { domainId: string }, schoolId: ObjectId, studentId: string, realName: string, year: number) {
+        const r = await taskModel.addManualStayEvent(domainId, schoolId, studentId.trim(), realName.trim(), year, this.user._id);
         if (!r.ok) throw new ValidationError('studentId', null, 'reason' in r ? r.reason : '添加失败');
         this.response.redirect = this.url('admin_tasks_scores', { query: { tab: 'stay' } });
     }
 
     @param('text', Types.Content)
     @param('schoolId', Types.ObjectId)
-    async postStayImport(
-        { domainId }: { domainId: string }, text: string, schoolId: ObjectId,
-    ) {
+    async postStayImport({ domainId }: { domainId: string }, text: string, schoolId: ObjectId) {
         const { rows, errors } = parseScoreImport(text, ['studentId', 'realName', 'year']);
         let imported = 0;
         const rowErrors: string[] = [...errors];
         for (const r of rows) {
-            const year = parseInt(r.year, 10);
+            const year = Number.parseInt(r.year, 10);
             if (!year || year < 1900 || year > 2099) {
                 rowErrors.push(`学号 ${r.studentId}: 年份无效`);
                 continue;
             }
-            const res = await taskModel.addManualStayEvent(
-                domainId, schoolId, r.studentId, r.realName, year, this.user._id,
-            );
+            const res = await taskModel.addManualStayEvent(domainId, schoolId, r.studentId, r.realName, year, this.user._id);
             if (!res.ok) rowErrors.push(`学号 ${r.studentId}: ${'reason' in res ? res.reason : '添加失败'}`);
             else imported++;
         }
@@ -1412,15 +1472,16 @@ class AdminSettingsHandler extends Handler {
     @param('maxPatScore', Types.Float, true)
     @param('maxGpltScore', Types.Float, true)
     @param('maxCspScore', Types.Float, true)
-    async post(
-        { domainId }: { domainId: string },
-        maxPatScore: number, maxGpltScore: number, maxCspScore: number,
-    ) {
-        await taskModel.setDomainSettings(domainId, {
-            maxPatScore: maxPatScore || undefined,
-            maxGpltScore: maxGpltScore || undefined,
-            maxCspScore: maxCspScore || undefined,
-        }, this.user._id);
+    async post({ domainId }: { domainId: string }, maxPatScore: number, maxGpltScore: number, maxCspScore: number) {
+        await taskModel.setDomainSettings(
+            domainId,
+            {
+                maxPatScore: maxPatScore || undefined,
+                maxGpltScore: maxGpltScore || undefined,
+                maxCspScore: maxCspScore || undefined,
+            },
+            this.user._id,
+        );
         this.response.redirect = this.url('admin_tasks_settings');
     }
 }
@@ -1448,9 +1509,7 @@ abstract class ScoresApiBase extends Handler {
         // must not author them.
         if (doc.uid == null) throw new ForbiddenError('录入分数需要绑定用户的令牌');
         const ys = scopeFilters.years;
-        this.scopeYears = Array.isArray(ys)
-            ? ys.filter((y): y is number => Number.isInteger(y))
-            : null; // null = unscoped (no year constraint)
+        this.scopeYears = Array.isArray(ys) ? ys.filter((y): y is number => Number.isInteger(y)) : null; // null = unscoped (no year constraint)
     }
 
     /** Whether this token may read/write `year`. */
@@ -1460,13 +1519,14 @@ abstract class ScoresApiBase extends Handler {
 
     /** Resolve studentDocId → {studentId, realName} for a result set. */
     protected async studentDict(domainId: string, docs: any[]) {
-        const ids = Array.from(new Set(docs.map((s) => String(s.studentDocId))))
-            .map((s) => new ObjectId(s));
+        const ids = Array.from(new Set(docs.map((s) => String(s.studentDocId)))).map((s) => new ObjectId(s));
         const dict: Record<string, { studentId: string; realName: string }> = {};
-        await Promise.all(ids.map(async (sid) => {
-            const st = await userBindModel.getStudent(domainId, sid);
-            if (st) dict[String(sid)] = { studentId: st.studentId, realName: st.realName };
-        }));
+        await Promise.all(
+            ids.map(async (sid) => {
+                const st = await userBindModel.getStudent(domainId, sid);
+                if (st) dict[String(sid)] = { studentId: st.studentId, realName: st.realName };
+            }),
+        );
         return dict;
     }
 }
@@ -1488,8 +1548,7 @@ class ScoresApiHandler extends ScoresApiBase {
         }
         // `any[]` matches AdminScoresHandler — the `db.collection<T>` wrapper here
         // doesn't propagate T through `.find().toArray()` (pre-existing quirk).
-        const docs: any[] = await gpltScoreColl.find(filter)
-            .sort({ year: -1, studentDocId: 1 }).limit(500).toArray();
+        const docs: any[] = await gpltScoreColl.find(filter).sort({ year: -1, studentDocId: 1 }).limit(500).toArray();
         const dict = await this.studentDict(domainId, docs);
         this.response.body = {
             domainId,
@@ -1511,10 +1570,7 @@ class ScoresApiHandler extends ScoresApiBase {
     @param('year', Types.Int)
     @param('score', Types.Float)
     @param('rank', Types.Int, true)
-    async postUpsert(
-        { domainId }: { domainId: string },
-        studentId: string, level: string, year: number, score: number, rank: number,
-    ) {
+    async postUpsert({ domainId }: { domainId: string }, studentId: string, level: string, year: number, score: number, rank: number) {
         if (!GPLT_LEVELS_OK.includes(level as GpltLevel)) throw new ValidationError('level');
         if (!this.yearAllowed(year)) throw new ForbiddenError(`令牌无权录入 ${year} 年的分数`);
         const student = await findStudentDoc(domainId, studentId);
@@ -1532,7 +1588,12 @@ class ScoresApiHandler extends ScoresApiBase {
             { upsert: true },
         );
         await OplogModel.log(this as any, 'scores.gplt.upsert', {
-            worker: this.user.uname, studentId, level, year, score: safe, rank: rank || null,
+            worker: this.user.uname,
+            studentId,
+            level,
+            year,
+            score: safe,
+            rank: rank || null,
         });
         this.response.body = { ok: true };
     }
@@ -1556,8 +1617,7 @@ class PatScoresApiHandler extends ScoresApiBase {
         } else if (this.scopeYears) {
             filter.year = { $in: this.scopeYears };
         }
-        const docs: any[] = await patScoreColl.find(filter)
-            .sort({ year: -1, season: 1, studentDocId: 1 }).limit(500).toArray();
+        const docs: any[] = await patScoreColl.find(filter).sort({ year: -1, season: 1, studentDocId: 1 }).limit(500).toArray();
         const dict = await this.studentDict(domainId, docs);
         this.response.body = {
             domainId,
@@ -1579,10 +1639,7 @@ class PatScoresApiHandler extends ScoresApiBase {
     @param('year', Types.Int)
     @param('season', Types.String)
     @param('score', Types.Float)
-    async postUpsert(
-        { domainId }: { domainId: string },
-        studentId: string, level: string, year: number, season: string, score: number,
-    ) {
+    async postUpsert({ domainId }: { domainId: string }, studentId: string, level: string, year: number, season: string, score: number) {
         if (!PAT_LEVELS_OK.includes(level as PatLevel)) throw new ValidationError('level');
         if (!PAT_SEASONS_OK.includes(season as PatSeason)) throw new ValidationError('season');
         if (!this.yearAllowed(year)) throw new ForbiddenError(`令牌无权录入 ${year} 年的分数`);
@@ -1601,7 +1658,12 @@ class PatScoresApiHandler extends ScoresApiBase {
             { upsert: true },
         );
         await OplogModel.log(this as any, 'scores.pat.upsert', {
-            worker: this.user.uname, studentId, level, year, season, score: safe,
+            worker: this.user.uname,
+            studentId,
+            level,
+            year,
+            season,
+            score: safe,
         });
         this.response.body = { ok: true };
     }
@@ -1616,8 +1678,7 @@ class CspScoresApiHandler extends ScoresApiBase {
     async get({ domainId }: { domainId: string }, round = 0) {
         const filter: any = { domainId };
         if (round) filter.round = round;
-        const docs: any[] = await cspScoreColl.find(filter)
-            .sort({ round: -1, studentDocId: 1 }).limit(500).toArray();
+        const docs: any[] = await cspScoreColl.find(filter).sort({ round: -1, studentDocId: 1 }).limit(500).toArray();
         const dict = await this.studentDict(domainId, docs);
         this.response.body = {
             domainId,
@@ -1635,10 +1696,7 @@ class CspScoresApiHandler extends ScoresApiBase {
     @param('studentId', Types.String)
     @param('round', Types.Int)
     @param('score', Types.Float)
-    async postUpsert(
-        { domainId }: { domainId: string },
-        studentId: string, round: number, score: number,
-    ) {
+    async postUpsert({ domainId }: { domainId: string }, studentId: string, round: number, score: number) {
         if (!round || round < 1) throw new ValidationError('round', null, '认证次数无效');
         const student = await findStudentDoc(domainId, studentId);
         if (!student) {
@@ -1655,7 +1713,10 @@ class CspScoresApiHandler extends ScoresApiBase {
             { upsert: true },
         );
         await OplogModel.log(this as any, 'scores.csp.upsert', {
-            worker: this.user.uname, studentId, round, score: safe,
+            worker: this.user.uname,
+            studentId,
+            round,
+            score: safe,
         });
         this.response.body = { ok: true };
     }

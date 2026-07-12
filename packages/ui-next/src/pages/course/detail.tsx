@@ -1,6 +1,4 @@
-import {
-  ArrowLeft, BookOpen, CheckCircle2, ClipboardPlus, Download, FileText, ListTree, Pencil, Trophy,
-} from 'lucide-react';
+import { ArrowLeft, BookOpen, CheckCircle2, ClipboardPlus, Download, FileText, ListTree, Pencil, Trophy } from 'lucide-react';
 import { useState } from 'react';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { Button } from '@/components/ui/button';
@@ -11,11 +9,13 @@ import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
 import type { CourseChapter, CourseRecord } from './types';
 
-function ProblemList({ chapter, problems }: { chapter: CourseChapter, problems: Record<string, CourseRecord> }) {
+function ProblemList({ chapter, problems }: { chapter: CourseChapter; problems: Record<string, CourseRecord> }) {
   if (!chapter.pids.length) return null;
   return (
     <section aria-labelledby="course-problems-title" className="space-y-2">
-      <h3 id="course-problems-title" className="text-xs font-semibold text-muted-foreground">本章题目</h3>
+      <h3 id="course-problems-title" className="text-xs font-semibold text-muted-foreground">
+        本章题目
+      </h3>
       <div className="divide-y divide-border/70 border-y border-border/70">
         {chapter.pids.map((pid, index) => {
           const problem = problems[String(pid)] || {};
@@ -39,11 +39,13 @@ function ProblemList({ chapter, problems }: { chapter: CourseChapter, problems: 
   );
 }
 
-function ContestList({ chapter, contests }: { chapter: CourseChapter, contests: Record<string, CourseRecord> }) {
+function ContestList({ chapter, contests }: { chapter: CourseChapter; contests: Record<string, CourseRecord> }) {
   if (!chapter.tids.length) return null;
   return (
     <section aria-labelledby="course-contests-title" className="space-y-2">
-      <h3 id="course-contests-title" className="text-xs font-semibold text-muted-foreground">比赛与作业</h3>
+      <h3 id="course-contests-title" className="text-xs font-semibold text-muted-foreground">
+        比赛与作业
+      </h3>
       <div className="divide-y divide-border/70 border-y border-border/70">
         {chapter.tids.map((contestId) => {
           const contest = contests[contestId] || {};
@@ -99,35 +101,41 @@ export function CourseDetailPage() {
     <main className="mx-auto w-full max-w-7xl space-y-6 pb-8">
       <header className="flex flex-wrap items-center gap-3 border-b border-border/70 pb-5">
         <Button asChild variant="ghost" size="icon" className="size-11">
-          <a href="/course" aria-label="返回课程列表"><ArrowLeft className="size-4" /></a>
+          <a href="/course" aria-label="返回课程列表">
+            <ArrowLeft className="size-4" />
+          </a>
         </Button>
         <div className="min-w-0 flex-1">
-          <p className="text-xs text-muted-foreground">{data.udoc?.uname || '课程'}{course.term ? ` · ${course.term}` : ''}</p>
+          <p className="text-xs text-muted-foreground">
+            {data.udoc?.uname || '课程'}
+            {course.term ? ` · ${course.term}` : ''}
+          </p>
           <h1 className="mt-1 truncate text-2xl font-semibold tracking-tight">{course.title}</h1>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          className="min-h-11 gap-1.5 lg:hidden"
-          onClick={() => setOutlineOpen(true)}
-        ><ListTree className="size-4" />章节</Button>
+        <Button type="button" variant="outline" className="min-h-11 gap-1.5 lg:hidden" onClick={() => setOutlineOpen(true)}>
+          <ListTree className="size-4" />
+          章节
+        </Button>
         {data.canManage ? (
           <Button asChild variant="outline" className="min-h-11 gap-1.5">
             <a href={`/course/${tid}/edit?chapter=${activeChapter?._id || ''}`}>
-              <Pencil className="size-4" />编辑
+              <Pencil className="size-4" />
+              编辑
             </a>
           </Button>
         ) : null}
         {data.canEnroll ? (
           <form method="post" action={`/course/${tid}`}>
             <input type="hidden" name="operation" value="enroll" />
-            <Button type="submit" className="min-h-11">报名课程</Button>
+            <Button type="submit" className="min-h-11">
+              报名课程
+            </Button>
           </form>
         ) : data.tsdoc?.enroll ? (
-          <span className={cn(
-            'inline-flex min-h-11 items-center gap-1.5 text-xs font-medium',
-            'text-emerald-700 dark:text-emerald-400',
-          )}><CheckCircle2 className="size-4" />已报名</span>
+          <span className={cn('inline-flex min-h-11 items-center gap-1.5 text-xs font-medium', 'text-emerald-700 dark:text-emerald-400')}>
+            <CheckCircle2 className="size-4" />
+            已报名
+          </span>
         ) : null}
       </header>
 
@@ -154,11 +162,10 @@ export function CourseDetailPage() {
               </p>
               <h2 className="mt-1 text-2xl font-semibold tracking-tight text-balance">{activeChapter.title}</h2>
               <div className="mt-4 flex items-center gap-3 text-xs tabular-nums text-muted-foreground">
-                <span>{activeChapter.doneCount}/{activeChapter.totalCount} 题完成</span>
-                <div
-                  className="h-1.5 max-w-48 flex-1 overflow-hidden rounded-full bg-muted"
-                  aria-label={`完成进度 ${activeChapter.progress}%`}
-                >
+                <span>
+                  {activeChapter.doneCount}/{activeChapter.totalCount} 题完成
+                </span>
+                <div className="h-1.5 max-w-48 flex-1 overflow-hidden rounded-full bg-muted" aria-label={`完成进度 ${activeChapter.progress}%`}>
                   <div
                     className="h-full bg-primary transition-[width] duration-200 motion-reduce:transition-none"
                     style={{ width: `${activeChapter.progress}%` }}
@@ -170,22 +177,30 @@ export function CourseDetailPage() {
 
             {course.content ? (
               <section aria-labelledby="course-overview-title" className="max-w-3xl">
-                <h3 id="course-overview-title" className="mb-3 text-xs font-semibold text-muted-foreground">课程说明</h3>
+                <h3 id="course-overview-title" className="mb-3 text-xs font-semibold text-muted-foreground">
+                  课程说明
+                </h3>
                 <MarkdownView content={course.content} preferredLang={bs.locale} />
               </section>
             ) : null}
 
             {activeChapter.content ? (
               <section data-course-slot="chapterContent" aria-labelledby="chapter-content-title" className="max-w-3xl">
-                <h3 id="chapter-content-title" className="mb-3 text-xs font-semibold text-muted-foreground">章节讲义</h3>
+                <h3 id="chapter-content-title" className="mb-3 text-xs font-semibold text-muted-foreground">
+                  章节讲义
+                </h3>
                 <MarkdownView content={activeChapter.content} preferredLang={bs.locale} />
               </section>
-            ) : <div data-course-slot="chapterContent" />}
+            ) : (
+              <div data-course-slot="chapterContent" />
+            )}
             <ProblemList chapter={activeChapter} problems={data.pdict || {}} />
             <ContestList chapter={activeChapter} contests={data.cdict || {}} />
             {data.canDownloadFiles && data.files?.length ? (
               <section data-course-slot="files" aria-labelledby="course-files-title" className="space-y-2">
-                <h3 id="course-files-title" className="text-xs font-semibold text-muted-foreground">课程课件</h3>
+                <h3 id="course-files-title" className="text-xs font-semibold text-muted-foreground">
+                  课程课件
+                </h3>
                 <div className="divide-y divide-border/70 border-y border-border/70">
                   {data.files.map((file) => (
                     <a
@@ -206,12 +221,15 @@ export function CourseDetailPage() {
                   ))}
                 </div>
               </section>
-            ) : <div data-course-slot="files" />}
+            ) : (
+              <div data-course-slot="files" />
+            )}
             <section data-course-slot="quiz" className="border-y border-border/70 py-3">
               {data.canCreateQuiz ? (
                 <Button asChild variant="outline" className="min-h-11 gap-1.5">
                   <a href={`/homework/create?fromCourse=${encodeURIComponent(tid)}&chapter=${activeChapter._id}`}>
-                    <ClipboardPlus className="size-4" />建小测
+                    <ClipboardPlus className="size-4" />
+                    建小测
                   </a>
                 </Button>
               ) : (
@@ -219,17 +237,18 @@ export function CourseDetailPage() {
               )}
             </section>
 
-            {!course.content && !activeChapter.content
-              && !activeChapter.pids.length && !activeChapter.tids.length ? (
-                <section className="border-y border-border/70 py-12 text-center text-sm text-muted-foreground">本章暂无内容。</section>
-              ) : null}
+            {!course.content && !activeChapter.content && !activeChapter.pids.length && !activeChapter.tids.length ? (
+              <section className="border-y border-border/70 py-12 text-center text-sm text-muted-foreground">本章暂无内容。</section>
+            ) : null}
           </article>
         </div>
       )}
 
       <Sheet open={outlineOpen} onOpenChange={setOutlineOpen}>
         <SheetContent side="left" className="w-[22rem] max-w-[calc(100vw-1rem)]">
-          <SheetHeader><SheetTitle>课程目录</SheetTitle></SheetHeader>
+          <SheetHeader>
+            <SheetTitle>课程目录</SheetTitle>
+          </SheetHeader>
           <div className="overflow-y-auto p-4">
             <ChapterOutline chapters={chapters} activeId={activeChapter?._id || null} onSelect={selectFromMobile} />
           </div>

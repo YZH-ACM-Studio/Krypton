@@ -1,5 +1,5 @@
 interface IHydroError {
-    new(...args: any[]): HydroError;
+    new (...args: any[]): HydroError;
 }
 
 export class HydroError extends Error {
@@ -27,7 +27,9 @@ const Err = (name: string, Class: IHydroError, ...info: Array<(() => string) | s
         if (typeof item === 'number') {
             code = item;
         } else if (typeof item === 'string') {
-            msg = function () { return item; };
+            msg = function () {
+                return item;
+            };
         } else if (typeof item === 'function') {
             msg = item;
         }
@@ -53,13 +55,9 @@ export const MethodNotAllowedError = Err('MethodNotAllowedError', UserFacingErro
 
 export const ValidationError = Err('ValidationError', ForbiddenError, function (this: HydroError) {
     if (this.params.length === 3) {
-        return this.params[1]
-            ? 'Field {0} or {1} validation failed. ({2})'
-            : 'Field {0} validation failed. ({2})';
+        return this.params[1] ? 'Field {0} or {1} validation failed. ({2})' : 'Field {0} validation failed. ({2})';
     }
-    return this.params[1]
-        ? 'Field {0} or {1} validation failed.'
-        : 'Field {0} validation failed.';
+    return this.params[1] ? 'Field {0} or {1} validation failed.' : 'Field {0} validation failed.';
 });
 export const CsrfTokenError = Err('CsrfTokenError', ForbiddenError, 'CsrfTokenError');
 export const InvalidOperationError = Err('InvalidOperationError', MethodNotAllowedError);

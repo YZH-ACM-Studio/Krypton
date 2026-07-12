@@ -23,12 +23,15 @@ const userAgent = `Hydro/${version} Node.js/${process.version.split('v').pop()}`
 
 function downloadAndExtractTgz(url: string, dest: string) {
     return new Promise((resolve, reject) => {
-        superagent.get(url)
+        superagent
+            .get(url)
             .set('User-Agent', userAgent)
-            .pipe(tar.x({
-                C: dest,
-                strip: 1,
-            }))
+            .pipe(
+                tar.x({
+                    C: dest,
+                    strip: 1,
+                }),
+            )
             .on('finish', resolve)
             .on('error', reject);
     });
@@ -61,8 +64,7 @@ export function register(cli: CAC) {
         let src = _src;
         if (!src.startsWith('http')) {
             try {
-                src = child.execSync(`yarn info ${src} dist.tarball`, { cwd: os.tmpdir() })
-                    .toString().trim().split('\n')[1];
+                src = child.execSync(`yarn info ${src} dist.tarball`, { cwd: os.tmpdir() }).toString().trim().split('\n')[1];
                 if (!src.startsWith('http')) throw new Error();
             } catch (e) {
                 throw new Error('Cannot fetch package info.');
@@ -84,10 +86,13 @@ export function register(cli: CAC) {
         if (!fs.existsSync(path.join(newAddonPath, 'package.json'))) throw new Error('Invalid plugin file');
         child.execSync('yarn --production', { stdio: 'inherit', cwd: newAddonPath });
         child.execSync(`hydrooj addon add '${newAddonPath}'`);
-        fs.writeFileSync(path.join(newAddonPath, '__metadata__'), JSON.stringify({
-            src: _src,
-            lastUpdate: Date.now(),
-        }));
+        fs.writeFileSync(
+            path.join(newAddonPath, '__metadata__'),
+            JSON.stringify({
+                src: _src,
+                lastUpdate: Date.now(),
+            }),
+        );
         logger.success(`Successfully installed ${_src}.`);
         logger.info('Please restart Hydro to apply changes.');
     });

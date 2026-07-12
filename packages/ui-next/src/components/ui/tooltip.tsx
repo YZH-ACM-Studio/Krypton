@@ -1,12 +1,4 @@
-import {
-  createContext,
-  type ReactNode,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { createContext, type ReactNode, useCallback, useContext, useRef, useState } from 'react';
 import { cn } from '@/lib/cn';
 
 /* ------------------------------------------------------------------ */
@@ -19,13 +11,7 @@ interface TooltipProviderCtx {
 
 const Ctx = createContext<TooltipProviderCtx>({ delayDuration: 300 });
 
-export function TooltipProvider({
-  children,
-  delayDuration = 300,
-}: {
-  children: ReactNode;
-  delayDuration?: number;
-}) {
+export function TooltipProvider({ children, delayDuration = 300 }: { children: ReactNode; delayDuration?: number }) {
   return <Ctx.Provider value={{ delayDuration }}>{children}</Ctx.Provider>;
 }
 
@@ -57,13 +43,7 @@ export function Tooltip({ children }: { children: ReactNode }) {
 /*  Trigger                                                            */
 /* ------------------------------------------------------------------ */
 
-export function TooltipTrigger({
-  asChild,
-  children,
-}: {
-  asChild?: boolean;
-  children: ReactNode;
-}) {
+export function TooltipTrigger({ asChild: _asChild, children }: { asChild?: boolean; children: ReactNode }) {
   const ctx = useContext(TooltipCtx)!;
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -77,13 +57,7 @@ export function TooltipTrigger({
   }, [ctx]);
 
   return (
-    <span
-      onMouseEnter={onEnter}
-      onMouseLeave={onLeave}
-      onFocus={onEnter}
-      onBlur={onLeave}
-      ref={ctx.triggerRef as any}
-    >
+    <span onMouseEnter={onEnter} onMouseLeave={onLeave} onFocus={onEnter} onBlur={onLeave} ref={ctx.triggerRef as any}>
       {children}
     </span>
   );

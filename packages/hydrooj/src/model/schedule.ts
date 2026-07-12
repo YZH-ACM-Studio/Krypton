@@ -5,7 +5,7 @@ import { Context } from '../context';
 import { Schedule } from '../interface';
 import { Logger } from '../logger';
 import db from '../service/db';
-import { } from '../service/worker';
+import {} from '../service/worker';
 import RecordModel from './record';
 
 const logger = new Logger('model/schedule');
@@ -19,7 +19,9 @@ async function getFirst(query: Filter<Schedule>) {
     if (res) {
         logger.debug('%o', res);
         if (res.interval) {
-            const executeAfter = moment(res.executeAfter).add(...res.interval).toDate();
+            const executeAfter = moment(res.executeAfter)
+                .add(...res.interval)
+                .toDate();
             await coll.insertOne({ ...res, executeAfter });
         }
         return res;
@@ -91,7 +93,7 @@ export async function apply(ctx: Context) {
     });
 
     if (process.env.NODE_APP_INSTANCE !== '0') return;
-    if (!await ScheduleModel.count({ type: 'schedule', subType: 'task.daily' })) {
+    if (!(await ScheduleModel.count({ type: 'schedule', subType: 'task.daily' }))) {
         await ScheduleModel.add({
             type: 'schedule',
             subType: 'task.daily',

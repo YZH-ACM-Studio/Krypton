@@ -1,11 +1,21 @@
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
+import { ProblemType } from '@hydrooj/common';
 import {
-    clientProblemConfig, inferQuestionKind, isProblemConfigFilename,
-    parseRegionMarkers, parseStructuredRegionSubmission,
-    problemFingerprint, questionKindMap, spliceFillFunction, templateSourceHash,
-    validateCompiledStructuredConfig, validateFillFunctionJudgeConfig,
-    validateFillFunctionTestdataFiles, validateRegions, validateTextProgramFillSubmission,
+    clientProblemConfig,
+    inferQuestionKind,
+    isProblemConfigFilename,
+    parseRegionMarkers,
+    parseStructuredRegionSubmission,
+    problemFingerprint,
+    questionKindMap,
+    spliceFillFunction,
+    templateSourceHash,
+    validateCompiledStructuredConfig,
+    validateFillFunctionJudgeConfig,
+    validateFillFunctionTestdataFiles,
+    validateRegions,
+    validateTextProgramFillSubmission,
 } from '../src/lib/problem-config';
 import { parseConfig } from '../src/lib/testdataConfig';
 
@@ -39,7 +49,10 @@ describe('questionKindMap', () => {
             q4: ['i++', 5, { kind: 'fill_program' }],
         });
         expect(result).to.deep.equal({
-            q1: 'single', q2: 'multi', q3: 'blank', q4: 'fill_program',
+            q1: 'single',
+            q2: 'multi',
+            q3: 'blank',
+            q4: 'fill_program',
         });
     });
 });
@@ -50,15 +63,26 @@ describe('objective client config', () => {
             type: 'objective',
             main: { options: ['Yes', 'No'], answerIndexes: [0], partialCreditPercent: 40 },
             answers: {
-                main: [['A'], 100, {
-                    kind: 'multi', choices: ['Yes', 'No'], partialCreditPercent: 40,
-                }],
+                main: [
+                    ['A'],
+                    100,
+                    {
+                        kind: 'multi',
+                        choices: ['Yes', 'No'],
+                        partialCreditPercent: 40,
+                    },
+                ],
             },
             options: { main: ['Yes', 'No'] },
         });
-        expect(client.questions).to.deep.equal([{
-            key: 'main', kind: 'multi', choices: ['Yes', 'No'], score: 100,
-        }]);
+        expect(client.questions).to.deep.equal([
+            {
+                key: 'main',
+                kind: 'multi',
+                choices: ['Yes', 'No'],
+                score: 100,
+            },
+        ]);
         expect(client).not.to.have.property('answers');
         expect(client).not.to.have.property('main');
         expect(JSON.stringify(client)).not.to.include('partialCreditPercent');
@@ -72,10 +96,14 @@ describe('objective client config', () => {
                 lang: 'cc.cc17',
                 source: 'private source',
                 sourceHash: 'private hash',
-                regions: [{
-                    id: 'solve', prompt: '实现 solve',
-                    start: { line: 0, col: 0 }, end: { line: 0, col: 14 },
-                }],
+                regions: [
+                    {
+                        id: 'solve',
+                        prompt: '实现 solve',
+                        start: { line: 0, col: 0 },
+                        end: { line: 0, col: 14 },
+                    },
+                ],
             },
         });
         expect(client).to.deep.equal({
@@ -90,20 +118,30 @@ describe('objective client config', () => {
 
 describe('parsed problem config', () => {
     it('keeps sanitized regions for direct submission without leaking source', async () => {
-        const parsed = await parseConfig({
-            type: 'fill_function',
-            subType: 'function',
-            langs: ['cc.cc17'],
-            template: {
-                lang: 'cc.cc17', source: 'private source', sourceHash: 'private hash',
-                regions: [{
-                    id: 'solve', prompt: '实现 solve',
-                    start: { line: 0, col: 0 }, end: { line: 0, col: 14 },
-                }],
+        const parsed = await parseConfig(
+            {
+                type: ProblemType.FillFunction,
+                subType: 'function',
+                langs: ['cc.cc17'],
+                template: {
+                    lang: 'cc.cc17',
+                    source: 'private source',
+                    sourceHash: 'private hash',
+                    regions: [
+                        {
+                            id: 'solve',
+                            prompt: '实现 solve',
+                            start: { line: 0, col: 0 },
+                            end: { line: 0, col: 14 },
+                        },
+                    ],
+                },
             },
-        }, []);
+            [],
+        );
         expect(parsed.template).to.deep.equal({
-            lang: 'cc.cc17', regions: [{ id: 'solve', prompt: '实现 solve' }],
+            lang: 'cc.cc17',
+            regions: [{ id: 'solve', prompt: '实现 solve' }],
         });
         expect(JSON.stringify(parsed)).not.to.include('private source');
         expect(JSON.stringify(parsed)).not.to.include('private hash');
@@ -124,12 +162,9 @@ describe('text program-fill submission', () => {
 
     it('accepts only the single string-valued main line', () => {
         expect(validateTextProgramFillSubmission('program_fill', config, { main: 'i++' })).to.equal(true);
-        expect(() => validateTextProgramFillSubmission('program_fill', config, { main: 'i++\nj++' }))
-            .to.throw(/one line/);
-        expect(() => validateTextProgramFillSubmission('program_fill', config, { main: 'i++', extra: '' }))
-            .to.throw(/only main/);
-        expect(() => validateTextProgramFillSubmission('program_fill', config, { main: ['i++'] }))
-            .to.throw(/must be a string/);
+        expect(() => validateTextProgramFillSubmission('program_fill', config, { main: 'i++\nj++' })).to.throw(/one line/);
+        expect(() => validateTextProgramFillSubmission('program_fill', config, { main: 'i++', extra: '' })).to.throw(/only main/);
+        expect(() => validateTextProgramFillSubmission('program_fill', config, { main: ['i++'] })).to.throw(/must be a string/);
     });
 
     it('does not affect other objective or programming problem types', () => {
@@ -188,14 +223,7 @@ describe('spliceFillFunction', () => {
     it('handles multiple regions correctly', () => {
         const multi = {
             lang: 'cpp',
-            source: [
-                'int f1() {',
-                '    return 0;',
-                '}',
-                'int f2() {',
-                '    return 0;',
-                '}',
-            ].join('\n'),
+            source: ['int f1() {', '    return 0;', '}', 'int f2() {', '    return 0;', '}'].join('\n'),
             regions: [
                 { id: 'a', start: { line: 1, col: 4 }, end: { line: 1, col: 13 } },
                 { id: 'b', start: { line: 4, col: 4 }, end: { line: 4, col: 13 } },
@@ -211,44 +239,59 @@ describe('spliceFillFunction', () => {
 
 describe('parseRegionMarkers', () => {
     it('strips marker lines and builds stable multi-line function regions', () => {
-        const template = parseRegionMarkers([
-            '#include <iostream>',
-            '// @krypton-region solve',
-            'int solve(int value) {',
-            '    return value;',
-            '}',
-            '// @krypton-endregion solve',
-            'int main() { return solve(1); }',
-        ].join('\n'), [{ id: 'solve', prompt: '实现 solve' }]);
+        const template = parseRegionMarkers(
+            [
+                '#include <iostream>',
+                '// @krypton-region solve',
+                'int solve(int value) {',
+                '    return value;',
+                '}',
+                '// @krypton-endregion solve',
+                'int main() { return solve(1); }',
+            ].join('\n'),
+            [{ id: 'solve', prompt: '实现 solve' }],
+        );
         expect(template.source).not.to.include('@krypton');
-        expect(template.regions).to.deep.equal([{
-            id: 'solve', prompt: '实现 solve',
-            start: { line: 1, col: 0 }, end: { line: 3, col: 1 },
-        }]);
+        expect(template.regions).to.deep.equal([
+            {
+                id: 'solve',
+                prompt: '实现 solve',
+                start: { line: 1, col: 0 },
+                end: { line: 3, col: 1 },
+            },
+        ]);
         expect(template.sourceHash).to.equal(templateSourceHash(template.source));
     });
 
     it('rejects missing, duplicate, nested, and mismatched markers', () => {
         expect(() => parseRegionMarkers('int main() {}', [{ id: 'main' }])).to.throw(/do not match/);
-        expect(() => parseRegionMarkers([
-            '// @krypton-region main', 'x', '// @krypton-endregion main',
-            '// @krypton-region main', 'y', '// @krypton-endregion main',
-        ].join('\n'), [{ id: 'main' }])).to.throw(/duplicate marker/);
-        expect(() => parseRegionMarkers([
-            '// @krypton-region a', '// @krypton-region b', 'x',
-        ].join('\n'), [{ id: 'a' }, { id: 'b' }])).to.throw(/nested region/);
-        expect(() => parseRegionMarkers([
-            '// @krypton-region a', 'x', '// @krypton-endregion b',
-        ].join('\n'), [{ id: 'a' }])).to.throw(/unmatched end marker/);
+        expect(() =>
+            parseRegionMarkers(
+                ['// @krypton-region main', 'x', '// @krypton-endregion main', '// @krypton-region main', 'y', '// @krypton-endregion main'].join(
+                    '\n',
+                ),
+                [{ id: 'main' }],
+            ),
+        ).to.throw(/duplicate marker/);
+        expect(() => parseRegionMarkers(['// @krypton-region a', '// @krypton-region b', 'x'].join('\n'), [{ id: 'a' }, { id: 'b' }])).to.throw(
+            /nested region/,
+        );
+        expect(() => parseRegionMarkers(['// @krypton-region a', 'x', '// @krypton-endregion b'].join('\n'), [{ id: 'a' }])).to.throw(
+            /unmatched end marker/,
+        );
     });
 });
 
 describe('validateCompiledStructuredConfig', () => {
     const valid = {
-        type: 'fill_function', subType: 'program_fill_compile',
-        main: { mode: 'compile', lang: 'cc.cc17' }, langs: ['cc.cc17'],
+        type: 'fill_function',
+        subType: 'program_fill_compile',
+        main: { mode: 'compile', lang: 'cc.cc17' },
+        langs: ['cc.cc17'],
         template: {
-            lang: 'cc.cc17', source: 'i++;', sourceHash: templateSourceHash('i++;'),
+            lang: 'cc.cc17',
+            source: 'i++;',
+            sourceHash: templateSourceHash('i++;'),
             regions: [{ id: 'main', start: { line: 0, col: 0 }, end: { line: 0, col: 4 } }],
         },
         cases: [{ input: '1.in', output: '1.out' }],
@@ -259,45 +302,52 @@ describe('validateCompiledStructuredConfig', () => {
     });
 
     it('rejects language mismatch and multi-line program-fill regions', () => {
-        expect(() => validateCompiledStructuredConfig('program_fill', {
-            ...valid, langs: ['py.py3'],
-        })).to.throw(/language mismatch/);
-        expect(() => validateCompiledStructuredConfig('program_fill', {
-            ...valid,
-            template: {
-                ...valid.template, source: 'a\nb',
-                regions: [{ id: 'main', start: { line: 0, col: 0 }, end: { line: 1, col: 1 } }],
-            },
-        })).to.throw(/one line/);
+        expect(() =>
+            validateCompiledStructuredConfig('program_fill', {
+                ...valid,
+                langs: ['py.py3'],
+            }),
+        ).to.throw(/language mismatch/);
+        expect(() =>
+            validateCompiledStructuredConfig('program_fill', {
+                ...valid,
+                template: {
+                    ...valid.template,
+                    source: 'a\nb',
+                    regions: [{ id: 'main', start: { line: 0, col: 0 }, end: { line: 1, col: 1 } }],
+                },
+            }),
+        ).to.throw(/one line/);
     });
 });
 
 describe('validateFillFunctionJudgeConfig', () => {
     it('rejects the old fake type-only configuration before publication or judging', () => {
-        expect(() => validateFillFunctionJudgeConfig({ type: 'fill_function' }))
-            .to.throw(/missing template/);
-        expect(() => validateFillFunctionJudgeConfig({
-            type: 'fill_function',
-            template: {
-                lang: 'cc.cc17', source: 'int main() {}',
-                regions: [{ id: 'main', start: { line: 0, col: 0 }, end: { line: 0, col: 13 } }],
-            },
-        })).to.throw(/testdata cases/);
+        expect(() => validateFillFunctionJudgeConfig({ type: 'fill_function' })).to.throw(/missing template/);
+        expect(() =>
+            validateFillFunctionJudgeConfig({
+                type: 'fill_function',
+                template: {
+                    lang: 'cc.cc17',
+                    source: 'int main() {}',
+                    regions: [{ id: 'main', start: { line: 0, col: 0 }, end: { line: 0, col: 13 } }],
+                },
+            }),
+        ).to.throw(/testdata cases/);
     });
 
     it('rejects publication until every declared physical input/output file exists', () => {
         const config = {
             type: 'fill_function',
             template: {
-                lang: 'cc.cc17', source: 'int main() {}',
+                lang: 'cc.cc17',
+                source: 'int main() {}',
                 regions: [{ id: 'main', start: { line: 0, col: 0 }, end: { line: 0, col: 13 } }],
             },
             cases: [{ input: '1.in', output: '1.out' }],
         };
-        expect(() => validateFillFunctionTestdataFiles(config, [{ name: '1.in' }]))
-            .to.throw(/missing testdata file 1\.out/);
-        expect(() => validateFillFunctionTestdataFiles(config, [{ name: '1.in' }, { name: '1.out' }]))
-            .not.to.throw();
+        expect(() => validateFillFunctionTestdataFiles(config, [{ name: '1.in' }])).to.throw(/missing testdata file 1\.out/);
+        expect(() => validateFillFunctionTestdataFiles(config, [{ name: '1.in' }, { name: '1.out' }])).not.to.throw();
     });
 });
 
@@ -308,24 +358,18 @@ describe('parseStructuredRegionSubmission', () => {
     } as any;
 
     it('accepts only the exact string-valued region map', () => {
-        expect(parseStructuredRegionSubmission(
-            'function', template, JSON.stringify({ first: 'a', second: 'b\nc' }),
-        )).to.deep.equal({ first: 'a', second: 'b\nc' });
-        expect(() => parseStructuredRegionSubmission(
-            'function', template, JSON.stringify({ first: 'a', extra: 'b' }),
-        )).to.throw(/keys do not match/);
-        expect(() => parseStructuredRegionSubmission(
-            'function', template, JSON.stringify({ first: 'a', second: 2 }),
-        )).to.throw(/must be a string/);
+        expect(parseStructuredRegionSubmission('function', template, JSON.stringify({ first: 'a', second: 'b\nc' }))).to.deep.equal({
+            first: 'a',
+            second: 'b\nc',
+        });
+        expect(() => parseStructuredRegionSubmission('function', template, JSON.stringify({ first: 'a', extra: 'b' }))).to.throw(/keys do not match/);
+        expect(() => parseStructuredRegionSubmission('function', template, JSON.stringify({ first: 'a', second: 2 }))).to.throw(/must be a string/);
     });
 
     it('rejects multi-line compile program-fill while allowing an empty attempted line', () => {
         const one = { lang: 'cc.cc17', regions: [{ id: 'main' }] } as any;
-        expect(parseStructuredRegionSubmission('program_fill', one, JSON.stringify({ main: '' })))
-            .to.deep.equal({ main: '' });
-        expect(() => parseStructuredRegionSubmission(
-            'program_fill', one, JSON.stringify({ main: 'i++\nj++' }),
-        )).to.throw(/one line/);
+        expect(parseStructuredRegionSubmission('program_fill', one, JSON.stringify({ main: '' }))).to.deep.equal({ main: '' });
+        expect(() => parseStructuredRegionSubmission('program_fill', one, JSON.stringify({ main: 'i++\nj++' }))).to.throw(/one line/);
     });
 });
 
@@ -333,39 +377,45 @@ describe('parseStructuredRegionSubmission', () => {
 
 describe('validateRegions', () => {
     it('accepts non-overlapping regions', () => {
-        expect(() => validateRegions({
-            source: 'line0\nline1\nline2\nline3',
-            regions: [
-                { id: 'r1', start: { line: 0, col: 0 }, end: { line: 0, col: 5 } },
-                { id: 'r2', start: { line: 2, col: 0 }, end: { line: 2, col: 5 } },
-            ],
-        })).to.not.throw();
+        expect(() =>
+            validateRegions({
+                source: 'line0\nline1\nline2\nline3',
+                regions: [
+                    { id: 'r1', start: { line: 0, col: 0 }, end: { line: 0, col: 5 } },
+                    { id: 'r2', start: { line: 2, col: 0 }, end: { line: 2, col: 5 } },
+                ],
+            }),
+        ).to.not.throw();
     });
     it('rejects overlapping regions', () => {
-        expect(() => validateRegions({
-            source: 'line0\nline1\nline2',
-            regions: [
-                { id: 'r1', start: { line: 0, col: 0 }, end: { line: 1, col: 2 } },
-                { id: 'r2', start: { line: 1, col: 0 }, end: { line: 2, col: 0 } },
-            ],
-        })).to.throw(/overlap/);
+        expect(() =>
+            validateRegions({
+                source: 'line0\nline1\nline2',
+                regions: [
+                    { id: 'r1', start: { line: 0, col: 0 }, end: { line: 1, col: 2 } },
+                    { id: 'r2', start: { line: 1, col: 0 }, end: { line: 2, col: 0 } },
+                ],
+            }),
+        ).to.throw(/overlap/);
     });
     it('rejects duplicate region ids', () => {
-        expect(() => validateRegions({
-            source: 'line0\nline1',
-            regions: [
-                { id: 'r1', start: { line: 0, col: 0 }, end: { line: 0, col: 1 } },
-                { id: 'r1', start: { line: 1, col: 0 }, end: { line: 1, col: 1 } },
-            ],
-        })).to.throw(/duplicate region id/);
+        expect(() =>
+            validateRegions({
+                source: 'line0\nline1',
+                regions: [
+                    { id: 'r1', start: { line: 0, col: 0 }, end: { line: 0, col: 1 } },
+                    { id: 'r1', start: { line: 1, col: 0 }, end: { line: 1, col: 1 } },
+                ],
+            }),
+        ).to.throw(/duplicate region id/);
     });
     it('rejects out-of-bounds regions', () => {
-        expect(() => validateRegions({
-            source: 'only one line',
-            regions: [
-                { id: 'r1', start: { line: 5, col: 0 }, end: { line: 5, col: 5 } },
-            ],
-        })).to.throw(/out of bounds/);
+        expect(() =>
+            validateRegions({
+                source: 'only one line',
+                regions: [{ id: 'r1', start: { line: 5, col: 0 }, end: { line: 5, col: 5 } }],
+            }),
+        ).to.throw(/out of bounds/);
     });
 });
 

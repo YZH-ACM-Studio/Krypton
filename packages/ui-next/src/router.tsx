@@ -1,19 +1,8 @@
 import { createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router';
 import { useCallback, useEffect, useState } from 'react';
-import {
-  LogOut,
-  Mail,
-  Menu,
-  Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Settings,
-  Sun,
-  Swords,
-  User,
-} from 'lucide-react';
+import { LogOut, Mail, Menu, Moon, PanelLeftClose, PanelLeftOpen, Settings, Sun, Swords, User } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
-import { replaceRouteTokens } from '@/lib/format';
+import { replaceRouteTokens, makeInitials } from '@/lib/format';
 import { KryptonFooter } from '@/components/layout/footer';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -22,7 +11,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sidebar } from '@/components/layout/sidebar';
 import { PageResolver } from '@/pages/resolver';
 import { AnnouncementPopover } from '@/components/announcement-popover';
-import { makeInitials } from '@/lib/format';
 
 const SIDEBAR_KEY = 'krypton:sidebar-collapsed';
 const THEME_KEY = 'krypton:theme';
@@ -31,12 +19,7 @@ const THEME_KEY = 'krypton:theme';
  * Templates that render their own SPA shell (no main OJ sidebar/topbar).
  * For these we skip `AppShell` entirely and let `PageResolver` paint its own.
  */
-const STANDALONE_TEMPLATES = new Set([
-  'exam_mode_home.html',
-  'exam_contest.html',
-  'exam_paper.html',
-  'contest_workspace.html',
-]);
+const STANDALONE_TEMPLATES = new Set(['exam_mode_home.html', 'exam_contest.html', 'exam_paper.html', 'contest_workspace.html']);
 
 function AppShell() {
   const bs = useBootstrap();
@@ -51,7 +34,11 @@ function DefaultAppShell() {
   const bs = useBootstrap();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {
-    try { return localStorage.getItem(SIDEBAR_KEY) === '1'; } catch { return false; }
+    try {
+      return localStorage.getItem(SIDEBAR_KEY) === '1';
+    } catch {
+      return false;
+    }
   });
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [dark, setDark] = useState(() => {
@@ -65,7 +52,9 @@ function DefaultAppShell() {
   const toggleCollapsed = () => {
     setCollapsed((prev) => {
       const next = !prev;
-      try { localStorage.setItem(SIDEBAR_KEY, next ? '1' : '0'); } catch {}
+      try {
+        localStorage.setItem(SIDEBAR_KEY, next ? '1' : '0');
+      } catch {}
       return next;
     });
   };
@@ -74,7 +63,9 @@ function DefaultAppShell() {
     setDark((prev) => {
       const next = !prev;
       document.documentElement.classList.toggle('dark', next);
-      try { localStorage.setItem(THEME_KEY, next ? 'dark' : 'light'); } catch {}
+      try {
+        localStorage.setItem(THEME_KEY, next ? 'dark' : 'light');
+      } catch {}
       return next;
     });
   }, []);
@@ -103,12 +94,7 @@ function DefaultAppShell() {
         {/* Top bar — frosted glass */}
         <header className="sticky top-0 z-40 flex h-12 shrink-0 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur-xl saturate-150 sm:px-4">
           {/* Mobile menu toggle */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8 md:hidden"
-            onClick={() => setSidebarOpen(true)}
-          >
+          <Button variant="ghost" size="icon" className="size-8 md:hidden" onClick={() => setSidebarOpen(true)}>
             <Menu className="size-4" />
           </Button>
 
@@ -127,20 +113,12 @@ function DefaultAppShell() {
           <a href={bs.urls.home} className="flex items-center gap-1.5 md:hidden">
             <Swords className="size-4 text-primary" />
           </a>
-          <span className="hidden text-sm text-muted-foreground md:inline-block">
-            {bs.domain.name}
-          </span>
+          <span className="hidden text-sm text-muted-foreground md:inline-block">{bs.domain.name}</span>
 
           <div className="flex-1" />
 
           {/* Theme toggle */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8"
-            onClick={toggleTheme}
-            title={dark ? '切换亮色模式' : '切换暗色模式'}
-          >
+          <Button variant="ghost" size="icon" className="size-8" onClick={toggleTheme} title={dark ? '切换亮色模式' : '切换暗色模式'}>
             {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </Button>
 
@@ -175,15 +153,16 @@ function DefaultAppShell() {
                   <button
                     type="button"
                     className="flex items-center gap-2 rounded-md px-2 py-1 transition-colors hover:bg-accent"
-                    onClick={(e) => { e.stopPropagation(); setUserMenuOpen((p) => !p); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setUserMenuOpen((p) => !p);
+                    }}
                   >
                     <Avatar className="size-7">
                       {bs.user.avatarUrl ? <AvatarImage src={bs.user.avatarUrl} alt={bs.user.name} /> : null}
                       <AvatarFallback className="text-[10px]">{makeInitials(bs.user.name)}</AvatarFallback>
                     </Avatar>
-                    <span className="hidden max-w-[120px] truncate text-sm font-medium sm:inline-block">
-                      {bs.user.name}
-                    </span>
+                    <span className="hidden max-w-[120px] truncate text-sm font-medium sm:inline-block">{bs.user.name}</span>
                   </button>
 
                   {userMenuOpen && (
@@ -196,7 +175,10 @@ function DefaultAppShell() {
                         <p className="text-[11px] text-muted-foreground">{bs.user.rp} RP</p>
                       </div>
                       <div className="my-1 h-px bg-border" />
-                      <a href={replaceRouteTokens(bs.urls.userDetail, { UID: String(bs.user.id) })} className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-accent">
+                      <a
+                        href={replaceRouteTokens(bs.urls.userDetail, { UID: String(bs.user.id) })}
+                        className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-accent"
+                      >
                         <User className="size-3.5" />
                         个人主页
                       </a>
@@ -207,12 +189,13 @@ function DefaultAppShell() {
                       <a href={bs.urls.messages} className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm hover:bg-accent">
                         <Mail className="size-3.5" />
                         消息
-                        {bs.user.unreadMessages > 0 && (
-                          <Badge className="ml-auto h-4 px-1 text-[10px]">{bs.user.unreadMessages}</Badge>
-                        )}
+                        {bs.user.unreadMessages > 0 && <Badge className="ml-auto h-4 px-1 text-[10px]">{bs.user.unreadMessages}</Badge>}
                       </a>
                       <div className="my-1 h-px bg-border" />
-                      <a href={bs.urls.logout} className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10">
+                      <a
+                        href={bs.urls.logout}
+                        className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10"
+                      >
                         <LogOut className="size-3.5" />
                         退出登录
                       </a>
@@ -238,10 +221,7 @@ function DefaultAppShell() {
             so on short pages it stretches to the viewport height (sticking
             the footer to the bottom), and on tall pages it grows naturally
             (footer ends up below scrolled content). */}
-        <ScrollArea
-          className="min-w-0 flex-1"
-          viewportClassName="[&>div]:!flex [&>div]:!flex-col [&>div]:!min-h-full"
-        >
+        <ScrollArea className="min-w-0 flex-1" viewportClassName="[&>div]:!flex [&>div]:!flex-col [&>div]:!min-h-full">
           <main className="flex min-w-0 flex-1 flex-col">
             <div className="min-w-0 flex-1 p-3 sm:p-6 xl:p-8 2xl:px-10">
               <Outlet />
@@ -253,7 +233,6 @@ function DefaultAppShell() {
     </div>
   );
 }
-
 
 const rootRoute = createRootRoute({
   component: AppShell,

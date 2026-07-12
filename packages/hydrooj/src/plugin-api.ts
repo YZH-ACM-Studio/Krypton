@@ -5,10 +5,7 @@ import db from './service/db';
 export { nanoid } from 'nanoid';
 export { isMoment, default as moment } from 'moment-timezone';
 
-export {
-    Apis, APIS, HandlerCommon, httpServer,
-    Mutation, Query, Router, Subscription, WebService,
-} from '@hydrooj/framework';
+export { Apis, APIS, HandlerCommon, httpServer, Mutation, Query, Router, Subscription, WebService } from '@hydrooj/framework';
 
 export * from './pipelineUtils';
 export * from './error';
@@ -64,4 +61,4 @@ export { EventMap } from './service/bus';
 export { db, pwsh };
 
 // to load services into to context
-export { } from './handler/contest';
+export {} from './handler/contest';

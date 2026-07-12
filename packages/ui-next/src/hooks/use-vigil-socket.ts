@@ -28,10 +28,7 @@
  * `/api/admin/vigil/dashboard-token` endpoint used by lib/vigil-api.ts.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type {
-  VigilEventSeverity,
-  VigilStudentStatus,
-} from '@/lib/vigil-api';
+import type { VigilEventSeverity, VigilStudentStatus } from '@/lib/vigil-api';
 
 /* ─── Message types ────────────────────────────────────────────────────── */
 
@@ -130,7 +127,7 @@ export type VigilEventMessage =
   | EventAddedMsg
   | CommandResultMsg
   | StreamStatusChangeMsg
-  | { type: string;[k: string]: any };
+  | { type: string; [k: string]: any };
 
 /* ─── Hook API ─────────────────────────────────────────────────────────── */
 
@@ -181,23 +178,28 @@ export function useVigilSocket(opts: UseVigilSocketOptions = {}): UseVigilSocket
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     if (sub) {
-      ws.send(JSON.stringify({
-        subscribe: {
-          contestId: sub.contestId,
-          page: sub.page,
-          pageSize: sub.pageSize ?? 30,
-          machineIds: sub.machineIds,
-        },
-      }));
+      ws.send(
+        JSON.stringify({
+          subscribe: {
+            contestId: sub.contestId,
+            page: sub.page,
+            pageSize: sub.pageSize ?? 30,
+            machineIds: sub.machineIds,
+          },
+        }),
+      );
     } else {
       ws.send(JSON.stringify({ unsubscribe: true }));
     }
   }, []);
 
-  const subscribeContest = useCallback((sub: ContestSubscription | null) => {
-    subscriptionRef.current = sub;
-    sendSubscription(sub);
-  }, [sendSubscription]);
+  const subscribeContest = useCallback(
+    (sub: ContestSubscription | null) => {
+      subscriptionRef.current = sub;
+      sendSubscription(sub);
+    },
+    [sendSubscription],
+  );
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -205,8 +207,7 @@ export function useVigilSocket(opts: UseVigilSocketOptions = {}): UseVigilSocket
 
     async function connect() {
       try {
-        const tk = await fetch('/api/admin/vigil/dashboard-token', { credentials: 'include' })
-          .then((r) => r.json());
+        const tk = await fetch('/api/admin/vigil/dashboard-token', { credentials: 'include' }).then((r) => r.json());
         if (cancelled) return;
         const url = `${tk.vigilWsUrl}?token=${encodeURIComponent(tk.token)}`;
         const ws = new WebSocket(url);
@@ -226,13 +227,17 @@ export function useVigilSocket(opts: UseVigilSocketOptions = {}): UseVigilSocket
           reconnectAttempt.current += 1;
           reconnectTimer.current = setTimeout(connect, backoff);
         };
-        ws.onerror = () => { /* close handler covers reconnect */ };
+        ws.onerror = () => {
+          /* close handler covers reconnect */
+        };
         ws.onmessage = (ev) => {
           try {
             const msg = JSON.parse(ev.data) as VigilEventMessage;
             if (msg.type === 'snapshot') setLastSnapshot(msg);
             onMessageRef.current?.(msg);
-          } catch { /* ignore malformed */ }
+          } catch {
+            /* ignore malformed */
+          }
         };
       } catch {
         if (cancelled) return;

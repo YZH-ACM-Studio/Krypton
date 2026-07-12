@@ -22,7 +22,9 @@ export async function uploadUserFile(file: File, uid: number): Promise<string> {
     try {
       const body = await res.json();
       if (body?.error?.message) msg = `上传失败：${body.error.message}`;
-    } catch { /* 非 JSON 响应，用默认文案 */ }
+    } catch {
+      /* 非 JSON 响应，用默认文案 */
+    }
     throw new Error(msg);
   }
   return `/file/${uid}/${filename}`;

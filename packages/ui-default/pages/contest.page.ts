@@ -23,13 +23,12 @@ export default new NamedPage(['contest_detail', 'contest_problemlist', 'contest_
   setInterval(updateProgress, 1000);
 
   addSpeculationRules({
-    prerender: [{
-      where: {
-        or: [
-          { href_matches: '/p/*' },
-          { href_matches: '/d/*/p/*' },
-        ],
+    prerender: [
+      {
+        where: {
+          or: [{ href_matches: '/p/*' }, { href_matches: '/d/*/p/*' }],
+        },
       },
-    }],
+    ],
   });
 });

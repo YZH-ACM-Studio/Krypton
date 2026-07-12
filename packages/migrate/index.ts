@@ -1,8 +1,6 @@
 import crypto from 'crypto';
 import { compareSync } from 'bcryptjs';
-import {
-    Context, md5, Schema, sha1, SystemError, SystemModel,
-} from 'hydrooj';
+import { Context, md5, Schema, sha1, SystemError, SystemModel } from 'hydrooj';
 
 const RE_MD5 = /^[\da-f]{32}$/;
 
@@ -16,7 +14,8 @@ function checkLock(innerCall) {
 
 export function apply(ctx: Context) {
     ctx.addScript(
-        'migrateHustoj', 'migrate from hustoj',
+        'migrateHustoj',
+        'migrate from hustoj',
         Schema.object({
             host: Schema.string().default('localhost'),
             port: Schema.number().default(3306),
@@ -32,7 +31,8 @@ export function apply(ctx: Context) {
         checkLock((...args) => require('./scripts/hustoj').run(...args)),
     );
     ctx.addScript(
-        'migrateJnoj', 'migrate from jnoj',
+        'migrateJnoj',
+        'migrate from jnoj',
         Schema.object({
             host: Schema.string().default('localhost'),
             port: Schema.number().default(3306),
@@ -49,7 +49,8 @@ export function apply(ctx: Context) {
         checkLock((...args) => require('./scripts/jnoj').run(...args)),
     );
     ctx.addScript(
-        'migrateSyzoj', 'migrate from syzoj',
+        'migrateSyzoj',
+        'migrate from syzoj',
         Schema.object({
             host: Schema.string().default('localhost'),
             port: Schema.number().default(3306),
@@ -63,7 +64,8 @@ export function apply(ctx: Context) {
         checkLock((...args) => require('./scripts/syzoj').run(...args)),
     );
     ctx.addScript(
-        'migrateVijos', 'migrate from vijos',
+        'migrateVijos',
+        'migrate from vijos',
         Schema.object({
             host: Schema.string().required(),
             port: Schema.number().required(),
@@ -74,7 +76,8 @@ export function apply(ctx: Context) {
         checkLock((...args) => require('./scripts/vijos').run(...args)),
     );
     ctx.addScript(
-        'migrateUniversaloj', 'migrate from universaloj',
+        'migrateUniversaloj',
+        'migrate from universaloj',
         Schema.object({
             host: Schema.string().default('172.17.0.2'),
             port: Schema.number().default(3306),
@@ -87,7 +90,8 @@ export function apply(ctx: Context) {
         checkLock((...args) => require('./scripts/universaloj').run(...args)),
     );
     ctx.addScript(
-        'migratePoj', 'migrate from poj',
+        'migratePoj',
+        'migrate from poj',
         Schema.object({
             host: Schema.string().required(),
             port: Schema.number().default(3306),
@@ -107,10 +111,7 @@ export function apply(ctx: Context) {
         if (RE_MD5.test($saved)) return $password === $saved;
         const $svd = Buffer.from($saved, 'base64').toString('hex');
         const $salt = Buffer.from($svd.substring(40), 'hex').toString();
-        const $hash = Buffer.concat([
-            Buffer.from(sha1($password + $salt), 'hex'),
-            Buffer.from($salt),
-        ]).toString('base64');
+        const $hash = Buffer.concat([Buffer.from(sha1($password + $salt), 'hex'), Buffer.from($salt)]).toString('base64');
         if ($hash.trim() === $saved.trim()) return true;
         return false;
     });

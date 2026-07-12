@@ -25,11 +25,9 @@ export default class AutoComplete<Options extends Record<string, any> = object, 
   container = document.createElement('div');
   options: AutoCompleteOptions<Multi> & Options;
   component = ReactDOM.createRoot(this.container);
-  changeListener = [
-    (val) => this.$dom.val(val),
-  ];
+  changeListener = [(val) => this.$dom.val(val)];
 
-  constructor($dom, options = {} as Options & { component?: React.ComponentType<any>, props?: Record<string, any> }) {
+  constructor($dom, options = {} as Options & { component?: React.ComponentType<any>; props?: Record<string, any> }) {
     super($dom);
     this.options = {
       items: async () => [],
@@ -67,16 +65,20 @@ export default class AutoComplete<Options extends Record<string, any> = object, 
     const Component = this.options.component || AutoCompleteFC;
     const Wrapper = (props) => {
       const [value, setValue] = React.useState(props.value);
-      return <Component
-        ref={(ref) => { this.ref = ref; }}
-        onChange={(v) => {
-          setValue(v);
-          this.onChange(v);
-        }}
-        selectedKeys={(Array.isArray(value) ? value : value.split(',')).map((i) => i.trim()).filter((i) => i)}
-        height="34px"
-        {...this.options.props}
-      />;
+      return (
+        <Component
+          ref={(ref) => {
+            this.ref = ref;
+          }}
+          onChange={(v) => {
+            setValue(v);
+            this.onChange(v);
+          }}
+          selectedKeys={(Array.isArray(value) ? value : value.split(',')).map((i) => i.trim()).filter((i) => i)}
+          height="34px"
+          {...this.options.props}
+        />
+      );
     };
     this.component.render(<Wrapper value={this.$dom.val()} />);
   }

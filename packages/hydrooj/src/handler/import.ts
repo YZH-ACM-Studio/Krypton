@@ -18,19 +18,20 @@ class ProblemImportHydroHandler extends Handler {
         if (keepUser) this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
         if (!this.request.files.file) throw new ValidationError('file');
         if (preferredPrefix && !/^[a-zA-Z]+$/.test(preferredPrefix)) throw new ValidationError('preferredPrefix');
-        const promise = problem.import(
-            domainId, this.request.files.file.filepath,
-            {
+        const promise = problem
+            .import(domainId, this.request.files.file.filepath, {
                 preferredPrefix,
                 progress: this.progress.bind(this),
                 operator: keepUser ? null : this.user._id,
                 delSource: true,
                 hidden,
-            },
-        ).catch((e) => MessageModel.send(1, this.user._id, `Import failed: ${e.message}\n${e.stack}`));
+            })
+            .catch((e) => MessageModel.send(1, this.user._id, `Import failed: ${e.message}\n${e.stack}`));
         let resolved = false;
         await Promise.race([
-            promise.then(() => { resolved = true; }),
+            promise.then(() => {
+                resolved = true;
+            }),
             sleep(5000),
         ]);
         this.response.redirect = this.url('problem_main', resolved ? {} : { query: { showImport: 1 } });

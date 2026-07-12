@@ -2,7 +2,7 @@ import { Context, Service } from 'cordis';
 import Schema from 'schemastery';
 import { param } from './decorators';
 import { BadRequestError, MethodNotAllowedError, NotFoundError } from './error';
-import { } from './interface';
+import {} from './interface';
 import { ConnectionHandler, Handler } from './server';
 import { Types } from './validator';
 
@@ -14,17 +14,20 @@ export type ApiType = 'Query' | 'Mutation' | 'Subscription';
 export interface ApiCall<Type extends ApiType, Arg, Res, Progress = void> {
     readonly type: Type;
     readonly input: Schema<Arg>;
-    readonly func: (Type extends 'Subscription'
-        ? (context: any, args: Arg, emit: (payload: Res) => void) => (() => MaybePromise<void>)
-        : (context: any, args: Arg) => MaybePromise<Res | AsyncGenerator<Progress, Res, never>>);
+    readonly func: Type extends 'Subscription'
+        ? (context: any, args: Arg, emit: (payload: Res) => void) => () => MaybePromise<void>
+        : (context: any, args: Arg) => MaybePromise<Res | AsyncGenerator<Progress, Res, never>>;
     readonly hooks: ApiCall<'Query', Arg, void>[];
 }
 
-export const _get = <Type extends ApiType>(type: Type) => <Arg, Res, Progress = void>(
-    schema: Schema<Arg>,
-    func: ApiCall<Type, Arg, Res, Progress>['func'],
-    hooks: ApiCall<'Query', Arg, void, void>[] = [],
-): ApiCall<Type, Arg, Res, Progress> => ({ input: schema, func, hooks, type } as const);
+export const _get =
+    <Type extends ApiType>(type: Type) =>
+    <Arg, Res, Progress = void>(
+        schema: Schema<Arg>,
+        func: ApiCall<Type, Arg, Res, Progress>['func'],
+        hooks: ApiCall<'Query', Arg, void, void>[] = [],
+    ): ApiCall<Type, Arg, Res, Progress> =>
+        ({ input: schema, func, hooks, type }) as const;
 
 export const Query = _get('Query');
 export const Mutation = _get('Mutation');
@@ -32,7 +35,11 @@ export const Subscription = _get('Subscription');
 
 export class BinaryResponse {
     [BINARY] = true;
-    constructor(public readonly data: Buffer, public filename: string) { }
+    constructor(
+        public readonly data: Buffer,
+        public filename: string,
+    ) {}
+
     static check(value: any): value is BinaryResponse {
         return value && typeof value === 'object' && BINARY in value && value[BINARY] === true;
     }
@@ -40,14 +47,14 @@ export class BinaryResponse {
 
 export class RedirectResponse {
     [REDIRECT] = true;
-    constructor(public readonly url: string) { }
+    constructor(public readonly url: string) {}
     static check(value: any): value is RedirectResponse {
         return value && typeof value === 'object' && REDIRECT in value && value[REDIRECT] === true;
     }
 }
 
 /** @deprecated TODO */
-export const NOP = Query(Schema.any(), () => { });
+export const NOP = Query(Schema.any(), () => {});
 
 export const APIS = {
     'query.batch': Query(Schema.array(Schema.object({ op: Schema.string(), args: Schema.any() })), () => ({})),
@@ -55,8 +62,8 @@ export const APIS = {
 } as const;
 export interface Apis {
     builtin: {
-        'query.batch': ApiCall<'Query', { op: string, args: any }[], { [key: string]: any }>;
-        'mutation.batch': ApiCall<'Mutation', { op: string, args: any }[], { [key: string]: any }>;
+        'query.batch': ApiCall<'Query', { op: string; args: any }[], { [key: string]: any }>;
+        'mutation.batch': ApiCall<'Mutation', { op: string; args: any }[], { [key: string]: any }>;
     };
     test: typeof TestApis;
 }
@@ -66,14 +73,18 @@ export type FlattenedApis = Apis[keyof Apis];
 type ProjectionSchemaId = 1;
 type MKeyOf<T> = T extends any ? keyof T : never;
 type MId<T> = { [K in MKeyOf<T>]: T[K] } & {};
-type ProjectionSchema<T> = T extends Array<infer U>
-    ? ProjectionSchema<U>
-    : { [K in keyof T]?: ProjectionSchemaId | ProjectionSchema<T[K]> } | Record<keyof any, ProjectionSchemaId | object>;
+type ProjectionSchema<T> =
+    T extends Array<infer U>
+        ? ProjectionSchema<U>
+        : { [K in keyof T]?: ProjectionSchemaId | ProjectionSchema<T[K]> } | Record<keyof any, ProjectionSchemaId | object>;
 type AsKeys<T> = T extends Array<infer U extends string> ? Record<U, 1> : T;
 type Projection<T, S> = S extends ProjectionSchemaId
-    ? T : T extends Array<infer U> ? Array<MId<Projection<U, S>>> : {
-        [K in keyof T & keyof S]: K extends keyof AsKeys<S> ? Projection<T[K], AsKeys<S>[K]> : never
-    };
+    ? T
+    : T extends Array<infer U>
+      ? Array<MId<Projection<U, S>>>
+      : {
+            [K in keyof T & keyof S]: K extends keyof AsKeys<S> ? Projection<T[K], AsKeys<S>[K]> : never;
+        };
 
 export const projection = <T, S extends ProjectionSchema<T>>(input: T, schema: S, serializeCtx?: any): Projection<T, S> => {
     if (typeof input !== 'object' || input === null) throw new Error('Input must be an object.');
@@ -95,8 +106,7 @@ export const projection = <T, S extends ProjectionSchema<T>>(input: T, schema: S
     return result;
 };
 
-export interface ApiExecutionContext {
-}
+export interface ApiExecutionContext {}
 
 function handleArguments(args: any) {
     try {
@@ -106,7 +116,10 @@ function handleArguments(args: any) {
         if (typeof args.projection === 'string') {
             args.projection = '{['.includes(args.projection[0])
                 ? JSON.parse(args.projection)
-                : args.projection.split(',').map((i) => i.trim()).filter((i) => i);
+                : args.projection
+                      .split(',')
+                      .map((i) => i.trim())
+                      .filter((i) => i);
         }
     } catch (e) {
         throw new BadRequestError('Invalid arguments');
@@ -145,13 +158,17 @@ export class ApiService extends Service {
     }
 
     async execute(
-        context: ApiExecutionContext, callOrName: ApiCall<ApiType, any, any> | string,
-        rawArgs: any, emitHook?: any, project?: any, sendPayload?: (payload: any) => void,
+        context: ApiExecutionContext,
+        callOrName: ApiCall<ApiType, any, any> | string,
+        rawArgs: any,
+        emitHook?: any,
+        project?: any,
+        sendPayload?: (payload: any) => void,
     ) {
         const call = typeof callOrName === 'string' ? APIS[callOrName] : callOrName;
         if (!call) throw new NotFoundError(callOrName);
         const { input, func, hooks } = call;
-        // eslint-disable-next-line no-await-in-loop
+
         for (const hook of hooks) await this.execute(context, hook, rawArgs);
 
         let args: any;
@@ -168,7 +185,7 @@ export class ApiService extends Service {
         if (result && typeof result === 'object' && 'next' in result) {
             const it = result as AsyncGenerator<any, any, never>;
             while (true) {
-                const value = await it.next(); // eslint-disable-line no-await-in-loop
+                const value = await it.next();
                 if (value.done) {
                     result = value;
                     break;
@@ -177,7 +194,7 @@ export class ApiService extends Service {
                 }
             }
         }
-        return (project && typeof result === 'object' && result !== null) ? projection(result, project, context) : result;
+        return project && typeof result === 'object' && result !== null ? projection(result, project, context) : result;
     }
 }
 
@@ -189,7 +206,7 @@ declare module 'cordis' {
 
 export class ApiHandler extends Handler {
     @param('op', Types.String)
-    async all({ }, op: string) {
+    async all({}, op: string) {
         if (!['get', 'post'].includes(this.request.method.toLowerCase())) {
             throw new MethodNotAllowedError(this.request.method);
         }
@@ -206,8 +223,11 @@ export class ApiHandler extends Handler {
         // @ts-ignore
         await this.ctx.parallel(`handler/api/before/${op}`, this);
         const result = await this.ctx.api.execute(
-            this, op, { domainId: this.args.domainId, ...this.args, ...(this.args.args || {}) },
-            (m, args) => (this.ctx.parallel as any)(m, args), this.args.projection,
+            this,
+            op,
+            { domainId: this.args.domainId, ...this.args, ...(this.args.args || {}) },
+            (m, args) => (this.ctx.parallel as any)(m, args),
+            this.args.projection,
         );
         if (BinaryResponse.check(result)) {
             this.binary(result.data, result.filename);
@@ -224,7 +244,7 @@ export class ApiConnectionHandler extends ConnectionHandler {
     isRpc: boolean;
 
     @param('op', Types.String)
-    async prepare({ }, op: string) {
+    async prepare({}, op: string) {
         if (op === 'rpc') {
             this.isRpc = true;
             return;
@@ -239,8 +259,12 @@ export class ApiConnectionHandler extends ConnectionHandler {
         // @ts-ignore
         await this.ctx.parallel(`handler/api/before/${op}`, this);
         this.dispose = await this.ctx.api.execute(
-            this, op, { domainId: this.args.domainId, ...this.args, ...(this.args.args || {}) },
-            (m, args) => (this.ctx.parallel as any)(m, args), this.args.projection, (p) => this.send(p),
+            this,
+            op,
+            { domainId: this.args.domainId, ...this.args, ...(this.args.args || {}) },
+            (m, args) => (this.ctx.parallel as any)(m, args),
+            this.args.projection,
+            (p) => this.send(p),
         );
     }
 
@@ -259,7 +283,11 @@ export class ApiConnectionHandler extends ConnectionHandler {
         }
         handleArguments(message);
         const result = await this.ctx.api.execute(
-            this, message.op, message.args, (m, args) => (this.ctx.parallel as any)(m, args), message.projection,
+            this,
+            message.op,
+            message.args,
+            (m, args) => (this.ctx.parallel as any)(m, args),
+            message.projection,
         );
         this.send(result);
     }
@@ -278,41 +306,53 @@ export async function applyApiHandler(ctx: Context, name: string, path: string) 
 }
 
 const TestApis = {
-    'test.query': Query(Schema.object({
-        name: Schema.string(),
-    }), (c, { name }) => ({
-        ok: true,
-        name,
-    })),
-    'test.mutation': Mutation(Schema.object({
-        name: Schema.string().required(),
-    }), (c, { name }) => ({
-        ok: true,
-        name,
-    })),
-    'test.mutation_progress': Mutation(Schema.object({
-        count: Schema.number().step(1).min(1).default(10),
-    }), async function* (c, { count }) {
-        for (let i = 1; i <= count; i++) {
-            yield { progress: i };
-        }
-        return {
+    'test.query': Query(
+        Schema.object({
+            name: Schema.string(),
+        }),
+        (c, { name }) => ({
             ok: true,
-            count,
-        };
-    }),
-    'test.subscription': Subscription(Schema.object({
-        initial: Schema.number().step(1).min(0).default(0),
-    }), (c, { initial }, send) => {
-        let count = initial;
-        const interval = setInterval(() => {
-            count++;
-            send({ count });
-        }, 1000);
-        return () => {
-            clearInterval(interval);
-        };
-    }),
+            name,
+        }),
+    ),
+    'test.mutation': Mutation(
+        Schema.object({
+            name: Schema.string().required(),
+        }),
+        (c, { name }) => ({
+            ok: true,
+            name,
+        }),
+    ),
+    'test.mutation_progress': Mutation(
+        Schema.object({
+            count: Schema.number().step(1).min(1).default(10),
+        }),
+        async function* (c, { count }) {
+            for (let i = 1; i <= count; i++) {
+                yield { progress: i };
+            }
+            return {
+                ok: true,
+                count,
+            };
+        },
+    ),
+    'test.subscription': Subscription(
+        Schema.object({
+            initial: Schema.number().step(1).min(0).default(0),
+        }),
+        (c, { initial }, send) => {
+            let count = initial;
+            const interval = setInterval(() => {
+                count++;
+                send({ count });
+            }, 1000);
+            return () => {
+                clearInterval(interval);
+            };
+        },
+    ),
 } as const;
 
 export function applyTestApis(ctx: Context) {

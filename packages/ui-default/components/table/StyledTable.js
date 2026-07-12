@@ -3,9 +3,7 @@ import responsiveCutoff from 'vj/breakpoints.json';
 import DOMAttachedObject from 'vj/components/DOMAttachedObject';
 import { isBelow } from 'vj/utils/mediaQuery';
 
-const navHeight = isBelow(responsiveCutoff.mobile)
-  ? 0
-  : $('.nav').height();
+const navHeight = isBelow(responsiveCutoff.mobile) ? 0 : $('.nav').height();
 
 export default class StyledTable extends DOMAttachedObject {
   static DOMAttachKey = 'vjStyledTableInstance';

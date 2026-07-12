@@ -17,7 +17,9 @@ describe('problem ACL preload', () => {
                     fencedPids: new Set([1]),
                 };
             },
-            (error) => { throw error; },
+            (error) => {
+                throw error;
+            },
         );
 
         expect(calls).to.equal(1);
@@ -39,7 +41,9 @@ describe('problem ACL preload', () => {
         await preloadProblemAcl(
             user,
             'system',
-            async () => { throw new Error('database unavailable'); },
+            async () => {
+                throw new Error('database unavailable');
+            },
             (error) => errors.push(error),
         );
 

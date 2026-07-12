@@ -3,19 +3,7 @@
  * difficulty, visibility, PID, with sidebar navigation and delete.
  */
 
-import {
-  AlertCircle,
-  CheckCircle2,
-  Download,
-  Eye,
-  EyeOff,
-  FileText,
-  Loader2,
-  Lock,
-  Save,
-  Tag,
-  Trash2,
-} from 'lucide-react';
+import { AlertCircle, CheckCircle2, Download, Eye, EyeOff, FileText, Loader2, Lock, Save, Tag, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { ProblemEditorWorkspace } from '@/components/problem-editor-workspace';
@@ -67,10 +55,10 @@ interface UserOption {
   avatarUrl?: string;
 }
 
-function PermitsPanel({ pid, pdocId, hidden }: { pid: string, pdocId: number, hidden: boolean }) {
+function PermitsPanel({ pid, pdocId, hidden }: { pid: string; pdocId: number; hidden: boolean }) {
   const bs = useBootstrap();
   const [permits, setPermits] = useState<PermitRow[]>([]);
-  const [udict, setUdict] = useState<Record<string, { _id: number, uname: string }>>({});
+  const [udict, setUdict] = useState<Record<string, { _id: number; uname: string }>>({});
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [open, setOpen] = useState(false);
@@ -95,31 +83,35 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string, pdocId: number, hi
       setLoaded(true);
     }
   }, [apiPid]);
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
-  const searchUsers = useCallback(async (query: string): Promise<UserOption[]> => {
-    const q = query.trim();
-    if (!q) return [];
-    const domainId = encodeURIComponent(bs.domain?.id || 'system');
-    const r = await fetch(`/d/${domainId}/api/users`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        args: { search: q, limit: 10, exact: false },
-        projection: ['_id', 'uname', 'mail', 'avatarUrl'],
-      }),
-    });
-    if (!r.ok) return [];
-    const users = await r.json();
-    return Array.isArray(users) ? users : [];
-  }, [bs.domain?.id]);
+  const searchUsers = useCallback(
+    async (query: string): Promise<UserOption[]> => {
+      const q = query.trim();
+      if (!q) return [];
+      const domainId = encodeURIComponent(bs.domain?.id || 'system');
+      const r = await fetch(`/d/${domainId}/api/users`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          args: { search: q, limit: 10, exact: false },
+          projection: ['_id', 'uname', 'mail', 'avatarUrl'],
+        }),
+      });
+      if (!r.ok) return [];
+      const users = await r.json();
+      return Array.isArray(users) ? users : [];
+    },
+    [bs.domain?.id],
+  );
 
   async function revoke(permitId: string) {
-    // eslint-disable-next-line no-alert
     if (!confirm('确定撤销该权限？')) return;
     const fd = new FormData();
     fd.set('permitId', permitId);
@@ -176,9 +168,7 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string, pdocId: number, hi
       </CardHeader>
       <CardContent className="space-y-2">
         {!hidden ? (
-          <p className="text-xs text-muted-foreground">
-            题目当前不是隐藏状态，无需邀请验题人。把题目设为「隐藏」并保存后即可邀请。
-          </p>
+          <p className="text-xs text-muted-foreground">题目当前不是隐藏状态，无需邀请验题人。把题目设为「隐藏」并保存后即可邀请。</p>
         ) : loadError ? (
           <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {loadError}
@@ -198,12 +188,13 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string, pdocId: number, hi
                       {p.role === 'maintainer' ? '维护者' : '验题人'}
                     </Badge>
                     {p.viaContest ? (
-                      <Badge variant="outline" className="text-[10px]">通过比赛邀请</Badge>
+                      <Badge variant="outline" className="text-[10px]">
+                        通过比赛邀请
+                      </Badge>
                     ) : null}
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    由 {udict[p.grantedBy]?.uname || `uid:${p.grantedBy}`} 邀请于{' '}
-                    {new Date(p.grantedAt).toLocaleString('zh-CN')}
+                    由 {udict[p.grantedBy]?.uname || `uid:${p.grantedBy}`} 邀请于 {new Date(p.grantedAt).toLocaleString('zh-CN')}
                     {p.note ? ` · ${p.note}` : ''}
                   </p>
                 </div>
@@ -221,17 +212,13 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string, pdocId: number, hi
         onOpenChange={(v) => {
           setOpen(v);
           if (!v) setInviteError('');
-        }}>
+        }}
+      >
         <DialogContent className="w-full overflow-visible sm:w-[560px]" onClose={() => setOpen(false)}>
           <DialogHeader>
             <DialogTitle>邀请验题人</DialogTitle>
           </DialogHeader>
-          <form
-            method="post"
-            action={`/p/${apiPid}/permits`}
-            className="space-y-4 p-5"
-            onSubmit={submitInvite}
-          >
+          <form method="post" action={`/p/${apiPid}/permits`} className="space-y-4 p-5" onSubmit={submitInvite}>
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">用户 UID</label>
               <MultiSelect<UserOption>
@@ -270,16 +257,18 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string, pdocId: number, hi
                 verifier finds issues, DMs author, author edits. */}
             <input type="hidden" name="role" value="verifier" />
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground" htmlFor="permit-note">附言（可选，会附在通知里）</label>
+              <label className="text-xs text-muted-foreground" htmlFor="permit-note">
+                附言（可选，会附在通知里）
+              </label>
               <Input id="permit-note" name="note" placeholder="例：帮我测一下边界数据" />
             </div>
             {inviteError ? (
-              <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                {inviteError}
-              </p>
+              <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">{inviteError}</p>
             ) : null}
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={inviteBusy}>取消</Button>
+              <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={inviteBusy}>
+                取消
+              </Button>
               <Button type="submit" disabled={inviteBusy || selectedUsers.length === 0}>
                 {inviteBusy ? '发送中…' : '发送邀请'}
               </Button>
@@ -306,9 +295,10 @@ export function ProblemEditPage() {
   const filesBase = pdoc.docId ? `${problemUrl}/files` : '';
 
   const rawContent = pdoc.content || '';
-  const contentValue = typeof rawContent === 'string' || (rawContent && typeof rawContent === 'object' && !Array.isArray(rawContent))
-    ? rawContent
-    : String(rawContent || '');
+  const contentValue =
+    typeof rawContent === 'string' || (rawContent && typeof rawContent === 'object' && !Array.isArray(rawContent))
+      ? rawContent
+      : String(rawContent || '');
   const [draftContent, setDraftContent] = useState<string | R>(contentValue);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState('');
@@ -335,7 +325,7 @@ export function ProblemEditPage() {
   const markDirty = useCallback(() => {
     editVersion.current += 1;
     setSaveError('');
-    setSaveState((current) => current === 'saving' ? current : 'dirty');
+    setSaveState((current) => (current === 'saving' ? current : 'dirty'));
   }, []);
 
   const handleDownloadPackage = useCallback(async () => {
@@ -344,16 +334,18 @@ export function ProblemEditPage() {
     setDownloadError('');
     try {
       const fd = formRef.current ? new FormData(formRef.current) : null;
-      const packagePdoc = fd ? {
-        ...pdoc,
-        pid: String(fd.get('pid') || pdoc.pid || ''),
-        title: String(fd.get('title') || pdoc.title || ''),
-        tag: String(fd.get('tag') || '')
-          .split(',')
-          .map((tag) => tag.trim())
-          .filter(Boolean),
-        difficulty: Number(fd.get('difficulty') || pdoc.difficulty || 0),
-      } : pdoc;
+      const packagePdoc = fd
+        ? {
+            ...pdoc,
+            pid: String(fd.get('pid') || pdoc.pid || ''),
+            title: String(fd.get('title') || pdoc.title || ''),
+            tag: String(fd.get('tag') || '')
+              .split(',')
+              .map((tag) => tag.trim())
+              .filter(Boolean),
+            difficulty: Number(fd.get('difficulty') || pdoc.difficulty || 0),
+          }
+        : pdoc;
       await downloadProblemPackage({
         pdoc: packagePdoc,
         problemUrl,
@@ -388,9 +380,7 @@ export function ProblemEditPage() {
         headers: { Accept: 'application/json' },
       });
       if (!editRes.ok) {
-        let message = editRes.status === 409
-          ? '题目已被其他操作修改或锁定，请刷新后重试。'
-          : `保存失败：HTTP ${editRes.status}`;
+        let message = editRes.status === 409 ? '题目已被其他操作修改或锁定，请刷新后重试。' : `保存失败：HTTP ${editRes.status}`;
         try {
           const body = await editRes.json();
           const serverMessage = body?.error?.message || body?.message || body?.error;
@@ -417,10 +407,30 @@ export function ProblemEditPage() {
 
   const status = (
     <span aria-live="polite" className="inline-flex min-h-9 items-center gap-1.5 text-xs text-muted-foreground">
-      {saveState === 'saving' ? <><Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" />保存中</> : null}
-      {saveState === 'dirty' ? <><span className="size-1.5 rounded-full bg-amber-500" />有未保存修改</> : null}
-      {saveState === 'saved' ? <><CheckCircle2 className="size-3.5 text-emerald-600" />已保存</> : null}
-      {saveState === 'error' ? <><AlertCircle className="size-3.5 text-destructive" />保存失败</> : null}
+      {saveState === 'saving' ? (
+        <>
+          <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" />
+          保存中
+        </>
+      ) : null}
+      {saveState === 'dirty' ? (
+        <>
+          <span className="size-1.5 rounded-full bg-amber-500" />
+          有未保存修改
+        </>
+      ) : null}
+      {saveState === 'saved' ? (
+        <>
+          <CheckCircle2 className="size-3.5 text-emerald-600" />
+          已保存
+        </>
+      ) : null}
+      {saveState === 'error' ? (
+        <>
+          <AlertCircle className="size-3.5 text-destructive" />
+          保存失败
+        </>
+      ) : null}
       {saveState === 'idle' && !isCreate ? '已载入服务器版本' : null}
     </span>
   );
@@ -462,31 +472,30 @@ export function ProblemEditPage() {
           </p>
         ) : null}
 
-        <form
-          id="programming-problem-form"
-          ref={formRef}
-          method="post"
-          onSubmit={handleSave}
-          onChange={markDirty}
-          className="space-y-6"
-        >
+        <form id="programming-problem-form" ref={formRef} method="post" onSubmit={handleSave} onChange={markDirty} className="space-y-6">
           {!isCreate && pdoc.problemKind && pdoc.structureRevision ? (
             <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision)} />
           ) : null}
 
           <section id="basic" aria-labelledby="basic-heading" className="scroll-mt-44 rounded-2xl border border-border/70 bg-card/30">
             <header className="border-b border-border/60 px-5 py-4">
-              <h2 id="basic-heading" className="text-base font-semibold tracking-tight">基本信息</h2>
+              <h2 id="basic-heading" className="text-base font-semibold tracking-tight">
+                基本信息
+              </h2>
               <p className="mt-1 text-sm text-muted-foreground">设置题目在题库中的识别信息，不影响评测数据。</p>
             </header>
             <div className="space-y-5 p-5">
               <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_13rem]">
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium" htmlFor="edit-title">标题</label>
+                  <label className="text-sm font-medium" htmlFor="edit-title">
+                    标题
+                  </label>
                   <Input id="edit-title" name="title" defaultValue={pdoc.title || ''} placeholder="题目标题" required />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium" htmlFor="edit-pid">题目编号</label>
+                  <label className="text-sm font-medium" htmlFor="edit-pid">
+                    题目编号
+                  </label>
                   <Input
                     id="edit-pid"
                     name="pid"
@@ -500,7 +509,8 @@ export function ProblemEditPage() {
               <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_13rem]">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium" htmlFor="edit-tag">
-                    <Tag className="mr-1 inline-block size-3.5" />标签
+                    <Tag className="mr-1 inline-block size-3.5" />
+                    标签
                   </label>
                   <Input
                     id="edit-tag"
@@ -511,14 +521,22 @@ export function ProblemEditPage() {
                   />
                   {tagInput ? (
                     <div className="flex flex-wrap gap-1 pt-1">
-                      {tagInput.split(',').map((tag) => tag.trim()).filter(Boolean).map((tag) => (
-                        <Badge key={tag} variant="secondary" className="text-[10px]">{tag}</Badge>
-                      ))}
+                      {tagInput
+                        .split(',')
+                        .map((tag) => tag.trim())
+                        .filter(Boolean)
+                        .map((tag) => (
+                          <Badge key={tag} variant="secondary" className="text-[10px]">
+                            {tag}
+                          </Badge>
+                        ))}
                     </div>
                   ) : null}
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium" htmlFor="edit-difficulty">难度</label>
+                  <label className="text-sm font-medium" htmlFor="edit-difficulty">
+                    难度
+                  </label>
                   <SimpleSelect
                     id="edit-difficulty"
                     name="difficulty"
@@ -534,7 +552,9 @@ export function ProblemEditPage() {
             <header className="flex items-start gap-3 border-b border-border/60 px-5 py-4">
               <FileText className="mt-0.5 size-4 text-muted-foreground" aria-hidden="true" />
               <div>
-                <h2 id="statement-heading" className="text-base font-semibold tracking-tight">题面</h2>
+                <h2 id="statement-heading" className="text-base font-semibold tracking-tight">
+                  题面
+                </h2>
                 <p className="mt-1 text-sm text-muted-foreground">Markdown 内容；粘贴图片继续使用现有附加文件 API。</p>
               </div>
             </header>
@@ -547,11 +567,15 @@ export function ProblemEditPage() {
                   markDirty();
                 }}
                 minHeight={440}
-                pasteUpload={filesBase ? {
-                  endpoint: filesBase,
-                  meta: { type: 'additional_file' },
-                  makeUrl: (filename) => `file://${filename}`,
-                } : undefined}
+                pasteUpload={
+                  filesBase
+                    ? {
+                        endpoint: filesBase,
+                        meta: { type: 'additional_file' },
+                        makeUrl: (filename) => `file://${filename}`,
+                      }
+                    : undefined
+                }
                 previewFileUrl={(filename, original) => {
                   const queryIndex = original.indexOf('?');
                   const query = queryIndex >= 0 ? original.slice(queryIndex) : '';
@@ -563,7 +587,9 @@ export function ProblemEditPage() {
 
           <section id="permissions" aria-labelledby="permissions-heading" className="scroll-mt-44 rounded-2xl border border-border/70 bg-card/30">
             <header className="border-b border-border/60 px-5 py-4">
-              <h2 id="permissions-heading" className="text-base font-semibold tracking-tight">权限与可见性</h2>
+              <h2 id="permissions-heading" className="text-base font-semibold tracking-tight">
+                权限与可见性
+              </h2>
               <p className="mt-1 text-sm text-muted-foreground">新题固定以隐藏状态创建；发布与维护权限沿用现有模型。</p>
             </header>
             <div className="grid gap-4 p-5 sm:grid-cols-2">
@@ -577,7 +603,8 @@ export function ProblemEditPage() {
               <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-muted/45 px-3">
                 <Checkbox name="lockHidden" defaultChecked={!!pdoc.lockHidden} />
                 <span className="flex items-center gap-1.5 text-sm">
-                  <Lock className="size-3.5" />锁定隐藏（比赛结束后不自动公开）
+                  <Lock className="size-3.5" />
+                  锁定隐藏（比赛结束后不自动公开）
                 </span>
               </label>
             </div>
@@ -587,18 +614,25 @@ export function ProblemEditPage() {
             <section aria-labelledby="danger-heading" className="rounded-2xl border border-destructive/25 bg-destructive/[0.025] p-5">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h2 id="danger-heading" className="text-sm font-semibold text-destructive">危险操作</h2>
+                  <h2 id="danger-heading" className="text-sm font-semibold text-destructive">
+                    危险操作
+                  </h2>
                   <p className="mt-1 text-xs text-muted-foreground">删除将同时移除题目文件、提交记录和讨论。</p>
                 </div>
                 {!showDeleteConfirm ? (
                   <Button type="button" variant="destructive" size="sm" onClick={() => setShowDeleteConfirm(true)}>
-                    <Trash2 className="mr-1 size-3.5" />删除题目
+                    <Trash2 className="mr-1 size-3.5" />
+                    删除题目
                   </Button>
                 ) : (
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-medium text-destructive">确认永久删除？</span>
-                    <Button type="submit" name="operation" value="delete" variant="destructive" size="sm">确认删除</Button>
-                    <Button type="button" variant="outline" size="sm" onClick={() => setShowDeleteConfirm(false)}>取消</Button>
+                    <Button type="submit" name="operation" value="delete" variant="destructive" size="sm">
+                      确认删除
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setShowDeleteConfirm(false)}>
+                      取消
+                    </Button>
                   </div>
                 )}
               </div>

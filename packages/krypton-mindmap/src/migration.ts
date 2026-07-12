@@ -12,7 +12,7 @@ import { seedDefaultTreeIfEmpty } from './db';
 const logger = new Logger('mindmap.migration');
 const MIGRATION_FLAG = 'mindmap.migration_v1_done';
 
-async function migrateV1(_ctx: Context): Promise<void> {
+async function migrateV1(_ctx: Context): Promise<boolean> {
     return await oncePerSetting(MIGRATION_FLAG, async () => {
         await seedDefaultTreeIfEmpty();
         logger.info('seeded default mindmap tree (if empty)');

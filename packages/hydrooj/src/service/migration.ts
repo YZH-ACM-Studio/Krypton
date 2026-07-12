@@ -1,4 +1,3 @@
-/* eslint-disable no-await-in-loop */
 import cac from 'cac';
 import { Logger } from '@hydrooj/utils';
 import { Context, Service } from '../context';
@@ -75,7 +74,7 @@ export default class MigrationService extends Service {
                     logger.warn('To prevent data corruption, the startup has been aborted.');
                     logger.warn('If you want to continue, use --ignore-version on startup.');
                     logger.warn('Do it at your own risk.');
-                    await new Promise(() => { });
+                    await new Promise(() => {});
                 }
             }
             while (dbVer < expected) {
@@ -88,9 +87,11 @@ export default class MigrationService extends Service {
                 if ('dontWait' in func) {
                     logger.info('[Background Task]');
                     // For those scripts we don't really care if they fail
-                    func(this.ctx).then(() => {
-                        logger.info('Background Task Completed [%s]: from %d to %d', channel, func.dontWait, expected);
-                    }).catch(logger.error);
+                    func(this.ctx)
+                        .then(() => {
+                            logger.info('Background Task Completed [%s]: from %d to %d', channel, func.dontWait, expected);
+                        })
+                        .catch(logger.error);
                 } else {
                     const result = await func(this.ctx);
                     if (!result) break;

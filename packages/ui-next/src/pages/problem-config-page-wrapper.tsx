@@ -17,19 +17,8 @@ export function ProblemConfigPage() {
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
 
   return (
-    <ProblemEditorWorkspace
-      page="config"
-      problemUrl={problemUrl}
-      title={pdoc.title || String(pid)}
-      pid={String(pid)}
-    >
-      <ProblemConfigEditor
-        problemUrl={problemUrl}
-        pdoc={pdoc}
-        files={testdata}
-        initialYaml={config}
-        embedded
-      />
+    <ProblemEditorWorkspace page="config" problemUrl={problemUrl} title={pdoc.title || String(pid)} pid={String(pid)}>
+      <ProblemConfigEditor problemUrl={problemUrl} pdoc={pdoc} files={testdata} initialYaml={config} embedded />
     </ProblemEditorWorkspace>
   );
 }

@@ -63,11 +63,7 @@ export function ExamModeHomePage() {
               <Swords className="size-5 text-primary" />
               <h1 className="text-xl font-semibold">考试入口</h1>
             </div>
-            <p className="text-sm text-muted-foreground">
-              {live.length > 0
-                ? `当前有 ${live.length} 场考试可进入`
-                : '当前没有正在进行的考试'}
-            </p>
+            <p className="text-sm text-muted-foreground">{live.length > 0 ? `当前有 ${live.length} 场考试可进入` : '当前没有正在进行的考试'}</p>
           </div>
           {data.user.realName && (
             <div className="text-right text-sm">
@@ -106,9 +102,7 @@ function EmptyWaitingState({ next }: { next: ExamCardData | undefined }) {
     >
       <Hourglass className="mx-auto size-12 text-muted-foreground/40" />
       <h2 className="mt-4 text-lg font-semibold">等待考试开始</h2>
-      <p className="mt-1 text-sm text-muted-foreground">
-        当前没有可进入的考试。监考服务正常 — 请保持本机器在线，到点会自动可见。
-      </p>
+      <p className="mt-1 text-sm text-muted-foreground">当前没有可进入的考试。监考服务正常 — 请保持本机器在线，到点会自动可见。</p>
       {next && (
         <div className="mx-auto mt-6 inline-flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
           <Clock className="size-4 text-muted-foreground" />
@@ -133,15 +127,19 @@ function ExamCard({ exam, disabled }: { exam: ExamCardData; disabled?: boolean }
           <h3 className="line-clamp-2 font-semibold">{exam.title}</h3>
           <div className="flex flex-wrap gap-1.5">
             <Badge variant="outline" className="gap-1 text-[10px]">
-              <Calendar className="size-3" />{exam.pids.length} 题
+              <Calendar className="size-3" />
+              {exam.pids.length} 题
             </Badge>
             {exam.lockdownMode && (
               <Badge variant="outline" className="gap-1 text-[10px]">
-                <Lock className="size-3" />屏幕锁定
+                <Lock className="size-3" />
+                屏幕锁定
               </Badge>
             )}
             {exam.approvalMode === 'strict' && (
-              <Badge variant="outline" className="text-[10px]">人工审核</Badge>
+              <Badge variant="outline" className="text-[10px]">
+                人工审核
+              </Badge>
             )}
           </div>
         </div>

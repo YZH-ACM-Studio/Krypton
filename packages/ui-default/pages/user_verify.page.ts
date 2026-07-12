@@ -18,11 +18,10 @@ async function verifywebauthn($form) {
     return null;
   }
   Notification.info(i18n('Please follow the instructions on your device to complete the verification.'));
-  const result = await startAuthentication({ optionsJSON: authnInfo.authOptions })
-    .catch((e) => {
-      Notification.error(i18n('Failed to get credential: {0}', e));
-      return null;
-    });
+  const result = await startAuthentication({ optionsJSON: authnInfo.authOptions }).catch((e) => {
+    Notification.error(i18n('Failed to get credential: {0}', e));
+    return null;
+  });
   if (!result) return null;
   try {
     const authn = await request.post('/user/webauthn', {
@@ -86,7 +85,7 @@ export default new AutoloadPage('user_verify', () => {
         }
       };
       $(document).on('keydown', handleKeyDown);
-      let action = (authn && tfa) ? await chooseAction(true) : '';
+      let action = authn && tfa ? await chooseAction(true) : '';
       action ||= tfa ? await chooseAction(false) : 'webauthn';
       $(document).off('keydown', handleKeyDown);
       if (action === 'webauthn') {

@@ -18,9 +18,7 @@
  */
 import yaml from 'js-yaml';
 import { ObjectId } from 'mongodb';
-import {
-    Context, Handler, OplogModel, param, PERM, PermissionError, Types,
-} from 'hydrooj';
+import { Context, Handler, OplogModel, param, PERM, PermissionError, Types } from 'hydrooj';
 import { ForbiddenError } from '../error';
 import { requireAuthToken } from '../lib/auth-token';
 import { Logger } from '../logger';
@@ -32,11 +30,17 @@ const importColl = db.collection('crawler.imported');
 const logger = new Logger('crawler');
 
 function normTime(s: string): string {
-    const t = String(s || '').replace(/\s/g, '').toLowerCase();
-    return /\d+ms$/.test(t) ? t : (/^\d+$/.test(t) ? `${t}ms` : '1000ms');
+    const t = String(s || '')
+        .replace(/\s/g, '')
+        .toLowerCase();
+    return /\d+ms$/.test(t) ? t : /^\d+$/.test(t) ? `${t}ms` : '1000ms';
 }
 function normMemory(s: string): string {
-    const m = String(s || '').replace(/\s/g, '').toLowerCase().replace(/kb$/, 'k').replace(/mb$/, 'm');
+    const m = String(s || '')
+        .replace(/\s/g, '')
+        .toLowerCase()
+        .replace(/kb$/, 'k')
+        .replace(/mb$/, 'm');
     return /^\d+[km]$/.test(m) ? m : '256m';
 }
 
@@ -58,9 +62,7 @@ async function loadCrawlerProblemAcl(user: any, domainId: string): Promise<void>
         const permits = (global.Hydro?.model as any)?.permits;
         if (typeof permits?.loadAclForUser !== 'function') throw new Error('permits.loadAclForUser is unavailable');
         const loaded = await permits.loadAclForUser(domainId, Number(user?._id) || 0);
-        if (!(loaded?.permitPids instanceof Set)
-            || !(loaded?.maintainedPids instanceof Set)
-            || !(loaded?.fencedPids instanceof Set)) {
+        if (!(loaded?.permitPids instanceof Set) || !(loaded?.maintainedPids instanceof Set) || !(loaded?.fencedPids instanceof Set)) {
             throw new TypeError('permits.loadAclForUser returned an invalid ACL snapshot');
         }
         Object.assign(user, {
@@ -73,10 +75,7 @@ async function loadCrawlerProblemAcl(user: any, domainId: string): Promise<void>
         problem.assertProblemAclDomain(user, domainId);
     } catch (error) {
         denyProblemAcl(user);
-        logger.error(
-            'Crawler ACL preload failed domain=%s uid=%d error=%s',
-            domainId, Number(user?._id) || 0, error,
-        );
+        logger.error('Crawler ACL preload failed domain=%s uid=%d error=%s', domainId, Number(user?._id) || 0, error);
         throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
     }
 }
@@ -119,9 +118,16 @@ class CrawlerProblemHandler extends CrawlerApiHandler {
     @param('timeLimit', Types.String, true)
     @param('memoryLimit', Types.String, true)
     async post(
-        _args: any, title: string, content: string, sourceUrl: string,
-        source: string, pid: string, cid: number, problemId: string,
-        timeLimit: string, memoryLimit: string,
+        _args: any,
+        title: string,
+        content: string,
+        sourceUrl: string,
+        source: string,
+        pid: string,
+        cid: number,
+        problemId: string,
+        timeLimit: string,
+        memoryLimit: string,
     ) {
         this.checkPerm(PERM.PERM_CREATE_PROBLEM);
         const domainId = this.crawlerDomain;
@@ -150,7 +156,9 @@ class CrawlerProblemHandler extends CrawlerApiHandler {
                 { $set: { updatedAt: new Date(), timeLimit: timeLimit || '', memoryLimit: memoryLimit || '' } },
             );
             await OplogModel.log(this as any, 'crawler.update', {
-                worker: this.user.uname, docId: existing.docId, sourceUrl: url,
+                worker: this.user.uname,
+                docId: existing.docId,
+                sourceUrl: url,
             });
             this.response.body = { pid: existing.pid, docId: existing.docId, updated: true };
             return;
@@ -186,10 +194,7 @@ class CrawlerProblemHandler extends CrawlerApiHandler {
                 try {
                     await problem.del(domainId, docId);
                 } catch (cleanupError) {
-                    logger.error(
-                        'Crawler duplicate cleanup failed domain=%s docId=%d error=%s',
-                        domainId, docId, cleanupError,
-                    );
+                    logger.error('Crawler duplicate cleanup failed domain=%s docId=%d error=%s', domainId, docId, cleanupError);
                     throw cleanupError;
                 }
                 const winner = await importColl.findOne({ domainId, sourceUrl: url });
@@ -210,7 +215,11 @@ class CrawlerProblemHandler extends CrawlerApiHandler {
             throw e;
         }
         await OplogModel.log(this as any, 'crawler.create', {
-            worker: this.user.uname, docId, pid: realPid, sourceUrl: url, source,
+            worker: this.user.uname,
+            docId,
+            pid: realPid,
+            sourceUrl: url,
+            source,
         });
         this.response.body = { pid: realPid, docId, updated: false };
     }
@@ -240,10 +249,8 @@ class CrawlerTestdataHandler extends CrawlerApiHandler {
             }
             const rawCases = Array.isArray(item?.cases) ? item.cases : [];
             // drop blank cases (both input & output empty) so we never unhide junk.
-            const cases = rawCases.filter(
-                (c: any) => c && (String(c.input ?? '') !== '' || String(c.output ?? '') !== ''),
-            );
-            // eslint-disable-next-line no-await-in-loop
+            const cases = rawCases.filter((c: any) => c && (String(c.input ?? '') !== '' || String(c.output ?? '') !== ''));
+
             const rec = await importColl.findOne({
                 domainId,
                 cid: Number.isInteger(cid) ? cid : null,
@@ -258,48 +265,35 @@ class CrawlerTestdataHandler extends CrawlerApiHandler {
                 continue;
             }
             try {
-                // eslint-disable-next-line no-await-in-loop
                 await requireMaintainedProblem(domainId, rec.docId, this.user);
-                const yamlCases: { input: string, output: string }[] = [];
-                // eslint-disable-next-line no-await-in-loop
-                await problem.withAuthorizedStructuralWriteClaim(
-                    domainId,
-                    rec.docId,
-                    this.user,
-                    'crawler-testdata-replace',
-                    async (claim) => {
-                        const cur = await problem.get(domainId, rec.docId);
-                        if (!cur) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
-                        // Clean replace under one durable claim. Revocation cannot
-                        // interleave between storage, config mirror, and publish.
-                        const oldNames = ((cur as any).data || []).map((d: any) => d.name).filter(Boolean);
-                        if (oldNames.length) {
-                            await problem.delTestdataWithClaim(claim, oldNames, this.user._id);
-                        }
-                        for (let i = 0; i < cases.length; i++) {
-                            const inName = `${i + 1}.in`;
-                            const outName = `${i + 1}.out`;
-                            // eslint-disable-next-line no-await-in-loop
-                            await problem.addTestdataWithClaim(
-                                claim, inName, String(cases[i]?.input ?? ''), this.user._id,
-                            );
-                            // eslint-disable-next-line no-await-in-loop
-                            await problem.addTestdataWithClaim(
-                                claim, outName, String(cases[i]?.output ?? ''), this.user._id,
-                            );
-                            yamlCases.push({ input: inName, output: outName });
-                        }
-                        const config = {
-                            time: normTime(rec.timeLimit),
-                            memory: normMemory(rec.memoryLimit),
-                            subtasks: [{ score: 100, type: 'min', cases: yamlCases }],
-                        };
-                        await problem.addTestdataWithClaim(
-                            claim, 'config.yaml', yaml.dump(config), this.user._id,
-                        );
-                        await problem.editWithClaim(claim, { hidden: false });
-                    },
-                );
+                const yamlCases: { input: string; output: string }[] = [];
+
+                await problem.withAuthorizedStructuralWriteClaim(domainId, rec.docId, this.user, 'crawler-testdata-replace', async (claim) => {
+                    const cur = await problem.get(domainId, rec.docId);
+                    if (!cur) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
+                    // Clean replace under one durable claim. Revocation cannot
+                    // interleave between storage, config mirror, and publish.
+                    const oldNames = ((cur as any).data || []).map((d: any) => d.name).filter(Boolean);
+                    if (oldNames.length) {
+                        await problem.delTestdataWithClaim(claim, oldNames, this.user._id);
+                    }
+                    for (let i = 0; i < cases.length; i++) {
+                        const inName = `${i + 1}.in`;
+                        const outName = `${i + 1}.out`;
+
+                        await problem.addTestdataWithClaim(claim, inName, String(cases[i]?.input ?? ''), this.user._id);
+
+                        await problem.addTestdataWithClaim(claim, outName, String(cases[i]?.output ?? ''), this.user._id);
+                        yamlCases.push({ input: inName, output: outName });
+                    }
+                    const config = {
+                        time: normTime(rec.timeLimit),
+                        memory: normMemory(rec.memoryLimit),
+                        subtasks: [{ score: 100, type: 'min', cases: yamlCases }],
+                    };
+                    await problem.addTestdataWithClaim(claim, 'config.yaml', yaml.dump(config), this.user._id);
+                    await problem.editWithClaim(claim, { hidden: false });
+                });
                 unhidden++;
                 results.push({ cid, problemId, docId: rec.docId, ok: true, cases: yamlCases.length });
             } catch (e: any) {
@@ -307,12 +301,14 @@ class CrawlerTestdataHandler extends CrawlerApiHandler {
                     cid,
                     problemId,
                     ok: false,
-                    error: e instanceof PermissionError ? 'not_found' : (e?.message || 'failed'),
+                    error: e instanceof PermissionError ? 'not_found' : e?.message || 'failed',
                 });
             }
         }
         await OplogModel.log(this as any, 'crawler.testdata', {
-            worker: this.user.uname, ok: results.filter((r) => r.ok).length, unhidden,
+            worker: this.user.uname,
+            ok: results.filter((r) => r.ok).length,
+            unhidden,
         });
         this.response.body = { results };
     }

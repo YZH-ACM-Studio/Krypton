@@ -11,15 +11,11 @@
  * 草稿存 localStorage（按题目+比赛+用户隔离），提交成功后清除并跳转
  * 评测记录页。普通题目页 / 比赛 / homework（submitUrl 带 ?tid=）通用。
  */
-import {
-  AlertTriangle, Loader2, RotateCcw, Send,
-} from 'lucide-react';
+import { AlertTriangle, Loader2, RotateCcw, Send } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import * as YAML from 'yaml';
 import { MarkdownView } from '@/components/markdown-renderer';
-import {
-  BlankRenderer, FillProgramRenderer, MultiChoiceRenderer, SingleChoiceRenderer,
-} from '@/components/paper/paper-shell';
+import { BlankRenderer, FillProgramRenderer, MultiChoiceRenderer, SingleChoiceRenderer } from '@/components/paper/paper-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -36,7 +32,11 @@ export interface ObjectiveClientQuestion {
 }
 
 const KIND_LABEL: Record<string, string> = {
-  single: '单选', multi: '多选', blank: '填空', fill_program: '程序填空', subjective: '主观题',
+  single: '单选',
+  multi: '多选',
+  blank: '填空',
+  fill_program: '程序填空',
+  subjective: '主观题',
 };
 
 type AnswerMap = Record<string, string | string[]>;
@@ -45,7 +45,7 @@ function loadDraft(storageKey: string): AnswerMap {
   try {
     const raw = window.localStorage.getItem(storageKey);
     const parsed = raw ? JSON.parse(raw) : null;
-    return (parsed && typeof parsed === 'object') ? parsed : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
   } catch {
     return {};
   }
@@ -65,22 +65,29 @@ function answered(v: string | string[] | undefined): boolean {
  * multi 的标准答案必为字母数组，保留字母解析。
  */
 function LetterFallback({
-  kind, value, onChange,
+  kind,
+  value,
+  onChange,
 }: {
   kind: 'single' | 'multi';
   value: string | string[];
   onChange: (next: string | string[]) => void;
 }) {
   if (kind === 'multi') {
-    const display = Array.isArray(value) ? value.join('') : (value || '');
+    const display = Array.isArray(value) ? value.join('') : value || '';
     return (
       <div className="space-y-1">
         <Input
           value={display}
           onChange={(e) => {
-            const letters = Array.from(new Set(
-              e.target.value.toUpperCase().replace(/[^A-Z]/g, '').split(''),
-            )).sort();
+            const letters = Array.from(
+              new Set(
+                e.target.value
+                  .toUpperCase()
+                  .replace(/[^A-Z]/g, '')
+                  .split(''),
+              ),
+            ).sort();
             onChange(letters);
           }}
           placeholder="输入选项字母组合，如 ACD"
@@ -93,7 +100,7 @@ function LetterFallback({
   return (
     <div className="space-y-1">
       <Input
-        value={Array.isArray(value) ? (value[0] || '') : (value || '')}
+        value={Array.isArray(value) ? value[0] || '' : value || ''}
         onChange={(e) => {
           const raw = e.target.value;
           // 单个小写字母视为选项，自动大写；其他内容（数字/单词）原样。
@@ -108,7 +115,11 @@ function LetterFallback({
 }
 
 export function ObjectiveAnswerPanel({
-  questions, submitUrl, storageKey, signedIn, previewOnly = false,
+  questions,
+  submitUrl,
+  storageKey,
+  signedIn,
+  previewOnly = false,
 }: {
   questions: ObjectiveClientQuestion[];
   submitUrl: string;
@@ -132,16 +143,23 @@ export function ObjectiveAnswerPanel({
   const set = (key: string, v: string | string[]) => {
     setAnswers((prev) => {
       const next = { ...prev, [key]: v };
-      try { window.localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* 隐私模式等 */ }
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify(next));
+      } catch {
+        /* 隐私模式等 */
+      }
       return next;
     });
   };
 
   const clearAll = () => {
-    // eslint-disable-next-line no-alert
     if (!window.confirm('清空本题全部已选答案？')) return;
     setAnswers({});
-    try { window.localStorage.removeItem(storageKey); } catch { /* ignore */ }
+    try {
+      window.localStorage.removeItem(storageKey);
+    } catch {
+      /* ignore */
+    }
   };
 
   const totalScore = questions.reduce((s, q) => s + (q.score || 0), 0);
@@ -149,9 +167,9 @@ export function ObjectiveAnswerPanel({
 
   const submit = async () => {
     const missing = questions.length - answeredCount;
-    // eslint-disable-next-line no-alert
+
     if (missing > 0 && !window.confirm(`还有 ${missing} 道题未作答，确认提交？`)) return;
-    // eslint-disable-next-line no-alert
+
     if (missing === 0 && !window.confirm('确认提交全部答案？')) return;
     setSubmitting(true);
     setError('');
@@ -166,9 +184,7 @@ export function ObjectiveAnswerPanel({
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
           lang: '_',
-          code: questions.length === 1 && questions[0].kind === 'subjective'
-            ? String(payload[questions[0].key] || '')
-            : YAML.stringify(payload),
+          code: questions.length === 1 && questions[0].kind === 'subjective' ? String(payload[questions[0].key] || '') : YAML.stringify(payload),
         }),
         credentials: 'same-origin',
       });
@@ -176,7 +192,11 @@ export function ObjectiveAnswerPanel({
       if (!res.ok || data?.error) {
         throw new Error(data?.error?.message || `提交失败（HTTP ${res.status}）`);
       }
-      try { window.localStorage.removeItem(storageKey); } catch { /* ignore */ }
+      try {
+        window.localStorage.removeItem(storageKey);
+      } catch {
+        /* ignore */
+      }
       const rid = data?.rid ? String(data.rid) : '';
       window.location.href = data?.url || (rid ? `/record/${rid}` : submitUrl);
     } catch (e: any) {
@@ -195,7 +215,8 @@ export function ObjectiveAnswerPanel({
           </span>
           <div className="flex-1" />
           <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={clearAll} disabled={submitting}>
-            <RotateCcw className="size-3" />清空
+            <RotateCcw className="size-3" />
+            清空
           </Button>
         </div>
 
@@ -204,15 +225,19 @@ export function ObjectiveAnswerPanel({
             <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-2">
               <span className="text-sm font-medium">第 {q.key} 题</span>
               <Badge variant="secondary" className="text-[10px]">
-                {q.presentation === 'truefalse' ? '判断' : (KIND_LABEL[q.kind] || q.kind)}
+                {q.presentation === 'truefalse' ? '判断' : KIND_LABEL[q.kind] || q.kind}
               </Badge>
-              {answered(answers[q.key]) ? <Badge variant="outline" className="text-[10px]">已答</Badge> : null}
+              {answered(answers[q.key]) ? (
+                <Badge variant="outline" className="text-[10px]">
+                  已答
+                </Badge>
+              ) : null}
               <span className="ml-auto text-xs text-muted-foreground">{q.score} 分</span>
             </div>
             <div className="space-y-3 p-4">
               {q.prompt ? <MarkdownView content={q.prompt} /> : null}
-              {q.kind === 'single' && (
-                q.choices?.length ? (
+              {q.kind === 'single' &&
+                (q.choices?.length ? (
                   <SingleChoiceRenderer
                     name={`objective-${q.key || idx}`}
                     value={(answers[q.key] as string) || null}
@@ -222,10 +247,9 @@ export function ObjectiveAnswerPanel({
                   />
                 ) : (
                   <LetterFallback kind="single" value={answers[q.key] || ''} onChange={(v) => set(q.key, v)} />
-                )
-              )}
-              {q.kind === 'multi' && (
-                q.choices?.length ? (
+                ))}
+              {q.kind === 'multi' &&
+                (q.choices?.length ? (
                   <MultiChoiceRenderer
                     value={(answers[q.key] as string[]) || []}
                     options={q.choices}
@@ -234,21 +258,10 @@ export function ObjectiveAnswerPanel({
                   />
                 ) : (
                   <LetterFallback kind="multi" value={answers[q.key] || []} onChange={(v) => set(q.key, v)} />
-                )
-              )}
-              {q.kind === 'blank' && (
-                <BlankRenderer
-                  value={(answers[q.key] as string) || ''}
-                  onChange={(v) => set(q.key, v)}
-                  disabled={submitting}
-                />
-              )}
+                ))}
+              {q.kind === 'blank' && <BlankRenderer value={(answers[q.key] as string) || ''} onChange={(v) => set(q.key, v)} disabled={submitting} />}
               {q.kind === 'fill_program' && (
-                <FillProgramRenderer
-                  value={(answers[q.key] as string) || ''}
-                  onChange={(v) => set(q.key, v)}
-                  disabled={submitting}
-                />
+                <FillProgramRenderer value={(answers[q.key] as string) || ''} onChange={(v) => set(q.key, v)} disabled={submitting} />
               )}
               {q.kind === 'subjective' && (
                 <div className="space-y-1.5">
@@ -268,10 +281,12 @@ export function ObjectiveAnswerPanel({
         ))}
 
         {error ? (
-          <div className={cn(
-            'flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700',
-            'dark:border-red-900 dark:bg-red-950/30 dark:text-red-300',
-          )}>
+          <div
+            className={cn(
+              'flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700',
+              'dark:border-red-900 dark:bg-red-950/30 dark:text-red-300',
+            )}
+          >
             <AlertTriangle className="size-4 shrink-0" />
             {error}
           </div>

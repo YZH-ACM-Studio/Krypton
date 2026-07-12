@@ -12,12 +12,9 @@
  *     session required).
  */
 import { ObjectId } from 'mongodb';
-import {
-    Context, Handler, NotFoundError, OplogModel, param, PRIV, Types,
-    ValidationError,
-} from 'hydrooj';
+import { Context, Handler, NotFoundError, OplogModel, param, PRIV, Types, ValidationError } from 'hydrooj';
 import * as contest from '../model/contest';
-import * as record from '../model/record';
+import record from '../model/record';
 import { finalizePaperForUser } from './paper';
 
 class AdminPaperHandler extends Handler {
@@ -30,13 +27,11 @@ class ForceUnlockHandler extends AdminPaperHandler {
     @param('tid', Types.ObjectId)
     @param('pid', Types.UnsignedInt)
     @param('confirm', Types.String, true)
-    async post(
-        { domainId }: { domainId: string },
-        tid: ObjectId, pid: number, confirm?: string,
-    ) {
+    async post({ domainId }: { domainId: string }, tid: ObjectId, pid: number, confirm?: string) {
         if (confirm !== 'YES') {
             throw new ValidationError(
-                'confirm', null,
+                'confirm',
+                null,
                 'Force-unlock is destructive: it will re-grade existing records. Pass confirm=YES to proceed.',
             );
         }
@@ -45,7 +40,9 @@ class ForceUnlockHandler extends AdminPaperHandler {
         const recordColl = (await import('../service/db')).default.collection('record');
         const snapshot = await recordColl.find({ domainId, contest: tid, pid }).toArray();
         await OplogModel.log(this, 'paper.force_unlock_snapshot', {
-            tid, pid, recordCount: snapshot.length,
+            tid,
+            pid,
+            recordCount: snapshot.length,
         });
 
         // Re-judge each record. We re-add records as 'rejudge' type using
@@ -71,10 +68,7 @@ class ForceUnlockHandler extends AdminPaperHandler {
 class ForceSubmitHandler extends AdminPaperHandler {
     @param('tid', Types.ObjectId)
     @param('uid', Types.Int)
-    async post(
-        { domainId }: { domainId: string },
-        tid: ObjectId, uid: number,
-    ) {
+    async post({ domainId }: { domainId: string }, tid: ObjectId, uid: number) {
         const tdoc = await contest.get(domainId, tid);
         if (!tdoc) throw new NotFoundError('Contest');
         // 复用 finalize 主路径（PLAN P3.2）：此前这里是它的复制品，且
@@ -91,8 +85,6 @@ class ForceSubmitHandler extends AdminPaperHandler {
 }
 
 export async function apply(ctx: Context) {
-    ctx.Route('admin_paper_force_unlock', '/api/admin/paper/:tid/force-unlock/:pid',
-        ForceUnlockHandler, PRIV.PRIV_EDIT_SYSTEM);
-    ctx.Route('admin_paper_force_submit', '/api/admin/paper/:tid/force-submit/:uid',
-        ForceSubmitHandler, PRIV.PRIV_EDIT_SYSTEM);
+    ctx.Route('admin_paper_force_unlock', '/api/admin/paper/:tid/force-unlock/:pid', ForceUnlockHandler, PRIV.PRIV_EDIT_SYSTEM);
+    ctx.Route('admin_paper_force_submit', '/api/admin/paper/:tid/force-submit/:uid', ForceSubmitHandler, PRIV.PRIV_EDIT_SYSTEM);
 }

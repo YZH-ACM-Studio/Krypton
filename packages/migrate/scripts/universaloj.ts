@@ -1,10 +1,27 @@
-/* eslint-disable no-await-in-loop */
 import mariadb from 'mariadb';
 import xml2js from 'xml2js';
 import {
-    ContestModel, DomainModel, fs, MessageModel, moment,
-    noop, NotFoundError, ObjectId, postJudge, ProblemConfigFile, ProblemModel, RecordDoc, RecordModel,
-    STATUS, SubtaskType, SystemModel, Time, UserModel, ValidationError, yaml, Zip,
+    ContestModel,
+    DomainModel,
+    fs,
+    MessageModel,
+    moment,
+    noop,
+    NotFoundError,
+    ObjectId,
+    postJudge,
+    ProblemConfigFile,
+    ProblemModel,
+    RecordDoc,
+    RecordModel,
+    STATUS,
+    SubtaskType,
+    SystemModel,
+    Time,
+    UserModel,
+    ValidationError,
+    yaml,
+    Zip,
 } from 'hydrooj';
 const statusMap = {
     Accepted: STATUS.STATUS_ACCEPTED,
@@ -41,11 +58,10 @@ function handleMailLower(mail: string) {
     return `${name.replace(/\./g, '')}@${d === 'googlemail.com' ? 'gmail.com' : d}`;
 }
 
-export async function run({
-    host = '172.17.0.2', port = 3306, name = 'app_uoj233',
-    username, password, domainId, dataDir,
-    rerun = true, randomMail = false,
-}, report: (data: any) => void) {
+export async function run(
+    { host = '172.17.0.2', port = 3306, name = 'app_uoj233', username, password, domainId, dataDir, rerun = true, randomMail = false },
+    report: (data: any) => void,
+) {
     const src = await mariadb.createConnection({
         host,
         port,
@@ -53,9 +69,12 @@ export async function run({
         password,
         database: name,
     });
-    const query = (q: string) => new Promise<any[]>((res, rej) => {
-        src.query(q).then((r) => res(r)).catch((e) => rej(e));
-    });
+    const query = (q: string) =>
+        new Promise<any[]>((res, rej) => {
+            src.query(q)
+                .then((r) => res(r))
+                .catch((e) => rej(e));
+        });
     const target = await DomainModel.get(domainId);
     if (!target) throw new NotFoundError(domainId);
     report({ message: 'Connected to database' });
@@ -151,21 +170,29 @@ export async function run({
         ) ENGINE=InnoDB AUTO_INCREMENT=16814 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     */
     const messages = await query('SELECT * FROM `user_msg`');
-    await Promise.all(messages.map((msg) => MessageModel.coll.insertOne({
-        _id: Time.getObjectID(new Date(msg.send_time), false),
-        from: uidMap[msg.sender],
-        to: uidMap[msg.receiver],
-        content: msg.message,
-        flag: 0,
-    })));
+    await Promise.all(
+        messages.map((msg) =>
+            MessageModel.coll.insertOne({
+                _id: Time.getObjectID(new Date(msg.send_time), false),
+                from: uidMap[msg.sender],
+                to: uidMap[msg.receiver],
+                content: msg.message,
+                flag: 0,
+            }),
+        ),
+    );
     const systemMessages = await query('SELECT * FROM `user_system_msg`');
-    await Promise.all(systemMessages.map((msg) => MessageModel.coll.insertOne({
-        _id: Time.getObjectID(new Date(msg.send_time), false),
-        from: 1,
-        to: uidMap[msg.receiver],
-        content: msg.content,
-        flag: 0,
-    })));
+    await Promise.all(
+        systemMessages.map((msg) =>
+            MessageModel.coll.insertOne({
+                _id: Time.getObjectID(new Date(msg.send_time), false),
+                from: 1,
+                to: uidMap[msg.receiver],
+                content: msg.content,
+                flag: 0,
+            }),
+        ),
+    );
     report({ message: 'message finished' });
 
     /*
@@ -218,10 +245,9 @@ export async function run({
             }
             if (!pidMap[pdoc.id]) {
                 const content = await query(`SELECT * FROM \`problems_contents\` WHERE \`id\` = ${pdoc.id}`);
-                const pid = await ProblemModel.add(
-                    domainId, `P${pdoc.id}`, pdoc.title, content[0].statement_md || '', 1, [],
-                    { problemKind: 'programming' },
-                );
+                const pid = await ProblemModel.add(domainId, `P${pdoc.id}`, pdoc.title, content[0].statement_md || '', 1, [], {
+                    problemKind: 'programming',
+                });
                 pidMap[pdoc.id] = pid;
             }
             const [permissions, tags] = await Promise.all([
@@ -326,8 +352,16 @@ export async function run({
         const startAt = moment(tdoc.start_time);
         const endAt = startAt.clone().add(tdoc.last_min, 'minutes');
         const tid = await ContestModel.add(
-            domainId, tdoc.name, content, uidMap[permissions[0]?.username] || 1, info.contest_type?.toLowerCase() || 'oi',
-            startAt.toDate(), endAt.toDate(), pids, !Object.keys(info).includes('unrated'), { maintainer },
+            domainId,
+            tdoc.name,
+            content,
+            uidMap[permissions[0]?.username] || 1,
+            info.contest_type?.toLowerCase() || 'oi',
+            startAt.toDate(),
+            endAt.toDate(),
+            pids,
+            !Object.keys(info).includes('unrated'),
+            { maintainer },
         );
         tidMap[tdoc.id] = tid.toHexString();
     }
@@ -389,8 +423,10 @@ export async function run({
                     throw new ValidationError('zip', null, e.message);
                 }
                 const codeEntry = entries.find((i) => i.filename.endsWith('answer.code') && i.directory === false);
-                data.code = await (codeEntry as any)?.getData(new Zip.TextWriter()) || '';
-            } catch { /* ignore no code */ }
+                data.code = (await (codeEntry as any)?.getData(new Zip.TextWriter())) || '';
+            } catch {
+                /* ignore no code */
+            }
             const result = JSON.parse(Buffer.from(rdoc.result, 'base64').toString('utf8'));
             if (result.error) {
                 if (data.status === STATUS.STATUS_COMPILE_ERROR) data.compilerTexts.push(result.error);
@@ -414,29 +450,35 @@ export async function run({
                                 });
                                 continue;
                             }
-                            data.testCases.push(...subtask.test.map((curCase, caseIndex) => ({
-                                subtaskId: subtask.$.num,
-                                id: caseIndex + 1,
+                            data.testCases.push(
+                                ...subtask.test.map((curCase, caseIndex) => ({
+                                    subtaskId: subtask.$.num,
+                                    id: caseIndex + 1,
+                                    score: curCase.$.score,
+                                    time: curCase.$.time === '-1' ? 0 : curCase.time,
+                                    memory: curCase.$.memory === '-1' ? 0 : curCase.memory,
+                                    message: curCase.res[0] || '',
+                                    status: statusMap[curCase.$.info] || STATUS.STATUS_WAITING,
+                                })),
+                            );
+                        }
+                    } else if (details.tests.test) {
+                        data.testCases.push(
+                            ...details.tests.test.map((curCase) => ({
+                                subtaskId: 1,
+                                id: curCase.$.num,
                                 score: curCase.$.score,
                                 time: curCase.$.time === '-1' ? 0 : curCase.time,
                                 memory: curCase.$.memory === '-1' ? 0 : curCase.memory,
                                 message: curCase.res[0] || '',
                                 status: statusMap[curCase.$.info] || STATUS.STATUS_WAITING,
-                            })));
-                        }
-                    } else if (details.tests.test) {
-                        data.testCases.push(...details.tests.test.map((curCase) => ({
-                            subtaskId: 1,
-                            id: curCase.$.num,
-                            score: curCase.$.score,
-                            time: curCase.$.time === '-1' ? 0 : curCase.time,
-                            memory: curCase.$.memory === '-1' ? 0 : curCase.memory,
-                            message: curCase.res[0] || '',
-                            status: statusMap[curCase.$.info] || STATUS.STATUS_WAITING,
-                        })));
+                            })),
+                        );
                     }
                     data.status = Math.max(...data.testCases.map((x) => x.status));
-                } catch (e) { console.log(rdoc.id, result); }
+                } catch (e) {
+                    console.log(rdoc.id, result);
+                }
             }
             if (rdoc.contest_id) {
                 data.contest = new ObjectId(tidMap[rdoc.contest_id]);
@@ -474,7 +516,11 @@ export async function run({
                 const config: ProblemConfigFile = {
                     subtasks: [],
                 };
-                const lines = conf.replace(/\r/g, '').split('\n').map((i) => i.trim()).filter((i) => i);
+                const lines = conf
+                    .replace(/\r/g, '')
+                    .split('\n')
+                    .map((i) => i.trim())
+                    .filter((i) => i);
                 for (const line of lines) {
                     const [key, value] = line.split(' ');
                     if (key === 'use_builtin_checker') {
@@ -498,26 +544,36 @@ export async function run({
                 }
                 if (filenames.includes('val.cpp')) config.validator = 'val.cpp';
                 if (confInfo.n_tests && Object.keys(confInfo.point).length === +confInfo.n_tests) {
-                    config.subtasks.push(...Object.keys(confInfo.point).map((i) => ({
-                        id: +i,
-                        score: confInfo.point[i],
-                        cases: [{
-                            input: `${confInfo.input_pre}${i}.${confInfo.input_suf}`,
-                            output: `${confInfo.output_pre}${i}.${confInfo.output_suf}`,
-                        }],
-                    })));
-                }
-                if (confInfo.n_subtasks
-                    && Object.keys(confInfo.subtask_end).length === +confInfo.n_subtasks
-                    && Object.keys(confInfo.subtask_score).length === +confInfo.n_subtasks) {
-                    config.subtasks.push(...[...Array.from({ length: +confInfo.n_subtasks })].map((v, i) => i + 1).map((i) => ({
-                        id: +i,
-                        score: confInfo.subtask_score[i],
-                        cases: [...Array.from({ length: confInfo.subtask_end[i] - (confInfo.subtask_end[i - 1] || 0) })].map((v, j) => ({
-                            input: `${confInfo.input_pre}${j + (confInfo.subtask_end[i - 1] || 0) + 1}.${confInfo.input_suf}`,
-                            output: `${confInfo.output_pre}${j + (confInfo.subtask_end[i - 1] || 0) + 1}.${confInfo.output_suf}`,
+                    config.subtasks.push(
+                        ...Object.keys(confInfo.point).map((i) => ({
+                            id: +i,
+                            score: confInfo.point[i],
+                            cases: [
+                                {
+                                    input: `${confInfo.input_pre}${i}.${confInfo.input_suf}`,
+                                    output: `${confInfo.output_pre}${i}.${confInfo.output_suf}`,
+                                },
+                            ],
                         })),
-                    })));
+                    );
+                }
+                if (
+                    confInfo.n_subtasks &&
+                    Object.keys(confInfo.subtask_end).length === +confInfo.n_subtasks &&
+                    Object.keys(confInfo.subtask_score).length === +confInfo.n_subtasks
+                ) {
+                    config.subtasks.push(
+                        ...[...Array.from({ length: +confInfo.n_subtasks })]
+                            .map((v, i) => i + 1)
+                            .map((i) => ({
+                                id: +i,
+                                score: confInfo.subtask_score[i],
+                                cases: [...Array.from({ length: confInfo.subtask_end[i] - (confInfo.subtask_end[i - 1] || 0) })].map((v, j) => ({
+                                    input: `${confInfo.input_pre}${j + (confInfo.subtask_end[i - 1] || 0) + 1}.${confInfo.input_suf}`,
+                                    output: `${confInfo.output_pre}${j + (confInfo.subtask_end[i - 1] || 0) + 1}.${confInfo.output_suf}`,
+                                })),
+                            })),
+                    );
                 }
                 if (+confInfo.n_ex_tests) {
                     if (!config.subtasks.length) {
@@ -525,19 +581,23 @@ export async function run({
                             id: 1,
                             score: 97,
                             type: 'sum' as SubtaskType,
-                            cases: [...Array.from({ length: +confInfo.n_tests })].map((v, i) => i + 1).map((i) => ({
-                                input: `${confInfo.input_pre}${i}.${confInfo.input_suf}`,
-                                output: `${confInfo.output_pre}${i}.${confInfo.output_suf}`,
-                            })),
+                            cases: [...Array.from({ length: +confInfo.n_tests })]
+                                .map((v, i) => i + 1)
+                                .map((i) => ({
+                                    input: `${confInfo.input_pre}${i}.${confInfo.input_suf}`,
+                                    output: `${confInfo.output_pre}${i}.${confInfo.output_suf}`,
+                                })),
                         });
                     }
                     config.subtasks.push({
                         id: Math.max(...config.subtasks.map((i) => i.id)) + 1,
                         score: 3,
-                        cases: [...Array.from({ length: +confInfo.n_ex_tests })].map((v, i) => i + 1).map((i) => ({
-                            input: `ex_${confInfo.input_pre}${i}.${confInfo.input_suf}`,
-                            output: `ex_${confInfo.output_pre}${i}.${confInfo.output_suf}`,
-                        })),
+                        cases: [...Array.from({ length: +confInfo.n_ex_tests })]
+                            .map((v, i) => i + 1)
+                            .map((i) => ({
+                                input: `ex_${confInfo.input_pre}${i}.${confInfo.input_suf}`,
+                                output: `ex_${confInfo.output_pre}${i}.${confInfo.output_suf}`,
+                            })),
                     });
                 }
                 await ProblemModel.addTestdata(domainId, pdoc.docId, 'config.yaml', Buffer.from(yaml.dump(config)));

@@ -62,5 +62,8 @@ export async function get(id: ObjectId) {
 }
 
 global.Hydro.model.oplog = {
-    coll, add, get, log,
+    coll,
+    add,
+    get,
+    log,
 };

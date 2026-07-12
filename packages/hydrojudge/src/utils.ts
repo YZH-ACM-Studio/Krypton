@@ -28,7 +28,10 @@ export namespace Lock {
 }
 
 export function compilerText(...messages: string[]) {
-    return messages.filter((i) => !EMPTY_STR.test(i)).map((i) => i.substring(0, 1024 * 1024)).join('\n');
+    return messages
+        .filter((i) => !EMPTY_STR.test(i))
+        .map((i) => i.substring(0, 1024 * 1024))
+        .join('\n');
 }
 
 function restrictFile(p: string) {

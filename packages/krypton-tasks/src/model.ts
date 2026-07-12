@@ -22,23 +22,25 @@
  */
 import { NotFoundError, ObjectId, PermissionError } from 'hydrooj';
 import { userBindModel } from '@hydrooj/krypton-userbind';
-import {
-    assignmentsColl, auditColl, gpltScoreColl, settingsColl, stayEventsColl, tasksColl,
-} from './db';
+import { assignmentsColl, auditColl, gpltScoreColl, settingsColl, stayEventsColl, tasksColl } from './db';
 import { runChecker, taskPointPresets } from './presets';
 import type {
-    AuditEventType, AuditLogDoc, DomainSettingsDoc, GpltLevel, GpltScoreDoc, StayEventDoc,
-    TaskAssignmentDoc, TaskDoc, TaskGraph, TaskPointResult,
+    AuditEventType,
+    AuditLogDoc,
+    DomainSettingsDoc,
+    GpltLevel,
+    GpltScoreDoc,
+    StayEventDoc,
+    TaskAssignmentDoc,
+    TaskDoc,
+    TaskGraph,
+    TaskPointResult,
 } from './types';
 import { DEFAULT_DOMAIN_SETTINGS, emptyTaskGraph } from './types';
 
 // ============ Tasks CRUD ============
 
-async function createTask(
-    domainId: string,
-    createdBy: number,
-    task: Partial<TaskDoc>,
-): Promise<ObjectId> {
+async function createTask(domainId: string, createdBy: number, task: Partial<TaskDoc>): Promise<ObjectId> {
     const now = new Date();
     const doc: TaskDoc = {
         _id: new ObjectId(),
@@ -78,22 +80,20 @@ async function listTasks(
 ): Promise<{ docs: TaskDoc[]; count: number; page: number; pageSize: number }> {
     const query = { domainId, ...filter };
     const [docs, count] = await Promise.all([
-        tasksColl.find(query).sort({ _id: -1 }).skip((page - 1) * pageSize).limit(pageSize).toArray(),
+        tasksColl
+            .find(query)
+            .sort({ _id: -1 })
+            .skip((page - 1) * pageSize)
+            .limit(pageSize)
+            .toArray(),
         tasksColl.countDocuments(query),
     ]);
     return { docs, count, page, pageSize };
 }
 
-async function updateTask(
-    domainId: string,
-    taskId: ObjectId,
-    update: Partial<TaskDoc>,
-): Promise<void> {
+async function updateTask(domainId: string, taskId: ObjectId, update: Partial<TaskDoc>): Promise<void> {
     const { _id: _, ...rest } = update as any;
-    await tasksColl.updateOne(
-        { domainId, _id: taskId },
-        { $set: { ...rest, updatedAt: new Date() } },
-    );
+    await tasksColl.updateOne({ domainId, _id: taskId }, { $set: { ...rest, updatedAt: new Date() } });
 }
 
 async function deleteTask(domainId: string, taskId: ObjectId): Promise<void> {
@@ -102,11 +102,7 @@ async function deleteTask(domainId: string, taskId: ObjectId): Promise<void> {
     await auditColl.deleteMany({ domainId, taskId });
 }
 
-async function cloneTask(
-    domainId: string,
-    sourceId: ObjectId,
-    actorUid: number,
-): Promise<ObjectId | null> {
+async function cloneTask(domainId: string, sourceId: ObjectId, actorUid: number): Promise<ObjectId | null> {
     const src = await getTask(domainId, sourceId);
     if (!src) return null;
     return createTask(domainId, actorUid, {
@@ -129,13 +125,7 @@ async function cloneTask(
 
 // ============ Assignment lifecycle ============
 
-async function assignTask(
-    domainId: string,
-    taskId: ObjectId,
-    userId: number,
-    assignedBy: number,
-    note = '',
-): Promise<ObjectId> {
+async function assignTask(domainId: string, taskId: ObjectId, userId: number, assignedBy: number, note = ''): Promise<ObjectId> {
     const existing = await assignmentsColl.findOne({
         domainId,
         taskId,
@@ -145,10 +135,7 @@ async function assignTask(
     if (existing) {
         // Admin re-assign locks an existing self-claim, but doesn't downgrade.
         if (assignedBy !== 0 && existing.canCancel) {
-            await assignmentsColl.updateOne(
-                { _id: existing._id },
-                { $set: { canCancel: false, assignedBy, note: note || existing.note } },
-            );
+            await assignmentsColl.updateOne({ _id: existing._id }, { $set: { canCancel: false, assignedBy, note: note || existing.note } });
         }
         return existing._id;
     }
@@ -182,43 +169,28 @@ async function assignTask(
     return doc._id;
 }
 
-async function cancelAssignment(
-    domainId: string,
-    assignmentId: ObjectId,
-    actorUid: number,
-): Promise<void> {
+async function cancelAssignment(domainId: string, assignmentId: ObjectId, actorUid: number): Promise<void> {
     const a = await assignmentsColl.findOne({ _id: assignmentId, domainId });
     if (!a) throw new NotFoundError('任务分配不存在');
     if (a.userId !== actorUid) throw new PermissionError('无权操作');
     if (!a.canCancel) throw new Error('该任务由管理员分配，无法取消');
     if (a.status === 'completed') throw new Error('已完成的任务无法取消');
-    await assignmentsColl.updateOne(
-        { _id: assignmentId },
-        { $set: { status: 'cancelled' } },
-    );
+    await assignmentsColl.updateOne({ _id: assignmentId }, { $set: { status: 'cancelled' } });
     await tasksColl.updateOne({ _id: a.taskId }, { $inc: { currentAssignments: -1 } });
 }
 
-async function getUserAssignments(
-    domainId: string,
-    userId: number,
-    filter: any = {},
-): Promise<TaskAssignmentDoc[]> {
-    return assignmentsColl.find({ domainId, userId, ...filter }).sort({ _id: -1 }).toArray();
+async function getUserAssignments(domainId: string, userId: number, filter: any = {}): Promise<TaskAssignmentDoc[]> {
+    return assignmentsColl
+        .find({ domainId, userId, ...filter })
+        .sort({ _id: -1 })
+        .toArray();
 }
 
-async function getTaskAssignments(
-    domainId: string,
-    taskId: ObjectId,
-    filter: any = {},
-): Promise<TaskAssignmentDoc[]> {
+async function getTaskAssignments(domainId: string, taskId: ObjectId, filter: any = {}): Promise<TaskAssignmentDoc[]> {
     return assignmentsColl.find({ domainId, taskId, ...filter }).toArray();
 }
 
-async function getAssignment(
-    domainId: string,
-    assignmentId: ObjectId,
-): Promise<TaskAssignmentDoc | null> {
+async function getAssignment(domainId: string, assignmentId: ObjectId): Promise<TaskAssignmentDoc | null> {
     return assignmentsColl.findOne({ domainId, _id: assignmentId });
 }
 
@@ -231,10 +203,7 @@ async function getAssignment(
  * Start/end sentinels are always traversable. Cycles (which shouldn't exist
  * in a valid DAG) are broken by a visited-set; the evaluator runs in O(V+E).
  */
-export function evaluateGraph(
-    graph: TaskGraph,
-    progress: Record<string, TaskPointResult>,
-): boolean {
+export function evaluateGraph(graph: TaskGraph, progress: Record<string, TaskPointResult>): boolean {
     if (!graph || !graph.nodes?.length) return false;
     const start = graph.nodes.find((n) => n.type === 'start');
     const end = graph.nodes.find((n) => n.type === 'end');
@@ -304,8 +273,7 @@ async function checkTaskCompletion(
     // Quota-mode states (qualified / admitted) are admin-managed; checker
     // doesn't move them backwards or forwards. We do still refresh `progress`
     // for the stats display but skip status changes.
-    const isQuotaAdvancedState = task.admissionMode === 'quota'
-        && (a.status === 'qualified' || a.status === 'admitted');
+    const isQuotaAdvancedState = task.admissionMode === 'quota' && (a.status === 'qualified' || a.status === 'admitted');
 
     // If task is inactive, freeze: return cached, no recompute (unless force).
     if (!task.isActive && !opts.force) {
@@ -323,12 +291,16 @@ async function checkTaskCompletion(
             progress[node.id] = stored; // keep admin override
             continue;
         }
-        progress[node.id] = await runChecker(node.presetId, {
-            userId: a.userId,
-            domainId,
-            startDate: task.startDate || undefined,
-            endDate: task.endDate || undefined,
-        }, node.params || {});
+        progress[node.id] = await runChecker(
+            node.presetId,
+            {
+                userId: a.userId,
+                domainId,
+                startDate: task.startDate || undefined,
+                endDate: task.endDate || undefined,
+            },
+            node.params || {},
+        );
     }
 
     const conditionMet = evaluateGraph(task.graph, progress);
@@ -362,9 +334,7 @@ async function checkTaskCompletion(
  * does NOT award — by design, the two-stage flow gives admins a window to
  * revoke before any side-effect fires.
  */
-async function maybeAwardStayEvent(
-    task: TaskDoc, assignment: TaskAssignmentDoc,
-): Promise<void> {
+async function maybeAwardStayEvent(task: TaskDoc, assignment: TaskAssignmentDoc): Promise<void> {
     if (!task.countsAsStay) return;
     const source = `task:${assignment._id.toHexString()}`;
     const doc: StayEventDoc = {
@@ -417,12 +387,7 @@ async function writeAudit(row: {
  * Admin admit (quota mode only). qualified → admitted.
  * Does NOT trigger side effects (stay event) — wait for confirm.
  */
-async function admitAssignment(
-    domainId: string,
-    assignmentId: ObjectId,
-    adminUid: number,
-    note = '',
-): Promise<void> {
+async function admitAssignment(domainId: string, assignmentId: ObjectId, adminUid: number, note = ''): Promise<void> {
     const a = await assignmentsColl.findOne({ _id: assignmentId, domainId });
     if (!a) throw new NotFoundError('任务分配不存在');
     const task = await getTask(domainId, a.taskId);
@@ -445,8 +410,12 @@ async function admitAssignment(
         },
     );
     await writeAudit({
-        domainId, assignmentId, taskId: a.taskId,
-        eventType: 'admit', adminUid, reason: note,
+        domainId,
+        assignmentId,
+        taskId: a.taskId,
+        eventType: 'admit',
+        adminUid,
+        reason: note,
         before: { status: 'qualified' },
         after: { status: 'admitted', admittedBy: adminUid },
     });
@@ -457,12 +426,7 @@ async function admitAssignment(
  * No stay event has been written yet (those wait for confirm), so this is
  * cleanly reversible.
  */
-async function unadmitAssignment(
-    domainId: string,
-    assignmentId: ObjectId,
-    adminUid: number,
-    reason = '',
-): Promise<void> {
+async function unadmitAssignment(domainId: string, assignmentId: ObjectId, adminUid: number, reason = ''): Promise<void> {
     const a = await assignmentsColl.findOne({ _id: assignmentId, domainId });
     if (!a) throw new NotFoundError('任务分配不存在');
     if (a.status !== 'admitted') {
@@ -480,8 +444,12 @@ async function unadmitAssignment(
         },
     );
     await writeAudit({
-        domainId, assignmentId, taskId: a.taskId,
-        eventType: 'unadmit', adminUid, reason,
+        domainId,
+        assignmentId,
+        taskId: a.taskId,
+        eventType: 'unadmit',
+        adminUid,
+        reason,
         before: { status: 'admitted', admittedBy: a.admittedBy },
         after: { status: 'qualified' },
     });
@@ -492,12 +460,7 @@ async function unadmitAssignment(
  * TERMINAL. Triggers stay event (idempotent). Cannot be undone (admin must
  * manually delete the stay event row if a true correction is needed).
  */
-async function confirmAssignment(
-    domainId: string,
-    assignmentId: ObjectId,
-    adminUid: number,
-    reason = '',
-): Promise<void> {
+async function confirmAssignment(domainId: string, assignmentId: ObjectId, adminUid: number, reason = ''): Promise<void> {
     const a = await assignmentsColl.findOne({ _id: assignmentId, domainId });
     if (!a) throw new NotFoundError('任务分配不存在');
     const task = await getTask(domainId, a.taskId);
@@ -522,8 +485,12 @@ async function confirmAssignment(
     );
     await maybeAwardStayEvent(task, a);
     await writeAudit({
-        domainId, assignmentId, taskId: a.taskId,
-        eventType: 'confirm', adminUid, reason,
+        domainId,
+        assignmentId,
+        taskId: a.taskId,
+        eventType: 'confirm',
+        adminUid,
+        reason,
         before: { status: 'admitted' },
         after: { status: 'completed', confirmedBy: adminUid },
     });
@@ -575,29 +542,24 @@ async function overridePointCompletion(
     await assignmentsColl.updateOne({ _id: a._id }, { $set: update });
 
     await writeAudit({
-        domainId, assignmentId, taskId: a.taskId,
-        eventType: 'override', adminUid,
-        pointId, reason,
-        before, after,
+        domainId,
+        assignmentId,
+        taskId: a.taskId,
+        eventType: 'override',
+        adminUid,
+        pointId,
+        reason,
+        before,
+        after,
     });
 }
 
-async function listAuditForTask(
-    domainId: string,
-    taskId: ObjectId,
-    limit = 100,
-): Promise<AuditLogDoc[]> {
-    return auditColl.find({ domainId, taskId })
-        .sort({ createdAt: -1 }).limit(limit).toArray();
+async function listAuditForTask(domainId: string, taskId: ObjectId, limit = 100): Promise<AuditLogDoc[]> {
+    return auditColl.find({ domainId, taskId }).sort({ createdAt: -1 }).limit(limit).toArray();
 }
 
-async function listAuditForAssignment(
-    domainId: string,
-    assignmentId: ObjectId,
-    limit = 100,
-): Promise<AuditLogDoc[]> {
-    return auditColl.find({ domainId, assignmentId })
-        .sort({ createdAt: -1 }).limit(limit).toArray();
+async function listAuditForAssignment(domainId: string, assignmentId: ObjectId, limit = 100): Promise<AuditLogDoc[]> {
+    return auditColl.find({ domainId, assignmentId }).sort({ createdAt: -1 }).limit(limit).toArray();
 }
 
 // ============ Per-domain settings ============
@@ -614,22 +576,14 @@ async function getDomainSettings(domainId: string): Promise<DomainSettingsDoc> {
     };
 }
 
-async function setDomainSettings(
-    domainId: string,
-    update: Partial<DomainSettingsDoc>,
-    actorUid: number,
-): Promise<void> {
+async function setDomainSettings(domainId: string, update: Partial<DomainSettingsDoc>, actorUid: number): Promise<void> {
     const safe: any = {};
     if (typeof update.maxPatScore === 'number') safe.maxPatScore = Math.max(0, update.maxPatScore);
     if (typeof update.maxGpltScore === 'number') safe.maxGpltScore = Math.max(0, update.maxGpltScore);
     if (typeof update.maxCspScore === 'number') safe.maxCspScore = Math.max(0, update.maxCspScore);
     safe.updatedAt = new Date();
     safe.updatedBy = actorUid;
-    await settingsColl.updateOne(
-        { domainId },
-        { $set: safe, $setOnInsert: { _id: new ObjectId(), domainId } },
-        { upsert: true },
-    );
+    await settingsColl.updateOne({ domainId }, { $set: safe, $setOnInsert: { _id: new ObjectId(), domainId } }, { upsert: true });
 }
 
 // ============ Event hooks ============
@@ -642,10 +596,7 @@ async function setDomainSettings(
  * past the auto-recompute fence and stay frozen.
  */
 async function markUserAssignmentsStale(domainId: string, userId: number): Promise<void> {
-    await assignmentsColl.updateMany(
-        { domainId, userId, status: 'pending' },
-        { $set: { progressUpdatedAt: null } },
-    );
+    await assignmentsColl.updateMany({ domainId, userId, status: 'pending' }, { $set: { progressUpdatedAt: null } });
 }
 
 // ============ Stay events (留校次数) ============
@@ -688,10 +639,7 @@ async function addManualStayEvent(
     return { ok: true, userId: student.boundUserId };
 }
 
-async function listStayEvents(
-    domainId: string,
-    filter: { userId?: number; year?: number } = {},
-): Promise<StayEventDoc[]> {
+async function listStayEvents(domainId: string, filter: { userId?: number; year?: number } = {}): Promise<StayEventDoc[]> {
     const q: any = { domainId };
     if (filter.userId) q.userId = filter.userId;
     if (filter.year) q.year = filter.year;
@@ -716,10 +664,7 @@ async function deleteStayEvent(domainId: string, id: ObjectId): Promise<void> {
  * single source of truth after 2026-06-07). Pass `level` to narrow (rankboard
  * uses 'national'). Returns raw docs; caller indexes by (studentDocId, year).
  */
-export async function listGpltScores(
-    domainId: string,
-    opts: { studentDocIds?: ObjectId[]; level?: GpltLevel } = {},
-): Promise<GpltScoreDoc[]> {
+export async function listGpltScores(domainId: string, opts: { studentDocIds?: ObjectId[]; level?: GpltLevel } = {}): Promise<GpltScoreDoc[]> {
     const q: Record<string, any> = { domainId };
     if (opts.studentDocIds?.length) q.studentDocId = { $in: opts.studentDocIds };
     if (opts.level) q.level = opts.level;
@@ -730,19 +675,38 @@ export const taskModel = {
     presets: taskPointPresets,
     emptyTaskGraph,
     // CRUD
-    createTask, getTask, listTasks, updateTask, deleteTask, cloneTask,
+    createTask,
+    getTask,
+    listTasks,
+    updateTask,
+    deleteTask,
+    cloneTask,
     // assignment
-    assignTask, cancelAssignment, getUserAssignments, getTaskAssignments, getAssignment,
+    assignTask,
+    cancelAssignment,
+    getUserAssignments,
+    getTaskAssignments,
+    getAssignment,
     // check
-    checkTaskCompletion, evaluateGraph,
+    checkTaskCompletion,
+    evaluateGraph,
     // admission (quota mode)
-    admitAssignment, unadmitAssignment, confirmAssignment,
+    admitAssignment,
+    unadmitAssignment,
+    confirmAssignment,
     // override / audit
-    overridePointCompletion, listAuditForTask, listAuditForAssignment, writeAudit,
+    overridePointCompletion,
+    listAuditForTask,
+    listAuditForAssignment,
+    writeAudit,
     // settings
-    getDomainSettings, setDomainSettings,
+    getDomainSettings,
+    setDomainSettings,
     // stay events
-    addManualStayEvent, listStayEvents, countStayEvents, deleteStayEvent,
+    addManualStayEvent,
+    listStayEvents,
+    countStayEvents,
+    deleteStayEvent,
     // scores (read; cross-plugin — rankboard reads GPLT scores from here)
     listGpltScores,
     // hooks

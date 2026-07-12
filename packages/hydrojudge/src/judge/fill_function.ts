@@ -40,9 +40,10 @@ export const judge = async (ctx: Context) => {
     }
 
     // The submitted code is JSON: { regionId -> content }
-    const rawCode = ('src' in (ctx.code as any))
-        ? null // file-mode submissions not supported for fill_function — students always type
-        : (ctx.code as any).content || '';
+    const rawCode =
+        'src' in (ctx.code as any)
+            ? null // file-mode submissions not supported for fill_function — students always type
+            : (ctx.code as any).content || '';
     let regionContents: Record<string, string>;
     try {
         regionContents = JSON.parse(rawCode || '{}');

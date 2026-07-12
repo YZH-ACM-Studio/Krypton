@@ -25,9 +25,7 @@ class TokenModel {
         [TokenModel.TYPE_WEBAUTHN]: 'WebAuthn',
     };
 
-    static async add(
-        tokenType: number, expireSeconds: number, data: any, id = randomstring(32),
-    ): Promise<[string, TokenDoc]> {
+    static async add(tokenType: number, expireSeconds: number, data: any, id = randomstring(32)): Promise<[string, TokenDoc]> {
         const now = new Date();
         const payload = {
             ...data,
@@ -50,10 +48,7 @@ class TokenModel {
         return TokenModel.coll.find({ tokenType, ...query });
     }
 
-    static async update(
-        tokenId: string, tokenType: number, expireSeconds: number,
-        data: object,
-    ) {
+    static async update(tokenId: string, tokenType: number, expireSeconds: number, data: object) {
         const now = new Date();
         const res = await TokenModel.coll.findOneAndUpdate(
             { _id: tokenId, tokenType },
@@ -76,9 +71,7 @@ class TokenModel {
         return !!result.deletedCount;
     }
 
-    static async createOrUpdate(
-        tokenType: number, expireSeconds: number, data: any,
-    ): Promise<string> {
+    static async createOrUpdate(tokenType: number, expireSeconds: number, data: any): Promise<string> {
         const d = await TokenModel.coll.findOne({ tokenType, ...data });
         if (!d) {
             const res = await TokenModel.add(tokenType, expireSeconds, data);

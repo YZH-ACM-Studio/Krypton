@@ -1,19 +1,17 @@
 import fs from 'fs';
 import path from 'path';
 import c2k from 'koa2-connect';
-import {
-    Context, PERM, PRIV, ProblemModel,
-} from 'hydrooj';
+import { Context, PERM, PRIV, ProblemModel } from 'hydrooj';
 import { serializer } from '@hydrooj/framework';
 import type { ViteDevServer } from 'vite';
 import { resolveRankboardCapabilities } from './rankboard-capabilities';
 
-type ManifestChunk = {
-    file: string;
-    css?: string[];
-    imports?: string[];
-    isEntry?: boolean;
-};
+interface ManifestChunk {
+  file: string;
+  css?: string[];
+  imports?: string[];
+  isEntry?: boolean;
+}
 
 const templatePath = path.join(__dirname, 'index.html');
 const manifestPath = path.join(__dirname, 'public', 'next', 'manifest.json');
@@ -21,134 +19,142 @@ const templateEntryTag = '<script type="module" src="/src/main.tsx"></script>';
 const devEntryTag = '<script type="module" src="/src/main.tsx"></script>';
 const bootstrapPlaceholder = '__KRYPTON_BOOTSTRAP_DATA__';
 
-type MailTemplateConfig = {
-    title: string;
-    intro: string;
-    button: string;
-    pathArg: 'path' | 'url';
-    nameArg?: 'uname';
-};
+interface MailTemplateConfig {
+  title: string;
+  intro: string;
+  button: string;
+  pathArg: 'path' | 'url';
+  nameArg?: 'uname';
+}
 
 const mailTemplates: Record<string, MailTemplateConfig> = {
-    'user_register_mail.html': {
-        title: 'Sign Up',
-        intro: 'Hello! You can click following link to sign up your {0} account:',
-        button: 'Sign Up',
-        pathArg: 'path',
-    },
-    'user_lostpass_mail.html': {
-        title: 'Lost Password',
-        intro: 'Hello, {0}! You can click following link to reset the password of your {1} account:',
-        button: 'Reset Password',
-        pathArg: 'url',
-        nameArg: 'uname',
-    },
-    'user_changemail_mail.html': {
-        title: 'Change Email',
-        intro: 'Hello, {0}! You can click following link to active your new email of your {1} account:',
-        button: 'Change Email',
-        pathArg: 'path',
-        nameArg: 'uname',
-    },
+  'user_register_mail.html': {
+    title: 'Sign Up',
+    intro: 'Hello! You can click following link to sign up your {0} account:',
+    button: 'Sign Up',
+    pathArg: 'path',
+  },
+  'user_lostpass_mail.html': {
+    title: 'Lost Password',
+    intro: 'Hello, {0}! You can click following link to reset the password of your {1} account:',
+    button: 'Reset Password',
+    pathArg: 'url',
+    nameArg: 'uname',
+  },
+  'user_changemail_mail.html': {
+    title: 'Change Email',
+    intro: 'Hello, {0}! You can click following link to active your new email of your {1} account:',
+    button: 'Change Email',
+    pathArg: 'path',
+    nameArg: 'uname',
+  },
 };
 
 function escapeForScript(data: unknown, handler?: any) {
-    return JSON.stringify(data, serializer(false, handler))
-        .replace(/</g, '\\u003c')
-        .replace(/>/g, '\\u003e')
-        .replace(/&/g, '\\u0026')
-        .replace(/\u2028/g, '\\u2028')
-        .replace(/\u2029/g, '\\u2029');
+  return JSON.stringify(data, serializer(false, handler))
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
 }
 
-function applyReplacements(template: string, payload: {
+function applyReplacements(
+  template: string,
+  payload: {
     bootstrap: string;
     head: string;
     entry: string;
-}) {
-    return template
-        .split(bootstrapPlaceholder).join(payload.bootstrap)
-        .split('<!--KRYPTON_HEAD-->').join(payload.head)
-        .split(templateEntryTag).join(payload.entry);
+  },
+) {
+  return template
+    .split(bootstrapPlaceholder)
+    .join(payload.bootstrap)
+    .split('<!--KRYPTON_HEAD-->')
+    .join(payload.head)
+    .split(templateEntryTag)
+    .join(payload.entry);
 }
 
 function readTemplate() {
-    return fs.readFileSync(templatePath, 'utf-8');
+  return fs.readFileSync(templatePath, 'utf-8');
 }
 
 function toUiTheme(theme: unknown) {
-    if (typeof theme === 'string' && theme.includes('dark')) return 'dark';
-    return 'light';
+  if (typeof theme === 'string' && theme.includes('dark')) return 'dark';
+  return 'light';
 }
 
 function safeUrl(context: Record<string, any>, name: string, params?: Record<string, any>) {
-    try { return params ? context.url(name, params) : context.url(name); } catch { return '#'; }
+  try {
+    return params ? context.url(name, params) : context.url(name);
+  } catch {
+    return '#';
+  }
 }
 
 function safeSystemGet(key: string): string {
-    try {
-        return (global as any).Hydro?.model?.system?.get?.(key) || '';
-    } catch { return ''; }
+  try {
+    return (global as any).Hydro?.model?.system?.get?.(key) || '';
+  } catch {
+    return '';
+  }
 }
 
-export function resolveProblemBankCapability(
-    user: unknown,
-    onError: (error: unknown) => void,
-): boolean {
-    try {
-        if (!user) throw new Error('handler user is unavailable');
-        return ProblemModel.canBrowseProblemBank(user as any);
-    } catch (error) {
-        onError(error);
-        return false;
-    }
+export function resolveProblemBankCapability(user: unknown, onError: (error: unknown) => void): boolean {
+  try {
+    if (!user) throw new Error('handler user is unavailable');
+    return ProblemModel.canBrowseProblemBank(user as any);
+  } catch (error) {
+    onError(error);
+    return false;
+  }
 }
 
 function escapeHtml(value: unknown) {
-    return String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function translate(context: Record<string, any>, message: string) {
-    try {
-        return context._?.(message) || message;
-    } catch { return message; }
+  try {
+    return context._?.(message) || message;
+  } catch {
+    return message;
+  }
 }
 
 function formatMessage(message: string, values: unknown[]) {
-    return message.replace(/\{(\d+)\}/g, (_, index) => String(values[Number(index)] ?? ''));
+  return message.replace(/\{(\d+)\}/g, (_, index) => String(values[Number(index)] ?? ''));
 }
 
 function renderUiNextMail(templateName: string, args: Record<string, any>, context: Record<string, any>) {
-    const config = mailTemplates[templateName];
-    if (!config) return null;
+  const config = mailTemplates[templateName];
+  if (!config) return null;
 
-    const handler = context.handler || {};
-    const domain = args.domain || handler.domain || {};
-    const siteName = domain?.ui?.name || domain?.name || safeSystemGet('server.name') || 'Krypton';
-    const urlPrefix = String(args.url_prefix || safeSystemGet('server.url') || '').replace(/\/$/, '');
-    const pathOrUrl = String(args[config.pathArg] || '');
-    const link = `${urlPrefix}${pathOrUrl}`;
-    const title = translate(context, config.title);
-    const name = config.nameArg ? String(args[config.nameArg] || '') : '';
-    const introValues = config.nameArg ? [name, siteName] : [siteName];
-    const intro = formatMessage(translate(context, config.intro), introValues);
-    const button = translate(context, config.button);
-    const senderLink = `<a href="${escapeHtml(`${urlPrefix || '#'}/`)}" target="_blank" style="color:#0ea5e9;text-decoration:none;">${escapeHtml(siteName)}</a>`;
-    const footerText = formatMessage(
-        escapeHtml(translate(context, 'This email was sent by {0} automatically, and please do not reply directly.')),
-        [senderLink],
-    );
-    const requestIp = handler.request?.ip || '';
-    const requestText = requestIp
-        ? escapeHtml(formatMessage(translate(context, 'This email was requested from {0}'), [requestIp]))
-        : '';
+  const handler = context.handler || {};
+  const domain = args.domain || handler.domain || {};
+  const siteName = domain?.ui?.name || domain?.name || safeSystemGet('server.name') || 'Krypton';
+  const urlPrefix = String(args.url_prefix || safeSystemGet('server.url') || '').replace(/\/$/, '');
+  const pathOrUrl = String(args[config.pathArg] || '');
+  const link = `${urlPrefix}${pathOrUrl}`;
+  const title = translate(context, config.title);
+  const name = config.nameArg ? String(args[config.nameArg] || '') : '';
+  const introValues = config.nameArg ? [name, siteName] : [siteName];
+  const intro = formatMessage(translate(context, config.intro), introValues);
+  const button = translate(context, config.button);
+  const senderLink = `<a href="${escapeHtml(`${urlPrefix || '#'}/`)}" target="_blank" style="color:#0ea5e9;text-decoration:none;">${escapeHtml(siteName)}</a>`;
+  const footerText = formatMessage(escapeHtml(translate(context, 'This email was sent by {0} automatically, and please do not reply directly.')), [
+    senderLink,
+  ]);
+  const requestIp = handler.request?.ip || '';
+  const requestText = requestIp ? escapeHtml(formatMessage(translate(context, 'This email was requested from {0}'), [requestIp])) : '';
 
-    return `<!doctype html>
+  return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
@@ -197,151 +203,150 @@ function renderUiNextMail(templateName: string, args: Record<string, any>, conte
 }
 
 function buildBootstrap(templateName: string, args: Record<string, any>, context: Record<string, any>) {
-    const currentUser = context.UserContext || {};
-    const domain = args.domain || context.handler?.domain || {};
-    const siteName = domain?.ui?.name || domain?.name || 'Hydro';
-    // Footer extras: system-wide and per-domain HTML lines. Pre-sanitised
-    // by hydrooj when configured via system settings.
-    const systemFooterHtml = safeSystemGet('ui-default.footer_extra_html');
-    const domainFooterHtml = (domain?.ui?.footer_extra_html || '');
-    const rankboardCapabilities = resolveRankboardCapabilities({
-        user: context.handler?.user,
-        // Missing domain context is not assumed to be system: capabilities
-        // stay closed until the real request scope is available.
+  const currentUser = context.UserContext || {};
+  const domain = args.domain || context.handler?.domain || {};
+  const siteName = domain?.ui?.name || domain?.name || 'Hydro';
+  // Footer extras: system-wide and per-domain HTML lines. Pre-sanitised
+  // by hydrooj when configured via system settings.
+  const systemFooterHtml = safeSystemGet('ui-default.footer_extra_html');
+  const domainFooterHtml = domain?.ui?.footer_extra_html || '';
+  const rankboardCapabilities = resolveRankboardCapabilities({
+    user: context.handler?.user,
+    // Missing domain context is not assumed to be system: capabilities
+    // stay closed until the real request scope is available.
+    domainId: String(domain?._id || ''),
+    editSystemPriv: PRIV.PRIV_EDIT_SYSTEM,
+    importPerm: PERM.PERM_RANKBOARD_IMPORT,
+    managePerm: PERM.PERM_RANKBOARD_MANAGE,
+    onError(error) {
+      console.error('[ui-next] rankboard capability resolution failed:', error);
+    },
+  });
+  const problemBankCapability = resolveProblemBankCapability(context.handler?.user, (error) => {
+    console.error(
+      '[ui-next] problem bank capability resolution failed; denying navigation:',
+      {
         domainId: String(domain?._id || ''),
-        editSystemPriv: PRIV.PRIV_EDIT_SYSTEM,
-        importPerm: PERM.PERM_RANKBOARD_IMPORT,
-        managePerm: PERM.PERM_RANKBOARD_MANAGE,
-        onError(error) {
-            console.error('[ui-next] rankboard capability resolution failed:', error);
-        },
-    });
-    const problemBankCapability = resolveProblemBankCapability(
-        context.handler?.user,
-        (error) => {
-            console.error('[ui-next] problem bank capability resolution failed; denying navigation:', {
-                domainId: String(domain?._id || ''),
-                uid: Number(context.handler?.user?._id || 0),
-                templateName,
-            }, error);
-        },
+        uid: Number(context.handler?.user?._id || 0),
+        templateName,
+      },
+      error,
     );
+  });
 
-    return {
-        appName: 'Krypton',
-        siteName,
-        locale: currentUser.viewLang || 'zh-CN',
-        theme: toUiTheme(currentUser.theme),
-        generatedAt: new Date().toISOString(),
-        user: {
-            id: Number(currentUser._id || 0),
-            name: currentUser.uname || 'Guest',
-            mail: currentUser.mail || '',
-            signedIn: Number(currentUser._id || 0) > 0,
-            theme: currentUser.theme || 'light',
-            viewLang: currentUser.viewLang || 'zh-CN',
-            unreadMessages: currentUser.unreadMsg || 0,
-            rp: currentUser.rp || 0,
-            bio: currentUser.bio || '',
-            priv: currentUser.priv || 0,
-            role: currentUser.role || 'default',
-            tfa: !!currentUser.tfa,
-            authn: !!currentUser.authn,
-            pinnedDomains: currentUser.pinnedDomains || [],
-            avatar: currentUser.avatar || '',
-            avatarUrl: currentUser.avatarUrl || '',
-            // 仅用于前端 affordance；服务端枚举与写入仍独立强制。同一能力
-            // 解析失败时必须 fail closed，并由上面的结构化日志留下现场。
-            canBrowseProblemBank: problemBankCapability,
-            canImportRankboard: rankboardCapabilities.canImportRankboard,
-            canManageRankboard: rankboardCapabilities.canManageRankboard,
-        },
-        domain: {
-            id: String(domain._id || 'system'),
-            name: domain?.ui?.name || domain?.name || siteName,
-            bulletin: domain?.bulletin || '',
-            avatar: domain?.avatar || '',
-        },
-        urls: {
-            home: safeUrl(context, 'homepage'),
-            problems: safeUrl(context, 'problem_main'),
-            contests: safeUrl(context, 'contest_main'),
-            homework: safeUrl(context, 'homework_main'),
-            training: safeUrl(context, 'training_main'),
-            ranking: safeUrl(context, 'ranking'),
-            discussions: safeUrl(context, 'discussion_main'),
-            domains: safeUrl(context, 'home_domain'),
-            messages: safeUrl(context, 'home_messages'),
-            login: safeUrl(context, 'user_login'),
-            register: safeUrl(context, 'user_register'),
-            logout: safeUrl(context, 'user_logout'),
-            settings: safeUrl(context, 'home_settings', { category: 'preference' }).replace(/\/preference$/, ''),
-            security: safeUrl(context, 'home_security'),
-            files: safeUrl(context, 'home_files'),
-            records: safeUrl(context, 'record_main'),
-            domainDashboard: safeUrl(context, 'domain_dashboard'),
-            manage: safeUrl(context, 'manage_dashboard'),
-            status: safeUrl(context, 'status'),
-            problemDetail: safeUrl(context, 'problem_detail', { pid: '__PID__' }),
-            contestDetail: safeUrl(context, 'contest_detail', { tid: '__TID__' }),
-            homeworkDetail: safeUrl(context, 'homework_detail', { tid: '__TID__' }),
-            trainingDetail: safeUrl(context, 'training_detail', { tid: '__TID__' }),
-            discussionDetail: safeUrl(context, 'discussion_detail', { did: '__DID__' }),
-            discussionNode: safeUrl(context, 'discussion_node', { type: '__TYPE__', name: '__NAME__' }),
-            userDetail: safeUrl(context, 'user_detail', { uid: '__UID__' }),
-            recordDetail: safeUrl(context, 'record_detail', { rid: '__RID__' }),
-        },
-        udict: args.udict || {},
-        footer: {
-            systemHtml: systemFooterHtml,
-            domainHtml: domainFooterHtml,
-        },
-        page: {
-            templateName,
-            data: args,
-        },
-    };
+  return {
+    appName: 'Krypton',
+    siteName,
+    locale: currentUser.viewLang || 'zh-CN',
+    theme: toUiTheme(currentUser.theme),
+    generatedAt: new Date().toISOString(),
+    user: {
+      id: Number(currentUser._id || 0),
+      name: currentUser.uname || 'Guest',
+      mail: currentUser.mail || '',
+      signedIn: Number(currentUser._id || 0) > 0,
+      theme: currentUser.theme || 'light',
+      viewLang: currentUser.viewLang || 'zh-CN',
+      unreadMessages: currentUser.unreadMsg || 0,
+      rp: currentUser.rp || 0,
+      bio: currentUser.bio || '',
+      priv: currentUser.priv || 0,
+      role: currentUser.role || 'default',
+      tfa: !!currentUser.tfa,
+      authn: !!currentUser.authn,
+      pinnedDomains: currentUser.pinnedDomains || [],
+      avatar: currentUser.avatar || '',
+      avatarUrl: currentUser.avatarUrl || '',
+      // 仅用于前端 affordance；服务端枚举与写入仍独立强制。同一能力
+      // 解析失败时必须 fail closed，并由上面的结构化日志留下现场。
+      canBrowseProblemBank: problemBankCapability,
+      canImportRankboard: rankboardCapabilities.canImportRankboard,
+      canManageRankboard: rankboardCapabilities.canManageRankboard,
+    },
+    domain: {
+      id: String(domain._id || 'system'),
+      name: domain?.ui?.name || domain?.name || siteName,
+      bulletin: domain?.bulletin || '',
+      avatar: domain?.avatar || '',
+    },
+    urls: {
+      home: safeUrl(context, 'homepage'),
+      problems: safeUrl(context, 'problem_main'),
+      contests: safeUrl(context, 'contest_main'),
+      homework: safeUrl(context, 'homework_main'),
+      training: safeUrl(context, 'training_main'),
+      ranking: safeUrl(context, 'ranking'),
+      discussions: safeUrl(context, 'discussion_main'),
+      domains: safeUrl(context, 'home_domain'),
+      messages: safeUrl(context, 'home_messages'),
+      login: safeUrl(context, 'user_login'),
+      register: safeUrl(context, 'user_register'),
+      logout: safeUrl(context, 'user_logout'),
+      settings: safeUrl(context, 'home_settings', { category: 'preference' }).replace(/\/preference$/, ''),
+      security: safeUrl(context, 'home_security'),
+      files: safeUrl(context, 'home_files'),
+      records: safeUrl(context, 'record_main'),
+      domainDashboard: safeUrl(context, 'domain_dashboard'),
+      manage: safeUrl(context, 'manage_dashboard'),
+      status: safeUrl(context, 'status'),
+      problemDetail: safeUrl(context, 'problem_detail', { pid: '__PID__' }),
+      contestDetail: safeUrl(context, 'contest_detail', { tid: '__TID__' }),
+      homeworkDetail: safeUrl(context, 'homework_detail', { tid: '__TID__' }),
+      trainingDetail: safeUrl(context, 'training_detail', { tid: '__TID__' }),
+      discussionDetail: safeUrl(context, 'discussion_detail', { did: '__DID__' }),
+      discussionNode: safeUrl(context, 'discussion_node', { type: '__TYPE__', name: '__NAME__' }),
+      userDetail: safeUrl(context, 'user_detail', { uid: '__UID__' }),
+      recordDetail: safeUrl(context, 'record_detail', { rid: '__RID__' }),
+    },
+    udict: args.udict || {},
+    footer: {
+      systemHtml: systemFooterHtml,
+      domainHtml: domainFooterHtml,
+    },
+    page: {
+      templateName,
+      data: args,
+    },
+  };
 }
 
 function assetPath(file: string) {
-    return `/next/${file}`;
+  return `/next/${file}`;
 }
 
 function resolveManifestAssets() {
-    if (!fs.existsSync(manifestPath)) return null;
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as Record<string, ManifestChunk>;
-    const entryKey = manifest['index.html']
-        ? 'index.html'
-        : Object.keys(manifest).find((key) => manifest[key].isEntry);
-    if (!entryKey) return null;
+  if (!fs.existsSync(manifestPath)) return null;
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as Record<string, ManifestChunk>;
+  const entryKey = manifest['index.html'] ? 'index.html' : Object.keys(manifest).find((key) => manifest[key].isEntry);
+  if (!entryKey) return null;
 
-    const css = new Set<string>();
-    const preloads = new Set<string>();
-    const visited = new Set<string>();
+  const css = new Set<string>();
+  const preloads = new Set<string>();
+  const visited = new Set<string>();
 
-    const visit = (key: string) => {
-        if (visited.has(key)) return;
-        visited.add(key);
-        const chunk = manifest[key];
-        if (!chunk) return;
-        for (const stylesheet of chunk.css || []) css.add(assetPath(stylesheet));
-        for (const imported of chunk.imports || []) {
-            const importedChunk = manifest[imported];
-            if (importedChunk?.file) preloads.add(assetPath(importedChunk.file));
-            visit(imported);
-        }
-    };
+  const visit = (key: string) => {
+    if (visited.has(key)) return;
+    visited.add(key);
+    const chunk = manifest[key];
+    if (!chunk) return;
+    for (const stylesheet of chunk.css || []) css.add(assetPath(stylesheet));
+    for (const imported of chunk.imports || []) {
+      const importedChunk = manifest[imported];
+      if (importedChunk?.file) preloads.add(assetPath(importedChunk.file));
+      visit(imported);
+    }
+  };
 
-    visit(entryKey);
-    return {
-        script: assetPath(manifest[entryKey].file),
-        styles: Array.from(css),
-        preloads: Array.from(preloads),
-    };
+  visit(entryKey);
+  return {
+    script: assetPath(manifest[entryKey].file),
+    styles: Array.from(css),
+    preloads: Array.from(preloads),
+  };
 }
 
 function renderMissingBuild(bootstrap: ReturnType<typeof buildBootstrap>) {
-    const baseStyle = `
+  const baseStyle = `
       <style>
         :root { color-scheme: ${bootstrap.theme}; }
         body {
@@ -369,89 +374,88 @@ function renderMissingBuild(bootstrap: ReturnType<typeof buildBootstrap>) {
         }
       </style>
     `;
-    return `<!doctype html><html lang="${bootstrap.locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${baseStyle}</head><body><main><h1>Krypton UI build output not found</h1><p>Run <code>bun run build:ui:next</code> or <code>bun run build:ui</code>, then restart Hydro to load the React homepage.</p></main></body></html>`;
+  return `<!doctype html><html lang="${bootstrap.locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">${baseStyle}</head><body><main><h1>Krypton UI build output not found</h1><p>Run <code>bun run build:ui:next</code> or <code>bun run build:ui</code>, then restart Hydro to load the React homepage.</p></main></body></html>`;
 }
 
 async function renderApp(templateName: string, args: Record<string, any>, context: Record<string, any>, vite: ViteDevServer | null) {
-    const mail = renderUiNextMail(templateName, args, context);
-    if (mail) return mail;
+  const mail = renderUiNextMail(templateName, args, context);
+  if (mail) return mail;
 
-    context.handler?.response?.addHeader?.('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    context.handler?.response?.addHeader?.('Pragma', 'no-cache');
-    context.handler?.response?.addHeader?.('Expires', '0');
+  context.handler?.response?.addHeader?.('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  context.handler?.response?.addHeader?.('Pragma', 'no-cache');
+  context.handler?.response?.addHeader?.('Expires', '0');
 
-    const bootstrap = buildBootstrap(templateName, args, context);
-    let serializedBootstrap: string;
-    try {
-        serializedBootstrap = escapeForScript(bootstrap, context.handler);
-    } catch (e) {
-        console.error('[ui-next] Failed to serialize bootstrap for', templateName, e);
-        // Fallback: strip page data to avoid total failure
-        bootstrap.page.data = { _serializationError: String(e) };
-        serializedBootstrap = escapeForScript(bootstrap, context.handler);
-    }
+  const bootstrap = buildBootstrap(templateName, args, context);
+  let serializedBootstrap: string;
+  try {
+    serializedBootstrap = escapeForScript(bootstrap, context.handler);
+  } catch (e) {
+    console.error('[ui-next] Failed to serialize bootstrap for', templateName, e);
+    // Fallback: strip page data to avoid total failure
+    bootstrap.page.data = { _serializationError: String(e) };
+    serializedBootstrap = escapeForScript(bootstrap, context.handler);
+  }
 
-    if (vite) {
-        const template = applyReplacements(readTemplate(), {
-            bootstrap: serializedBootstrap,
-            head: '',
-            entry: devEntryTag,
-        });
-        return await vite.transformIndexHtml('/', template);
-    }
-
-    const assets = resolveManifestAssets();
-    if (!assets) return renderMissingBuild(bootstrap);
-
-    const head = [
-        ...assets.preloads.map((href) => `<link rel="modulepreload" href="${href}" crossorigin>`),
-        ...assets.styles.map((href) => `<link rel="stylesheet" href="${href}" crossorigin>`),
-    ].join('\n');
-    const entry = `<script type="module" crossorigin src="${assets.script}"></script>`;
-
-    return applyReplacements(readTemplate(), {
-        bootstrap: serializedBootstrap,
-        head,
-        entry,
+  if (vite) {
+    const template = applyReplacements(readTemplate(), {
+      bootstrap: serializedBootstrap,
+      head: '',
+      entry: devEntryTag,
     });
+    return await vite.transformIndexHtml('/', template);
+  }
+
+  const assets = resolveManifestAssets();
+  if (!assets) return renderMissingBuild(bootstrap);
+
+  const head = [
+    ...assets.preloads.map((href) => `<link rel="modulepreload" href="${href}" crossorigin>`),
+    ...assets.styles.map((href) => `<link rel="stylesheet" href="${href}" crossorigin>`),
+  ].join('\n');
+  const entry = `<script type="module" crossorigin src="${assets.script}"></script>`;
+
+  return applyReplacements(readTemplate(), {
+    bootstrap: serializedBootstrap,
+    head,
+    entry,
+  });
 }
 
 export async function apply(ctx: Context) {
-    if (process.env.HYDRO_CLI) return;
-    let vite: ViteDevServer | null = null;
+  if (process.env.HYDRO_CLI) return;
+  let vite: ViteDevServer | null = null;
 
-    if (process.env.DEV) {
-        const { createServer } = await import('vite');
-        vite = await createServer({
-            root: __dirname,
-            configFile: path.join(__dirname, 'vite.config.ts'),
-            base: '/',
-            appType: 'custom',
-            server: {
-                middlewareMode: true,
-                hmr: {
-                    port: 3010,
-                },
-            },
-        });
-
-        const middleware = c2k(vite.middlewares);
-        for (const route of ['/src/', '/@vite/', '/@react-refresh', '/node_modules/', '/@fs/', '/@id/']) {
-            ctx.server.addCaptureRoute(route, middleware);
-        }
-    }
-
-    ctx.server.registerRenderer('next', {
-        name: 'next',
-        output: 'html',
-        accept: [],
-        asFallback: true,
-        priority: 100,
-        render: async (name, args, context) => await renderApp(name, args, context, vite),
+  if (process.env.DEV) {
+    const { createServer } = await import('vite');
+    vite = await createServer({
+      root: __dirname,
+      configFile: path.join(__dirname, 'vite.config.ts'),
+      base: '/',
+      appType: 'custom',
+      server: {
+        middlewareMode: true,
+        hmr: {
+          port: 3010,
+        },
+      },
     });
 
-    // eslint-disable-next-line consistent-return
-    return async () => {
-        await vite?.close().catch((e) => console.error(e));
-    };
+    const middleware = c2k(vite.middlewares);
+    for (const route of ['/src/', '/@vite/', '/@react-refresh', '/node_modules/', '/@fs/', '/@id/']) {
+      ctx.server.addCaptureRoute(route, middleware);
+    }
+  }
+
+  ctx.server.registerRenderer('next', {
+    name: 'next',
+    output: 'html',
+    accept: [],
+    asFallback: true,
+    priority: 100,
+    render: async (name, args, context) => await renderApp(name, args, context, vite),
+  });
+
+  return async () => {
+    await vite?.close().catch((e) => console.error(e));
+  };
 }

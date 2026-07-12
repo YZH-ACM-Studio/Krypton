@@ -12,7 +12,7 @@ function noopDecorator() {
     return (_target: unknown, _key: string, descriptor: PropertyDescriptor) => descriptor;
 }
 
-class HandlerStub { }
+class HandlerStub {}
 const serverStub = {
     Handler: HandlerStub,
     param: noopDecorator,
@@ -20,20 +20,32 @@ const serverStub = {
     Types: new Proxy({}, { get: () => () => ({}) }),
 };
 
-const errors = new Proxy({}, {
-    get: (_target, key: string) => class extends Error { name = key; },
-});
+const errors = new Proxy(
+    {},
+    {
+        get: (_target, key: string) =>
+            class extends Error {
+                name = key;
+            },
+    },
+);
 
 function cursor(rows: any[] = []) {
     const value: any = {
-        project() { return value; },
-        sort() { return value; },
-        async toArray() { return rows; },
+        project() {
+            return value;
+        },
+        sort() {
+            return value;
+        },
+        async toArray() {
+            return rows;
+        },
     };
     return value;
 }
 
-const calls: Array<{ model: string, domainId: string }> = [];
+const calls: Array<{ model: string; domainId: string }> = [];
 const contestAdds: any[][] = [];
 const courseAttaches: any[][] = [];
 const contestDeletes: any[][] = [];
@@ -52,9 +64,14 @@ const homeworkId = new ObjectId('dddddddddddddddddddddddd');
 (global as any).Hydro = {
     model: {
         userbind: {
-            async findStudentByUserId() { return { groupIds: studentGroupIds }; },
+            async findStudentByUserId() {
+                return { groupIds: studentGroupIds };
+            },
             async listUserGroups() {
-                return [{ _id: groupA, name: 'A 班' }, { _id: groupB, name: 'B 班' }];
+                return [
+                    { _id: groupA, name: 'A 班' },
+                    { _id: groupB, name: 'B 班' },
+                ];
             },
         },
     },
@@ -116,7 +133,9 @@ const problemStub = {
         calls.push({ model: 'problem.getList', domainId });
         return {};
     },
-    assertProblemAclDomain() { return undefined; },
+    assertProblemAclDomain() {
+        return undefined;
+    },
 };
 
 const recordStub = {
@@ -131,13 +150,15 @@ const userStub = {
         calls.push({ model: 'user.getList', domainId });
         return {};
     },
-    async listGroup() { return []; },
+    async listGroup() {
+        return [];
+    },
 };
 
 const contestHandlerStub = {
-    ContestCodeHandler: class { },
-    ContestFileDownloadHandler: class { },
-    ContestScoreboardHandler: class { },
+    ContestCodeHandler: class {},
+    ContestFileDownloadHandler: class {},
+    ContestScoreboardHandler: class {},
 };
 
 const homeworkPath = require.resolve('../src/handler/homework.ts');
@@ -147,7 +168,13 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromHomework && request === '@hydrooj/utils/lib/utils') {
         return { sortFiles: (files: any[]) => files, Time: { day: 86400000 } };
     }
-    if (fromHomework && request === '@hydrooj/utils') return { Logger: class { error() { } } };
+    if (fromHomework && request === '@hydrooj/utils') {
+        return {
+            Logger: class {
+                error() {}
+            },
+        };
+    }
     if (fromHomework && request === '../error') return errors;
     if (fromHomework && request === '../interface') return {};
     if (fromHomework && request === '../model/builtin') return { PERM, PRIV };
@@ -177,9 +204,15 @@ try {
 
 const routes: Record<string, any> = {};
 void homeworkModule.apply({
-    Route(name: string, _path: string, HandlerClass: any) { routes[name] = HandlerClass; },
+    Route(name: string, _path: string, HandlerClass: any) {
+        routes[name] = HandlerClass;
+    },
     async inject(_deps: string[], callback: (ctx: any) => unknown) {
-        return callback({ Route() { return undefined; } });
+        return callback({
+            Route() {
+                return undefined;
+            },
+        });
     },
 } as any);
 
@@ -199,9 +232,7 @@ function makeHandler(HandlerClass: any, userOverrides: Record<string, unknown> =
         response: { body: {} },
         request: { ip: '127.0.0.1' },
         paginate: async () => [[], 1, 0],
-        url: (name: string, args: any = {}) => (
-            name === 'course_detail' ? `/course/${args.tid}` : '/target'
-        ),
+        url: (name: string, args: any = {}) => (name === 'course_detail' ? `/course/${args.tid}` : '/target'),
         back: () => undefined,
         checkPerm: () => undefined,
     });
@@ -218,8 +249,15 @@ beforeEach(() => {
     contestDone = true;
     attachSucceeds = true;
     currentHomework = {
-        domainId: 'system', docId: 'homework', owner: 42, rule: 'homework',
-        title: 'Homework', content: '', pids: [11], assign: [], files: [],
+        domainId: 'system',
+        docId: 'homework',
+        owner: 42,
+        rule: 'homework',
+        title: 'Homework',
+        content: '',
+        pids: [11],
+        assign: [],
+        files: [],
     };
     currentStatus = {
         attend: 1,
@@ -227,8 +265,12 @@ beforeEach(() => {
         journal: [{ pid: 11, rid: 'record-1' }],
     };
     currentCourse = {
-        domainId: 'system', docId: courseId, owner: 42, kind: 'course',
-        title: '程序设计', courseGroupIds: [groupA],
+        domainId: 'system',
+        docId: courseId,
+        owner: 42,
+        kind: 'course',
+        title: '程序设计',
+        courseGroupIds: [groupA],
         dag: [{ _id: 3, title: '循环', pids: [], requireNids: [], tids: [] }],
     };
 });
@@ -241,8 +283,12 @@ describe('homework authoritative domain', () => {
         await handler.get('forged-domain', 'homework', 1);
 
         expect(calls.map((call) => call.model)).to.include.members([
-            'contest.get', 'contest.getStatus', 'discussion.getMulti',
-            'user.getList', 'problem.getList', 'record.getList',
+            'contest.get',
+            'contest.getStatus',
+            'discussion.getMulti',
+            'user.getList',
+            'problem.getList',
+            'record.getList',
         ]);
         expect(calls.filter((call) => call.domainId !== 'system')).to.deep.equal([]);
         expect(handler.response.body.tdoc).to.equal(currentHomework);
@@ -339,10 +385,25 @@ describe('P3.7 course homework scope', () => {
         expect(handler.response.body.participantGroupIds).to.deep.equal([String(groupA)]);
 
         await handler.postUpdate(
-            'forged-domain', undefined,
-            '2026-07-13', '00:00', '2026-07-20', '23:59', 1,
-            { 1: 0.9 }, '程序设计 · 循环', '', '101', false,
-            [], [], [], 'none', [], courseId, 3,
+            'forged-domain',
+            undefined,
+            '2026-07-13',
+            '00:00',
+            '2026-07-20',
+            '23:59',
+            1,
+            { 1: 0.9 },
+            '程序设计 · 循环',
+            '',
+            '101',
+            false,
+            [],
+            [],
+            [],
+            'none',
+            [],
+            courseId,
+            3,
         );
         const createData = contestAdds[0][9];
         expect(createData.participantScopeMode).to.equal('groups');
@@ -370,22 +431,36 @@ describe('P3.7 course homework scope', () => {
     });
 
     it('keeps ordinary homework unrestricted when participant scope is none', () => {
-        expect(homeworkParticipantScopeAllows({ participantScopeMode: 'none' } as any, new Set()))
-            .to.equal(true);
-        expect(homeworkParticipantScopeAllows({} as any, new Set()))
-            .to.equal(true);
+        expect(homeworkParticipantScopeAllows({ participantScopeMode: 'none' } as any, new Set())).to.equal(true);
+        expect(homeworkParticipantScopeAllows({} as any, new Set())).to.equal(true);
     });
 
     it('creates an ordinary homework without course scope or chapter attachment', async () => {
         const handler = makeHandler(routes.homework_create);
         await handler.postUpdate(
-            'forged-domain', undefined,
-            '2026-07-13', '00:00', '2026-07-20', '23:59', 1,
-            { 1: 0.9 }, '普通作业', '', '101', false,
-            [], [], [], 'none', [], undefined, 0,
+            'forged-domain',
+            undefined,
+            '2026-07-13',
+            '00:00',
+            '2026-07-20',
+            '23:59',
+            1,
+            { 1: 0.9 },
+            '普通作业',
+            '',
+            '101',
+            false,
+            [],
+            [],
+            [],
+            'none',
+            [],
+            undefined,
+            0,
         );
         expect(contestAdds[0][9]).to.deep.include({
-            participantScopeMode: 'none', participantGroupIds: [],
+            participantScopeMode: 'none',
+            participantGroupIds: [],
         });
         expect(courseAttaches).to.deep.equal([]);
         expect(handler.response.redirect).to.equal('/target');
@@ -397,10 +472,25 @@ describe('P3.7 course homework scope', () => {
         let error: any;
         try {
             await handler.postUpdate(
-                'forged-domain', undefined,
-                '2026-07-13', '00:00', '2026-07-20', '23:59', 1,
-                { 1: 0.9 }, '程序设计 · 循环', '', '101', false,
-                [], [], [], 'none', [], courseId, 3,
+                'forged-domain',
+                undefined,
+                '2026-07-13',
+                '00:00',
+                '2026-07-20',
+                '23:59',
+                1,
+                { 1: 0.9 },
+                '程序设计 · 循环',
+                '',
+                '101',
+                false,
+                [],
+                [],
+                [],
+                'none',
+                [],
+                courseId,
+                3,
             );
         } catch (caught) {
             error = caught;

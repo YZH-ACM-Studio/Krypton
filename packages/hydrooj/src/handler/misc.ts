@@ -2,18 +2,13 @@ import { writeHeapSnapshot } from 'v8';
 import { pick } from 'lodash';
 import { lookup } from 'mime-types';
 import { Context } from '../context';
-import {
-    AccessDeniedError, FileExistsError, FileLimitExceededError, FileUploadError, NotFoundError,
-    ValidationError,
-} from '../error';
+import { AccessDeniedError, FileExistsError, FileLimitExceededError, FileUploadError, NotFoundError, ValidationError } from '../error';
 import { PRIV } from '../model/builtin';
 import * as oplog from '../model/oplog';
 import storage from '../model/storage';
 import system from '../model/system';
 import user, { User } from '../model/user';
-import {
-    Handler, param, post, requireSudo, Types,
-} from '../service/server';
+import { Handler, param, post, requireSudo, Types } from '../service/server';
 import { encodeRFC5987ValueChars } from '../service/storage';
 import { sortFiles } from '../utils';
 
@@ -44,7 +39,7 @@ export class FilesHandler extends Handler {
         }
     }
 
-    async get({ }) {
+    async get({}) {
         if (!this.udoc._files?.length) this.checkPriv(PRIV.PRIV_CREATE_FILE);
         this.response.body = {
             files: sortFiles(this.udoc._files),
@@ -55,7 +50,7 @@ export class FilesHandler extends Handler {
     }
 
     @post('filename', Types.Filename)
-    async postUploadFile({ }, filename: string) {
+    async postUploadFile({}, filename: string) {
         this.checkPriv(PRIV.PRIV_CREATE_FILE);
         if ((this.user._files?.length || 0) >= system.get('limit.user_files')) {
             if (!this.user.hasPriv(PRIV.PRIV_UNLIMITED_QUOTA)) throw new FileLimitExceededError('count');
@@ -77,9 +72,12 @@ export class FilesHandler extends Handler {
     }
 
     @post('files', Types.ArrayOf(Types.Filename))
-    async postDeleteFiles({ }, files: string[]) {
+    async postDeleteFiles({}, files: string[]) {
         await Promise.all([
-            storage.del(files.map((t) => `user/${this.udoc._id}/${t}`), this.user._id),
+            storage.del(
+                files.map((t) => `user/${this.udoc._id}/${t}`),
+                this.user._id,
+            ),
             user.setById(this.udoc._id, { _files: this.udoc._files.filter((i) => !files.includes(i.name)) }),
         ]);
         this.back();
@@ -100,9 +98,7 @@ export class FSDownloadHandler extends Handler {
             size: file?.size || 0,
         });
         try {
-            this.response.redirect = await storage.signDownloadLink(
-                target, noDisposition ? undefined : filename, false, 'user',
-            );
+            this.response.redirect = await storage.signDownloadLink(target, noDisposition ? undefined : filename, false, 'user');
             this.response.addHeader('Cache-Control', 'public');
         } catch (e) {
             if (e.message.includes('Invalid path')) throw new NotFoundError(filename);
@@ -119,13 +115,11 @@ export class StorageHandler extends Handler {
     @param('filename', Types.Filename, true)
     @param('expire', Types.UnsignedInt)
     @param('secret', Types.String)
-    async get({ }, target: string, filename = '', expire: number, secret: string) {
+    async get({}, target: string, filename = '', expire: number, secret: string) {
         if (expire < Date.now()) throw new AccessDeniedError();
         if (!(await this.ctx.get('storage')?.isLinkValid?.(`${target}/${expire}/${secret}`))) throw new AccessDeniedError();
         this.response.body = await storage.get(target);
-        this.response.type = (target.endsWith('.out') || target.endsWith('.ans'))
-            ? 'text/plain'
-            : lookup(target) || 'application/octet-stream';
+        this.response.type = target.endsWith('.out') || target.endsWith('.ans') ? 'text/plain' : lookup(target) || 'application/octet-stream';
         if (filename) this.response.disposition = `attachment; filename="${encodeRFC5987ValueChars(filename)}"`;
     }
 }
@@ -133,7 +127,7 @@ export class StorageHandler extends Handler {
 export class SwitchAccountHandler extends Handler {
     @requireSudo
     @param('uid', Types.Int)
-    async get({ }, uid: number) {
+    async get({}, uid: number) {
         this.session.sudoUid = this.user._id;
         this.session.uid = uid;
         this.back();
@@ -142,7 +136,7 @@ export class SwitchAccountHandler extends Handler {
 
 class HeapSnapshotHandler extends Handler {
     @param('worker', Types.Int)
-    async post({ }, worker: number) {
+    async post({}, worker: number) {
         this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
         if (worker && process.env.NODE_APP_INSTANCE !== worker.toString()) {
             this.response.body = { error: 'Not current worker' };

@@ -28,7 +28,7 @@ Object.assign(ReactDOMMain, ReactDOMClient);
 
 export const ReactDOM = ReactDOMMain as typeof ReactDOMMain & typeof ReactDOMClient;
 export default load;
-export interface EventMap { }
+export interface EventMap {}
 
 import AutoComplete from './components/autocomplete';
 import AssignSelectAutoComplete from './components/autocomplete/AssignSelectAutoComplete';
@@ -38,7 +38,12 @@ import ProblemSelectAutoComplete from './components/autocomplete/ProblemSelectAu
 import UserSelectAutoComplete from './components/autocomplete/UserSelectAutoComplete';
 
 export {
-  AssignSelectAutoComplete, AutoComplete, CustomSelectAutoComplete, DomainSelectAutoComplete, ProblemSelectAutoComplete, UserSelectAutoComplete,
+  AssignSelectAutoComplete,
+  AutoComplete,
+  CustomSelectAutoComplete,
+  DomainSelectAutoComplete,
+  ProblemSelectAutoComplete,
+  UserSelectAutoComplete,
 };
 export function addPage(page: import('./misc/Page').Page | (() => Promise<void> | void)) {
   window.Hydro.extraPages.push(page);
@@ -51,8 +56,8 @@ declare global {
     lazyModuleResolver: Record<string, any>;
   }
 
-  let UserContext: Record<string, any>; // eslint-disable-line
-  let UiContext: Record<string, any>; // eslint-disable-line
+  let UserContext: Record<string, any>;
+  let UiContext: Record<string, any>;
 }
 
 // Below are old version api compat

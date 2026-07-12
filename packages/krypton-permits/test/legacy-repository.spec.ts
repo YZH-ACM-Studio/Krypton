@@ -5,8 +5,10 @@ import { createAclService } from '../src/service';
 const Module = require('module');
 
 class FakeObjectId {
-    constructor(private readonly value: string) { }
-    toHexString() { return this.value; }
+    constructor(private readonly value: string) {}
+    toHexString() {
+        return this.value;
+    }
 }
 
 function sameValue(actual: any, expected: any): boolean {
@@ -48,10 +50,18 @@ describe('legacy canonical repository compatibility', () => {
                     find(filter: any) {
                         return { toArray: async () => docs.filter((doc) => matches(doc, filter)) };
                     },
-                    async findOne(filter: any) { return docs.find((doc) => matches(doc, filter)) || null; },
-                    async insertOne(...args: any[]) { writes.push(['insertOne', name, ...args]); },
-                    async updateOne(...args: any[]) { writes.push(['updateOne', name, ...args]); },
-                    async deleteOne(...args: any[]) { writes.push(['deleteOne', name, ...args]); },
+                    async findOne(filter: any) {
+                        return docs.find((doc) => matches(doc, filter)) || null;
+                    },
+                    async insertOne(...args: any[]) {
+                        writes.push(['insertOne', name, ...args]);
+                    },
+                    async updateOne(...args: any[]) {
+                        writes.push(['updateOne', name, ...args]);
+                    },
+                    async deleteOne(...args: any[]) {
+                        writes.push(['deleteOne', name, ...args]);
+                    },
                 });
             }
             return collections.get(name);
@@ -128,8 +138,13 @@ describe('legacy canonical repository compatibility', () => {
             const { MongoAclRepository } = require(repositoryPath);
             const repository = new MongoAclRepository();
             const marker = {
-                domainId: 'system', pid: 7, uid: 9, requestId: 'marker-request',
-                intent: { role: 'verifier' }, completedSteps: ['source'], lastError: null,
+                domainId: 'system',
+                pid: 7,
+                uid: 9,
+                requestId: 'marker-request',
+                intent: { role: 'verifier' },
+                completedSteps: ['source'],
+                lastError: null,
             };
             await repository.getCanonical(marker);
             await repository.getSources(marker);
@@ -137,8 +152,15 @@ describe('legacy canonical repository compatibility', () => {
             await repository.updateFence(marker, 'owned-request', { lastError: null });
             await repository.writeCanonical(marker, null);
             await repository.writeCanonical(marker, {
-                domainId: 'system', pid: 7, uid: 9, role: 'verifier', active: true,
-                grantedBy: 2, grantedAt: new Date(), viaContest: null, note: '',
+                domainId: 'system',
+                pid: 7,
+                uid: 9,
+                role: 'verifier',
+                active: true,
+                grantedBy: 2,
+                grantedAt: new Date(),
+                viaContest: null,
+                note: '',
             });
             await repository.deleteFence(marker, 'owned-request');
 

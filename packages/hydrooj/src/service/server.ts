@@ -4,8 +4,12 @@ import fs from 'fs-extra';
 import cache from 'koa-static-cache';
 import { type FindCursor, ObjectId } from 'mongodb';
 import {
-    applyApiHandler, ConnectionHandler as ConnectionHandlerOriginal,
-    Handler as HandlerOriginal, HydroError, NotFoundError, UserFacingError,
+    applyApiHandler,
+    ConnectionHandler as ConnectionHandlerOriginal,
+    Handler as HandlerOriginal,
+    HydroError,
+    NotFoundError,
+    UserFacingError,
     WebService,
 } from '@hydrooj/framework';
 import { errorMessage, Time } from '@hydrooj/utils';
@@ -114,9 +118,12 @@ export async function apply(ctx: Context) {
         for (const addon of [...Object.values(global.addons)].reverse()) {
             const dir = resolve(addon, 'public');
             if (!fs.existsSync(dir)) continue;
-            server.addServerLayer(`${addon}_public`, cache(dir, {
-                maxAge: argv.options.public ? 0 : 24 * 3600 * 1000,
-            }));
+            server.addServerLayer(
+                `${addon}_public`,
+                cache(dir, {
+                    maxAge: argv.options.public ? 0 : 24 * 3600 * 1000,
+                }),
+            );
         }
 
         server.addServerLayer('domain', domainLayer);
@@ -147,12 +154,12 @@ export async function apply(ctx: Context) {
                     let withDomainId = args.domainId || false;
                     const domainId = this.args.domainId;
                     const host = this.domain?.host;
-                    if (domainId !== 'system' && (
-                        !this.request.host
-                        || (host instanceof Array
-                            ? (!host.includes(this.request.host))
-                            : this.request.host !== host)
-                    )) withDomainId ||= domainId;
+                    if (
+                        domainId !== 'system' &&
+                        (!this.request.host || (host instanceof Array ? !host.includes(this.request.host) : this.request.host !== host))
+                    ) {
+                        withDomainId ||= domainId;
+                    }
                     delete args.query;
                     res = server.router.url(name, args, { query }).toString();
                     if (anchor) res = `${res}#${anchor}`;
@@ -167,13 +174,11 @@ export async function apply(ctx: Context) {
             translate(str: string) {
                 if (!str) return '';
                 const lang = this.user?.viewLang || this.session?.viewLang;
-                const langs = lang
-                    ? [lang, ...this.context.acceptsLanguages()]
-                    : [...this.context.acceptsLanguages(), system.get('server.language')];
+                const langs = lang ? [lang, ...this.context.acceptsLanguages()] : [...this.context.acceptsLanguages(), system.get('server.language')];
                 return cachedTranslate(str.toString(), langs);
             },
             paginate<T>(cursor: FindCursor<T>, page: number, key: string | number) {
-                return db.paginate(cursor, page, typeof key === 'number' ? key : (this.ctx.setting.get(`pagination.${key}`) || 20));
+                return db.paginate(cursor, page, typeof key === 'number' ? key : this.ctx.setting.get(`pagination.${key}`) || 20);
             },
             checkPerm(...args: bigint[]) {
                 if (!this.user.hasPerm(...args)) {
@@ -188,7 +193,10 @@ export async function apply(ctx: Context) {
                 Hydro.model.message.sendInfo(this.user._id, JSON.stringify({ message, params }));
             },
             async limitRate(
-                op: string, periodSecs: number, maxOperations: number, defaultKey = system.get('limit.by_user') ? '{{ip}}@{{user}}' : '{{ip}}',
+                op: string,
+                periodSecs: number,
+                maxOperations: number,
+                defaultKey = system.get('limit.by_user') ? '{{ip}}@{{user}}' : '{{ip}}',
             ) {
                 if (ignoredLimit.includes(op)) return;
                 if (this.user && this.user.hasPriv(PRIV.PRIV_UNLIMITED_ACCESS)) return;
@@ -210,8 +218,11 @@ export async function apply(ctx: Context) {
                 error.msg ||= () => error.message;
                 if (error instanceof UserFacingError && !process.env.DEV) error.stack = '';
                 if (!(error instanceof NotFoundError) && !('nolog' in error)) {
-                    // eslint-disable-next-line max-len
-                    logger.error(`User: ${this.user._id}(${this.user.uname}) ${this.request.method}: /d/${this.domain._id}${this.request.path}`, error.msg(), error.params);
+                    logger.error(
+                        `User: ${this.user._id}(${this.user.uname}) ${this.request.method}: /d/${this.domain._id}${this.request.path}`,
+                        error.msg(),
+                        error.params,
+                    );
                     if (error.stack) logger.error(error.stack);
                 }
                 if (this.user?._id === 0 && (error instanceof PermissionError || error instanceof PrivilegeError)) {
@@ -234,8 +245,11 @@ export async function apply(ctx: Context) {
                     this.response.body = {
                         UserFacingError,
                         error: {
-                            message: error.msg(), stack: errorMessage(error.stack || ''),
-                            params: error.params, name: error.name, code: error.code,
+                            message: error.msg(),
+                            stack: errorMessage(error.stack || ''),
+                            params: error.params,
+                            name: error.name,
+                            code: error.code,
                         },
                         _rawError: error,
                     };

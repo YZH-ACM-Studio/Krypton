@@ -1,28 +1,10 @@
 import type { ReactNode } from 'react';
 import { motion } from 'motion/react';
-import {
-  ArrowLeft,
-  Boxes,
-  CheckCircle2,
-  CircleOff,
-  FileText,
-  Hash,
-  LinkIcon,
-  ListTree,
-  Table2,
-  Text,
-} from 'lucide-react';
+import { ArrowLeft, Boxes, CheckCircle2, CircleOff, FileText, Hash, LinkIcon, ListTree, Table2, Text } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
@@ -80,17 +62,10 @@ export function GenericPage() {
 
   const title = data.pdoc?.title || data.tdoc?.title || data.ddoc?.title || data.udoc?.uname || '';
   const entries = usefulEntries(data);
-  const metrics = entries
-    .filter(([, value]) => isScalar(value) || Array.isArray(value) || isPlainObject(value))
-    .slice(0, 6);
+  const metrics = entries.filter(([, value]) => isScalar(value) || Array.isArray(value) || isPlainObject(value)).slice(0, 6);
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
           <ArrowLeft className="size-4" />
@@ -99,7 +74,9 @@ export function GenericPage() {
           <h1 className="text-xl font-semibold capitalize">{label}</h1>
           {title ? <p className="text-sm text-muted-foreground">{title}</p> : null}
         </div>
-        <Badge variant="outline" className="ml-auto">{tpl}</Badge>
+        <Badge variant="outline" className="ml-auto">
+          {tpl}
+        </Badge>
       </div>
 
       {entries.length > 0 ? (
@@ -128,18 +105,7 @@ export function GenericPage() {
   );
 }
 
-const HIDDEN_KEYS = new Set([
-  '_',
-  'handler',
-  'model',
-  'global',
-  'ctx',
-  'context',
-  'domain',
-  'udict',
-  'UserContext',
-  'UiContext',
-]);
+const HIDDEN_KEYS = new Set(['_', 'handler', 'model', 'global', 'ctx', 'context', 'domain', 'udict', 'UserContext', 'UiContext']);
 
 const LABELS: Record<string, string> = {
   pdoc: '题目',
@@ -248,7 +214,9 @@ function DataSection({ name, value, locale }: { name: string; value: any; locale
         <CardTitle className="flex items-center gap-2 text-base">
           <Icon className="size-4 text-primary" />
           {title}
-          <Badge variant="outline" className="ml-auto font-mono text-[10px]">{name}</Badge>
+          <Badge variant="outline" className="ml-auto font-mono text-[10px]">
+            {name}
+          </Badge>
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -258,15 +226,7 @@ function DataSection({ name, value, locale }: { name: string; value: any; locale
   );
 }
 
-function ValueView({
-  value,
-  locale,
-  depth,
-}: {
-  value: any;
-  locale: string;
-  depth: number;
-}): ReactNode {
+function ValueView({ value, locale, depth }: { value: any; locale: string; depth: number }): ReactNode {
   if (isScalar(value)) return <ScalarValue value={value} locale={locale} />;
   if (Array.isArray(value)) return <ArrayValue value={value} locale={locale} depth={depth} />;
   if (isPlainObject(value)) return <ObjectValue value={value} locale={locale} depth={depth} />;
@@ -275,11 +235,7 @@ function ValueView({
 
 function ScalarValue({ value, locale }: { value: unknown; locale: string }) {
   if (typeof value === 'boolean') {
-    return (
-      <Badge variant={value ? 'secondary' : 'outline'}>
-        {value ? '是' : '否'}
-      </Badge>
-    );
+    return <Badge variant={value ? 'secondary' : 'outline'}>{value ? '是' : '否'}</Badge>;
   }
   if (isUrl(value)) {
     return (
@@ -338,9 +294,7 @@ function ObjectValue({ value, locale, depth }: { value: R; locale: string; depth
                 <span className="text-sm text-muted-foreground">{describeValue(item, locale)}</span>
               ) : (
                 <details className="group">
-                  <summary className="cursor-pointer select-none text-sm text-primary">
-                    {describeValue(item, locale)}
-                  </summary>
+                  <summary className="cursor-pointer select-none text-sm text-primary">{describeValue(item, locale)}</summary>
                   <div className="mt-2">
                     <ValueView value={item} locale={locale} depth={depth + 1} />
                   </div>
@@ -383,10 +337,7 @@ function pickColumns(rows: R[]) {
       if (!HIDDEN_KEYS.has(key) && !key.startsWith('__')) keys.add(key);
     }
   }
-  const ordered = [
-    ...COLUMN_PRIORITY.filter((key) => keys.has(key)),
-    ...Array.from(keys).filter((key) => !COLUMN_PRIORITY.includes(key)),
-  ];
+  const ordered = [...COLUMN_PRIORITY.filter((key) => keys.has(key)), ...Array.from(keys).filter((key) => !COLUMN_PRIORITY.includes(key))];
   return ordered.slice(0, 6);
 }
 
@@ -411,12 +362,7 @@ function ObjectTable({ rows, locale, depth }: { rows: R[]; locale: string; depth
               {columns.map((column) => (
                 <TableCell
                   key={column}
-                  className={cn(
-                    'max-w-[220px]',
-                    isPlainObject(row[column]) || Array.isArray(row[column])
-                      ? 'text-muted-foreground'
-                      : '',
-                  )}
+                  className={cn('max-w-[220px]', isPlainObject(row[column]) || Array.isArray(row[column]) ? 'text-muted-foreground' : '')}
                 >
                   <ValueView value={row[column]} locale={locale} depth={depth + 1} />
                 </TableCell>
@@ -425,9 +371,7 @@ function ObjectTable({ rows, locale, depth }: { rows: R[]; locale: string; depth
           ))}
         </TableBody>
       </Table>
-      {rows.length > 40 ? (
-        <p className="text-xs text-muted-foreground">已显示前 40 项，另有 {rows.length - 40} 项。</p>
-      ) : null}
+      {rows.length > 40 ? <p className="text-xs text-muted-foreground">已显示前 40 项，另有 {rows.length - 40} 项。</p> : null}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 // This file was adapted from @koishijs, MIT licensed.
-/* eslint-disable consistent-return */
+
 /* eslint-disable ts/no-shadow */
 import { readFileSync } from 'fs';
 import { relative } from 'path';
@@ -11,7 +11,7 @@ import { unwrapExports } from '../utils';
 
 declare module 'cordis' {
     interface Events {
-        'hmr/reload': (reloads: Map<Plugin, { filename: string, runtime: Plugin.Runtime }>) => void;
+        'hmr/reload': (reloads: Map<Plugin, { filename: string; runtime: Plugin.Runtime }>) => void;
     }
     interface Context {
         hmr: HMR;
@@ -36,12 +36,16 @@ export function handleError(ctx: Context, e: any) {
         try {
             const { file, line, column } = error.location;
             const source = readFileSync(file, 'utf8');
-            const formatted = codeFrameColumns(source, {
-                start: { line, column },
-            }, {
-                highlightCode: true,
-                message: error.text,
-            });
+            const formatted = codeFrameColumns(
+                source,
+                {
+                    start: { line, column },
+                },
+                {
+                    highlightCode: true,
+                    message: error.text,
+                },
+            );
             ctx.logger.warn(`File: ${file}:${line}:${column}\n${formatted}`);
         } catch (e) {
             ctx.logger.warn(e);
@@ -69,7 +73,10 @@ export default class HMR extends Service {
     private declined: Set<string>;
     private stashed = new Set<string>();
 
-    constructor(public ctx: Context, config: { watch: boolean }) {
+    constructor(
+        public ctx: Context,
+        config: { watch: boolean },
+    ) {
         super(ctx, 'hmr');
         this.externals = new Set(Object.keys(require.cache));
         const debouncedReload = ctx.debounce(() => this.triggerLocalReload(), 1000);
@@ -150,7 +157,7 @@ export default class HMR extends Service {
         const pending = new Map<string, Plugin>();
 
         /** plugins that should be reloaded */
-        const reloads = new Map<Plugin, { filename: string, runtime: Plugin.Runtime }>();
+        const reloads = new Map<Plugin, { filename: string; runtime: Plugin.Runtime }>();
 
         // we assume that plugin entry files are "atomic"
         // that is, reloading them will not cause any other reloads
@@ -209,7 +216,6 @@ export default class HMR extends Service {
         const reload = async (plugin: any, runtime?: Plugin.Runtime) => {
             if (!runtime) return;
             for (const oldFiber of runtime.fibers) {
-                // eslint-disable-next-line no-await-in-loop
                 await oldFiber.parent.plugin(plugin, oldFiber.config);
             }
         };
@@ -226,7 +232,6 @@ export default class HMR extends Service {
                 }
 
                 try {
-                    // eslint-disable-next-line no-await-in-loop
                     await reload(attempts[filename], runtime);
                     logger.info('reload plugin at %c', path);
                 } catch (err) {
@@ -241,7 +246,7 @@ export default class HMR extends Service {
             for (const [plugin, { filename, runtime }] of reloads) {
                 try {
                     this.ctx.registry.delete(attempts[filename]);
-                    // eslint-disable-next-line no-await-in-loop
+
                     await reload(plugin, runtime);
                 } catch (err) {
                     logger.warn(err);

@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 import { MantineProvider, Popover } from '@mantine/core';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
@@ -30,40 +29,44 @@ function History({ payload }) {
   React.useEffect(() => {
     if (!load) return;
     setLoading(true);
-    request.get(`${payload}?all=1`).then(({ history }) => {
-      setData(history);
-    }).catch((e) => {
-      setError(e.message);
-    }).finally(() => {
-      setLoading(false);
-    });
+    request
+      .get(`${payload}?all=1`)
+      .then(({ history }) => {
+        setData(history);
+      })
+      .catch((e) => {
+        setError(e.message);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, [load]);
 
-  return <Popover onOpen={() => setLoad(true)}>
-    <Popover.Target>
-      <span>{i18n('Edited')} <span className="icon icon-expand_more"></span></span>
-    </Popover.Target>
-    <Popover.Dropdown>
-      <ol className="menu">
-        {(isLoading || error) && (
-          <li className="menu__item">
-            <a className="menu__link">
-              {isLoading ? i18n('Loading...') : i18n('Loading failed.')}
-            </a>
-          </li>
-        )}
-        {data?.map((item) => (
-          <li className="menu__item" key={item.time}>
-            <a className="menu__link" onClick={() => historyDialog(payload, item.time, item.uid)}>
-              {i18n('Edited at')}
-              {' '}
-              <TimeAgo datetime={item.time} locale={i18n('timeago_locale')} />
-            </a>
-          </li>
-        ))}
-      </ol>
-    </Popover.Dropdown>
-  </Popover>;
+  return (
+    <Popover onOpen={() => setLoad(true)}>
+      <Popover.Target>
+        <span>
+          {i18n('Edited')} <span className="icon icon-expand_more"></span>
+        </span>
+      </Popover.Target>
+      <Popover.Dropdown>
+        <ol className="menu">
+          {(isLoading || error) && (
+            <li className="menu__item">
+              <a className="menu__link">{isLoading ? i18n('Loading...') : i18n('Loading failed.')}</a>
+            </li>
+          )}
+          {data?.map((item) => (
+            <li className="menu__item" key={item.time}>
+              <a className="menu__link" onClick={() => historyDialog(payload, item.time, item.uid)}>
+                {i18n('Edited at')} <TimeAgo datetime={item.time} locale={i18n('timeago_locale')} />
+              </a>
+            </li>
+          ))}
+        </ol>
+      </Popover.Dropdown>
+    </Popover>
+  );
 }
 
 const page = new AutoloadPage('discussionHistoryPage', () => {

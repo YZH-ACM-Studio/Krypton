@@ -89,20 +89,17 @@ const problemStub = {
     async getList(domainId: string, pids: number[], canViewHidden: number | boolean) {
         calls.getList.push({ domainId, pids: [...pids], canViewHidden });
         const docs = pids.map((pid) => problemDocs.get(pid)).filter(Boolean);
-        const visible = canViewHidden === true
-            ? docs
-            : docs.filter((doc) => !doc.hidden || doc.owner === canViewHidden);
+        const visible = canViewHidden === true ? docs : docs.filter((doc) => !doc.hidden || doc.owner === canViewHidden);
         return problemDict(visible);
     },
-    async getListStatus() { return {}; },
+    async getListStatus() {
+        return {};
+    },
     canViewBy(pdoc: any, user: any) {
         if (!user._problemAclLoaded || user._problemAclDomainId !== pdoc.domainId) return false;
         if (user._aclFencedPids?.has(pdoc.docId)) return false;
         if (!user.hasPerm(PERM.PERM_VIEW_PROBLEM)) return false;
-        return !pdoc.hidden
-            || pdoc.owner === user._id
-            || user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN)
-            || user._permitPids?.has(pdoc.docId);
+        return !pdoc.hidden || pdoc.owner === user._id || user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN) || user._permitPids?.has(pdoc.docId);
     },
     async getViewableAuthorized(domainId: string, rawPid: unknown, user: any) {
         calls.getViewableAuthorized.push({ domainId, rawPid });
@@ -125,9 +122,15 @@ function getPids(dag: any[]) {
 
 function cursor(rows: any[] = []) {
     const value: any = {
-        limit() { return value; },
-        project() { return value; },
-        async toArray() { return rows; },
+        limit() {
+            return value;
+        },
+        project() {
+            return value;
+        },
+        async toArray() {
+            return rows;
+        },
     };
     return value;
 }
@@ -138,27 +141,51 @@ const trainingStub = {
     isProgress: () => false,
     isOpen: () => true,
     isInvalid: () => false,
-    async get(domainId: string, tid: unknown) { calls.containerGets.push({ domainId, tid }); return currentContainer; },
-    async add(...args: any[]) { calls.add.push(args); return 'new-container'; },
-    async edit(...args: any[]) { calls.edit.push(args); },
-    async setStatus() { return {}; },
-    async getStatus() { return currentTrainingStatus; },
+    async get(domainId: string, tid: unknown) {
+        calls.containerGets.push({ domainId, tid });
+        return currentContainer;
+    },
+    async add(...args: any[]) {
+        calls.add.push(args);
+        return 'new-container';
+    },
+    async edit(...args: any[]) {
+        calls.edit.push(args);
+    },
+    async setStatus() {
+        return {};
+    },
+    async getStatus() {
+        return currentTrainingStatus;
+    },
     getMulti(domainId: string, query: any) {
         calls.trainingQueries.push({ domainId, query: structuredClone(query) });
         return cursor(trainingRows);
     },
-    getMultiStatus() { return cursor(); },
+    getMultiStatus() {
+        return cursor();
+    },
 };
 
 const contestStub = {
-    async get() { return { docId: 'contest' }; },
-    getMulti() { return cursor(); },
+    async get() {
+        return { docId: 'contest' };
+    },
+    getMulti() {
+        return cursor();
+    },
 };
 
 const storageStub = {
-    async put(...args: any[]) { calls.storagePuts.push(args); },
-    async getMeta() { return { size: 12, lastModified: new Date('2026-07-12'), etag: 'etag' }; },
-    async del(...args: any[]) { calls.storageDeletes.push(args); },
+    async put(...args: any[]) {
+        calls.storagePuts.push(args);
+    },
+    async getMeta() {
+        return { size: 12, lastModified: new Date('2026-07-12'), etag: 'etag' };
+    },
+    async del(...args: any[]) {
+        calls.storageDeletes.push(args);
+    },
     async signDownloadLink(...args: any[]) {
         calls.storageSigns.push(args);
         return '/signed';
@@ -166,16 +193,22 @@ const storageStub = {
 };
 
 const userStub = {
-    async getById() { return { _id: 7, uname: 'owner' }; },
-    async getListForRender() { return {}; },
-    async listGroup() { return []; },
+    async getById() {
+        return { _id: 7, uname: 'owner' };
+    },
+    async getListForRender() {
+        return {};
+    },
+    async listGroup() {
+        return [];
+    },
 };
 
 function noopDecorator() {
     return (_target: unknown, _key: string, descriptor: PropertyDescriptor) => descriptor;
 }
 
-class HandlerStub { }
+class HandlerStub {}
 const serverStub = {
     Handler: HandlerStub,
     param: noopDecorator,
@@ -184,8 +217,8 @@ const serverStub = {
 };
 
 const errors = {
-    FileLimitExceededError: class extends Error { },
-    FileUploadError: class extends Error { },
+    FileLimitExceededError: class extends Error {},
+    FileUploadError: class extends Error {},
     NotFoundError: TestNotFoundError,
     ProblemNotFoundError: TestProblemNotFoundError,
     ValidationError: TestValidationError,
@@ -201,7 +234,13 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromHandler && request === '../model/builtin') return { PERM, PRIV, STATUS };
     if (fromHandler && request === '../model/contest') return contestStub;
     if (fromHandler && request === '../model/document') return { getMultiStatus: () => cursor(), TYPE_PROBLEM: 10 };
-    if (fromHandler && request === '../model/oplog') return { async log() { return undefined; } };
+    if (fromHandler && request === '../model/oplog') {
+        return {
+            async log() {
+                return undefined;
+            },
+        };
+    }
     if (fromHandler && request === '../model/problem') return problemStub;
     if (fromHandler && request === '../model/problem-access') return problemAccessStub;
     if (fromHandler && request === '../model/storage') return storageStub;
@@ -226,10 +265,14 @@ try {
 }
 
 void trainingModule.apply({
-    Route(name: string, _path: string, HandlerClass: any) { trainingRoutes[name] = HandlerClass; },
+    Route(name: string, _path: string, HandlerClass: any) {
+        trainingRoutes[name] = HandlerClass;
+    },
 } as any);
 void courseModule.apply({
-    Route(name: string, _path: string, HandlerClass: any) { courseRoutes[name] = HandlerClass; },
+    Route(name: string, _path: string, HandlerClass: any) {
+        courseRoutes[name] = HandlerClass;
+    },
 } as any);
 
 function makeUser(overrides: Record<string, unknown> = {}) {
@@ -261,7 +304,12 @@ function makeHandler(HandlerClass: any, user = makeUser()) {
             if (!user.hasPriv(priv)) throw new TestPermissionError();
         },
         request: { files: {} },
-        response: { body: {}, addHeader() { return undefined; } },
+        response: {
+            body: {},
+            addHeader() {
+                return undefined;
+            },
+        },
         async paginate(value: any) {
             const docs = await value.toArray();
             return [docs, 1, docs.length];
@@ -319,8 +367,15 @@ describe('P3.8 course workspace capabilities', () => {
     it('passes the real enrollment status to course detail', async () => {
         currentTrainingStatus = { enroll: 1, donePids: [11] };
         currentContainer = {
-            domainId: 'system', docId: 'course', owner: 7, kind: 'course', title: 'Course',
-            content: '', description: '', courseGroupIds: [], dag: [],
+            domainId: 'system',
+            docId: 'course',
+            owner: 7,
+            kind: 'course',
+            title: 'Course',
+            content: '',
+            description: '',
+            courseGroupIds: [],
+            dag: [],
         };
         const handler = makeHandler(courseRoutes.course_detail);
         await handler.get('forged-domain', 'course');
@@ -330,8 +385,15 @@ describe('P3.8 course workspace capabilities', () => {
 
     it('publishes quiz creation only when a course manager can also create homework', async () => {
         currentContainer = {
-            domainId: 'system', docId: 'course', owner: 42, kind: 'course', title: 'Course',
-            content: '', description: '', courseGroupIds: [], dag: [],
+            domainId: 'system',
+            docId: 'course',
+            owner: 42,
+            kind: 'course',
+            title: 'Course',
+            content: '',
+            description: '',
+            courseGroupIds: [],
+            dag: [],
         };
         const denied = makeHandler(courseRoutes.course_detail);
         await denied.get('forged-domain', 'course');
@@ -351,16 +413,26 @@ describe('P3.5 course chapter content', () => {
         const markdown = '# 指针\n\n```c\nint *p;\n```';
         const createHandler = makeHandler(courseRoutes.course_create);
         await createHandler.post(
-            'forged-domain', null, 'Course', 'Overview',
+            'forged-domain',
+            null,
+            'Course',
+            'Overview',
             JSON.stringify([{ _id: 1, title: 'Pointers', content: markdown, pids: [], tids: [] }]),
-            '', '', [],
+            '',
+            '',
+            [],
         );
         expect(calls.add.at(-1)[4][0].content).to.equal(markdown);
 
         const editHandler = makeHandler(courseRoutes.course_edit);
         editHandler.tdoc = {
-            docId: 'course', kind: 'course', title: 'Course', content: 'Overview',
-            description: '', courseGroupIds: [], dag: [calls.add.at(-1)[4][0]],
+            docId: 'course',
+            kind: 'course',
+            title: 'Course',
+            content: 'Overview',
+            description: '',
+            courseGroupIds: [],
+            dag: [calls.add.at(-1)[4][0]],
         };
         await editHandler.get('forged-domain');
         const chapters = JSON.parse(editHandler.response.body.chapters);
@@ -369,11 +441,18 @@ describe('P3.5 course chapter content', () => {
 
     it('rejects non-string chapter content before writing', async () => {
         const handler = makeHandler(courseRoutes.course_create);
-        const error = await captureFailure(() => handler.post(
-            'forged-domain', null, 'Course', 'Overview',
-            JSON.stringify([{ _id: 1, title: 'Pointers', content: { nested: true }, pids: [], tids: [] }]),
-            '', '', [],
-        ));
+        const error = await captureFailure(() =>
+            handler.post(
+                'forged-domain',
+                null,
+                'Course',
+                'Overview',
+                JSON.stringify([{ _id: 1, title: 'Pointers', content: { nested: true }, pids: [], tids: [] }]),
+                '',
+                '',
+                [],
+            ),
+        );
         expect(error?.name).to.equal('ValidationError');
         expect(calls.add).to.have.length(0);
     });
@@ -381,8 +460,15 @@ describe('P3.5 course chapter content', () => {
 
 describe('P3.6 protected course files', () => {
     const courseWithFile = (overrides: Record<string, unknown> = {}) => ({
-        domainId: 'system', docId: 'course', owner: 7, kind: 'course', title: 'Course',
-        content: '', description: '', courseGroupIds: ['group-a'], dag: [],
+        domainId: 'system',
+        docId: 'course',
+        owner: 7,
+        kind: 'course',
+        title: 'Course',
+        content: '',
+        description: '',
+        courseGroupIds: ['group-a'],
+        dag: [],
         files: [{ _id: 'slides.pdf', name: 'slides.pdf', size: 12 }],
         ...overrides,
     });
@@ -403,12 +489,14 @@ describe('P3.6 protected course files', () => {
     it('allows only the owner or a system administrator to manage files', async () => {
         currentContainer = courseWithFile();
         const regular = makeHandler(courseRoutes.course_files);
-        expect((await captureFailure(() => regular.prepare('forged-domain', 'course')))?.name)
-            .to.equal('PermissionError');
+        expect((await captureFailure(() => regular.prepare('forged-domain', 'course')))?.name).to.equal('PermissionError');
 
-        const admin = makeHandler(courseRoutes.course_files, makeUser({
-            hasPriv: (priv: number) => priv === PRIV.PRIV_USER_PROFILE || priv === PRIV.PRIV_EDIT_SYSTEM,
-        }));
+        const admin = makeHandler(
+            courseRoutes.course_files,
+            makeUser({
+                hasPriv: (priv: number) => priv === PRIV.PRIV_USER_PROFILE || priv === PRIV.PRIV_EDIT_SYSTEM,
+            }),
+        );
         await admin.prepare('forged-domain', 'course');
     });
 
@@ -436,8 +524,7 @@ describe('P3.6 protected course files', () => {
     it('rejects anonymous downloads and propagates membership lookup failures', async () => {
         currentContainer = courseWithFile();
         const anonymous = makeHandler(courseRoutes.course_file_download, makeUser({ hasPriv: () => false }));
-        expect((await captureFailure(() => anonymous.get('forged-domain', 'course', 'slides.pdf')))?.name)
-            .to.equal('PermissionError');
+        expect((await captureFailure(() => anonymous.get('forged-domain', 'course', 'slides.pdf')))?.name).to.equal('PermissionError');
 
         boundGroupError = new Error('userbind unavailable');
         const lookupFailure = makeHandler(courseRoutes.course_file_download);
@@ -450,9 +537,7 @@ describe('P3.6 protected course files', () => {
         currentContainer = courseWithFile({ owner: 42 });
         const handler = makeHandler(courseRoutes.course_files);
         await handler.prepare('forged-domain', 'course');
-        const error = await captureFailure(() => handler.postDeleteFiles(
-            'forged-domain', 'course', ['slides.pdf', 'secret.pdf'],
-        ));
+        const error = await captureFailure(() => handler.postDeleteFiles('forged-domain', 'course', ['slides.pdf', 'secret.pdf']));
         expect(error?.name).to.equal('NotFoundError');
         expect(calls.storageDeletes).to.have.length(0);
         expect(calls.edit).to.have.length(0);
@@ -461,14 +546,12 @@ describe('P3.6 protected course files', () => {
     it('rejects undeclared filenames and non-course tids before signing', async () => {
         currentContainer = courseWithFile({ courseGroupIds: [] });
         const missing = makeHandler(courseRoutes.course_file_download);
-        expect((await captureFailure(() => missing.get('forged-domain', 'course', 'secret.pdf')))?.name)
-            .to.equal('NotFoundError');
+        expect((await captureFailure(() => missing.get('forged-domain', 'course', 'secret.pdf')))?.name).to.equal('NotFoundError');
         expect(calls.storageSigns).to.have.length(0);
 
         currentContainer = courseWithFile({ kind: undefined });
         const swapped = makeHandler(courseRoutes.course_file_download);
-        expect((await captureFailure(() => swapped.get('forged-domain', 'training', 'slides.pdf')))?.name)
-            .to.equal('NotFoundError');
+        expect((await captureFailure(() => swapped.get('forged-domain', 'training', 'slides.pdf')))?.name).to.equal('NotFoundError');
         expect(calls.storageSigns).to.have.length(0);
     });
 
@@ -494,11 +577,9 @@ describe('training/course problem selection', () => {
             else problemDocs.delete(77);
             denySelection = true;
             const handler = makeHandler(HandlerClass);
-            const error = await captureFailure(() => handler.post(
-                'forged', null, 'Training', 'Body',
-                JSON.stringify([{ _id: 1, title: 'N', requireNids: [], pids: [77] }]),
-                0, '',
-            ));
+            const error = await captureFailure(() =>
+                handler.post('forged', null, 'Training', 'Body', JSON.stringify([{ _id: 1, title: 'N', requireNids: [], pids: [77] }]), 0, ''),
+            );
             return error;
         };
         const missing = await run(false);
@@ -520,11 +601,9 @@ describe('training/course problem selection', () => {
             else problemDocs.delete(88);
             denySelection = true;
             const handler = makeHandler(HandlerClass);
-            const error = await captureFailure(() => handler.post(
-                'forged', null, 'Course', 'Body',
-                JSON.stringify([{ _id: 1, title: 'C', pids: [88], tids: [] }]),
-                '', '', [],
-            ));
+            const error = await captureFailure(() =>
+                handler.post('forged', null, 'Course', 'Body', JSON.stringify([{ _id: 1, title: 'C', pids: [88], tids: [] }]), '', '', []),
+            );
             return error;
         };
         const missing = await run(false);
@@ -540,16 +619,16 @@ describe('training/course problem selection', () => {
         problemDocs.set(11, { domainId: 'system', docId: 11, owner: 42, hidden: true });
         const trainingHandler = makeHandler(trainingRoutes.training_create);
         await trainingHandler.post(
-            'forged', null, 'Training', 'Body',
+            'forged',
+            null,
+            'Training',
+            'Body',
             JSON.stringify([{ _id: 1, title: 'N', requireNids: [], pids: ['11', 11] }]),
-            0, '',
+            0,
+            '',
         );
         const courseHandler = makeHandler(courseRoutes.course_create);
-        await courseHandler.post(
-            'forged', null, 'Course', 'Body',
-            JSON.stringify([{ _id: 1, title: 'C', pids: ['11', 11], tids: [] }]),
-            '', '', [],
-        );
+        await courseHandler.post('forged', null, 'Course', 'Body', JSON.stringify([{ _id: 1, title: 'C', pids: ['11', 11], tids: [] }]), '', '', []);
         expect(calls.selections.map((call) => call.pids)).to.deep.equal([[11], [11]]);
         expect(calls.add[0][4][0].pids).to.deep.equal([11]);
         expect(calls.add[1][4][0].pids).to.deep.equal([11]);
@@ -558,30 +637,32 @@ describe('training/course problem selection', () => {
 
     it('keeps unchanged grandfathered training references without a pre-scope lookup', async () => {
         currentContainer = {
-            domainId: 'system', docId: 'training', owner: 42, pin: 0,
+            domainId: 'system',
+            docId: 'training',
+            owner: 42,
+            pin: 0,
             dag: [{ _id: 1, title: 'N', requireNids: [], pids: [11] }],
         };
         const handler = makeHandler(trainingRoutes.training_edit);
         handler.tdoc = currentContainer;
-        await handler.post(
-            'forged', 'training', 'Training', 'Body',
-            JSON.stringify([{ _id: 1, title: 'N', requireNids: [], pids: ['11'] }]),
-            0, '',
-        );
+        await handler.post('forged', 'training', 'Training', 'Body', JSON.stringify([{ _id: 1, title: 'N', requireNids: [], pids: ['11'] }]), 0, '');
         expect(calls.selections[0].existingPids).to.deep.equal([11]);
         expect(calls.get).to.deep.equal([]);
         expect(calls.edit).to.have.length(1);
     });
 });
 
-function registerReferencedProblemVisibilitySuite(
-    label: 'training' | 'course', routeMap: Record<string, any>, routeName: string,
-) {
+function registerReferencedProblemVisibilitySuite(label: 'training' | 'course', routeMap: Record<string, any>, routeName: string) {
     describe(`${label} referenced problem visibility`, () => {
         async function render(user: any) {
             currentContainer = {
-                domainId: 'system', docId: 'container', owner: 7, kind: label === 'course' ? 'course' : undefined,
-                title: label, description: '', courseGroupIds: [],
+                domainId: 'system',
+                docId: 'container',
+                owner: 7,
+                kind: label === 'course' ? 'course' : undefined,
+                title: label,
+                description: '',
+                courseGroupIds: [],
                 dag: [{ _id: 1, title: 'N', requireNids: [], pids: [11], tids: [] }],
             };
             const handler = makeHandler(routeMap[routeName], user);
@@ -606,8 +687,13 @@ function registerReferencedProblemVisibilitySuite(
         it('ignores a forged method domain and binds container/problem reads to the request domain', async () => {
             problemDocs.set(11, { domainId: 'system', docId: 11, owner: 7, hidden: false, title: 'Public' });
             currentContainer = {
-                domainId: 'system', docId: 'container', owner: 7, kind: label === 'course' ? 'course' : undefined,
-                title: label, description: '', courseGroupIds: [],
+                domainId: 'system',
+                docId: 'container',
+                owner: 7,
+                kind: label === 'course' ? 'course' : undefined,
+                title: label,
+                description: '',
+                courseGroupIds: [],
                 dag: [{ _id: 1, title: 'N', requireNids: [], pids: [11], tids: [] }],
             };
             const handler = makeHandler(routeMap[routeName], makeUser());

@@ -25,12 +25,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { canSeeAdminAffordance } from '@/lib/perms';
@@ -48,15 +43,7 @@ interface NavGroup {
   show?: boolean;
 }
 
-function SidebarLink({
-  item,
-  active,
-  collapsed,
-}: {
-  item: NavItem;
-  active: boolean;
-  collapsed: boolean;
-}) {
+function SidebarLink({ item, active, collapsed }: { item: NavItem; active: boolean; collapsed: boolean }) {
   const link = (
     <a
       href={item.href}
@@ -86,15 +73,7 @@ function SidebarLink({
   return link;
 }
 
-export function Sidebar({
-  open,
-  onClose,
-  collapsed,
-}: {
-  open: boolean;
-  onClose: () => void;
-  collapsed: boolean;
-}) {
+export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: () => void; collapsed: boolean }) {
   const bs = useBootstrap();
   const tpl = bs.page.templateName;
 
@@ -107,30 +86,75 @@ export function Sidebar({
         // 比赛/作业/训练入口始终保留；导航隐藏不是服务端授权边界。
         ...(bs.user.canBrowseProblemBank
           ? [
-            {
-              label: '题库',
-              href: bs.urls.problems,
-              icon: BookOpen,
-              templates: [
-                'problem_main.html', 'problem_mine.html', 'problem_create_hub.html',
-                'problem_detail.html', 'problem_submit.html', 'problem_hack.html',
-                'problem_edit.html', 'problem_edit_single.html', 'problem_edit_multi.html',
-                'problem_edit_true_false.html', 'problem_edit_blank.html', 'problem_edit_subjective.html',
-                'problem_edit_program_fill.html', 'problem_edit_function.html',
-                'problem_config.html', 'problem_files.html', 'problem_solution.html',
-                'problem_statistics.html', 'problem_import.html', 'problem_import_fps.html',
-              ],
-            },
-          ]
+              {
+                label: '题库',
+                href: bs.urls.problems,
+                icon: BookOpen,
+                templates: [
+                  'problem_main.html',
+                  'problem_mine.html',
+                  'problem_create_hub.html',
+                  'problem_detail.html',
+                  'problem_submit.html',
+                  'problem_hack.html',
+                  'problem_edit.html',
+                  'problem_edit_single.html',
+                  'problem_edit_multi.html',
+                  'problem_edit_true_false.html',
+                  'problem_edit_blank.html',
+                  'problem_edit_subjective.html',
+                  'problem_edit_program_fill.html',
+                  'problem_edit_function.html',
+                  'problem_config.html',
+                  'problem_files.html',
+                  'problem_solution.html',
+                  'problem_statistics.html',
+                  'problem_import.html',
+                  'problem_import_fps.html',
+                ],
+              },
+            ]
           : []),
         { label: '导图', href: '/mindmap', icon: Network, templates: ['mindmap_main.html'] },
-        { label: '比赛', href: bs.urls.contests, icon: Trophy, templates: ['contest_main.html', 'contest_detail.html', 'contest_edit.html', 'contest_scoreboard.html', 'xcpcio_board.html', 'contest_manage.html', 'contest_problemlist.html', 'contest_user.html', 'contest_balloon.html', 'contest_clarification.html', 'contest_print.html'] },
-        { label: '作业', href: bs.urls.homework, icon: ClipboardList, templates: ['homework_main.html', 'homework_detail.html', 'homework_edit.html', 'homework_files.html'] },
+        {
+          label: '比赛',
+          href: bs.urls.contests,
+          icon: Trophy,
+          templates: [
+            'contest_main.html',
+            'contest_detail.html',
+            'contest_edit.html',
+            'contest_scoreboard.html',
+            'xcpcio_board.html',
+            'contest_manage.html',
+            'contest_problemlist.html',
+            'contest_user.html',
+            'contest_balloon.html',
+            'contest_clarification.html',
+            'contest_print.html',
+          ],
+        },
+        {
+          label: '作业',
+          href: bs.urls.homework,
+          icon: ClipboardList,
+          templates: ['homework_main.html', 'homework_detail.html', 'homework_edit.html', 'homework_files.html'],
+        },
         { label: '课程', href: '/course', icon: BookMarked, templates: ['course_main.html', 'course_detail.html', 'course_edit.html'] },
-        { label: '训练', href: bs.urls.training, icon: GraduationCap, templates: ['training_main.html', 'training_detail.html', 'training_edit.html', 'training_files.html'] },
+        {
+          label: '训练',
+          href: bs.urls.training,
+          icon: GraduationCap,
+          templates: ['training_main.html', 'training_detail.html', 'training_edit.html', 'training_files.html'],
+        },
         { label: '任务', href: '/tasks', icon: ListChecks, templates: ['tasks_center.html', 'tasks_my.html', 'tasks_detail.html'] },
         { label: '验题', href: '/permits/inbox', icon: ShieldCheck, templates: ['my_verify_inbox.html'] },
-        { label: '讨论', href: bs.urls.discussions, icon: MessageSquare, templates: ['discussion_main_or_node.html', 'discussion_detail.html', 'discussion_create.html', 'discussion_edit.html'] },
+        {
+          label: '讨论',
+          href: bs.urls.discussions,
+          icon: MessageSquare,
+          templates: ['discussion_main_or_node.html', 'discussion_detail.html', 'discussion_create.html', 'discussion_edit.html'],
+        },
         { label: '记录', href: bs.urls.records, icon: Clock, templates: ['record_main.html', 'record_detail.html'] },
         { label: '排名', href: bs.urls.ranking, icon: Medal, templates: ['ranking.html'] },
         { label: '荣誉榜', href: '/rankboard', icon: Award, templates: ['rankboard_main.html', 'rankboard_detail.html'] },
@@ -146,7 +170,16 @@ export function Sidebar({
           label: '域管理',
           href: bs.urls.domainDashboard,
           icon: LayoutDashboard,
-          templates: ['domain_dashboard.html', 'domain_edit.html', 'domain_user.html', 'domain_user_raw.html', 'domain_permission.html', 'domain_role.html', 'domain_group.html', 'domain_join_applications.html'],
+          templates: [
+            'domain_dashboard.html',
+            'domain_edit.html',
+            'domain_user.html',
+            'domain_user_raw.html',
+            'domain_permission.html',
+            'domain_role.html',
+            'domain_group.html',
+            'domain_join_applications.html',
+          ],
         });
       }
       if (bs.user.canImportRankboard || bs.user.canManageRankboard) {
@@ -179,8 +212,10 @@ export function Sidebar({
           href: '/admin/vigil',
           icon: ShieldAlert,
           templates: [
-            'admin_vigil_overview.html', 'admin_vigil_approvals.html',
-            'admin_vigil_sessions.html', 'admin_vigil_events.html',
+            'admin_vigil_overview.html',
+            'admin_vigil_approvals.html',
+            'admin_vigil_sessions.html',
+            'admin_vigil_events.html',
             'admin_vigil_exam_detail.html',
           ],
         });
@@ -194,7 +229,14 @@ export function Sidebar({
           label: '系统',
           href: bs.urls.manage,
           icon: Wrench,
-          templates: ['manage_dashboard.html', 'manage_script.html', 'manage_setting.html', 'manage_config.html', 'manage_user_import.html', 'manage_user_priv.html'],
+          templates: [
+            'manage_dashboard.html',
+            'manage_script.html',
+            'manage_setting.html',
+            'manage_config.html',
+            'manage_user_import.html',
+            'manage_user_priv.html',
+          ],
         });
       }
       return {
@@ -223,10 +265,7 @@ export function Sidebar({
 
       {/* Nav */}
       <TooltipProvider delayDuration={0}>
-        <ScrollArea
-          className="flex-1"
-          viewportClassName={cn(collapsed ? 'p-1.5' : 'p-3')}
-        >
+        <ScrollArea className="flex-1" viewportClassName={cn(collapsed ? 'p-1.5' : 'p-3')}>
           <nav>
             {groups.map((group, gi) => {
               if (group.show === false) return null;
@@ -235,21 +274,12 @@ export function Sidebar({
                   {group.label ? (
                     <>
                       <Separator className="my-3" />
-                      {!collapsed && (
-                        <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                          {group.label}
-                        </p>
-                      )}
+                      {!collapsed && <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{group.label}</p>}
                     </>
                   ) : null}
                   <div className="space-y-0.5">
                     {group.items.map((item) => (
-                      <SidebarLink
-                        key={item.href}
-                        item={item}
-                        active={item.templates.includes(tpl)}
-                        collapsed={collapsed}
-                      />
+                      <SidebarLink key={item.href} item={item} active={item.templates.includes(tpl)} collapsed={collapsed} />
                     ))}
                   </div>
                 </div>

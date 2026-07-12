@@ -13,14 +13,8 @@ import {
 
 describe('problem kind contract', () => {
     it('keeps the one-to-one stored-kind and URL-slug mapping', () => {
-        expect(PROBLEM_KINDS).to.deep.equal([
-            'programming', 'single', 'multi', 'true_false',
-            'blank', 'subjective', 'program_fill', 'function',
-        ]);
-        expect(PROBLEM_KIND_SLUGS).to.deep.equal([
-            'programming', 'single', 'multi', 'true-false',
-            'blank', 'subjective', 'program-fill', 'function',
-        ]);
+        expect(PROBLEM_KINDS).to.deep.equal(['programming', 'single', 'multi', 'true_false', 'blank', 'subjective', 'program_fill', 'function']);
+        expect(PROBLEM_KIND_SLUGS).to.deep.equal(['programming', 'single', 'multi', 'true-false', 'blank', 'subjective', 'program-fill', 'function']);
         for (const kind of PROBLEM_KINDS) {
             expect(parseProblemKindSlug(problemKindToSlug(kind))).to.equal(kind);
         }
@@ -33,8 +27,7 @@ describe('problem kind contract', () => {
             BASIC_OBJECTIVE_KIND.trueFalse,
             BASIC_OBJECTIVE_KIND.blank,
         ]);
-        expect(BASIC_OBJECTIVE_KINDS.map(problemKindToSlug))
-            .to.deep.equal(['single', 'multi', 'true-false', 'blank']);
+        expect(BASIC_OBJECTIVE_KINDS.map(problemKindToSlug)).to.deep.equal(['single', 'multi', 'true-false', 'blank']);
     });
 
     it('interprets a missing legacy kind as programming without mutating it', () => {

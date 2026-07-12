@@ -8,13 +8,18 @@
  */
 import { Logger } from '@hydrooj/utils';
 import type { Context } from 'hydrooj';
-import {
-    ForbiddenError, Handler, ObjectId, param, PRIV, PrivilegeError, ProblemModel, Types,
-} from 'hydrooj';
+import { ForbiddenError, Handler, ObjectId, param, PRIV, PrivilegeError, ProblemModel, Types } from 'hydrooj';
 import {
     clearAllPositions,
-    createNode, deleteNodeRecursive, getConfig, listAllNodes,
-    listProblemsForNode, moveNode, setConfig, setNodePosition, updateNode,
+    createNode,
+    deleteNodeRecursive,
+    getConfig,
+    listAllNodes,
+    listProblemsForNode,
+    moveNode,
+    setConfig,
+    setNodePosition,
+    updateNode,
 } from './model';
 
 const logger = new Logger('krypton-mindmap.handler');
@@ -37,14 +42,8 @@ function canExposeProblemMetadata(user: any, domainId: string): boolean {
 class MindmapPage extends Handler {
     noCheckPermView = true;
     async get() {
-        const exposeProblemMetadata = canExposeProblemMetadata(
-            this.user as any,
-            String(this.domain?._id || ''),
-        );
-        const [nodes, config] = await Promise.all([
-            listAllNodes(),
-            getConfig(),
-        ]);
+        const exposeProblemMetadata = canExposeProblemMetadata(this.user as any, String(this.domain?._id || ''));
+        const [nodes, config] = await Promise.all([listAllNodes(), getConfig()]);
         this.response.template = 'mindmap_main.html';
         this.response.body = {
             nodes: nodes.map((n) => ({
@@ -96,23 +95,43 @@ class AdminMutateNodes extends AdminBase {
     @param('x', Types.Float, true)
     @param('y', Types.Float, true)
     async post(
-        _ctx: any, operation: string,
-        id?: ObjectId, parentId?: ObjectId,
-        topic?: string, description?: string, color?: string,
-        tagsCsv?: string, problemIdsCsv?: string,
-        newParentId?: ObjectId, order?: number,
-        x?: number, y?: number,
+        _ctx: any,
+        operation: string,
+        id?: ObjectId,
+        parentId?: ObjectId,
+        topic?: string,
+        description?: string,
+        color?: string,
+        tagsCsv?: string,
+        problemIdsCsv?: string,
+        newParentId?: ObjectId,
+        order?: number,
+        x?: number,
+        y?: number,
     ) {
-        const tags = tagsCsv ? tagsCsv.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+        const tags = tagsCsv
+            ? tagsCsv
+                  .split(',')
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+            : undefined;
         const problemIds = problemIdsCsv
-            ? problemIdsCsv.split(',').map((s) => s.trim()).filter(Boolean)
+            ? problemIdsCsv
+                  .split(',')
+                  .map((s) => s.trim())
+                  .filter(Boolean)
             : undefined;
 
         switch (operation) {
             case 'create': {
                 if (!parentId || !topic) throw new Error('parentId + topic required');
                 const node = await createNode({
-                    parentId, topic, tags, problemIds, description, color,
+                    parentId,
+                    topic,
+                    tags,
+                    problemIds,
+                    description,
+                    color,
                 });
                 this.response.body = {
                     node: {

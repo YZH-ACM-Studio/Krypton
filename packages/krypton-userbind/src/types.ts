@@ -201,8 +201,8 @@ export interface ImportReport {
 /** Outcome of resolving a school/user_group token against a (studentId, realName) input. */
 export type RosterLookupOutcome =
     | { kind: 'matched_unbound'; studentRecord: StudentRecord }
-    | { kind: 'matched_self';    studentRecord: StudentRecord }
-    | { kind: 'matched_other';   boundToUid: number }
+    | { kind: 'matched_self'; studentRecord: StudentRecord }
+    | { kind: 'matched_other'; boundToUid: number }
     | { kind: 'no_match' };
 
 // Module augmentation: extend hydrooj's UserDocument and Collections interfaces.
@@ -222,9 +222,5 @@ declare module 'hydrooj' {
         'userbind.students': StudentRecord;
         'userbind.bind_tokens': BindToken;
         'userbind.binding_requests': BindingRequest;
-    }
-
-    interface Model {
-        userbind: typeof import('./model').userBindModel;
     }
 }

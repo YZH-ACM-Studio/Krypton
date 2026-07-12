@@ -18,21 +18,16 @@ import WebpackBar from 'webpackbar';
 import { version } from '../../package.json';
 import root from '../utils/root';
 
-const {
-  list,
-  targets,
-} = compat({
+const { list, targets } = compat({
   targets: '> 1%, chrome 70, firefox 90, safari 16, ios_saf 16, not ie 11, not op_mini all',
-  modules: [
-    'core-js/stable',
-  ],
+  modules: ['core-js/stable'],
   exclude: [],
   version: coreJsVersion,
   inverse: false,
 });
 fs.writeFileSync(root('__core-js.js'), `${list.map((i) => `import 'core-js/modules/${i}';`).join('\n')}\n`);
 
-export default async function (env: { watch?: boolean, production?: boolean, measure?: boolean } = {}) {
+export default async function (env: { watch?: boolean; production?: boolean; measure?: boolean } = {}) {
   if (env.production) console.log(targets);
   let createSentryRelease = !!(process.env.CI && process.env.SENTRY_AUTH_TOKEN);
   if (createSentryRelease) {
@@ -91,14 +86,13 @@ export default async function (env: { watch?: boolean, production?: boolean, mea
   function scssLoader() {
     return {
       loader: 'sass-loader',
-      options: {
-      },
+      options: {},
     };
   }
 
   const config: import('webpack').Configuration = {
     // bail: !env.production,
-    mode: (env.production || env.measure) ? 'production' : 'development',
+    mode: env.production || env.measure ? 'production' : 'development',
     profile: env.measure,
     context: root(),
     stats: {
@@ -201,12 +195,14 @@ export default async function (env: { watch?: boolean, production?: boolean, mea
           test: /\.[mc]?[jt]sx?$/,
           include: [/components\/message\//, /entry\.js/],
           type: 'javascript/auto',
-          use: [{
-            loader: 'ts-loader',
-            options: {
-              transpileOnly: true,
+          use: [
+            {
+              loader: 'ts-loader',
+              options: {
+                transpileOnly: true,
+              },
             },
-          }],
+          ],
         },
         {
           test: /\.styl$/,
@@ -259,18 +255,18 @@ export default async function (env: { watch?: boolean, production?: boolean, mea
         },
       },
       usedExports: true,
-      minimizer: [new EsbuildPlugin({
-        css: true,
-        minify: true,
-        minifySyntax: true,
-        minifyWhitespace: true,
-        minifyIdentifiers: true,
-        treeShaking: true,
-        target: [
-          'chrome70',
-        ],
-        exclude: [/mathmaps/, /\.min\.js$/],
-      })],
+      minimizer: [
+        new EsbuildPlugin({
+          css: true,
+          minify: true,
+          minifySyntax: true,
+          minifyWhitespace: true,
+          minifyIdentifiers: true,
+          treeShaking: true,
+          target: ['chrome70'],
+          exclude: [/mathmaps/, /\.min\.js$/],
+        }),
+      ],
       moduleIds: env.production ? 'deterministic' : 'named',
       chunkIds: env.production ? 'deterministic' : 'named',
     },
@@ -306,10 +302,12 @@ export default async function (env: { watch?: boolean, production?: boolean, mea
         sourcemaps: {
           rewriteSources: (source) => source.replace('@hydrooj/ui-default/../../node_modules/', ''),
         },
-        release: createSentryRelease ? {
-          name: `hydro-web@${version}`,
-          uploadLegacySourcemaps: root('public'),
-        } : {},
+        release: createSentryRelease
+          ? {
+              name: `hydro-web@${version}`,
+              uploadLegacySourcemaps: root('public'),
+            }
+          : {},
       }),
       new webpack.DefinePlugin({
         'process.env.VERSION': JSON.stringify(require('@hydrooj/ui-default/package.json').version),
@@ -323,19 +321,18 @@ export default async function (env: { watch?: boolean, production?: boolean, mea
       new webpack.NormalModuleReplacementPlugin(/core-js\/stable/, root('__core-js.js')),
       new MonacoWebpackPlugin({
         filename: '[name].[hash:6].worker.js',
-        customLanguages: [{
-          label: 'yaml',
-          entry: require.resolve('monaco-yaml/index.js'),
-          worker: {
-            id: 'vs/language/yaml/yamlWorker',
-            entry: require.resolve('monaco-yaml/yaml.worker.js'),
+        customLanguages: [
+          {
+            label: 'yaml',
+            entry: require.resolve('monaco-yaml/index.js'),
+            worker: {
+              id: 'vs/language/yaml/yamlWorker',
+              entry: require.resolve('monaco-yaml/yaml.worker.js'),
+            },
           },
-        }],
+        ],
       }),
-      ...env.measure ? [
-        new BundleAnalyzerPlugin({ analyzerPort: 'auto' }),
-        new DuplicatesPlugin(),
-      ] : [],
+      ...(env.measure ? [new BundleAnalyzerPlugin({ analyzerPort: 'auto' }), new DuplicatesPlugin()] : []),
     ],
   };
 

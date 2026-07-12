@@ -75,12 +75,7 @@ export function MiniTabs<T extends string = string>({
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className={cn(
-        'relative inline-flex items-center gap-0.5 rounded-lg bg-muted/70 backdrop-blur-sm',
-        sizeClass,
-        fullWidth && 'w-full',
-        className,
-      )}
+      className={cn('relative inline-flex items-center gap-0.5 rounded-lg bg-muted/70 backdrop-blur-sm', sizeClass, fullWidth && 'w-full', className)}
     >
       {items.map((item) => {
         const active = item.value === value;
@@ -116,21 +111,13 @@ export function MiniTabs<T extends string = string>({
           itemPadding,
           'h-full',
           fullWidth && 'flex-1',
-          active
-            ? 'text-foreground'
-            : 'text-muted-foreground hover:text-foreground hover:bg-background/60',
+          active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-background/60',
           item.disabled && 'pointer-events-none opacity-50',
         );
 
         if (item.href) {
           return (
-            <a
-              key={item.value}
-              href={item.href}
-              role="tab"
-              aria-selected={active}
-              className={sharedClass}
-            >
+            <a key={item.value} href={item.href} role="tab" aria-selected={active} className={sharedClass}>
               {inner}
             </a>
           );

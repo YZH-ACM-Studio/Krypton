@@ -13,10 +13,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { ObjectId } from 'mongodb';
-import {
-    Context, Handler, OplogModel, param, PRIV, Types,
-    UserModel, requireServiceToken,
-} from 'hydrooj';
+import { Context, Handler, OplogModel, param, PRIV, requireServiceToken, Types, UserModel } from 'hydrooj';
 import * as contestModel from '../model/contest';
 import * as document from '../model/document';
 import system from '../model/system';
@@ -31,10 +28,9 @@ function parseStringList(value: any): string[] {
 }
 
 function vigilMediaFields(tdoc: any) {
-    const processWhitelist = Array.from(new Set([
-        ...parseStringList(system.get('vigil.processWhitelistGlobal')),
-        ...parseStringList(tdoc?.vigilProcessWhitelist || []),
-    ]));
+    const processWhitelist = Array.from(
+        new Set([...parseStringList(system.get('vigil.processWhitelistGlobal')), ...parseStringList(tdoc?.vigilProcessWhitelist || [])]),
+    );
     return {
         liveEnabled: tdoc?.liveEnabled !== false,
         recordEnabled: !!tdoc?.recordEnabled,
@@ -112,7 +108,10 @@ async function deleteLocalClientSession(vigilSessionId: string) {
 }
 
 async function verifyVigilParticipantScope(
-    domainId: string, contestId: string | undefined, uid: number, scopeOverride = false,
+    domainId: string,
+    contestId: string | undefined,
+    uid: number,
+    scopeOverride = false,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
     if (!contestId) return { ok: true };
     if (!ObjectId.isValid(contestId)) {
@@ -135,7 +134,9 @@ async function verifyVigilParticipantScope(
 }
 
 async function checkVigilStudentFinished(
-    domainId: string, contestId: string | undefined, uid: number,
+    domainId: string,
+    contestId: string | undefined,
+    uid: number,
 ): Promise<{ finished: false } | { finished: true; message: string }> {
     if (!contestId || !ObjectId.isValid(contestId) || !uid) return { finished: false };
     const tid = new ObjectId(contestId);
@@ -193,14 +194,13 @@ class VigilLookupStudentHandler extends VigilApiHandler {
     @param('contestId', Types.String, true)
     @param('ojContestId', Types.String, true)
     @param('tid', Types.String, true)
-    async post(
-        _args: any, domainId: string, studentId: string, realName: string,
-        contestId?: string, ojContestId?: string, tid?: string,
-    ) {
+    async post(_args: any, domainId: string, studentId: string, realName: string, contestId?: string, ojContestId?: string, tid?: string) {
         const userbind = (global as any).Hydro?.model?.userbind;
         if (!userbind?.lookupStudent) {
             this.response.body = {
-                found: false, eligibleContests: [], reason: 'userbind_not_loaded',
+                found: false,
+                eligibleContests: [],
+                reason: 'userbind_not_loaded',
             };
             return;
         }
@@ -218,7 +218,8 @@ class VigilLookupStudentHandler extends VigilApiHandler {
         // workspace templates (paper for `exam`; scoreboard for `acm`).
         let eligibleContests: any[] = [];
         if (result.found && result.eligibleContestIds.length > 0) {
-            const tdocs = await db.collection('document')
+            const tdocs = await db
+                .collection('document')
                 .find({ docId: { $in: result.eligibleContestIds } })
                 .toArray();
             eligibleContests = tdocs
@@ -271,15 +272,17 @@ class VigilNotifySessionOpenedHandler extends VigilApiHandler {
     @param('machineId', Types.String)
     async post(_args: any, sessionId: string, ojUserId: number, tid: string, machineId: string) {
         await OplogModel.log(this as any, 'vigil.session_opened', {
-            sessionId, ojUserId, tid, machineId,
+            sessionId,
+            ojUserId,
+            tid,
+            machineId,
         });
         // Persist last-seen machine id on the user doc for convenience.
         try {
-            await UserModel.coll.updateOne(
-                { _id: ojUserId },
-                { $set: { vigilLastSeenMachineId: machineId, vigilLastSessionAt: new Date() } as any },
-            );
-        } catch { /* best-effort */ }
+            await UserModel.coll.updateOne({ _id: ojUserId }, { $set: { vigilLastSeenMachineId: machineId, vigilLastSessionAt: new Date() } as any });
+        } catch {
+            /* best-effort */
+        }
         this.response.body = { ok: true };
     }
 }
@@ -292,7 +295,9 @@ class VigilNotifySessionClosedHandler extends VigilApiHandler {
     async post(_args: any, sessionId: string, closeReason?: string) {
         const deletedLocalClientSessions = await deleteLocalClientSession(sessionId);
         await OplogModel.log(this as any, 'vigil.session_closed', {
-            sessionId, closeReason, deletedLocalClientSessions,
+            sessionId,
+            closeReason,
+            deletedLocalClientSessions,
         });
         this.response.body = { ok: true };
     }
@@ -324,8 +329,9 @@ class VigilStudentFinishHandler extends VigilApiHandler {
             return;
         }
         const tid = new ObjectId(ojContestId);
-        const tdoc: any = await contestModel.get('system', tid).catch(() => null)
-            || await db.collection('document').findOne({ docType: document.TYPE_CONTEST, docId: tid });
+        const tdoc: any =
+            (await contestModel.get('system', tid).catch(() => null)) ||
+            (await db.collection('document').findOne({ docType: document.TYPE_CONTEST, docId: tid }));
         if (!tdoc) {
             this.response.status = 404;
             this.response.body = { error: 'contest_not_found' };
@@ -334,7 +340,7 @@ class VigilStudentFinishHandler extends VigilApiHandler {
         const domainId = tdoc.domainId || 'system';
         const identity = await verifyStudentFinishIdentity(domainId, ojUserId, studentIdInput, realNameInput);
         if (!identity.ok) {
-            const failedIdentity = identity as { ok: false, message: string };
+            const failedIdentity = identity as { ok: false; message: string };
             this.response.status = 403;
             this.response.body = { error: 'identity_mismatch', message: failedIdentity.message };
             return;
@@ -398,8 +404,7 @@ class VigilResetStudentFinishHandler extends VigilApiHandler {
             return;
         }
         const tid = new ObjectId(ojContestId);
-        const tdoc: any = await db.collection('document')
-            .findOne({ docType: document.TYPE_CONTEST, docId: tid });
+        const tdoc: any = await db.collection('document').findOne({ docType: document.TYPE_CONTEST, docId: tid });
         if (!tdoc) {
             this.response.status = 404;
             this.response.body = { error: 'contest_not_found' };
@@ -457,22 +462,14 @@ class VigilExchangeAccessTokenHandler extends Handler {
             });
             return;
         }
-        const finishedCheck = await checkVigilStudentFinished(
-            result.ojDomainId || 'system',
-            result.ojContestId,
-            result.ojUserId,
-        );
+        const finishedCheck = await checkVigilStudentFinished(result.ojDomainId || 'system', result.ojContestId, result.ojUserId);
         if (finishedCheck.finished) {
             this.response.status = 403;
             this.response.body = { error: 'student_finished', message: finishedCheck.message };
             return;
         }
         try {
-            await ensureVigilContestParticipation(
-                result.ojDomainId || 'system',
-                result.ojContestId,
-                result.ojUserId,
-            );
+            await ensureVigilContestParticipation(result.ojDomainId || 'system', result.ojContestId, result.ojUserId);
         } catch (e: any) {
             this.response.status = 500;
             this.response.body = {
@@ -585,22 +582,14 @@ class VigilExamModeLaunchHandler extends Handler {
             renderError('无权进入比赛', message, 403);
             return;
         }
-        const finishedCheck = await checkVigilStudentFinished(
-            result.ojDomainId || 'system',
-            result.ojContestId,
-            result.ojUserId,
-        );
+        const finishedCheck = await checkVigilStudentFinished(result.ojDomainId || 'system', result.ojContestId, result.ojUserId);
         if (finishedCheck.finished) {
             renderError('已主动结束', finishedCheck.message, 403);
             return;
         }
 
         try {
-            await ensureVigilContestParticipation(
-                result.ojDomainId || 'system',
-                result.ojContestId,
-                result.ojUserId,
-            );
+            await ensureVigilContestParticipation(result.ojDomainId || 'system', result.ojContestId, result.ojUserId);
         } catch (e: any) {
             await OplogModel.log(this as any, 'vigilguard.attend_fail', {
                 sessionId,
@@ -639,9 +628,7 @@ class VigilExamModeLaunchHandler extends Handler {
 
         // 302 to the real exam-mode page. Falling back to /exam-mode (the
         // home list) is defensive — should never trigger with a valid token.
-        this.response.redirect = result.ojContestId
-            ? `/exam-mode/${result.ojContestId}`
-            : '/exam-mode';
+        this.response.redirect = result.ojContestId ? `/exam-mode/${result.ojContestId}` : '/exam-mode';
     }
 }
 
@@ -660,10 +647,7 @@ class VigilTemporaryUserHandler extends VigilApiHandler {
     @param('machineId', Types.String)
     @param('tid', Types.String)
     @param('approvedByOjUserId', Types.Int)
-    async post(
-        _args: any, studentIdInput: string, realNameInput: string, machineId: string,
-        tid: string, approvedByOjUserId: number,
-    ) {
+    async post(_args: any, studentIdInput: string, realNameInput: string, machineId: string, tid: string, approvedByOjUserId: number) {
         const tempSuffix = randomBytes(3).toString('hex');
         const username = `temp_${tid.slice(-8)}_${tempSuffix}`;
         const email = `${username}@temp.krypton.local`;
@@ -672,28 +656,40 @@ class VigilTemporaryUserHandler extends VigilApiHandler {
 
         const uid = await UserModel.create(email, username, password, undefined, ip, PRIV.PRIV_USER_PROFILE);
         // Mark as temporary; record the studentId/realName for audit and later claim.
-        await UserModel.coll.updateOne({ _id: uid }, {
-            $set: {
-                isTemporary: true,
-                tempStudentIdInput: studentIdInput,
-                tempRealNameInput: realNameInput,
-                tempMachineId: machineId,
-                tempContestId: tid,
-                tempApprovedBy: approvedByOjUserId,
-                displayName: `[临时] ${realNameInput}`,
-            } as any,
-        });
+        await UserModel.coll.updateOne(
+            { _id: uid },
+            {
+                $set: {
+                    isTemporary: true,
+                    tempStudentIdInput: studentIdInput,
+                    tempRealNameInput: realNameInput,
+                    tempMachineId: machineId,
+                    tempContestId: tid,
+                    tempApprovedBy: approvedByOjUserId,
+                    displayName: `[临时] ${realNameInput}`,
+                } as any,
+            },
+        );
         await OplogModel.log(this as any, 'vigil.temporary_user_created', {
-            tempUid: uid, studentIdInput, realNameInput, tid, approvedByOjUserId,
+            tempUid: uid,
+            studentIdInput,
+            realNameInput,
+            tid,
+            approvedByOjUserId,
         });
 
         const oneTimeToken = `t_oneshot_${randomBytes(24).toString('hex')}`;
         // Store the one-time token in system settings keyed by token id — it's a
         // short-lived bearer that gets consumed by `exchange-access-token` flow.
         // (Stored briefly; cleanup via TTL or manual purge.)
-        await system.set(`vigil.oneshot.${oneTimeToken}`, JSON.stringify({
-            uid, contestId: tid, expiresAt: Date.now() + 3600_000,
-        }));
+        await system.set(
+            `vigil.oneshot.${oneTimeToken}`,
+            JSON.stringify({
+                uid,
+                contestId: tid,
+                expiresAt: Date.now() + 3600_000,
+            }),
+        );
 
         this.response.body = { tempUserId: uid, oneTimeToken };
     }
@@ -718,7 +714,7 @@ class VigilDashboardTokenHandler extends Handler {
     async get() {
         const token = system.get('vigil.dashboardToken') || '';
         const vigilBaseUrl = system.get('vigil.baseUrl') || '';
-        const vigilWsUrl = (vigilBaseUrl.replace(/^http/, 'ws')) + '/api/ws/dashboard';
+        const vigilWsUrl = `${vigilBaseUrl.replace(/^http/, 'ws')}/api/ws/dashboard`;
         this.response.body = {
             token,
             vigilBaseUrl,
@@ -742,15 +738,13 @@ class VigilForceFinalizeHandler extends VigilApiHandler {
     @param('ojContestId', Types.String)
     async post(_args: any, sessionId: string, ojUserId: number, ojContestId: string) {
         const tid = new ObjectId(ojContestId);
-        const PaperDraftModel = (global as any).Hydro?.model?.paper_draft
-            || (await import('../model/paper-draft')).default;
-        const contestModel = await import('../model/contest');
-        const recordModel = await import('../model/record');
+        const PaperDraftModel = (global as any).Hydro?.model?.paper_draft || (await import('../model/paper-draft')).default;
+        const contestModule = await import('../model/contest');
+        const { default: recordModel } = await import('../model/record');
         const yaml = await import('js-yaml');
 
         // We don't know which OJ domain — pull it from the contest doc.
-        const tdoc: any = await db.collection('document')
-            .findOne({ docId: tid, docType: 30 /* TYPE_CONTEST */ });
+        const tdoc: any = await db.collection('document').findOne({ docId: tid, docType: 30 /* TYPE_CONTEST */ });
         if (!tdoc) {
             this.response.status = 404;
             this.response.body = { error: 'contest not found' };
@@ -760,10 +754,12 @@ class VigilForceFinalizeHandler extends VigilApiHandler {
 
         const drafts = await PaperDraftModel.getDraftsForUser(domainId, tid, ojUserId);
         const pdocs: Record<number, any> = {};
-        await Promise.all((tdoc.pids || []).map(async (pid: number) => {
-            const pdoc = await (await import('../model/problem')).default.get(domainId, pid);
-            if (pdoc) pdocs[pid] = pdoc;
-        }));
+        await Promise.all(
+            (tdoc.pids || []).map(async (pid: number) => {
+                const pdoc = await (await import('../model/problem')).default.get(domainId, pid);
+                if (pdoc) pdocs[pid] = pdoc;
+            }),
+        );
 
         const rids: ObjectId[] = [];
         for (const draft of drafts) {
@@ -773,25 +769,45 @@ class VigilForceFinalizeHandler extends VigilApiHandler {
             const type = config?.type || 'default';
             if (type === 'objective') {
                 const yamlBody = yaml.default.dump(draft.answers || {});
-                rids.push(await recordModel.add(domainId, draft.pid, ojUserId, '_', yamlBody, true,
-                    { contest: tid, type: 'judge', meta: { proctorForced: true, sessionId } } as any));
+                rids.push(
+                    await recordModel.add(domainId, draft.pid, ojUserId, '_', yamlBody, true, {
+                        contest: tid,
+                        type: 'judge',
+                        meta: { proctorForced: true, sessionId },
+                    } as any),
+                );
             } else if (type === 'fill_function') {
                 const codeBody = draft.code || JSON.stringify(draft.answers || {});
                 const lang = draft.lang || config?.template?.lang || 'cpp';
-                rids.push(await recordModel.add(domainId, draft.pid, ojUserId, lang, codeBody, true,
-                    { contest: tid, type: 'judge', meta: { proctorForced: true, sessionId } } as any));
+                rids.push(
+                    await recordModel.add(domainId, draft.pid, ojUserId, lang, codeBody, true, {
+                        contest: tid,
+                        type: 'judge',
+                        meta: { proctorForced: true, sessionId },
+                    } as any),
+                );
             } else if (type === 'default' && draft.code) {
                 const lang = draft.lang || config?.langs?.[0] || 'cpp';
-                rids.push(await recordModel.add(domainId, draft.pid, ojUserId, lang, draft.code, true,
-                    { contest: tid, type: 'judge', meta: { proctorForced: true, sessionId } } as any));
+                rids.push(
+                    await recordModel.add(domainId, draft.pid, ojUserId, lang, draft.code, true, {
+                        contest: tid,
+                        type: 'judge',
+                        meta: { proctorForced: true, sessionId },
+                    } as any),
+                );
             } else if (type === 'submit_answer') {
-                rids.push(await recordModel.add(domainId, draft.pid, ojUserId, '_', draft.code || '', true,
-                    { contest: tid, type: 'judge', meta: { proctorForced: true, sessionId } } as any));
+                rids.push(
+                    await recordModel.add(domainId, draft.pid, ojUserId, '_', draft.code || '', true, {
+                        contest: tid,
+                        type: 'judge',
+                        meta: { proctorForced: true, sessionId },
+                    } as any),
+                );
             }
         }
 
         for (const rid of rids) {
-            await contestModel.updateStatus(domainId, tid, ojUserId, rid, 0);
+            await contestModule.updateStatus(domainId, tid, ojUserId, rid, 0);
         }
 
         // Close the session via the outbound bridge.
@@ -806,7 +822,10 @@ class VigilForceFinalizeHandler extends VigilApiHandler {
 // ─── Admin dashboard shell handlers ──────────────────────────────────────
 
 class VigilAdminOverviewHandler extends Handler {
-    async prepare() { this.checkPriv(PRIV.PRIV_EDIT_SYSTEM); }
+    async prepare() {
+        this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
+    }
+
     async get() {
         const now = new Date();
         // Include contests that have not started yet but are within the
@@ -815,20 +834,24 @@ class VigilAdminOverviewHandler extends Handler {
         // the dashboard's "进行中" bucket needs to surface them so the
         // approval rows aren't misfiled into "已结束".
         const upcomingHorizon = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-        const activeVigilContests = await document.coll.find({
-            docType: document.TYPE_CONTEST,
-            vigilEnabled: true,
-            beginAt: { $lte: upcomingHorizon },
-            endAt: { $gt: now },
-        }).project({
-            domainId: 1,
-            docId: 1,
-            title: 1,
-            beginAt: 1,
-            endAt: 1,
-            rule: 1,
-            entryMode: 1,
-        }).sort({ beginAt: -1 }).toArray();
+        const activeVigilContests = await document.coll
+            .find({
+                docType: document.TYPE_CONTEST,
+                vigilEnabled: true,
+                beginAt: { $lte: upcomingHorizon },
+                endAt: { $gt: now },
+            })
+            .project({
+                domainId: 1,
+                docId: 1,
+                title: 1,
+                beginAt: 1,
+                endAt: 1,
+                rule: 1,
+                entryMode: 1,
+            })
+            .sort({ beginAt: -1 })
+            .toArray();
         this.response.template = 'admin_vigil_overview.html';
         this.response.body = {
             activeVigilContests: activeVigilContests.map((tdoc: any) => ({
@@ -848,7 +871,10 @@ class VigilAdminOverviewHandler extends Handler {
 // / overview) for one Hydro contest. The React page reads :examId and
 // filters client-side.
 class VigilAdminExamDetailHandler extends Handler {
-    async prepare() { this.checkPriv(PRIV.PRIV_EDIT_SYSTEM); }
+    async prepare() {
+        this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
+    }
+
     async get({ domainId, examId }: { domainId: string; examId: string }) {
         let examTitle: string | null = null;
         let liveEnabled = true;
@@ -857,15 +883,18 @@ class VigilAdminExamDetailHandler extends Handler {
         if (ObjectId.isValid(examId)) {
             try {
                 const tid = new ObjectId(examId);
-                const tdoc = await contestModel.get(domainId || 'system', tid).catch(() => null)
-                    || await document.coll.findOne({ docType: document.TYPE_CONTEST, docId: tid });
+                const tdoc =
+                    (await contestModel.get(domainId || 'system', tid).catch(() => null)) ||
+                    (await document.coll.findOne({ docType: document.TYPE_CONTEST, docId: tid }));
                 if (tdoc?.title) examTitle = tdoc.title;
                 if (tdoc) {
                     liveEnabled = tdoc.liveEnabled !== false;
                     recordEnabled = !!tdoc.recordEnabled;
                     cameraEnabled = tdoc.cameraEnabled !== false;
                 }
-            } catch { /* not found → leave null, React falls back to id */ }
+            } catch {
+                /* not found → leave null, React falls back to id */
+            }
         }
         this.response.template = 'admin_vigil_exam_detail.html';
         this.response.body = {
@@ -890,7 +919,9 @@ class VigilAdminExamDetailHandler extends Handler {
  * caller can treat the map as "best effort" and fall back to the id.
  */
 class VigilResolveContestsHandler extends Handler {
-    async prepare() { this.checkPriv(PRIV.PRIV_EDIT_SYSTEM); }
+    async prepare() {
+        this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
+    }
 
     @param('ids', Types.CommaSeperatedArray, true)
     async post({ domainId: _domainId }: { domainId: string }, ids: string[] = []) {
@@ -905,10 +936,13 @@ class VigilResolveContestsHandler extends Handler {
             // by `domainId` here on purpose — the vigil dashboard is a
             // system-wide admin view and the proctored exam may live in any
             // domain. Caller already gated to PRIV_EDIT_SYSTEM.
-            const tdocs = await document.coll.find({
-                docType: document.TYPE_CONTEST,
-                docId: { $in: validIds },
-            }).project({ docId: 1, title: 1 }).toArray();
+            const tdocs = await document.coll
+                .find({
+                    docType: document.TYPE_CONTEST,
+                    docId: { $in: validIds },
+                })
+                .project({ docId: 1, title: 1 })
+                .toArray();
             for (const tdoc of tdocs) {
                 if (tdoc.docId && tdoc.title) map[String(tdoc.docId)] = tdoc.title;
             }
@@ -951,17 +985,11 @@ class VigilCheckHlsAccessHandler extends Handler {
         // underscore, so the middle segment regex must accept those.
         // Use `.+?` (non-greedy) so the trailing `_screen|_camera`
         // anchor wins; otherwise greedy `.+` would swallow the type.
-        const liveMatch = path.match(
-            /^\/vigil-hls\/(live-record|live-nodvr)\/([0-9a-f]{24})_(.+?)_(screen|camera)(?:-\d+)?\.(m3u8|ts)$/,
-        );
-        const recMatch = path.match(
-            /^\/vigil-hls\/recordings\/([0-9a-f]{24})_(.+?)_(screen|camera)(?:_\d{8}_\d{6})?\.mp4$/,
-        );
+        const liveMatch = path.match(/^\/vigil-hls\/(live-record|live-nodvr)\/([0-9a-f]{24})_(.+?)_(screen|camera)(?:-\d+)?\.(m3u8|ts)$/);
+        const recMatch = path.match(/^\/vigil-hls\/recordings\/([0-9a-f]{24})_(.+?)_(screen|camera)(?:_\d{8}_\d{6})?\.mp4$/);
         // Low-latency HTTP-FLV live path (mpegts.js), proxied by Caddy's
         // /vigil-flv/*: /vigil-flv/{live-record|live-nodvr}/{contestId}_{machineId}_{type}.flv
-        const flvMatch = path.match(
-            /^\/vigil-flv\/(live-record|live-nodvr)\/([0-9a-f]{24})_(.+?)_(screen|camera)\.flv$/,
-        );
+        const flvMatch = path.match(/^\/vigil-flv\/(live-record|live-nodvr)\/([0-9a-f]{24})_(.+?)_(screen|camera)\.flv$/);
         if (!liveMatch && !recMatch && !flvMatch) {
             this.response.status = 403;
             this.response.body = { error: 'invalid path' };

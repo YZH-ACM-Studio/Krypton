@@ -70,13 +70,7 @@ export function formatDate(date: Date, fmt = '%Y-%m-%d %H:%M:%S') {
     if (M.length < 2) M = `0${M}`;
     let S = date.getSeconds().toString();
     if (S.length < 2) S = `0${S}`;
-    return fmt
-        .replace('%Y', date.getFullYear().toString())
-        .replace('%m', m)
-        .replace('%d', d)
-        .replace('%H', H)
-        .replace('%M', M)
-        .replace('%S', S);
+    return fmt.replace('%Y', date.getFullYear().toString()).replace('%m', m).replace('%d', d).replace('%H', H).replace('%M', M).replace('%S', S);
 }
 
 Math.sum = function sum(...args) {
@@ -140,7 +134,7 @@ function deepen(modifyString: (source: string) => string) {
     };
 }
 
-export function noop() { }
+export function noop() {}
 
 export const camelCase = deepen((source) => source.replace(/[_-][a-z]/g, (str) => str.slice(1).toUpperCase()));
 export const paramCase = deepen((source) => source.replace(/_/g, '-').replace(/(?<!^)[A-Z]/g, (str) => `-${str.toLowerCase()}`));
@@ -197,7 +191,7 @@ export function randomPick<T>(arr: T[]): T {
 }
 
 export type StringKeys<O> = {
-    [K in keyof O]: string extends O[K] ? K : never
+    [K in keyof O]: string extends O[K] ? K : never;
 }[keyof O];
 const fSortR = /\D+|\d+/g;
 export function sortFiles(files: string[]): string[];
@@ -224,7 +218,7 @@ export function sortFiles(files: Record<string, any>[] | string[], key = '_id') 
             }
             return weightA ? 1 : -1;
         });
-    return result.map((x) => (isString ? x.name : (delete x._weights && x)));
+    return result.map((x) => (isString ? x.name : delete x._weights && x));
 }
 
 export const getAlphabeticId = (() => {

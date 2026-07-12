@@ -25,7 +25,9 @@ export function KryptonFooter() {
         {/* Left: copyright + site */}
         <div className="space-y-1">
           <p className="font-medium text-foreground">{bs.siteName || bs.appName || 'Krypton'}</p>
-          <p>© {year} · 由 <span className="text-foreground">{bs.appName || 'Krypton'}</span> 提供</p>
+          <p>
+            © {year} · 由 <span className="text-foreground">{bs.appName || 'Krypton'}</span> 提供
+          </p>
           <p className="flex items-center gap-1">
             <Heart className="size-3" />
             Powered by Hydro + Krypton
@@ -34,16 +36,19 @@ export function KryptonFooter() {
 
         {/* Middle: links */}
         <nav className="flex flex-wrap items-start gap-3">
-          <a href="/wiki/about" className="hover:text-foreground">关于</a>
-          <a href="/wiki/help" className="hover:text-foreground">帮助</a>
-          <a href="/wiki/tos" className="hover:text-foreground">服务条款</a>
-          <a href="/wiki/privacy" className="hover:text-foreground">隐私</a>
-          <a
-            href="https://github.com/hydro-dev/Hydro"
-            className="flex items-center gap-1 hover:text-foreground"
-            target="_blank"
-            rel="noreferrer"
-          >
+          <a href="/wiki/about" className="hover:text-foreground">
+            关于
+          </a>
+          <a href="/wiki/help" className="hover:text-foreground">
+            帮助
+          </a>
+          <a href="/wiki/tos" className="hover:text-foreground">
+            服务条款
+          </a>
+          <a href="/wiki/privacy" className="hover:text-foreground">
+            隐私
+          </a>
+          <a href="https://github.com/hydro-dev/Hydro" className="flex items-center gap-1 hover:text-foreground" target="_blank" rel="noreferrer">
             <Github className="size-3" />
             GitHub
           </a>
@@ -65,5 +70,8 @@ export function KryptonFooter() {
 
 function splitLines(html?: string): string[] {
   if (!html) return [];
-  return html.split('\n').map((s) => s.trim()).filter(Boolean);
+  return html
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
 }

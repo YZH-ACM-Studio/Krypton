@@ -23,7 +23,11 @@ export default async (ctx: KoaContext, next: Next) => {
     // Base Layer
     const { domainId, domainInfo } = ctx;
     const args = {
-        domainId, ...ctx.params, ...ctx.query, ...ctx.request.body, __start: Date.now(),
+        domainId,
+        ...ctx.params,
+        ...ctx.query,
+        ...ctx.request.body,
+        __start: Date.now(),
     };
     const UiContext: any = cloneDeep(UiContextBase);
     if (!process.env.DEV) {
@@ -47,10 +51,17 @@ export default async (ctx: KoaContext, next: Next) => {
     await next();
     const request = ctx.HydroContext.request;
     const ua = request.headers['user-agent'] || '';
-    if (!ctx.session.uid && system.get('server.ignoreUA').replace(/\r/g, '').split('\n').filter((i) => i && ua.includes(i)).length) return;
-    const expireSeconds = ctx.session.save
-        ? system.get('session.saved_expire_seconds')
-        : system.get('session.unsaved_expire_seconds');
+    if (
+        !ctx.session.uid &&
+        system
+            .get('server.ignoreUA')
+            .replace(/\r/g, '')
+            .split('\n')
+            .filter((i) => i && ua.includes(i)).length
+    ) {
+        return;
+    }
+    const expireSeconds = ctx.session.save ? system.get('session.saved_expire_seconds') : system.get('session.unsaved_expire_seconds');
     const isRecent = ctx.session.updateAt ? Date.now() - new Date(ctx.session.updateAt).getTime() < 5 * Time.minute : true;
     if (!Object.getOwnPropertyNames(ctx.session).length && isRecent) return;
     Object.assign(ctx.session, { updateIp: request.ip, updateUa: ua });

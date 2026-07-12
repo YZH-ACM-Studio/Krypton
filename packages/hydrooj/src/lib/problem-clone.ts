@@ -25,7 +25,7 @@ export async function copyProblemStorageFiles(input: {
     for (const file of input.files) {
         try {
             // Deliberately sequential: stop at the first exact failed file.
-            // eslint-disable-next-line no-await-in-loop
+
             await input.copy(file.path, `${input.targetPrefix}${file.name}`);
         } catch (error) {
             const failure = {

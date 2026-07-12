@@ -74,10 +74,7 @@ function assertValidDate(date: Date, field: string): void {
  * Parse a strict YYYY-MM-DD natural day in Asia/Shanghai.
  * `from` is that day's 00:00 inclusive; `to` is the next day's 00:00 exclusive.
  */
-export function parseShanghaiNaturalDate(
-    value: string,
-    boundary: 'from' | 'to',
-): Date {
+export function parseShanghaiNaturalDate(value: string, boundary: 'from' | 'to'): Date {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
     if (!match) {
         throw new StudentFilterValidationError(boundary, '日期必须为 YYYY-MM-DD');
@@ -86,11 +83,7 @@ export function parseShanghaiNaturalDate(
     const month = Number(match[2]);
     const day = Number(match[3]);
     const calendarDate = new Date(Date.UTC(year, month - 1, day));
-    if (
-        calendarDate.getUTCFullYear() !== year
-        || calendarDate.getUTCMonth() !== month - 1
-        || calendarDate.getUTCDate() !== day
-    ) {
+    if (calendarDate.getUTCFullYear() !== year || calendarDate.getUTCMonth() !== month - 1 || calendarDate.getUTCDate() !== day) {
         throw new StudentFilterValidationError(boundary, '日期不是有效的日历日期');
     }
 
@@ -99,9 +92,7 @@ export function parseShanghaiNaturalDate(
     return new Date(Date.UTC(year, month - 1, day + dayOffset) - shanghaiOffsetMs);
 }
 
-export function parseStudentFilterQuery(
-    input: StudentFilterQueryInput,
-): ParsedStudentFilterQuery {
+export function parseStudentFilterQuery(input: StudentFilterQueryInput): ParsedStudentFilterQuery {
     const enrollmentYearValue = optionalString(input.enrollmentYear, 'enrollmentYear');
     const bindingStatusValue = optionalString(input.bindingStatus, 'bindingStatus') || 'all';
     const timeFieldValue = optionalString(input.timeField, 'timeField') || 'boundAt';
@@ -148,50 +139,28 @@ export function escapeRegexLiteral(input: string): string {
 
 function normalizeBindingStatus(filter: ListStudentsFilter): StudentBindingStatus {
     if (filter.boundOnly && filter.unboundOnly) {
-        throw new StudentFilterValidationError(
-            'bindingStatus',
-            'boundOnly 与 unboundOnly 不能同时启用',
-        );
+        throw new StudentFilterValidationError('bindingStatus', 'boundOnly 与 unboundOnly 不能同时启用');
     }
 
-    const legacyStatus = filter.boundOnly
-        ? 'bound'
-        : filter.unboundOnly
-            ? 'unbound'
-            : undefined;
+    const legacyStatus = filter.boundOnly ? 'bound' : filter.unboundOnly ? 'unbound' : undefined;
     const requestedStatus = filter.bindingStatus;
     if (requestedStatus && !['all', 'bound', 'unbound'].includes(requestedStatus)) {
         throw new StudentFilterValidationError('bindingStatus', '绑定状态参数非法');
     }
-    if (
-        legacyStatus
-        && requestedStatus
-        && requestedStatus !== legacyStatus
-    ) {
-        throw new StudentFilterValidationError(
-            'bindingStatus',
-            '新旧绑定状态参数互相冲突',
-        );
+    if (legacyStatus && requestedStatus && requestedStatus !== legacyStatus) {
+        throw new StudentFilterValidationError('bindingStatus', '新旧绑定状态参数互相冲突');
     }
     return requestedStatus || legacyStatus || 'all';
 }
 
-export function buildStudentsMongoFilter(
-    domainId: string,
-    filter: ListStudentsFilter = {},
-): Filter<StudentRecord> {
+export function buildStudentsMongoFilter(domainId: string, filter: ListStudentsFilter = {}): Filter<StudentRecord> {
     const mongoFilter: Filter<StudentRecord> = { domainId };
     if (filter.schoolId) mongoFilter.schoolId = filter.schoolId;
     if (filter.groupId) mongoFilter.groupIds = filter.groupId;
 
     if (filter.enrollmentYear !== undefined) {
-        if (!Number.isInteger(filter.enrollmentYear)
-            || filter.enrollmentYear < 1900
-            || filter.enrollmentYear > 2099) {
-            throw new StudentFilterValidationError(
-                'enrollmentYear',
-                '入学年必须是 1900–2099 的整数',
-            );
+        if (!Number.isInteger(filter.enrollmentYear) || filter.enrollmentYear < 1900 || filter.enrollmentYear > 2099) {
+            throw new StudentFilterValidationError('enrollmentYear', '入学年必须是 1900–2099 的整数');
         }
         mongoFilter.enrollmentYear = filter.enrollmentYear;
     }
@@ -210,7 +179,7 @@ export function buildStudentsMongoFilter(
         throw new StudentFilterValidationError('from', '开始日期不能晚于结束日期');
     }
     if (filter.from || filter.to) {
-        const timeRange: { $gte?: Date, $lt?: Date } = {};
+        const timeRange: { $gte?: Date; $lt?: Date } = {};
         if (filter.from) timeRange.$gte = filter.from;
         if (filter.to) timeRange.$lt = filter.to;
         (mongoFilter as Record<string, unknown>)[timeField] = timeRange;
@@ -219,10 +188,7 @@ export function buildStudentsMongoFilter(
     const query = (filter.query || '').trim();
     if (query) {
         const escaped = escapeRegexLiteral(query);
-        mongoFilter.$or = [
-            { studentId: { $regex: escaped, $options: 'i' } },
-            { realName: { $regex: escaped, $options: 'i' } },
-        ];
+        mongoFilter.$or = [{ studentId: { $regex: escaped, $options: 'i' } }, { realName: { $regex: escaped, $options: 'i' } }];
     }
     return mongoFilter;
 }
@@ -243,7 +209,7 @@ export async function listStudentsFromCollection(
     collection: StudentListCollection,
     domainId: string,
     filter: ListStudentsFilter = {},
-): Promise<{ docs: StudentRecord[], total: number }> {
+): Promise<{ docs: StudentRecord[]; total: number }> {
     const mongoFilter = buildStudentsMongoFilter(domainId, filter);
     const total = await collection.countDocuments(mongoFilter);
     const docs = await collection

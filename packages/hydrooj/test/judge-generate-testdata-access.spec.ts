@@ -6,8 +6,8 @@ const Module = require('module');
 const judgePath = require.resolve('../src/handler/judge.ts');
 const originalLoad = Module._load;
 
-class ForbiddenError extends Error { }
-class GenericError extends Error { }
+class ForbiddenError extends Error {}
+class GenericError extends Error {}
 
 const calls = {
     add: [] as any[],
@@ -20,21 +20,34 @@ let claimAllowed = true;
 
 const generateSentinel = {
     toString: () => '000000000000000000000001',
-    equals(value: unknown) { return String(value) === this.toString(); },
+    equals(value: unknown) {
+        return String(value) === this.toString();
+    },
 };
 const pretestSentinel = { toString: () => '000000000000000000000002' };
 let currentRecord: any = {
-    domainId: 'system', pid: 7, uid: 42, contest: generateSentinel,
+    domainId: 'system',
+    pid: 7,
+    uid: 42,
+    contest: generateSentinel,
 };
 
 const pdoc = {
-    domainId: 'system', docId: 7, owner: 1, reference: null,
-    data: [], additional_file: [],
+    domainId: 'system',
+    docId: 7,
+    owner: 1,
+    reference: null,
+    data: [],
+    additional_file: [],
 };
 const actor = {
     _id: 42,
-    own() { throw new Error('legacy udoc.own must not authorize callback writes'); },
-    hasPerm() { throw new Error('legacy wide permission check must not authorize callback writes'); },
+    own() {
+        throw new Error('legacy udoc.own must not authorize callback writes');
+    },
+    hasPerm() {
+        throw new Error('legacy wide permission check must not authorize callback writes');
+    },
 };
 
 const problemStub = {
@@ -42,24 +55,12 @@ const problemStub = {
         calls.gets.push(args);
         return pdoc;
     },
-    async withAuthorizedWriteClaim(
-        domainId: string,
-        pid: number,
-        user: any,
-        operation: string,
-        work: (claim: any) => Promise<any>,
-    ) {
+    async withAuthorizedWriteClaim(domainId: string, pid: number, user: any, operation: string, work: (claim: any) => Promise<any>) {
         calls.claims.push({ domainId, pid, user, operation });
         if (!claimAllowed) throw new ForbiddenError('revoke won');
         return work({ domainId, pid, actor: user._id, requestId: 'generate-callback' });
     },
-    async withAuthorizedStructuralWriteClaim(
-        domainId: string,
-        pid: number,
-        user: any,
-        operation: string,
-        work: (claim: any) => Promise<any>,
-    ) {
+    async withAuthorizedStructuralWriteClaim(domainId: string, pid: number, user: any, operation: string, work: (claim: any) => Promise<any>) {
         return problemStub.withAuthorizedWriteClaim(domainId, pid, user, operation, work);
     },
     async addTestdataWithClaim(claim: any, ...args: any[]) {
@@ -70,8 +71,14 @@ const problemStub = {
 const recordStub = {
     RECORD_GENERATE: generateSentinel,
     RECORD_PRETEST: pretestSentinel,
-    collHistory: { async updateOne() { return undefined; } },
-    async get() { return currentRecord; },
+    collHistory: {
+        async updateOne() {
+            return undefined;
+        },
+    },
+    async get() {
+        return currentRecord;
+    },
 };
 
 function noopDecorator() {
@@ -82,8 +89,13 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (parent?.filename !== judgePath) return originalLoad.call(this, request, parent, isMain);
     if (request === 'fs-extra') {
         return {
-            async stat(filePath: string) { calls.stats.push(filePath); return { size: 1 }; },
-            createReadStream(filePath: string) { return { filePath }; },
+            async stat(filePath: string) {
+                calls.stats.push(filePath);
+                return { size: 1 };
+            },
+            createReadStream(filePath: string) {
+                return { filePath };
+            },
         };
     }
     if (request === '@hydrooj/common') return {};
@@ -96,7 +108,14 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../lib/problem-config') {
         return { mergeSubjectiveScores: () => null, parseProblemConfigObject: () => ({}) };
     }
-    if (request === '../logger') return { Logger: class { info() {} warn() {} } };
+    if (request === '../logger') {
+        return {
+            Logger: class {
+                info() {}
+                warn() {}
+            },
+        };
+    }
     if (request === '../model/builtin') {
         return { PERM: { PERM_EDIT_PROBLEM_SELF: 1n, PERM_EDIT_PROBLEM: 2n }, STATUS: {}, PRIV: {} };
     }
@@ -120,8 +139,11 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../service/monitor') return { updateJudge: () => undefined };
     if (request === '../service/server') {
         return {
-            ConnectionHandler: class {}, Handler: class {}, post: noopDecorator,
-            subscribe: noopDecorator, Types: new Proxy({}, { get: () => () => ({}) }),
+            ConnectionHandler: class {},
+            Handler: class {},
+            post: noopDecorator,
+            subscribe: noopDecorator,
+            Types: new Proxy({}, { get: () => () => ({}) }),
         };
     }
     return originalLoad.call(this, request, parent, isMain);
@@ -139,16 +161,24 @@ beforeEach(() => {
     for (const entries of Object.values(calls)) entries.length = 0;
     claimAllowed = true;
     currentRecord = {
-        domainId: 'system', pid: 7, uid: 42, contest: generateSentinel,
+        domainId: 'system',
+        pid: 7,
+        uid: 42,
+        contest: generateSentinel,
     };
 });
 
 describe('generated testdata judge callback authorization', () => {
     it('writes only inside an authoritative current-actor claim', async () => {
         await processJudgeFileCallback('rid' as any, 'generated.in', '/tmp/generated.in');
-        expect(calls.claims).to.deep.equal([{
-            domainId: 'system', pid: 7, user: actor, operation: 'generate-testdata-callback',
-        }]);
+        expect(calls.claims).to.deep.equal([
+            {
+                domainId: 'system',
+                pid: 7,
+                user: actor,
+                operation: 'generate-testdata-callback',
+            },
+        ]);
         expect(calls.add).to.have.length(1);
         expect(calls.add[0].claim.requestId).to.equal('generate-callback');
         expect(calls.add[0].args[0]).to.equal('generated.in');
@@ -178,7 +208,6 @@ describe('generated testdata judge callback authorization', () => {
             currentRecord = invalid;
             let error: unknown;
             try {
-                // eslint-disable-next-line no-await-in-loop
                 await processJudgeFileCallback('rid' as any, 'generated.in', '/tmp/generated.in');
             } catch (caught) {
                 error = caught;

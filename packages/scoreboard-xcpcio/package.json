@@ -8,7 +8,9 @@
         "postinstall": "node install.js"
     },
     "dependencies": {
-        "@xcpcio/board-app": "^0.84.0"
+        "@xcpcio/board-app": "^0.84.0",
+        "hydrooj": "workspace:^",
+        "lru-cache": "^11.3.5"
     },
     "devDependencies": {
         "@xcpcio/types": "^0.84.0"

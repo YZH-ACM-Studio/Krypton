@@ -38,14 +38,16 @@ export function BlogMainPage() {
     <BlogShell
       title={`${udoc.uname || '用户'} 的博客`}
       udoc={udoc}
-      aside={isOwner ? (
-        <Button asChild className="w-full gap-2">
-          <a href={`${blogMainUrl(ownerId)}/create`}>
-            <Plus className="size-4" />
-            新建文章
-          </a>
-        </Button>
-      ) : null}
+      aside={
+        isOwner ? (
+          <Button asChild className="w-full gap-2">
+            <a href={`${blogMainUrl(ownerId)}/create`}>
+              <Plus className="size-4" />
+              新建文章
+            </a>
+          </Button>
+        ) : null
+      }
     >
       {posts.length ? (
         <div className="space-y-3">
@@ -58,9 +60,7 @@ export function BlogMainPage() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <h2 className="truncate text-base font-semibold">{post.title || '未命名文章'}</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {formatDateTime(post.updateAt || post._id, bs.locale)}
-                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">{formatDateTime(post.updateAt || post._id, bs.locale)}</p>
                 </div>
                 <div className="flex shrink-0 gap-2">
                   <Badge variant="outline" className="gap-1">
@@ -101,9 +101,7 @@ export function BlogDetailPage() {
               {udoc.uname || '用户'} 的博客
             </a>
             <h1 className="mt-2 text-2xl font-semibold">{post.title || '未命名文章'}</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {formatDateTime(post.updateAt || post._id, bs.locale)}
-            </p>
+            <p className="mt-2 text-sm text-muted-foreground">{formatDateTime(post.updateAt || post._id, bs.locale)}</p>
           </div>
           <div className="flex gap-2">
             <Badge variant="outline" className="gap-1">
@@ -136,15 +134,10 @@ export function BlogEditPage() {
     <BlogShell title={isEdit ? '编辑博客' : '新建博客'} udoc={bs.page.data.udoc || { _id: ownerId, uname: bs.user.name }}>
       <form method="post" className="space-y-5">
         <div className="space-y-2">
-          <label htmlFor="blog-title" className="text-sm font-medium">标题</label>
-          <Input
-            id="blog-title"
-            name="title"
-            defaultValue={post.title || ''}
-            autoFocus
-            required
-            placeholder="写一个清楚的标题"
-          />
+          <label htmlFor="blog-title" className="text-sm font-medium">
+            标题
+          </label>
+          <Input id="blog-title" name="title" defaultValue={post.title || ''} autoFocus required placeholder="写一个清楚的标题" />
         </div>
         <div className="space-y-2">
           <label className="text-sm font-medium">内容</label>
@@ -179,17 +172,7 @@ export function BlogEditPage() {
   );
 }
 
-function BlogShell({
-  title,
-  udoc,
-  aside,
-  children,
-}: {
-  title: string;
-  udoc: GenericUserDoc;
-  aside?: React.ReactNode;
-  children: React.ReactNode;
-}) {
+function BlogShell({ title, udoc, aside, children }: { title: string; udoc: GenericUserDoc; aside?: React.ReactNode; children: React.ReactNode }) {
   return (
     <motion.div
       className="grid gap-5 lg:grid-cols-[1fr_260px]"
@@ -220,15 +203,14 @@ function BlogShell({
                 <p className="text-xs text-muted-foreground">UID {udoc._id || '—'}</p>
               </div>
             </div>
-            {udoc.bio ? (
-              <MarkdownView
-                content={udoc.bio}
-                className="mt-3 text-sm text-muted-foreground"
-              />
-            ) : null}
+            {udoc.bio ? <MarkdownView content={udoc.bio} className="mt-3 text-sm text-muted-foreground" /> : null}
           </CardContent>
         </Card>
-        {aside ? <Card><CardContent className="p-4">{aside}</CardContent></Card> : null}
+        {aside ? (
+          <Card>
+            <CardContent className="p-4">{aside}</CardContent>
+          </Card>
+        ) : null}
         <Card>
           <CardContent className="space-y-2 p-4 text-sm">
             <a href={blogMainUrl(udoc._id || '')} className="flex items-center gap-2 text-muted-foreground hover:text-foreground">

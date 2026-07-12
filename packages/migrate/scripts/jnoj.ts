@@ -1,10 +1,28 @@
-/* eslint-disable no-await-in-loop */
 import path from 'path';
 import mariadb from 'mariadb';
 import TurndownService from 'turndown';
 import {
-    _, buildContent, ContestModel, DiscussionModel, DocumentModel, DomainModel, fs, moment, noop, NotFoundError, ObjectId, postJudge, ProblemModel,
-    RecordDoc, RecordModel, SolutionModel, STATUS, StorageModel, SystemModel, Time, UserModel,
+    _,
+    buildContent,
+    ContestModel,
+    DiscussionModel,
+    DocumentModel,
+    DomainModel,
+    fs,
+    moment,
+    noop,
+    NotFoundError,
+    ObjectId,
+    postJudge,
+    ProblemModel,
+    RecordDoc,
+    RecordModel,
+    SolutionModel,
+    STATUS,
+    StorageModel,
+    SystemModel,
+    Time,
+    UserModel,
 } from 'hydrooj';
 
 const turndown = new TurndownService({
@@ -73,8 +91,10 @@ function fixFileName(fileName: string) {
 }
 
 async function iterate(
-    count: bigint | number, step: bigint | number, cb: (pageId: bigint) => Promise<void>,
-    reportOpts?: { every: number | bigint, namespace: string, report: (data: any) => void },
+    count: bigint | number,
+    step: bigint | number,
+    cb: (pageId: bigint) => Promise<void>,
+    reportOpts?: { every: number | bigint; namespace: string; report: (data: any) => void },
 ) {
     const _count = BigInt(count);
     const _step = BigInt(step);
@@ -84,7 +104,7 @@ async function iterate(
     for (let pageId = 0n; pageId < pageCount; pageId++) {
         await cb(pageId);
         if (reportOpts && pageId % _showProgress === 0n) {
-            const progress = pageId * _step * 100n / _count;
+            const progress = (pageId * _step * 100n) / _count;
             report({
                 message: `${namespace} finished ${Number(pageId * _step)} / ${Number(count)} (${Number(progress)}%)`,
             });
@@ -92,12 +112,24 @@ async function iterate(
     }
 }
 
-export async function run({
-    host = 'localhost', port = 3306, name = 'jnoj',
-    username, password, domainId, dataDir = '/www/jnoj/jnoj/judge/data/',
-    uploadDir = '/www/jnoj/jnoj/web/uploads/', rerun = true, randomMail = false,
-    withContest = true, keepGroups = '', hideExtraGroup = false,
-}, report: (data: any) => void) {
+export async function run(
+    {
+        host = 'localhost',
+        port = 3306,
+        name = 'jnoj',
+        username,
+        password,
+        domainId,
+        dataDir = '/www/jnoj/jnoj/judge/data/',
+        uploadDir = '/www/jnoj/jnoj/web/uploads/',
+        rerun = true,
+        randomMail = false,
+        withContest = true,
+        keepGroups = '',
+        hideExtraGroup = false,
+    },
+    report: (data: any) => void,
+) {
     const _keepGroups = keepGroups.split(',').map((i) => i.trim());
     const src = await mariadb.createConnection({
         host,
@@ -106,9 +138,12 @@ export async function run({
         password,
         database: name,
     });
-    const query = (q: string) => new Promise<any[]>((res, rej) => {
-        src.query(q).then((r) => res(r)).catch((e) => rej(e));
-    });
+    const query = (q: string) =>
+        new Promise<any[]>((res, rej) => {
+            src.query(q)
+                .then((r) => res(r))
+                .catch((e) => rej(e));
+        });
     report({ message: JSON.stringify(await query("show VARIABLES like 'char%';")) });
     const target = await DomainModel.get(domainId);
     if (!target) throw new NotFoundError(domainId);
@@ -169,8 +204,12 @@ export async function run({
             uidMap[udoc.id] = current._id;
         } else {
             const uid = await UserModel.create(
-                udoc.email || `${udoc.username}@jnoj.local`, udoc.username, '',
-                null, '127.0.0.1', udoc.status === 10 ? SystemModel.get('default.priv') : 0,
+                udoc.email || `${udoc.username}@jnoj.local`,
+                udoc.username,
+                '',
+                null,
+                '127.0.0.1',
+                udoc.status === 10 ? SystemModel.get('default.priv') : 0,
             );
             uidMap[udoc.id] = uid;
             await UserModel.setById(uid, {
@@ -228,70 +267,87 @@ export async function run({
     const pidMap: Record<string, number> = {};
     const [{ 'count(*)': pcount }] = await query('SELECT count(*) FROM `problem`');
     const step = 50n;
-    await iterate(pcount, 50n, async (pageId: bigint) => {
-        const pdocs = await query(`SELECT * FROM \`problem\` LIMIT ${Number(pageId * step)}, ${Number(step)}`);
-        for (const pdoc of pdocs) {
-            if (rerun) {
-                const opdoc = await ProblemModel.get(domainId, `P${pdoc.id}`);
-                if (opdoc) pidMap[pdoc.id] = opdoc.docId;
-            }
-            if (!pidMap[pdoc.id]) {
-                const files = {};
-                const markdown = [pdoc.description, pdoc.input, pdoc.output, pdoc.hint].some((i) => i?.includes('[md]'));
-                const samples = [];
-                const sampleInput = parsePhpArray(pdoc.sample_input);
-                const sampleOutput = parsePhpArray(pdoc.sample_output);
-                if (sampleInput[0]?.trim() || sampleOutput[0]?.trim()) samples.push([sampleInput[0]?.trim(), sampleOutput[0]?.trim()]);
-                if (sampleInput[1]?.trim() || sampleOutput[1]?.trim()) samples.push([sampleInput[1]?.trim(), sampleOutput[1]?.trim()]);
-                if (sampleInput[2]?.trim() || sampleOutput[2]?.trim()) samples.push([sampleInput[2]?.trim(), sampleOutput[2]?.trim()]);
-                let content = buildContent({
-                    description: pdoc.description,
-                    input: pdoc.input,
-                    output: pdoc.output,
-                    samples,
-                    hint: pdoc.hint,
-                    source: pdoc.source,
-                }, 'html').replace(/<math xm<x>lns=/g, '<math xmlns=').replace(/\[\/?md\]/g, '');
-                const uploadFiles = [
-                    ...content.matchAll(/(?:src|href)="\/uploads(\/.+?)"/g),
-                    ...content.matchAll(/\(\/uploads(\/.+?)\)/g),
-                ];
-                for (const file of uploadFiles) {
-                    try {
-                        const fileWithPath = file[1];
-                        const filename = fixFileName(path.basename(file[1]));
-                        files[filename] = await fs.readFile(path.join(uploadDir, fileWithPath));
-                        content = content.replace(`/uploads${fileWithPath}`, `file://${filename}`);
-                    } catch (e) {
-                        report({ message: `failed to read file: ${path.join(uploadDir, file[1])}` });
-                    }
+    await iterate(
+        pcount,
+        50n,
+        async (pageId: bigint) => {
+            const pdocs = await query(`SELECT * FROM \`problem\` LIMIT ${Number(pageId * step)}, ${Number(step)}`);
+            for (const pdoc of pdocs) {
+                if (rerun) {
+                    const opdoc = await ProblemModel.get(domainId, `P${pdoc.id}`);
+                    if (opdoc) pidMap[pdoc.id] = opdoc.docId;
                 }
-                const tags = pdoc.tags?.split(',')?.map((i) => i.trim())?.filter((i) => i);
-                if (pdoc.source) tags.push(...pdoc.source.split(' ').map((i) => i.trim()).filter((i) => i));
-                const pid = await ProblemModel.add(
-                    domainId, `P${pdoc.id}`, pdoc.title, content, 1, tags,
-                    { hidden: pdoc.status === 1, problemKind: 'programming' },
-                );
-                if (!markdown) await ProblemModel.edit(domainId, pid, { html: true });
-                pidMap[pdoc.id] = pid;
-                await Promise.all(Object.keys(files).map((filename) => ProblemModel.addAdditionalFile(domainId, pid, filename, files[filename])));
-                if (Object.keys(files).length) report({ message: `move ${Object.keys(files).length} file for problem ${pid}` });
-            }
-            await ProblemModel.edit(domainId, pidMap[pdoc.id], {
-                nAccept: pdoc.accepted,
-                nSubmit: pdoc.submit,
-                config: `time: ${pdoc.time_limit}s
+                if (!pidMap[pdoc.id]) {
+                    const files = {};
+                    const markdown = [pdoc.description, pdoc.input, pdoc.output, pdoc.hint].some((i) => i?.includes('[md]'));
+                    const samples = [];
+                    const sampleInput = parsePhpArray(pdoc.sample_input);
+                    const sampleOutput = parsePhpArray(pdoc.sample_output);
+                    if (sampleInput[0]?.trim() || sampleOutput[0]?.trim()) samples.push([sampleInput[0]?.trim(), sampleOutput[0]?.trim()]);
+                    if (sampleInput[1]?.trim() || sampleOutput[1]?.trim()) samples.push([sampleInput[1]?.trim(), sampleOutput[1]?.trim()]);
+                    if (sampleInput[2]?.trim() || sampleOutput[2]?.trim()) samples.push([sampleInput[2]?.trim(), sampleOutput[2]?.trim()]);
+                    let content = buildContent(
+                        {
+                            description: pdoc.description,
+                            input: pdoc.input,
+                            output: pdoc.output,
+                            samples,
+                            hint: pdoc.hint,
+                            source: pdoc.source,
+                        },
+                        'html',
+                    )
+                        .replace(/<math xm<x>lns=/g, '<math xmlns=')
+                        .replace(/\[\/?md\]/g, '');
+                    const uploadFiles = [...content.matchAll(/(?:src|href)="\/uploads(\/.+?)"/g), ...content.matchAll(/\(\/uploads(\/.+?)\)/g)];
+                    for (const file of uploadFiles) {
+                        try {
+                            const fileWithPath = file[1];
+                            const filename = fixFileName(path.basename(file[1]));
+                            files[filename] = await fs.readFile(path.join(uploadDir, fileWithPath));
+                            content = content.replace(`/uploads${fileWithPath}`, `file://${filename}`);
+                        } catch (e) {
+                            report({ message: `failed to read file: ${path.join(uploadDir, file[1])}` });
+                        }
+                    }
+                    const tags = pdoc.tags
+                        ?.split(',')
+                        ?.map((i) => i.trim())
+                        ?.filter((i) => i);
+                    if (pdoc.source) {
+                        tags.push(
+                            ...pdoc.source
+                                .split(' ')
+                                .map((i) => i.trim())
+                                .filter((i) => i),
+                        );
+                    }
+                    const pid = await ProblemModel.add(domainId, `P${pdoc.id}`, pdoc.title, content, 1, tags, {
+                        hidden: pdoc.status === 1,
+                        problemKind: 'programming',
+                    });
+                    if (!markdown) await ProblemModel.edit(domainId, pid, { html: true });
+                    pidMap[pdoc.id] = pid;
+                    await Promise.all(Object.keys(files).map((filename) => ProblemModel.addAdditionalFile(domainId, pid, filename, files[filename])));
+                    if (Object.keys(files).length) report({ message: `move ${Object.keys(files).length} file for problem ${pid}` });
+                }
+                await ProblemModel.edit(domainId, pidMap[pdoc.id], {
+                    nAccept: pdoc.accepted,
+                    nSubmit: pdoc.submit,
+                    config: `time: ${pdoc.time_limit}s
 memory: ${pdoc.memory_limit}m
 `,
-                owner: uidMap[pdoc.created_by] || 1,
-                maintainer: [],
-            });
-            if (pdoc.solution) {
-                const md = turndown.turndown(pdoc.solution);
-                await SolutionModel.add(domainId, pidMap[pdoc.id], uidMap[pdoc.created_by] || 1, md);
+                    owner: uidMap[pdoc.created_by] || 1,
+                    maintainer: [],
+                });
+                if (pdoc.solution) {
+                    const md = turndown.turndown(pdoc.solution);
+                    await SolutionModel.add(domainId, pidMap[pdoc.id], uidMap[pdoc.created_by] || 1, md);
+                }
             }
-        }
-    }, { every: 10n, namespace: 'problem', report });
+        },
+        { every: 10n, namespace: 'problem', report },
+    );
 
     report({ message: 'problem finished' });
 
@@ -324,8 +380,11 @@ memory: ${pdoc.memory_limit}m
     const groupMap: Record<number, string> = {};
     const groupMembers: Record<string, number[]> = {};
     const escapeGroupName = (s: string) => {
-        let val = s.replace(/[_:/\\[\] %$^&!=();'".,<>?*@#-]/g, '_').replace(/（/g, '(').replace(/）/g, ')')
-            || Math.random().toString(36).substring(2, 15);
+        let val =
+            s
+                .replace(/[_:/\\[\] %$^&!=();'".,<>?*@#-]/g, '_')
+                .replace(/（/g, '(')
+                .replace(/）/g, ')') || Math.random().toString(36).substring(2, 15);
         while (Number.isSafeInteger(+val)) val = Math.random().toString(36).substring(2, 15);
         return val;
     };
@@ -405,8 +464,10 @@ memory: ${pdoc.memory_limit}m
                 description = description.replace(`/uploads${fileWithPath}`, `file://${filename}`);
             }
             tdoc.start_time ||= new Date(0);
-            const endAt = (!tdoc.end_time || moment(tdoc.end_time).isSameOrBefore(tdoc.start_time))
-                ? moment(tdoc.start_time).add(1, 'minute').toDate() : tdoc.end_time;
+            const endAt =
+                !tdoc.end_time || moment(tdoc.end_time).isSameOrBefore(tdoc.start_time)
+                    ? moment(tdoc.start_time).add(1, 'minute').toDate()
+                    : tdoc.end_time;
             const extra: Record<string, any> = {};
             if (typeMap[tdoc.type] === 'homework') {
                 extra.penaltyRules = { 9999: 0 };
@@ -414,8 +475,15 @@ memory: ${pdoc.memory_limit}m
             }
             if (tdoc.group_id) extra.assign = [groupMap[tdoc.group_id]];
             const tid = await ContestModel.add(
-                domainId, tdoc.title, description || 'Description',
-                uidMap[tdoc.created_by] || 1, typeMap[tdoc.type], tdoc.start_time, endAt, pids, true,
+                domainId,
+                tdoc.title,
+                description || 'Description',
+                uidMap[tdoc.created_by] || 1,
+                typeMap[tdoc.type],
+                tdoc.start_time,
+                endAt,
+                pids,
+                true,
                 extra,
             );
             tidMap[tdoc.id] = tid.toHexString();
@@ -462,8 +530,8 @@ memory: ${pdoc.memory_limit}m
             discussionsToRemove.push(ddoc.id);
             continue;
         }
-        const parentId = ddoc.entity === 'news' ? 'News'
-            : ddoc.entity_id === 'problem' ? pidMap[ddoc.entity_id] : new ObjectId(tidMap[ddoc.entity_id]);
+        const parentId =
+            ddoc.entity === 'news' ? 'News' : ddoc.entity_id === 'problem' ? pidMap[ddoc.entity_id] : new ObjectId(tidMap[ddoc.entity_id]);
         if (!parentId) continue;
         const payload = {
             _id,
@@ -488,7 +556,12 @@ memory: ${pdoc.memory_limit}m
         await Promise.all([
             DocumentModel.coll.insertOne(payload),
             DiscussionModel.coll.insertOne({
-                domainId, docId: payload.docId, content: ddoc.content, uid: uidMap[ddoc.created_by] || 1, ip: '127.0.0.1', time: ddoc.created_at,
+                domainId,
+                docId: payload.docId,
+                content: ddoc.content,
+                uid: uidMap[ddoc.created_by] || 1,
+                ip: '127.0.0.1',
+                time: ddoc.created_at,
             }),
         ]);
         discussRoots[ddoc.id] = payload.docId;
@@ -501,8 +574,11 @@ memory: ${pdoc.memory_limit}m
             continue;
         }
         const drid = await DiscussionModel.addReply(
-            domainId, discussRoots[drdoc.parent_id], uidMap[drdoc.created_by] || 1,
-            `${drdoc.title}\n${drdoc.content}`, '127.0.0.1',
+            domainId,
+            discussRoots[drdoc.parent_id],
+            uidMap[drdoc.created_by] || 1,
+            `${drdoc.title}\n${drdoc.content}`,
+            '127.0.0.1',
         );
         discussRoots[drdoc.id] = drid;
     }
@@ -580,16 +656,22 @@ memory: ${pdoc.memory_limit}m
         try {
             const info = JSON.parse(runInfo);
             return {
-                testCases: info.subtasks.flatMap((subtask: any, subtaskId: number) => subtask.cases.map((cas: any, caseId: number) => ({
-                    subtaskId: subtaskId + 1,
-                    id: caseId + 1,
-                    status: statusMap[cas.verdict] || STATUS.STATUS_WAITING,
-                    time: cas.time || 0,
-                    memory: cas.memory || 0,
-                    message: cas.checker_log
-                        || (cas.exit_code ? `Exit code: ${cas.exit_code}`
-                            : cas.checker_exit_code ? `Checker exit code: ${cas.checker_exit_code}` : ''),
-                }))),
+                testCases: info.subtasks.flatMap((subtask: any, subtaskId: number) =>
+                    subtask.cases.map((cas: any, caseId: number) => ({
+                        subtaskId: subtaskId + 1,
+                        id: caseId + 1,
+                        status: statusMap[cas.verdict] || STATUS.STATUS_WAITING,
+                        time: cas.time || 0,
+                        memory: cas.memory || 0,
+                        message:
+                            cas.checker_log ||
+                            (cas.exit_code
+                                ? `Exit code: ${cas.exit_code}`
+                                : cas.checker_exit_code
+                                  ? `Checker exit code: ${cas.checker_exit_code}`
+                                  : ''),
+                    })),
+                ),
             };
         } catch (e) {
             return {
@@ -601,52 +683,57 @@ memory: ${pdoc.memory_limit}m
     const [{ 'count(*)': rcount }] = await query('SELECT count(*) FROM `solution` WHERE `problem_id` > 0 AND `status` != 2');
     const attended = {};
     let recordSkipped = 0n;
-    await iterate(rcount, 50n, async (pageId: bigint) => {
-        const rdocs = await query(`SELECT * FROM \`solution\` WHERE \`problem_id\` > 0 LIMIT ${pageId * BigInt(step)}, ${step}`);
-        const solInfos = await query(`SELECT * FROM \`solution_info\` WHERE \`solution_id\` IN (${rdocs.map((i) => i.id).join(',')})`);
-        const solInfoMap = _.keyBy(solInfos, 'solution_id');
-        for (const rdoc of rdocs) {
-            if (rdoc.contest_id && contestsToRemove.includes(rdoc.contest_id)) {
-                recordSkipped++;
-                continue;
-            }
-            const data: RecordDoc = {
-                status: statusMap[rdoc.result] || STATUS.STATUS_WAITING,
-                _id: Time.getObjectID(rdoc.created_at, false),
-                uid: uidMap[rdoc.created_by] || 0,
-                code: rdoc.source,
-                lang: langMap[rdoc.language] || '',
-                pid: pidMap[rdoc.problem_id] || 0,
-                domainId,
-                score: rdoc.score,
-                time: rdoc.time || 0,
-                memory: rdoc.memory || 0,
-                judgeTexts: [],
-                compilerTexts: [],
-                testCases: [],
-                judgeAt: new Date(),
-                rejudged: false,
-                judger: 1,
-                ...buildTestCases(solInfoMap[rdoc.id]?.run_info || '{}'),
-            };
-            if (rdoc.contest_id && withContest) {
-                if (!tidMap[rdoc.contest_id]) {
-                    report({ message: `warning: contest_id ${rdoc.contest_id} for submission ${rdoc.id} not found` });
-                } else {
-                    data.contest = new ObjectId(tidMap[rdoc.contest_id]);
-                    if (!attended[`${data.contest}/${rdoc.created_by}`]) {
-                        await ContestModel.attend(domainId, data.contest, uidMap[rdoc.created_by]).catch(noop);
-                        attended[`${data.contest}/${rdoc.created_by}`] = true;
+    await iterate(
+        rcount,
+        50n,
+        async (pageId: bigint) => {
+            const rdocs = await query(`SELECT * FROM \`solution\` WHERE \`problem_id\` > 0 LIMIT ${pageId * BigInt(step)}, ${step}`);
+            const solInfos = await query(`SELECT * FROM \`solution_info\` WHERE \`solution_id\` IN (${rdocs.map((i) => i.id).join(',')})`);
+            const solInfoMap = _.keyBy(solInfos, 'solution_id');
+            for (const rdoc of rdocs) {
+                if (rdoc.contest_id && contestsToRemove.includes(rdoc.contest_id)) {
+                    recordSkipped++;
+                    continue;
+                }
+                const data: RecordDoc = {
+                    status: statusMap[rdoc.result] || STATUS.STATUS_WAITING,
+                    _id: Time.getObjectID(rdoc.created_at, false),
+                    uid: uidMap[rdoc.created_by] || 0,
+                    code: rdoc.source,
+                    lang: langMap[rdoc.language] || '',
+                    pid: pidMap[rdoc.problem_id] || 0,
+                    domainId,
+                    score: rdoc.score,
+                    time: rdoc.time || 0,
+                    memory: rdoc.memory || 0,
+                    judgeTexts: [],
+                    compilerTexts: [],
+                    testCases: [],
+                    judgeAt: new Date(),
+                    rejudged: false,
+                    judger: 1,
+                    ...buildTestCases(solInfoMap[rdoc.id]?.run_info || '{}'),
+                };
+                if (rdoc.contest_id && withContest) {
+                    if (!tidMap[rdoc.contest_id]) {
+                        report({ message: `warning: contest_id ${rdoc.contest_id} for submission ${rdoc.id} not found` });
+                    } else {
+                        data.contest = new ObjectId(tidMap[rdoc.contest_id]);
+                        if (!attended[`${data.contest}/${rdoc.created_by}`]) {
+                            await ContestModel.attend(domainId, data.contest, uidMap[rdoc.created_by]).catch(noop);
+                            attended[`${data.contest}/${rdoc.created_by}`] = true;
+                        }
                     }
                 }
+                await RecordModel.coll.insertOne(data);
+                await postJudge(data).catch((err) => {
+                    report({ message: err.message });
+                    console.log(err, data);
+                });
             }
-            await RecordModel.coll.insertOne(data);
-            await postJudge(data).catch((err) => {
-                report({ message: err.message });
-                console.log(err, data);
-            });
-        }
-    }, { every: 10n, namespace: 'record', report });
+        },
+        { every: 10n, namespace: 'record', report },
+    );
     report({ message: `record finished, ${recordSkipped} records skipped (from removed contests)` });
 
     src.end();

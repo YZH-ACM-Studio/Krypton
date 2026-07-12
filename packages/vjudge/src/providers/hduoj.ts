@@ -1,11 +1,8 @@
-/* eslint-disable no-await-in-loop */
 import { PassThrough } from 'stream';
 import { JSDOM } from 'jsdom';
 import charset from 'superagent-charset';
 import proxy from 'superagent-proxy';
-import {
-    htmlEncode, Logger, parseMemoryMB, parseTimeMS, randomstring, sleep, STATUS, superagent,
-} from 'hydrooj';
+import { htmlEncode, Logger, parseMemoryMB, parseTimeMS, randomstring, sleep, STATUS, superagent } from 'hydrooj';
 import { BasicFetcher } from '../fetch';
 import { IBasicProvider, RemoteAccount } from '../interface';
 import { VERDICT } from '../verdict';
@@ -21,7 +18,10 @@ proxy(superagent as any);
 const logger = new Logger('remote/hduoj');
 
 export default class HDUOJProvider extends BasicFetcher implements IBasicProvider {
-    constructor(public account: RemoteAccount, private save: (data: any) => Promise<void>) {
+    constructor(
+        public account: RemoteAccount,
+        private save: (data: any) => Promise<void>,
+    ) {
         super(account, 'https://acm.hdu.edu.cn', 'form', logger);
     }
 
@@ -39,13 +39,11 @@ export default class HDUOJProvider extends BasicFetcher implements IBasicProvide
         if (await this.loggedIn) return true;
         logger.info('retry login');
         await this.getCsrfToken('/');
-        await this.post('/userloginex.php?action=login&cid=0&notice=0')
-            .set('referer', 'https://acm.hdu.edu.cn/userloginex.php')
-            .send({
-                username: this.account.handle,
-                userpass: this.account.password,
-                login: 'Sign In',
-            });
+        await this.post('/userloginex.php?action=login&cid=0&notice=0').set('referer', 'https://acm.hdu.edu.cn/userloginex.php').send({
+            username: this.account.handle,
+            userpass: this.account.password,
+            login: 'Sign In',
+        });
         return this.loggedIn;
     }
 
@@ -55,7 +53,9 @@ export default class HDUOJProvider extends BasicFetcher implements IBasicProvide
             .query({ pid: id.split('P')[1] })
             .buffer(true)
             .charset('gbk');
-        const { window: { document } } = new JSDOM(res.text);
+        const {
+            window: { document },
+        } = new JSDOM(res.text);
         const images = {};
         const files = {};
         const problemContent = document.querySelector('table>tbody').children[3].children[0];
@@ -118,7 +118,7 @@ export default class HDUOJProvider extends BasicFetcher implements IBasicProvide
                 }
             }
         }
-        const tagList = (tag.length === 0) ? [] : [tag];
+        const tagList = tag.length === 0 ? [] : [tag];
         return {
             title,
             data: {
@@ -161,8 +161,10 @@ export default class HDUOJProvider extends BasicFetcher implements IBasicProvide
         if (text.includes('One or more following ERROR(s) occurred.')) {
             throw new Error(text.split('<li>')[1].split('</li>')[0]);
         }
-        // eslint-disable-next-line max-len
-        const { text: status } = await this.get(`/status.php?first=&pid=${id}&user=${this.account.handle}&lang=${Number.parseInt(language, 10) + 1}&status=0`);
+
+        const { text: status } = await this.get(
+            `/status.php?first=&pid=${id}&user=${this.account.handle}&lang=${Number.parseInt(language, 10) + 1}&status=0`,
+        );
         const $dom = new JSDOM(status);
         const res = $dom.window.document.querySelector('.table_text>tbody');
         return res.children[2].children[0].innerHTML;
@@ -172,15 +174,14 @@ export default class HDUOJProvider extends BasicFetcher implements IBasicProvide
         while (true) {
             await sleep(3000);
             const { text } = await this.get(`/status.php?first=${id}`);
-            const { window: { document } } = new JSDOM(text);
+            const {
+                window: { document },
+            } = new JSDOM(text);
             const submission = document.querySelector('#fixed_table>table>tbody').children[2];
-            const status = VERDICT[submission.children[2].children[0].textContent.trim()]
-                || STATUS.STATUS_SYSTEM_ERROR;
+            const status = VERDICT[submission.children[2].children[0].textContent.trim()] || STATUS.STATUS_SYSTEM_ERROR;
             if (status === STATUS.STATUS_JUDGING) continue;
             if (status === STATUS.STATUS_COMPILE_ERROR) {
-                const { text: info } = await this.get(`http://acm.hdu.edu.cn/viewerror.php?rid=${id}`)
-                    .buffer(true)
-                    .charset('gbk');
+                const { text: info } = await this.get(`http://acm.hdu.edu.cn/viewerror.php?rid=${id}`).buffer(true).charset('gbk');
                 const ceInfo = new JSDOM(info);
                 await next({ compilerText: ceInfo.window.document.querySelector('table>tbody>tr>td>pre').innerHTML });
                 return await end({

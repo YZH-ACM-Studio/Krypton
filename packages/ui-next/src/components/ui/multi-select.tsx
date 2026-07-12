@@ -13,18 +13,10 @@
  *
  * Designed for the multi-language and multi-problem pickers but generic.
  */
-import {
-  useCallback, useEffect, useMemo, useRef, useState, type ReactNode,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, ChevronDown, Loader2, Search, X } from 'lucide-react';
-import {
-  DndContext, type DragEndEvent, KeyboardSensor, PointerSensor,
-  closestCenter, useSensor, useSensors,
-} from '@dnd-kit/core';
-import {
-  SortableContext, arrayMove, horizontalListSortingStrategy, useSortable,
-  sortableKeyboardCoordinates,
-} from '@dnd-kit/sortable';
+import { DndContext, type DragEndEvent, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, arrayMove, horizontalListSortingStrategy, useSortable, sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from '@/lib/cn';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -77,10 +69,15 @@ export interface MultiSelectProps<T> {
 /* ------------------------------------------------------------------ */
 
 export function MultiSelect<T>({
-  options, loadOptions,
-  value, onChange,
-  getKey, getLabel, getDescription,
-  renderChip, renderOption,
+  options,
+  loadOptions,
+  value,
+  onChange,
+  getKey,
+  getLabel,
+  getDescription,
+  renderChip,
+  renderOption,
   placeholder = '搜索…',
   emptyText = '无匹配项',
   maxItems,
@@ -101,10 +98,7 @@ export function MultiSelect<T>({
   const triggerRef = useRef<HTMLDivElement | null>(null);
   const requestSeq = useRef(0);
 
-  const selectedKeys = useMemo(
-    () => new Set(value.map(getKey)),
-    [value, getKey],
-  );
+  const selectedKeys = useMemo(() => new Set(value.map(getKey)), [value, getKey]);
 
   /* Async loader (debounced 250ms while open) */
   useEffect(() => {
@@ -124,8 +118,9 @@ export function MultiSelect<T>({
           if (seq === requestSeq.current) setLoading(false);
         });
     }, 250);
-    return () => { clearTimeout(t); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      clearTimeout(t);
+    };
   }, [query, open, isAsync]);
 
   /* Click-outside to close */
@@ -157,23 +152,29 @@ export function MultiSelect<T>({
 
   const atMax = maxItems != null && value.length >= maxItems;
 
-  const toggleItem = useCallback((item: T) => {
-    if (disabled) return;
-    const k = getKey(item);
-    if (selectedKeys.has(k)) {
-      onChange(value.filter((v) => getKey(v) !== k));
-    } else {
-      if (atMax) return;
-      onChange([...value, item]);
-    }
-    // Refocus input so user can continue typing
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }, [disabled, getKey, selectedKeys, value, onChange, atMax]);
+  const toggleItem = useCallback(
+    (item: T) => {
+      if (disabled) return;
+      const k = getKey(item);
+      if (selectedKeys.has(k)) {
+        onChange(value.filter((v) => getKey(v) !== k));
+      } else {
+        if (atMax) return;
+        onChange([...value, item]);
+      }
+      // Refocus input so user can continue typing
+      requestAnimationFrame(() => inputRef.current?.focus());
+    },
+    [disabled, getKey, selectedKeys, value, onChange, atMax],
+  );
 
-  const removeItem = useCallback((key: string) => {
-    if (disabled) return;
-    onChange(value.filter((v) => getKey(v) !== key));
-  }, [disabled, value, getKey, onChange]);
+  const removeItem = useCallback(
+    (key: string) => {
+      if (disabled) return;
+      onChange(value.filter((v) => getKey(v) !== key));
+    },
+    [disabled, value, getKey, onChange],
+  );
 
   /* Drag-to-reorder chips */
   const sensors = useSensors(
@@ -199,7 +200,10 @@ export function MultiSelect<T>({
       e.preventDefault();
       setHighlightedIndex((i) => Math.max(0, i - 1));
     } else if (e.key === 'Enter') {
-      if (!open) { setOpen(true); return; }
+      if (!open) {
+        setOpen(true);
+        return;
+      }
       const item = visibleOptions[highlightedIndex];
       if (item) {
         e.preventDefault();
@@ -254,7 +258,10 @@ export function MultiSelect<T>({
             <input
               ref={inputRef}
               value={query}
-              onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setOpen(true);
+              }}
               onFocus={() => setOpen(true)}
               onKeyDown={onInputKeyDown}
               placeholder={value.length === 0 ? placeholder : ''}
@@ -308,18 +315,26 @@ export function MultiSelect<T>({
                     highlightedIndex === i ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50',
                   )}
                   onMouseEnter={() => setHighlightedIndex(i)}
-                  onClick={(e) => { e.stopPropagation(); toggleItem(item); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleItem(item);
+                  }}
                 >
-                  <span className={cn('mt-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-sm border', selected ? 'border-primary bg-primary text-primary-foreground' : 'border-input')}>
+                  <span
+                    className={cn(
+                      'mt-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-sm border',
+                      selected ? 'border-primary bg-primary text-primary-foreground' : 'border-input',
+                    )}
+                  >
                     {selected ? <Check className="size-3" /> : null}
                   </span>
                   <span className="flex-1 min-w-0">
-                    {renderOption ? renderOption(item, { selected }) : (
+                    {renderOption ? (
+                      renderOption(item, { selected })
+                    ) : (
                       <>
                         <span className="block truncate">{getLabel(item)}</span>
-                        {getDescription ? (
-                          <span className="block truncate text-[11px] text-muted-foreground">{getDescription(item)}</span>
-                        ) : null}
+                        {getDescription ? <span className="block truncate text-[11px] text-muted-foreground">{getDescription(item)}</span> : null}
                       </>
                     )}
                   </span>
@@ -356,7 +371,11 @@ function Chip({ id, label, onRemove }: { id: string; label: ReactNode; onRemove:
       <span className="min-w-0 truncate">{label}</span>
       <button
         type="button"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(); }}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onRemove();
+        }}
         onPointerDown={(e) => e.stopPropagation()}
         className="ml-0.5 inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
         aria-label="移除"

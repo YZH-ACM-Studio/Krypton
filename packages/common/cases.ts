@@ -39,10 +39,12 @@ export async function readYamlCases(cfg: ProblemConfigFile = {}, checkFile = (s:
         }
     }
     if (cfg.cases?.length) {
-        config.subtasks = [{
-            cases: cfg.cases,
-            type: 'sum',
-        }];
+        config.subtasks = [
+            {
+                cases: cfg.cases,
+                type: 'sum',
+            },
+        ];
     }
     if (cfg.time) config.time = parseTimeMS(cfg.time);
     if (cfg.memory) config.memory = parseMemoryMB(cfg.memory);

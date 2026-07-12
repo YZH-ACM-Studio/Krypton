@@ -1,4 +1,4 @@
-import Prism from 'prismjs'; // eslint-disable-line
+import Prism from 'prismjs';
 
 import 'prismjs/plugins/toolbar/prism-toolbar';
 import 'prismjs/plugins/toolbar/prism-toolbar.css';
@@ -73,7 +73,7 @@ function addInvisibles(grammar) {
   for (const name in grammar) {
     if (Object.hasOwn(grammar, name) && !invisibles[name]) {
       if (name === 'rest') addInvisibles(grammar.rest);
-      else handlerInvisiblesToken(grammar, name); // eslint-disable-line ts/no-use-before-define
+      else handlerInvisiblesToken(grammar, name);
     }
   }
 }
@@ -99,21 +99,24 @@ Prism.hooks.add('before-highlight', (env) => {
 
 const prismjsApiWrap = {
   highlightBlocks: ($dom) => {
-    $dom.find('pre code').get().forEach((code) => {
-      const $code = $(code);
-      const $pre = $code.parent();
-      $pre.addClass('syntax-hl');
-      const language = ($(code).attr('class') || '').trim();
-      // try to map the language name
-      const m = language.match(/language-([a-z]+)/);
-      if (m && m[1]) {
-        const languageName = m[1].toLowerCase();
-        if (languageExtMap[languageName]) {
-          $(code).attr('class', `language-${languageExtMap[languageName]}`);
+    $dom
+      .find('pre code')
+      .get()
+      .forEach((code) => {
+        const $code = $(code);
+        const $pre = $code.parent();
+        $pre.addClass('syntax-hl');
+        const language = ($(code).attr('class') || '').trim();
+        // try to map the language name
+        const m = language.match(/language-([a-z]+)/);
+        if (m && m[1]) {
+          const languageName = m[1].toLowerCase();
+          if (languageExtMap[languageName]) {
+            $(code).attr('class', `language-${languageExtMap[languageName]}`);
+          }
         }
-      }
-      Prism.highlightElement(code);
-    });
+        Prism.highlightElement(code);
+      });
   },
   highlight: (text, grammar, language) => Prism.highlight(text, grammar, language),
   Prism,

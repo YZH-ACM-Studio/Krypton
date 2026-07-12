@@ -5,7 +5,7 @@ services:
     volumes:
       - mongodb-data:/data/db
   hydro:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
     privileged: true

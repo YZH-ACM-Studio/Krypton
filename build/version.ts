@@ -44,7 +44,6 @@ function calcPackage(name: string) {
 
     for (const name of folders) {
         try {
-            // eslint-disable-next-line import/no-dynamic-require
             const meta = require(`../${name}/package.json`);
             if (!ignore.includes(meta.name)) calcPackage(meta.name);
         } catch (e) {
@@ -52,4 +51,4 @@ function calcPackage(name: string) {
         }
     }
     console.log(lowest);
-})().catch((e) => process.exit(1));
+})().catch(() => process.exit(1));

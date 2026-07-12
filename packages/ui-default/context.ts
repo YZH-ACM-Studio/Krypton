@@ -2,7 +2,7 @@ import { Context } from 'cordis';
 import type { EventMap } from './api';
 
 declare module 'cordis' {
-  export interface Events extends EventMap { }
+  export interface Events extends EventMap {}
 }
 
 export type { Disposable, Plugin } from 'cordis';

@@ -1,16 +1,20 @@
 import { sumBy } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
-import {
-    Counter, formatSeconds, getAlphabeticId, sleep, Time,
-} from '@hydrooj/utils/lib/utils';
+import { Counter, formatSeconds, getAlphabeticId, sleep, Time } from '@hydrooj/utils/lib/utils';
 import { Context } from '../context';
+import { ContestAlreadyAttendedError, ContestNotFoundError, ContestScoreboardHiddenError, ValidationError } from '../error';
 import {
-    ContestAlreadyAttendedError, ContestNotFoundError,
-    ContestScoreboardHiddenError, ValidationError,
-} from '../error';
-import {
-    BaseUserDict, ContestPrintDoc, ContestRule, ContestRules, ProblemDict, RecordDoc,
-    ScoreboardConfig, ScoreboardNode, ScoreboardRow, SubtaskResult, Tdoc,
+    BaseUserDict,
+    ContestPrintDoc,
+    ContestRule,
+    ContestRules,
+    ProblemDict,
+    RecordDoc,
+    ScoreboardConfig,
+    ScoreboardNode,
+    ScoreboardRow,
+    SubtaskResult,
+    Tdoc,
 } from '../interface';
 import avatar from '../lib/avatar';
 import bus from '../service/bus';
@@ -53,17 +57,17 @@ export function isNew(tdoc: Tdoc, days = 1) {
 export function isUpcoming(tdoc: Tdoc, days = 7) {
     const now = Date.now();
     const readyAt = tdoc.beginAt.getTime();
-    return (now > readyAt - days * Time.day && now < readyAt);
+    return now > readyAt - days * Time.day && now < readyAt;
 }
 
 export function isNotStarted(tdoc: Tdoc) {
-    return (new Date()) < tdoc.beginAt;
+    return new Date() < tdoc.beginAt;
 }
 
 export function isOngoing(tdoc: Tdoc, tsdoc?: any) {
     const now = new Date();
     if (tsdoc && tdoc.duration && tsdoc.startAt <= new Date(Date.now() - Math.floor(tdoc.duration * Time.hour))) return false;
-    return (tdoc.beginAt <= now && now < tdoc.endAt);
+    return tdoc.beginAt <= now && now < tdoc.endAt;
 }
 
 export function isDone(tdoc: Tdoc, tsdoc?: any) {
@@ -203,7 +207,7 @@ export function buildContestRule<T>(def: Partial<ContestRule<T>>, baseRule: Cont
 
 const acm = buildContestRule({
     TEXT: 'XCPC',
-    check: () => { },
+    check: () => {},
     statusSort: { accept: -1, time: 1 },
     submitAfterAccept: false,
     showScoreboard: (tdoc, now) => now > tdoc.beginAt,
@@ -226,7 +230,11 @@ const acm = buildContestRule({
             const real = Math.floor((j.rid.getTimestamp().getTime() - tdoc.beginAt.getTime()) / 1000);
             const penalty = 20 * 60 * naccept[j.pid];
             detail[j.pid] = {
-                ...j, naccept: naccept[j.pid], time: real + penalty, real, penalty,
+                ...j,
+                naccept: naccept[j.pid],
+                time: real + penalty,
+                real,
+                penalty,
             };
             if (lockAt && j.rid.getTimestamp() > lockAt) {
                 npending[j.pid]++;
@@ -243,7 +251,10 @@ const acm = buildContestRule({
             time += d.time;
         }
         return {
-            accept, time, detail, display,
+            accept,
+            time,
+            detail,
+            display,
         };
     },
     async scoreboardHeader(config, _, tdoc, pdict) {
@@ -310,15 +321,12 @@ const acm = buildContestRule({
         }
         const tsddict = (config.lockAt ? tsdoc.display : tsdoc.detail) || {};
         for (const pid of tdoc.pids) {
-            const doc = tsddict[pid] || {} as Partial<AcmDetail>;
+            const doc = tsddict[pid] || ({} as Partial<AcmDetail>);
             const accept = doc.status === STATUS.STATUS_ACCEPTED;
             const colTime = accept ? formatSeconds(doc.real, false).toString() : '';
             const colPenalty = doc.rid ? Math.ceil(doc.penalty / 60).toString() : '';
             if (config.isExport) {
-                row.push(
-                    { type: 'string', value: colTime },
-                    { type: 'string', value: colPenalty },
-                );
+                row.push({ type: 'string', value: colTime }, { type: 'string', value: colPenalty });
             } else {
                 let value = '';
                 if (doc.rid) value = `-${doc.naccept}`;
@@ -330,9 +338,7 @@ const acm = buildContestRule({
                     value,
                     hover: accept ? formatSeconds(doc.time) : '',
                     raw: doc.rid,
-                    style: accept && doc.rid.getTimestamp().getTime() === meta?.first?.[pid]
-                        ? 'background-color: rgb(217, 240, 199);'
-                        : undefined,
+                    style: accept && doc.rid.getTimestamp().getTime() === meta?.first?.[pid] ? 'background-color: rgb(217, 240, 199);' : undefined,
                 });
             }
         }
@@ -344,29 +350,29 @@ const acm = buildContestRule({
         const udict = await UserModel.getListForRender(tdoc.domainId, uids, config.showDisplayName ? ['displayName'] : []);
         // Find first accept
         const first = {};
-        const data = await document.collStatus.aggregate([
-            {
-                $match: {
-                    domainId: tdoc.domainId,
-                    docType: document.TYPE_CONTEST,
-                    docId: tdoc.docId,
-                    accept: { $gte: 1 },
+        const data = (await document.collStatus
+            .aggregate([
+                {
+                    $match: {
+                        domainId: tdoc.domainId,
+                        docType: document.TYPE_CONTEST,
+                        docId: tdoc.docId,
+                        accept: { $gte: 1 },
+                    },
                 },
-            },
-            { $project: { r: { $objectToArray: '$detail' } } },
-            { $unwind: '$r' },
-            { $match: { 'r.v.status': STATUS.STATUS_ACCEPTED } },
-            { $group: { _id: '$r.v.pid', first: { $min: '$r.v.rid' } } },
-        ]).toArray() as any[];
+                { $project: { r: { $objectToArray: '$detail' } } },
+                { $unwind: '$r' },
+                { $match: { 'r.v.status': STATUS.STATUS_ACCEPTED } },
+                { $group: { _id: '$r.v.pid', first: { $min: '$r.v.rid' } } },
+            ])
+            .toArray()) as any[];
         for (const t of data) first[t._id] = t.first.getTimestamp().getTime();
 
         const columns = await this.scoreboardHeader(config, _, tdoc, pdict);
         const rows: ScoreboardRow[] = [
             columns,
-            ...await Promise.all(rankedTsdocs.map(
-                ([rank, tsdoc]) => this.scoreboardRow(
-                    config, _, tdoc, pdict, udict[tsdoc.uid], rank, tsdoc, { first },
-                ),
+            ...(await Promise.all(
+                rankedTsdocs.map(([rank, tsdoc]) => this.scoreboardRow(config, _, tdoc, pdict, udict[tsdoc.uid], rank, tsdoc, { first })),
             )),
         ];
         return [rows, udict];
@@ -389,7 +395,7 @@ const acm = buildContestRule({
 
 const oi = buildContestRule({
     TEXT: 'OI',
-    check: () => { },
+    check: () => {},
     submitAfterAccept: true,
     statusSort: { score: -1 },
     stat(tdoc, journal) {
@@ -475,34 +481,42 @@ const oi = buildContestRule({
                 accepted[s.pid] = true;
             }
         }
-        const tsddict = ((config.lockAt && isLocked(tdoc, new Date())) ? tsdoc.display : tsdoc.detail) || {};
+        const tsddict = (config.lockAt && isLocked(tdoc, new Date()) ? tsdoc.display : tsdoc.detail) || {};
         const useRelativeTime = !!tdoc.duration;
         for (const pid of tdoc.pids) {
             const index = `${tsdoc.uid}/${tdoc.domainId}/${pid}`;
 
-            const node: ScoreboardNode = (!config.isExport && !config.lockAt && isDone(tdoc)
-                && meta?.psdict?.[index]?.rid
-                && tsddict[pid]?.rid?.toHexString() !== meta?.psdict?.[index]?.rid?.toHexString()
-                && meta?.psdict?.[index]?.rid?.getTimestamp() > tdoc.endAt)
-                ? {
-                    type: 'records',
-                    value: '',
-                    raw: [{
-                        value: displayScore(pid, tsddict[pid]?.score),
-                        raw: tsddict[pid]?.rid || null,
-                        score: tsddict[pid]?.score,
-                    }, {
-                        value: displayScore(pid, meta?.psdict?.[index]?.score),
-                        raw: meta?.psdict?.[index]?.rid ?? null,
-                        score: meta?.psdict?.[index]?.score,
-                    }],
-                } : {
-                    type: 'record',
-                    value: `${displayScore(pid, tsddict[pid]?.score)}${tsddict[pid]?.npending
-                        ? `<span style="color:orange">+${tsddict[pid]?.npending}</span>` : ''}`,
-                    raw: tsddict[pid]?.rid || null,
-                    score: tsddict[pid]?.score,
-                };
+            const node: ScoreboardNode =
+                !config.isExport &&
+                !config.lockAt &&
+                isDone(tdoc) &&
+                meta?.psdict?.[index]?.rid &&
+                tsddict[pid]?.rid?.toHexString() !== meta?.psdict?.[index]?.rid?.toHexString() &&
+                meta?.psdict?.[index]?.rid?.getTimestamp() > tdoc.endAt
+                    ? {
+                          type: 'records',
+                          value: '',
+                          raw: [
+                              {
+                                  value: displayScore(pid, tsddict[pid]?.score),
+                                  raw: tsddict[pid]?.rid || null,
+                                  score: tsddict[pid]?.score,
+                              },
+                              {
+                                  value: displayScore(pid, meta?.psdict?.[index]?.score),
+                                  raw: meta?.psdict?.[index]?.rid ?? null,
+                                  score: meta?.psdict?.[index]?.score,
+                              },
+                          ],
+                      }
+                    : {
+                          type: 'record',
+                          value: `${displayScore(pid, tsddict[pid]?.score)}${
+                              tsddict[pid]?.npending ? `<span style="color:orange">+${tsddict[pid]?.npending}</span>` : ''
+                          }`,
+                          raw: tsddict[pid]?.rid || null,
+                          score: tsddict[pid]?.score,
+                      };
             if (tsddict[pid]?.status === STATUS.STATUS_ACCEPTED) {
                 const startAt = (useRelativeTime ? tsdoc.startAt || tdoc.beginAt : tdoc.beginAt).getTime();
                 if (tsddict[pid].rid.getTimestamp().getTime() - startAt === meta?.first?.[pid]) {
@@ -541,10 +555,8 @@ const oi = buildContestRule({
         const columns = await this.scoreboardHeader(config, _, tdoc, pdict);
         const rows: ScoreboardRow[] = [
             columns,
-            ...await Promise.all(rankedTsdocs.map(
-                ([rank, tsdoc]) => this.scoreboardRow(
-                    config, _, tdoc, pdict, udict[tsdoc.uid], rank, tsdoc, { psdict, first },
-                ),
+            ...(await Promise.all(
+                rankedTsdocs.map(([rank, tsdoc]) => this.scoreboardRow(config, _, tdoc, pdict, udict[tsdoc.uid], rank, tsdoc, { psdict, first })),
             )),
         ];
         return [rows, udict];
@@ -566,182 +578,205 @@ const oi = buildContestRule({
     },
 });
 
-const ioi = buildContestRule({
-    TEXT: 'IOI',
-    submitAfterAccept: false,
+const ioi = buildContestRule(
+    {
+        TEXT: 'IOI',
+        submitAfterAccept: false,
 
-    showRecord: (tdoc, now) => now > tdoc.endAt && !isLocked(tdoc),
-    showSelfRecord: () => true,
-    showScoreboard: (tdoc, now) => now > tdoc.beginAt,
-    applyProjection(_, rdoc) {
-        return rdoc;
+        showRecord: (tdoc, now) => now > tdoc.endAt && !isLocked(tdoc),
+        showSelfRecord: () => true,
+        showScoreboard: (tdoc, now) => now > tdoc.beginAt,
+        applyProjection(_, rdoc) {
+            return rdoc;
+        },
     },
-}, oi);
+    oi,
+);
 
-const strictioi = buildContestRule({
-    TEXT: 'IOI(Strict)',
-    submitAfterAccept: false,
-    showRecord: (tdoc, now) => now > tdoc.endAt && !tdoc.keepScoreboardHidden,
-    showSelfRecord: (tdoc) => !tdoc.keepScoreboardHidden || !isDone(tdoc),
-    showScoreboard: (tdoc, now) => now > tdoc.endAt && !tdoc.keepScoreboardHidden,
-    stat(tdoc, journal) {
-        const detail = {};
-        let score = 0;
-        const subtasks: Record<number, Record<number, SubtaskResult>> = {};
-        for (const j of journal.filter((i) => tdoc.pids.includes(i.pid))) {
-            subtasks[j.pid] ||= {};
-            for (const i in j.subtasks) {
-                if (!subtasks[j.pid][i] || subtasks[j.pid][i].score < j.subtasks[i].score) subtasks[j.pid][i] = j.subtasks[i];
+const strictioi = buildContestRule(
+    {
+        TEXT: 'IOI(Strict)',
+        submitAfterAccept: false,
+        showRecord: (tdoc, now) => now > tdoc.endAt && !tdoc.keepScoreboardHidden,
+        showSelfRecord: (tdoc) => !tdoc.keepScoreboardHidden || !isDone(tdoc),
+        showScoreboard: (tdoc, now) => now > tdoc.endAt && !tdoc.keepScoreboardHidden,
+        stat(tdoc, journal) {
+            const detail = {};
+            let score = 0;
+            const subtasks: Record<number, Record<number, SubtaskResult>> = {};
+            for (const j of journal.filter((i) => tdoc.pids.includes(i.pid))) {
+                subtasks[j.pid] ||= {};
+                for (const i in j.subtasks) {
+                    if (!subtasks[j.pid][i] || subtasks[j.pid][i].score < j.subtasks[i].score) subtasks[j.pid][i] = j.subtasks[i];
+                }
+                j.score = sumBy(Object.values(subtasks[j.pid]), 'score');
+                j.status = Math.max(...Object.values(subtasks[j.pid]).map((i) => i.status));
+                if (!detail[j.pid] || detail[j.pid].score < j.score) detail[j.pid] = { ...j, subtasks: subtasks[j.pid] };
             }
-            j.score = sumBy(Object.values(subtasks[j.pid]), 'score');
-            j.status = Math.max(...Object.values(subtasks[j.pid]).map((i) => i.status));
-            if (!detail[j.pid] || detail[j.pid].score < j.score) detail[j.pid] = { ...j, subtasks: subtasks[j.pid] };
-        }
-        for (const i in detail) score += ((tdoc.score?.[i] || 100) * (detail[i].score || 0)) / 100;
-        return { score, detail };
+            for (const i in detail) score += ((tdoc.score?.[i] || 100) * (detail[i].score || 0)) / 100;
+            return { score, detail };
+        },
+        async scoreboardRow(config, _, tdoc, pdict, udoc, rank, tsdoc, meta) {
+            const tsddict = tsdoc.detail || {};
+            const row: ScoreboardNode[] = [
+                { type: 'rank', value: rank.toString() },
+                { type: 'user', value: udoc.uname, raw: tsdoc.uid },
+            ];
+            if (config.isExport && config.showDisplayName) {
+                row.push({ type: 'email', value: udoc.mail });
+                row.push({ type: 'string', value: udoc.school || '' });
+                row.push({ type: 'string', value: udoc.displayName || '' });
+                row.push({ type: 'string', value: udoc.studentId || '' });
+            }
+            row.push({ type: 'total_score', value: tsdoc.score || 0 });
+            const accepted = {};
+            for (const s of tsdoc.journal || []) {
+                if (!pdict[s.pid]) continue;
+                pdict[s.pid].nSubmit++;
+                if (s.status === STATUS.STATUS_ACCEPTED && !accepted[s.pid]) {
+                    pdict[s.pid].nAccept++;
+                    accepted[s.pid] = true;
+                }
+            }
+            for (const pid of tdoc.pids) {
+                const index = `${tsdoc.uid}/${tdoc.domainId}/${pid}`;
+                const n: ScoreboardNode =
+                    !config.isExport &&
+                    !config.lockAt &&
+                    isDone(tdoc) &&
+                    meta?.psdict?.[index]?.rid &&
+                    tsddict[pid]?.rid?.toHexString() !== meta?.psdict?.[index]?.rid?.toHexString() &&
+                    meta?.psdict?.[index]?.rid?.getTimestamp() > tdoc.endAt
+                        ? {
+                              type: 'records',
+                              value: '',
+                              raw: [
+                                  {
+                                      value: ((tsddict[pid]?.score || 0) * ((tdoc.score?.[pid] || 100) / 100)).toString() || '',
+                                      raw: tsddict[pid]?.rid || null,
+                                      score: tsddict[pid]?.score,
+                                  },
+                                  {
+                                      value: ((meta?.psdict?.[index]?.score || 0) * ((tdoc.score?.[pid] || 100) / 100)).toString() || '',
+                                      raw: meta?.psdict?.[index]?.rid ?? null,
+                                      score: meta?.psdict?.[index]?.score,
+                                  },
+                              ],
+                          }
+                        : {
+                              type: 'record',
+                              value: ((tsddict[pid]?.score || 0) * ((tdoc.score?.[pid] || 100) / 100)).toString() || '',
+                              raw: tsddict[pid]?.rid,
+                              score: tsddict[pid]?.score,
+                          };
+                n.hover = Object.values(tsddict[pid]?.subtasks || {})
+                    .map((i: SubtaskResult) => `${STATUS_SHORT_TEXTS[i.status]} ${i.score}`)
+                    .join(',');
+                if (
+                    tsddict[pid]?.status === STATUS.STATUS_ACCEPTED &&
+                    tsddict[pid].rid.getTimestamp().getTime() - (tsdoc.startAt || tdoc.beginAt).getTime() === meta?.first?.[pid]
+                ) {
+                    n.style = 'background-color: rgb(217, 240, 199);';
+                }
+                row.push(n);
+            }
+            return row;
+        },
     },
-    async scoreboardRow(config, _, tdoc, pdict, udoc, rank, tsdoc, meta) {
-        const tsddict = tsdoc.detail || {};
-        const row: ScoreboardNode[] = [
-            { type: 'rank', value: rank.toString() },
-            { type: 'user', value: udoc.uname, raw: tsdoc.uid },
-        ];
-        if (config.isExport && config.showDisplayName) {
-            row.push({ type: 'email', value: udoc.mail });
-            row.push({ type: 'string', value: udoc.school || '' });
-            row.push({ type: 'string', value: udoc.displayName || '' });
-            row.push({ type: 'string', value: udoc.studentId || '' });
-        }
-        row.push({ type: 'total_score', value: tsdoc.score || 0 });
-        const accepted = {};
-        for (const s of tsdoc.journal || []) {
-            if (!pdict[s.pid]) continue;
-            pdict[s.pid].nSubmit++;
-            if (s.status === STATUS.STATUS_ACCEPTED && !accepted[s.pid]) {
-                pdict[s.pid].nAccept++;
-                accepted[s.pid] = true;
+    ioi,
+);
+
+const ledo = buildContestRule(
+    {
+        TEXT: 'Ledo',
+        check: () => {},
+        submitAfterAccept: false,
+        showScoreboard: (tdoc, now) => now > tdoc.beginAt,
+        showSelfRecord: () => true,
+        showRecord: (tdoc, now) => now > tdoc.endAt,
+        stat(tdoc, journal) {
+            const ntry = Counter<number>();
+            const detail = {};
+            for (const j of journal.filter((i) => tdoc.pids.includes(i.pid))) {
+                const vaild = ![STATUS.STATUS_COMPILE_ERROR, STATUS.STATUS_FORMAT_ERROR].includes(j.status);
+                if (vaild) ntry[j.pid]++;
+                const penaltyScore = vaild ? Math.round(Math.max(0.7, 0.95 ** (ntry[j.pid] - 1)) * j.score) : 0;
+                if (!detail[j.pid] || detail[j.pid].penaltyScore < penaltyScore) {
+                    detail[j.pid] = {
+                        ...j,
+                        penaltyScore,
+                        ntry: Math.max(0, ntry[j.pid] - 1),
+                    };
+                }
             }
-        }
-        for (const pid of tdoc.pids) {
-            const index = `${tsdoc.uid}/${tdoc.domainId}/${pid}`;
-            const n: ScoreboardNode = (!config.isExport && !config.lockAt && isDone(tdoc)
-                && meta?.psdict?.[index]?.rid
-                && tsddict[pid]?.rid?.toHexString() !== meta?.psdict?.[index]?.rid?.toHexString()
-                && meta?.psdict?.[index]?.rid?.getTimestamp() > tdoc.endAt)
-                ? {
-                    type: 'records',
-                    value: '',
-                    raw: [{
-                        value: ((tsddict[pid]?.score || 0) * ((tdoc.score?.[pid] || 100) / 100)).toString() || '',
-                        raw: tsddict[pid]?.rid || null,
-                        score: tsddict[pid]?.score,
-                    }, {
-                        value: ((meta?.psdict?.[index]?.score || 0) * ((tdoc.score?.[pid] || 100) / 100)).toString() || '',
-                        raw: meta?.psdict?.[index]?.rid ?? null,
-                        score: meta?.psdict?.[index]?.score,
-                    }],
-                } : {
+            let score = 0;
+            let originalScore = 0;
+            for (const pid of tdoc.pids) {
+                if (!detail[pid]) continue;
+                const rate = (tdoc.score?.[pid] || 100) / 100;
+                score += detail[pid].penaltyScore * rate;
+                originalScore += detail[pid].score * rate;
+            }
+            return {
+                score,
+                originalScore,
+                detail,
+            };
+        },
+        async scoreboardRow(config, _, tdoc, pdict, udoc, rank, tsdoc, meta) {
+            const tsddict = tsdoc.detail || {};
+            const row: ScoreboardRow = [
+                { type: 'rank', value: rank.toString() },
+                { type: 'user', value: udoc.uname, raw: tsdoc.uid },
+            ];
+            if (config.isExport && config.showDisplayName) {
+                row.push({ type: 'email', value: udoc.mail });
+                row.push({ type: 'string', value: udoc.school || '' });
+                row.push({ type: 'string', value: udoc.displayName || '' });
+                row.push({ type: 'string', value: udoc.studentId || '' });
+            }
+            row.push({
+                type: 'total_score',
+                value: tsdoc.score || 0,
+                hover: tsdoc.score !== tsdoc.originalScore ? _('Original score: {0}').format(tsdoc.originalScore) : '',
+            });
+            const accepted = {};
+            for (const s of tsdoc.journal || []) {
+                if (!pdict[s.pid]) continue;
+                pdict[s.pid].nSubmit++;
+                if (s.status === STATUS.STATUS_ACCEPTED && !accepted[s.pid]) {
+                    pdict[s.pid].nAccept++;
+                    accepted[s.pid] = true;
+                }
+            }
+            for (const pid of tdoc.pids) {
+                row.push({
                     type: 'record',
-                    value: ((tsddict[pid]?.score || 0) * ((tdoc.score?.[pid] || 100) / 100)).toString() || '',
+                    value: ((tsddict[pid]?.penaltyScore || 0) * ((tdoc.score?.[pid] || 100) / 100)).toString(),
+                    hover: tsddict[pid]?.ntry ? `-${tsddict[pid].ntry} (${Math.round(Math.max(0.7, 0.95 ** tsddict[pid].ntry) * 100)}%)` : '',
                     raw: tsddict[pid]?.rid,
                     score: tsddict[pid]?.score,
-                };
-            n.hover = Object.values(tsddict[pid]?.subtasks || {}).map((i: SubtaskResult) => `${STATUS_SHORT_TEXTS[i.status]} ${i.score}`).join(',');
-            if (tsddict[pid]?.status === STATUS.STATUS_ACCEPTED
-                && tsddict[pid].rid.getTimestamp().getTime() - (tsdoc.startAt || tdoc.beginAt).getTime() === meta?.first?.[pid]) {
-                n.style = 'background-color: rgb(217, 240, 199);';
+                    style:
+                        tsddict[pid]?.status === STATUS.STATUS_ACCEPTED &&
+                        tsddict[pid].rid.getTimestamp().getTime() - (tsdoc.startAt || tdoc.beginAt).getTime() === meta?.first?.[pid]
+                            ? 'background-color: rgb(217, 240, 199);'
+                            : undefined,
+                });
             }
-            row.push(n);
-        }
-        return row;
+            return row;
+        },
+        applyProjection(_, rdoc) {
+            return rdoc;
+        },
     },
-}, ioi);
-
-const ledo = buildContestRule({
-    TEXT: 'Ledo',
-    check: () => { },
-    submitAfterAccept: false,
-    showScoreboard: (tdoc, now) => now > tdoc.beginAt,
-    showSelfRecord: () => true,
-    showRecord: (tdoc, now) => now > tdoc.endAt,
-    stat(tdoc, journal) {
-        const ntry = Counter<number>();
-        const detail = {};
-        for (const j of journal.filter((i) => tdoc.pids.includes(i.pid))) {
-            const vaild = ![STATUS.STATUS_COMPILE_ERROR, STATUS.STATUS_FORMAT_ERROR].includes(j.status);
-            if (vaild) ntry[j.pid]++;
-            const penaltyScore = vaild ? Math.round(Math.max(0.7, 0.95 ** (ntry[j.pid] - 1)) * j.score) : 0;
-            if (!detail[j.pid] || detail[j.pid].penaltyScore < penaltyScore) {
-                detail[j.pid] = {
-                    ...j,
-                    penaltyScore,
-                    ntry: Math.max(0, ntry[j.pid] - 1),
-                };
-            }
-        }
-        let score = 0;
-        let originalScore = 0;
-        for (const pid of tdoc.pids) {
-            if (!detail[pid]) continue;
-            const rate = (tdoc.score?.[pid] || 100) / 100;
-            score += detail[pid].penaltyScore * rate;
-            originalScore += detail[pid].score * rate;
-        }
-        return {
-            score, originalScore, detail,
-        };
-    },
-    async scoreboardRow(config, _, tdoc, pdict, udoc, rank, tsdoc, meta) {
-        const tsddict = tsdoc.detail || {};
-        const row: ScoreboardRow = [
-            { type: 'rank', value: rank.toString() },
-            { type: 'user', value: udoc.uname, raw: tsdoc.uid },
-        ];
-        if (config.isExport && config.showDisplayName) {
-            row.push({ type: 'email', value: udoc.mail });
-            row.push({ type: 'string', value: udoc.school || '' });
-            row.push({ type: 'string', value: udoc.displayName || '' });
-            row.push({ type: 'string', value: udoc.studentId || '' });
-        }
-        row.push({
-            type: 'total_score',
-            value: tsdoc.score || 0,
-            hover: tsdoc.score !== tsdoc.originalScore ? _('Original score: {0}').format(tsdoc.originalScore) : '',
-        });
-        const accepted = {};
-        for (const s of tsdoc.journal || []) {
-            if (!pdict[s.pid]) continue;
-            pdict[s.pid].nSubmit++;
-            if (s.status === STATUS.STATUS_ACCEPTED && !accepted[s.pid]) {
-                pdict[s.pid].nAccept++;
-                accepted[s.pid] = true;
-            }
-        }
-        for (const pid of tdoc.pids) {
-            row.push({
-                type: 'record',
-                value: ((tsddict[pid]?.penaltyScore || 0) * ((tdoc.score?.[pid] || 100) / 100)).toString(),
-                hover: tsddict[pid]?.ntry ? `-${tsddict[pid].ntry} (${Math.round(Math.max(0.7, 0.95 ** tsddict[pid].ntry) * 100)}%)` : '',
-                raw: tsddict[pid]?.rid,
-                score: tsddict[pid]?.score,
-                style: tsddict[pid]?.status === STATUS.STATUS_ACCEPTED
-                    && tsddict[pid].rid.getTimestamp().getTime() - (tsdoc.startAt || tdoc.beginAt).getTime() === meta?.first?.[pid]
-                    ? 'background-color: rgb(217, 240, 199);'
-                    : undefined,
-            });
-        }
-        return row;
-    },
-    applyProjection(_, rdoc) {
-        return rdoc;
-    },
-}, oi);
+    oi,
+);
 
 const homework = buildContestRule({
     TEXT: 'Assignment',
     hidden: true,
     features: ['scoreboard', 'download'],
-    check: () => { },
+    check: () => {},
     submitAfterAccept: false,
     statusSort: { penaltyScore: -1, time: 1 },
     stat: (tdoc, journal) => {
@@ -756,12 +791,12 @@ const homework = buildContestRule({
 
         function penaltyScore(jdoc) {
             const rate = (tdoc.score?.[jdoc.pid] || 100) / 100;
-            const exceedSeconds = Math.floor(
-                (jdoc.rid.getTimestamp().getTime() - tdoc.penaltySince.getTime()) / 1000,
-            );
+            const exceedSeconds = Math.floor((jdoc.rid.getTimestamp().getTime() - tdoc.penaltySince.getTime()) / 1000);
             if (exceedSeconds < 0) return rate * jdoc.score;
             let coefficient = 1;
-            const keys = Object.keys(tdoc.penaltyRules).map(Number.parseFloat).sort((a, b) => a - b);
+            const keys = Object.keys(tdoc.penaltyRules)
+                .map(Number.parseFloat)
+                .sort((a, b) => a - b);
             for (const i of keys) {
                 if (i * 3600 <= exceedSeconds) coefficient = tdoc.penaltyRules[i];
                 else break;
@@ -865,18 +900,15 @@ const homework = buildContestRule({
             const colTime = tsddict[pid]?.time || '';
             const colTimeStr = colTime ? formatSeconds(colTime, false) : '';
             if (config.isExport) {
-                row.push(
-                    { type: 'string', value: colScore },
-                    { type: 'string', value: colOriginalScore },
-                    { type: 'time', value: colTime },
-                );
+                row.push({ type: 'string', value: colScore }, { type: 'string', value: colOriginalScore }, { type: 'time', value: colTime });
             } else {
                 row.push({
                     type: 'record',
                     score: tsddict[pid]?.score,
-                    value: colScore === colOriginalScore
-                        ? '{0}\n{1}'.format(colScore, colTimeStr)
-                        : '{0} / {1}\n{2}'.format(colScore, colOriginalScore, colTimeStr),
+                    value:
+                        colScore === colOriginalScore
+                            ? '{0}\n{1}'.format(colScore, colTimeStr)
+                            : '{0} / {1}\n{2}'.format(colScore, colOriginalScore, colTimeStr),
                     raw: rid,
                 });
             }
@@ -890,9 +922,7 @@ const homework = buildContestRule({
         const columns = await this.scoreboardHeader(config, _, tdoc, pdict);
         const rows: ScoreboardRow[] = [
             columns,
-            ...await Promise.all(rankedTsdocs.map(
-                ([rank, tsdoc]) => this.scoreboardRow(config, _, tdoc, pdict, udict[tsdoc.uid], rank, tsdoc),
-            )),
+            ...(await Promise.all(rankedTsdocs.map(([rank, tsdoc]) => this.scoreboardRow(config, _, tdoc, pdict, udict[tsdoc.uid], rank, tsdoc)))),
         ];
         return [rows, udict];
     },
@@ -916,36 +946,67 @@ const homework = buildContestRule({
  *   - participantGroupIds: ObjectId[]          — userbind UserGroup ids
  *   - exclusive          : boolean             — hide contest picker on entry
  */
-const exam = buildContestRule({
-    TEXT: 'Exam',
-    features: ['scoreboard'],
-    check: () => { },
-}, oi);
+const exam = buildContestRule(
+    {
+        TEXT: 'Exam',
+        features: ['scoreboard'],
+        check: () => {},
+    },
+    oi,
+);
 
 export const RULES: ContestRules = {
-    acm, oi, homework, ioi, ledo, strictioi, exam,
+    acm,
+    oi,
+    homework,
+    ioi,
+    ledo,
+    strictioi,
+    exam,
 };
 
 const collBalloon = db.collection('contest.balloon');
 
 function _getStatusJournal(tsdoc) {
-    return tsdoc.journal.sort((a, b) => (a.rid.getTimestamp() - b.rid.getTimestamp()));
+    return tsdoc.journal.sort((a, b) => a.rid.getTimestamp() - b.rid.getTimestamp());
 }
 
 export async function add(
-    domainId: string, title: string, content: string, owner: number,
-    rule: string, beginAt = new Date(), endAt = new Date(), pids: number[] = [],
-    rated = false, data: Partial<Tdoc> = {},
+    domainId: string,
+    title: string,
+    content: string,
+    owner: number,
+    rule: string,
+    beginAt = new Date(),
+    endAt = new Date(),
+    pids: number[] = [],
+    rated = false,
+    data: Partial<Tdoc> = {},
 ) {
     if (!RULES[rule]) throw new ValidationError('rule');
     if (beginAt >= endAt) throw new ValidationError('beginAt', 'endAt');
     Object.assign(data, {
-        content, owner, title, rule, beginAt, endAt, pids, attend: 0,
+        content,
+        owner,
+        title,
+        rule,
+        beginAt,
+        endAt,
+        pids,
+        attend: 0,
     });
     RULES[rule].check(data);
     await bus.parallel('contest/before-add', data);
     const docId = await document.add(domainId, content, owner, document.TYPE_CONTEST, null, null, null, {
-        assign: [], ...data, title, rule, beginAt, endAt, pids, attend: 0, rated,
+        assign: [],
+        ...data,
+        title,
+        rule,
+        beginAt,
+        endAt,
+        pids,
+        attend: 0,
+        rated,
     });
     await bus.parallel('contest/add', data, docId);
     return docId;
@@ -995,21 +1056,27 @@ export async function addBalloon(domainId: string, tid: ObjectId, uid: number, r
     if (isFirst) {
         let pending: RecordDoc[] = [];
         do {
-            if (pending.length) await sleep(500); // eslint-disable-line no-await-in-loop
-            pending = await RecordModel.getMulti(domainId, { // eslint-disable-line no-await-in-loop
-                pid, contest: tid, _id: { $lt: rid }, status: {
-                    $in: [
-                        STATUS.STATUS_WAITING, STATUS.STATUS_COMPILING,
-                        STATUS.STATUS_JUDGING, STATUS.STATUS_FETCHED,
-                        STATUS.STATUS_ACCEPTED,
-                    ],
+            if (pending.length) await sleep(500);
+            pending = await RecordModel.getMulti(domainId, {
+                pid,
+                contest: tid,
+                _id: { $lt: rid },
+                status: {
+                    $in: [STATUS.STATUS_WAITING, STATUS.STATUS_COMPILING, STATUS.STATUS_JUDGING, STATUS.STATUS_FETCHED, STATUS.STATUS_ACCEPTED],
                 },
-            }).limit(1).toArray();
+            })
+                .limit(1)
+                .toArray();
         } while (pending.length && !pending.some((i) => i.status === STATUS.STATUS_ACCEPTED));
         if (pending.some((i) => i.status === STATUS.STATUS_ACCEPTED)) isFirst = false;
     }
     const newBdoc = {
-        _id: rid, domainId, tid, pid, uid, ...(isFirst ? { first: true } : {}),
+        _id: rid,
+        domainId,
+        tid,
+        pid,
+        uid,
+        ...(isFirst ? { first: true } : {}),
     };
     await collBalloon.insertOne(newBdoc);
     bus.emit('contest/balloon', domainId, tid, newBdoc);
@@ -1033,19 +1100,36 @@ export async function getStatus(domainId: string, tid: ObjectId, uid: number) {
 }
 
 export async function updateStatus(
-    domainId: string, tid: ObjectId, uid: number, rid: ObjectId, pid: number,
+    domainId: string,
+    tid: ObjectId,
+    uid: number,
+    rid: ObjectId,
+    pid: number,
     {
         status = STATUS.STATUS_WAITING,
         score = 0,
         subtasks,
         lang,
-    }: { status?: STATUS, score?: number, subtasks?: Record<number, SubtaskResult>, lang?: string } = {},
+    }: { status?: STATUS; score?: number; subtasks?: Record<number, SubtaskResult>; lang?: string } = {},
 ) {
     const tdoc = await get(domainId, tid);
     if (tdoc.balloon && status === STATUS.STATUS_ACCEPTED && !isLocked(tdoc)) await addBalloon(domainId, tid, uid, rid, pid);
-    const tsdoc = await document.revPushStatus(tdoc.domainId, document.TYPE_CONTEST, tdoc.docId, uid, 'journal', {
-        rid, pid, status, score, subtasks, lang,
-    }, 'rid');
+    const tsdoc = await document.revPushStatus(
+        tdoc.domainId,
+        document.TYPE_CONTEST,
+        tdoc.docId,
+        uid,
+        'journal',
+        {
+            rid,
+            pid,
+            status,
+            score,
+            subtasks,
+            lang,
+        },
+        'rid',
+    );
     const journal = _getStatusJournal(tsdoc);
     const stats = RULES[tdoc.rule].stat(tdoc, journal);
     return await document.revSetStatus(tdoc.domainId, document.TYPE_CONTEST, tdoc.docId, uid, tsdoc.rev, { journal, ...stats });
@@ -1053,7 +1137,7 @@ export async function updateStatus(
 
 export async function getListStatus(domainId: string, uid: number, tids: ObjectId[]) {
     const r = {};
-    // eslint-disable-next-line no-await-in-loop
+
     for (const tid of tids) r[tid.toHexString()] = await getStatus(domainId, tid, uid);
     return r;
 }
@@ -1084,17 +1168,14 @@ export function countStatus(domainId: string, query: any) {
     return document.countStatus(domainId, document.TYPE_CONTEST, query);
 }
 
-export function getMulti(
-    domainId: string, query: Filter<document.DocType['30']> = {},
-) {
+export function getMulti(domainId: string, query: Filter<document.DocType['30']> = {}) {
     return document.getMulti(domainId, document.TYPE_CONTEST, query).sort({ beginAt: -1 });
 }
 
 export async function getAndListStatus(domainId: string, tid: ObjectId): Promise<[Tdoc, any[]]> {
     // TODO(iceboy): projection, pagination.
     const tdoc = await get(domainId, tid);
-    const tsdocs = await document.getMultiStatus(domainId, document.TYPE_CONTEST, { docId: tid })
-        .sort(RULES[tdoc.rule].statusSort).toArray();
+    const tsdocs = await document.getMultiStatus(domainId, document.TYPE_CONTEST, { docId: tid }).sort(RULES[tdoc.rule].statusSort).toArray();
     return [tdoc, tsdocs];
 }
 
@@ -1108,12 +1189,7 @@ export async function recalcStatus(domainId: string, tid: ObjectId) {
         if (tsdoc.journal) {
             const journal = _getStatusJournal(tsdoc);
             const stats = RULES[tdoc.rule].stat(tdoc, journal);
-            tasks.push(
-                document.revSetStatus(
-                    domainId, document.TYPE_CONTEST, tid,
-                    tsdoc.uid, tsdoc.rev, { journal, ...stats },
-                ),
-            );
+            tasks.push(document.revSetStatus(domainId, document.TYPE_CONTEST, tid, tsdoc.uid, tsdoc.rev, { journal, ...stats }));
         }
     }
     return await Promise.all(tasks);
@@ -1151,38 +1227,26 @@ export function canShowScoreboard(this: { user: User }, tdoc: Tdoc, allowPermOve
 }
 
 export async function getScoreboard(
-    this: Handler, domainId: string, tid: ObjectId, config: ScoreboardConfig,
+    this: Handler,
+    domainId: string,
+    tid: ObjectId,
+    config: ScoreboardConfig,
 ): Promise<[Tdoc, ScoreboardRow[], BaseUserDict, ProblemDict]> {
     const tdoc = await get(domainId, tid);
     if (!canShowScoreboard.call(this, tdoc)) throw new ContestScoreboardHiddenError(tid);
     const tsdocsCursor = getMultiStatus(domainId, { docId: tid }).sort(RULES[tdoc.rule].statusSort);
     const pdict = await problem.getList(domainId, tdoc.pids, true, true, problem.PROJECTION_CONTEST_DETAIL);
-    const [rows, udict] = await RULES[tdoc.rule].scoreboard(
-        config, this.translate.bind(this),
-        tdoc, pdict, tsdocsCursor,
-    );
+    const [rows, udict] = await RULES[tdoc.rule].scoreboard(config, this.translate.bind(this), tdoc, pdict, tsdocsCursor);
     await bus.parallel('contest/scoreboard', tdoc, rows, udict, pdict);
     return [tdoc, rows, udict, pdict];
 }
 
-export function addClarification(
-    domainId: string, tid: ObjectId, owner: number, content: string,
-    ip: string, subject = 0,
-) {
-    return document.add(
-        domainId, content, owner, document.TYPE_CONTEST_CLARIFICATION,
-        null, document.TYPE_CONTEST, tid, { ip, subject },
-    );
+export function addClarification(domainId: string, tid: ObjectId, owner: number, content: string, ip: string, subject = 0) {
+    return document.add(domainId, content, owner, document.TYPE_CONTEST_CLARIFICATION, null, document.TYPE_CONTEST, tid, { ip, subject });
 }
 
-export function addClarificationReply(
-    domainId: string, did: ObjectId, owner: number,
-    content: string, ip: string,
-) {
-    return document.push(
-        domainId, document.TYPE_CONTEST_CLARIFICATION, did,
-        'reply', { content, owner, ip },
-    );
+export function addClarificationReply(domainId: string, did: ObjectId, owner: number, content: string, ip: string) {
+    return document.push(domainId, document.TYPE_CONTEST_CLARIFICATION, did, 'reply', { content, owner, ip });
 }
 
 export function getClarification(domainId: string, did: ObjectId) {
@@ -1190,10 +1254,14 @@ export function getClarification(domainId: string, did: ObjectId) {
 }
 
 export function getMultiClarification(domainId: string, tid: ObjectId, owner?: number) {
-    return document.getMulti(
-        domainId, document.TYPE_CONTEST_CLARIFICATION,
-        { parentType: document.TYPE_CONTEST, parentId: tid, ...(typeof owner === 'number' ? { owner: { $in: [owner, 0] } } : {}) },
-    ).sort('_id', -1).toArray();
+    return document
+        .getMulti(domainId, document.TYPE_CONTEST_CLARIFICATION, {
+            parentType: document.TYPE_CONTEST,
+            parentId: tid,
+            ...(typeof owner === 'number' ? { owner: { $in: [owner, 0] } } : {}),
+        })
+        .sort('_id', -1)
+        .toArray();
 }
 
 export function applyProjection(tdoc: Tdoc, rdoc: RecordDoc, udoc: User) {
@@ -1201,14 +1269,8 @@ export function applyProjection(tdoc: Tdoc, rdoc: RecordDoc, udoc: User) {
     return RULES[tdoc.rule].applyProjection(tdoc, rdoc, udoc);
 }
 
-export const statusText = (tdoc: Tdoc, tsdoc?: any) => (
-    isNew(tdoc)
-        ? 'New'
-        : isUpcoming(tdoc)
-            ? 'Ready (☆▽☆)'
-            : isOngoing(tdoc, tsdoc)
-                ? 'Live...'
-                : 'Done');
+export const statusText = (tdoc: Tdoc, tsdoc?: any) =>
+    isNew(tdoc) ? 'New' : isUpcoming(tdoc) ? 'Ready (☆▽☆)' : isOngoing(tdoc, tsdoc) ? 'Live...' : 'Done';
 
 export function addPrintTask(domainId: string, tid: ObjectId, uid: number, name: string, content: string) {
     return document.add(domainId, content, uid, document.TYPE_CONTEST_PRINT, null, document.TYPE_CONTEST, tid, {
@@ -1218,28 +1280,39 @@ export function addPrintTask(domainId: string, tid: ObjectId, uid: number, name:
 }
 
 export async function updatePrintTask(domainId: string, tid: ObjectId, taskId: ObjectId, $set: Partial<ContestPrintDoc>) {
-    const res = await document.coll.updateOne({
-        domainId, docType: document.TYPE_CONTEST_PRINT,
-        docId: taskId, parentType: document.TYPE_CONTEST, parentId: tid,
-    }, { $set });
+    const res = await document.coll.updateOne(
+        {
+            domainId,
+            docType: document.TYPE_CONTEST_PRINT,
+            docId: taskId,
+            parentType: document.TYPE_CONTEST,
+            parentId: tid,
+        },
+        { $set },
+    );
     return !!res.modifiedCount;
 }
 
 export function allocatePrintTask(domainId: string, tid: ObjectId) {
-    return document.coll.findOneAndUpdate({
-        domainId, docType: document.TYPE_CONTEST_PRINT,
-        parentType: document.TYPE_CONTEST, parentId: tid,
-        status: PrintTaskStatus.pending,
-    }, {
-        $set: {
-            status: PrintTaskStatus.printing,
+    return document.coll.findOneAndUpdate(
+        {
+            domainId,
+            docType: document.TYPE_CONTEST_PRINT,
+            parentType: document.TYPE_CONTEST,
+            parentId: tid,
+            status: PrintTaskStatus.pending,
         },
-    }, { returnDocument: 'after' });
+        {
+            $set: {
+                status: PrintTaskStatus.printing,
+            },
+        },
+        { returnDocument: 'after' },
+    );
 }
 
 export function getMultiPrintTask(domainId: string, tid: ObjectId, query = {}) {
-    return document.getMulti(domainId, document.TYPE_CONTEST_PRINT, { parentType: document.TYPE_CONTEST, parentId: tid, ...query })
-        .sort({ _id: 1 });
+    return document.getMulti(domainId, document.TYPE_CONTEST_PRINT, { parentType: document.TYPE_CONTEST, parentId: tid, ...query }).sort({ _id: 1 });
 }
 
 export async function apply(ctx: Context) {
@@ -1253,11 +1326,16 @@ export async function apply(ctx: Context) {
                 get(domainId, tid),
                 ProblemModel.get(domainId, bdoc.pid),
             ]);
-            await MessageModel.send(1, uids, JSON.stringify({
-                message: 'First Blood Notice\n{0} solved problem {1} ({2})',
-                avatar: avatar(team.avatar),
-                params: [team.uname, getAlphabeticId(tdoc.pids.indexOf(bdoc.pid)), pdoc.title],
-            }), MessageModel.FLAG_I18N);
+            await MessageModel.send(
+                1,
+                uids,
+                JSON.stringify({
+                    message: 'First Blood Notice\n{0} solved problem {1} ({2})',
+                    avatar: avatar(team.avatar),
+                    params: [team.uname, getAlphabeticId(tdoc.pids.indexOf(bdoc.pid)), pdoc.title],
+                }),
+                MessageModel.FLAG_I18N,
+            );
         })();
     });
     await ctx.db.ensureIndexes(

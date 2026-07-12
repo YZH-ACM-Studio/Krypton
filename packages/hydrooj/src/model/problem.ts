@@ -1,4 +1,3 @@
-/* eslint-disable no-await-in-loop */
 import child from 'child_process';
 import os from 'os';
 import path from 'path';
@@ -8,32 +7,31 @@ import fs from 'fs-extra';
 import yaml from 'js-yaml';
 import { isEqual, keyBy, pick } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
-import {
-    parseProblemKind, ProblemConfigFile, type ProblemKind, ProblemType,
-} from '@hydrooj/common';
-import {
-    extractZip, Logger, size, streamToBuffer,
-} from '@hydrooj/utils/lib/utils';
+import { parseProblemKind, ProblemConfigFile, type ProblemKind, ProblemType } from '@hydrooj/common';
+import { extractZip, Logger, size, streamToBuffer } from '@hydrooj/utils/lib/utils';
 import { Context } from '../context';
 import {
-    FileUploadError, NotFoundError, PermissionError, ProblemIsReferencedError,
-    ProblemNotFoundError, ProblemStructureConflictError, ValidationError,
+    FileUploadError,
+    NotFoundError,
+    PermissionError,
+    ProblemIsReferencedError,
+    ProblemNotFoundError,
+    ProblemStructureConflictError,
+    ValidationError,
 } from '../error';
-import type {
-    Document, ProblemDict, ProblemStatusDoc, User,
-} from '../interface';
+import type { Document, ProblemDict, ProblemStatusDoc, User } from '../interface';
 import { copyProblemStorageFiles } from '../lib/problem-clone';
 import {
-    isProblemConfigFilename, parseProblemConfigObject,
-    validateCompiledStructuredConfig, validateFillFunctionTestdataFiles,
+    isProblemConfigFilename,
+    parseProblemConfigObject,
+    validateCompiledStructuredConfig,
+    validateFillFunctionTestdataFiles,
 } from '../lib/problem-config';
 import { normalizeProblemTestdataUpload } from '../lib/problem-testdata-upload';
 import { parseConfig } from '../lib/testdataConfig';
 import bus from '../service/bus';
 import db from '../service/db';
-import {
-    ArrayKeys, MaybeArray, NumberKeys, Projection,
-} from '../typeutils';
+import { ArrayKeys, MaybeArray, NumberKeys, Projection } from '../typeutils';
 import { buildProjection } from '../utils';
 import { PERM, STATUS } from './builtin';
 import * as document from './document';
@@ -74,19 +72,19 @@ import SolutionModel from './solution';
 import storage from './storage';
 import SystemModel from './system';
 
-export interface ProblemDoc extends Document { }
+export interface ProblemDoc extends Document {}
 export type Field = keyof ProblemDoc;
 
 const logger = new Logger('problem');
 function sortable(source: string, namespaces: Record<string, string>) {
     const [namespace, pid] = source.includes('-') ? source.split('-') : ['default', source];
-    return ((namespaces ? `${namespaces[namespace]}-` : '') + pid)
-        .replace(/(\d+)/g, (str) => (str.length >= 6 ? str : ('0'.repeat(6 - str.length) + str)));
+    return ((namespaces ? `${namespaces[namespace]}-` : '') + pid).replace(/(\d+)/g, (str) =>
+        str.length >= 6 ? str : '0'.repeat(6 - str.length) + str,
+    );
 }
 
 function isStructuralPatch($set: Record<string, unknown>, $unset: Record<string, unknown> = {}) {
-    return [...Object.keys($set), ...Object.keys($unset)]
-        .some((field) => PROBLEM_STRUCTURAL_FIELDS.has(field));
+    return [...Object.keys($set), ...Object.keys($unset)].some((field) => PROBLEM_STRUCTURAL_FIELDS.has(field));
 }
 
 function assertPublishableFillFunction(input: {
@@ -106,7 +104,11 @@ function assertPublishableFillFunction(input: {
     } catch (error: any) {
         logger.error(
             'Fill-function publish rejected domain=%s pid=%d kind=%s revision=%s error=%o',
-            input.domainId, input.pid, problemKind, input.structureRevision, error,
+            input.domainId,
+            input.pid,
+            problemKind,
+            input.structureRevision,
+            error,
         );
         throw new ValidationError('hidden', null, error.message);
     }
@@ -155,38 +157,52 @@ interface ProblemImportOptions {
 interface ProblemCreateOptions {
     difficulty?: number;
     hidden?: boolean;
-    reference?: { domainId: string, pid: number };
+    reference?: { domainId: string; pid: number };
     problemKind: ProblemKind;
     structuredConfig?: unknown;
 }
 
-const PROJECTION_BASE: Field[] = [
-    '_id', 'domainId', 'docType', 'docId', 'pid',
-    'owner', 'title',
-];
+const PROJECTION_BASE: Field[] = ['_id', 'domainId', 'docType', 'docId', 'pid', 'owner', 'title'];
 
 export class ProblemModel {
-    static PROJECTION_CONTEST_LIST: Field[] = [
-        ...PROJECTION_BASE, 'config',
-    ];
+    static PROJECTION_CONTEST_LIST: Field[] = [...PROJECTION_BASE, 'config'];
 
     static PROJECTION_LIST: Field[] = [
         ...PROJECTION_BASE,
-        'nSubmit', 'nAccept', 'difficulty', 'tag', 'hidden',
-        'stats', 'problemKind', 'structureRevision', 'structureLockedAt',
-        'structureLockReason', 'archivedAt', 'archivedBy', 'archiveReason',
+        'nSubmit',
+        'nAccept',
+        'difficulty',
+        'tag',
+        'hidden',
+        'stats',
+        'problemKind',
+        'structureRevision',
+        'structureLockedAt',
+        'structureLockReason',
+        'archivedAt',
+        'archivedBy',
+        'archiveReason',
     ];
 
     static PROJECTION_CONTEST_DETAIL: Field[] = [
         ...ProblemModel.PROJECTION_CONTEST_LIST,
-        'content', 'html', 'data', 'additional_file',
-        'reference', 'maintainer',
+        'content',
+        'html',
+        'data',
+        'additional_file',
+        'reference',
+        'maintainer',
     ];
 
     static PROJECTION_PUBLIC: Field[] = [
         ...ProblemModel.PROJECTION_LIST,
-        'content', 'html', 'data', 'config', 'additional_file',
-        'reference', 'maintainer',
+        'content',
+        'html',
+        'data',
+        'config',
+        'additional_file',
+        'reference',
+        'maintainer',
         // 原赛通过率：只进 PUBLIC 不进 LIST——RecordDetailHandler 等以
         // PROJECTION_LIST 取 pdoc 的路径在比赛进行中会原样回传 pdoc，
         // 放进 LIST 会把难度提示漏给赛中考生（对抗审查发现）。
@@ -219,12 +235,7 @@ export class ProblemModel {
         return canMaintainProblemAccess(user, pdoc);
     }
 
-    static assertProblemBankSelection(
-        domainId: string,
-        pids: number[],
-        user: ProblemAclUser,
-        grandfatheredPids: number[] = [],
-    ) {
+    static assertProblemBankSelection(domainId: string, pids: number[], user: ProblemAclUser, grandfatheredPids: number[] = []) {
         return assertProblemBankSelectionAccess(domainId, pids, user, grandfatheredPids);
     }
 
@@ -271,23 +282,32 @@ export class ProblemModel {
     };
 
     static async add(
-        domainId: string, pid: string = '', title: string, content: string, owner: number,
-        tag: string[] = [], meta: ProblemCreateOptions = {} as ProblemCreateOptions,
+        domainId: string,
+        pid: string = '',
+        title: string,
+        content: string,
+        owner: number,
+        tag: string[] = [],
+        meta: ProblemCreateOptions = {} as ProblemCreateOptions,
     ) {
         const [doc] = await ProblemModel.getMulti(domainId, {})
             .withReadPreference('primary')
-            .sort({ docId: -1 }).limit(1).project({ docId: 1 })
+            .sort({ docId: -1 })
+            .limit(1)
+            .project({ docId: 1 })
             .toArray();
-        const result = await ProblemModel.addWithId(
-            domainId, (doc?.docId || 0) + 1, pid,
-            title, content, owner, tag, meta,
-        );
+        const result = await ProblemModel.addWithId(domainId, (doc?.docId || 0) + 1, pid, title, content, owner, tag, meta);
         return result;
     }
 
     static async addWithId(
-        domainId: string, docId: number, pid: string = '', title: string,
-        content: string, owner: number, tag: string[] = [],
+        domainId: string,
+        docId: number,
+        pid: string = '',
+        title: string,
+        content: string,
+        owner: number,
+        tag: string[] = [],
         meta: ProblemCreateOptions = {} as ProblemCreateOptions,
     ) {
         const ddoc = await DomainModel.get(domainId);
@@ -311,10 +331,7 @@ export class ProblemModel {
             try {
                 args.config = normalizeStructuredProblemConfig(problemKind, meta.structuredConfig) as any;
             } catch (error) {
-                logger.error(
-                    'Structured problem create rejected domain=%s pid=%d kind=%s revision=1 error=%o',
-                    domainId, docId, problemKind, error,
-                );
+                logger.error('Structured problem create rejected domain=%s pid=%d kind=%s revision=1 error=%o', domainId, docId, problemKind, error);
                 throw error;
             }
         }
@@ -359,51 +376,67 @@ export class ProblemModel {
     }
 
     private static async materializeStartedContainerLock(domainId: string, pid: number): Promise<boolean> {
-        if (!await hasStartedProblemContainer(domainId, pid)) return false;
+        if (!(await hasStartedProblemContainer(domainId, pid))) return false;
         const now = new Date();
-        await document.coll.updateOne({
-            domainId,
-            docType: document.TYPE_PROBLEM,
-            docId: pid,
-            problemKind: { $exists: true },
-            structureLockedAt: { $exists: false },
-        }, {
-            $set: {
-                structureLockedAt: now,
-                structureLockReason: 'container_started',
+        await document.coll.updateOne(
+            {
+                domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: pid,
+                problemKind: { $exists: true },
+                structureLockedAt: { $exists: false },
             },
-            $inc: { structureRevision: 1 },
-        });
+            {
+                $set: {
+                    structureLockedAt: now,
+                    structureLockReason: 'container_started',
+                },
+                $inc: { structureRevision: 1 },
+            },
+        );
         return true;
     }
 
     static async claimStructureLockForSubmission(domainId: string, pid: number): Promise<void> {
-        const pdoc = await document.coll.findOne({
-            domainId, docType: document.TYPE_PROBLEM, docId: pid,
-        }, { projection: { problemKind: 1, structureRevision: 1, structureLockedAt: 1 } });
+        const pdoc = await document.coll.findOne(
+            {
+                domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: pid,
+            },
+            { projection: { problemKind: 1, structureRevision: 1, structureLockedAt: 1 } },
+        );
         if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
         if (pdoc.problemKind === undefined || pdoc.structureLockedAt) return;
         parseProblemKind(pdoc.problemKind);
         assertStructureRevision(pdoc.structureRevision);
         const now = new Date();
-        const result = await document.coll.updateOne({
-            domainId,
-            docType: document.TYPE_PROBLEM,
-            docId: pid,
-            structureRevision: pdoc.structureRevision,
-            structureLockedAt: { $exists: false },
-            aclWriteClaim: { $exists: false },
-        }, {
-            $set: {
-                structureLockedAt: now,
-                structureLockReason: 'first_submission',
+        const result = await document.coll.updateOne(
+            {
+                domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: pid,
+                structureRevision: pdoc.structureRevision,
+                structureLockedAt: { $exists: false },
+                aclWriteClaim: { $exists: false },
             },
-            $inc: { structureRevision: 1 },
-        });
+            {
+                $set: {
+                    structureLockedAt: now,
+                    structureLockReason: 'first_submission',
+                },
+                $inc: { structureRevision: 1 },
+            },
+        );
         if (result.matchedCount === 1) return;
-        const current = await document.coll.findOne({
-            domainId, docType: document.TYPE_PROBLEM, docId: pid,
-        }, { projection: { structureLockedAt: 1 } });
+        const current = await document.coll.findOne(
+            {
+                domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: pid,
+            },
+            { projection: { structureLockedAt: 1 } },
+        );
         if (!current?.structureLockedAt) throw new ProblemStructureConflictError(pid);
     }
 
@@ -415,63 +448,64 @@ export class ProblemModel {
         $set: Partial<ProblemDoc>;
         expectedProblemKind: ProblemKind;
         expectedStructureRevision?: number;
-    }): Promise<{ before: ProblemDoc, result: ProblemDoc, auditedFields: string[] }> {
+    }): Promise<{ before: ProblemDoc; result: ProblemDoc; auditedFields: string[] }> {
         const auditedFields = problemEditAuditedFields(input.$set as Record<string, unknown>);
-        return ProblemModel.withAuthorizedWriteClaim(
-            input.domainId,
-            input.pid,
-            input.user,
-            input.operation,
-            async (claim) => {
-                const projection = Object.fromEntries([
-                    ...new Set([...auditedFields, 'problemKind', 'structureRevision', 'config', 'data']),
-                ].map((field) => [field, 1]));
-                const before = await document.coll.findOne({
+        return ProblemModel.withAuthorizedWriteClaim(input.domainId, input.pid, input.user, input.operation, async (claim) => {
+            const projection = Object.fromEntries(
+                [...new Set([...auditedFields, 'problemKind', 'structureRevision', 'config', 'data'])].map((field) => [field, 1]),
+            );
+            const before = (await document.coll.findOne(
+                {
                     domainId: input.domainId,
                     docType: document.TYPE_PROBLEM,
                     docId: input.pid,
                     'aclWriteClaim.requestId': claim.requestId,
                     'aclWriteClaim.actor': claim.actor,
                     'aclWriteClaim.state': 'active',
-                }, { projection }) as ProblemDoc | null;
-                if (!before) {
-                    throw new Error(`problem write claim ownership lost before snapshot: ${claim.requestId}`);
-                }
-                if (parseProblemKind(before.problemKind) !== input.expectedProblemKind) {
-                    throw new ValidationError('problemKind');
-                }
-                const hasConfigUpdate = input.$set.config !== undefined;
-                const existingConfig = before.config as any;
-                const nextConfig = hasConfigUpdate ? input.$set.config as any : existingConfig;
-                const existingMain = existingConfig?.main;
-                const nextMain = nextConfig?.main;
-                if (hasConfigUpdate && input.expectedProblemKind === 'program_fill' && existingMain) {
-                    if (existingMain.mode !== nextMain?.mode) throw new ValidationError('mode', null, '程序填空模式创建后不可修改');
-                    if (existingMain.mode === 'compile' && existingMain.lang !== nextMain?.lang) {
-                        throw new ValidationError('lang', null, '评测语言创建后不可修改');
-                    }
-                }
-                if (hasConfigUpdate && input.expectedProblemKind === 'function'
-                    && existingMain && existingMain.lang !== nextMain?.lang) {
+                },
+                { projection },
+            )) as ProblemDoc | null;
+            if (!before) {
+                throw new Error(`problem write claim ownership lost before snapshot: ${claim.requestId}`);
+            }
+            if (parseProblemKind(before.problemKind) !== input.expectedProblemKind) {
+                throw new ValidationError('problemKind');
+            }
+            const hasConfigUpdate = input.$set.config !== undefined;
+            const existingConfig = before.config as any;
+            const nextConfig = hasConfigUpdate ? (input.$set.config as any) : existingConfig;
+            const existingMain = existingConfig?.main;
+            const nextMain = nextConfig?.main;
+            if (hasConfigUpdate && input.expectedProblemKind === 'program_fill' && existingMain) {
+                if (existingMain.mode !== nextMain?.mode) throw new ValidationError('mode', null, '程序填空模式创建后不可修改');
+                if (existingMain.mode === 'compile' && existingMain.lang !== nextMain?.lang) {
                     throw new ValidationError('lang', null, '评测语言创建后不可修改');
                 }
-                if (input.$set.hidden === false) {
-                    assertPublishableFillFunction({
-                        domainId: input.domainId,
-                        pid: input.pid,
-                        problemKind: input.expectedProblemKind,
-                        structureRevision: before.structureRevision,
-                        config: nextConfig,
-                        data: before.data,
-                    });
-                }
-                const result = await ProblemModel.editWithClaim(claim, input.$set, {}, {
+            }
+            if (hasConfigUpdate && input.expectedProblemKind === 'function' && existingMain && existingMain.lang !== nextMain?.lang) {
+                throw new ValidationError('lang', null, '评测语言创建后不可修改');
+            }
+            if (input.$set.hidden === false) {
+                assertPublishableFillFunction({
+                    domainId: input.domainId,
+                    pid: input.pid,
+                    problemKind: input.expectedProblemKind,
+                    structureRevision: before.structureRevision,
+                    config: nextConfig,
+                    data: before.data,
+                });
+            }
+            const result = await ProblemModel.editWithClaim(
+                claim,
+                input.$set,
+                {},
+                {
                     expectedStructureRevision: input.expectedStructureRevision,
                     requireExpectedStructureRevision: true,
-                });
-                return { before, result, auditedFields };
-            },
-        );
+                },
+            );
+            return { before, result, auditedFields };
+        });
     }
 
     static async saveStructuredProblem(input: {
@@ -483,10 +517,7 @@ export class ProblemModel {
         problemKind: ProblemKind;
         content: string;
         config: unknown;
-        metadata?: Partial<Pick<
-            ProblemDoc,
-            'title' | 'pid' | 'hidden' | 'tag' | 'difficulty' | 'lockHidden' | 'html'
-        >>;
+        metadata?: Partial<Pick<ProblemDoc, 'title' | 'pid' | 'hidden' | 'tag' | 'difficulty' | 'lockHidden' | 'html'>>;
     }): Promise<ProblemDoc> {
         const problemKind = parseProblemKind(input.problemKind);
         let config: Record<string, unknown>;
@@ -495,7 +526,11 @@ export class ProblemModel {
         } catch (error) {
             logger.error(
                 'Structured problem save rejected domain=%s pid=%d kind=%s revision=%d error=%o',
-                input.domainId, input.pid, problemKind, input.expectedStructureRevision, error,
+                input.domainId,
+                input.pid,
+                problemKind,
+                input.expectedStructureRevision,
+                error,
             );
             throw error;
         }
@@ -555,23 +590,25 @@ export class ProblemModel {
         return result;
     }
 
-    static async archiveProblem(
-        domainId: string,
-        pid: number,
-        actor: number,
-        reason: string,
-        user: ProblemAclUser,
-    ): Promise<ProblemDoc> {
+    static async archiveProblem(domainId: string, pid: number, actor: number, reason: string, user: ProblemAclUser): Promise<ProblemDoc> {
         const archiveReason = reason.trim();
         if (!archiveReason) throw new ValidationError('reason');
-        const result = await ProblemModel.editAuthorized(domainId, pid, {
-            hidden: true,
-            archivedAt: new Date(),
-            archivedBy: actor,
-            archiveReason,
-        }, user);
+        const result = await ProblemModel.editAuthorized(
+            domainId,
+            pid,
+            {
+                hidden: true,
+                archivedAt: new Date(),
+                archivedBy: actor,
+                archiveReason,
+            },
+            user,
+        );
         await OplogModel.add({
-            type: 'problem.archive', domainId, operator: actor, problemId: pid,
+            type: 'problem.archive',
+            domainId,
+            operator: actor,
+            problemId: pid,
             changedFields: ['hidden', 'archivedAt', 'archivedBy', 'archiveReason'],
             time: new Date(),
         } as any);
@@ -596,16 +633,23 @@ export class ProblemModel {
     }
 
     static async get(
-        domainId: string, pid: string | number,
+        domainId: string,
+        pid: string | number,
         projection: Projection<ProblemDoc> = ProblemModel.PROJECTION_PUBLIC,
         rawConfig = false,
     ): Promise<ProblemDoc | null> {
         if (Number.isSafeInteger(+pid)) pid = +pid;
         const ddoc = await DomainModel.get(domainId);
-        const res = typeof pid === 'number'
-            ? await document.get(domainId, document.TYPE_PROBLEM, pid, projection)
-            : (await document.getMulti(domainId, document.TYPE_PROBLEM, { sort: sortable(pid, ddoc?.namespaces), pid })
-                .project(buildProjection(projection)).limit(1).toArray())[0];
+        const res =
+            typeof pid === 'number'
+                ? await document.get(domainId, document.TYPE_PROBLEM, pid, projection)
+                : (
+                      await document
+                          .getMulti(domainId, document.TYPE_PROBLEM, { sort: sortable(pid, ddoc?.namespaces), pid })
+                          .project(buildProjection(projection))
+                          .limit(1)
+                          .toArray()
+                  )[0];
         if (!res) return null;
         try {
             if (!rawConfig && projection.includes('config')) res.config = await parseConfig(res.config, res.data?.map((i) => i.name) || []);
@@ -629,23 +673,21 @@ export class ProblemModel {
     ): Promise<ProblemDoc | null> {
         const requestedFields = new Set<string>(projection as string[]);
         const authorizationFields = ['domainId', 'docId', 'owner', 'hidden'] as Field[];
-        const readProjection = Array.from(new Set([
-            ...(projection as Field[]),
-            ...authorizationFields,
-            ...Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[],
-        ])) as Projection<ProblemDoc>;
+        const readProjection = Array.from(
+            new Set([...(projection as Field[]), ...authorizationFields, ...(Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[])]),
+        ) as Projection<ProblemDoc>;
 
         const read = async (filter?: Filter<ProblemDoc>) => {
             if (!filter) return ProblemModel.get(domainId, pid, readProjection, rawConfig);
-            const [res] = await document.getMulti(domainId, document.TYPE_PROBLEM, filter)
-                .project<ProblemDoc>(buildProjection(readProjection)).limit(1).toArray();
+            const [res] = await document
+                .getMulti(domainId, document.TYPE_PROBLEM, filter)
+                .project<ProblemDoc>(buildProjection(readProjection))
+                .limit(1)
+                .toArray();
             if (!res) return null;
             try {
                 if (!rawConfig && readProjection.includes('config')) {
-                    res.config = await parseConfig(
-                        res.config as string | ProblemConfigFile,
-                        res.data?.map((i) => i.name) || [],
-                    );
+                    res.config = await parseConfig(res.config as string | ProblemConfigFile, res.data?.map((i) => i.name) || []);
                 }
             } catch (e) {
                 res.config = `Cannot parse: ${e.message}`;
@@ -675,28 +717,24 @@ export class ProblemModel {
     ): Promise<ProblemDoc | null> {
         const requestedFields = new Set<string>(projection as string[]);
         const authorizationFields = ['domainId', 'docId', 'owner'] as Field[];
-        const identityProjection = Array.from(new Set([
-            ...authorizationFields,
-            ...Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[],
-        ])) as Projection<ProblemDoc>;
-        const readProjection = Array.from(new Set([
-            ...(projection as Field[]),
-            ...identityProjection,
-        ])) as Projection<ProblemDoc>;
+        const identityProjection = Array.from(
+            new Set([...authorizationFields, ...(Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[])]),
+        ) as Projection<ProblemDoc>;
+        const readProjection = Array.from(new Set([...(projection as Field[]), ...identityProjection])) as Projection<ProblemDoc>;
 
         const read = async (filter?: Filter<ProblemDoc>) => {
             // The first read establishes identity/revision only. Sensitive raw
             // fields are fetched solely by the conditional final read below.
             if (!filter) return ProblemModel.get(domainId, pid, identityProjection, true);
-            const [res] = await document.getMulti(domainId, document.TYPE_PROBLEM, filter)
-                .project<ProblemDoc>(buildProjection(readProjection)).limit(1).toArray();
+            const [res] = await document
+                .getMulti(domainId, document.TYPE_PROBLEM, filter)
+                .project<ProblemDoc>(buildProjection(readProjection))
+                .limit(1)
+                .toArray();
             if (!res) return null;
             try {
                 if (!rawConfig && readProjection.includes('config')) {
-                    res.config = await parseConfig(
-                        res.config as string | ProblemConfigFile,
-                        res.data?.map((i) => i.name) || [],
-                    );
+                    res.config = await parseConfig(res.config as string | ProblemConfigFile, res.data?.map((i) => i.name) || []);
                 }
             } catch (e) {
                 res.config = `Cannot parse: ${e.message}`;
@@ -718,14 +756,13 @@ export class ProblemModel {
 
     /** @deprecated */
     static async list(
-        domainId: string, query: Filter<ProblemDoc>,
-        page: number, pageSize: number,
+        domainId: string,
+        query: Filter<ProblemDoc>,
+        page: number,
+        pageSize: number,
         projection = ProblemModel.PROJECTION_LIST,
     ): Promise<[ProblemDoc[], number, number]> {
-        return await db.paginate(
-            document.getMulti(domainId, document.TYPE_PROBLEM, query, projection).sort({ sort: 1, docId: 1 }),
-            page, pageSize,
-        );
+        return await db.paginate(document.getMulti(domainId, document.TYPE_PROBLEM, query, projection).sort({ sort: 1, docId: 1 }), page, pageSize);
     }
 
     static getStatus(domainId: string, docId: number, uid: number) {
@@ -740,7 +777,7 @@ export class ProblemModel {
         domainId: string,
         _id: number,
         $set: Partial<ProblemDoc>,
-        options: { expectedStructureRevision?: number, skipStructureGuard?: boolean } = {},
+        options: { expectedStructureRevision?: number; skipStructureGuard?: boolean } = {},
     ): Promise<ProblemDoc> {
         const delpid = $set.pid === '';
         const ddoc = await DomainModel.get(domainId);
@@ -752,45 +789,63 @@ export class ProblemModel {
             $set.sort = sortable($set.pid, ddoc.namespaces);
         }
         await bus.parallel('problem/before-edit', $set, $unset);
-        const current = await document.coll.findOne({
-            domainId, docType: document.TYPE_PROBLEM, docId: _id,
-        }, { projection: {
-            content: 1, config: 1, data: 1,
-            problemKind: 1, structureRevision: 1, structureLockedAt: 1, archivedAt: 1,
-        } });
+        const current = await document.coll.findOne(
+            {
+                domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: _id,
+            },
+            {
+                projection: {
+                    content: 1,
+                    config: 1,
+                    data: 1,
+                    problemKind: 1,
+                    structureRevision: 1,
+                    structureLockedAt: 1,
+                    archivedAt: 1,
+                },
+            },
+        );
         if (!current) throw new ProblemNotFoundError(domainId, _id);
         if (current.archivedAt && $set.hidden === false) throw new ValidationError('hidden');
         if ($set.hidden === false) {
             assertPublishableFillFunction({
-                domainId, pid: _id, problemKind: current.problemKind,
-                structureRevision: current.structureRevision, config: $set.config ?? current.config,
+                domainId,
+                pid: _id,
+                problemKind: current.problemKind,
+                structureRevision: current.structureRevision,
+                config: $set.config ?? current.config,
                 data: ($set.data ?? current.data) as any,
             });
         }
         if ($set.content === current.content) delete $set.content;
         let result: ProblemDoc | null;
-        if (current.problemKind !== undefined && isStructuralPatch($set as any, $unset)
-            && !options.skipStructureGuard) {
+        if (current.problemKind !== undefined && isStructuralPatch($set as any, $unset) && !options.skipStructureGuard) {
             const expectedRevision = options.expectedStructureRevision ?? current.structureRevision;
             assertStructureRevision(expectedRevision);
             parseProblemKind(current.problemKind);
             if ($set.problemKind !== undefined && $set.problemKind !== current.problemKind) {
                 throw new ValidationError('problemKind');
             }
-            if (current.structureLockedAt || await ProblemModel.materializeStartedContainerLock(domainId, _id)) {
+            if (current.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, _id))) {
                 throw new ProblemStructureConflictError(_id);
             }
-            result = await document.coll.findOneAndUpdate({
-                domainId,
-                docType: document.TYPE_PROBLEM,
-                docId: _id,
-                structureRevision: expectedRevision,
-                structureLockedAt: { $exists: false },
-            }, {
-                $set,
-                ...(Object.keys($unset).length ? { $unset } : {}),
-                $inc: { structureRevision: 1 },
-            }, { returnDocument: 'after' });
+            result = await document.coll.findOneAndUpdate(
+                {
+                    domainId,
+                    docType: document.TYPE_PROBLEM,
+                    docId: _id,
+                    structureRevision: expectedRevision,
+                    structureLockedAt: { $exists: false },
+                },
+                {
+                    $set,
+                    ...(Object.keys($unset).length ? { $unset } : {}),
+                    $inc: { structureRevision: 1 },
+                },
+                { returnDocument: 'after' },
+            );
             if (!result) throw new ProblemStructureConflictError(_id);
         } else {
             result = await document.set(domainId, document.TYPE_PROBLEM, _id, $set, $unset);
@@ -804,7 +859,7 @@ export class ProblemModel {
         _id: number,
         user: ProblemAclUser,
         operation: string,
-        options: { requestId?: string, selfRevokeUid?: number } = {},
+        options: { requestId?: string; selfRevokeUid?: number } = {},
     ): Promise<ProblemWriteClaim> {
         try {
             const prepareProblemWriteClaim = (global.Hydro?.model as any)?.permits?.prepareProblemWriteClaim;
@@ -815,25 +870,29 @@ export class ProblemModel {
         } catch (error) {
             logger.error(
                 'Problem write-claim preflight failed domain=%s pid=%d uid=%d operation=%s error=%o',
-                domainId, _id, user._id, operation, error,
+                domainId,
+                _id,
+                user._id,
+                operation,
+                error,
             );
             const denied = new PermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
             Object.defineProperty(denied, 'cause', { value: error, configurable: true });
             throw denied;
         }
         await ProblemModel.refreshProblemAcl(user, domainId);
-        const authorizedPdoc = await document.get(
-            domainId,
-            document.TYPE_PROBLEM,
-            _id,
-            [
-                'domainId', 'docType', 'docId', 'owner', 'maintainer',
-                'aclMutationRevision', 'aclMutationLocks', 'aclWriteClaim',
-            ] as any,
-        );
+        const authorizedPdoc = await document.get(domainId, document.TYPE_PROBLEM, _id, [
+            'domainId',
+            'docType',
+            'docId',
+            'owner',
+            'maintainer',
+            'aclMutationRevision',
+            'aclMutationLocks',
+            'aclWriteClaim',
+        ] as any);
         if (!authorizedPdoc) throw new PermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
-        const requestId = options.requestId?.trim()
-            || `problem-write:${operation}:${domainId}:${_id}:${new ObjectId().toHexString()}`;
+        const requestId = options.requestId?.trim() || `problem-write:${operation}:${domainId}:${_id}:${new ObjectId().toHexString()}`;
         const claim = await acquireProblemWriteClaim(user, authorizedPdoc, requestId, operation, {
             selfRevokeUid: options.selfRevokeUid,
         });
@@ -849,20 +908,18 @@ export class ProblemModel {
         user: ProblemAclUser,
         operation: string,
         work: (claim: ProblemWriteClaim) => Promise<T>,
-        options: { requestId?: string, selfRevokeUid?: number } = {},
+        options: { requestId?: string; selfRevokeUid?: number } = {},
     ): Promise<T> {
         const claim = await ProblemModel.beginAuthorizedWriteClaim(domainId, _id, user, operation, options);
         try {
             const result = await work(claim);
-            if (!await clearProblemWriteClaim(claim)) {
+            if (!(await clearProblemWriteClaim(claim))) {
                 throw new Error(`problem write claim ownership lost before clear: ${claim.requestId}`);
             }
             return result;
         } catch (error) {
-            if (error instanceof ValidationError
-                || error instanceof ProblemStructureConflictError
-                || error instanceof ProblemIsReferencedError) {
-                if (!await clearProblemWriteClaim(claim)) {
+            if (error instanceof ValidationError || error instanceof ProblemStructureConflictError || error instanceof ProblemIsReferencedError) {
+                if (!(await clearProblemWriteClaim(claim))) {
                     throw new Error(`problem write claim ownership lost after rejected request: ${claim.requestId}`, {
                         cause: error,
                     });
@@ -875,22 +932,26 @@ export class ProblemModel {
             } catch (markerError) {
                 logger.error(
                     'Problem write failed and ERROR marker write also failed domain=%s pid=%d requestId=%s error=%s markerError=%s',
-                    domainId, _id, claim.requestId, error, markerError,
+                    domainId,
+                    _id,
+                    claim.requestId,
+                    error,
+                    markerError,
                 );
-                throw new Error(
-                    `problem write failed and ERROR marker could not be persisted: ${claim.requestId}`,
-                    { cause: error },
-                );
+                throw new Error(`problem write failed and ERROR marker could not be persisted: ${claim.requestId}`, { cause: error });
             }
             logger.error(
                 'Problem write failed; durable claim retained domain=%s pid=%d actor=%d operation=%s requestId=%s marked=%s error=%s',
-                domainId, _id, claim.actor, operation, claim.requestId, marked, error,
+                domainId,
+                _id,
+                claim.actor,
+                operation,
+                claim.requestId,
+                marked,
+                error,
             );
             if (!marked) {
-                throw new Error(
-                    `problem write claim vanished before ERROR marker: ${claim.requestId}`,
-                    { cause: error },
-                );
+                throw new Error(`problem write claim vanished before ERROR marker: ${claim.requestId}`, { cause: error });
             }
             throw error;
         }
@@ -904,28 +965,27 @@ export class ProblemModel {
         work: (claim: ProblemWriteClaim) => Promise<T>,
     ): Promise<T> {
         return ProblemModel.withAuthorizedWriteClaim(domainId, pid, user, operation, async (claim) => {
-            const current = await document.coll.findOne({
-                domainId,
-                docType: document.TYPE_PROBLEM,
-                docId: pid,
-                'aclWriteClaim.requestId': claim.requestId,
-                'aclWriteClaim.actor': claim.actor,
-                'aclWriteClaim.state': 'active',
-            }, { projection: { problemKind: 1, structureRevision: 1, structureLockedAt: 1, archivedAt: 1 } });
+            const current = await document.coll.findOne(
+                {
+                    domainId,
+                    docType: document.TYPE_PROBLEM,
+                    docId: pid,
+                    'aclWriteClaim.requestId': claim.requestId,
+                    'aclWriteClaim.actor': claim.actor,
+                    'aclWriteClaim.state': 'active',
+                },
+                { projection: { problemKind: 1, structureRevision: 1, structureLockedAt: 1, archivedAt: 1 } },
+            );
             if (!current) throw new Error(`problem write claim ownership lost before ${operation}: ${claim.requestId}`);
             if (current.problemKind === undefined) return work(claim);
             const expectedRevision = current.structureRevision;
             assertStructureRevision(expectedRevision);
             parseProblemKind(current.problemKind);
-            if (current.archivedAt || current.structureLockedAt
-                || await ProblemModel.materializeStartedContainerLock(domainId, pid)) {
+            if (current.archivedAt || current.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, pid))) {
                 throw new ProblemStructureConflictError(pid);
             }
             const result = await work(claim);
-            const bumped = await document.coll.updateOne(
-                revisionClaimFilter(claim, expectedRevision),
-                { $inc: { structureRevision: 1 } },
-            );
+            const bumped = await document.coll.updateOne(revisionClaimFilter(claim, expectedRevision), { $inc: { structureRevision: 1 } });
             if (bumped.matchedCount !== 1) throw new ProblemStructureConflictError(pid);
             return result;
         });
@@ -937,9 +997,14 @@ export class ProblemModel {
         testdata = false,
         testdataNames: string[] = [],
     ): Promise<boolean> {
-        const pdoc = await document.coll.findOne({
-            domainId, docType: document.TYPE_PROBLEM, docId: pid,
-        }, { projection: { problemKind: 1, config: 1, structureLockedAt: 1, archivedAt: 1 } });
+        const pdoc = await document.coll.findOne(
+            {
+                domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: pid,
+            },
+            { projection: { problemKind: 1, config: 1, structureLockedAt: 1, archivedAt: 1 } },
+        );
         if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
         if (pdoc.problemKind === undefined) return false;
         const problemKind = parseProblemKind(pdoc.problemKind);
@@ -949,21 +1014,23 @@ export class ProblemModel {
         if (testdata && problemKind !== 'programming' && testdataNames.some(isProblemConfigFilename)) {
             throw new ValidationError('name', null, '结构化题配置不通过 testdata 文件修改');
         }
-        if (pdoc.archivedAt || pdoc.structureLockedAt
-            || await ProblemModel.materializeStartedContainerLock(domainId, pid)) {
+        if (pdoc.archivedAt || pdoc.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, pid))) {
             throw new ProblemStructureConflictError(pid);
         }
         return true;
     }
 
     private static async bumpDirectStructureRevision(domainId: string, pid: number): Promise<void> {
-        const result = await document.coll.updateOne({
-            domainId,
-            docType: document.TYPE_PROBLEM,
-            docId: pid,
-            problemKind: { $exists: true },
-            structureLockedAt: { $exists: false },
-        }, { $inc: { structureRevision: 1 } });
+        const result = await document.coll.updateOne(
+            {
+                domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: pid,
+                problemKind: { $exists: true },
+                structureLockedAt: { $exists: false },
+            },
+            { $inc: { structureRevision: 1 } },
+        );
         if (result.matchedCount !== 1) throw new ProblemStructureConflictError(pid);
     }
 
@@ -990,30 +1057,42 @@ export class ProblemModel {
             $set.sort = sortable($set.pid, ddoc.namespaces);
         }
         await bus.parallel('problem/before-edit', $set, $unset);
-        const current = await document.coll.findOne({
-            domainId,
-            docType: document.TYPE_PROBLEM,
-            docId: _id,
-            'aclWriteClaim.requestId': claim.requestId,
-            'aclWriteClaim.actor': claim.actor,
-            'aclWriteClaim.state': 'active',
-        }, { projection: {
-            content: 1, config: 1, data: 1,
-            problemKind: 1, structureRevision: 1, structureLockedAt: 1, archivedAt: 1,
-        } });
+        const current = await document.coll.findOne(
+            {
+                domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: _id,
+                'aclWriteClaim.requestId': claim.requestId,
+                'aclWriteClaim.actor': claim.actor,
+                'aclWriteClaim.state': 'active',
+            },
+            {
+                projection: {
+                    content: 1,
+                    config: 1,
+                    data: 1,
+                    problemKind: 1,
+                    structureRevision: 1,
+                    structureLockedAt: 1,
+                    archivedAt: 1,
+                },
+            },
+        );
         if (!current) throw new Error(`problem write claim ownership lost before edit: ${claim.requestId}`);
         if (current.archivedAt && $set.hidden === false) throw new ValidationError('hidden');
         if ($set.hidden === false) {
             assertPublishableFillFunction({
-                domainId, pid: _id, problemKind: current.problemKind,
-                structureRevision: current.structureRevision, config: $set.config ?? current.config,
+                domainId,
+                pid: _id,
+                problemKind: current.problemKind,
+                structureRevision: current.structureRevision,
+                config: $set.config ?? current.config,
                 data: ($set.data ?? current.data) as any,
             });
         }
         if ($set.content === current.content) delete $set.content;
         let result: ProblemDoc | null;
-        if (current.problemKind !== undefined && isStructuralPatch($set as any, $unset)
-            && !options.skipStructureGuard) {
+        if (current.problemKind !== undefined && isStructuralPatch($set as any, $unset) && !options.skipStructureGuard) {
             if (options.requireExpectedStructureRevision) {
                 assertStructureRevision(options.expectedStructureRevision);
             }
@@ -1023,7 +1102,7 @@ export class ProblemModel {
             if ($set.problemKind !== undefined && $set.problemKind !== current.problemKind) {
                 throw new ValidationError('problemKind');
             }
-            if (current.structureLockedAt || await ProblemModel.materializeStartedContainerLock(domainId, _id)) {
+            if (current.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, _id))) {
                 throw new ProblemStructureConflictError(_id);
             }
             result = await document.coll.findOneAndUpdate(
@@ -1052,12 +1131,8 @@ export class ProblemModel {
         requestedUnset: Record<string, unknown> = {},
         options: { expectedStructureRevision?: number } = {},
     ): Promise<ProblemDoc> {
-        return ProblemModel.withAuthorizedWriteClaim(
-            domainId,
-            _id,
-            user,
-            'metadata-edit',
-            (claim) => ProblemModel.editWithClaim(claim, $set, requestedUnset, {
+        return ProblemModel.withAuthorizedWriteClaim(domainId, _id, user, 'metadata-edit', (claim) =>
+            ProblemModel.editWithClaim(claim, $set, requestedUnset, {
                 ...options,
                 requireExpectedStructureRevision: true,
             }),
@@ -1071,16 +1146,14 @@ export class ProblemModel {
         pid?: string,
         _hidden?: boolean,
         structuredLanguage?: string,
-        attribution: { owner?: number, actor?: number } = {},
+        attribution: { owner?: number; actor?: number } = {},
     ) {
         const original = await ProblemModel.get(domainId, _id, ProblemModel.PROJECTION_PUBLIC, true);
         if (!original) throw new ProblemNotFoundError(domainId, _id);
         if (original.reference) throw new ValidationError('reference');
-        if (pid && (/^[0-9]+$/.test(pid) || await ProblemModel.get(target, pid))) pid = '';
-        if (!pid && original.pid && !await ProblemModel.get(target, original.pid)) pid = original.pid;
-        const problemKind = original.problemKind === undefined
-            ? 'programming'
-            : parseProblemKind(original.problemKind);
+        if (pid && (/^[0-9]+$/.test(pid) || (await ProblemModel.get(target, pid)))) pid = '';
+        if (!pid && original.pid && !(await ProblemModel.get(target, original.pid))) pid = original.pid;
+        const problemKind = original.problemKind === undefined ? 'programming' : parseProblemKind(original.problemKind);
         const cloneConfig = structuredLanguage
             ? cloneStructuredProblemForLanguage(problemKind, original.config, structuredLanguage)
             : original.config;
@@ -1114,9 +1187,12 @@ export class ProblemModel {
                 onFailure: (failure) => {
                     logger.error(
                         'Problem clone file copy failed source=%s/%d target=%s/%d filename=%s error=%o',
-                        failure.sourceDomainId, failure.sourceProblemId,
-                        failure.targetDomainId, failure.targetProblemId,
-                        failure.filename, failure.error,
+                        failure.sourceDomainId,
+                        failure.sourceProblemId,
+                        failure.targetDomainId,
+                        failure.targetProblemId,
+                        failure.filename,
+                        failure.error,
                     );
                 },
             });
@@ -1127,16 +1203,20 @@ export class ProblemModel {
                 html: !!original.html,
             });
         } catch (error) {
-            logger.error(
-                'Problem clone failed domain=%s pid=%d target=%s cloneId=%d error=%o',
-                domainId, _id, target, cloneId, error,
-            );
+            logger.error('Problem clone failed domain=%s pid=%d target=%s cloneId=%d error=%o', domainId, _id, target, cloneId, error);
             throw error;
         }
         await OplogModel.add({
-            type: 'problem.clone', domainId: target, operator: cloneActor,
-            problemId: cloneId, sourceDomainId: domainId, sourceProblemId: _id,
-            problemKind, revision: 1, changedFields: ['all'], time: new Date(),
+            type: 'problem.clone',
+            domainId: target,
+            operator: cloneActor,
+            problemId: cloneId,
+            sourceDomainId: domainId,
+            sourceProblemId: _id,
+            problemKind,
+            revision: 1,
+            changedFields: ['all'],
+            time: new Date(),
         } as any);
         return cloneId;
     }
@@ -1165,7 +1245,8 @@ export class ProblemModel {
         const res = await Promise.all([
             document.deleteOne(domainId, document.TYPE_PROBLEM, docId),
             document.deleteMultiStatus(domainId, document.TYPE_PROBLEM, { docId }),
-            storage.list(`problem/${domainId}/${docId}/`)
+            storage
+                .list(`problem/${domainId}/${docId}/`)
                 .then((items) => storage.del(items.map((item) => `problem/${domainId}/${docId}/${item.name}`))),
             bus.parallel('problem/delete', domainId, docId),
         ]);
@@ -1173,23 +1254,17 @@ export class ProblemModel {
     }
 
     /** HTTP hard-delete entrypoint. The ProblemDoc delete itself owns the claim token. */
-    static async delAuthorized(
-        domainId: string,
-        docId: number,
-        user: ProblemAclUser,
-        options: { requestId?: string } = {},
-    ) {
+    static async delAuthorized(domainId: string, docId: number, user: ProblemAclUser, options: { requestId?: string } = {}) {
         const pdoc = await ProblemModel.get(domainId, docId, ['docId', 'pid'] as any, true);
         if (!pdoc) throw new ProblemNotFoundError(domainId, docId);
         await ProblemModel.assertNoProblemReferences(domainId, docId, pdoc.pid);
-        const claim = await ProblemModel.beginAuthorizedWriteClaim(
-            domainId, docId, user, 'hard-delete', options,
-        );
+        const claim = await ProblemModel.beginAuthorizedWriteClaim(domainId, docId, user, 'hard-delete', options);
         try {
             await bus.parallel('problem/before-del', domainId, docId, claim.requestId);
             await Promise.all([
                 document.deleteMultiStatus(domainId, document.TYPE_PROBLEM, { docId }),
-                storage.list(`problem/${domainId}/${docId}/`)
+                storage
+                    .list(`problem/${domainId}/${docId}/`)
                     .then((items) => storage.del(items.map((item) => `problem/${domainId}/${docId}/${item.name}`))),
                 bus.parallel('problem/delete', domainId, docId),
             ]);
@@ -1212,16 +1287,22 @@ export class ProblemModel {
             } catch (markerError) {
                 logger.error(
                     'Hard delete failed and ERROR marker write also failed domain=%s pid=%d requestId=%s error=%s markerError=%s',
-                    domainId, docId, claim.requestId, error, markerError,
+                    domainId,
+                    docId,
+                    claim.requestId,
+                    error,
+                    markerError,
                 );
-                throw new Error(
-                    `hard delete failed and ERROR marker could not be persisted: ${claim.requestId}`,
-                    { cause: error },
-                );
+                throw new Error(`hard delete failed and ERROR marker could not be persisted: ${claim.requestId}`, { cause: error });
             }
             logger.error(
                 'Hard delete failed; durable claim retained domain=%s pid=%d actor=%d requestId=%s marked=%s error=%s',
-                domainId, docId, claim.actor, claim.requestId, marked, error,
+                domainId,
+                docId,
+                claim.actor,
+                claim.requestId,
+                marked,
+                error,
             );
             if (!marked) {
                 throw new Error(`hard-delete claim vanished before ERROR marker: ${claim.requestId}`, { cause: error });
@@ -1251,9 +1332,7 @@ export class ProblemModel {
 
     static async renameTestdata(domainId: string, pid: number, file: string, newName: string, operator = 1) {
         if (file === newName) return;
-        const revisionManaged = await ProblemModel.assertDirectStructureWritable(
-            domainId, pid, true, [file, newName],
-        );
+        const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid, true, [file, newName]);
         if (isProblemConfigFilename(newName)) {
             const source = await storage.get(`problem/${domainId}/${pid}/testdata/${file}`);
             await normalizeProblemTestdataUpload(newName, source);
@@ -1262,11 +1341,7 @@ export class ProblemModel {
         if (sdoc) await ProblemModel.delTestdata(domainId, pid, newName);
         const payload = { _id: newName, name: newName, lastModified: new Date() };
         await Promise.all([
-            storage.rename(
-                `problem/${domainId}/${pid}/testdata/${file}`,
-                `problem/${domainId}/${pid}/testdata/${newName}`,
-                operator,
-            ),
+            storage.rename(`problem/${domainId}/${pid}/testdata/${file}`, `problem/${domainId}/${pid}/testdata/${newName}`, operator),
             document.setSub(domainId, document.TYPE_PROBLEM, pid, 'data', file, payload),
         ]);
         await bus.emit('problem/renameTestdata', domainId, pid, file, newName);
@@ -1274,20 +1349,20 @@ export class ProblemModel {
     }
 
     static async delTestdata(domainId: string, pid: number, name: string | string[], operator = 1) {
-        const names = (name instanceof Array) ? name : [name];
+        const names = name instanceof Array ? name : [name];
         const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid, true, names);
         await Promise.all([
-            storage.del(names.map((t) => `problem/${domainId}/${pid}/testdata/${t}`), operator),
+            storage.del(
+                names.map((t) => `problem/${domainId}/${pid}/testdata/${t}`),
+                operator,
+            ),
             ProblemModel.pull(domainId, pid, 'data', names),
         ]);
         await bus.emit('problem/delTestdata', domainId, pid, names);
         if (revisionManaged) await ProblemModel.bumpDirectStructureRevision(domainId, pid);
     }
 
-    static async addAdditionalFile(
-        domainId: string, pid: number, name: string,
-        f: Readable | Buffer | string, operator = 1, skipUpload = false,
-    ) {
+    static async addAdditionalFile(domainId: string, pid: number, name: string, f: Readable | Buffer | string, operator = 1, skipUpload = false) {
         const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid);
         name = name.trim();
         const [[, fileinfo]] = await Promise.all([
@@ -1309,11 +1384,7 @@ export class ProblemModel {
         if (sdoc) await ProblemModel.delAdditionalFile(domainId, pid, newName);
         const payload = { _id: newName, name: newName, lastModified: new Date() };
         await Promise.all([
-            storage.rename(
-                `problem/${domainId}/${pid}/additional_file/${file}`,
-                `problem/${domainId}/${pid}/additional_file/${newName}`,
-                operator,
-            ),
+            storage.rename(`problem/${domainId}/${pid}/additional_file/${file}`, `problem/${domainId}/${pid}/additional_file/${newName}`, operator),
             document.setSub(domainId, document.TYPE_PROBLEM, pid, 'additional_file', file, payload),
         ]);
         await bus.emit('problem/renameAdditionalFile', domainId, pid, file, newName);
@@ -1322,9 +1393,12 @@ export class ProblemModel {
 
     static async delAdditionalFile(domainId: string, pid: number, name: MaybeArray<string>, operator = 1) {
         const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid);
-        const names = (name instanceof Array) ? name : [name];
+        const names = name instanceof Array ? name : [name];
         await Promise.all([
-            storage.del(names.map((t) => `problem/${domainId}/${pid}/additional_file/${t}`), operator),
+            storage.del(
+                names.map((t) => `problem/${domainId}/${pid}/additional_file/${t}`),
+                operator,
+            ),
             ProblemModel.pull(domainId, pid, 'additional_file', names),
         ]);
         await bus.emit('problem/delAdditionalFile', domainId, pid, names);
@@ -1336,14 +1410,17 @@ export class ProblemModel {
         key: 'data' | 'additional_file',
         testdataNames: string[] = [],
     ): Promise<any[]> {
-        const doc = await document.coll.findOne({
-            domainId: claim.domainId,
-            docType: document.TYPE_PROBLEM,
-            docId: claim.pid,
-            'aclWriteClaim.requestId': claim.requestId,
-            'aclWriteClaim.actor': claim.actor,
-            'aclWriteClaim.state': 'active',
-        }, { projection: { [key]: 1, problemKind: 1, config: 1 } });
+        const doc = await document.coll.findOne(
+            {
+                domainId: claim.domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: claim.pid,
+                'aclWriteClaim.requestId': claim.requestId,
+                'aclWriteClaim.actor': claim.actor,
+                'aclWriteClaim.state': 'active',
+            },
+            { projection: { [key]: 1, problemKind: 1, config: 1 } },
+        );
         if (!doc) throw new Error(`problem write claim ownership lost before file operation: ${claim.requestId}`);
         if (key === 'data' && doc.problemKind !== undefined) {
             const kind = parseProblemKind(doc.problemKind);
@@ -1357,12 +1434,7 @@ export class ProblemModel {
         return Array.isArray(doc[key]) ? doc[key] : [];
     }
 
-    static async addTestdataWithClaim(
-        claim: ProblemWriteClaim,
-        name: string,
-        f: Readable | Buffer | string,
-        operator = 1,
-    ) {
+    static async addTestdataWithClaim(claim: ProblemWriteClaim, name: string, f: Readable | Buffer | string, operator = 1) {
         name = name.trim();
         if (!name) throw new ValidationError('name');
         const current = await ProblemModel.getClaimedProblemFiles(claim, 'data', [name]);
@@ -1374,18 +1446,13 @@ export class ProblemModel {
         payload.lastModified ||= new Date();
         const next = current.filter((item) => item.name !== name);
         next.push({ _id: name, ...payload });
-        if (!await commitProblemWriteClaimUpdate(claim, { data: next } as any)) {
+        if (!(await commitProblemWriteClaimUpdate(claim, { data: next } as any))) {
             throw new Error(`problem write claim ownership lost after testdata upload: ${claim.requestId}`);
         }
         await bus.emit('problem/addTestdata', claim.domainId, claim.pid, name, payload, claim);
     }
 
-    static async renameTestdataWithClaim(
-        claim: ProblemWriteClaim,
-        file: string,
-        newName: string,
-        operator = 1,
-    ) {
+    static async renameTestdataWithClaim(claim: ProblemWriteClaim, file: string, newName: string, operator = 1) {
         if (file === newName) return;
         const current = await ProblemModel.getClaimedProblemFiles(claim, 'data', [file, newName]);
         if (isProblemConfigFilename(newName)) {
@@ -1400,36 +1467,29 @@ export class ProblemModel {
             `problem/${claim.domainId}/${claim.pid}/testdata/${newName}`,
             operator,
         );
-        const next = current.filter((item) => item.name !== newName).map((item) => (
-            item.name === file ? { ...item, _id: newName, name: newName, lastModified: new Date() } : item
-        ));
-        if (!await commitProblemWriteClaimUpdate(claim, { data: next } as any)) {
+        const next = current
+            .filter((item) => item.name !== newName)
+            .map((item) => (item.name === file ? { ...item, _id: newName, name: newName, lastModified: new Date() } : item));
+        if (!(await commitProblemWriteClaimUpdate(claim, { data: next } as any))) {
             throw new Error(`problem write claim ownership lost after testdata rename: ${claim.requestId}`);
         }
         await bus.emit('problem/renameTestdata', claim.domainId, claim.pid, file, newName, claim);
     }
 
-    static async delTestdataWithClaim(
-        claim: ProblemWriteClaim,
-        name: string | string[],
-        operator = 1,
-    ) {
+    static async delTestdataWithClaim(claim: ProblemWriteClaim, name: string | string[], operator = 1) {
         const names = name instanceof Array ? name : [name];
         const current = await ProblemModel.getClaimedProblemFiles(claim, 'data', names);
-        await storage.del(names.map((item) => `problem/${claim.domainId}/${claim.pid}/testdata/${item}`), operator);
-        if (!await commitProblemWriteClaimUpdate(
-            claim,
-            { data: current.filter((item) => !names.includes(item.name)) } as any,
-        )) throw new Error(`problem write claim ownership lost after testdata delete: ${claim.requestId}`);
+        await storage.del(
+            names.map((item) => `problem/${claim.domainId}/${claim.pid}/testdata/${item}`),
+            operator,
+        );
+        if (!(await commitProblemWriteClaimUpdate(claim, { data: current.filter((item) => !names.includes(item.name)) } as any))) {
+            throw new Error(`problem write claim ownership lost after testdata delete: ${claim.requestId}`);
+        }
         await bus.emit('problem/delTestdata', claim.domainId, claim.pid, names, claim);
     }
 
-    static async addAdditionalFileWithClaim(
-        claim: ProblemWriteClaim,
-        name: string,
-        f: Readable | Buffer | string,
-        operator = 1,
-    ) {
+    static async addAdditionalFileWithClaim(claim: ProblemWriteClaim, name: string, f: Readable | Buffer | string, operator = 1) {
         name = name.trim();
         if (!name) throw new ValidationError('name');
         const current = await ProblemModel.getClaimedProblemFiles(claim, 'additional_file');
@@ -1439,18 +1499,13 @@ export class ProblemModel {
         const payload = { name, ...pick(meta, ['size', 'lastModified', 'etag']) } as any;
         const next = current.filter((item) => item.name !== name);
         next.push({ _id: name, ...payload });
-        if (!await commitProblemWriteClaimUpdate(claim, { additional_file: next } as any)) {
+        if (!(await commitProblemWriteClaimUpdate(claim, { additional_file: next } as any))) {
             throw new Error(`problem write claim ownership lost after additional-file upload: ${claim.requestId}`);
         }
         await bus.emit('problem/addAdditionalFile', claim.domainId, claim.pid, name, payload, claim);
     }
 
-    static async renameAdditionalFileWithClaim(
-        claim: ProblemWriteClaim,
-        file: string,
-        newName: string,
-        operator = 1,
-    ) {
+    static async renameAdditionalFileWithClaim(claim: ProblemWriteClaim, file: string, newName: string, operator = 1) {
         if (file === newName) return;
         const current = await ProblemModel.getClaimedProblemFiles(claim, 'additional_file');
         if (current.some((item) => item.name === newName)) {
@@ -1461,70 +1516,76 @@ export class ProblemModel {
             `problem/${claim.domainId}/${claim.pid}/additional_file/${newName}`,
             operator,
         );
-        const next = current.filter((item) => item.name !== newName).map((item) => (
-            item.name === file ? { ...item, _id: newName, name: newName, lastModified: new Date() } : item
-        ));
-        if (!await commitProblemWriteClaimUpdate(claim, { additional_file: next } as any)) {
+        const next = current
+            .filter((item) => item.name !== newName)
+            .map((item) => (item.name === file ? { ...item, _id: newName, name: newName, lastModified: new Date() } : item));
+        if (!(await commitProblemWriteClaimUpdate(claim, { additional_file: next } as any))) {
             throw new Error(`problem write claim ownership lost after additional-file rename: ${claim.requestId}`);
         }
         await bus.emit('problem/renameAdditionalFile', claim.domainId, claim.pid, file, newName, claim);
     }
 
-    static async delAdditionalFileWithClaim(
-        claim: ProblemWriteClaim,
-        name: MaybeArray<string>,
-        operator = 1,
-    ) {
+    static async delAdditionalFileWithClaim(claim: ProblemWriteClaim, name: MaybeArray<string>, operator = 1) {
         const names = name instanceof Array ? name : [name];
         const current = await ProblemModel.getClaimedProblemFiles(claim, 'additional_file');
-        await storage.del(names.map((item) => `problem/${claim.domainId}/${claim.pid}/additional_file/${item}`), operator);
-        if (!await commitProblemWriteClaimUpdate(
-            claim,
-            { additional_file: current.filter((item) => !names.includes(item.name)) } as any,
-        )) throw new Error(`problem write claim ownership lost after additional-file delete: ${claim.requestId}`);
+        await storage.del(
+            names.map((item) => `problem/${claim.domainId}/${claim.pid}/additional_file/${item}`),
+            operator,
+        );
+        if (!(await commitProblemWriteClaimUpdate(claim, { additional_file: current.filter((item) => !names.includes(item.name)) } as any))) {
+            throw new Error(`problem write claim ownership lost after additional-file delete: ${claim.requestId}`);
+        }
         await bus.emit('problem/delAdditionalFile', claim.domainId, claim.pid, names, claim);
     }
 
     static async random(domainId: string, query: Filter<ProblemDoc>) {
         const pcount = await document.count(domainId, document.TYPE_PROBLEM, query);
         if (!pcount) return null;
-        const pdoc = await document.getMulti(domainId, document.TYPE_PROBLEM, query)
-            .skip(Math.floor(Math.random() * pcount)).limit(1).toArray();
+        const pdoc = await document
+            .getMulti(domainId, document.TYPE_PROBLEM, query)
+            .skip(Math.floor(Math.random() * pcount))
+            .limit(1)
+            .toArray();
         return pdoc[0].pid || pdoc[0].docId;
     }
 
     static async getList(
-        domainId: string, pids: number[], canViewHidden: number | boolean = false,
-        doThrow = true, projection = ProblemModel.PROJECTION_PUBLIC, indexByDocIdOnly = false,
+        domainId: string,
+        pids: number[],
+        canViewHidden: number | boolean = false,
+        doThrow = true,
+        projection = ProblemModel.PROJECTION_PUBLIC,
+        indexByDocIdOnly = false,
     ): Promise<ProblemDict> {
         if (!pids?.length) return {};
         const r: Record<number, ProblemDoc> = {};
         const l: Record<string, ProblemDoc> = {};
         const q: any = { docId: { $in: pids } };
         const projectionExpr = buildProjection(projection.includes('config') ? [...projection, 'data', 'reference'] : projection);
-        let pdocs = await document.getMulti(domainId, document.TYPE_PROBLEM, q)
-            .project<ProblemDoc>(projectionExpr).toArray();
+        let pdocs = await document.getMulti(domainId, document.TYPE_PROBLEM, q).project<ProblemDoc>(projectionExpr).toArray();
         if (canViewHidden !== true) {
             pdocs = pdocs.filter((i) => i.owner === canViewHidden || !i.hidden);
         }
-        await Promise.all(pdocs.map(async (pdoc) => {
-            if (projection.includes('config')) {
-                if (pdoc.reference) {
-                    const src = await ProblemModel.get(pdoc.reference.domainId, pdoc.reference.pid);
-                    pdoc.config = src ? src.config : 'Cannot find source problem';
-                } else {
-                    try {
-                        pdoc.config = await parseConfig(pdoc.config as string, pdoc.data?.map((i) => i.name) || []);
-                    } catch (e) {
-                        pdoc.config = `Cannot parse: ${e.message}`;
+        await Promise.all(
+            pdocs.map(async (pdoc) => {
+                if (projection.includes('config')) {
+                    if (pdoc.reference) {
+                        const src = await ProblemModel.get(pdoc.reference.domainId, pdoc.reference.pid);
+                        pdoc.config = src ? src.config : 'Cannot find source problem';
+                    } else {
+                        try {
+                            pdoc.config = await parseConfig(pdoc.config as string, pdoc.data?.map((i) => i.name) || []);
+                        } catch (e) {
+                            pdoc.config = `Cannot parse: ${e.message}`;
+                        }
                     }
                 }
-            }
-            if (!projection.includes('data')) delete pdoc.data;
-            if (!projection.includes('reference')) delete pdoc.reference;
-            r[pdoc.docId] = pdoc;
-            if (pdoc.pid) l[pdoc.pid] = pdoc;
-        }));
+                if (!projection.includes('data')) delete pdoc.data;
+                if (!projection.includes('reference')) delete pdoc.reference;
+                r[pdoc.docId] = pdoc;
+                if (pdoc.pid) l[pdoc.pid] = pdoc;
+            }),
+        );
         // TODO enhance
         if (pdocs.length !== pids.length) {
             for (const pid of pids) {
@@ -1538,29 +1599,17 @@ export class ProblemModel {
     }
 
     static async getListStatus(domainId: string, uid: number, pids: number[]) {
-        const psdocs = await ProblemModel.getMultiStatus(
-            domainId, { uid, docId: { $in: Array.from(new Set(pids)) } },
-        ).toArray();
+        const psdocs = await ProblemModel.getMultiStatus(domainId, { uid, docId: { $in: Array.from(new Set(pids)) } }).toArray();
         return keyBy(psdocs, 'docId');
     }
 
-    static async updateStatus(
-        domainId: string, pid: number, uid: number,
-        rid: ObjectId, status: number, score: number,
-    ) {
-        const condition = status === STATUS.STATUS_ACCEPTED ? {}
-            : { $or: [{ status: { $ne: STATUS.STATUS_ACCEPTED } }, { rid }] };
-        const res = await document.setStatusIfCondition(
-            domainId, document.TYPE_PROBLEM, pid, uid,
-            condition, { rid, status, score },
-        );
+    static async updateStatus(domainId: string, pid: number, uid: number, rid: ObjectId, status: number, score: number) {
+        const condition = status === STATUS.STATUS_ACCEPTED ? {} : { $or: [{ status: { $ne: STATUS.STATUS_ACCEPTED } }, { rid }] };
+        const res = await document.setStatusIfCondition(domainId, document.TYPE_PROBLEM, pid, uid, condition, { rid, status, score });
         return !!res;
     }
 
-    static async updateManualStatusLatest(
-        domainId: string, pid: number, uid: number,
-        rid: ObjectId, status: number, score: number,
-    ) {
+    static async updateManualStatusLatest(domainId: string, pid: number, uid: number, rid: ObjectId, status: number, score: number) {
         const res = await document.collStatus.findOneAndUpdate(
             {
                 domainId,
@@ -1575,10 +1624,7 @@ export class ProblemModel {
         return !!res;
     }
 
-    static async updateManualGradeStatus(
-        domainId: string, pid: number, uid: number,
-        latestRid: ObjectId, score: number,
-    ) {
+    static async updateManualGradeStatus(domainId: string, pid: number, uid: number, latestRid: ObjectId, score: number) {
         const res = await document.collStatus.findOneAndUpdate(
             {
                 domainId,
@@ -1593,10 +1639,7 @@ export class ProblemModel {
         return !!res;
     }
 
-    static async incStatus(
-        domainId: string, pid: number, uid: number,
-        key: NumberKeys<ProblemStatusDoc>, count: number,
-    ) {
+    static async incStatus(domainId: string, pid: number, uid: number, key: NumberKeys<ProblemStatusDoc>, count: number) {
         return await document.incStatus(domainId, document.TYPE_PROBLEM, pid, uid, key, count);
     }
 
@@ -1614,9 +1657,7 @@ export class ProblemModel {
             logger.warn('ProblemModel.import: options should be an object');
             options = {};
         }
-        const {
-            preferredPrefix, progress, override = false, operator = 1,
-        } = options;
+        const { preferredPrefix, progress, override = false, operator = 1 } = options;
         let delSource = options.delSource;
         let problems: string[];
         const ddoc = await DomainModel.get(domainId);
@@ -1666,7 +1707,7 @@ export class ProblemModel {
                 let overridePid = null;
 
                 const isValidPid = async (id: string) => {
-                    if (!(/^(?:[a-z0-9]{1,10}-)?[a-z][0-9a-z]*$/i.test(id))) return false;
+                    if (!/^(?:[a-z0-9]{1,10}-)?[a-z][0-9a-z]*$/i.test(id)) return false;
                     if (id.includes('-')) {
                         const [prefix] = id.split('-');
                         if (!ddoc?.namespaces?.[prefix]) return false;
@@ -1696,7 +1737,7 @@ export class ProblemModel {
                         const newPid = pid.replace(/^[A-Za-z]+/, preferredPrefix);
                         if (await isValidPid(newPid)) pid = newPid;
                     }
-                    if (!await isValidPid(pid)) pid = undefined;
+                    if (!(await isValidPid(pid))) pid = undefined;
                 }
                 let overrideContent = findOverrideContent(path.join(tmpdir, i), 'problem');
                 overrideContent ||= findOverrideContent(path.join(tmpdir, i, 'statement'), 'problem');
@@ -1705,17 +1746,21 @@ export class ProblemModel {
                 const title = pdoc.title || (pdoc as any).name;
                 if (typeof title !== 'string') throw new ValidationError('title', null, 'Invalid title');
                 const allFiles = await getFiles(
-                    'testdata', 'additional_file',
+                    'testdata',
+                    'additional_file',
                     // The following is from https://icpc.io/problem-package-format/spec/2023-07-draft.html
-                    'attachments', 'generators', 'include', 'data', 'statement', 'problem_statement',
+                    'attachments',
+                    'generators',
+                    'include',
+                    'data',
+                    'statement',
+                    'problem_statement',
                 );
                 const totalSize = allFiles.map((f) => fs.statSync(f[1]).size).reduce((a, b) => a + b, 0);
                 if (allFiles.length > SystemModel.get('limit.problem_files')) throw new ValidationError('files', null, 'Too many files');
                 if (totalSize > SystemModel.get('limit.problem_files_size')) throw new ValidationError('files', null, 'Files too large');
                 const validateImportedTestdataConfigs = async () => {
-                    const entries = await getFiles(
-                        'testdata', 'attachments', 'generators', 'include', 'data', 'output_validators',
-                    );
+                    const entries = await getFiles('testdata', 'attachments', 'generators', 'include', 'data', 'output_validators');
                     for (const [entry, location] of entries) {
                         if (entry.isFile()) {
                             if (isProblemConfigFilename(entry.name)) {
@@ -1727,9 +1772,7 @@ export class ProblemModel {
                         const children = await fs.readdir(location, { withFileTypes: true });
                         for (const childEntry of children) {
                             if (!childEntry.isFile() || !isProblemConfigFilename(childEntry.name)) continue;
-                            await normalizeProblemTestdataUpload(
-                                childEntry.name, path.join(location, childEntry.name),
-                            );
+                            await normalizeProblemTestdataUpload(childEntry.name, path.join(location, childEntry.name));
                         }
                     }
                 };
@@ -1745,8 +1788,9 @@ export class ProblemModel {
                     }
                 }
                 if (await fs.exists(path.join(tmpdir, i, 'domjudge-problem.ini'))) {
-                    const djConfig = (await fs.readFile(path.join(tmpdir, i, 'domjudge-problem.ini'), 'utf-8') as string)
-                        .split('\n').map((line: string) => line.split('=').map((lines: string) => lines.trim()));
+                    const djConfig = ((await fs.readFile(path.join(tmpdir, i, 'domjudge-problem.ini'), 'utf-8')) as string)
+                        .split('\n')
+                        .map((line: string) => line.split('=').map((lines: string) => lines.trim()));
                     const djConfigJson: any = {};
                     for (const [key, value] of djConfig) {
                         djConfigJson[key] = value;
@@ -1762,25 +1806,35 @@ export class ProblemModel {
                     config.memory = (pdoc as any).limits.memory ? `${(pdoc as any).limits.memory}m` : config.memory || undefined;
                     configChanged = true;
                 }
-                const overrideDoc = overridePid
-                    ? await ProblemModel.get(domainId, overridePid, ['structureRevision'] as any, true)
-                    : null;
+                const overrideDoc = overridePid ? await ProblemModel.get(domainId, overridePid, ['structureRevision'] as any, true) : null;
                 const docId = overridePid
-                    ? (await ProblemModel.edit(domainId, overridePid, {
-                        title: title.trim(),
-                        content: overrideContent || pdoc.content?.toString() || 'No content',
-                        tag,
-                        difficulty: pdoc.difficulty,
-                        ...(options.hidden ? { hidden: true } : {}),
-                    }, { expectedStructureRevision: overrideDoc?.structureRevision })).docId
+                    ? (
+                          await ProblemModel.edit(
+                              domainId,
+                              overridePid,
+                              {
+                                  title: title.trim(),
+                                  content: overrideContent || pdoc.content?.toString() || 'No content',
+                                  tag,
+                                  difficulty: pdoc.difficulty,
+                                  ...(options.hidden ? { hidden: true } : {}),
+                              },
+                              { expectedStructureRevision: overrideDoc?.structureRevision },
+                          )
+                      ).docId
                     : await ProblemModel.add(
-                        domainId, pid, title.trim(), overrideContent || pdoc.content?.toString() || 'No content',
-                        operator || pdoc.owner, tag, {
-                            hidden: options.hidden || pdoc.hidden,
-                            difficulty: pdoc.difficulty,
-                            problemKind: 'programming',
-                        },
-                    );
+                          domainId,
+                          pid,
+                          title.trim(),
+                          overrideContent || pdoc.content?.toString() || 'No content',
+                          operator || pdoc.owner,
+                          tag,
+                          {
+                              hidden: options.hidden || pdoc.hidden,
+                              difficulty: pdoc.difficulty,
+                              problemKind: 'programming',
+                          },
+                      );
                 // TODO delete unused file when updating pdoc
                 for (const [f, loc] of await getFiles('testdata', 'attachments', 'generators', 'include')) {
                     if (f.isDirectory()) {
@@ -1860,12 +1914,13 @@ export class ProblemModel {
         const tmpdir = path.join(os.tmpdir(), 'hydro', `${Math.random()}.export`);
         await fs.mkdir(tmpdir);
         const pdocs = await ProblemModel.getMulti(
-            domainId, pidFilter ? { pid: new RegExp(pidFilter) } : {},
+            domainId,
+            pidFilter ? { pid: new RegExp(pidFilter) } : {},
             ProblemModel.PROJECTION_PUBLIC,
         ).toArray();
         if (process.env.HYDRO_CLI) logger.info(`Exporting ${pdocs.length} problems`);
         for (const pdoc of pdocs) {
-            if (process.env.HYDRO_CLI) logger.info(`Exporting problem ${pdoc.pid || (`P${pdoc.docId}`)} (${pdoc.title})`);
+            if (process.env.HYDRO_CLI) logger.info(`Exporting problem ${pdoc.pid || `P${pdoc.docId}`} (${pdoc.title})`);
             const problemPath = path.join(tmpdir, `${pdoc.docId}`);
             await fs.mkdir(problemPath);
             const problemYaml = path.join(problemPath, 'problem.yaml');
@@ -1920,9 +1975,14 @@ export class ProblemModel {
 }
 
 async function assertConfigTestdataEventAllowed(domainId: string, docId: number) {
-    const pdoc = await document.coll.findOne({
-        domainId, docType: document.TYPE_PROBLEM, docId,
-    }, { projection: { problemKind: 1 } });
+    const pdoc = await document.coll.findOne(
+        {
+            domainId,
+            docType: document.TYPE_PROBLEM,
+            docId,
+        },
+        { projection: { problemKind: 1 } },
+    );
     if (!pdoc) throw new ProblemNotFoundError(domainId, docId);
     if (pdoc.problemKind !== undefined && parseProblemKind(pdoc.problemKind) !== 'programming') {
         throw new ValidationError('name', null, '结构化题配置不通过 testdata 文件修改');

@@ -45,8 +45,7 @@ export default function ProblemType() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
               <div>{i18n('CheckerType')}</div>
               <SegmentedControl
-                value={(['strict', 'default'].includes(checkerType) || !checkerType)
-                  ? 'default' : (checkerType !== 'testlib' ? 'other' : 'testlib')}
+                value={['strict', 'default'].includes(checkerType) || !checkerType ? 'default' : checkerType !== 'testlib' ? 'other' : 'testlib'}
                 onChange={(value) => {
                   dispatch({ type: 'CONFIG_FORM_UPDATE', key: 'checker_type', value });
                   if (value === 'testlib' && !category) setCategory('custom');
@@ -59,25 +58,33 @@ export default function ProblemType() {
               />
             </div>
 
-            {((['strict', 'default'].includes(checkerType) || !checkerType)) && (
+            {(['strict', 'default'].includes(checkerType) || !checkerType) && (
               <Switch
                 styles={{ body: { display: 'flex' } }}
                 checked={checkerType !== 'strict'}
                 label={i18n('Ignore trailing space and enter.')}
                 onChange={() => {
-                  dispatch({ type: 'CONFIG_FORM_UPDATE', key: 'checker_type', value: checkerType === 'strict' ? 'default' : 'strict' });
+                  dispatch({
+                    type: 'CONFIG_FORM_UPDATE',
+                    key: 'checker_type',
+                    value: checkerType === 'strict' ? 'default' : 'strict',
+                  });
                 }}
               />
             )}
 
-            {(!['strict', 'default'].includes(checkerType) && checkerType && checkerType === 'testlib') && (
+            {!['strict', 'default'].includes(checkerType) && checkerType && checkerType === 'testlib' && (
               <div className="row">
                 <FormItem columns={4} label="Type">
                   <select
                     value={category}
                     onChange={(ev) => {
                       setCategory(ev.currentTarget.value);
-                      dispatch({ type: 'CONFIG_FORM_UPDATE', key: 'checker', value: ev.currentTarget.value === 'preset' ? 'acmp' : null });
+                      dispatch({
+                        type: 'CONFIG_FORM_UPDATE',
+                        key: 'checker',
+                        value: ev.currentTarget.value === 'preset' ? 'acmp' : null,
+                      });
                     }}
                     className="select"
                   >
@@ -85,23 +92,27 @@ export default function ProblemType() {
                     <option value="custom">{i18n('Custom')}</option>
                   </select>
                 </FormItem>
-                {category === 'preset'
-                  ? <FormItem columns={8} label="Checker">
+                {category === 'preset' ? (
+                  <FormItem columns={8} label="Checker">
                     <select
                       value={typeof checker === 'string' ? checker : checker.file}
                       onChange={(ev) => dispatch({ type: 'CONFIG_FORM_UPDATE', key: 'checker', value: ev.currentTarget.value })}
                       className="select"
                     >
                       {testlibCheckers.map((c) => (
-                        <option key={c} value={c}>{c}</option>
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
                       ))}
                     </select>
                   </FormItem>
-                  : <SingleFileSelect formKey="checker" label="Checker" withLang />}
+                ) : (
+                  <SingleFileSelect formKey="checker" label="Checker" withLang />
+                )}
               </div>
             )}
 
-            {(!['strict', 'default'].includes(checkerType) && checkerType && checkerType !== 'testlib') && (
+            {!['strict', 'default'].includes(checkerType) && checkerType && checkerType !== 'testlib' && (
               <div className="row">
                 <FormItem columns={4} label="Interface">
                   <ManagedSelect options={['syzoj', 'hustoj', 'qduoj', 'lemon', 'kattis']} formKey="checker_type" />
@@ -125,7 +136,7 @@ export default function ProblemType() {
               <input
                 defaultValue={numProcesses || 2}
                 placeholder="2"
-                onChange={(ev) => dispatch(({ type: 'CONFIG_FORM_UPDATE', key: 'num_processes', value: +ev.currentTarget.value }))}
+                onChange={(ev) => dispatch({ type: 'CONFIG_FORM_UPDATE', key: 'num_processes', value: +ev.currentTarget.value })}
                 className="textbox"
               />
             </FormItem>
@@ -149,16 +160,14 @@ export default function ProblemType() {
                 defaultValue={filename || '#.txt'}
                 placeholder="#.txt"
                 disabled={subType !== 'multi'}
-                onChange={(ev) => dispatch(({ type: 'CONFIG_FORM_UPDATE', key: 'filename', value: ev.currentTarget.value }))}
+                onChange={(ev) => dispatch({ type: 'CONFIG_FORM_UPDATE', key: 'filename', value: ev.currentTarget.value })}
                 className="textbox"
               />
             </FormItem>
           </div>
         )}
 
-        {Type === 'objective' && (
-          <p>{i18n('Unsupported configure this type of problem. Please refer to the documentation.')}</p>
-        )}
+        {Type === 'objective' && <p>{i18n('Unsupported configure this type of problem. Please refer to the documentation.')}</p>}
       </Card>
     </FormItem>
   );

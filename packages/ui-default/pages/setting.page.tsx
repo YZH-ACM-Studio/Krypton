@@ -11,10 +11,7 @@ const page = new NamedPage('manage_config', async () => {
     document.documentElement.className += ' dark';
   }
 
-  const [{ ConfigEditor, ComponentsProvider }, { load }] = await Promise.all([
-    import('@hydrooj/components'),
-    import('vj/components/monaco/loader'),
-  ]);
+  const [{ ConfigEditor, ComponentsProvider }, { load }] = await Promise.all([import('@hydrooj/components'), import('vj/components/monaco/loader')]);
   const { monaco, registerAction, renderMarkdown } = await load(['yaml']);
 
   function Markdown({ source }) {
@@ -37,17 +34,21 @@ const page = new NamedPage('manage_config', async () => {
         registerAction={registerAction}
         Markdown={Markdown}
         onSave={(value) => {
-          request.post('', { value }).then(() => {
-            Notification.success(i18n('Changes saved successfully'));
-            window.location.reload();
-          }).catch((e) => {
-            Notification.error(i18n('Failed to save changes:'), e.message);
-          });
+          request
+            .post('', { value })
+            .then(() => {
+              Notification.success(i18n('Changes saved successfully'));
+              window.location.reload();
+            })
+            .catch((e) => {
+              Notification.error(i18n('Failed to save changes:'), e.message);
+            });
         }}
         sidebar={<DomComponent childDom={$('.section.side').get(0)} />}
         dynamic={UiContext.dynamic || {}}
       />
-      <style>{`
+      <style>
+        {`
         body {
           overflow: hidden;
         }

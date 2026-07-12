@@ -1,4 +1,3 @@
-/* eslint-disable no-await-in-loop */
 import child from 'child_process';
 import path from 'path';
 import { CAC } from 'cac';
@@ -28,7 +27,7 @@ export function register(cli: CAC) {
     cli.command('patch <patchfile>')
         .option('--dry-run', 'Show what files would be patched without actually patching them')
         .option('-R, --revert', 'Revert the patch instead of applying it')
-        .action(async (patch: string, options: { dryRun?: boolean, revert?: boolean }) => {
+        .action(async (patch: string, options: { dryRun?: boolean; revert?: boolean }) => {
             let content = '';
             global.__DISABLE_HYDRO_DEPRECATION_WARNING__ = true;
             if (/^[a-f0-9]{40}$/.test(patch)) patch = `https://github.com/hydro-dev/Hydro/commit/${patch}.patch`;
@@ -38,7 +37,7 @@ export function register(cli: CAC) {
                 content = res.body.toString();
             } else content = await fs.readFile(patch, 'utf-8');
             const lines = content.split('\n');
-            const filePatches: { filename: string, startLine: number, endLine: number }[] = [];
+            const filePatches: { filename: string; startLine: number; endLine: number }[] = [];
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
                 if (line.startsWith('diff --git')) {

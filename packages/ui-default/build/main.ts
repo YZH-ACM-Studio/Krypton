@@ -11,26 +11,29 @@ import root from './utils/root';
 
 const argv = cac().parse();
 
-async function runWebpack({
-  watch, production, measure, dev, https,
-}) {
+async function runWebpack({ watch, production, measure, dev, https }) {
   const compiler = webpack(await webpackConfig({ watch, production, measure }));
   if (dev) {
-    const server = new WebpackDevServer({
-      port: https ? 8001 : 8000,
-      compress: true,
-      hot: true,
-      server: https ? 'https' : 'http',
-      allowedHosts: 'all',
-      proxy: [{
-        context: (p) => p !== '/ws',
-        target: 'http://localhost:2333',
-        ws: true,
-      }],
-      client: {
-        webSocketURL: 'auto://0.0.0.0:0/ws',
+    const server = new WebpackDevServer(
+      {
+        port: https ? 8001 : 8000,
+        compress: true,
+        hot: true,
+        server: https ? 'https' : 'http',
+        allowedHosts: 'all',
+        proxy: [
+          {
+            context: (p) => p !== '/ws',
+            target: 'http://localhost:2333',
+            ws: true,
+          },
+        ],
+        client: {
+          webSocketURL: 'auto://0.0.0.0:0/ws',
+        },
       },
-    }, compiler);
+      compiler,
+    );
     server.start();
     return;
   }
@@ -82,7 +85,7 @@ async function runWebpack({
       sorted.push(['Total', oldTotal, newTotal]);
       for (const entry of sorted) {
         const [name, orig, curr] = entry;
-        const diff = 100 * (curr - orig) / orig;
+        const diff = (100 * (curr - orig)) / orig;
         if (Math.abs(diff) < 0.01 && name !== 'Total') continue;
         const color = orig > curr ? chalk.green : chalk.red;
         console.log(color(`${name.padStart(35)} ${size(orig).padStart(10)} -> ${size(curr).padEnd(10)} (${diff.toPrecision(5)}%)`), chalk.reset());
@@ -104,13 +107,13 @@ async function main() {
       classNamePrefix: 'icon',
       fontName: 'hydro-icons',
       css: true,
-      startUnicode: 0xEA01,
+      startUnicode: 0xea01,
       svg2ttf: {
         timestamp: 1577836800, // 2020-1-1
       },
       svgicons2svgfont: {
         fontHeight: 1000,
-        descent: 6.25 / 100 * 1000,
+        descent: (6.25 / 100) * 1000,
         normalize: true,
       },
     });

@@ -4,29 +4,9 @@
 
 import { useMemo, useState } from 'react';
 import { motion } from 'motion/react';
-import {
-  ArrowLeft,
-  FolderOpen,
-  GripVertical,
-  Plus,
-  Save,
-  Trash2,
-  Upload,
-} from 'lucide-react';
-import {
-  DndContext,
-  PointerSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core';
-import {
-  SortableContext,
-  arrayMove,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
+import { ArrowLeft, FolderOpen, GripVertical, Plus, Save, Trash2, Upload } from 'lucide-react';
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -41,12 +21,12 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens } from '@/lib/format';
 
 type R = Record<string, any>;
-type TrainingPlanNode = {
+interface TrainingPlanNode {
   _id: number;
   title: string;
   requireNids: number[];
   pids: Array<string | number>;
-};
+}
 
 const DEFAULT_PLAN: TrainingPlanNode[] = [
   {
@@ -69,13 +49,6 @@ function normalizeToken(value: string): string | number {
   return token;
 }
 
-function parseTokenList(value: string): Array<string | number> {
-  return value
-    .split(/[\s,，]+/)
-    .map(normalizeToken)
-    .filter((token) => token !== '');
-}
-
 function uniqueValues<T>(items: T[]): T[] {
   return Array.from(new Set(items));
 }
@@ -89,17 +62,13 @@ function normalizePlanNode(node: R, index: number): TrainingPlanNode {
       ? uniqueValues(node.requireNids.map(Number).filter((value) => Number.isSafeInteger(value) && value > 0))
       : [],
     pids: Array.isArray(node.pids)
-      ? uniqueValues(node.pids.map((value) => typeof value === 'number' ? value : normalizeToken(String(value))).filter((value) => value !== ''))
+      ? uniqueValues(node.pids.map((value) => (typeof value === 'number' ? value : normalizeToken(String(value)))).filter((value) => value !== ''))
       : [],
   };
 }
 
 function parsePlan(value: unknown): TrainingPlanNode[] {
-  const source = Array.isArray(value)
-    ? value
-    : typeof value === 'string' && value.trim()
-      ? JSON.parse(value)
-      : DEFAULT_PLAN;
+  const source = Array.isArray(value) ? value : typeof value === 'string' && value.trim() ? JSON.parse(value) : DEFAULT_PLAN;
   if (!Array.isArray(source)) return DEFAULT_PLAN;
   const nodes = source.map(normalizePlanNode).filter((node) => node.title && node.pids.length > 0);
   return nodes.length ? nodes : DEFAULT_PLAN;
@@ -131,9 +100,7 @@ export function TrainingEditPage() {
   const data = bs.page.data;
   const tdoc: R = data.tdoc || {};
   const isEdit = data.page_name === 'training_edit';
-  const trainingUrl = isEdit
-    ? replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tdoc.docId || tdoc._id) })
-    : bs.urls.training;
+  const trainingUrl = isEdit ? replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tdoc.docId || tdoc._id) }) : bs.urls.training;
   const [planNodes, setPlanNodes] = useState<TrainingPlanNode[]>(() => {
     try {
       return parsePlan(data.dag || tdoc.dag);
@@ -143,7 +110,7 @@ export function TrainingEditPage() {
   });
 
   const updateNode = (index: number, patch: Partial<TrainingPlanNode>) => {
-    setPlanNodes((nodes) => nodes.map((node, i) => i === index ? { ...node, ...patch } : node));
+    setPlanNodes((nodes) => nodes.map((node, i) => (i === index ? { ...node, ...patch } : node)));
   };
 
   const updateNodeId = (index: number, nextId: number) => {
@@ -154,7 +121,7 @@ export function TrainingEditPage() {
         if (i === index) return { ...node, _id: safeId, requireNids: node.requireNids.filter((id) => id !== safeId) };
         return {
           ...node,
-          requireNids: uniqueValues(node.requireNids.map((id) => id === currentId ? safeId : id)).filter((id) => id !== node._id),
+          requireNids: uniqueValues(node.requireNids.map((id) => (id === currentId ? safeId : id))).filter((id) => id !== node._id),
         };
       });
     });
@@ -189,25 +156,24 @@ export function TrainingEditPage() {
   };
 
   const toggleDependency = (index: number, dependencyId: number) => {
-    setPlanNodes((nodes) => nodes.map((node, i) => {
-      if (i !== index) return node;
-      const next = node.requireNids.includes(dependencyId)
-        ? node.requireNids.filter((id) => id !== dependencyId)
-        : [...node.requireNids, dependencyId];
-      return { ...node, requireNids: next };
-    }));
+    setPlanNodes((nodes) =>
+      nodes.map((node, i) => {
+        if (i !== index) return node;
+        const next = node.requireNids.includes(dependencyId)
+          ? node.requireNids.filter((id) => id !== dependencyId)
+          : [...node.requireNids, dependencyId];
+        return { ...node, requireNids: next };
+      }),
+    );
   };
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center gap-3">
         <Button asChild variant="ghost" size="icon">
-          <a href={trainingUrl}><ArrowLeft className="size-4" /></a>
+          <a href={trainingUrl}>
+            <ArrowLeft className="size-4" />
+          </a>
         </Button>
         <h1 className="text-xl font-semibold">{isEdit ? '编辑训练' : '创建训练'}</h1>
       </div>
@@ -216,17 +182,23 @@ export function TrainingEditPage() {
         <CardContent className="p-6">
           <form method="post" className="space-y-4">
             <div className="space-y-1.5">
-              <label htmlFor="title" className="text-sm font-medium">标题</label>
+              <label htmlFor="title" className="text-sm font-medium">
+                标题
+              </label>
               <Input id="title" name="title" defaultValue={tdoc.title || ''} required />
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="description" className="text-sm font-medium">简介 (Markdown)</label>
+              <label htmlFor="description" className="text-sm font-medium">
+                简介 (Markdown)
+              </label>
               <MarkdownEditor name="description" value={tdoc.description || ''} minHeight={280} preferredLang={bs.locale} />
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="content" className="text-sm font-medium">详细说明 (Markdown)</label>
+              <label htmlFor="content" className="text-sm font-medium">
+                详细说明 (Markdown)
+              </label>
               <MarkdownEditor name="content" value={tdoc.content || ''} minHeight={280} preferredLang={bs.locale} />
             </div>
 
@@ -242,7 +214,9 @@ export function TrainingEditPage() {
             <input type="hidden" name="dag" value={serializePlan(planNodes)} readOnly />
 
             <div className="space-y-1.5">
-              <label htmlFor="pin" className="text-sm font-medium">置顶</label>
+              <label htmlFor="pin" className="text-sm font-medium">
+                置顶
+              </label>
               <SimpleSelect
                 id="pin"
                 name="pin"
@@ -258,7 +232,8 @@ export function TrainingEditPage() {
 
             <div className="flex items-center gap-3">
               <Button type="submit">
-                <Save className="mr-1 size-4" />{isEdit ? '保存修改' : '创建训练'}
+                <Save className="mr-1 size-4" />
+                {isEdit ? '保存修改' : '创建训练'}
               </Button>
             </div>
           </form>
@@ -313,7 +288,8 @@ function topologicalSort(nodes: TrainingPlanNode[]): TrainingPlanNode[] {
         if (next === 0) {
           // Insert preserving ascending id order.
           const idx = ready.findIndex((x) => x > dep._id);
-          if (idx < 0) ready.push(dep._id); else ready.splice(idx, 0, dep._id);
+          if (idx < 0) ready.push(dep._id);
+          else ready.splice(idx, 0, dep._id);
         }
       }
     }
@@ -321,9 +297,7 @@ function topologicalSort(nodes: TrainingPlanNode[]): TrainingPlanNode[] {
   return out.length === nodes.length ? out : [...nodes].sort((a, b) => a._id - b._id);
 }
 
-function StagePlanEditor({
-  planNodes, setPlanNodes, addNode, removeNode, updateNode, updateNodeId, toggleDependency,
-}: StagePlanEditorProps) {
+function StagePlanEditor({ planNodes, setPlanNodes, addNode, removeNode, updateNode, updateNodeId, toggleDependency }: StagePlanEditorProps) {
   // 8px pointer activation distance prevents drag-handle clicks from
   // triggering on every mousedown — users can still click stage cards normally.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -408,9 +382,7 @@ interface SortableStageCardProps {
   onToggleDependency: (dep: number) => void;
 }
 
-function SortableStageCard({
-  node, index, planNodes, onRemove, onUpdate, onUpdateId, onToggleDependency,
-}: SortableStageCardProps) {
+function SortableStageCard({ node, index, planNodes, onRemove, onUpdate, onUpdateId, onToggleDependency }: SortableStageCardProps) {
   const sortable = useSortable({ id: `${node._id}` });
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = sortable;
   const style: React.CSSProperties = {
@@ -425,11 +397,7 @@ function SortableStageCard({
   const hiddenCount = otherNodes.length - visibleOthers.length;
 
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="rounded-md border bg-muted/20 p-4"
-    >
+    <div ref={setNodeRef} style={style} className="rounded-md border bg-muted/20 p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           {/* Drag handle. Cursor changes to grab/grabbing; the rest of the
@@ -465,7 +433,9 @@ function SortableStageCard({
 
       <div className="grid gap-3 sm:grid-cols-[96px_1fr]">
         <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground" htmlFor={`plan-id-${index}`}>ID</label>
+          <label className="text-xs text-muted-foreground" htmlFor={`plan-id-${index}`}>
+            ID
+          </label>
           <Input
             id={`plan-id-${index}`}
             type="number"
@@ -476,23 +446,16 @@ function SortableStageCard({
           />
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs text-muted-foreground" htmlFor={`plan-title-${index}`}>标题</label>
-          <Input
-            id={`plan-title-${index}`}
-            required
-            value={node.title}
-            onChange={(event) => onUpdate({ title: event.target.value })}
-          />
+          <label className="text-xs text-muted-foreground" htmlFor={`plan-title-${index}`}>
+            标题
+          </label>
+          <Input id={`plan-title-${index}`} required value={node.title} onChange={(event) => onUpdate({ title: event.target.value })} />
         </div>
       </div>
 
       <div className="mt-3 space-y-1.5">
         <label className="text-xs text-muted-foreground">题目</label>
-        <ProblemPicker
-          value={node.pids}
-          onChange={(next) => onUpdate({ pids: next })}
-          placeholder="搜索题目 (pid / 标题)…"
-        />
+        <ProblemPicker value={node.pids} onChange={(next) => onUpdate({ pids: next })} placeholder="搜索题目 (pid / 标题)…" />
       </div>
 
       <div className="mt-3 space-y-2">
@@ -504,12 +467,8 @@ function SortableStageCard({
                 key={candidate._id}
                 className="inline-flex cursor-pointer items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs"
               >
-                <Checkbox
-                  size="sm"
-                  checked={node.requireNids.includes(candidate._id)}
-                  onChange={() => onToggleDependency(candidate._id)}
-                />
-                #{candidate._id} {candidate.title}
+                <Checkbox size="sm" checked={node.requireNids.includes(candidate._id)} onChange={() => onToggleDependency(candidate._id)} />#
+                {candidate._id} {candidate.title}
               </label>
             ))}
             {hiddenCount > 0 ? (
@@ -550,15 +509,12 @@ export function TrainingFilesPage() {
   const trainingUrl = replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tid) });
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center gap-3">
         <Button asChild variant="ghost" size="icon">
-          <a href={trainingUrl}><ArrowLeft className="size-4" /></a>
+          <a href={trainingUrl}>
+            <ArrowLeft className="size-4" />
+          </a>
         </Button>
         <div>
           <h1 className="text-xl font-semibold">训练文件</h1>
@@ -569,12 +525,14 @@ export function TrainingFilesPage() {
       <Card>
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="flex items-center gap-2 text-base">
-            <FolderOpen className="size-4" />文件 ({files.length})
+            <FolderOpen className="size-4" />
+            文件 ({files.length})
           </CardTitle>
           <form method="post" encType="multipart/form-data" className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             <input type="file" name="file" className="text-xs" />
             <Button type="submit" name="operation" value="upload_file" size="sm" variant="outline">
-              <Upload className="mr-1 size-3" />上传
+              <Upload className="mr-1 size-3" />
+              上传
             </Button>
           </form>
         </CardHeader>

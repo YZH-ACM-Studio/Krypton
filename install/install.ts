@@ -1,4 +1,3 @@
-/* eslint-disable no-await-in-loop */
 /* eslint-disable no-sequences */
 import { execSync, ExecSyncOptions } from 'child_process';
 import crypto from 'crypto';
@@ -12,15 +11,16 @@ const isSupported = supportsHyperlink.stdout;
 const OSC = '\u001B]';
 const BEL = '\u0007';
 const SEP = ';';
-export const link = isSupported ? (text: string, url: string) => [
-    OSC, '8', SEP, SEP, url, BEL, text, OSC, '8', SEP, SEP, BEL,
-].join('') : (text: string, url: string) => `${text} < ${url} > `;
+export const link = isSupported
+    ? (text: string, url: string) => [OSC, '8', SEP, SEP, url, BEL, text, OSC, '8', SEP, SEP, BEL].join('')
+    : (text: string, url: string) => `${text} < ${url} > `;
 const freemem = os.freemem();
-const smallMemory = (freemem < 1024 * 1024 * 1024);
+const smallMemory = freemem < 1024 * 1024 * 1024;
 
-const nixInstall = (...packages: string[]) => (smallMemory
-    ? packages.map((t) => `nix-env -iA ${t.includes('.') ? t : `nixpkgs.${t}`}`).join(' && ')
-    : `nix-env -iA ${packages.map((t) => (t.includes('.') ? t : `nixpkgs.${t}`)).join(' ')}`);
+const nixInstall = (...packages: string[]) =>
+    smallMemory
+        ? packages.map((t) => `nix-env -iA ${t.includes('.') ? t : `nixpkgs.${t}`}`).join(' && ')
+        : `nix-env -iA ${packages.map((t) => (t.includes('.') ? t : `nixpkgs.${t}`)).join(' ')}`;
 
 const warnings: [string, ...any[]][] = [];
 
@@ -37,7 +37,10 @@ const exec = (command: string, args?: ExecSyncOptions) => {
         };
     }
 };
-const sleep = (t: number) => new Promise((r) => { setTimeout(r, t); });
+const sleep = (t: number) =>
+    new Promise((r) => {
+        setTimeout(r, t);
+    });
 
 const shmFAQ = 'https://docs.hydro.ac/FAQ/#%E8%B0%83%E6%95%B4%E4%B8%B4%E6%97%B6%E7%9B%AE%E5%BD%95%E5%A4%A7%E5%B0%8F';
 const locales = {
@@ -51,7 +54,8 @@ const locales = {
         'error.unsupportedArch': '不支持的架构 %s ,请尝试手动安装。',
         'error.osreleaseNotFound': '无法获取系统版本信息（/etc/os-release 文件未找到），请尝试手动安装。',
         'error.unsupportedOS': '不支持的操作系统 %s ，请尝试手动安装，',
-        'error.centos': 'CentOS 及其变种系统因系统内核过低，无法安装 Hydro，强烈建议使用其他系统。若确有需求，请升级 Linux 内核至 4.4+ 后再手动安装 Hydro。',
+        'error.centos':
+            'CentOS 及其变种系统因系统内核过低，无法安装 Hydro，强烈建议使用其他系统。若确有需求，请升级 Linux 内核至 4.4+ 后再手动安装 Hydro。',
         'install.preparing': '正在初始化安装...',
         'install.mongodb': '正在安装 mongodb...',
         'install.createDatabaseUser': '正在创建数据库用户...',
@@ -141,9 +145,11 @@ let migration = migrationArg ? migrationArg.split('=')[1] : '';
 
 let needRestart = false;
 
-let locale = (process.env.LANG?.includes('zh') || process.env.LOCALE?.includes('zh')) ? 'zh' : 'en';
+let locale = process.env.LANG?.includes('zh') || process.env.LOCALE?.includes('zh') ? 'zh' : 'en';
 if (process.env.TERM === 'linux') locale = 'en';
-const processLog = (orig) => (str, ...args) => (orig(locales[locale][str] || str, ...args), 0);
+const processLog =
+    (orig) =>
+    (str, ...args) => (orig(locales[locale][str] || str, ...args), 0);
 const log = {
     info: processLog(console.log),
     warn: processLog(console.warn),
@@ -174,7 +180,7 @@ if (!cpuInfoFile.includes('avx') && !installAsJudge) {
 let retry = 0;
 log.info('install.start');
 let password = crypto.randomBytes(32).toString('hex');
-// eslint-disable-next-line
+
 let CN = true;
 
 const nixProfile = `${process.env.HOME}/.nix-profile/`;
@@ -299,17 +305,18 @@ function removeOptionalEsbuildDeps() {
     const pkgjson = `${yarnGlobalPath}/package.json`;
     const data = existsSync(pkgjson) ? require(pkgjson) : {};
     data.resolutions ||= {};
-    Object.assign(data.resolutions, Object.fromEntries([
-        '@esbuild/linux-loong64',
-        'esbuild-windows-32',
-        ...['android', 'darwin', 'freebsd', 'windows']
-            .flatMap((i) => [`${i}-64`, `${i}-arm64`])
-            .map((i) => `esbuild-${i}`),
-        ...['32', 'arm', 'mips64', 'ppc64', 'riscv64', 's390x']
-            .map((i) => `esbuild-linux-${i}`),
-        ...['netbsd', 'openbsd', 'sunos']
-            .map((i) => `esbuild-${i}-64`),
-    ].map((i) => [i, 'link:/dev/null'])));
+    Object.assign(
+        data.resolutions,
+        Object.fromEntries(
+            [
+                '@esbuild/linux-loong64',
+                'esbuild-windows-32',
+                ...['android', 'darwin', 'freebsd', 'windows'].flatMap((i) => [`${i}-64`, `${i}-arm64`]).map((i) => `esbuild-${i}`),
+                ...['32', 'arm', 'mips64', 'ppc64', 'riscv64', 's390x'].map((i) => `esbuild-linux-${i}`),
+                ...['netbsd', 'openbsd', 'sunos'].map((i) => `esbuild-${i}-64`),
+            ].map((i) => [i, 'link:/dev/null']),
+        ),
+    );
     exec(`mkdir -p ${yarnGlobalPath}`);
     writeFileSync(pkgjson, JSON.stringify(data, null, 2));
     return true;
@@ -381,7 +388,7 @@ const Steps = () => [
                     warnings.push(['shm.readFail']);
                     return;
                 }
-                const size = (+shm) / 1024;
+                const size = +shm / 1024;
                 if (size < 250) {
                     log.warn('shm.sizeTooSmall', size);
                     warnings.push(['shm.sizeTooSmall', size]);
@@ -392,7 +399,10 @@ const Steps = () => [
                 if (process.arch !== 'arm64') return;
                 const isRpi = ['rpi', 'raspberrypi'].some((i) => readFileSync('/proc/cpuinfo', 'utf-8').toLowerCase().includes(i));
                 if (!isRpi) return;
-                const memoryLine = readFileSync('/proc/cgroups', 'utf-8').split('\n').find((i) => i.includes('memory'))?.trim();
+                const memoryLine = readFileSync('/proc/cgroups', 'utf-8')
+                    .split('\n')
+                    .find((i) => i.includes('memory'))
+                    ?.trim();
                 const memoryCgroupEnabled = memoryLine && !memoryLine.endsWith('0');
                 if (memoryCgroupEnabled) return;
                 let targetFile = '/boot/cmdline.txt';
@@ -405,11 +415,17 @@ const Steps = () => [
             },
             () => {
                 if (substituters.length) {
-                    writeFileSync('/etc/nix/nix.conf', `substituters = ${substituters.join(' ')}
-${nixConfBase}`);
+                    writeFileSync(
+                        '/etc/nix/nix.conf',
+                        `substituters = ${substituters.join(' ')}
+${nixConfBase}`,
+                    );
                 } else if (!CN) {
-                    writeFileSync('/etc/nix/nix.conf', `substituters = https://cache.nixos.org/ https://nix.hydro.ac/cache
-${nixConfBase}`);
+                    writeFileSync(
+                        '/etc/nix/nix.conf',
+                        `substituters = https://cache.nixos.org/ https://nix.hydro.ac/cache
+${nixConfBase}`,
+                    );
                 }
                 if (CN) return;
                 // rollback mirrors
@@ -430,8 +446,12 @@ ${nixConfBase}`);
                     if (migration) return;
                     const docker = !exec('docker -v').code;
                     if (!docker) return;
-                    const containers = exec('docker ps -a --format json').output?.split('\n')
-                        .map((i) => i.trim()).filter((i) => i).map((i) => JSON.parse(i)) || [];
+                    const containers =
+                        exec('docker ps -a --format json')
+                            .output?.split('\n')
+                            .map((i) => i.trim())
+                            .filter((i) => i)
+                            .map((i) => JSON.parse(i)) || [];
                     const uoj = containers.find((i) => i.Image.toLowerCase() === 'universaloj/uoj-system' && i.State === 'running');
                     if (uoj) {
                         log.info('migrate.uojFound');
@@ -456,7 +476,10 @@ ${nixConfBase}`);
         skip: () => installAsJudge,
         hidden: installAsJudge,
         operations: [
-            () => writeFileSync(`${process.env.HOME}/.config/nixpkgs/config.nix`, `\
+            () =>
+                writeFileSync(
+                    `${process.env.HOME}/.config/nixpkgs/config.nix`,
+                    `\
 {
     permittedInsecurePackages = [
         "openssl-1.1.1t"
@@ -467,55 +490,50 @@ ${nixConfBase}`);
         "openssl-1.1.1y"
         "openssl-1.1.1z"
     ];
-}`),
+}`,
+                ),
             nixInstall(`hydro.mongodb${avx ? 7 : 4}${CN ? '-cn' : ''}`, 'mongosh', 'mongodb-tools'),
         ],
     },
     {
         init: 'install.compiler',
-        operations: [
-            nixInstall('gcc', 'python3'),
-        ],
+        operations: [nixInstall('gcc', 'python3')],
     },
     {
         init: 'install.sandbox',
         skip: () => !exec('hydro-sandbox --help').code,
-        operations: [
-            nixInstall('go-judge'),
-            'ln -sf $(which go-judge) /usr/local/bin/hydro-sandbox',
-        ],
+        operations: [nixInstall('go-judge'), 'ln -sf $(which go-judge) /usr/local/bin/hydro-sandbox'],
     },
     {
         init: 'install.caddy',
         skip: () => installAsJudge || noCaddy || existsSync(`${process.env.HOME}/.hydro/Caddyfile`),
         hidden: installAsJudge,
-        operations: [
-            nixInstall('caddy'),
-            () => writeFileSync(`${process.env.HOME}/.hydro/Caddyfile`, Caddyfile),
-        ],
+        operations: [nixInstall('caddy'), () => writeFileSync(`${process.env.HOME}/.hydro/Caddyfile`, Caddyfile)],
     },
     {
         init: 'install.hydro',
         operations: [
             () => removeOptionalEsbuildDeps(),
-            (CN ? () => {
-                let res: any = null;
-                try {
-                    exec('yarn config set registry https://registry.npmmirror.com/', { stdio: 'inherit' });
-                    res = exec(`yarn global add ${installTarget}`, { stdio: 'inherit' });
-                } catch (e) {
-                    console.log('Failed to install from npmmirror, fallback to yarnpkg');
-                } finally {
-                    exec('yarn config set registry https://registry.yarnpkg.com', { stdio: 'inherit' });
-                }
-                try {
-                    exec(`yarn global add ${installTarget}`, { timeout: 60000 });
-                } catch (e) {
-                    console.warn('Failed to check update from yarnpkg');
-                    if (res?.code !== 0) return 'retry';
-                }
-                return null;
-            } : [`yarn global add ${installTarget}`, { retry: true }]),
+            CN
+                ? () => {
+                      let res: any = null;
+                      try {
+                          exec('yarn config set registry https://registry.npmmirror.com/', { stdio: 'inherit' });
+                          res = exec(`yarn global add ${installTarget}`, { stdio: 'inherit' });
+                      } catch (e) {
+                          console.log('Failed to install from npmmirror, fallback to yarnpkg');
+                      } finally {
+                          exec('yarn config set registry https://registry.yarnpkg.com', { stdio: 'inherit' });
+                      }
+                      try {
+                          exec(`yarn global add ${installTarget}`, { timeout: 60000 });
+                      } catch (e) {
+                          console.warn('Failed to check update from yarnpkg');
+                          if (res?.code !== 0) return 'retry';
+                      }
+                      return null;
+                  }
+                : [`yarn global add ${installTarget}`, { retry: true }],
             () => {
                 if (installAsJudge) writeFileSync(`${process.env.HOME}/.hydro/judge.yaml`, judgeYaml);
                 else writeFileSync(`${process.env.HOME}/.hydro/addon.json`, JSON.stringify(addons));
@@ -532,7 +550,9 @@ ${nixConfBase}`);
             () => sleep(3000),
             async () => {
                 // eslint-disable-next-line
-                const { MongoClient, WriteConcern } = eval('require')('/usr/local/share/.config/yarn/global/node_modules/mongodb') as typeof import('mongodb');
+                const { MongoClient, WriteConcern } = eval('require')(
+                    '/usr/local/share/.config/yarn/global/node_modules/mongodb',
+                ) as typeof import('mongodb');
                 const client = await MongoClient.connect('mongodb://127.0.0.1', {
                     readPreference: 'nearest',
                     writeConcern: new WriteConcern('majority'),
@@ -544,9 +564,13 @@ ${nixConfBase}`);
                 });
                 await client.close();
             },
-            () => writeFileSync(`${process.env.HOME}/.hydro/config.json`, JSON.stringify({
-                uri: `mongodb://hydro:${password}@127.0.0.1:27017/hydro`,
-            })),
+            () =>
+                writeFileSync(
+                    `${process.env.HOME}/.hydro/config.json`,
+                    JSON.stringify({
+                        uri: `mongodb://hydro:${password}@127.0.0.1:27017/hydro`,
+                    }),
+                ),
             'pm2 stop mongod',
             'pm2 del mongod',
         ],
@@ -556,35 +580,37 @@ ${nixConfBase}`);
         operations: [
             ['pm2 stop all', { ignore: true }],
             () => writeFileSync(`${process.env.HOME}/.hydro/mount.yaml`, mount),
-            // eslint-disable-next-line max-len
+
             `pm2 start bash --name hydro-sandbox -- -c "ulimit -s unlimited && hydro-sandbox -mount-conf ${process.env.HOME}/.hydro/mount.yaml -http-addr=localhost:5050"`,
-            ...installAsJudge ? [] : [
-                () => console.log(`WiredTiger cache size: ${wtsize}GB`),
-                // The only thing mongod writes to stderr is 'libcurl no version information available'
-                `pm2 start mongod --name mongodb -e /dev/null -- --auth ${exposeDb ? '--bind_ip=0.0.0.0 ' : ''}--wiredTigerCacheSizeGB=${wtsize}`,
-                () => sleep(1000),
-                async () => {
-                    if (noCaddy) {
-                        exec('hydrooj cli system set server.host 0.0.0.0');
-                        return;
-                    }
-                    if (migration === 'hustoj') {
-                        exec('systemctl stop nginx || true');
-                        exec('systemctl disable nginx || true');
-                        exec('/etc/init.d/nginx stop || true');
-                        await sleep(1000);
-                    }
-                    if (!await isPortFree(80)) {
-                        log.warn('port.80');
-                        warnings.push(['port.80']);
-                    }
-                    exec('pm2 start caddy -- run', { cwd: `${process.env.HOME}/.hydro` });
-                    exec('hydrooj cli system set server.xff x-forwarded-for');
-                    exec('hydrooj cli system set server.xhost x-forwarded-host');
-                    exec('hydrooj cli system set server.xproxy true');
-                },
-                'pm2 start hydrooj',
-            ],
+            ...(installAsJudge
+                ? []
+                : [
+                      () => console.log(`WiredTiger cache size: ${wtsize}GB`),
+                      // The only thing mongod writes to stderr is 'libcurl no version information available'
+                      `pm2 start mongod --name mongodb -e /dev/null -- --auth ${exposeDb ? '--bind_ip=0.0.0.0 ' : ''}--wiredTigerCacheSizeGB=${wtsize}`,
+                      () => sleep(1000),
+                      async () => {
+                          if (noCaddy) {
+                              exec('hydrooj cli system set server.host 0.0.0.0');
+                              return;
+                          }
+                          if (migration === 'hustoj') {
+                              exec('systemctl stop nginx || true');
+                              exec('systemctl disable nginx || true');
+                              exec('/etc/init.d/nginx stop || true');
+                              await sleep(1000);
+                          }
+                          if (!(await isPortFree(80))) {
+                              log.warn('port.80');
+                              warnings.push(['port.80']);
+                          }
+                          exec('pm2 start caddy -- run', { cwd: `${process.env.HOME}/.hydro` });
+                          exec('hydrooj cli system set server.xff x-forwarded-for');
+                          exec('hydrooj cli system set server.xhost x-forwarded-host');
+                          exec('hydrooj cli system set server.xproxy true');
+                      },
+                      'pm2 start hydrooj',
+                  ]),
             'pm2 startup',
             'pm2 save',
         ],
@@ -593,10 +619,7 @@ ${nixConfBase}`);
         init: 'install.migrate',
         skip: () => !migration,
         silent: true,
-        operations: [
-            ['yarn global add @hydrooj/migrate', { retry: true }],
-            'hydrooj addon add @hydrooj/migrate',
-        ],
+        operations: [['yarn global add @hydrooj/migrate', { retry: true }], 'hydrooj addon add @hydrooj/migrate'],
     },
     {
         init: 'install.migrateHustoj',
@@ -608,7 +631,11 @@ ${nixConfBase}`);
                 const dbInc = readFileSync('/home/judge/src/web/include/db_info.inc.php', 'utf-8');
                 const l = dbInc.split('\n');
                 function getConfig(key) {
-                    const t = l.find((i) => i.includes(`$${key}`))?.split('=', 2)[1].split(';')[0].trim();
+                    const t = l
+                        .find((i) => i.includes(`$${key}`))
+                        ?.split('=', 2)[1]
+                        .split(';')[0]
+                        .trim();
                     if (!t) return null;
                     if (t.startsWith('"') && t.endsWith('"')) return t.slice(1, -1);
                     if (t === 'false') return false;
@@ -638,8 +665,11 @@ ${nixConfBase}`);
         silent: true,
         operations: [
             () => {
-                const containers = exec('docker ps -a --format json').output?.split('\n')
-                    .map((i) => i.trim()).filter((i) => i).map((i) => JSON.parse(i));
+                const containers = exec('docker ps -a --format json')
+                    .output?.split('\n')
+                    .map((i) => i.trim())
+                    .filter((i) => i)
+                    .map((i) => JSON.parse(i));
                 const uoj = containers!.find((i) => i.Image.toLowerCase() === 'universaloj/uoj-system' && i.State === 'running')!;
                 const id = uoj.Id || uoj.ID;
                 const info = JSON.parse(exec(`docker inspect ${id}`).output!);
@@ -647,10 +677,13 @@ ${nixConfBase}`);
                 exec(`sed s/127.0.0.1/0.0.0.0/g -i ${dir}/etc/mysql/mysql.conf.d/mysqld.cnf`);
                 exec(`docker exec -i ${id} /etc/init.d/mysql restart`);
                 const passwd = readFileSync(`${dir}/etc/mysql/debian.cnf`, 'utf-8')
-                    .split('\n').find((i) => i.startsWith('password'))?.split('=')[1].trim();
+                    .split('\n')
+                    .find((i) => i.startsWith('password'))
+                    ?.split('=')[1]
+                    .trim();
                 const script = [
                     `CREATE USER 'hydromigrate'@'%' IDENTIFIED BY '${password}';`,
-                    'GRANT ALL PRIVILEGES ON *.* TO \'hydromigrate\'@\'%\' WITH GRANT OPTION;',
+                    "GRANT ALL PRIVILEGES ON *.* TO 'hydromigrate'@'%' WITH GRANT OPTION;",
                     'FLUSH PRIVILEGES;',
                     '',
                 ].join('\n');
@@ -723,7 +756,7 @@ async function main() {
     for (let i = 0; i < steps.length; i++) {
         const step = steps[i];
         if (!step.silent) log.info(step.init);
-        if (!(step.skip?.())) {
+        if (!step.skip?.()) {
             for (let op of step.operations) {
                 if (!(op instanceof Array)) op = [op, {}] as any;
                 if (op[0].toString().startsWith('nix-env')) op[1].retry = true;

@@ -22,8 +22,7 @@
 import type { ObjectId } from 'hydrooj';
 import type { AclMutationFence, PermitSource, ProblemAclMutationLock } from './coordinator';
 
-export const ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION =
-    'PROCESS_QUIESCED_AND_PARTIAL_WRITE_INSPECTED';
+export const ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION = 'PROCESS_QUIESCED_AND_PARTIAL_WRITE_INSPECTED';
 
 export interface ProblemWriteClaimMarker {
     requestId: string;

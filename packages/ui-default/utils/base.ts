@@ -17,7 +17,9 @@ export function i18n(str: string, ...params: any[]) {
 }
 
 export function delay(ms) {
-  return new Promise((resolve) => { setTimeout(resolve, ms); });
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 const defaultDict = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890';
@@ -32,7 +34,7 @@ export function secureRandomString(digit = 32, dict = defaultDict) {
   return result;
 }
 
-type Substitution = string | number | { templateRaw: true, html: string };
+type Substitution = string | number | { templateRaw: true; html: string };
 
 export function tpl<T extends boolean = false>(node: React.ReactNode, reactive?: T): T extends true ? HTMLDivElement : string;
 export function tpl(pieces: TemplateStringsArray, ...substitutions: Substitution[]): string;
@@ -94,14 +96,13 @@ export const request = {
   ajax(options: Record<string, any>) {
     const stack = new Error().stack;
     return new Promise<any>((resolve, reject) => {
-      $
-        .ajax({
-          dataType: 'json',
-          headers: {
-            Accept: 'application/json',
-          },
-          ...options,
-        })
+      $.ajax({
+        dataType: 'json',
+        headers: {
+          Accept: 'application/json',
+        },
+        ...options,
+      })
         .fail((jqXHR, textStatus, errorThrown: any) => {
           if (textStatus === 'abort') {
             const err = new Error(i18n('Aborted')) as any;
@@ -116,9 +117,9 @@ export const request = {
             const { error } = jqXHR.responseJSON;
             if (error.params) {
               const message = i18n(error.message, ...error.params);
-              const err = new Error(message === error.message && error.params.length
-                ? `${error.message}: ${error.params.join(' ')}`
-                : message) as any;
+              const err = new Error(
+                message === error.message && error.params.length ? `${error.message}: ${error.params.join(' ')}` : message,
+              ) as any;
               err.rawMessage = error.message;
               err.params = error.params;
               reject(err);
@@ -185,7 +186,7 @@ export const request = {
 
 let transition: ViewTransition | null = null;
 
-export async function withTransitionCallback(callback: () => (Promise<void> | void)) {
+export async function withTransitionCallback(callback: () => Promise<void> | void) {
   if (!document.startViewTransition || document.visibilityState === 'hidden') return callback?.();
   transition?.skipTransition?.();
   transition = document.startViewTransition(callback);

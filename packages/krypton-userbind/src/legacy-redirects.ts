@@ -61,7 +61,7 @@ class LegacyBindTokenRedirectHandler extends Handler {
     noCheckPermView = true;
 
     @param('code', Types.String)
-    async get({ }, code: string) {
+    async get({}, code: string) {
         if (policy() === 'gone') {
             this.response.status = 410;
             this.response.body = { message: 'This bind link was issued under the old plugin and is no longer valid. Ask the admin to re-issue.' };
@@ -71,7 +71,7 @@ class LegacyBindTokenRedirectHandler extends Handler {
     }
 
     @param('code', Types.String)
-    async post({ }, code: string) {
+    async post({}, code: string) {
         this.response.redirect = `/bind/${code}`;
     }
 }

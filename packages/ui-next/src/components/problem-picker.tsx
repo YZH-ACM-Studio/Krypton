@@ -7,12 +7,10 @@
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { MultiSelect } from '@/components/ui/multi-select';
-import {
-  fetchProblemsByIds, problemKey, type ProblemOption, searchProblems,
-} from '@/lib/multi-select-presets';
+import { fetchProblemsByIds, problemKey, type ProblemOption, searchProblems } from '@/lib/multi-select-presets';
 
 export interface ProblemPickerProps {
-  value: string[];
+  value: Array<string | number>;
   onChange: (next: string[]) => void;
   /** Hidden input name for native form submit (CSV by default). */
   name?: string;
@@ -26,30 +24,45 @@ export interface ProblemPickerProps {
 }
 
 export function ProblemPicker({
-  value, onChange, name, valueFormat = 'csv',
-  placeholder, maxItems, disabled, className, minHeight = 48,
+  value,
+  onChange,
+  name,
+  valueFormat = 'csv',
+  placeholder,
+  maxItems,
+  disabled,
+  className,
+  minHeight = 48,
 }: ProblemPickerProps) {
   // Local state — kept in ProblemOption[] form for richer chip rendering.
-  const [items, setItems] = useState<ProblemOption[]>(() => value.map((id) => ({
-    docId: Number(id) || 0, pid: id, title: '',
-  })));
+  const [items, setItems] = useState<ProblemOption[]>(() =>
+    value.map((id) => ({
+      docId: Number(id) || 0,
+      pid: id,
+      title: '',
+    })),
+  );
 
   // Fill titles in for the initial id list once.
   useEffect(() => {
-    if (!value.length) { setItems([]); return; }
+    if (!value.length) {
+      setItems([]);
+      return;
+    }
     let cancelled = false;
     fetchProblemsByIds(value).then((res) => {
       if (cancelled) return;
       // Honour the order of `value` rather than the search results.
-      const byKey = new Map<string, ProblemOption>();
+      const byKey = new Map<string | number, ProblemOption>();
       for (const problem of res) {
         byKey.set(String(problem.docId), problem);
         if (problem.pid) byKey.set(String(problem.pid), problem);
       }
       setItems(value.map((id) => byKey.get(id) || { docId: Number(id) || 0, pid: id, title: '' }));
     });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // When the external `value` array changes (e.g. parent reset), sync
@@ -60,7 +73,6 @@ export function ProblemPicker({
     const localKey = items.map(problemKey).join(',');
     if (externalKey === localKey) return;
     setItems(value.map((id) => ({ docId: Number(id) || 0, pid: id, title: '' })));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value.join(',')]);
 
   const handleChange = (next: ProblemOption[]) => {
@@ -85,9 +97,15 @@ export function ProblemPicker({
         <div className="flex items-center gap-2 min-w-0">
           <span className="font-mono text-[11px] text-muted-foreground shrink-0">{p.pid || p.docId}</span>
           <span className="truncate flex-1">{p.title || '—'}</span>
-          {p.difficulty ? <Badge variant="outline" className="text-[10px] shrink-0">Lv.{p.difficulty}</Badge> : null}
+          {p.difficulty ? (
+            <Badge variant="outline" className="text-[10px] shrink-0">
+              Lv.{p.difficulty}
+            </Badge>
+          ) : null}
           {p.nSubmit ? (
-            <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">{p.nAccept ?? 0}/{p.nSubmit}</span>
+            <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+              {p.nAccept ?? 0}/{p.nSubmit}
+            </span>
           ) : null}
         </div>
       )}

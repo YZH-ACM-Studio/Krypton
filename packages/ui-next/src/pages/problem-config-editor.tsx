@@ -17,20 +17,15 @@ import { motion } from 'motion/react';
 import {
   ArrowLeft,
   ArrowRight,
-  Check,
   ChevronDown,
   ChevronRight,
   Download,
-  Edit3,
-  Eye,
   FileCode,
-  Files,
   FolderOpen,
   Grid3X3,
   GripVertical,
   FileEdit,
   Link2,
-  Lock,
   Plus,
   Save,
   Settings,
@@ -65,8 +60,8 @@ import { MultiSelect } from '@/components/ui/multi-select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { COMMON_LANG_OPTIONS as PRESET_LANG_OPTIONS, type LangOption, resolveLangs } from '@/lib/multi-select-presets';
-import { useBootstrap } from '@/lib/bootstrap';
-import { formatDateTime, replaceRouteTokens } from '@/lib/format';
+import '@/lib/bootstrap';
+import '@/lib/format';
 import {
   JudgeConfig,
   JudgeCase,
@@ -78,8 +73,14 @@ import {
   autoPair,
   classify,
   validateConfig,
-  emptyConfig,
-  parseTimeMS, parseMemoryMB, formatTime, formatMemory, splitTime, splitMemory, joinTime, joinMemory,
+  parseTimeMS,
+  parseMemoryMB,
+  formatTime,
+  formatMemory,
+  splitTime,
+  splitMemory,
+  joinTime,
+  joinMemory,
 } from '@/lib/judge-config';
 
 type R = Record<string, any>;
@@ -108,7 +109,13 @@ const CHECKER_TYPES_NEEDING_FILE: CheckerType[] = ['lemon', 'syzoj', 'testlib', 
 /*  Top-level page                                                    */
 /* ────────────────────────────────────────────────────────────────── */
 
-export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml, embedded = false }: {
+export function ProblemConfigEditor({
+  problemUrl,
+  pdoc,
+  files,
+  initialYaml,
+  embedded = false,
+}: {
   problemUrl: string;
   pdoc: R;
   files: R[];
@@ -158,7 +165,6 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml, embe
       if (next !== yamlText) setYamlText(next);
     }, 200);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config]);
 
   // --- yaml → form sync (debounced) ---
@@ -209,9 +215,7 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml, embe
     setSaveError('');
     setSaveMsg(null);
     try {
-      const currentYaml = lastSource.current === 'form'
-        ? serializeJudgeConfig(config, { preserveSource: yamlText })
-        : yamlText;
+      const currentYaml = lastSource.current === 'form' ? serializeJudgeConfig(config, { preserveSource: yamlText }) : yamlText;
       if (currentYaml !== yamlText) setYamlText(currentYaml);
       const formData = new FormData();
       formData.append('operation', 'upload_file');
@@ -276,7 +280,7 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml, embe
       if (stid != null && cfg.subtasks) {
         return {
           ...cfg,
-          subtasks: cfg.subtasks.map((s) => s.id === stid ? { ...s, cases: s.cases.filter((_, i) => i !== idx) } : s),
+          subtasks: cfg.subtasks.map((s) => (s.id === stid ? { ...s, cases: s.cases.filter((_, i) => i !== idx) } : s)),
         };
       }
       return { ...cfg, cases: (cfg.cases || []).filter((_, i) => i !== idx) };
@@ -287,10 +291,10 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml, embe
       if (stid != null && cfg.subtasks) {
         return {
           ...cfg,
-          subtasks: cfg.subtasks.map((s) => s.id === stid ? { ...s, cases: s.cases.map((c, i) => i === idx ? { ...c, ...patch } : c) } : s),
+          subtasks: cfg.subtasks.map((s) => (s.id === stid ? { ...s, cases: s.cases.map((c, i) => (i === idx ? { ...c, ...patch } : c)) } : s)),
         };
       }
-      return { ...cfg, cases: (cfg.cases || []).map((c, i) => i === idx ? { ...c, ...patch } : c) };
+      return { ...cfg, cases: (cfg.cases || []).map((c, i) => (i === idx ? { ...c, ...patch } : c)) };
     });
   };
 
@@ -324,7 +328,7 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml, embe
   const updateSubtask = (stid: number, patch: Partial<JudgeSubtask>) => {
     updateConfig((cfg) => ({
       ...cfg,
-      subtasks: (cfg.subtasks || []).map((s) => s.id === stid ? { ...s, ...patch } : s),
+      subtasks: (cfg.subtasks || []).map((s) => (s.id === stid ? { ...s, ...patch } : s)),
     }));
   };
 
@@ -352,9 +356,11 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml, embe
       // AppShell topbar (3rem) + main padding (varies) + this page's
       // breathing room; everything below the kanban (sticky footer) is
       // outside this motion.div but still inside the main ScrollArea.
-      className={embedded
-        ? 'flex h-[calc(100dvh-13rem)] min-h-[560px] flex-col gap-4'
-        : 'flex h-[calc(100dvh-5rem)] min-h-[520px] flex-col gap-4 sm:h-[calc(100dvh-6rem)] xl:h-[calc(100dvh-7rem)]'}
+      className={
+        embedded
+          ? 'flex h-[calc(100dvh-13rem)] min-h-[560px] flex-col gap-4'
+          : 'flex h-[calc(100dvh-5rem)] min-h-[520px] flex-col gap-4 sm:h-[calc(100dvh-6rem)] xl:h-[calc(100dvh-7rem)]'
+      }
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
@@ -364,27 +370,38 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml, embe
         {!embedded ? (
           <>
             <Button asChild variant="ghost" size="icon">
-              <a href={problemUrl}><ArrowLeft className="size-4" /></a>
+              <a href={problemUrl}>
+                <ArrowLeft className="size-4" />
+              </a>
             </Button>
             <div className="flex-1">
               <h1 className="text-xl font-semibold">评测配置</h1>
               <p className="text-sm text-muted-foreground">{pdoc.title || pdoc.pid || '题目'}</p>
             </div>
           </>
-        ) : <div className="flex-1"><h2 className="text-base font-semibold">评测配置</h2></div>}
+        ) : (
+          <div className="flex-1">
+            <h2 className="text-base font-semibold">评测配置</h2>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
           <span aria-live="polite" className="text-xs text-muted-foreground">
             {saving ? '保存中' : saveError ? '保存失败' : dirty ? '有未保存修改' : saveMsg || '已载入服务器版本'}
           </span>
           {errorCount > 0 ? (
-            <Badge variant="destructive" className="gap-1"><AlertTriangle className="size-3" />{errorCount} 错误</Badge>
+            <Badge variant="destructive" className="gap-1">
+              <AlertTriangle className="size-3" />
+              {errorCount} 错误
+            </Badge>
           ) : warnCount > 0 ? (
             <Badge variant="outline" className="gap-1 border-amber-400 text-amber-600 dark:text-amber-400">
-              <AlertTriangle className="size-3" />{warnCount} 警告
+              <AlertTriangle className="size-3" />
+              {warnCount} 警告
             </Badge>
           ) : (
             <Badge variant="outline" className="gap-1 border-green-500 text-green-600 dark:text-green-400">
-              <CheckCircle2 className="size-3" />OK
+              <CheckCircle2 className="size-3" />
+              OK
             </Badge>
           )}
           <Button onClick={handleSave} disabled={saving} className="gap-1.5">
@@ -412,7 +429,9 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml, embe
           ]}
         />
         {yamlError ? (
-          <Badge variant="destructive" className="text-[10px]">YAML 解析错误：未应用最新编辑</Badge>
+          <Badge variant="destructive" className="text-[10px]">
+            YAML 解析错误：未应用最新编辑
+          </Badge>
         ) : (
           <span className="text-[11px] text-muted-foreground">两侧实时双向同步</span>
         )}
@@ -421,11 +440,7 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml, embe
       {viewMode === 'yaml' ? (
         // ── YAML mode: full-width KryptonIDE simple editor on the raw text
         <Card className="flex min-h-0 flex-1 flex-col">
-          {yamlError ? (
-            <CardContent className="shrink-0 border-b bg-destructive/5 p-2 text-xs text-destructive">
-              ⚠ {yamlError}
-            </CardContent>
-          ) : null}
+          {yamlError ? <CardContent className="shrink-0 border-b bg-destructive/5 p-2 text-xs text-destructive">⚠ {yamlError}</CardContent> : null}
           <CardContent className="min-h-0 flex-1 overflow-hidden p-0">
             <KryptonIDE
               mode="simple"
@@ -469,71 +484,93 @@ export function ProblemConfigEditor({ problemUrl, pdoc, files, initialYaml, embe
               vertical space; each column then scrolls internally. */}
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragEnd={onDragEnd}>
             {viewport === 'mobile' ? null : viewport === 'desktop' ? (
-          <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[280px_minmax(0,1fr)_minmax(0,1.2fr)] xl:grid-cols-[300px_minmax(0,1fr)_minmax(0,1.3fr)]">
-            <FilesColumn files={files} usedInPairs={usedInPairs} problemUrl={problemUrl} addCase={addCase} onOpenFile={setEditingFile} />
-            <CasesColumn config={config} fileSet={fileSet} addCase={addCase} removeCase={removeCase} updateCase={updateCase} addSubtaskFromCases={(cases) => {
-              const existing = config.subtasks || [];
-              const nextId = (existing.length ? Math.max(...existing.map((s) => s.id ?? 0)) : 0) + 1;
-              const newSt: JudgeSubtask = { id: nextId, score: 0, type: 'min', cases };
-              updateConfig((cfg) => {
-                const nextSubs = [...existing, newSt];
-                const out: JudgeConfig = { ...cfg, subtasks: nextSubs };
-                // remove these cases from flat list
-                if (cfg.cases) {
-                  out.cases = cfg.cases.filter((c) => !cases.some((cc) => cc.input === c.input && cc.output === c.output));
-                  if (out.cases.length === 0) delete (out as any).cases;
-                }
-                return out;
-              });
-            }} autoPairAll={() => {
-              const result = autoPair(fileNames);
-              updateConfig((cfg) => ({ ...cfg, cases: result.pairs, subtasks: undefined }));
-            }} />
-            <SubtasksColumn config={config} updateSubtask={updateSubtask} removeSubtask={removeSubtask} addSubtask={addSubtask} removeCase={removeCase} updateCase={updateCase} />
-          </div>
-        ) : (
-          // tablet
-          <div className="grid min-h-0 flex-1 grid-cols-[1fr_1.3fr] gap-3">
-            <div className="flex min-h-0 flex-col">
-              <MiniTabs
-                value={mobileTab === 'subtasks' ? 'cases' : mobileTab}
-                onValueChange={(v) => setMobileTab(v as any)}
-                items={[
-                  { value: 'files', label: '文件' },
-                  { value: 'cases', label: '用例' },
-                ]}
-              />
-              <div className="mt-3 min-h-0 flex-1">
-                {mobileTab === 'files'
-                  ? <FilesColumn files={files} usedInPairs={usedInPairs} problemUrl={problemUrl} addCase={addCase} onOpenFile={setEditingFile} />
-                  : <CasesColumn config={config} fileSet={fileSet} addCase={addCase} removeCase={removeCase} updateCase={updateCase}
-                      addSubtaskFromCases={() => {}} autoPairAll={() => {
-                        const result = autoPair(fileNames);
-                        updateConfig((cfg) => ({ ...cfg, cases: result.pairs, subtasks: undefined }));
-                      }} />
-                }
+              <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[280px_minmax(0,1fr)_minmax(0,1.2fr)] xl:grid-cols-[300px_minmax(0,1fr)_minmax(0,1.3fr)]">
+                <FilesColumn files={files} usedInPairs={usedInPairs} problemUrl={problemUrl} addCase={addCase} onOpenFile={setEditingFile} />
+                <CasesColumn
+                  config={config}
+                  fileSet={fileSet}
+                  addCase={addCase}
+                  removeCase={removeCase}
+                  updateCase={updateCase}
+                  addSubtaskFromCases={(cases) => {
+                    const existing = config.subtasks || [];
+                    const nextId = (existing.length ? Math.max(...existing.map((s) => s.id ?? 0)) : 0) + 1;
+                    const newSt: JudgeSubtask = { id: nextId, score: 0, type: 'min', cases };
+                    updateConfig((cfg) => {
+                      const nextSubs = [...existing, newSt];
+                      const out: JudgeConfig = { ...cfg, subtasks: nextSubs };
+                      // remove these cases from flat list
+                      if (cfg.cases) {
+                        out.cases = cfg.cases.filter((c) => !cases.some((cc) => cc.input === c.input && cc.output === c.output));
+                        if (out.cases.length === 0) delete (out as any).cases;
+                      }
+                      return out;
+                    });
+                  }}
+                  autoPairAll={() => {
+                    const result = autoPair(fileNames);
+                    updateConfig((cfg) => ({ ...cfg, cases: result.pairs, subtasks: undefined }));
+                  }}
+                />
+                <SubtasksColumn
+                  config={config}
+                  updateSubtask={updateSubtask}
+                  removeSubtask={removeSubtask}
+                  addSubtask={addSubtask}
+                  removeCase={removeCase}
+                  updateCase={updateCase}
+                />
               </div>
-            </div>
-            <SubtasksColumn config={config} updateSubtask={updateSubtask} removeSubtask={removeSubtask} addSubtask={addSubtask} removeCase={removeCase} updateCase={updateCase} />
-          </div>
-        )}
+            ) : (
+              // tablet
+              <div className="grid min-h-0 flex-1 grid-cols-[1fr_1.3fr] gap-3">
+                <div className="flex min-h-0 flex-col">
+                  <MiniTabs
+                    value={mobileTab === 'subtasks' ? 'cases' : mobileTab}
+                    onValueChange={(v) => setMobileTab(v as any)}
+                    items={[
+                      { value: 'files', label: '文件' },
+                      { value: 'cases', label: '用例' },
+                    ]}
+                  />
+                  <div className="mt-3 min-h-0 flex-1">
+                    {mobileTab === 'files' ? (
+                      <FilesColumn files={files} usedInPairs={usedInPairs} problemUrl={problemUrl} addCase={addCase} onOpenFile={setEditingFile} />
+                    ) : (
+                      <CasesColumn
+                        config={config}
+                        fileSet={fileSet}
+                        addCase={addCase}
+                        removeCase={removeCase}
+                        updateCase={updateCase}
+                        addSubtaskFromCases={() => {}}
+                        autoPairAll={() => {
+                          const result = autoPair(fileNames);
+                          updateConfig((cfg) => ({ ...cfg, cases: result.pairs, subtasks: undefined }));
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+                <SubtasksColumn
+                  config={config}
+                  updateSubtask={updateSubtask}
+                  removeSubtask={removeSubtask}
+                  addSubtask={addSubtask}
+                  removeCase={removeCase}
+                  updateCase={updateCase}
+                />
+              </div>
+            )}
 
             {/* DragOverlay */}
-            <DragOverlay>
-              {draggedItem ? <DragPreview item={draggedItem} /> : null}
-            </DragOverlay>
+            <DragOverlay>{draggedItem ? <DragPreview item={draggedItem} /> : null}</DragOverlay>
           </DndContext>
         </>
       )}
 
       {/* File edit dialog */}
-      {editingFile ? (
-        <FileEditDialog
-          file={editingFile}
-          problemUrl={problemUrl}
-          onClose={() => setEditingFile(null)}
-        />
-      ) : null}
+      {editingFile ? <FileEditDialog file={editingFile} problemUrl={problemUrl} onClose={() => setEditingFile(null)} /> : null}
     </motion.div>
   );
 }
@@ -570,19 +607,12 @@ function bytesLabel(n: number): string {
 
 const MAX_FILE_EDIT_BYTES = 1 * 1024 * 1024; // 1 MB cap — heavy testdata stays read-only via raw URL
 
-function FileEditDialog({ file, problemUrl, onClose }: {
-  file: R;
-  problemUrl: string;
-  onClose: () => void;
-}) {
+function FileEditDialog({ file, problemUrl, onClose }: { file: R; problemUrl: string; onClose: () => void }) {
   const filename: string = file.name;
   const size: number = file.size ?? 0;
   const tooBig = size > MAX_FILE_EDIT_BYTES;
   const lang = useMemo(() => detectLanguage(filename), [filename]);
-  const fileUrl = useMemo(
-    () => `${problemUrl}/file/${encodeURIComponent(filename)}?type=testdata&noDisposition=1`,
-    [problemUrl, filename],
-  );
+  const fileUrl = useMemo(() => `${problemUrl}/file/${encodeURIComponent(filename)}?type=testdata&noDisposition=1`, [problemUrl, filename]);
   const [content, setContent] = useState<string | null>(null);
   const [originalContent, setOriginalContent] = useState<string>('');
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -616,7 +646,9 @@ function FileEditDialog({ file, problemUrl, onClose }: {
         if (cancelled) return;
         setLoadError(e?.message || '加载失败');
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [fileUrl, size, tooBig]);
 
   const dirty = content != null && content !== originalContent;
@@ -653,17 +685,22 @@ function FileEditDialog({ file, problemUrl, onClose }: {
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent
-        className="h-[88vh] w-[92vw] max-w-none max-h-[92vh]"
-        onClose={onClose}
-      >
+      <DialogContent className="h-[88vh] w-[92vw] max-w-none max-h-[92vh]" onClose={onClose}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileCode className="size-4" />
             <span className="font-mono">{filename}</span>
-            <Badge variant="outline" className="text-[10px]">{bytesLabel(size)}</Badge>
-            <Badge variant="secondary" className="text-[10px]">{lang.toUpperCase()}</Badge>
-            {dirty ? <Badge variant="default" className="text-[10px]">未保存</Badge> : null}
+            <Badge variant="outline" className="text-[10px]">
+              {bytesLabel(size)}
+            </Badge>
+            <Badge variant="secondary" className="text-[10px]">
+              {lang.toUpperCase()}
+            </Badge>
+            {dirty ? (
+              <Badge variant="default" className="text-[10px]">
+                未保存
+              </Badge>
+            ) : null}
           </DialogTitle>
         </DialogHeader>
 
@@ -674,7 +711,8 @@ function FileEditDialog({ file, problemUrl, onClose }: {
               <div className="mt-2">
                 <Button asChild variant="outline" size="sm">
                   <a href={fileUrl} download={filename}>
-                    <Download className="size-3.5 mr-1" />下载文件
+                    <Download className="size-3.5 mr-1" />
+                    下载文件
                   </a>
                 </Button>
               </div>
@@ -699,21 +737,17 @@ function FileEditDialog({ file, problemUrl, onClose }: {
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {!tooBig && content != null ? (
                 <label className="flex items-center gap-1 cursor-pointer">
-                  <Checkbox
-                    checked={readonly}
-                    onChange={() => setReadonly(!readonly)}
-                  />
+                  <Checkbox checked={readonly} onChange={() => setReadonly(!readonly)} />
                   只读
                 </label>
               ) : null}
               {saveMsg ? <span className="text-foreground">{saveMsg}</span> : null}
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={onClose}>关闭</Button>
-              <Button
-                onClick={handleSave}
-                disabled={!dirty || saving || readonly || tooBig}
-              >
+              <Button variant="outline" onClick={onClose}>
+                关闭
+              </Button>
+              <Button onClick={handleSave} disabled={!dirty || saving || readonly || tooBig}>
                 <Save className="size-3.5 mr-1" />
                 {saving ? '保存中…' : '保存'}
               </Button>
@@ -729,7 +763,15 @@ function FileEditDialog({ file, problemUrl, onClose }: {
 /*  Basic config strip                                                */
 /* ────────────────────────────────────────────────────────────────── */
 
-function BasicConfigStrip({ config, updateConfig, files }: { config: JudgeConfig; updateConfig: (m: (c: JudgeConfig) => JudgeConfig) => void; files: R[] }) {
+function BasicConfigStrip({
+  config,
+  updateConfig,
+  files,
+}: {
+  config: JudgeConfig;
+  updateConfig: (m: (c: JudgeConfig) => JudgeConfig) => void;
+  files: R[];
+}) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   return (
     <Card>
@@ -744,25 +786,15 @@ function BasicConfigStrip({ config, updateConfig, files }: { config: JudgeConfig
             />
           </Field>
           <Field label="时间限制">
-            <DurationInput
-              value={config.time}
-              onChange={(v) => updateConfig((c) => ({ ...c, time: v }))}
-              placeholder="默认 1"
-              size="md"
-            />
+            <DurationInput value={config.time} onChange={(v) => updateConfig((c) => ({ ...c, time: v }))} placeholder="默认 1" size="md" />
           </Field>
           <Field label="内存限制">
-            <MemoryInput
-              value={config.memory}
-              onChange={(v) => updateConfig((c) => ({ ...c, memory: v }))}
-              placeholder="默认 256"
-              size="md"
-            />
+            <MemoryInput value={config.memory} onChange={(v) => updateConfig((c) => ({ ...c, memory: v }))} placeholder="默认 256" size="md" />
           </Field>
           {/* Global score mode only applies when there are NO subtasks —
               each subtask carries its own `type`. Hiding it under that
               condition removes a confusing always-visible global switch. */}
-          {!(config.subtasks && config.subtasks.length > 0) ? (
+          {!config.subtasks || config.subtasks.length <= 0 ? (
             <Field label="扁平算分模式">
               <SimpleSelect
                 value={config.score || ''}
@@ -781,14 +813,16 @@ function BasicConfigStrip({ config, updateConfig, files }: { config: JudgeConfig
           <Field label="Checker">
             <SimpleSelect
               value={config.checker_type || 'default'}
-              onValueChange={(v) => updateConfig((c) => ({
-                ...c,
-                checker_type: v as CheckerType,
-                // Preserve the file path when switching among checker-types
-                // that need a file (lemon/syzoj/testlib/custom), drop it
-                // when going back to a fileless type.
-                checker: CHECKER_TYPES_NEEDING_FILE.includes(v as CheckerType) ? c.checker : undefined,
-              }))}
+              onValueChange={(v) =>
+                updateConfig((c) => ({
+                  ...c,
+                  checker_type: v as CheckerType,
+                  // Preserve the file path when switching among checker-types
+                  // that need a file (lemon/syzoj/testlib/custom), drop it
+                  // when going back to a fileless type.
+                  checker: CHECKER_TYPES_NEEDING_FILE.includes(v as CheckerType) ? c.checker : undefined,
+                }))
+              }
               size="sm"
               options={CHECKER_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
             />
@@ -796,30 +830,41 @@ function BasicConfigStrip({ config, updateConfig, files }: { config: JudgeConfig
         </div>
 
         {/* Conditional fields per checker / type */}
-        {(config.checker_type === 'float'
-          || (config.checker_type && CHECKER_TYPES_NEEDING_FILE.includes(config.checker_type as CheckerType))
-          || config.type === 'interactive'
-          || config.type === 'communication'
-          || config.type === 'submit_answer'
-          || showAdvanced) ? (
+        {config.checker_type === 'float' ||
+        (config.checker_type && CHECKER_TYPES_NEEDING_FILE.includes(config.checker_type as CheckerType)) ||
+        config.type === 'interactive' ||
+        config.type === 'communication' ||
+        config.type === 'submit_answer' ||
+        showAdvanced ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 pt-2 border-t">
             {config.checker_type === 'float' ? (
               <>
                 <Field label="相对误差">
-                  <Input type="number" step="any" value={config.float_relative ?? ''} placeholder="1e-6"
-                    onChange={(e) => updateConfig((c) => ({ ...c, float_relative: e.target.value === '' ? undefined : parseFloat(e.target.value) }))} />
+                  <Input
+                    type="number"
+                    step="any"
+                    value={config.float_relative ?? ''}
+                    placeholder="1e-6"
+                    onChange={(e) =>
+                      updateConfig((c) => ({ ...c, float_relative: e.target.value === '' ? undefined : Number.parseFloat(e.target.value) }))
+                    }
+                  />
                 </Field>
                 <Field label="绝对误差">
-                  <Input type="number" step="any" value={config.float_absolute ?? ''} placeholder="1e-6"
-                    onChange={(e) => updateConfig((c) => ({ ...c, float_absolute: e.target.value === '' ? undefined : parseFloat(e.target.value) }))} />
+                  <Input
+                    type="number"
+                    step="any"
+                    value={config.float_absolute ?? ''}
+                    placeholder="1e-6"
+                    onChange={(e) =>
+                      updateConfig((c) => ({ ...c, float_absolute: e.target.value === '' ? undefined : Number.parseFloat(e.target.value) }))
+                    }
+                  />
                 </Field>
               </>
             ) : null}
             {config.checker_type && CHECKER_TYPES_NEEDING_FILE.includes(config.checker_type as CheckerType) ? (
-              <Field
-                label="Checker 文件"
-                hint="先在「测试数据」面板上传 checker 源码（如 .cc/.cpp），这里选中即可"
-              >
+              <Field label="Checker 文件">
                 <FilePicker value={config.checker || ''} files={files} onChange={(v) => updateConfig((c) => ({ ...c, checker: v }))} />
               </Field>
             ) : null}
@@ -840,7 +885,11 @@ function BasicConfigStrip({ config, updateConfig, files }: { config: JudgeConfig
             ) : null}
             {config.type === 'submit_answer' ? (
               <Field label="文件名模板">
-                <Input value={config.filename || ''} placeholder="#1.in" onChange={(e) => updateConfig((c) => ({ ...c, filename: e.target.value || undefined }))} />
+                <Input
+                  value={config.filename || ''}
+                  placeholder="#1.in"
+                  onChange={(e) => updateConfig((c) => ({ ...c, filename: e.target.value || undefined }))}
+                />
               </Field>
             ) : null}
             {showAdvanced ? (
@@ -848,14 +897,16 @@ function BasicConfigStrip({ config, updateConfig, files }: { config: JudgeConfig
                 <MultiSelect<LangOption>
                   options={PRESET_LANG_OPTIONS}
                   value={resolveLangs(config.langs || [])}
-                  onChange={(next) => updateConfig((c) => ({
-                    ...c,
-                    langs: next.length ? next.map((o) => o.value) : undefined,
-                  }))}
+                  onChange={(next) =>
+                    updateConfig((c) => ({
+                      ...c,
+                      langs: next.length ? next.map((o) => o.value) : undefined,
+                    }))
+                  }
                   getKey={(o) => o.value}
                   getLabel={(o) => `${o.label} (${o.value})`}
                   renderChip={(o) => <span className="font-mono">{o.label}</span>}
-                  renderOption={(o, { selected }) => (
+                  renderOption={(o, { selected: _selected }) => (
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium">{o.label}</span>
                       <span className="text-[10px] font-mono text-muted-foreground">{o.value}</span>
@@ -870,9 +921,7 @@ function BasicConfigStrip({ config, updateConfig, files }: { config: JudgeConfig
 
         {/* Per-language absolute time / memory limits — written to YAML as
             rates relative to the global base. */}
-        {showAdvanced ? (
-          <PerLangLimits config={config} updateConfig={updateConfig} />
-        ) : null}
+        {showAdvanced ? <PerLangLimits config={config} updateConfig={updateConfig} /> : null}
 
         <button
           type="button"
@@ -901,10 +950,7 @@ const COMMON_LANG_OPTIONS = PRESET_LANG_OPTIONS;
  * If the global base isn't set yet, we display a hint and let the user
  * input nothing — keeping ratios empty is safer than writing infinities.
  */
-function PerLangLimits({ config, updateConfig }: {
-  config: JudgeConfig;
-  updateConfig: (m: (c: JudgeConfig) => JudgeConfig) => void;
-}) {
+function PerLangLimits({ config, updateConfig }: { config: JudgeConfig; updateConfig: (m: (c: JudgeConfig) => JudgeConfig) => void }) {
   const baseTimeMs = parseTimeMS(config.time);
   const baseMemMb = parseMemoryMB(config.memory);
   const hasTimeBase = baseTimeMs != null;
@@ -912,10 +958,7 @@ function PerLangLimits({ config, updateConfig }: {
   const canAddLanguageLimit = hasTimeBase || hasMemoryBase;
 
   // Union of langs that have any rate set
-  const langKeys = Array.from(new Set([
-    ...Object.keys(config.time_limit_rate || {}),
-    ...Object.keys(config.memory_limit_rate || {}),
-  ]));
+  const langKeys = Array.from(new Set([...Object.keys(config.time_limit_rate || {}), ...Object.keys(config.memory_limit_rate || {})]));
   const [pendingLang, setPendingLang] = useState('');
 
   const addLang = (id: string) => {
@@ -990,20 +1033,25 @@ function PerLangLimits({ config, updateConfig }: {
           <div className="flex items-center gap-1">
             <SimpleSelect
               value=""
-              onValueChange={(v) => { if (v) addLang(v); }}
+              onValueChange={(v) => {
+                if (v) addLang(v);
+              }}
               size="sm"
               disabled={!canAddLanguageLimit}
               className="w-auto min-w-[10rem] text-[11px]"
               placeholder={canAddLanguageLimit ? '+ 添加语言…' : '先填写默认限制'}
               ariaLabel="添加语言时空限制"
-              options={COMMON_LANG_OPTIONS
-                .filter((o) => !langKeys.includes(o.value))
-                .map((o) => ({ value: o.value, label: o.label }))}
+              options={COMMON_LANG_OPTIONS.filter((o) => !langKeys.includes(o.value)).map((o) => ({ value: o.value, label: o.label }))}
             />
             <input
               value={pendingLang}
               onChange={(e) => setPendingLang(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addLang(pendingLang); } }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  addLang(pendingLang);
+                }
+              }}
               placeholder="或自定义 id"
               disabled={!canAddLanguageLimit}
               title={canAddLanguageLimit ? undefined : '先填写上方默认时间限制或默认内存限制'}
@@ -1011,9 +1059,7 @@ function PerLangLimits({ config, updateConfig }: {
             />
           </div>
           {!canAddLanguageLimit ? (
-            <p className="text-[10px] text-amber-700 dark:text-amber-300">
-              先填写上方默认时间限制或默认内存限制后，才能添加语言覆写。
-            </p>
+            <p className="text-[10px] text-amber-700 dark:text-amber-300">先填写上方默认时间限制或默认内存限制后，才能添加语言覆写。</p>
           ) : null}
         </div>
       </div>
@@ -1039,15 +1085,15 @@ function PerLangLimits({ config, updateConfig }: {
           {langKeys.map((id) => {
             const tr = config.time_limit_rate?.[id];
             const mr = config.memory_limit_rate?.[id];
-            const langTimeAbs = baseTimeMs && typeof tr === 'number'
-              ? formatTime(baseTimeMs * tr) : '';
-            const langMemAbs = baseMemMb && typeof mr === 'number'
-              ? formatMemory(baseMemMb * mr) : '';
+            const langTimeAbs = baseTimeMs && typeof tr === 'number' ? formatTime(baseTimeMs * tr) : '';
+            const langMemAbs = baseMemMb && typeof mr === 'number' ? formatMemory(baseMemMb * mr) : '';
             const label = COMMON_LANG_OPTIONS.find((o) => o.value === id)?.label || id;
             return (
               <div key={id} className="grid grid-cols-[1fr_minmax(0,140px)_minmax(0,140px)_24px] items-center gap-2">
                 <div className="min-w-0">
-                  <p className="text-xs font-medium truncate" title={id}>{label}</p>
+                  <p className="text-xs font-medium truncate" title={id}>
+                    {label}
+                  </p>
                   {label !== id ? <p className="font-mono text-[9px] text-muted-foreground truncate">{id}</p> : null}
                 </div>
                 <DurationInput
@@ -1095,10 +1141,7 @@ function FilePicker({ value, files, onChange }: { value: string; files: R[]; onC
       onValueChange={onChange}
       size="sm"
       placeholder="— 选择文件 —"
-      options={[
-        { value: '', label: '— 选择文件 —' },
-        ...files.map((f) => ({ value: f.name, label: f.name })),
-      ]}
+      options={[{ value: '', label: '— 选择文件 —' }, ...files.map((f) => ({ value: f.name, label: f.name }))]}
     />
   );
 }
@@ -1108,7 +1151,14 @@ function FilePicker({ value, files, onChange }: { value: string; files: R[]; onC
  * Empty value renders the placeholder (e.g. "默认 1s"). Output is `undefined`
  * when value is cleared, so the config object drops the override entirely.
  */
-function DurationInput({ value, onChange, placeholder, className, size = 'sm', disabled }: {
+function DurationInput({
+  value,
+  onChange,
+  placeholder,
+  className,
+  size = 'sm',
+  disabled,
+}: {
   value?: string;
   onChange: (next: string | undefined) => void;
   placeholder?: string;
@@ -1146,7 +1196,14 @@ function DurationInput({ value, onChange, placeholder, className, size = 'sm', d
 }
 
 /** Number-plus-unit picker for a Hydro memory string ("256m" / "1g" / "512k"). */
-function MemoryInput({ value, onChange, placeholder, className, size = 'sm', disabled }: {
+function MemoryInput({
+  value,
+  onChange,
+  placeholder,
+  className,
+  size = 'sm',
+  disabled,
+}: {
   value?: string;
   onChange: (next: string | undefined) => void;
   placeholder?: string;
@@ -1197,13 +1254,19 @@ function IssuesPanel({ issues }: { issues: ReturnType<typeof validateConfig> }) 
         {errors.map((i, idx) => (
           <div key={`e${idx}`} className="flex items-start gap-2 text-xs text-destructive">
             <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
-            <span>{i.message}{i.subtaskId != null ? ` (subtask #${i.subtaskId})` : ''}</span>
+            <span>
+              {i.message}
+              {i.subtaskId != null ? ` (subtask #${i.subtaskId})` : ''}
+            </span>
           </div>
         ))}
         {warnings.map((i, idx) => (
           <div key={`w${idx}`} className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-400">
             <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
-            <span>{i.message}{i.subtaskId != null ? ` (subtask #${i.subtaskId})` : ''}</span>
+            <span>
+              {i.message}
+              {i.subtaskId != null ? ` (subtask #${i.subtaskId})` : ''}
+            </span>
           </div>
         ))}
       </CardContent>
@@ -1215,7 +1278,13 @@ function IssuesPanel({ issues }: { issues: ReturnType<typeof validateConfig> }) 
 /*  Column 1 — Files                                                  */
 /* ────────────────────────────────────────────────────────────────── */
 
-function FilesColumn({ files, usedInPairs, problemUrl, addCase, onOpenFile }: {
+function FilesColumn({
+  files,
+  usedInPairs,
+  problemUrl,
+  addCase: _addCase,
+  onOpenFile,
+}: {
   files: R[];
   usedInPairs: Set<string>;
   problemUrl: string;
@@ -1228,13 +1297,15 @@ function FilesColumn({ files, usedInPairs, problemUrl, addCase, onOpenFile }: {
   // "what still needs assigning". To move a file between cases, drag it
   // straight in the Cases column instead.
   const visibleFiles = useMemo(() => files.filter((f) => !usedInPairs.has(f.name)), [files, usedInPairs]);
-  const filtered = useMemo(() => filter
-    ? visibleFiles.filter((f) => f.name.toLowerCase().includes(filter.toLowerCase()))
-    : visibleFiles
-  , [visibleFiles, filter]);
+  const filtered = useMemo(
+    () => (filter ? visibleFiles.filter((f) => f.name.toLowerCase().includes(filter.toLowerCase())) : visibleFiles),
+    [visibleFiles, filter],
+  );
 
   const stats = useMemo(() => {
-    let inputs = 0, outputs = 0, other = 0;
+    let inputs = 0;
+    let outputs = 0;
+    let other = 0;
     for (const f of files) {
       const cls = classify(f.name);
       if (cls.kind === 'input') inputs++;
@@ -1262,30 +1333,21 @@ function FilesColumn({ files, usedInPairs, problemUrl, addCase, onOpenFile }: {
           <Stat label="输出" value={stats.outputs} color="text-purple-500" />
           <Stat label="其他" value={stats.other} color="text-muted-foreground" />
         </div>
-        <Input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="搜索文件…"
-          className="text-xs h-8"
-        />
+        <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="搜索文件…" className="text-xs h-8" />
       </CardHeader>
       <CardContent className="min-h-0 flex-1 p-0">
         <ScrollArea className="h-full" viewportClassName="p-2 pt-0">
-        {filtered.length === 0 ? (
-          <p className="p-4 text-center text-xs text-muted-foreground">
-            {files.length === 0 ? '暂无文件，先上传一些' : usedInPairs.size === files.length ? '所有文件已分配' : '无匹配文件'}
-          </p>
-        ) : (
-          <div className="space-y-1">
-            {filtered.map((f) => (
-              <FileRow
-                key={f.name}
-                f={f}
-                onOpen={() => onOpenFile(f)}
-              />
-            ))}
-          </div>
-        )}
+          {filtered.length === 0 ? (
+            <p className="p-4 text-center text-xs text-muted-foreground">
+              {files.length === 0 ? '暂无文件，先上传一些' : usedInPairs.size === files.length ? '所有文件已分配' : '无匹配文件'}
+            </p>
+          ) : (
+            <div className="space-y-1">
+              {filtered.map((f) => (
+                <FileRow key={f.name} f={f} onOpen={() => onOpenFile(f)} />
+              ))}
+            </div>
+          )}
         </ScrollArea>
       </CardContent>
 
@@ -1313,7 +1375,9 @@ function FilesColumn({ files, usedInPairs, problemUrl, addCase, onOpenFile }: {
               }}
             />
             <div className="flex justify-end">
-              <Button variant="outline" onClick={() => setUploadOpen(false)}>关闭</Button>
+              <Button variant="outline" onClick={() => setUploadOpen(false)}>
+                关闭
+              </Button>
             </div>
           </div>
         </DialogContent>
@@ -1383,7 +1447,15 @@ function Stat({ label, value, color }: { label: string; value: number; color: st
 /*  Column 2 — Cases (flat pool when no subtasks)                     */
 /* ────────────────────────────────────────────────────────────────── */
 
-function CasesColumn({ config, fileSet, addCase, removeCase, updateCase, addSubtaskFromCases, autoPairAll }: {
+function CasesColumn({
+  config,
+  fileSet,
+  addCase,
+  removeCase,
+  updateCase,
+  addSubtaskFromCases,
+  autoPairAll,
+}: {
   config: JudgeConfig;
   fileSet: Set<string>;
   addCase: (c: JudgeCase) => void;
@@ -1404,7 +1476,8 @@ function CasesColumn({ config, fileSet, addCase, removeCase, updateCase, addSubt
   const toggleSel = (i: number) => {
     setSelected((s) => {
       const n = new Set(s);
-      if (n.has(i)) n.delete(i); else n.add(i);
+      if (n.has(i)) n.delete(i);
+      else n.add(i);
       return n;
     });
   };
@@ -1432,62 +1505,73 @@ function CasesColumn({ config, fileSet, addCase, removeCase, updateCase, addSubt
         {selected.size > 0 ? (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-muted-foreground">{selected.size} 已选</span>
-            <Button size="sm" variant="outline" onClick={() => {
-              addSubtaskFromCases(selectedCases);
-              setSelected(new Set());
-            }}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                addSubtaskFromCases(selectedCases);
+                setSelected(new Set());
+              }}
+            >
               建为测试点
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>清除</Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+              清除
+            </Button>
           </div>
         ) : null}
       </CardHeader>
-      <CardContent
-        className={`min-h-0 flex-1 p-0 transition-colors ${isOver ? 'bg-primary/5 border-primary' : ''}`}
-      >
+      <CardContent className={`min-h-0 flex-1 p-0 transition-colors ${isOver ? 'bg-primary/5 border-primary' : ''}`}>
         <ScrollArea viewportRef={dropRef} className="h-full" viewportClassName="p-2 space-y-1.5">
-        {/* Header note when in subtask mode — but we STILL render flat cases below if any,
+          {/* Header note when in subtask mode — but we STILL render flat cases below if any,
             so that cases dragged back from a subtask don't vanish into thin air. */}
-        {hasSubtasks ? (
-          <div className="rounded-md border border-dashed bg-muted/20 p-3 text-center text-[11px] text-muted-foreground">
-            已使用 Subtask 分组。拖文件到右侧测试点；从测试点拖回的用例会暂存在下方"未分组"区。
-          </div>
-        ) : null}
-        {!hasSubtasks && flatCases.length === 0 ? (
-          <div className="rounded-md border border-dashed bg-muted/10 p-6 text-center text-xs text-muted-foreground">
-            把文件从左侧拖到此处自动配对。
-            <br />
-            或点击「自动配对」一键完成。
-          </div>
-        ) : null}
-        {flatCases.length > 0 ? (
-          <>
-            {hasSubtasks ? (
-              <p className="px-1 pt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-                未分组（{flatCases.length}）
-              </p>
-            ) : null}
-            {flatCases.map((c, i) => (
-              <CaseRow
-                key={i}
-                c={c}
-                idx={i}
-                fileSet={fileSet}
-                selected={selected.has(i)}
-                onToggleSelect={() => toggleSel(i)}
-                onRemove={() => removeCase(i)}
-                onUpdate={(patch) => updateCase(i, patch)}
-              />
-            ))}
-          </>
-        ) : null}
+          {hasSubtasks ? (
+            <div className="rounded-md border border-dashed bg-muted/20 p-3 text-center text-[11px] text-muted-foreground">
+              已使用 Subtask 分组。拖文件到右侧测试点；从测试点拖回的用例会暂存在下方"未分组"区。
+            </div>
+          ) : null}
+          {!hasSubtasks && flatCases.length === 0 ? (
+            <div className="rounded-md border border-dashed bg-muted/10 p-6 text-center text-xs text-muted-foreground">
+              把文件从左侧拖到此处自动配对。
+              <br />
+              或点击「自动配对」一键完成。
+            </div>
+          ) : null}
+          {flatCases.length > 0 ? (
+            <>
+              {hasSubtasks ? (
+                <p className="px-1 pt-1 text-[10px] uppercase tracking-wide text-muted-foreground">未分组（{flatCases.length}）</p>
+              ) : null}
+              {flatCases.map((c, i) => (
+                <CaseRow
+                  key={i}
+                  c={c}
+                  idx={i}
+                  fileSet={fileSet}
+                  selected={selected.has(i)}
+                  onToggleSelect={() => toggleSel(i)}
+                  onRemove={() => removeCase(i)}
+                  onUpdate={(patch) => updateCase(i, patch)}
+                />
+              ))}
+            </>
+          ) : null}
         </ScrollArea>
       </CardContent>
     </Card>
   );
 }
 
-function CaseRow({ c, idx, fileSet, selected, onToggleSelect, onRemove, onUpdate, stid }: {
+function CaseRow({
+  c,
+  idx,
+  fileSet,
+  selected,
+  onToggleSelect,
+  onRemove,
+  onUpdate,
+  stid,
+}: {
   c: JudgeCase;
   idx: number;
   fileSet: Set<string>;
@@ -1521,9 +1605,7 @@ function CaseRow({ c, idx, fileSet, selected, onToggleSelect, onRemove, onUpdate
       className={`rounded border bg-card text-xs transition-all ${isDragging ? 'opacity-30' : ''} ${selected ? 'border-primary' : ''}`}
     >
       <div className="flex items-center gap-1 p-1.5">
-        {onToggleSelect ? (
-          <Checkbox checked={selected} onChange={onToggleSelect} />
-        ) : null}
+        {onToggleSelect ? <Checkbox checked={selected} onChange={onToggleSelect} /> : null}
         {/* Dedicated drag handle — only this grip triggers drag, so the input fields stay typeable. */}
         <span
           {...attributes}
@@ -1568,11 +1650,7 @@ function CaseRow({ c, idx, fileSet, selected, onToggleSelect, onRemove, onUpdate
         >
           <Settings className="size-3" />
         </button>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-        >
+        <button type="button" onClick={onRemove} className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
           <X className="size-3" />
         </button>
       </div>
@@ -1580,19 +1658,11 @@ function CaseRow({ c, idx, fileSet, selected, onToggleSelect, onRemove, onUpdate
         <div className="grid grid-cols-2 gap-2 border-t bg-muted/20 p-1.5">
           <label className="space-y-0.5">
             <span className="text-[10px] text-muted-foreground">时间覆写</span>
-            <DurationInput
-              value={c.time}
-              onChange={(v) => onUpdate({ time: v })}
-              placeholder="留空 = 默认"
-            />
+            <DurationInput value={c.time} onChange={(v) => onUpdate({ time: v })} placeholder="留空 = 默认" />
           </label>
           <label className="space-y-0.5">
             <span className="text-[10px] text-muted-foreground">内存覆写</span>
-            <MemoryInput
-              value={c.memory}
-              onChange={(v) => onUpdate({ memory: v })}
-              placeholder="留空 = 默认"
-            />
+            <MemoryInput value={c.memory} onChange={(v) => onUpdate({ memory: v })} placeholder="留空 = 默认" />
           </label>
           <label className="col-span-2 space-y-0.5">
             <span className="text-[10px] text-muted-foreground">测试点提示（PTA 风格，显示在评测详情该测试点旁）</span>
@@ -1619,10 +1689,7 @@ function CaseRow({ c, idx, fileSet, selected, onToggleSelect, onRemove, onUpdate
             />
           </label>
           <label className="col-span-2 flex items-center gap-1.5">
-            <Checkbox
-              checked={c.videoPublic ?? !!c.hintPublic}
-              onChange={() => onUpdate({ videoPublic: !(c.videoPublic ?? !!c.hintPublic) })}
-            />
+            <Checkbox checked={c.videoPublic ?? !!c.hintPublic} onChange={() => onUpdate({ videoPublic: !(c.videoPublic ?? !!c.hintPublic) })} />
             <span className="text-[10px] text-muted-foreground">视频对外公开（未单独设置时跟随提示的公开状态）</span>
           </label>
         </div>
@@ -1635,7 +1702,14 @@ function CaseRow({ c, idx, fileSet, selected, onToggleSelect, onRemove, onUpdate
 /*  Column 3 — Subtasks                                               */
 /* ────────────────────────────────────────────────────────────────── */
 
-function SubtasksColumn({ config, updateSubtask, removeSubtask, addSubtask, removeCase, updateCase }: {
+function SubtasksColumn({
+  config,
+  updateSubtask,
+  removeSubtask,
+  addSubtask,
+  removeCase,
+  updateCase,
+}: {
   config: JudgeConfig;
   updateSubtask: (stid: number, patch: Partial<JudgeSubtask>) => void;
   removeSubtask: (stid: number) => void;
@@ -1659,44 +1733,40 @@ function SubtasksColumn({ config, updateSubtask, removeSubtask, addSubtask, remo
             </Button>
           </div>
         </div>
-        {subtasks.length > 0 ? (
-          <p className="text-[11px] text-muted-foreground">
-            总分 {subtasks.reduce((n, s) => n + (s.score || 0), 0)} 分
-          </p>
-        ) : null}
+        {subtasks.length > 0 ? <p className="text-[11px] text-muted-foreground">总分 {subtasks.reduce((n, s) => n + (s.score || 0), 0)} 分</p> : null}
       </CardHeader>
       <CardContent className="relative min-h-0 flex-1 p-0">
         <ScrollArea className="h-full" viewportClassName="p-2 space-y-2">
-        {/* SVG layer for dep lines */}
-        {subtasks.length > 0 ? <SubtaskDepLines subtasks={subtasks} /> : null}
-        {subtasks.length === 0 ? (
-          <div className="rounded-md border border-dashed bg-muted/10 p-6 text-center text-xs text-muted-foreground">
-            <p className="mb-2">还没有测试点</p>
-            <Button size="sm" variant="outline" onClick={addSubtask}>
-              <Plus className="size-3 mr-1" />
-              新建第一个测试点
-            </Button>
-          </div>
-        ) : (
-          subtasks.map((s) => (
-            <SubtaskCard
-              key={s.id}
-              subtask={s}
-              allIds={subtasks.map((x) => x.id!).filter((id) => id !== s.id)}
-              onUpdate={(patch) => updateSubtask(s.id!, patch)}
-              onRemove={() => removeSubtask(s.id!)}
-              onUpdateCase={(idx, patch) => updateCase(idx, patch, s.id)}
-              onRemoveCase={(idx) => removeCase(idx, s.id)}
-            />
-          ))
-        )}
+          {/* SVG layer for dep lines */}
+          {subtasks.length > 0 ? <SubtaskDepLines subtasks={subtasks} /> : null}
+          {subtasks.length === 0 ? (
+            <div className="rounded-md border border-dashed bg-muted/10 p-6 text-center text-xs text-muted-foreground">
+              <p className="mb-2">还没有测试点</p>
+              <Button size="sm" variant="outline" onClick={addSubtask}>
+                <Plus className="size-3 mr-1" />
+                新建第一个测试点
+              </Button>
+            </div>
+          ) : (
+            subtasks.map((s) => (
+              <SubtaskCard
+                key={s.id}
+                subtask={s}
+                allIds={subtasks.map((x) => x.id!).filter((id) => id !== s.id)}
+                onUpdate={(patch) => updateSubtask(s.id!, patch)}
+                onRemove={() => removeSubtask(s.id!)}
+                onUpdateCase={(idx, patch) => updateCase(idx, patch, s.id)}
+                onRemoveCase={(idx) => removeCase(idx, s.id)}
+              />
+            ))
+          )}
         </ScrollArea>
       </CardContent>
     </Card>
   );
 }
 
-function SubtaskDepLines({ subtasks }: { subtasks: JudgeSubtask[] }) {
+function SubtaskDepLines({ subtasks: _subtasks }: { subtasks: JudgeSubtask[] }) {
   // SVG drawn absolutely on top of the column. For each subtask with `if`,
   // draw a line from the right edge of the dependency to the left edge of
   // this card. The actual coords are unknown until paint; we use data-*
@@ -1705,7 +1775,14 @@ function SubtaskDepLines({ subtasks }: { subtasks: JudgeSubtask[] }) {
   return null;
 }
 
-function SubtaskCard({ subtask, allIds, onUpdate, onRemove, onUpdateCase, onRemoveCase }: {
+function SubtaskCard({
+  subtask,
+  allIds,
+  onUpdate,
+  onRemove,
+  onUpdateCase,
+  onRemoveCase,
+}: {
   subtask: JudgeSubtask;
   allIds: number[];
   onUpdate: (patch: Partial<JudgeSubtask>) => void;
@@ -1721,10 +1798,7 @@ function SubtaskCard({ subtask, allIds, onUpdate, onRemove, onUpdateCase, onRemo
   });
 
   return (
-    <div
-      ref={setNodeRef}
-      className={`rounded-md border bg-card transition-all ${isOver ? 'border-primary bg-primary/5' : ''}`}
-    >
+    <div ref={setNodeRef} className={`rounded-md border bg-card transition-all ${isOver ? 'border-primary bg-primary/5' : ''}`}>
       <div className="flex items-center gap-2 border-b bg-muted/30 p-2">
         <button type="button" onClick={() => setCollapsed(!collapsed)} className="text-muted-foreground hover:text-foreground">
           {collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
@@ -1734,7 +1808,7 @@ function SubtaskCard({ subtask, allIds, onUpdate, onRemove, onUpdateCase, onRemo
         <Input
           type="number"
           value={subtask.score ?? ''}
-          onChange={(e) => onUpdate({ score: e.target.value === '' ? undefined : parseInt(e.target.value, 10) })}
+          onChange={(e) => onUpdate({ score: e.target.value === '' ? undefined : Number.parseInt(e.target.value, 10) })}
           placeholder="分数"
           className="w-16 text-xs h-7"
         />
@@ -1766,7 +1840,9 @@ function SubtaskCard({ subtask, allIds, onUpdate, onRemove, onUpdateCase, onRemo
         <div className="border-b bg-muted/10 p-2">
           <p className="mb-1 text-[10px] text-muted-foreground">依赖测试点（必须先通过）：</p>
           <div className="flex flex-wrap gap-1">
-            {allIds.length === 0 ? <span className="text-[11px] text-muted-foreground">没有其它测试点</span> :
+            {allIds.length === 0 ? (
+              <span className="text-[11px] text-muted-foreground">没有其它测试点</span>
+            ) : (
               allIds.map((id) => {
                 const enabled = (subtask.if || []).includes(id);
                 return (
@@ -1782,7 +1858,8 @@ function SubtaskCard({ subtask, allIds, onUpdate, onRemove, onUpdateCase, onRemo
                     #{id}
                   </button>
                 );
-              })}
+              })
+            )}
           </div>
         </div>
       ) : null}
@@ -1790,9 +1867,7 @@ function SubtaskCard({ subtask, allIds, onUpdate, onRemove, onUpdateCase, onRemo
       {!collapsed ? (
         <div className="p-1.5 space-y-1">
           {subtask.cases.length === 0 ? (
-            <p className="rounded border border-dashed p-3 text-center text-[11px] text-muted-foreground">
-              拖测试用例到这里
-            </p>
+            <p className="rounded border border-dashed p-3 text-center text-[11px] text-muted-foreground">拖测试用例到这里</p>
           ) : (
             subtask.cases.map((c, i) => (
               <CaseRow
@@ -1811,26 +1886,16 @@ function SubtaskCard({ subtask, allIds, onUpdate, onRemove, onUpdateCase, onRemo
           <div className="mt-1 grid grid-cols-2 gap-2 border-t pt-1.5">
             <label className="space-y-0.5">
               <span className="text-[10px] text-muted-foreground">组级时间覆写</span>
-              <DurationInput
-                value={subtask.time}
-                onChange={(v) => onUpdate({ time: v })}
-                placeholder="留空 = 默认"
-              />
+              <DurationInput value={subtask.time} onChange={(v) => onUpdate({ time: v })} placeholder="留空 = 默认" />
             </label>
             <label className="space-y-0.5">
               <span className="text-[10px] text-muted-foreground">组级内存覆写</span>
-              <MemoryInput
-                value={subtask.memory}
-                onChange={(v) => onUpdate({ memory: v })}
-                placeholder="留空 = 默认"
-              />
+              <MemoryInput value={subtask.memory} onChange={(v) => onUpdate({ memory: v })} placeholder="留空 = 默认" />
             </label>
           </div>
         </div>
       ) : (
-        <div className="p-1.5 text-[11px] text-muted-foreground">
-          {subtask.cases.length} 用例
-        </div>
+        <div className="p-1.5 text-[11px] text-muted-foreground">{subtask.cases.length} 用例</div>
       )}
     </div>
   );
@@ -1855,11 +1920,12 @@ function handleDrop(active: DraggedItem, over: DropTarget, updateConfig: (m: (c:
     // File dropped on case-pool: create new case
     if (over.kind === 'case-pool') {
       updateConfig((cfg) => {
-        const c: JudgeCase = active.cls === 'input'
-          ? { input: active.name, output: '' }
-          : active.cls === 'output'
-            ? { input: '', output: active.name }
-            : { input: active.name, output: '' };
+        const c: JudgeCase =
+          active.cls === 'input'
+            ? { input: active.name, output: '' }
+            : active.cls === 'output'
+              ? { input: '', output: active.name }
+              : { input: active.name, output: '' };
         if (cfg.subtasks && cfg.subtasks.length > 0) {
           // Add to first subtask
           const newSubs = [...cfg.subtasks];
@@ -1874,13 +1940,11 @@ function handleDrop(active: DraggedItem, over: DropTarget, updateConfig: (m: (c:
     if (over.kind === 'case-input' || over.kind === 'case-output') {
       const target = over.kind === 'case-input' ? 'input' : 'output';
       updateConfig((cfg) => {
-        const updateInList = (list: JudgeCase[]) => list.map((c, i) =>
-          i === over.idx ? { ...c, [target]: active.name } : c
-        );
+        const updateInList = (list: JudgeCase[]) => list.map((c, i) => (i === over.idx ? { ...c, [target]: active.name } : c));
         if (over.stid != null && cfg.subtasks) {
           return {
             ...cfg,
-            subtasks: cfg.subtasks.map((s) => s.id === over.stid ? { ...s, cases: updateInList(s.cases) } : s),
+            subtasks: cfg.subtasks.map((s) => (s.id === over.stid ? { ...s, cases: updateInList(s.cases) } : s)),
           };
         }
         return { ...cfg, cases: updateInList(cfg.cases || []) };
@@ -1890,12 +1954,10 @@ function handleDrop(active: DraggedItem, over: DropTarget, updateConfig: (m: (c:
     // File dropped on subtask: create new case in subtask
     if (over.kind === 'subtask') {
       updateConfig((cfg) => {
-        const c: JudgeCase = active.cls === 'output'
-          ? { input: '', output: active.name }
-          : { input: active.name, output: '' };
+        const c: JudgeCase = active.cls === 'output' ? { input: '', output: active.name } : { input: active.name, output: '' };
         return {
           ...cfg,
-          subtasks: (cfg.subtasks || []).map((s) => s.id === over.stid ? { ...s, cases: [...s.cases, c] } : s),
+          subtasks: (cfg.subtasks || []).map((s) => (s.id === over.stid ? { ...s, cases: [...s.cases, c] } : s)),
         };
       });
       return;
@@ -1911,7 +1973,9 @@ function handleDrop(active: DraggedItem, over: DropTarget, updateConfig: (m: (c:
         if (active.fromStid != null) {
           newConfig = {
             ...newConfig,
-            subtasks: (newConfig.subtasks || []).map((s) => s.id === active.fromStid ? { ...s, cases: s.cases.filter((_, i) => i !== active.fromIdx) } : s),
+            subtasks: (newConfig.subtasks || []).map((s) =>
+              s.id === active.fromStid ? { ...s, cases: s.cases.filter((_, i) => i !== active.fromIdx) } : s,
+            ),
           };
         } else {
           newConfig = { ...newConfig, cases: (newConfig.cases || []).filter((_, i) => i !== active.fromIdx) };
@@ -1919,7 +1983,7 @@ function handleDrop(active: DraggedItem, over: DropTarget, updateConfig: (m: (c:
         // Add to target
         newConfig = {
           ...newConfig,
-          subtasks: (newConfig.subtasks || []).map((s) => s.id === over.stid ? { ...s, cases: [...s.cases, active.case] } : s),
+          subtasks: (newConfig.subtasks || []).map((s) => (s.id === over.stid ? { ...s, cases: [...s.cases, active.case] } : s)),
         };
         return newConfig;
       });
@@ -1928,10 +1992,11 @@ function handleDrop(active: DraggedItem, over: DropTarget, updateConfig: (m: (c:
     // Case dropped back to pool: move out of subtask
     if (over.kind === 'case-pool' && active.fromStid != null) {
       updateConfig((cfg) => {
-        const newSubs = (cfg.subtasks || []).map((s) => s.id === active.fromStid ? { ...s, cases: s.cases.filter((_, i) => i !== active.fromIdx) } : s);
+        const newSubs = (cfg.subtasks || []).map((s) =>
+          s.id === active.fromStid ? { ...s, cases: s.cases.filter((_, i) => i !== active.fromIdx) } : s,
+        );
         return { ...cfg, cases: [...(cfg.cases || []), active.case], subtasks: newSubs };
       });
-      return;
     }
   }
 }

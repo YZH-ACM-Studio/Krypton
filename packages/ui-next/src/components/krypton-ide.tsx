@@ -13,13 +13,7 @@
  *  - Configurable font size, tab size, word wrap, theme
  */
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { Compartment, EditorState, type Extension } from '@codemirror/state';
@@ -35,21 +29,8 @@ import {
   crosshairCursor,
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import {
-  bracketMatching,
-  defaultHighlightStyle,
-  foldGutter,
-  foldKeymap,
-  indentUnit,
-  indentOnInput,
-  syntaxHighlighting,
-} from '@codemirror/language';
-import {
-  autocompletion,
-  closeBrackets,
-  closeBracketsKeymap,
-  completionKeymap,
-} from '@codemirror/autocomplete';
+import { bracketMatching, defaultHighlightStyle, foldGutter, foldKeymap, indentUnit, indentOnInput, syntaxHighlighting } from '@codemirror/language';
+import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { lintKeymap } from '@codemirror/lint';
 
@@ -66,12 +47,7 @@ import { oneDark } from '@codemirror/theme-one-dark';
 
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import {
@@ -138,9 +114,7 @@ const LANGUAGES: Record<string, LangEntry> = {
  */
 let LANG_KEYS_DESC: string[] | null = null;
 function langKeysDesc(): string[] {
-  if (!LANG_KEYS_DESC) {
-    LANG_KEYS_DESC = Object.keys(LANGUAGES).sort((a, b) => b.length - a.length);
-  }
+  LANG_KEYS_DESC ||= Object.keys(LANGUAGES).sort((a, b) => b.length - a.length);
   return LANG_KEYS_DESC;
 }
 
@@ -196,7 +170,7 @@ export function getLangEntry(id: string): LangEntry {
     const family = id.slice(0, dotIdx);
     if (LANGUAGES[family]) {
       return {
-        label: id,  // unknown variant — show the raw id so the user can tell which
+        label: id, // unknown variant — show the raw id so the user can tell which
         extension: LANGUAGES[family].extension,
       };
     }
@@ -267,15 +241,11 @@ const DEFAULT_CONFIG: IdeConfig = {
 function normalizeConfig(value: Partial<IdeConfig> = {}): IdeConfig {
   const fontSize = Number(value.fontSize);
   const tabSize = Number(value.tabSize);
-  const theme = value.theme && ['light', 'dark', 'oneDark'].includes(value.theme)
-    ? value.theme
-    : DEFAULT_CONFIG.theme;
+  const theme = value.theme && ['light', 'dark', 'oneDark'].includes(value.theme) ? value.theme : DEFAULT_CONFIG.theme;
   return {
     ...DEFAULT_CONFIG,
     ...value,
-    fontSize: [12, 13, 14, 15, 16, 18, 20, 22, 24].includes(fontSize)
-      ? fontSize
-      : DEFAULT_CONFIG.fontSize,
+    fontSize: [12, 13, 14, 15, 16, 18, 20, 22, 24].includes(fontSize) ? fontSize : DEFAULT_CONFIG.fontSize,
     tabSize: [2, 4, 8].includes(tabSize) ? tabSize : DEFAULT_CONFIG.tabSize,
     theme,
     wordWrap: typeof value.wordWrap === 'boolean' ? value.wordWrap : DEFAULT_CONFIG.wordWrap,
@@ -287,19 +257,28 @@ function loadConfig(): IdeConfig {
   try {
     const raw = localStorage.getItem(IDE_CONFIG_KEY);
     if (raw) return normalizeConfig(JSON.parse(raw));
-  } catch { /* empty */ }
+  } catch {
+    /* empty */
+  }
   return { ...DEFAULT_CONFIG };
 }
 
 function saveConfig(c: IdeConfig) {
-  try { localStorage.setItem(IDE_CONFIG_KEY, JSON.stringify(c)); } catch { /* empty */ }
+  try {
+    localStorage.setItem(IDE_CONFIG_KEY, JSON.stringify(c));
+  } catch {
+    /* empty */
+  }
 }
 
 /* ================================================================== */
 /*  Status helpers                                                     */
 /* ================================================================== */
 
-interface StatusDisplay { label: string; className: string }
+interface StatusDisplay {
+  label: string;
+  className: string;
+}
 
 const STATUS_MAP: Record<number, StatusDisplay> = {
   0: { label: '等待中', className: 'text-muted-foreground' },
@@ -343,10 +322,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
       )}
     >
       <span
-        className={cn(
-          'inline-block size-3.5 rounded-full bg-white shadow transition-transform',
-          checked ? 'translate-x-4.5' : 'translate-x-0.75',
-        )}
+        className={cn('inline-block size-3.5 rounded-full bg-white shadow transition-transform', checked ? 'translate-x-4.5' : 'translate-x-0.75')}
       />
     </button>
   );
@@ -365,14 +341,7 @@ function SettingRow({ label, children }: { label: string; children: React.ReactN
 /*  Settings dialog                                                    */
 /* ================================================================== */
 
-const FONT_OPTIONS = [
-  'JetBrains Mono',
-  'Fira Code',
-  'Cascadia Code',
-  'SF Mono',
-  'Menlo',
-  'Consolas',
-];
+const FONT_OPTIONS = ['JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'Menlo', 'Consolas'];
 
 function SettingsDialog({
   open,
@@ -408,9 +377,7 @@ function SettingsDialog({
                 onClick={() => setTab(cat.id)}
                 className={cn(
                   'flex w-full items-center rounded-md px-3 py-2 text-sm transition-colors',
-                  tab === cat.id
-                    ? 'bg-primary/10 text-primary font-medium'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+                  tab === cat.id ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
                 )}
               >
                 {cat.label}
@@ -430,7 +397,8 @@ function SettingsDialog({
                     className="w-auto min-w-[6rem]"
                     ariaLabel="字号"
                     options={[12, 13, 14, 15, 16, 18, 20, 22, 24].map((s) => ({
-                      value: String(s), label: `${s}px`,
+                      value: String(s),
+                      label: `${s}px`,
                     }))}
                   />
                 </SettingRow>
@@ -444,9 +412,7 @@ function SettingsDialog({
                         onClick={() => onChange({ ...config, tabSize: s })}
                         className={cn(
                           'rounded-md border px-3 py-1 text-sm transition-colors',
-                          config.tabSize === s
-                            ? 'border-primary bg-primary text-primary-foreground'
-                            : 'hover:bg-accent',
+                          config.tabSize === s ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-accent',
                         )}
                       >
                         {s}
@@ -456,10 +422,7 @@ function SettingsDialog({
                 </SettingRow>
 
                 <SettingRow label="自动换行">
-                  <Toggle
-                    checked={config.wordWrap}
-                    onChange={(v) => onChange({ ...config, wordWrap: v })}
-                  />
+                  <Toggle checked={config.wordWrap} onChange={(v) => onChange({ ...config, wordWrap: v })} />
                 </SettingRow>
               </>
             )}
@@ -554,8 +517,10 @@ function diffLines(actual: string, expected: string): { type: 'same' | 'add' | '
   return result;
 }
 
-/** Extract the program's stdout from a pretest record (same precedence the
- *  output/diff panes use). */
+/**
+ * Extract the program's stdout from a pretest record (same precedence the
+ *  output/diff panes use).
+ */
 function pretestActualOutput(result: Pick<PretestResult, 'testCases' | 'stdout' | 'judgeTexts'> | null | undefined): string {
   return result?.testCases?.[0]?.message || result?.stdout || result?.judgeTexts?.join('\n') || '';
 }
@@ -605,22 +570,16 @@ function PretestResultInline({
   // expected output instead of the raw backend status. See selfTestVerdict.
   const verdict = selfTestVerdict(result, expectedOutput);
   const verdictDisplay =
-    verdict === 'ac' ? { label: '通过 (Accepted)', className: 'text-green-500' }
-      : verdict === 'wa' ? { label: '答案错误 (Wrong Answer)', className: 'text-red-500' }
-        : verdict === 'ran' ? { label: '运行完成', className: 'text-muted-foreground' }
+    verdict === 'ac'
+      ? { label: '通过 (Accepted)', className: 'text-green-500' }
+      : verdict === 'wa'
+        ? { label: '答案错误 (Wrong Answer)', className: 'text-red-500' }
+        : verdict === 'ran'
+          ? { label: '运行完成', className: 'text-muted-foreground' }
           : status;
   const time = result.time != null ? `${result.time} ms` : '—';
-  const memory =
-    result.memory != null
-      ? result.memory >= 1024
-        ? `${(result.memory / 1024).toFixed(1)} MB`
-        : `${result.memory} KB`
-      : '—';
-  const actualOutput =
-    result.testCases?.[0]?.message
-    || result.stdout
-    || result.judgeTexts?.join('\n')
-    || '';
+  const memory = result.memory != null ? (result.memory >= 1024 ? `${(result.memory / 1024).toFixed(1)} MB` : `${result.memory} KB`) : '—';
+  const actualOutput = result.testCases?.[0]?.message || result.stdout || result.judgeTexts?.join('\n') || '';
   const compilerOutput = result.compilerTexts?.join('\n') || '';
   const stderr = result.stderr || '';
   const hasExpected = expectedOutput.trim().length > 0;
@@ -644,7 +603,9 @@ function PretestResultInline({
           <XCircle className="size-3.5 text-red-500" />
         )}
         <span className={cn('text-xs font-medium', verdictDisplay.className)}>{verdictDisplay.label}</span>
-        <span className="text-[10px] text-muted-foreground">{time} · {memory}</span>
+        <span className="text-[10px] text-muted-foreground">
+          {time} · {memory}
+        </span>
         {hasExpected && (
           <span className={cn('text-[10px] font-medium ml-auto', outputMatch ? 'text-green-500' : 'text-red-500')}>
             {outputMatch ? '输出匹配' : '输出不匹配'}
@@ -654,30 +615,28 @@ function PretestResultInline({
 
       {/* Result sub-tabs */}
       <div className="flex items-center gap-0 border-b bg-muted/10 px-1 shrink-0">
-        {tabs.filter((t) => t.show).map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => onResultTabChange(tab.id)}
-            className={cn(
-              'px-3 py-1 text-[11px] transition-colors border-b -mb-px',
-              activeResultTab === tab.id
-                ? 'border-primary text-foreground font-medium'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
+        {tabs
+          .filter((t) => t.show)
+          .map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => onResultTabChange(tab.id)}
+              className={cn(
+                'px-3 py-1 text-[11px] transition-colors border-b -mb-px',
+                activeResultTab === tab.id
+                  ? 'border-primary text-foreground font-medium'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
       </div>
 
       {/* Result content */}
       <ScrollArea orientation="both" className="flex-1 min-h-0">
-        {activeResultTab === 'output' && (
-          <pre className="p-2 font-mono text-xs whitespace-pre-wrap break-all">
-            {actualOutput || '(无输出)'}
-          </pre>
-        )}
+        {activeResultTab === 'output' && <pre className="p-2 font-mono text-xs whitespace-pre-wrap break-all">{actualOutput || '(无输出)'}</pre>}
 
         {activeResultTab === 'diff' && hasExpected && (
           <div className="p-2 font-mono text-xs">
@@ -701,20 +660,12 @@ function PretestResultInline({
 
         {activeResultTab === 'compiler' && (
           <div className="p-2 space-y-2">
-            {compilerOutput && (
-              <pre className="font-mono text-xs whitespace-pre-wrap break-all">{compilerOutput}</pre>
-            )}
-            {stderr && (
-              <pre className="font-mono text-xs whitespace-pre-wrap break-all text-red-500">{stderr}</pre>
-            )}
+            {compilerOutput && <pre className="font-mono text-xs whitespace-pre-wrap break-all">{compilerOutput}</pre>}
+            {stderr && <pre className="font-mono text-xs whitespace-pre-wrap break-all text-red-500">{stderr}</pre>}
           </div>
         )}
 
-        {result.error && (
-          <div className="mx-2 mt-2 rounded-md bg-red-500/10 p-2 text-xs text-red-500">
-            {result.error}
-          </div>
-        )}
+        {result.error && <div className="mx-2 mt-2 rounded-md bg-red-500/10 p-2 text-xs text-red-500">{result.error}</div>}
       </ScrollArea>
     </div>
   );
@@ -832,7 +783,9 @@ export function KryptonIDE({
     try {
       const saved = localStorage.getItem(LANG_KEY);
       if (saved && (langs.length === 0 || langs.includes(saved))) return saved;
-    } catch { /* empty */ }
+    } catch {
+      /* empty */
+    }
     return defaultLang || langs[0] || 'cc.cc17';
   });
   const [showLangMenu, setShowLangMenu] = useState(false);
@@ -862,7 +815,12 @@ export function KryptonIDE({
   }, [records, onRecordsChange]);
 
   /* ── Pretest tabs: sample cases + custom tab ── */
-  type PretestTab = { id: string; label: string; input: string; expectedOutput: string };
+  interface PretestTab {
+    id: string;
+    label: string;
+    input: string;
+    expectedOutput: string;
+  }
   const [pretestTabs, setPretestTabs] = useState<PretestTab[]>(() => {
     const tabs: PretestTab[] = samples.map((s) => ({
       id: `sample-${s.id}`,
@@ -889,10 +847,7 @@ export function KryptonIDE({
    * with a new array reference every time → infinite re-render loop.
    * We use a serialised signature instead so identity churn is ignored.
    */
-  const samplesKey = useMemo(
-    () => samples.map((s) => `${s.id}|${(s.input || '').length}|${(s.output || '').length}`).join('\n'),
-    [samples],
-  );
+  const samplesKey = useMemo(() => samples.map((s) => `${s.id}|${(s.input || '').length}|${(s.output || '').length}`).join('\n'), [samples]);
   useEffect(() => {
     setPretestTabs((prev) => {
       const custom = prev.filter((t) => t.id === 'custom' || t.id.startsWith('custom-'));
@@ -905,35 +860,40 @@ export function KryptonIDE({
       const customTabs = custom.length > 0 ? custom : [{ id: 'custom', label: '自定义', input: '', expectedOutput: '' }];
       const next = [...sampleTabs, ...customTabs];
       // Cheap equality check — same length + same ids + same data lengths means we're done.
-      if (prev.length === next.length
-        && prev.every((t, i) => t.id === next[i].id && t.input === next[i].input && t.expectedOutput === next[i].expectedOutput)) {
+      if (
+        prev.length === next.length &&
+        prev.every((t, i) => t.id === next[i].id && t.input === next[i].input && t.expectedOutput === next[i].expectedOutput)
+      ) {
         return prev;
       }
       return next;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [samplesKey]);
 
-  const updateTabField = useCallback((tabId: string, field: 'input' | 'expectedOutput', value: string) => {
-    setPretestTabs((prev) =>
-      prev.map((t) => (t.id === tabId ? { ...t, [field]: value } : t)),
-    );
+  const updateTabField = useCallback((tabId: string, field: 'input' | 'expectedOutput', nextValue: string) => {
+    setPretestTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, [field]: nextValue } : t)));
   }, []);
 
   const addCustomTab = useCallback(() => {
     const id = `custom-${Date.now()}`;
-    setPretestTabs((prev) => [...prev, { id, label: `自定义 ${prev.filter((t) => t.id.startsWith('custom')).length + 1}`, input: '', expectedOutput: '' }]);
+    setPretestTabs((prev) => [
+      ...prev,
+      { id, label: `自定义 ${prev.filter((t) => t.id.startsWith('custom')).length + 1}`, input: '', expectedOutput: '' },
+    ]);
     setActiveTestTab(id);
   }, []);
 
-  const removeTab = useCallback((tabId: string) => {
-    setPretestTabs((prev) => {
-      const next = prev.filter((t) => t.id !== tabId);
-      if (next.length === 0) next.push({ id: 'custom', label: '自定义', input: '', expectedOutput: '' });
-      return next;
-    });
-    setActiveTestTab((cur) => (cur === tabId ? (pretestTabs[0]?.id || 'custom') : cur));
-  }, [pretestTabs]);
+  const removeTab = useCallback(
+    (tabId: string) => {
+      setPretestTabs((prev) => {
+        const next = prev.filter((t) => t.id !== tabId);
+        if (next.length === 0) next.push({ id: 'custom', label: '自定义', input: '', expectedOutput: '' });
+        return next;
+      });
+      setActiveTestTab((cur) => (cur === tabId ? pretestTabs[0]?.id || 'custom' : cur));
+    },
+    [pretestTabs],
+  );
 
   /* ── config persistence ── */
   const updateConfig = useCallback((c: IdeConfig) => {
@@ -943,7 +903,11 @@ export function KryptonIDE({
 
   /* ── persist selected language ── */
   useEffect(() => {
-    try { localStorage.setItem(LANG_KEY, selectedLang); } catch { /* empty */ }
+    try {
+      localStorage.setItem(LANG_KEY, selectedLang);
+    } catch {
+      /* empty */
+    }
   }, [selectedLang]);
 
   /* ── helpers ── */
@@ -980,8 +944,21 @@ export function KryptonIDE({
         ...completionKeymap,
         ...lintKeymap,
         indentWithTab,
-        { key: 'F9', run: () => { pretestRef.current(); return true; } },
-        { key: 'F10', run: () => { submitRef.current(); return true; }, preventDefault: true },
+        {
+          key: 'F9',
+          run: () => {
+            pretestRef.current();
+            return true;
+          },
+        },
+        {
+          key: 'F10',
+          run: () => {
+            submitRef.current();
+            return true;
+          },
+          preventDefault: true,
+        },
       ]),
       lang.extension(),
       themeExtension(config.theme),
@@ -1000,7 +977,11 @@ export function KryptonIDE({
         if (update.docChanged && codeCacheKey) {
           clearTimeout(cacheTimer.current);
           cacheTimer.current = setTimeout(() => {
-            try { localStorage.setItem(codeCacheKey, update.state.doc.toString()); } catch { /* empty */ }
+            try {
+              localStorage.setItem(codeCacheKey, update.state.doc.toString());
+            } catch {
+              /* empty */
+            }
           }, 500);
         }
       }),
@@ -1015,9 +996,13 @@ export function KryptonIDE({
       /* Read-only flag for `mode='readonly'` */
       ...(isReadOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
       /* Controlled value: emit onValueChange on each keystroke */
-      ...(onValueChange ? [EditorView.updateListener.of((update) => {
-        if (update.docChanged) onValueChange(update.state.doc.toString());
-      })] : []),
+      ...(onValueChange
+        ? [
+            EditorView.updateListener.of((update) => {
+              if (update.docChanged) onValueChange(update.state.doc.toString());
+            }),
+          ]
+        : []),
     ];
   }, [selectedLang, config, codeCacheKey, isReadOnly, onValueChange]);
 
@@ -1034,7 +1019,7 @@ export function KryptonIDE({
 
     // Controlled `value` (simple/readonly mode) wins; otherwise fall back to
     // defaultCode or the cached document.
-    let initialDoc = value != null ? value : defaultCode;
+    let initialDoc = value ?? defaultCode;
     if (value == null && codeCacheKey) {
       const cached = localStorage.getItem(codeCacheKey);
       if (cached) initialDoc = cached;
@@ -1051,7 +1036,6 @@ export function KryptonIDE({
       view.destroy();
       viewRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extensions]);
 
   /* ── External value sync (controlled mode) ──
@@ -1081,11 +1065,7 @@ export function KryptonIDE({
         const data = await res.json();
         const rdoc = data.rdoc || data;
         const s: number = rdoc.status ?? 0;
-        setRecords((prev) =>
-          prev.map((r) =>
-            r.rid === rid ? { ...r, status: s, time: rdoc.time, memory: rdoc.memory } : r,
-          ),
-        );
+        setRecords((prev) => prev.map((r) => (r.rid === rid ? { ...r, status: s, time: rdoc.time, memory: rdoc.memory } : r)));
         if (s > 0 && s < 20) return;
       } catch {
         break;
@@ -1093,19 +1073,25 @@ export function KryptonIDE({
     }
   }, []);
 
-  const resolveRecordUrl = useCallback((rid: string, fallback?: string) => {
-    if (recordUrlTemplate) {
-      return recordUrlTemplate.replace(/__RID__/g, encodeURIComponent(rid));
-    }
-    return fallback || `/record/${rid}`;
-  }, [recordUrlTemplate]);
+  const resolveRecordUrl = useCallback(
+    (rid: string, fallback?: string) => {
+      if (recordUrlTemplate) {
+        return recordUrlTemplate.replace(/__RID__/g, encodeURIComponent(rid));
+      }
+      return fallback || `/record/${rid}`;
+    },
+    [recordUrlTemplate],
+  );
 
-  const resolvePretestRecordUrl = useCallback((rid: string, fallback?: string) => {
-    if (pretestRecordUrlTemplate) {
-      return pretestRecordUrlTemplate.replace(/__RID__/g, encodeURIComponent(rid));
-    }
-    return fallback || `/record/${rid}`;
-  }, [pretestRecordUrlTemplate]);
+  const resolvePretestRecordUrl = useCallback(
+    (rid: string, fallback?: string) => {
+      if (pretestRecordUrlTemplate) {
+        return pretestRecordUrlTemplate.replace(/__RID__/g, encodeURIComponent(rid));
+      }
+      return fallback || `/record/${rid}`;
+    },
+    [pretestRecordUrlTemplate],
+  );
 
   /* ── Submit handler ── */
   const handleSubmit = useCallback(async () => {
@@ -1170,120 +1156,124 @@ export function KryptonIDE({
    *   - one judge queue slot, so "run all" stays atomic
    *   - results stream in together — easier to render partial progress
    */
-  const runPretestForTabs = useCallback(async (tabIds: string[]) => {
-    if (!submitUrl || !canPretest) return;
-    const tabs = tabIds
-      .map((id) => pretestTabs.find((t) => t.id === id))
-      .filter((t): t is PretestTab => !!t && t.input.length > 0);
-    if (tabs.length === 0) return;
+  const runPretestForTabs = useCallback(
+    async (tabIds: string[]) => {
+      if (!submitUrl || !canPretest) return;
+      const tabs = tabIds.map((id) => pretestTabs.find((t) => t.id === id)).filter((t): t is PretestTab => !!t && t.input.length > 0);
+      if (tabs.length === 0) return;
 
-    // Any in-flight pretest gets aborted — only one run owns the controller.
-    pretestAbort.current?.abort();
-    const abort = new AbortController();
-    pretestAbort.current = abort;
-    const runningIds = tabs.map((t) => t.id);
-    setPretestRunning(new Set(runningIds));
-    setPretestCooldown(3);
-    setPretestResults((prev) => {
-      const m = new Map(prev);
-      runningIds.forEach((id) => m.delete(id));
-      return m;
-    });
-
-    const distributeFromRdoc = (rdoc: any) => {
+      // Any in-flight pretest gets aborted — only one run owns the controller.
+      pretestAbort.current?.abort();
+      const abort = new AbortController();
+      pretestAbort.current = abort;
+      const runningIds = tabs.map((t) => t.id);
+      setPretestRunning(new Set(runningIds));
+      setPretestCooldown(3);
       setPretestResults((prev) => {
         const m = new Map(prev);
-        const cases = Array.isArray(rdoc.testCases) ? rdoc.testCases : [];
-        runningIds.forEach((tabId, i) => {
-          const tc = cases[i];
-          // testCases settle one at a time. If this tab's case hasn't
-          // landed yet, show the record-level status (pending / compile
-          // error / etc.) so the tab badge isn't blank.
-          m.set(tabId, tc
-            ? {
-                status: tc.status,
-                time: tc.time,
-                memory: tc.memory,
-                testCases: [tc],
-                compilerTexts: rdoc.compilerTexts,
-                judgeTexts: rdoc.judgeTexts,
-              }
-            : {
-                status: rdoc.status ?? 0,
-                compilerTexts: rdoc.compilerTexts,
-                judgeTexts: rdoc.judgeTexts,
-              });
+        runningIds.forEach((id) => m.delete(id));
+        return m;
+      });
+
+      const distributeFromRdoc = (rdoc: any) => {
+        setPretestResults((prev) => {
+          const m = new Map(prev);
+          const cases = Array.isArray(rdoc.testCases) ? rdoc.testCases : [];
+          runningIds.forEach((tabId, i) => {
+            const tc = cases[i];
+            // testCases settle one at a time. If this tab's case hasn't
+            // landed yet, show the record-level status (pending / compile
+            // error / etc.) so the tab badge isn't blank.
+            m.set(
+              tabId,
+              tc
+                ? {
+                    status: tc.status,
+                    time: tc.time,
+                    memory: tc.memory,
+                    testCases: [tc],
+                    compilerTexts: rdoc.compilerTexts,
+                    judgeTexts: rdoc.judgeTexts,
+                  }
+                : {
+                    status: rdoc.status ?? 0,
+                    compilerTexts: rdoc.compilerTexts,
+                    judgeTexts: rdoc.judgeTexts,
+                  },
+            );
+          });
+          return m;
         });
-        return m;
-      });
-    };
+      };
 
-    const setErrorForAll = (status: number, error?: string) => {
-      setPretestResults((prev) => {
-        const m = new Map(prev);
-        runningIds.forEach((id) => m.set(id, { status, error }));
-        return m;
-      });
-    };
+      const setErrorForAll = (status: number, error?: string) => {
+        setPretestResults((prev) => {
+          const m = new Map(prev);
+          runningIds.forEach((id) => m.set(id, { status, error }));
+          return m;
+        });
+      };
 
-    try {
-      const code = getCode();
-      const res = await fetch(submitUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ lang: selectedLang, code, pretest: true, input: tabs.map((t) => t.input) }),
-        signal: abort.signal,
-        credentials: 'same-origin',
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const data = await res.json();
-      const rid = data.rid ? String(data.rid) : '';
-      if (!rid) throw new Error('No rid in response');
-
-      const recordUrl = resolvePretestRecordUrl(rid, data.url || `/record/${rid}`);
-
-      // Multi-case runs need more headroom — judge time scales with N.
-      const maxAttempts = tabs.length > 1 ? 90 : 60;
-      for (let i = 0; i < maxAttempts; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
-        if (abort.signal.aborted) return;
-
-        const rRes = await fetch(recordUrl, {
-          headers: { Accept: 'application/json' },
+      try {
+        const code = getCode();
+        const res = await fetch(submitUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ lang: selectedLang, code, pretest: true, input: tabs.map((t) => t.input) }),
           signal: abort.signal,
           credentials: 'same-origin',
         });
-        if (!rRes.ok) throw new Error(`Record HTTP ${rRes.status}`);
-        const contentType = rRes.headers.get('content-type') || '';
-        if (!contentType.includes('application/json')) {
-          throw new Error('评测记录接口返回了非 JSON，请检查记录轮询地址');
-        }
-        const rData = await rRes.json();
-        const rdoc = rData.rdoc || rData;
-        const s: number = rdoc.status ?? 0;
-        distributeFromRdoc(rdoc);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-        // Final status: 1-19
-        if (s > 0 && s < 20) {
-          setPretestResultTab('output');
-          return;
-        }
-      }
+        const data = await res.json();
+        const rid = data.rid ? String(data.rid) : '';
+        if (!rid) throw new Error('No rid in response');
 
-      setErrorForAll(8, '评测超时，请稍后重试');
-    } catch (e: any) {
-      if (e.name !== 'AbortError') {
-        setErrorForAll(8, e.message || '请求失败');
+        const recordUrl = resolvePretestRecordUrl(rid, data.url || `/record/${rid}`);
+
+        // Multi-case runs need more headroom — judge time scales with N.
+        const maxAttempts = tabs.length > 1 ? 90 : 60;
+        for (let i = 0; i < maxAttempts; i++) {
+          await new Promise((r) => setTimeout(r, 1000));
+          if (abort.signal.aborted) return;
+
+          const rRes = await fetch(recordUrl, {
+            headers: { Accept: 'application/json' },
+            signal: abort.signal,
+            credentials: 'same-origin',
+          });
+          if (!rRes.ok) throw new Error(`Record HTTP ${rRes.status}`);
+          const contentType = rRes.headers.get('content-type') || '';
+          if (!contentType.includes('application/json')) {
+            throw new Error('评测记录接口返回了非 JSON，请检查记录轮询地址');
+          }
+          const rData = await rRes.json();
+          const rdoc = rData.rdoc || rData;
+          const s: number = rdoc.status ?? 0;
+          distributeFromRdoc(rdoc);
+
+          // Final status: 1-19
+          if (s > 0 && s < 20) {
+            setPretestResultTab('output');
+            return;
+          }
+        }
+
+        setErrorForAll(8, '评测超时，请稍后重试');
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          setErrorForAll(8, e.message || '请求失败');
+        }
+      } finally {
+        setPretestRunning((prev) => {
+          const s = new Set(prev);
+          runningIds.forEach((id) => s.delete(id));
+          return s;
+        });
       }
-    } finally {
-      setPretestRunning((prev) => {
-        const s = new Set(prev);
-        runningIds.forEach((id) => s.delete(id));
-        return s;
-      });
-    }
-  }, [submitUrl, canPretest, pretestTabs, selectedLang, getCode, resolvePretestRecordUrl]);
+    },
+    [submitUrl, canPretest, pretestTabs, selectedLang, getCode, resolvePretestRecordUrl],
+  );
 
   /** Toolbar "运行全部自测" — run every non-empty pretest tab in one request. */
   const handleRunAll = useCallback(() => {
@@ -1377,8 +1367,7 @@ export function KryptonIDE({
       const r = btn.getBoundingClientRect();
       // If the button has scrolled out of viewport, close the menu;
       // otherwise update fixed position so the dropdown tracks the button.
-      const offscreen = r.bottom < 0 || r.top > window.innerHeight
-        || r.right < 0 || r.left > window.innerWidth;
+      const offscreen = r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth;
       if (offscreen) {
         setShowLangMenu(false);
       } else {
@@ -1411,34 +1400,31 @@ export function KryptonIDE({
     if (submitCooldown <= 0) return;
     const t = setInterval(() => setSubmitCooldown((c) => Math.max(0, c - 1)), 1000);
     return () => clearInterval(t);
-  }, [submitCooldown > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [submitCooldown > 0]);
 
   /* ── Pretest cooldown timer ── */
   useEffect(() => {
     if (pretestCooldown <= 0) return;
     const t = setInterval(() => setPretestCooldown((c) => Math.max(0, c - 1)), 1000);
     return () => clearInterval(t);
-  }, [pretestCooldown > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pretestCooldown > 0]);
 
   /* ── File upload handler ── */
-  const handleFileUpload = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        const text = reader.result as string;
-        if (viewRef.current) {
-          viewRef.current.dispatch({
-            changes: { from: 0, to: viewRef.current.state.doc.length, insert: text },
-          });
-        }
-      };
-      reader.readAsText(file);
-      e.target.value = '';
-    },
-    [],
-  );
+  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = reader.result as string;
+      if (viewRef.current) {
+        viewRef.current.dispatch({
+          changes: { from: 0, to: viewRef.current.state.doc.length, insert: text },
+        });
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }, []);
 
   /* ── Reset code handler ── */
   const handleReset = useCallback(() => {
@@ -1451,7 +1437,9 @@ export function KryptonIDE({
     if (codeCacheKey) {
       try {
         localStorage.removeItem(codeCacheKey);
-      } catch { /* empty */ }
+      } catch {
+        /* empty */
+      }
     }
   }, [defaultCode, codeCacheKey]);
 
@@ -1471,185 +1459,165 @@ export function KryptonIDE({
     >
       {/* ── Toolbar (hidden in simple/readonly mode) ── */}
       {!isSimple ? (
-      <ScrollArea
-        orientation="horizontal"
-        className="shrink-0 border-b bg-muted/50"
-        viewportClassName="px-2 py-1 [&>div]:!flex [&>div]:items-center [&>div]:gap-1"
-      >
-        {/* Language selector — button stays in toolbar, dropdown portals to body */}
-        <button
-          ref={langButtonRef}
-          type="button"
-          onClick={() => {
-            if (showLangMenu) {
-              setShowLangMenu(false);
-              return;
-            }
-            const r = langButtonRef.current?.getBoundingClientRect();
-            if (r) setLangMenuPos({ top: r.bottom + 4, left: r.left });
-            setShowLangMenu(true);
-          }}
-          className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium hover:bg-accent"
+        <ScrollArea
+          orientation="horizontal"
+          className="shrink-0 border-b bg-muted/50"
+          viewportClassName="px-2 py-1 [&>div]:!flex [&>div]:items-center [&>div]:gap-1"
         >
-          {langLabel}
-          <ChevronDown className="size-3" />
-        </button>
-        {showLangMenu && langMenuPos && createPortal(
-          <ScrollArea
-            ref={langDropdownRef as any}
-            style={{ position: 'fixed', top: langMenuPos.top, left: langMenuPos.left }}
-            className="z-[60] max-h-64 w-48 rounded-lg border bg-popover shadow-lg"
-            viewportClassName="p-1"
+          {/* Language selector — button stays in toolbar, dropdown portals to body */}
+          <button
+            ref={langButtonRef}
+            type="button"
+            onClick={() => {
+              if (showLangMenu) {
+                setShowLangMenu(false);
+                return;
+              }
+              const r = langButtonRef.current?.getBoundingClientRect();
+              if (r) setLangMenuPos({ top: r.bottom + 4, left: r.left });
+              setShowLangMenu(true);
+            }}
+            className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium hover:bg-accent"
           >
-            {availableLangs.map((id) => {
-              const entry = getLangEntry(id);
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedLang(id);
-                    setShowLangMenu(false);
-                  }}
-                  className={cn(
-                    'flex w-full items-center rounded px-2 py-1.5 text-xs hover:bg-accent',
-                    id === selectedLang && 'bg-accent font-medium',
-                  )}
-                >
-                  {entry.label}
-                  <span className="ml-auto text-[10px] text-muted-foreground">{id}</span>
-                </button>
-              );
-            })}
-          </ScrollArea>,
-          document.body,
-        )}
+            {langLabel}
+            <ChevronDown className="size-3" />
+          </button>
+          {showLangMenu &&
+            langMenuPos &&
+            createPortal(
+              <ScrollArea
+                ref={langDropdownRef as any}
+                style={{ position: 'fixed', top: langMenuPos.top, left: langMenuPos.left }}
+                className="z-[60] max-h-64 w-48 rounded-lg border bg-popover shadow-lg"
+                viewportClassName="p-1"
+              >
+                {availableLangs.map((id) => {
+                  const entry = getLangEntry(id);
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedLang(id);
+                        setShowLangMenu(false);
+                      }}
+                      className={cn(
+                        'flex w-full items-center rounded px-2 py-1.5 text-xs hover:bg-accent',
+                        id === selectedLang && 'bg-accent font-medium',
+                      )}
+                    >
+                      {entry.label}
+                      <span className="ml-auto text-[10px] text-muted-foreground">{id}</span>
+                    </button>
+                  );
+                })}
+              </ScrollArea>,
+              document.body,
+            )}
 
-        {/* Pretest toggle + Run */}
-        {canPretest && submitUrl && (
-          <>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 gap-1 text-xs"
-              onClick={() => setShowPretest((p) => !p)}
-            >
-              <Terminal className="size-3" />
-              自测
-              {showPretest ? (
-                <ChevronUp className="size-3" />
-              ) : (
-                <ChevronDown className="size-3" />
-              )}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 gap-1 text-xs"
-              disabled={pretestLoading || pretestCooldown > 0}
-              onClick={handleRunAll}
-              title="一次评测所有非空自测 tab"
-            >
-              {pretestLoading ? (
+          {/* Pretest toggle + Run */}
+          {canPretest && submitUrl && (
+            <>
+              <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => setShowPretest((p) => !p)}>
+                <Terminal className="size-3" />
+                自测
+                {showPretest ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1 text-xs"
+                disabled={pretestLoading || pretestCooldown > 0}
+                onClick={handleRunAll}
+                title="一次评测所有非空自测 tab"
+              >
+                {pretestLoading ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : pretestCooldown > 0 ? (
+                  <Clock className="size-3" />
+                ) : (
+                  <Play className="size-3" />
+                )}
+                {pretestCooldown > 0 ? `${pretestCooldown}s` : '运行全部自测'}
+              </Button>
+            </>
+          )}
+
+          {/* Submit */}
+          {(submitUrl || onSubmit) && (
+            <Button size="sm" className="h-7 gap-1 text-xs" disabled={submitting || submitCooldown > 0} onClick={handleSubmit}>
+              {submitting ? (
                 <Loader2 className="size-3 animate-spin" />
-              ) : pretestCooldown > 0 ? (
+              ) : submitCooldown > 0 ? (
                 <Clock className="size-3" />
               ) : (
-                <Play className="size-3" />
+                <Send className="size-3" />
               )}
-              {pretestCooldown > 0 ? `${pretestCooldown}s` : '运行全部自测'}
+              {submitCooldown > 0 ? `${submitCooldown}s` : '提交'}
+              <kbd className="ml-0.5 rounded bg-primary-foreground/20 px-1 text-[10px] font-normal">F10</kbd>
             </Button>
-          </>
-        )}
-
-        {/* Submit */}
-        {(submitUrl || onSubmit) && (
-          <Button
-            size="sm"
-            className="h-7 gap-1 text-xs"
-            disabled={submitting || submitCooldown > 0}
-            onClick={handleSubmit}
-          >
-            {submitting ? (
-              <Loader2 className="size-3 animate-spin" />
-            ) : submitCooldown > 0 ? (
-              <Clock className="size-3" />
-            ) : (
-              <Send className="size-3" />
-            )}
-            {submitCooldown > 0 ? `${submitCooldown}s` : '提交'}
-            <kbd className="ml-0.5 rounded bg-primary-foreground/20 px-1 text-[10px] font-normal">
-              F10
-            </kbd>
-          </Button>
-        )}
-
-        {/* Records toggle — right next to submit */}
-        {showRecordsButton && (
-          <Button
-            type="button"
-            variant={(recordsVisible ?? showRecords) ? 'secondary' : 'ghost'}
-            size="sm"
-            onClick={onToggleRecords}
-            className="h-7 gap-1 px-2 text-xs"
-            title={(recordsVisible ?? showRecords) ? '收起提交记录' : '展开提交记录'}
-          >
-            <History className="size-3" />
-            <span>提交记录</span>
-            {recordsCount > 0 ? (
-              <span className="ml-0.5 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground">
-                {recordsCount}
-              </span>
-            ) : null}
-          </Button>
-        )}
-
-        <div className="flex-1" />
-
-        {/* Upload file */}
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-          title="上传代码文件"
-        >
-          <FileUp className="size-3.5" />
-        </button>
-
-        {/* Reset code */}
-        <button
-          type="button"
-          onClick={handleReset}
-          className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-          title="重置代码"
-        >
-          <RotateCcw className="size-3.5" />
-        </button>
-
-        {/* Settings */}
-        <button
-          type="button"
-          onClick={() => setShowSettings(true)}
-          className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-          title="设置"
-        >
-          <Settings2 className="size-3.5" />
-        </button>
-
-        {/* Fullscreen */}
-        <button
-          type="button"
-          onClick={() => setFullscreen((p) => !p)}
-          className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-          title={fullscreen ? '退出全屏' : '全屏'}
-        >
-          {fullscreen ? (
-            <Minimize2 className="size-3.5" />
-          ) : (
-            <Maximize2 className="size-3.5" />
           )}
-        </button>
-      </ScrollArea>
+
+          {/* Records toggle — right next to submit */}
+          {showRecordsButton && (
+            <Button
+              type="button"
+              variant={(recordsVisible ?? showRecords) ? 'secondary' : 'ghost'}
+              size="sm"
+              onClick={onToggleRecords}
+              className="h-7 gap-1 px-2 text-xs"
+              title={(recordsVisible ?? showRecords) ? '收起提交记录' : '展开提交记录'}
+            >
+              <History className="size-3" />
+              <span>提交记录</span>
+              {recordsCount > 0 ? (
+                <span className="ml-0.5 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground">{recordsCount}</span>
+              ) : null}
+            </Button>
+          )}
+
+          <div className="flex-1" />
+
+          {/* Upload file */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            title="上传代码文件"
+          >
+            <FileUp className="size-3.5" />
+          </button>
+
+          {/* Reset code */}
+          <button
+            type="button"
+            onClick={handleReset}
+            className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            title="重置代码"
+          >
+            <RotateCcw className="size-3.5" />
+          </button>
+
+          {/* Settings */}
+          <button
+            type="button"
+            onClick={() => setShowSettings(true)}
+            className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            title="设置"
+          >
+            <Settings2 className="size-3.5" />
+          </button>
+
+          {/* Fullscreen */}
+          <button
+            type="button"
+            onClick={() => setFullscreen((p) => !p)}
+            className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            title={fullscreen ? '退出全屏' : '全屏'}
+          >
+            {fullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+          </button>
+        </ScrollArea>
       ) : null}
 
       {/* ── Editor area ── */}
@@ -1664,7 +1632,9 @@ export function KryptonIDE({
 
       {/* ── Status bar ── */}
       <div className="flex items-center border-t bg-muted/40 px-3 py-0.5 text-[11px] text-muted-foreground">
-        <span>Ln {cursorPos.line}, Col {cursorPos.col}</span>
+        <span>
+          Ln {cursorPos.line}, Col {cursorPos.col}
+        </span>
         <div className="flex-1" />
         <span>{langLabel}</span>
       </div>
@@ -1685,7 +1655,10 @@ export function KryptonIDE({
           {/* Tab bar — each tab carries an inline pass/fail/judging badge
               so "运行全部自测" results are scannable without clicking through
               every tab. */}
-          <div className="flex items-center gap-0 border-b bg-muted/30 px-1 shrink-0 overflow-x-auto overflow-y-hidden" style={{ scrollbarWidth: 'none' }}>
+          <div
+            className="flex items-center gap-0 border-b bg-muted/30 px-1 shrink-0 overflow-x-auto overflow-y-hidden"
+            style={{ scrollbarWidth: 'none' }}
+          >
             {pretestTabs.map((tab) => {
               const tabResult = pretestResults.get(tab.id);
               const tabBusy = pretestRunning.has(tab.id);
@@ -1720,8 +1693,16 @@ export function KryptonIDE({
                     <span
                       role="button"
                       tabIndex={0}
-                      onClick={(e) => { e.stopPropagation(); removeTab(tab.id); }}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); removeTab(tab.id); } }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeTab(tab.id);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.stopPropagation();
+                          removeTab(tab.id);
+                        }
+                      }}
                       className="ml-1 rounded-full p-0.5 hover:bg-accent"
                     >
                       <XCircle className="size-3" />
@@ -1880,12 +1861,7 @@ export function KryptonIDE({
       )}
 
       {/* ── Dialogs ── */}
-      <SettingsDialog
-        open={showSettings}
-        onOpenChange={setShowSettings}
-        config={config}
-        onChange={updateConfig}
-      />
+      <SettingsDialog open={showSettings} onOpenChange={setShowSettings} config={config} onChange={updateConfig} />
 
       {/* ── Hidden file input ── */}
       <input

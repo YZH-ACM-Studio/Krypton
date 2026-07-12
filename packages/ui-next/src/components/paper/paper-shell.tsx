@@ -12,8 +12,17 @@ import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { cn } from '@/lib/cn';
 
-export type QuestionKind = 'single' | 'multi' | 'blank' | 'fill_program' | 'program_fill_compile'
-  | 'subjective' | 'function' | 'fill_function' | 'default' | 'submit_answer';
+export type QuestionKind =
+  | 'single'
+  | 'multi'
+  | 'blank'
+  | 'fill_program'
+  | 'program_fill_compile'
+  | 'subjective'
+  | 'function'
+  | 'fill_function'
+  | 'default'
+  | 'submit_answer';
 
 export interface PaperCell {
   pid: number;
@@ -63,8 +72,16 @@ export function groupCellsByKind(cells: PaperCell[]): Map<QuestionKind, PaperCel
 }
 
 const KIND_ORDER: QuestionKind[] = [
-  'single', 'multi', 'blank', 'fill_program', 'program_fill_compile',
-  'subjective', 'function', 'fill_function', 'default', 'submit_answer',
+  'single',
+  'multi',
+  'blank',
+  'fill_program',
+  'program_fill_compile',
+  'subjective',
+  'function',
+  'fill_function',
+  'default',
+  'submit_answer',
 ];
 
 // ─── Mini Tab Bar (horizontal, lives at top of sub-sidebar) ──────────────
@@ -74,7 +91,10 @@ const KIND_ORDER: QuestionKind[] = [
 // strip across the sub-sidebar so it visually anchors the cell grid below.
 
 export function MiniTabBar({
-  groups, current, onChange, lockedKinds,
+  groups,
+  current,
+  onChange,
+  lockedKinds,
 }: {
   groups: Map<QuestionKind, PaperCell[]>;
   current: QuestionKind | null;
@@ -105,7 +125,10 @@ export function MiniTabBar({
 // ─── Cell Navigator (grid of numbered squares with status) ───────────────
 
 export function CellNavigator({
-  cells, activeIndex, statuses, onJump,
+  cells,
+  activeIndex,
+  statuses,
+  onJump,
 }: {
   cells: PaperCell[];
   activeIndex: number;
@@ -117,25 +140,13 @@ export function CellNavigator({
       {cells.map((_cell, i) => {
         const status = statuses[i] || 'unanswered';
         const active = i === activeIndex;
-        return (
-          <StatusButton
-            key={i}
-            index={i + 1}
-            status={status}
-            active={active}
-            onClick={() => onJump(i)}
-          />
-        );
+        return <StatusButton key={i} index={i + 1} status={status} active={active} onClick={() => onJump(i)} />;
       })}
     </div>
   );
 }
 
-export function StatusButton({
-  index, status, active, onClick,
-}: {
-  index: number; status: CellStatus; active: boolean; onClick: () => void;
-}) {
+export function StatusButton({ index, status, active, onClick }: { index: number; status: CellStatus; active: boolean; onClick: () => void }) {
   const base = 'relative flex aspect-square w-full items-center justify-center rounded-md text-xs font-semibold transition-colors';
   const palette: Record<CellStatus, string> = {
     unanswered: 'bg-muted/40 text-muted-foreground hover:bg-muted/60',
@@ -148,18 +159,14 @@ export function StatusButton({
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        base,
-        palette[status],
-        active && 'ring-2 ring-sky-500 ring-offset-2 ring-offset-background',
-      )}
+      className={cn(base, palette[status], active && 'ring-2 ring-sky-500 ring-offset-2 ring-offset-background')}
     >
       <CellStatusIcon status={status} fallback={String(index)} />
     </button>
   );
 }
 
-function CellStatusIcon({ status, fallback }: { status: CellStatus, fallback: string }) {
+function CellStatusIcon({ status, fallback }: { status: CellStatus; fallback: string }) {
   if (status === 'correct') return <Check className="size-4" strokeWidth={3} />;
   if (status === 'wrong') return <XIcon className="size-4" strokeWidth={3} />;
   if (status === 'partial') return <Minus className="size-4" strokeWidth={3} />;
@@ -170,7 +177,11 @@ function CellStatusIcon({ status, fallback }: { status: CellStatus, fallback: st
 // ─── Single / Multi / Blank renderers ────────────────────────────────────
 
 export function SingleChoiceRenderer({
-  value, options, onChange, disabled, name,
+  value,
+  options,
+  onChange,
+  disabled,
+  name,
 }: {
   value: string | null;
   options: string[];
@@ -192,7 +203,8 @@ export function SingleChoiceRenderer({
               checked && 'border-primary bg-primary/5',
               !checked && 'hover:bg-accent/50',
               disabled && 'cursor-not-allowed opacity-60',
-            )}>
+            )}
+          >
             <input
               type="radio"
               name={name || 'single-choice'}
@@ -211,7 +223,10 @@ export function SingleChoiceRenderer({
 }
 
 export function MultiChoiceRenderer({
-  value, options, onChange, disabled,
+  value,
+  options,
+  onChange,
+  disabled,
 }: {
   value: string[];
   options: string[];
@@ -232,7 +247,8 @@ export function MultiChoiceRenderer({
               checked && 'border-primary bg-primary/5',
               !checked && 'hover:bg-accent/50',
               disabled && 'cursor-not-allowed opacity-60',
-            )}>
+            )}
+          >
             <Checkbox
               checked={checked}
               disabled={disabled}
@@ -253,30 +269,20 @@ export function MultiChoiceRenderer({
 }
 
 export function BlankRenderer({
-  value, onChange, disabled, placeholder,
+  value,
+  onChange,
+  disabled,
+  placeholder,
 }: {
   value: string;
   onChange: (next: string) => void;
   disabled?: boolean;
   placeholder?: string;
 }) {
-  return (
-    <Input
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-      placeholder={placeholder || '在此输入你的答案'}
-    />
-  );
+  return <Input value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} placeholder={placeholder || '在此输入你的答案'} />;
 }
 
-export function FillProgramRenderer({
-  value, onChange, disabled,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  disabled?: boolean;
-}) {
+export function FillProgramRenderer({ value, onChange, disabled }: { value: string; onChange: (next: string) => void; disabled?: boolean }) {
   return (
     <Input
       value={value}
@@ -290,7 +296,7 @@ export function FillProgramRenderer({
 
 // ─── Countdown ────────────────────────────────────────────────────────────
 
-export function Countdown({ endAt, onExpire }: { endAt: number, onExpire?: () => void }) {
+export function Countdown({ endAt, onExpire }: { endAt: number; onExpire?: () => void }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const i = setInterval(() => setNow(Date.now()), 1000);
@@ -309,17 +315,19 @@ export function Countdown({ endAt, onExpire }: { endAt: number, onExpire?: () =>
   const danger = remainingMs > 0 && remainingMs < 5 * 60 * 1000;
 
   return (
-    <div className={cn(
-      'flex items-center gap-1.5 rounded-md border px-3 py-1 font-mono text-sm tabular-nums',
-      expired && 'border-destructive/30 bg-destructive/10 text-destructive',
-      danger && 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
-    )}>
+    <div
+      className={cn(
+        'flex items-center gap-1.5 rounded-md border px-3 py-1 font-mono text-sm tabular-nums',
+        expired && 'border-destructive/30 bg-destructive/10 text-destructive',
+        danger && 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
+      )}
+    >
       <Clock className="size-4" />
-      {expired ? '已结束' : (
+      {expired ? (
+        '已结束'
+      ) : (
         <span>
-          {h.toString().padStart(2, '0')}:
-          {m.toString().padStart(2, '0')}:
-          {s.toString().padStart(2, '0')}
+          {h.toString().padStart(2, '0')}:{m.toString().padStart(2, '0')}:{s.toString().padStart(2, '0')}
         </span>
       )}
     </div>
@@ -328,20 +336,41 @@ export function Countdown({ endAt, onExpire }: { endAt: number, onExpire?: () =>
 
 // ─── Status pill ─────────────────────────────────────────────────────────
 
-export function PaperStatusPill({ dirtyCount, saving }: { dirtyCount: number, saving?: boolean }) {
+export function PaperStatusPill({ dirtyCount, saving }: { dirtyCount: number; saving?: boolean }) {
   if (saving) {
-    return <span className="flex items-center gap-1 text-xs text-muted-foreground"><AlertCircle className="size-3.5" />保存中…</span>;
+    return (
+      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+        <AlertCircle className="size-3.5" />
+        保存中…
+      </span>
+    );
   }
   if (dirtyCount > 0) {
-    return <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400"><AlertCircle className="size-3.5" />{dirtyCount} 道未保存</span>;
+    return (
+      <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+        <AlertCircle className="size-3.5" />
+        {dirtyCount} 道未保存
+      </span>
+    );
   }
-  return <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400"><Check className="size-3.5" />已保存</span>;
+  return (
+    <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+      <Check className="size-3.5" />
+      已保存
+    </span>
+  );
 }
 
 // ─── Section card wrapper ────────────────────────────────────────────────
 
 export function CellCard({
-  title, score, prompt, children, locked, status, id,
+  title,
+  score,
+  prompt,
+  children,
+  locked,
+  status,
+  id,
 }: {
   title: string;
   score: number;
@@ -361,26 +390,31 @@ export function CellCard({
   return (
     <article
       id={id}
-      className={cn(
-        'overflow-hidden rounded-lg border bg-card shadow-sm scroll-mt-20',
-        accent,
-        locked && 'border-amber-500/30 bg-amber-500/5',
-      )}
+      className={cn('overflow-hidden rounded-lg border bg-card shadow-sm scroll-mt-20', accent, locked && 'border-amber-500/30 bg-amber-500/5')}
     >
       <header className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-5 py-3">
         <div className="flex items-center gap-2">
           <h3 className="text-base font-semibold">{title}</h3>
-          <Badge variant="secondary" className="text-[10px]">{score} 分</Badge>
-          {locked && <Badge variant="outline" className="gap-1 text-[10px]"><Lock className="size-3" />已锁定</Badge>}
+          <Badge variant="secondary" className="text-[10px]">
+            {score} 分
+          </Badge>
+          {locked && (
+            <Badge variant="outline" className="gap-1 text-[10px]">
+              <Lock className="size-3" />
+              已锁定
+            </Badge>
+          )}
         </div>
         {status && status !== 'unanswered' && (
-          <span className={cn(
-            'rounded-full px-2 py-0.5 text-[10px] font-semibold',
-            status === 'answered' && 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
-            status === 'correct' && 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
-            status === 'wrong' && 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
-            status === 'partial' && 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
-          )}>
+          <span
+            className={cn(
+              'rounded-full px-2 py-0.5 text-[10px] font-semibold',
+              status === 'answered' && 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
+              status === 'correct' && 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+              status === 'wrong' && 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
+              status === 'partial' && 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
+            )}
+          >
             {status === 'answered' && '已作答'}
             {status === 'correct' && '正确'}
             {status === 'wrong' && '错误'}

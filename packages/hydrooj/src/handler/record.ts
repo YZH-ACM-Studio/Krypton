@@ -1,14 +1,17 @@
-import {
-    omit, pick, throttle, uniqBy,
-} from 'lodash';
+import { omit, pick, throttle, uniqBy } from 'lodash';
 import { normalizeSubtasks } from '@hydrooj/common';
 import { readYamlCases } from '@hydrooj/common/cases';
 import { load as loadYaml } from 'js-yaml';
 import { Filter, ObjectId } from 'mongodb';
 import {
-    ContestNotFoundError, HackRejudgeFailedError,
-    PermissionError, PretestRejudgeFailedError, ProblemConfigError,
-    ProblemNotFoundError, RecordNotFoundError, UserNotFoundError,
+    ContestNotFoundError,
+    HackRejudgeFailedError,
+    PermissionError,
+    PretestRejudgeFailedError,
+    ProblemConfigError,
+    ProblemNotFoundError,
+    RecordNotFoundError,
+    UserNotFoundError,
 } from '../error';
 import { RecordDoc, Tdoc } from '../interface';
 import { PERM, PRIV, STATUS, STATUS_TEXTS } from '../model/builtin';
@@ -20,9 +23,7 @@ import storage from '../model/storage';
 import system from '../model/system';
 import TaskModel from '../model/task';
 import user from '../model/user';
-import {
-    ConnectionHandler, param, subscribe, Types,
-} from '../service/server';
+import { ConnectionHandler, param, subscribe, Types } from '../service/server';
 import { buildProjection, Time } from '../utils';
 import { ContestDetailBaseHandler } from './contest';
 import { postJudge } from './judge';
@@ -39,9 +40,17 @@ export class RecordListHandler extends ContestDetailBaseHandler {
     @param('allDomain', Types.Boolean)
     @param('stat', Types.Boolean)
     async get(
-        domainId: string, page = 1, pid?: string | number, tid?: ObjectId,
-        uidOrName?: string, lang?: string, status?: number, full = false,
-        all = false, allDomain = false, stat = false,
+        domainId: string,
+        page = 1,
+        pid?: string | number,
+        tid?: ObjectId,
+        uidOrName?: string,
+        lang?: string,
+        status?: number,
+        full = false,
+        all = false,
+        allDomain = false,
+        stat = false,
     ) {
         const notification = [];
         let tdoc = null;
@@ -52,14 +61,13 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         // pretest records (contest = RECORD_PRETEST sentinel) leak into
         // the per-problem "提交记录" list. Build the contest filter
         // explicitly to keep practice records (no contest field) only.
-        const q: Filter<RecordDoc> = tid
-            ? { contest: tid }
-            : { contest: { $exists: false } };
+        const q: Filter<RecordDoc> = tid ? { contest: tid } : { contest: { $exists: false } };
         if (full) uidOrName = this.user._id.toString();
         if (uidOrName) {
-            const udoc = await user.getById(domainId, +uidOrName)
-                || await user.getByUname(domainId, uidOrName)
-                || await user.getByEmail(domainId, uidOrName);
+            const udoc =
+                (await user.getById(domainId, +uidOrName)) ||
+                (await user.getByUname(domainId, uidOrName)) ||
+                (await user.getByEmail(domainId, uidOrName));
             if (udoc) q.uid = udoc._id;
             else invalid = true;
         }
@@ -73,9 +81,7 @@ export class RecordListHandler extends ContestDetailBaseHandler {
                 throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
             }
             if (!(await contest.getStatus(domainId, tid, this.user._id))?.attend) {
-                const name = tdoc.rule === 'homework'
-                    ? "You haven't claimed this homework yet."
-                    : "You haven't attended this contest yet.";
+                const name = tdoc.rule === 'homework' ? "You haven't claimed this homework yet." : "You haven't attended this contest yet.";
                 notification.push({ name, args: { type: 'note' }, checker: () => true });
             }
         }
@@ -103,31 +109,50 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         if (!full) cursor = cursor.project(buildProjection(record.PROJECTION_LIST));
         const limit = full ? 10 : system.get('pagination.record');
         let rdocs = invalid
-            ? [] as RecordDoc[]
-            : await cursor.skip((page - 1) * limit).limit(limit).toArray();
+            ? ([] as RecordDoc[])
+            : await cursor
+                  .skip((page - 1) * limit)
+                  .limit(limit)
+                  .toArray();
         const canViewHiddenProblem = this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN) || this.user._id;
-        const [udict, pdict] = full ? [{}, {}]
+        const [udict, pdict] = full
+            ? [{}, {}]
             : await Promise.all([
-                user.getList(domainId, rdocs.map((rdoc) => rdoc.uid)),
-                tid
-                    ? problem.getList(domainId, rdocs.map((rdoc) => rdoc.pid), true, false, problem.PROJECTION_CONTEST_LIST)
-                    : this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)
-                        ? problem.getList(domainId, rdocs.map((rdoc) => rdoc.pid), canViewHiddenProblem, false, problem.PROJECTION_LIST)
+                  user.getList(
+                      domainId,
+                      rdocs.map((rdoc) => rdoc.uid),
+                  ),
+                  tid
+                      ? problem.getList(
+                            domainId,
+                            rdocs.map((rdoc) => rdoc.pid),
+                            true,
+                            false,
+                            problem.PROJECTION_CONTEST_LIST,
+                        )
+                      : this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)
+                        ? problem.getList(
+                              domainId,
+                              rdocs.map((rdoc) => rdoc.pid),
+                              canViewHiddenProblem,
+                              false,
+                              problem.PROJECTION_LIST,
+                          )
                         : Object.fromEntries(uniqBy(rdocs, 'pid').map((rdoc) => [rdoc.pid, { ...problem.default, pid: rdoc.pid }])),
-            ]);
+              ]);
         if (this.tdoc && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
             rdocs = rdocs.map((i) => contest.applyProjection(tdoc, i, this.user));
         }
         // Admin extra column: 学号 / 姓名. Only populated when the viewer has
         // PRIV_EDIT_SYSTEM and krypton-userbind is loaded; otherwise the dict
         // stays empty and the UI hides the column.
-        let studentDict: Record<string, { studentId: string, realName: string }> = {};
+        let studentDict: Record<string, { studentId: string; realName: string }> = {};
         if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && global.Hydro?.model?.userbind?.findStudentsByUserIds) {
             const uids = Array.from(new Set(rdocs.map((r) => r.uid))).filter((u) => u && u > 1);
             const students = await global.Hydro.model.userbind.findStudentsByUserIds(domainId, uids);
-            studentDict = Object.fromEntries(Object.entries(students).map(
-                ([uid, s]: [string, any]) => [uid, { studentId: s.studentId, realName: s.realName }],
-            ));
+            studentDict = Object.fromEntries(
+                Object.entries(students).map(([uid, s]: [string, any]) => [uid, { studentId: s.studentId, realName: s.realName }]),
+            );
         }
         this.response.body = {
             page,
@@ -176,7 +201,7 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         for (const file of ['code', 'hack']) {
             if (!this.rdoc.files?.[file]) continue;
             const [id, filename] = this.rdoc.files?.[file]?.split('#') || [];
-            // eslint-disable-next-line no-await-in-loop
+
             this.response.redirect = await storage.signDownloadLink(`submission/${id}`, filename || file, true, 'user');
             return;
         }
@@ -189,7 +214,6 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
     @param('rid', Types.ObjectId)
     @param('download', Types.Boolean)
     @param('rev', Types.ObjectId, true)
-    // eslint-disable-next-line consistent-return
     async get(domainId: string, rid: ObjectId, download = false, rev?: ObjectId) {
         let rdoc = this.rdoc;
         const allRev = await record.collHistory.find({ rid }).project({ _id: 1, judgeAt: 1 }).sort({ _id: -1 }).toArray();
@@ -219,10 +243,7 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         const requiresDirectProblemAccess = !this.tdoc || !this.tsdoc?.attend;
         const [pdoc, self, udoc] = await Promise.all([
             requiresDirectProblemAccess
-                ? problem.getViewableAuthorized(
-                    rdoc.domainId, rdoc.pid, this.user,
-                    problem.PROJECTION_LIST.concat('config'),
-                )
+                ? problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user, problem.PROJECTION_LIST.concat('config'))
                 : problem.get(rdoc.domainId, rdoc.pid, problem.PROJECTION_LIST.concat('config')),
             problem.getStatus(domainId, rdoc.pid, this.user._id),
             user.getById(domainId, rdoc.uid),
@@ -257,15 +278,12 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         // NOTE(MVP): does not yet block the "open the same problem from the bank
         // while attending an ongoing contest that contains it" bypass — left as
         // a follow-up; the practice problem is normally contest-hidden anyway.
-        const testHints: Record<string, { hint?: string, videoUrl?: string }> = {};
+        const testHints: Record<string, { hint?: string; videoUrl?: string }> = {};
         try {
             const inActiveContest = this.tdoc ? !contest.isDone(this.tdoc, this.tsdoc) : false;
             if (canViewDetail && !inActiveContest) {
                 const rawPdoc = requiresDirectProblemAccess
-                    ? await problem.getViewableAuthorized(
-                        rdoc.domainId, rdoc.pid, this.user,
-                        ['domainId', 'docId', 'config'], true,
-                    )
+                    ? await problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user, ['domainId', 'docId', 'config'], true)
                     : await problem.get(rdoc.domainId, rdoc.pid, ['domainId', 'docId', 'config'], true);
                 const rawCfg = rawPdoc?.config;
                 const cfgObj: any = typeof rawCfg === 'string' ? loadYaml(rawCfg) : rawCfg;
@@ -290,10 +308,17 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
                     }
                 }
             }
-        } catch { /* malformed config → no hints, never break the page */ }
+        } catch {
+            /* malformed config → no hints, never break the page */
+        }
         this.response.template = 'record_detail.html';
         this.response.body = {
-            udoc, rdoc: canViewDetail ? rdoc : pick(rdoc, ['_id', 'lang', 'code']), pdoc, tdoc: this.tdoc, rev, allRevs,
+            udoc,
+            rdoc: canViewDetail ? rdoc : pick(rdoc, ['_id', 'lang', 'code']),
+            pdoc,
+            tdoc: this.tdoc,
+            rev,
+            allRevs,
             // ui-next needs `langs` to render `rdoc.lang` (e.g. "cc.cc17") as
             // a human-readable label (e.g. "C++ 17"). RecordsMain already
             // ships this; mirror it here for the detail page.
@@ -329,15 +354,20 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             score: 0,
             time: 0,
             memory: 0,
-            testCases: [{
-                id: 0, subtaskId: 0, status: 9, score: 0, time: 0, memory: 0, message: 'score canceled',
-            }],
+            testCases: [
+                {
+                    id: 0,
+                    subtaskId: 0,
+                    status: 9,
+                    score: 0,
+                    time: 0,
+                    memory: 0,
+                    message: 'score canceled',
+                },
+            ],
             subtasks: {},
         };
-        const [latest] = await Promise.all([
-            record.update(domainId, rid, $set),
-            TaskModel.deleteMany({ rid: this.rdoc._id }),
-        ]);
+        const [latest] = await Promise.all([record.update(domainId, rid, $set), TaskModel.deleteMany({ rid: this.rdoc._id })]);
         if (latest) {
             this.ctx.broadcast('record/change', latest);
             await postJudge(latest);
@@ -369,8 +399,15 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
     @param('allDomain', Types.Boolean)
     @param('noTemplate', Types.Boolean, true)
     async prepare(
-        domainId: string, tid?: ObjectId, pid?: string | number, uidOrName?: string,
-        status?: number, pretest = false, all = false, allDomain = false, noTemplate = false,
+        domainId: string,
+        tid?: ObjectId,
+        pid?: string | number,
+        uidOrName?: string,
+        status?: number,
+        pretest = false,
+        all = false,
+        allDomain = false,
+        noTemplate = false,
     ) {
         if (tid) {
             this.tdoc = await contest.get(domainId, tid);
@@ -416,8 +453,10 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
     async message(msg: { rids: string[] }) {
         if (!(msg.rids instanceof Array)) return;
         const rids = msg.rids.map((id) => new ObjectId(id));
-        const rdocs = await record.getMulti(this.args.domainId, { _id: { $in: rids } })
-            .project<RecordDoc>(buildProjection(record.PROJECTION_LIST)).toArray();
+        const rdocs = await record
+            .getMulti(this.args.domainId, { _id: { $in: rids } })
+            .project<RecordDoc>(buildProjection(record.PROJECTION_LIST))
+            .toArray();
         for (const rdoc of rdocs) this.onRecordChange(rdoc);
     }
 
@@ -440,9 +479,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
 
         let [udoc, pdoc] = await Promise.all([
             user.getById(this.args.domainId, rdoc.uid),
-            rdoc.contest
-                ? problem.get(rdoc.domainId, rdoc.pid)
-                : problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user),
+            rdoc.contest ? problem.get(rdoc.domainId, rdoc.pid) : problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user),
         ]);
         const tdoc = this.tid ? this.tdoc : null;
         if (pdoc && !rdoc.contest && !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) pdoc = null;
@@ -454,7 +491,11 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         } else {
             this.queueSend(rdoc._id.toHexString(), async () => ({
                 html: await this.renderHTML('record_main_tr.html', {
-                    rdoc, udoc, pdoc, tdoc, allDomain: this.allDomain,
+                    rdoc,
+                    udoc,
+                    pdoc,
+                    tdoc,
+                    allDomain: this.allDomain,
                 }),
             }));
         }
@@ -498,9 +539,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
         }
         const requiresDirectProblemAccess = !rdoc.contest || this.user._id !== rdoc.uid;
         const [pdoc, self] = await Promise.all([
-            requiresDirectProblemAccess
-                ? problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user)
-                : problem.get(rdoc.domainId, rdoc.pid),
+            requiresDirectProblemAccess ? problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user) : problem.get(rdoc.domainId, rdoc.pid),
             problem.getStatus(domainId, rdoc.pid, this.user._id),
         ]);
 

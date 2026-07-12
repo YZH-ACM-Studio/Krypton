@@ -26,85 +26,69 @@ import { Check, Minus } from 'lucide-react';
 import { forwardRef, useEffect, useRef } from 'react';
 import { cn } from '@/lib/cn';
 
-export interface CheckboxProps
-  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'> {
+export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'> {
   size?: 'sm' | 'md';
   indeterminate?: boolean;
   /** Called with the new boolean state, alongside the standard onChange. */
   onCheckedChange?: (checked: boolean) => void;
 }
 
-export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(function Checkbox(
-  {
-    className, size = 'md', indeterminate, onCheckedChange, onChange,
-    disabled, ...props
-  },
-  forwardedRef,
-) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
+export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
+  ({ className, size = 'md', indeterminate, onCheckedChange, onChange, disabled, ...props }, forwardedRef) => {
+    const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // Mirror the indeterminate DOM property since React doesn't have an attribute for it.
-  useEffect(() => {
-    if (inputRef.current) inputRef.current.indeterminate = !!indeterminate;
-  }, [indeterminate, props.checked, props.defaultChecked]);
+    // Mirror the indeterminate DOM property since React doesn't have an attribute for it.
+    useEffect(() => {
+      if (inputRef.current) inputRef.current.indeterminate = !!indeterminate;
+    }, [indeterminate, props.checked, props.defaultChecked]);
 
-  const dim = size === 'sm' ? 'size-3.5' : 'size-4';
-  const iconDim = size === 'sm' ? 'size-2.5' : 'size-3';
+    const dim = size === 'sm' ? 'size-3.5' : 'size-4';
+    const iconDim = size === 'sm' ? 'size-2.5' : 'size-3';
 
-  return (
-    <span
-      className={cn(
-        'relative inline-flex shrink-0 align-middle',
-        dim,
-        disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-        className,
-      )}
-    >
-      <input
-        ref={(el) => {
-          inputRef.current = el;
-          if (typeof forwardedRef === 'function') forwardedRef(el);
-          else if (forwardedRef) (forwardedRef as React.MutableRefObject<HTMLInputElement | null>).current = el;
-        }}
-        type="checkbox"
-        disabled={disabled}
-        className="peer absolute inset-0 m-0 size-full cursor-inherit opacity-0"
-        onChange={(e) => {
-          onCheckedChange?.(e.currentTarget.checked);
-          onChange?.(e);
-        }}
-        {...props}
-      />
-      {/* The visual square. Comes after the input so peer-* applies. */}
+    return (
       <span
-        className={cn(
-          'pointer-events-none block size-full rounded-sm border bg-background transition-colors',
-          'border-input',
-          'peer-checked:border-primary peer-checked:bg-primary',
-          'peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-1 peer-focus-visible:ring-offset-background',
-          !disabled && 'group-hover:border-primary/60',
-          indeterminate && 'border-primary bg-primary',
+        className={cn('relative inline-flex shrink-0 align-middle', dim, disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer', className)}
+      >
+        <input
+          ref={(el) => {
+            inputRef.current = el;
+            if (typeof forwardedRef === 'function') forwardedRef(el);
+            else if (forwardedRef) (forwardedRef as React.MutableRefObject<HTMLInputElement | null>).current = el;
+          }}
+          type="checkbox"
+          disabled={disabled}
+          className="peer absolute inset-0 m-0 size-full cursor-inherit opacity-0"
+          onChange={(e) => {
+            onCheckedChange?.(e.currentTarget.checked);
+            onChange?.(e);
+          }}
+          {...props}
+        />
+        {/* The visual square. Comes after the input so peer-* applies. */}
+        <span
+          className={cn(
+            'pointer-events-none block size-full rounded-sm border bg-background transition-colors',
+            'border-input',
+            'peer-checked:border-primary peer-checked:bg-primary',
+            'peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-1 peer-focus-visible:ring-offset-background',
+            !disabled && 'group-hover:border-primary/60',
+            indeterminate && 'border-primary bg-primary',
+          )}
+        />
+        {/* The check / minus glyph. Centred via inset-0+m-auto. */}
+        {indeterminate ? (
+          <Minus className={cn('pointer-events-none absolute inset-0 m-auto text-primary-foreground', iconDim)} strokeWidth={3} />
+        ) : (
+          <Check
+            className={cn(
+              'pointer-events-none absolute inset-0 m-auto text-primary-foreground opacity-0 transition-opacity',
+              'peer-checked:opacity-100',
+              iconDim,
+            )}
+            strokeWidth={3}
+          />
         )}
-      />
-      {/* The check / minus glyph. Centred via inset-0+m-auto. */}
-      {indeterminate ? (
-        <Minus
-          className={cn(
-            'pointer-events-none absolute inset-0 m-auto text-primary-foreground',
-            iconDim,
-          )}
-          strokeWidth={3}
-        />
-      ) : (
-        <Check
-          className={cn(
-            'pointer-events-none absolute inset-0 m-auto text-primary-foreground opacity-0 transition-opacity',
-            'peer-checked:opacity-100',
-            iconDim,
-          )}
-          strokeWidth={3}
-        />
-      )}
-    </span>
-  );
-});
+      </span>
+    );
+  },
+);

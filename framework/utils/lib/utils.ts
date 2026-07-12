@@ -17,23 +17,25 @@ Factory.formatters['d'] = (value, exporter) => Reggol.color(exporter, 3, value);
 
 const factory = new Factory();
 
-factory.addExporter(new Exporter.Console({
-    showDiff: false,
-    showTime: 'dd hh:mm:ss',
-    label: {
-        align: 'right',
-        width: 9,
-        margin: 1,
-    },
-    timestamp: Date.now(),
-    levels: { default: process.env.DEV ? 3 : 2 },
-}));
+factory.addExporter(
+    new Exporter.Console({
+        showDiff: false,
+        showTime: 'dd hh:mm:ss',
+        label: {
+            align: 'right',
+            width: 9,
+            margin: 1,
+        },
+        timestamp: Date.now(),
+        levels: { default: process.env.DEV ? 3 : 2 },
+    }),
+);
 
 function createLogger(name: string) {
     return factory.createLogger(name);
 }
 
-export type Logger = Reggol & { new(name: string): Reggol & Logger };
+export type Logger = Reggol & { new (name: string): Reggol & Logger };
 export const Logger = createLogger as any as Logger;
 
 const encrypt = (algorithm, content) => crypto.createHash(algorithm).update(content).digest('hex');
@@ -130,7 +132,7 @@ export function bufferToStream(buffer: Buffer): NodeJS.ReadableStream {
     return stream;
 }
 
-let ObjectId: typeof import('bson').ObjectId; // eslint-disable-line
+let ObjectId: typeof import('bson').ObjectId;
 let isMoment: (x: any) => x is Moment;
 
 export const Time = {
@@ -171,8 +173,7 @@ export const Time = {
 
 export function errorMessage(err: Error | string) {
     const t = typeof err === 'string' ? err : err.stack;
-    const lines = t.split('\n')
-        .filter((i) => !i.includes(' (node:') && !i.includes('(internal'));
+    const lines = t.split('\n').filter((i) => !i.includes(' (node:') && !i.includes('(internal'));
     let cursor = 1;
     let count = 0;
     while (cursor < lines.length) {
@@ -187,7 +188,8 @@ export function errorMessage(err: Error | string) {
             lines.splice(cursor, 1);
         }
     }
-    const parsed = lines.join('\n')
+    const parsed = lines
+        .join('\n')
         .replace(/[A-Z]:\\.+\\@hydrooj\\/g, '@hydrooj\\')
         .replace(/\/.+\/@hydrooj\//g, '\\')
         .replace(/[A-Z]:\\.+\\hydrooj\\/g, 'hydrooj\\')
@@ -213,7 +215,7 @@ export async function findFile(pathname: string, doThrow = true) {
     if (await fs.pathExists(path.resolve(__dirname, pathname))) return path.resolve(__dirname, pathname);
     try {
         return require.resolve(pathname);
-    } catch (e) { }
+    } catch (e) {}
     if (pathname.includes('/')) {
         const eles = pathname.split('/');
         let pkg = eles.shift();
@@ -222,12 +224,14 @@ export async function findFile(pathname: string, doThrow = true) {
         try {
             const p = path.dirname(require.resolve(path.join(pkg, 'package.json')));
             if (await fs.pathExists(path.resolve(p, rest))) return path.resolve(p, rest);
-        } catch (e) { }
+        } catch (e) {}
     }
     if (await fs.pathExists(path.resolve(os.homedir(), pathname))) return path.resolve(os.homedir(), pathname);
     if (await fs.pathExists(path.resolve(os.homedir(), '.hydro', pathname))) return path.resolve(os.homedir(), '.hydro', pathname);
-    // eslint-disable-next-line max-len
-    if (await fs.pathExists(path.resolve(os.homedir(), '.config', 'hydro', pathname))) return path.resolve(os.homedir(), '.config', 'hydro', pathname);
+
+    if (await fs.pathExists(path.resolve(os.homedir(), '.config', 'hydro', pathname))) {
+        return path.resolve(os.homedir(), '.config', 'hydro', pathname);
+    }
     if (doThrow) throw new Error(`File ${pathname} not found`);
     return null;
 }
@@ -238,7 +242,7 @@ export function findFileSync(pathname: string, doThrow: boolean | Error = true) 
     if (fs.pathExistsSync(path.resolve(__dirname, pathname))) return path.resolve(__dirname, pathname);
     try {
         return require.resolve(pathname);
-    } catch (e) { }
+    } catch (e) {}
     if (pathname.includes('/')) {
         const eles = pathname.split('/');
         let pkg = eles.shift();
@@ -247,31 +251,38 @@ export function findFileSync(pathname: string, doThrow: boolean | Error = true) 
         try {
             const p = path.dirname(require.resolve(path.join(pkg, 'package.json')));
             if (fs.statSync(path.resolve(p, rest))) return path.resolve(p, rest);
-        } catch (e) { }
+        } catch (e) {}
     }
     if (fs.pathExistsSync(path.resolve(os.homedir(), pathname))) return path.resolve(os.homedir(), pathname);
     if (fs.pathExistsSync(path.resolve(os.homedir(), '.hydro', pathname))) return path.resolve(os.homedir(), '.hydro', pathname);
     if (fs.pathExistsSync(path.resolve(os.homedir(), '.config', 'hydro', pathname))) return path.resolve(os.homedir(), '.config', 'hydro', pathname);
-    if (doThrow) throw (typeof doThrow !== 'boolean' ? doThrow : new Error(`File ${pathname} not found`));
+    if (doThrow) throw typeof doThrow !== 'boolean' ? doThrow : new Error(`File ${pathname} not found`);
     return null;
 }
 
-export const htmlEncode = (str: string) => str.replace(/[&<>'"]/g,
-    (tag: string) => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        "'": '&#39;',
-        '"': '&quot;',
-    }[tag]));
+export const htmlEncode = (str: string) =>
+    str.replace(
+        /[&<>'"]/g,
+        (tag: string) =>
+            ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                "'": '&#39;',
+                '"': '&quot;',
+            })[tag],
+    );
 
-export function Counter<T extends (string | number) = string>() {
-    return new Proxy({}, {
-        get: (target, prop) => {
-            if (target[prop] === undefined) return 0;
-            return target[prop];
+export function Counter<T extends string | number = string>() {
+    return new Proxy(
+        {},
+        {
+            get: (target, prop) => {
+                if (target[prop] === undefined) return 0;
+                return target[prop];
+            },
         },
-    }) as Record<T, number>;
+    ) as Record<T, number>;
 }
 
 function canonical(p: string) {
@@ -293,7 +304,10 @@ function sanitize(prefix: string, name: string) {
 }
 
 export function sanitizePath(pathname: string) {
-    const parts = pathname.replace(/\\/g, '/').split('/').filter((i) => i && i !== '.' && i !== '..');
+    const parts = pathname
+        .replace(/\\/g, '/')
+        .split('/')
+        .filter((i) => i && i !== '.' && i !== '..');
     return parts.join(path.sep);
 }
 
@@ -304,7 +318,6 @@ export interface ExtractZipConfig {
     parseError?: (err: Error) => Error;
 }
 
-/* eslint-disable no-await-in-loop */
 export async function extractZip<T>(zipOrEntries: ZipReader<T> | Entry[], dest: string, config: ExtractZipConfig = {}) {
     const { overwrite = false, strip = false, signal } = config;
     let entries: Entry[];
@@ -343,22 +356,25 @@ export async function pipeRequest(req: superagent.Request, w: fs.WriteStream, ti
             w.on('finish', () => {
                 resolve(null);
             });
-            req.buffer(false).timeout({
-                response: Math.min(10000, timeout),
-                deadline: timeout,
-            }).parse((resp, cb) => {
-                if (resp.statusCode !== 200) throw new Error(`${resp.statusCode}`);
-                else {
-                    resp.pipe(w);
-                    resp.on('end', () => {
-                        cb(null, undefined);
-                    });
-                    resp.on('error', (err) => {
-                        cb(err, undefined);
-                        reject(err);
-                    });
-                }
-            }).catch(reject);
+            req.buffer(false)
+                .timeout({
+                    response: Math.min(10000, timeout),
+                    deadline: timeout,
+                })
+                .parse((resp, cb) => {
+                    if (resp.statusCode !== 200) throw new Error(`${resp.statusCode}`);
+                    else {
+                        resp.pipe(w);
+                        resp.on('end', () => {
+                            cb(null, undefined);
+                        });
+                        resp.on('error', (err) => {
+                            cb(err, undefined);
+                            reject(err);
+                        });
+                    }
+                })
+                .catch(reject);
         });
     } catch (e: any) {
         throw new Error(`Download${e.errno === 'ETIMEDOUT' ? 'Timedout' : 'Error'}(${name ? `${name}, ` : ''}${e.message})`);

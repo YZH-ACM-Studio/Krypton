@@ -1,4 +1,4 @@
-name: "CLA Assistant"
+name: 'CLA Assistant'
 
 on:
   issue_comment:
@@ -17,7 +17,7 @@ jobs:
     if: github.repository == 'hydro-dev/Hydro'
     runs-on: ubuntu-latest
     steps:
-      - name: "CLA Assistant"
+      - name: 'CLA Assistant'
         if: |
           github.event.comment.body == 'recheck' ||
           github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA' ||
@@ -26,11 +26,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          path-to-signatures: ".github/cla-signatures.json"
-          path-to-document: "https://github.com/hydro-dev/Hydro/blob/master/CLA.md"
-          branch: "master"
+          path-to-signatures: '.github/cla-signatures.json'
+          path-to-document: 'https://github.com/hydro-dev/Hydro/blob/master/CLA.md'
+          branch: 'master'
           allowlist: undefined-moe,dependabot[bot]
-          custom-pr-sign-comment: "I have read the CLA Document and I hereby sign the CLA"
-          custom-notsigned-prcomment: "Thank you for your submission. We really appreciate it! Like many open-source projects, we ask that you sign our [Contributor License Agreement](https://github.com/hydro-dev/Hydro/blob/master/CLA.md) before we can accept your contribution. You can sign the CLA by just posting a Pull Request comment same as the below format."
+          custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'
+          custom-notsigned-prcomment: 'Thank you for your submission. We really appreciate it! Like many open-source projects, we ask that you sign our [Contributor License Agreement](https://github.com/hydro-dev/Hydro/blob/master/CLA.md) before we can accept your contribution. You can sign the CLA by just posting a Pull Request comment same as the below format.'
           lock-pullrequest-aftermerge: false
-          signed-commit-message: "cla: @$contributorName has signed the CLA"
+          signed-commit-message: 'cla: @$contributorName has signed the CLA'

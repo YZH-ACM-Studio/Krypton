@@ -15,9 +15,7 @@ import { escapeRegExp, pick } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { sortFiles } from '@hydrooj/utils/lib/utils';
-import {
-    FileLimitExceededError, FileUploadError, NotFoundError, PermissionError, ValidationError,
-} from '../error';
+import { FileLimitExceededError, FileUploadError, NotFoundError, PermissionError, ValidationError } from '../error';
 import { TrainingDoc, TrainingNode } from '../interface';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
@@ -28,9 +26,7 @@ import storage from '../model/storage';
 import system from '../model/system';
 import * as training from '../model/training';
 import user from '../model/user';
-import {
-    Handler, param, post, Types,
-} from '../service/server';
+import { Handler, param, post, Types } from '../service/server';
 import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-reference';
 
 const logger = new Logger('course');
@@ -93,7 +89,7 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
                 } catch {
                     throw new ValidationError('tids', null, `无效的比赛 id: ${t}`);
                 }
-                // eslint-disable-next-line no-await-in-loop
+
                 const tdoc = await contest.get(domainId, tid).catch(() => null);
                 if (!tdoc) throw new ValidationError('tids', null, `比赛不存在: ${t}`);
                 tids.push(tid);
@@ -144,25 +140,29 @@ class CourseMainHandler extends Handler {
                 ...(groupOids.length ? [{ courseGroupIds: { $in: groupOids } }] : []),
             ];
         }
-        const [tdocs, tpcount, tcount] = await this.paginate(
-            training.getMulti(domainId, query),
-            page,
-            'training',
-        );
-        const managedIds = tdocs
-            .filter((tdoc) => canManageAll || this.user.own(tdoc))
-            .map((tdoc) => String(tdoc.docId));
+        const [tdocs, tpcount, tcount] = await this.paginate(training.getMulti(domainId, query), page, 'training');
+        const managedIds = tdocs.filter((tdoc) => canManageAll || this.user.own(tdoc)).map((tdoc) => String(tdoc.docId));
         const tids = tdocs.map((t) => t.docId);
         const tsdict = {};
         if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) {
-            const tsdocs = await training.getMultiStatus(domainId, {
-                uid: this.user._id, docId: { $in: tids },
-            }).toArray();
+            const tsdocs = await training
+                .getMultiStatus(domainId, {
+                    uid: this.user._id,
+                    docId: { $in: tids },
+                })
+                .toArray();
             for (const tsdoc of tsdocs) tsdict[tsdoc.docId.toHexString()] = tsdoc;
         }
         this.response.template = 'course_main.html';
         this.response.body = {
-            tdocs, page, tpcount, tcount, tsdict, q, canCreate, managedIds,
+            tdocs,
+            page,
+            tpcount,
+            tcount,
+            tsdict,
+            q,
+            canCreate,
+            managedIds,
         };
     }
 }
@@ -174,9 +174,7 @@ class CourseDetailHandler extends Handler {
         problem.assertProblemAclDomain(this.user, domainId);
         const tdoc = await training.get(domainId, tid);
         if (tdoc.kind !== 'course') throw new ValidationError('tid', null, 'Not a course');
-        const canManage = this.user.own(tdoc)
-            || this.user.hasPerm(PERM.PERM_EDIT_COURSE)
-            || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        const canManage = this.user.own(tdoc) || this.user.hasPerm(PERM.PERM_EDIT_COURSE) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         // 可见性拦截（非管理者且不属于课程班级 → 拒绝）。
         if (!canManage && (tdoc.courseGroupIds || []).length) {
             const myGroups = await userGroupIds(domainId, this.user._id);
@@ -186,20 +184,18 @@ class CourseDetailHandler extends Handler {
         }
         const pids = training.getPids(tdoc.dag);
         // 解析章节引用的所有比赛。
-        const allTids = Array.from(new Set<string>(
-            tdoc.dag.flatMap((n) => (n.tids || []).map((t) => String(t))),
-        )).map((s) => new ObjectId(s));
+        const allTids = Array.from(new Set<string>(tdoc.dag.flatMap((n) => (n.tids || []).map((t) => String(t))))).map((s) => new ObjectId(s));
         const [udoc, pdict, psdict, ctdocs, tsdoc] = await Promise.all([
             user.getById(domainId, tdoc.owner),
             getVisibleReferencedProblems(domainId, pids, this.user),
-            this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
-                ? problem.getListStatus(domainId, this.user._id, pids) : {},
+            this.user.hasPriv(PRIV.PRIV_USER_PROFILE) ? problem.getListStatus(domainId, this.user._id, pids) : {},
             allTids.length
-                ? contest.getMulti(domainId, { docId: { $in: allTids } })
-                    .project({ docId: 1, title: 1, rule: 1, beginAt: 1, endAt: 1 }).toArray()
+                ? contest
+                      .getMulti(domainId, { docId: { $in: allTids } })
+                      .project({ docId: 1, title: 1, rule: 1, beginAt: 1, endAt: 1 })
+                      .toArray()
                 : [],
-            this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
-                ? training.getStatus(domainId, tdoc.docId, this.user._id) : null,
+            this.user.hasPriv(PRIV.PRIV_USER_PROFILE) ? training.getStatus(domainId, tdoc.docId, this.user._id) : null,
         ]);
         const cdict: Record<string, any> = {};
         for (const c of ctdocs) cdict[String(c.docId)] = c;
@@ -226,7 +222,14 @@ class CourseDetailHandler extends Handler {
         this.response.template = 'course_detail.html';
         const canDownloadFiles = this.user.hasPriv(PRIV.PRIV_USER_PROFILE);
         this.response.body = {
-            tdoc, chapters, pdict, psdict, cdict, udoc, canManage, tsdoc,
+            tdoc,
+            chapters,
+            pdict,
+            psdict,
+            cdict,
+            udoc,
+            canManage,
+            tsdoc,
             canCreateQuiz: canManage && this.user.hasPerm(PERM.PERM_CREATE_HOMEWORK),
             canEnroll: canDownloadFiles && !tsdoc?.enroll,
             canDownloadFiles,
@@ -272,7 +275,8 @@ class CourseEditHandler extends Handler {
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         // 提供可选比赛列表给编辑器挂章节。
         const groups = (global as any).Hydro?.model?.userbind?.listUserGroups
-            ? await (global as any).Hydro.model.userbind.listUserGroups(authoritativeDomainId) : [];
+            ? await (global as any).Hydro.model.userbind.listUserGroups(authoritativeDomainId)
+            : [];
         this.response.template = 'course_edit.html';
         this.response.body = {
             page_name: this.tdoc ? 'course_edit' : 'course_create',
@@ -291,7 +295,8 @@ class CourseEditHandler extends Handler {
                     pids: n.pids,
                     tids: (n.tids || []).map((t) => String(t)),
                 })),
-                null, 2,
+                null,
+                2,
             );
         }
     }
@@ -304,9 +309,14 @@ class CourseEditHandler extends Handler {
     @param('term', Types.String, true)
     @param('courseGroupIds', Types.CommaSeperatedArray, true)
     async post(
-        _domainId: string, tid: ObjectId,
-        title: string, content: string, chaptersJson: string,
-        description = '', term = '', courseGroupIds: string[] = [],
+        _domainId: string,
+        tid: ObjectId,
+        title: string,
+        content: string,
+        chaptersJson: string,
+        description = '',
+        term = '',
+        courseGroupIds: string[] = [],
     ) {
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
@@ -332,7 +342,12 @@ class CourseEditHandler extends Handler {
             await oplog.log(this, 'course.create', { tid, title });
         } else {
             await training.edit(authoritativeDomainId, tid, {
-                title, content, dag, description, term, courseGroupIds: groupIds,
+                title,
+                content,
+                dag,
+                description,
+                term,
+                courseGroupIds: groupIds,
             });
             await oplog.log(this, 'course.edit', { tid, title });
         }
@@ -348,7 +363,10 @@ class CourseEditHandler extends Handler {
         if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_COURSE);
         await Promise.all([
             training.del(domainId, tid),
-            storage.del((tdoc.files || []).map((file) => `${courseFilePrefix(domainId, tid)}${file.name}`), this.user._id),
+            storage.del(
+                (tdoc.files || []).map((file) => `${courseFilePrefix(domainId, tid)}${file.name}`),
+                this.user._id,
+            ),
         ]);
         await oplog.log(this, 'course.delete', { tid });
         this.response.redirect = this.url('course_main');
@@ -402,7 +420,10 @@ class CourseFilesHandler extends Handler {
     async postDeleteFiles(_domainId: string, tid: ObjectId, files: string[]) {
         for (const filename of files) listedCourseFile(this.tdoc, filename);
         await Promise.all([
-            storage.del(files.map((filename) => `${courseFilePrefix(this.domainId, tid)}${filename}`), this.user._id),
+            storage.del(
+                files.map((filename) => `${courseFilePrefix(this.domainId, tid)}${filename}`),
+                this.user._id,
+            ),
             training.edit(this.domainId, tid, {
                 files: (this.tdoc.files || []).filter((item) => !files.includes(item.name)),
             }),
@@ -430,12 +451,7 @@ class CourseFileDownloadHandler extends Handler {
         const target = `${courseFilePrefix(domainId, tid)}${filename}`;
         this.response.addHeader('Cache-Control', 'private');
         await oplog.log(this, 'course.file.download', { tid, filename, size: file.size || 0 });
-        this.response.redirect = await storage.signDownloadLink(
-            target,
-            noDisposition ? undefined : filename,
-            false,
-            'user',
-        );
+        this.response.redirect = await storage.signDownloadLink(target, noDisposition ? undefined : filename, false, 'user');
     }
 }
 

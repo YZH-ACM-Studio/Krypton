@@ -2,12 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
-import {
-    buildStudentsMongoFilter,
-    listStudentsFromCollection,
-    parseShanghaiNaturalDate,
-    parseStudentFilterQuery,
-} from '../src/student-filter';
+import { buildStudentsMongoFilter, listStudentsFromCollection, parseShanghaiNaturalDate, parseStudentFilterQuery } from '../src/student-filter';
 
 function loadStudentFilterHttpAdapter() {
     const Module = require('module');
@@ -78,8 +73,7 @@ describe('P2.9 student filter query parsing', () => {
     });
 
     it('validates natural dates before converting boundaries', () => {
-        expect(parseShanghaiNaturalDate('2000-02-29', 'from').toISOString())
-            .to.equal('2000-02-28T16:00:00.000Z');
+        expect(parseShanghaiNaturalDate('2000-02-29', 'from').toISOString()).to.equal('2000-02-28T16:00:00.000Z');
         expect(() => parseShanghaiNaturalDate('1900-02-29', 'from')).to.throw();
         expect(() => parseShanghaiNaturalDate('2024-00-10', 'to')).to.throw();
     });
@@ -97,11 +91,7 @@ describe('P2.9 HTTP filter validation adapter', () => {
         expect(thrown).to.be.instanceOf(Error);
         expect(thrown.name).to.equal('BadRequestError');
         expect(thrown.code).to.equal(400);
-        expect(thrown.params).to.deep.equal([
-            'enrollmentYear',
-            null,
-            '入学年必须是 1900–2099 的四位十进制年份',
-        ]);
+        expect(thrown.params).to.deep.equal(['enrollmentYear', null, '入学年必须是 1900–2099 的四位十进制年份']);
     });
 });
 
@@ -135,14 +125,10 @@ describe('P2.9 Mongo filter construction', () => {
     });
 
     it('uses boundUserId as authority and Mongo null equality for missing/unbound records', () => {
-        expect((buildStudentsMongoFilter('system', { bindingStatus: 'bound' }) as any).boundUserId)
-            .to.deep.equal({ $gt: 0 });
-        expect((buildStudentsMongoFilter('system', { bindingStatus: 'unbound' }) as any).boundUserId)
-            .to.equal(null);
-        expect((buildStudentsMongoFilter('system', { boundOnly: true }) as any).boundUserId)
-            .to.deep.equal({ $gt: 0 });
-        expect((buildStudentsMongoFilter('system', { unboundOnly: true }) as any).boundUserId)
-            .to.equal(null);
+        expect((buildStudentsMongoFilter('system', { bindingStatus: 'bound' }) as any).boundUserId).to.deep.equal({ $gt: 0 });
+        expect((buildStudentsMongoFilter('system', { bindingStatus: 'unbound' }) as any).boundUserId).to.equal(null);
+        expect((buildStudentsMongoFilter('system', { boundOnly: true }) as any).boundUserId).to.deep.equal({ $gt: 0 });
+        expect((buildStudentsMongoFilter('system', { unboundOnly: true }) as any).boundUserId).to.equal(null);
     });
 
     it('keeps boundAt+unbound intact so a date range naturally matches nothing', () => {
@@ -158,14 +144,18 @@ describe('P2.9 Mongo filter construction', () => {
 
     it('fails fast on contradictory legacy/new binding flags', () => {
         expect(() => buildStudentsMongoFilter('system', { boundOnly: true, unboundOnly: true })).to.throw();
-        expect(() => buildStudentsMongoFilter('system', {
-            boundOnly: true,
-            bindingStatus: 'unbound',
-        })).to.throw();
-        expect(() => buildStudentsMongoFilter('system', {
-            unboundOnly: true,
-            bindingStatus: 'bound',
-        })).to.throw();
+        expect(() =>
+            buildStudentsMongoFilter('system', {
+                boundOnly: true,
+                bindingStatus: 'unbound',
+            }),
+        ).to.throw();
+        expect(() =>
+            buildStudentsMongoFilter('system', {
+                unboundOnly: true,
+                bindingStatus: 'bound',
+            }),
+        ).to.throw();
     });
 });
 
@@ -211,14 +201,8 @@ describe('P2.9 listStudents DB boundary', () => {
 });
 
 describe('P2.9 UI and index source contracts', () => {
-    const uiSource = readFileSync(
-        resolve(process.cwd(), 'packages/ui-next/src/pages/userbind/index.tsx'),
-        'utf8',
-    );
-    const dbSource = readFileSync(
-        resolve(process.cwd(), 'packages/krypton-userbind/src/db.ts'),
-        'utf8',
-    );
+    const uiSource = readFileSync(resolve(process.cwd(), 'packages/ui-next/src/pages/userbind/index.tsx'), 'utf8');
+    const dbSource = readFileSync(resolve(process.cwd(), 'packages/krypton-userbind/src/db.ts'), 'utf8');
 
     it('uses one shared StudentFilterBar on both admin student lists', () => {
         expect(uiSource.match(/<StudentFilterBar\b/g)).to.have.lengthOf(2);
@@ -232,9 +216,7 @@ describe('P2.9 UI and index source contracts', () => {
         for (const key of ['q', 'enrollmentYear', 'bindingStatus', 'timeField', 'from', 'to']) {
             expect(uiSource).to.include(`params.set('${key}'`);
         }
-        expect(uiSource).to.match(
-            /clearHref=\{`\/admin\/userbind\/schools\/\$\{data\.school\._id\}\?tab=students`\}/,
-        );
+        expect(uiSource).to.match(/clearHref=\{`\/admin\/userbind\/schools\/\$\{data\.school\._id\}\?tab=students`\}/);
     });
 
     it('declares four ordinary compound indexes without partialFilterExpression', () => {

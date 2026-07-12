@@ -22,9 +22,7 @@ const judgeCase = (c: NormalizedCase) => async (ctx: Context) => {
         `pretest[${c.id}]<${ctx.rid}>`,
         1,
     );
-    const {
-        code, signalled, time, memory,
-    } = res;
+    const { code, signalled, time, memory } = res;
     let { status } = res;
     const message: string[] = [];
     if (time > parseTimeMS(ctx.config.time || '1s')) {
@@ -53,22 +51,24 @@ const judgeCase = (c: NormalizedCase) => async (ctx: Context) => {
 };
 
 export const judge = async (ctx: Context) => {
-    ctx.config.subtasks = [{
-        id: 1,
-        type: 'sum',
-        score: 100,
-        time: ctx.config.time,
-        memory: ctx.config.memory,
-        if: [],
-        cases: ctx.input.map((i, idx) => ({
-            id: idx + 1,
+    ctx.config.subtasks = [
+        {
+            id: 1,
+            type: 'sum',
+            score: 100,
             time: ctx.config.time,
             memory: ctx.config.memory,
-            input: i,
-            output: '',
-            score: 1,
-        })),
-    }];
+            if: [],
+            cases: ctx.input.map((i, idx) => ({
+                id: idx + 1,
+                time: ctx.config.time,
+                memory: ctx.config.memory,
+                input: i,
+                output: '',
+                score: 1,
+            })),
+        },
+    ];
     await runFlow(ctx, {
         compile: async () => {
             ctx.execute = await ctx.compile(ctx.lang, ctx.code);

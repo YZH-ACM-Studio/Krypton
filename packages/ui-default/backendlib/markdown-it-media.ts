@@ -1,5 +1,3 @@
-/* eslint-disable max-len */
-/* eslint-disable regexp/prefer-question-quantifier */
 /* eslint-disable regexp/no-useless-non-capturing-group */
 /* eslint-disable regexp/optimal-quantifier-concatenation */
 
@@ -14,8 +12,9 @@ function youtubeParser(url: string) {
   const match = url.match(ytRegex);
   return match && match[7].length === 11 ? match[7] : url;
 }
-// eslint-disable-next-line regexp/no-empty-alternative
-const vimeoRegex = /https?:\/\/(?:www\.|player\.)?vimeo.com\/(?:channels\/(?:\w+\/)?|groups\/([^/]*)\/videos\/|album\/(\d+)\/video\/|)(\d+)(?:$|\/|\?)/;
+
+const vimeoRegex =
+  /https?:\/\/(?:www\.|player\.)?vimeo.com\/(?:(?:channels\/(?:\w+\/)?|groups\/([^/]*)\/videos\/|album\/(\d+)\/video\/))?(\d+)(?:$|\/|\?)/;
 function vimeoParser(url: string) {
   const match = url.match(vimeoRegex);
   return match && typeof match[3] === 'string' ? match[3] : url;
@@ -51,7 +50,7 @@ function resourceUrl(service: string, src: string, url: string) {
       const timeParts = timeParameter.match(/[0-9]+/g);
       let j = 0;
       while (timeParts.length > 0) {
-        startTime += Number(timeParts.pop()) * (60 ** j);
+        startTime += Number(timeParts.pop()) * 60 ** j;
         j += 1;
       }
       parameters.set('start', startTime);
@@ -77,9 +76,11 @@ function resourceUrl(service: string, src: string, url: string) {
   if (service === 'vimeo') return `https://player.vimeo.com/video/${src}`;
   if (service === 'vine') return `https://vine.co/v/${src}/embed/simple`;
   if (service === 'prezi') {
-    return `https://prezi.com/embed/${src}/?bgcolor=ffffff&amp;lock_to_path=0&amp;autoplay=0&amp;autohide_ctrls=0&amp;`
-      + 'landing_data=bHVZZmNaNDBIWnNjdEVENDRhZDFNZGNIUE43MHdLNWpsdFJLb2ZHanI5N1lQVHkxSHFxazZ0UUNCRHloSXZROHh3PT0&amp;'
-      + 'landing_sign=1kD6c0N6aYpMUS0wxnQjxzSqZlEB8qNFdxtdjYhwSuI';
+    return (
+      `https://prezi.com/embed/${src}/?bgcolor=ffffff&amp;lock_to_path=0&amp;autoplay=0&amp;autohide_ctrls=0&amp;` +
+      'landing_data=bHVZZmNaNDBIWnNjdEVENDRhZDFNZGNIUE43MHdLNWpsdFJLb2ZHanI5N1lQVHkxSHFxazZ0UUNCRHloSXZROHh3PT0&amp;' +
+      'landing_sign=1kD6c0N6aYpMUS0wxnQjxzSqZlEB8qNFdxtdjYhwSuI'
+    );
   }
   return src;
 }
@@ -102,10 +103,12 @@ export function Media(md: MarkdownIt, { pdfToolbar = false }: { pdfToolbar?: boo
       if (result) return result;
     }
     if (service === 'pdf') {
-      if (['file://', './', '../'].some((i) => src.startsWith(i)) || (src[1] === '/' && src[2] !== '/')) src += src.includes('?') ? '&noDisposition=1' : '?noDisposition=1';
+      const isLocalPdf = ['file://', './', '../'].some((i) => src.startsWith(i)) || (src[1] === '/' && src[2] !== '/');
       // A response with has content-disposition header causes the browser to download the file automatically.
       // As we cannot control response header from external sites, we block embedding external PDFs.
-      else return `<p>Embedding an external PDF is no longer supported.</p> <a href="${_.escape(src)}">Download</a>`;
+      if (isLocalPdf) {
+        src += src.includes('?') ? '&noDisposition=1' : '?noDisposition=1';
+      } else return `<p>Embedding an external PDF is no longer supported.</p> <a href="${_.escape(src)}">Download</a>`;
       return `\
         <object classid="clsid:${uuid().toUpperCase()}">
           <param name="SRC" value="${src}">
@@ -133,8 +136,7 @@ export function Media(md: MarkdownIt, { pdfToolbar = false }: { pdfToolbar?: boo
   md.inline.ruler.before('emphasis', 'video', (state, silent) => {
     const theState = state;
     const oldPos = state.pos;
-    if (state.src.charCodeAt(oldPos) !== 0x40
-      ||/* @ */ state.src.charCodeAt(oldPos + 1) !== 0x5B/* [ */) {
+    if (state.src.charCodeAt(oldPos) !== 0x40 || /* @ */ state.src.charCodeAt(oldPos + 1) !== 0x5b /* [ */) {
       return false;
     }
     const match = EMBED_REGEX.exec(state.src.slice(state.pos, state.src.length));

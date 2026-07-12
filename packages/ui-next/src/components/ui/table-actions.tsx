@@ -58,8 +58,17 @@ export interface TableActionProps {
 }
 
 export function TableAction({
-  children, href, formAction, confirm, hidden, hint, icon: Icon,
-  variant = 'default', disabled, className, onClick,
+  children,
+  href,
+  formAction,
+  confirm,
+  hidden,
+  hint,
+  icon: Icon,
+  variant = 'default',
+  disabled,
+  className,
+  onClick,
 }: TableActionProps) {
   const isIconOnly = !children;
   const base = cn(
@@ -70,8 +79,8 @@ export function TableAction({
     variant === 'destructive'
       ? 'border-destructive/50 text-destructive hover:border-destructive hover:bg-destructive/10'
       : variant === 'primary'
-      ? 'border-primary/50 text-primary hover:border-primary hover:bg-primary/10'
-      : 'border-border bg-background text-foreground shadow-sm hover:border-foreground/30 hover:bg-muted',
+        ? 'border-primary/50 text-primary hover:border-primary hover:bg-primary/10'
+        : 'border-border bg-background text-foreground shadow-sm hover:border-foreground/30 hover:bg-muted',
     disabled && 'pointer-events-none opacity-50',
     className,
   );
@@ -125,7 +134,15 @@ export function TableAction({
  * `window.confirm` for destructive confirmation.
  */
 function TableActionForm({
-  formAction, confirm, hidden, base, hint, disabled, variant, label, children,
+  formAction,
+  confirm,
+  hidden,
+  base,
+  hint,
+  disabled,
+  variant,
+  label,
+  children,
 }: {
   formAction: string;
   confirm?: string;
@@ -155,9 +172,7 @@ function TableActionForm({
           }
         }}
       >
-        {hidden && Object.entries(hidden).map(([k, v]) => (
-          <input key={k} type="hidden" name={k} value={v} />
-        ))}
+        {hidden && Object.entries(hidden).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
         <button type="submit" className={base} title={hint} disabled={disabled}>
           {children}
         </button>
@@ -197,21 +212,16 @@ function TableActionForm({
 }
 
 export function TableActions({
-  children, className, align = 'start',
+  children,
+  className,
+  align = 'start',
 }: {
   children: ReactNode;
   className?: string;
   align?: 'start' | 'end' | 'center';
 }) {
   return (
-    <div
-      className={cn(
-        'flex items-center gap-1.5',
-        align === 'end' && 'justify-end',
-        align === 'center' && 'justify-center',
-        className,
-      )}
-    >
+    <div className={cn('flex items-center gap-1.5', align === 'end' && 'justify-end', align === 'center' && 'justify-center', className)}>
       {children}
     </div>
   );

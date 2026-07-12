@@ -43,7 +43,9 @@ export default class WorkerService extends Service {
         if (res) {
             this.ctx.logger.debug('%o', res);
             if (res.interval) {
-                const executeAfter = moment(res.executeAfter).add(...res.interval).toDate();
+                const executeAfter = moment(res.executeAfter)
+                    .add(...res.interval)
+                    .toDate();
                 await this.coll.insertOne({ ...res, executeAfter });
             }
             return res;
@@ -54,10 +56,8 @@ export default class WorkerService extends Service {
     async consume() {
         while (this.consuming) {
             try {
-                // eslint-disable-next-line no-await-in-loop
                 const doc = await this.getFirst();
                 if (!doc) {
-                    // eslint-disable-next-line no-await-in-loop
                     await sleep(1000);
                     continue;
                 }
@@ -71,7 +71,7 @@ export default class WorkerService extends Service {
                     }),
                     sleep(1200000),
                 ]);
-                // eslint-disable-next-line no-await-in-loop
+
                 await this.promise;
                 const spent = Date.now() - start;
                 if (spent > 500) this.ctx.logger.warn('Slow worker task (%d ms): %o', spent, doc);

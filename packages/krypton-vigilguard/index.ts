@@ -22,8 +22,8 @@ import system from 'hydrooj/src/model/system';
 import { ensureIndexes } from './src/db';
 import { applyHandlers } from './src/handler';
 import {
-    currentClientSession,
     clientSessionKeyFromSession,
+    currentClientSession,
     deleteClientSessionByVigilSessionId,
     effectiveContestAccess,
     hitsParticipantScope,
@@ -35,8 +35,8 @@ import { migrationScripts } from './src/migration';
 
 export * from './src/types';
 export {
-    currentClientSession,
     clientSessionKeyFromSession,
+    currentClientSession,
     deleteClientSessionByVigilSessionId,
     effectiveContestAccess,
     getBrowserLockoutDecision,
@@ -134,20 +134,10 @@ function networkFields(tdoc: any) {
     const defaultPolicy = system.get('vigil.networkLockFailurePolicy') || 'strict';
     return {
         networkLockdownMode: !!tdoc.networkLockdownMode,
-        networkLockdownFailurePolicy: tdoc.networkLockdownFailurePolicy
-            || (tdoc.networkLockdownMode ? defaultPolicy : 'off'),
-        networkWhitelistHosts: [
-            ...parseList(system.get('vigil.networkLockDefaultHosts')),
-            ...(tdoc.networkWhitelistHosts || []),
-        ],
-        networkWhitelistIps: [
-            ...parseList(system.get('vigil.networkLockDefaultIps')),
-            ...(tdoc.networkWhitelistIps || []),
-        ],
-        networkWhitelistPorts: [
-            ...parsePorts(system.get('vigil.networkLockDefaultPorts')),
-            ...(tdoc.networkWhitelistPorts || []),
-        ],
+        networkLockdownFailurePolicy: tdoc.networkLockdownFailurePolicy || (tdoc.networkLockdownMode ? defaultPolicy : 'off'),
+        networkWhitelistHosts: [...parseList(system.get('vigil.networkLockDefaultHosts')), ...(tdoc.networkWhitelistHosts || [])],
+        networkWhitelistIps: [...parseList(system.get('vigil.networkLockDefaultIps')), ...(tdoc.networkWhitelistIps || [])],
+        networkWhitelistPorts: [...parsePorts(system.get('vigil.networkLockDefaultPorts')), ...(tdoc.networkWhitelistPorts || [])],
     };
 }
 
@@ -212,9 +202,7 @@ async function pushContestToVigilIfEnabled(domainId: string, tid: any): Promise<
  * cleanly — but DELETE is idempotent on Vigil's side and the cost of a
  * spurious 404 is negligible, so we always issue DELETE on disabled.
  */
-async function pushContestToVigilFromTdoc(
-    domainId: string, tid: any, tdoc: any,
-): Promise<void> {
+async function pushContestToVigilFromTdoc(domainId: string, tid: any, tdoc: any): Promise<void> {
     if (!domainId || !tid || !tdoc) return;
     try {
         if (tdoc.vigilEnabled) {
@@ -229,10 +217,12 @@ async function pushContestToVigilFromTdoc(
 
 async function syncEnabledContestsToVigil(): Promise<void> {
     try {
-        const docs = await documentModel.coll.find({
-            docType: documentModel.TYPE_CONTEST,
-            vigilEnabled: true,
-        }).toArray();
+        const docs = await documentModel.coll
+            .find({
+                docType: documentModel.TYPE_CONTEST,
+                vigilEnabled: true,
+            })
+            .toArray();
         for (const tdoc of docs) {
             await pushContestToVigilFromTdoc(tdoc.domainId || 'system', tdoc.docId, tdoc);
         }

@@ -4,8 +4,9 @@ import type { Handler } from './server';
 import { Converter, Type, Validator } from './validator';
 
 type MethodDecorator = (target: any, funcName: string, obj: any) => any;
-type ClassDecorator = <T extends new (...args: any[]) => any>(Class: T) => T extends new (...args: infer R) => infer S
-    ? new (...args: R) => S : never;
+type ClassDecorator = <T extends new (...args: any[]) => any>(
+    Class: T,
+) => T extends new (...args: infer R) => infer S ? new (...args: R) => S : never;
 export interface ParamOption<T> {
     name: string;
     source: 'all' | 'get' | 'post' | 'route';
@@ -71,11 +72,12 @@ function _descriptor(v: ParamOption<any>) {
                 const arglist: ParamOption<any>[] = target.__param[target.constructor.name][funcName];
                 if (typeof rawArgs.domainId !== 'string' || !rawArgs.domainId) throw new ValidationError('domainId');
                 for (const item of arglist) {
-                    const src = item.source === 'all'
-                        ? rawArgs
-                        : item.source === 'get'
-                            ? this.request.query
-                            : item.source === 'route'
+                    const src =
+                        item.source === 'all'
+                            ? rawArgs
+                            : item.source === 'get'
+                              ? this.request.query
+                              : item.source === 'route'
                                 ? { ...this.request.params, domainId: this.args.domainId }
                                 : this.request.body;
                     const value = src[item.name];
@@ -96,12 +98,11 @@ function _descriptor(v: ParamOption<any>) {
     };
 }
 
-type DescriptorBuilder =
-    ((name: string, type: Type<any>) => MethodDecorator)
-    & ((name: string, type: Type<any>, validate: null, convert: Converter<any>) => MethodDecorator)
-    & ((name: string, type: Type<any>, validate?: Validator, convert?: Converter<any>) => MethodDecorator)
-    & ((name: string, type?: Type<any>, isOptional?: boolean, validate?: Validator, convert?: Converter<any>) => MethodDecorator)
-    & ((name: string, ...args: Array<Type<any> | boolean | Validator | Converter<any>>) => MethodDecorator);
+type DescriptorBuilder = ((name: string, type: Type<any>) => MethodDecorator) &
+    ((name: string, type: Type<any>, validate: null, convert: Converter<any>) => MethodDecorator) &
+    ((name: string, type: Type<any>, validate?: Validator, convert?: Converter<any>) => MethodDecorator) &
+    ((name: string, type?: Type<any>, isOptional?: boolean, validate?: Validator, convert?: Converter<any>) => MethodDecorator) &
+    ((name: string, ...args: Array<Type<any> | boolean | Validator | Converter<any>>) => MethodDecorator);
 
 export const get: DescriptorBuilder = (name, ...args) => _descriptor(_buildParam(name, 'get', ...args));
 export const query: DescriptorBuilder = (name, ...args) => _descriptor(_buildParam(name, 'get', ...args));

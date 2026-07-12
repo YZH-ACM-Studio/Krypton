@@ -7,9 +7,17 @@ import { Binary, ObjectId } from 'mongodb';
 import { UAParser } from 'ua-parser-js';
 import { Context } from '../context';
 import {
-    AuthOperationError, BadRequestError, BlacklistedError, DomainAlreadyExistsError, InvalidTokenError,
-    NotFoundError, PermissionError, UserAlreadyExistError,
-    UserNotFoundError, ValidationError, VerifyPasswordError,
+    AuthOperationError,
+    BadRequestError,
+    BlacklistedError,
+    DomainAlreadyExistsError,
+    InvalidTokenError,
+    NotFoundError,
+    PermissionError,
+    UserAlreadyExistError,
+    UserNotFoundError,
+    ValidationError,
+    VerifyPasswordError,
 } from '../error';
 import { DomainDoc, Setting } from '../interface';
 import avatar, { validate } from '../lib/avatar';
@@ -20,10 +28,7 @@ import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
 import domain from '../model/domain';
-import {
-    buildHomeworkListAccessFilter, canBypassHomeworkAccess,
-    getHomeworkUserGroupIds, participantGroupObjectIds,
-} from '../model/homework-access';
+import { buildHomeworkListAccessFilter, canBypassHomeworkAccess, getHomeworkUserGroupIds, participantGroupObjectIds } from '../model/homework-access';
 import message from '../model/message';
 import ProblemModel from '../model/problem';
 import * as setting from '../model/setting';
@@ -32,9 +37,7 @@ import system from '../model/system';
 import token from '../model/token';
 import * as training from '../model/training';
 import user from '../model/user';
-import {
-    Handler, param, query, requireSudo, Types,
-} from '../service/server';
+import { Handler, param, query, requireSudo, Types } from '../service/server';
 import { camelCase, md5 } from '../utils';
 
 export class HomeHandler extends Handler {
@@ -55,20 +58,25 @@ export class HomeHandler extends Handler {
     async getHomework(domainId: string, limit = 5) {
         if (!this.user.hasPerm(PERM.PERM_VIEW_HOMEWORK)) return [[], {}];
         const canBypass = canBypassHomeworkAccess(this.user);
-        const groups = (await user.listGroup(domainId, canBypass ? undefined : this.user._id))
-            .map((i) => i.name);
-        const participantGroups = canBypass
-            ? []
-            : participantGroupObjectIds(await getHomeworkUserGroupIds(domainId, this.user._id));
-        const tdocs = await contest.getMulti(domainId, {
-            rule: 'homework',
-            ...canBypass
-                ? {} : buildHomeworkListAccessFilter(this.user._id, groups, participantGroups),
-        }).sort({
-            penaltySince: -1, endAt: -1, beginAt: -1, _id: -1,
-        }).limit(limit).toArray();
+        const groups = (await user.listGroup(domainId, canBypass ? undefined : this.user._id)).map((i) => i.name);
+        const participantGroups = canBypass ? [] : participantGroupObjectIds(await getHomeworkUserGroupIds(domainId, this.user._id));
+        const tdocs = await contest
+            .getMulti(domainId, {
+                rule: 'homework',
+                ...(canBypass ? {} : buildHomeworkListAccessFilter(this.user._id, groups, participantGroups)),
+            })
+            .sort({
+                penaltySince: -1,
+                endAt: -1,
+                beginAt: -1,
+                _id: -1,
+            })
+            .limit(limit)
+            .toArray();
         const tsdict = await contest.getListStatus(
-            domainId, this.user._id, tdocs.map((tdoc) => tdoc.docId),
+            domainId,
+            this.user._id,
+            tdocs.map((tdoc) => tdoc.docId),
         );
         return [tdocs, tsdict];
     }
@@ -76,35 +84,33 @@ export class HomeHandler extends Handler {
     async getContest(domainId: string, limit = 10) {
         if (!this.user.hasPerm(PERM.PERM_VIEW_CONTEST)) return [[], {}];
         const rules = Object.keys(contest.RULES).filter((i) => !contest.RULES[i].hidden);
-        const groups = (await user.listGroup(domainId, this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST) ? undefined : this.user._id))
-            .map((i) => i.name);
+        const groups = (await user.listGroup(domainId, this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST) ? undefined : this.user._id)).map(
+            (i) => i.name,
+        );
         const q = {
             rule: { $in: rules },
-            ...this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)
+            ...(this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)
                 ? {}
                 : {
-                    $or: [
-                        { maintainer: this.user._id },
-                        { owner: this.user._id },
-                        { assign: { $in: groups } },
-                        { assign: { $size: 0 } },
-                    ],
-                },
+                      $or: [{ maintainer: this.user._id }, { owner: this.user._id }, { assign: { $in: groups } }, { assign: { $size: 0 } }],
+                  }),
         };
-        const tdocs = await contest.getMulti(domainId, q).sort({ endAt: -1, beginAt: -1, _id: -1 })
-            .limit(limit).toArray();
+        const tdocs = await contest.getMulti(domainId, q).sort({ endAt: -1, beginAt: -1, _id: -1 }).limit(limit).toArray();
         const tsdict = await contest.getListStatus(
-            domainId, this.user._id, tdocs.map((tdoc) => tdoc.docId),
+            domainId,
+            this.user._id,
+            tdocs.map((tdoc) => tdoc.docId),
         );
         return [tdocs, tsdict];
     }
 
     async getTraining(domainId: string, limit = 10) {
         if (!this.user.hasPerm(PERM.PERM_VIEW_TRAINING)) return [[], {}];
-        const tdocs = await training.getMulti(domainId)
-            .sort({ pin: -1, _id: 1 }).limit(limit).toArray();
+        const tdocs = await training.getMulti(domainId).sort({ pin: -1, _id: 1 }).limit(limit).toArray();
         const tsdict = await training.getListStatus(
-            domainId, this.user._id, tdocs.map((tdoc) => tdoc.docId),
+            domainId,
+            this.user._id,
+            tdocs.map((tdoc) => tdoc.docId),
         );
         return [tdocs, tsdict];
     }
@@ -119,8 +125,12 @@ export class HomeHandler extends Handler {
 
     async getRanking(domainId: string, limit = 50) {
         if (!this.user.hasPerm(PERM.PERM_VIEW_RANKING)) return [];
-        const dudocs = await domain.getMultiUserInDomain(domainId, { uid: { $gt: 1 }, rp: { $gt: 0 } })
-            .sort({ rp: -1 }).project({ uid: 1 }).limit(limit).toArray();
+        const dudocs = await domain
+            .getMultiUserInDomain(domainId, { uid: { $gt: 1 }, rp: { $gt: 0 } })
+            .sort({ rp: -1 })
+            .project({ uid: 1 })
+            .limit(limit)
+            .toArray();
         const uids = dudocs.map((dudoc) => dudoc.uid);
         this.collectUser(uids);
         return uids;
@@ -129,14 +139,10 @@ export class HomeHandler extends Handler {
     async getStarredProblems(domainId: string, limit = 50) {
         const currentDomainId = this.problemAccessDomain(domainId);
         if (!currentDomainId || !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) return [[], {}];
-        const psdocs = await ProblemModel.getMultiStatus(currentDomainId, { uid: this.user._id, star: true })
-            .sort('_id', 1).limit(limit).toArray();
+        const psdocs = await ProblemModel.getMultiStatus(currentDomainId, { uid: this.user._id, star: true }).sort('_id', 1).limit(limit).toArray();
         const pdocs = [];
         for (const psdoc of psdocs) {
-            // eslint-disable-next-line no-await-in-loop
-            const pdoc = await ProblemModel.getViewableAuthorized(
-                currentDomainId, psdoc.docId, this.user as any,
-            );
+            const pdoc = await ProblemModel.getViewableAuthorized(currentDomainId, psdoc.docId, this.user as any);
             if (pdoc) pdocs.push(pdoc);
         }
         return [pdocs];
@@ -144,18 +150,19 @@ export class HomeHandler extends Handler {
 
     async getRecentProblems(domainId: string, limit = 10) {
         const currentDomainId = this.problemAccessDomain(domainId);
-        if (!currentDomainId
-            || !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)
-            || !ProblemModel.canBrowseProblemBank(this.user as any)) return [[], {}];
+        if (!currentDomainId || !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM) || !ProblemModel.canBrowseProblemBank(this.user as any)) return [[], {}];
         const pdocs = await ProblemModel.getMulti(currentDomainId, {
-            $and: [
-                ProblemModel.buildProblemBankScope(this.user as any),
-                { hidden: false },
-            ],
+            $and: [ProblemModel.buildProblemBankScope(this.user as any), { hidden: false }],
         })
-            .sort({ _id: -1 }).limit(limit).toArray();
+            .sort({ _id: -1 })
+            .limit(limit)
+            .toArray();
         const psdict = this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
-            ? await ProblemModel.getListStatus(currentDomainId, this.user._id, pdocs.map((pdoc) => pdoc.docId))
+            ? await ProblemModel.getListStatus(
+                  currentDomainId,
+                  this.user._id,
+                  pdocs.map((pdoc) => pdoc.docId),
+              )
             : {};
         return [pdocs, psdict];
     }
@@ -184,7 +191,7 @@ export class HomeHandler extends Handler {
             }
             contents.push({
                 width: column.width,
-                // eslint-disable-next-line no-await-in-loop
+
                 sections: await Promise.all(tasks),
             });
         }
@@ -208,20 +215,16 @@ class HomeSecurityHandler extends Handler {
             session._id = md5(session._id);
             const ua = session.updateUa || session.createUa;
             if (ua) session.updateUaInfo = UAParser(ua);
-            session.updateGeoip = this.ctx.geoip?.lookup?.(
-                session.updateIp || session.createIp,
-                this.translate('geoip_locale'),
-            );
+            session.updateGeoip = this.ctx.geoip?.lookup?.(session.updateIp || session.createIp, this.translate('geoip_locale'));
         }
         const relations = await this.ctx.oauth.list(this.user._id);
         this.response.template = 'home_security.html';
         this.response.body = {
             sudoUid: this.session.sudoUid || null,
             sessions,
-            authenticators: this.user._authenticators.map((c) => pick(c, [
-                'credentialID', 'name', 'credentialType', 'credentialDeviceType',
-                'authenticatorAttachment', 'regat', 'fmt',
-            ])),
+            authenticators: this.user._authenticators.map((c) =>
+                pick(c, ['credentialID', 'name', 'credentialType', 'credentialDeviceType', 'authenticatorAttachment', 'regat', 'fmt']),
+            ),
             geoipProvider: this.ctx.geoip?.provider,
             relations,
         };
@@ -257,11 +260,7 @@ class HomeSecurityHandler extends Handler {
         const udoc = await user.getByEmail(domainId, email);
         if (udoc) throw new UserAlreadyExistError(email);
         await this.limitRate('send_mail', 3600, 30);
-        const [code] = await token.add(
-            token.TYPE_CHANGEMAIL,
-            system.get('session.unsaved_expire_seconds'),
-            { uid: this.user._id, email },
-        );
+        const [code] = await token.add(token.TYPE_CHANGEMAIL, system.get('session.unsaved_expire_seconds'), { uid: this.user._id, email });
         const prefix = (this.domain.host || [])[0] || system.get('server.url');
         const m = await this.renderHTML('user_changemail_mail.html', {
             path: `/home/changeMail/${code}`,
@@ -273,25 +272,24 @@ class HomeSecurityHandler extends Handler {
     }
 
     @param('platform', Types.String)
-    async postLinkAccount({ }, platform: string) {
+    async postLinkAccount({}, platform: string) {
         if (!this.ctx.oauth.providers[platform]) throw new ValidationError('platform');
         this.session.oauthBind = platform;
         await this.ctx.oauth.providers[platform].get.call(this);
     }
 
     @param('platform', Types.String)
-    async postUnlinkAccount({ }, platform: string) {
+    async postUnlinkAccount({}, platform: string) {
         if (!this.ctx.oauth.providers[platform]) throw new ValidationError('platform');
         await this.ctx.oauth.unbind(platform, this.user._id);
         this.back();
     }
 
     @param('tokenDigest', Types.String)
-    async postDeleteToken({ }, tokenDigest: string) {
+    async postDeleteToken({}, tokenDigest: string) {
         const sessions = await token.getSessionListByUid(this.user._id);
         for (const session of sessions) {
             if (tokenDigest === md5(session._id)) {
-                // eslint-disable-next-line no-await-in-loop
                 await token.del(session._id, token.TYPE_SESSION);
                 return this.back();
             }
@@ -307,7 +305,7 @@ class HomeSecurityHandler extends Handler {
     @requireSudo
     @param('code', Types.String)
     @param('secret', Types.String)
-    async postEnableTfa({ }, code: string, secret: string) {
+    async postEnableTfa({}, code: string, secret: string) {
         if (this.user._tfa) throw new AuthOperationError('2FA', 'enabled');
         if (!verifyTFA(secret, code)) throw new InvalidTokenError('2FA');
         await user.setById(this.user._id, { tfa: secret });
@@ -316,12 +314,13 @@ class HomeSecurityHandler extends Handler {
 
     getAuthnHost() {
         return system.get('authn.host') && this.request.hostname.includes(system.get('authn.host'))
-            ? system.get('authn.host') : this.request.hostname;
+            ? system.get('authn.host')
+            : this.request.hostname;
     }
 
     @requireSudo
     @param('type', Types.Range(['cross-platform', 'platform']))
-    async postRegister({ }, type: 'cross-platform' | 'platform') {
+    async postRegister({}, type: 'cross-platform' | 'platform') {
         const options = await generateRegistrationOptions({
             rpName: system.get('server.name'),
             rpID: this.getAuthnHost(),
@@ -345,14 +344,16 @@ class HomeSecurityHandler extends Handler {
 
     @requireSudo
     @param('name', Types.String)
-    async postEnableAuthn({ }, name: string) {
+    async postEnableAuthn({}, name: string) {
         if (!this.session.webauthnVerify) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_WEBAUTHN]);
         const verification = await verifyRegistrationResponse({
             response: this.args.result,
             expectedChallenge: this.session.webauthnVerify,
             expectedOrigin: this.request.headers.origin,
             expectedRPID: this.getAuthnHost(),
-        }).catch(() => { throw new ValidationError('verify'); });
+        }).catch(() => {
+            throw new ValidationError('verify');
+        });
         if (!verification.verified) throw new ValidationError('verify');
         const info = verification.registrationInfo;
         const id = isoBase64URL.toBuffer(info.credential.id);
@@ -373,7 +374,7 @@ class HomeSecurityHandler extends Handler {
 
     @requireSudo
     @param('id', Types.String)
-    async postDisableAuthn({ }, id: string) {
+    async postDisableAuthn({}, id: string) {
         const authenticators = this.user._authenticators?.filter((c) => Buffer.from(c.credentialID.buffer).toString('base64') !== id);
         if (this.user._authenticators?.length === authenticators?.length) throw new ValidationError('authenticator');
         await user.setById(this.user._id, { authenticators });
@@ -392,7 +393,7 @@ function set(s: Setting, key: string, value: any) {
     if (!s) return undefined;
     if (s.family === 'setting_storage') return undefined;
     if (s.flag & setting.FLAG_DISABLED) return undefined;
-    if ((s.flag & setting.FLAG_SECRET) && !value) return undefined;
+    if (s.flag & setting.FLAG_SECRET && !value) return undefined;
     if (s.validation && !s.validation(value)) throw new ValidationError(key);
     if (s.type === 'boolean') {
         if (value === 'on') return true;
@@ -433,7 +434,7 @@ function set(s: Setting, key: string, value: any) {
 
 class HomeSettingsHandler extends Handler {
     @param('category', Types.Range(['preference', 'account', 'domain']))
-    async get({ }, category: string) {
+    async get({}, category: string) {
         this.response.template = 'home_settings.html';
         this.response.body = {
             category,
@@ -453,9 +454,8 @@ class HomeSettingsHandler extends Handler {
         const $set = {};
         const booleanKeys = args.booleanKeys || {};
         delete args.booleanKeys;
-        const setter = args.category === 'domain'
-            ? (s) => domain.setUserInDomain(args.domainId, this.user._id, s)
-            : (s) => user.setById(this.user._id, s);
+        const setter =
+            args.category === 'domain' ? (s) => domain.setUserInDomain(args.domainId, this.user._id, s) : (s) => user.setById(this.user._id, s);
         const settings = args.category === 'domain' ? setting.DOMAIN_USER_SETTINGS_BY_KEY : setting.SETTINGS_BY_KEY;
         for (const key in args) {
             const val = set(settings[key], key, args[key]);
@@ -472,7 +472,7 @@ class HomeAvatarHandler extends Handler {
     noCheckPermView = true;
 
     @param('avatar', Types.String, true)
-    async post({ }, input: string) {
+    async post({}, input: string) {
         if (input) {
             if (!validate(input)) throw new ValidationError('avatar');
             await user.setById(this.user._id, { avatar: input });
@@ -503,17 +503,14 @@ class UserChangemailWithCodeHandler extends Handler {
         }
         const udoc = await user.getByEmail(domainId, tdoc.email);
         if (udoc) throw new UserAlreadyExistError(tdoc.email);
-        await Promise.all([
-            user.setEmail(this.user._id, tdoc.email),
-            token.del(code, token.TYPE_CHANGEMAIL),
-        ]);
+        await Promise.all([user.setEmail(this.user._id, tdoc.email), token.del(code, token.TYPE_CHANGEMAIL)]);
         this.response.redirect = this.url('home_security');
     }
 }
 
 class HomeDomainHandler extends Handler {
     @query('all', Types.Boolean)
-    async get({ }, all: boolean) {
+    async get({}, all: boolean) {
         let ddocs: DomainDoc[] = [];
         const role: Record<string, string> = {};
         if (!all) {
@@ -532,7 +529,6 @@ class HomeDomainHandler extends Handler {
             }
         } else {
             for (const ddoc of ddocs) {
-                // eslint-disable-next-line no-await-in-loop
                 const udoc = await user.getById(ddoc._id, this.user._id);
                 canManage[ddoc._id] = udoc.hasPerm(PERM.PERM_EDIT_DOMAIN);
                 role[ddoc._id] = udoc.role;
@@ -544,7 +540,7 @@ class HomeDomainHandler extends Handler {
 
     @param('id', Types.DomainId)
     @param('star', Types.Boolean)
-    async postStar({ }, id: string, star = false) {
+    async postStar({}, id: string, star = false) {
         if (star) {
             const ddoc = await domain.get(id);
             if (!ddoc) throw new NotFoundError(id);
@@ -554,7 +550,7 @@ class HomeDomainHandler extends Handler {
     }
 
     @param('id', Types.DomainId)
-    async postLeave({ }, id: string) {
+    async postLeave({}, id: string) {
         if (id === 'system') throw new BadRequestError();
         const ddoc = await domain.get(id);
         if (!ddoc) throw new NotFoundError(id);
@@ -583,9 +579,7 @@ class HomeDomainCreateHandler extends Handler {
         await Promise.all([
             domain.edit(domainId, { avatar }),
             domain.setUserRole(domainId, this.user._id, 'root'),
-            push
-                ? user.setById(this.user._id, undefined, undefined, { pinnedDomains: domainId })
-                : Promise.resolve(),
+            push ? user.setById(this.user._id, undefined, undefined, { pinnedDomains: domainId }) : Promise.resolve(),
         ]);
         this.response.redirect = this.url('domain_dashboard', { domainId });
         this.response.body = { domainId };
@@ -596,10 +590,7 @@ class HomeMessagesHandler extends Handler {
     async get() {
         // TODO(iceboy): projection, pagination.
         const messages = await message.getByUser(this.user._id);
-        const uids = new Set<number>([
-            ...messages.map((mdoc) => mdoc.from),
-            ...messages.flatMap((mdoc) => mdoc.to),
-        ]);
+        const uids = new Set<number>([...messages.map((mdoc) => mdoc.from), ...messages.flatMap((mdoc) => mdoc.to)]);
         const udict = await user.getList('system', Array.from(uids));
         // TODO(twd2): improve here:
         const parsed = {};
@@ -622,7 +613,7 @@ class HomeMessagesHandler extends Handler {
 
     @param('uid', Types.Int)
     @param('content', Types.Content)
-    async postSend({ }, uid: number, content: string) {
+    async postSend({}, uid: number, content: string) {
         this.checkPriv(PRIV.PRIV_SEND_MESSAGE);
         const udoc = await user.getById('system', uid);
         if (!udoc) throw new UserNotFoundError(uid);
@@ -632,7 +623,7 @@ class HomeMessagesHandler extends Handler {
     }
 
     @param('messageId', Types.ObjectId)
-    async postDeleteMessage({ }, messageId: ObjectId) {
+    async postDeleteMessage({}, messageId: ObjectId) {
         const msg = await message.get(messageId);
         if (msg.from === this.user._id) await message.del(messageId);
         else throw new PermissionError();
@@ -656,7 +647,7 @@ export function apply(ctx: Context) {
         return {
             operation: 'event',
             channels: uid.map((u) => `message:${u}`),
-            payload: { udoc: { ...udoc.serialize(h) as any, avatarUrl: avatar(udoc.avatar, 128) }, mdoc },
+            payload: { udoc: { ...(udoc.serialize(h) as any), avatarUrl: avatar(udoc.avatar, 128) }, mdoc },
         };
     }
 
@@ -676,7 +667,7 @@ export function apply(ctx: Context) {
         });
     });
 
-    ctx.on('subscription/subscribe', (channel, udoc) => { // eslint-disable-line consistent-return
+    ctx.on('subscription/subscribe', (channel, udoc) => {
         if (channel === 'message' && udoc.hasPriv(PRIV.PRIV_USER_PROFILE)) {
             return {
                 ok: true,

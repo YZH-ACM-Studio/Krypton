@@ -4,9 +4,7 @@ import type { ParsedAuthenticatorData } from '@simplewebauthn/server/helpers';
 import type fs from 'fs';
 import type { Dictionary, NumericDictionary } from 'lodash';
 import type { Binary, FindCursor, ObjectId } from 'mongodb';
-import type {
-    FileInfo, RecordJudgeInfo, RecordPayload,
-} from '@hydrooj/common/types';
+import type { FileInfo, RecordJudgeInfo, RecordPayload } from '@hydrooj/common/types';
 import type { Context } from './context';
 import type { ClientQuestion } from './lib/problem-config';
 import type { PrintTaskStatus } from './model/contest';
@@ -123,7 +121,10 @@ export interface UserPreferenceDoc {
     content: string;
 }
 
-export interface OwnerInfo { owner: number, maintainer?: number[] }
+export interface OwnerInfo {
+    owner: number;
+    maintainer?: number[];
+}
 
 export type User = import('./model/user').User;
 export type Udict = Record<number, User>;
@@ -166,7 +167,7 @@ export interface ProblemConfig {
     /** 编译型程序填空/函数题的学生端安全描述，不含私有完整模板。 */
     template?: {
         lang: string;
-        regions: Array<{ id: string, prompt?: string }>;
+        regions: Array<{ id: string; prompt?: string }>;
     };
 }
 
@@ -320,7 +321,7 @@ export interface Tdoc extends Document {
     lockAt?: Date;
     unlocked?: boolean;
     autoHide?: boolean;
-    balloon?: Record<number, string | { color: string, name: string }>;
+    balloon?: Record<number, string | { color: string; name: string }>;
     score?: Record<number, number>;
     langs?: string[];
 
@@ -632,17 +633,30 @@ export interface ContestRule<T = any> {
     showRecord: (tdoc: Tdoc, now: Date) => boolean;
     stat: (this: ContestRule<T>, tdoc: Tdoc, journal: any[]) => ContestStat & T;
     scoreboardHeader: (
-        this: ContestRule<T>, config: ScoreboardConfig, _: (s: string) => string,
-        tdoc: Tdoc, pdict: ProblemDict,
+        this: ContestRule<T>,
+        config: ScoreboardConfig,
+        _: (s: string) => string,
+        tdoc: Tdoc,
+        pdict: ProblemDict,
     ) => Promise<ScoreboardRow>;
     scoreboardRow: (
-        this: ContestRule<T>, config: ScoreboardConfig, _: (s: string) => string,
-        tdoc: Tdoc, pdict: ProblemDict, udoc: BaseUser, rank: number, tsdoc: ContestStat & T,
+        this: ContestRule<T>,
+        config: ScoreboardConfig,
+        _: (s: string) => string,
+        tdoc: Tdoc,
+        pdict: ProblemDict,
+        udoc: BaseUser,
+        rank: number,
+        tsdoc: ContestStat & T,
         meta?: any,
     ) => Promise<ScoreboardRow>;
     scoreboard: (
-        this: ContestRule<T>, config: ScoreboardConfig, _: (s: string) => string,
-        tdoc: Tdoc, pdict: ProblemDict, cursor: FindCursor<ContestStat & T>,
+        this: ContestRule<T>,
+        config: ScoreboardConfig,
+        _: (s: string) => string,
+        tdoc: Tdoc,
+        pdict: ProblemDict,
+        cursor: FindCursor<ContestStat & T>,
     ) => Promise<[board: ScoreboardRow[], udict: BaseUserDict]>;
     ranked: (tdoc: Tdoc, cursor: FindCursor<ContestStat & T>) => Promise<[number, ContestStat & T][]>;
     applyProjection: (tdoc: Tdoc, rdoc: RecordDoc, user: User) => RecordDoc;
@@ -749,9 +763,10 @@ declare module './service/db' {
         'record.stat': RecordStatDoc;
         'record.history': RecordHistoryDoc;
         document: any;
-        'document.status': StatusDocBase & {
-            [K in keyof DocStatusType]: { docType: K } & DocStatusType[K];
-        }[keyof DocStatusType];
+        'document.status': StatusDocBase &
+            {
+                [K in keyof DocStatusType]: { docType: K } & DocStatusType[K];
+            }[keyof DocStatusType];
         'discussion.history': DiscussionHistoryDoc;
         user: Udoc;
         'user.preference': UserPreferenceDoc;
@@ -774,6 +789,10 @@ declare module './service/db' {
         'contest.balloon': ContestBalloonDoc;
         lock: LockDoc;
     }
+}
+
+export interface UserbindModelBridge {
+    findStudentsByUserIds(domainId: string, userIds: number[]): Promise<Record<string, { studentId: string; realName: string }>>;
 }
 
 export interface Model {
@@ -799,6 +818,8 @@ export interface Model {
     oauth: typeof import('./model/oauth').default;
     storage: typeof import('./model/storage').default;
     rp: typeof import('./script/rating').RpTypes;
+    /** Optional bridge exposed when @hydrooj/krypton-userbind is loaded. */
+    userbind?: UserbindModelBridge;
 }
 
 export interface GeoIP {

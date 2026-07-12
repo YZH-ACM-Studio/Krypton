@@ -15,10 +15,7 @@ describe('P3.13 problem testdata config boundary', () => {
     });
 
     it('buffers and accepts a normal programming config', async () => {
-        const result = await normalizeProblemTestdataUpload(
-            'config.yaml',
-            Readable.from('type: default\ntime: 1s\n'),
-        );
+        const result = await normalizeProblemTestdataUpload('config.yaml', Readable.from('type: default\ntime: 1s\n'));
         assert.ok(Buffer.isBuffer(result));
         assert.equal(result.toString(), 'type: default\ntime: 1s\n');
     });
@@ -26,22 +23,14 @@ describe('P3.13 problem testdata config boundary', () => {
     for (const legacyType of ['objective', 'fill_function']) {
         it(`rejects legacy ${legacyType} before any model storage write`, async () => {
             await assert.rejects(
-                normalizeProblemTestdataUpload(
-                    'config.yaml', Buffer.from(`type: ${legacyType}\n`),
-                ),
+                normalizeProblemTestdataUpload('config.yaml', Buffer.from(`type: ${legacyType}\n`)),
                 hasDetail('复合客观题与旧函数填空配置已下线'),
             );
         });
     }
 
     it('rejects malformed or non-object config instead of storing latent failures', async () => {
-        await assert.rejects(
-            normalizeProblemTestdataUpload('config.yaml', Buffer.from('type: [')),
-            hasDetail('配置 YAML 无法解析'),
-        );
-        await assert.rejects(
-            normalizeProblemTestdataUpload('config.yaml', Buffer.from('default')),
-            hasDetail('配置 YAML 必须是对象'),
-        );
+        await assert.rejects(normalizeProblemTestdataUpload('config.yaml', Buffer.from('type: [')), hasDetail('配置 YAML 无法解析'));
+        await assert.rejects(normalizeProblemTestdataUpload('config.yaml', Buffer.from('default')), hasDetail('配置 YAML 必须是对象'));
     });
 });

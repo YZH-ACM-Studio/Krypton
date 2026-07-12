@@ -11,10 +11,7 @@
  *    The sidebar items deep-link via hash (#overview / #problems / ...).
  */
 import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import {
-  Bell, ClipboardList, ListOrdered, MessageSquare, Moon, Printer, Sun, Swords, Trophy,
-  type LucideIcon,
-} from 'lucide-react';
+import { Bell, ClipboardList, ListOrdered, MessageSquare, Moon, Printer, Sun, Swords, Trophy, type LucideIcon } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -57,11 +54,14 @@ function useDark() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
   }, [dark]);
-  const toggle = () => setDark((prev) => {
-    const next = !prev;
-    try { localStorage.setItem(THEME_KEY, next ? 'dark' : 'light'); } catch {}
-    return next;
-  });
+  const toggle = () =>
+    setDark((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(THEME_KEY, next ? 'dark' : 'light');
+      } catch {}
+      return next;
+    });
   return { dark, toggle };
 }
 
@@ -157,20 +157,13 @@ function StudentBadge() {
       <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 font-sans text-sm font-bold text-primary ring-1 ring-primary/30">
         考
       </div>
-      {avatarUrl
-        ? (
-          <img
-            src={avatarUrl}
-            alt={line1}
-            className="size-7 shrink-0 rounded-full object-cover ring-1 ring-border"
-            referrerPolicy="no-referrer"
-          />
-        )
-        : (
-          <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 font-mono text-[10px] font-semibold text-primary">
-            {initials}
-          </div>
-        )}
+      {avatarUrl ? (
+        <img src={avatarUrl} alt={line1} className="size-7 shrink-0 rounded-full object-cover ring-1 ring-border" referrerPolicy="no-referrer" />
+      ) : (
+        <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 font-mono text-[10px] font-semibold text-primary">
+          {initials}
+        </div>
+      )}
       <div className="hidden min-w-0 leading-tight sm:block">
         <p className="truncate text-xs font-medium">{line1}</p>
         {line2 && <p className="truncate font-mono text-[10px] text-muted-foreground">{line2}</p>}
@@ -179,9 +172,7 @@ function StudentBadge() {
   );
 }
 
-function ExamTopBar({
-  title, subtitle, right,
-}: { title?: string; subtitle?: ReactNode; right?: ReactNode }) {
+function ExamTopBar({ title, subtitle, right }: { title?: string; subtitle?: ReactNode; right?: ReactNode }) {
   const { dark, toggle } = useDark();
   return (
     <header className="sticky top-0 z-40 flex h-14 shrink-0 items-center gap-3 border-b bg-background/85 px-4 backdrop-blur-xl sm:px-6">
@@ -229,8 +220,12 @@ export function ExamHomeShell({ children }: { children: ReactNode }) {
  * a plain component without router knowledge.
  */
 export function ExamDetailShell({
-  title, subtitle, topBarRight, children,
-  section, onSectionChange,
+  title,
+  subtitle,
+  topBarRight,
+  children,
+  section,
+  onSectionChange,
 }: {
   title?: string;
   subtitle?: ReactNode;
@@ -268,19 +263,13 @@ export function ExamDetailShell({
           </nav>
         </aside>
         {/* Main outlet */}
-        <main className="min-w-0 flex-1 overflow-hidden">
-          {children}
-        </main>
+        <main className="min-w-0 flex-1 overflow-hidden">{children}</main>
       </div>
     </div>
   );
 }
 
-export function ExamContestShell({
-  children,
-}: {
-  children: ReactNode;
-}) {
+export function ExamContestShell({ children }: { children: ReactNode }) {
   const bs = useBootstrap();
   const data = bs.page.data || {};
   const examMode = data.examMode || {};
@@ -288,13 +277,11 @@ export function ExamContestShell({
   const section = (examMode.section || 'overview') as ExamSection;
   const title = examMode.title || tdoc.title || '考试';
   const urls = examMode.urls || {};
-  const beginAt = examMode.beginAt ? Date.parse(examMode.beginAt) : NaN;
+  const beginAt = examMode.beginAt ? Date.parse(examMode.beginAt) : Number.NaN;
   const beforeStart = Number.isFinite(beginAt) && Date.now() < beginAt && !examMode.previewMode;
   const lockedBeforeStart = new Set<ExamSection>(['problems', 'print']);
   const items = CLIENT_WORKSPACE_SIDEBAR.filter((item) => item.key !== 'print' || examMode.allowPrint);
-  const subtitle = examMode.previewMode ? (
-    <span className="text-amber-600 dark:text-amber-300">管理员预览模式</span>
-  ) : null;
+  const subtitle = examMode.previewMode ? <span className="text-amber-600 dark:text-amber-300">管理员预览模式</span> : null;
   const stopUserProfileLinks = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     const target = event.target as HTMLElement | null;
     const anchor = target?.closest?.('a[href]') as HTMLAnchorElement | null;
@@ -338,8 +325,8 @@ export function ExamContestShell({
                     disabled
                       ? 'cursor-not-allowed text-muted-foreground/45'
                       : active
-                      ? 'bg-primary/10 text-primary shadow-sm ring-1 ring-primary/30'
-                      : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                        ? 'bg-primary/10 text-primary shadow-sm ring-1 ring-primary/30'
+                        : 'text-muted-foreground hover:bg-accent hover:text-foreground',
                   )}
                 >
                   <item.icon className="size-5" />
@@ -373,7 +360,6 @@ export function useExamSection(defaultSection: ExamSection = 'overview'): [ExamS
     const handler = () => setSection(parse());
     window.addEventListener('hashchange', handler);
     return () => window.removeEventListener('hashchange', handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const update = (s: ExamSection) => {
     if (window.location.hash !== `#${s}`) {

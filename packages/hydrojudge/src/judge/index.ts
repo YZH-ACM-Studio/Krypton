@@ -10,5 +10,13 @@ import * as run from './run';
 import * as submit_answer from './submit_answer';
 
 export = {
-    default: def, generate, interactive, communication, run, submit_answer, objective, hack, fill_function,
+    default: def,
+    generate,
+    interactive,
+    communication,
+    run,
+    submit_answer,
+    objective,
+    hack,
+    fill_function,
 } as Record<string, { judge(ctx: Context): Promise<void> }>;

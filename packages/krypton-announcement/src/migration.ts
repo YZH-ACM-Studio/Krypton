@@ -31,7 +31,7 @@ interface LegacyAnnounceDoc {
     sort?: number;
 }
 
-async function migrateV1(_ctx: Context): Promise<void> {
+async function migrateV1(_ctx: Context): Promise<boolean> {
     return await oncePerSetting(MIGRATION_FLAG, async () => {
         const legacyColl = db.collection<LegacyAnnounceDoc>('document' as any);
         const legacyCount = await legacyColl.countDocuments({ docType: LEGACY_DOCTYPE });
@@ -74,6 +74,4 @@ async function migrateV1(_ctx: Context): Promise<void> {
     });
 }
 
-export const migrationScripts = [
-    migrateV1,
-];
+export const migrationScripts = [migrateV1];

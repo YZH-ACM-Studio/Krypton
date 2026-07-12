@@ -38,7 +38,10 @@ export function OverviewSection({ data, onEnterProblems }: { data: OverviewData;
   const totalScore = cells.reduce((sum, c) => sum + (c.score || 0), 0);
 
   const ruleLabel: Record<string, string> = {
-    exam: '考试 Exam', acm: 'ACM', oi: 'OI', ioi: 'IOI',
+    exam: '考试 Exam',
+    acm: 'ACM',
+    oi: 'OI',
+    ioi: 'IOI',
   };
 
   return (
@@ -55,11 +58,12 @@ export function OverviewSection({ data, onEnterProblems }: { data: OverviewData;
                 {isEnded && <Badge variant="secondary">已结束</Badge>}
                 <Badge variant="outline">{ruleLabel[tdoc.rule] || tdoc.rule}</Badge>
                 {tdoc.lockdownMode && (
-                  <Badge variant="outline" className="gap-1"><Lock className="size-3" />屏幕锁定</Badge>
+                  <Badge variant="outline" className="gap-1">
+                    <Lock className="size-3" />
+                    屏幕锁定
+                  </Badge>
                 )}
-                {tdoc.approvalMode === 'strict' && (
-                  <Badge variant="outline">人工审核入场</Badge>
-                )}
+                {tdoc.approvalMode === 'strict' && <Badge variant="outline">人工审核入场</Badge>}
               </div>
             </div>
             <div className="space-y-2 text-right">
@@ -74,7 +78,9 @@ export function OverviewSection({ data, onEnterProblems }: { data: OverviewData;
                   <Countdown endAt={beginAt} />
                 </>
               ) : (
-                <p className="text-xs text-muted-foreground">已结束 <DateTime value={endAt} /></p>
+                <p className="text-xs text-muted-foreground">
+                  已结束 <DateTime value={endAt} />
+                </p>
               )}
               {inWindow && (
                 <button
@@ -93,7 +99,9 @@ export function OverviewSection({ data, onEnterProblems }: { data: OverviewData;
       {/* Info grid */}
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
-          <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-sm">考试时间</CardTitle></CardHeader>
+          <CardHeader className="px-5 pb-3 pt-5">
+            <CardTitle className="text-sm">考试时间</CardTitle>
+          </CardHeader>
           <CardContent className="space-y-2 px-5 pb-5 text-sm">
             <InfoRow icon={Calendar} label="开始" value={<DateTime value={beginAt} />} />
             <InfoRow icon={Calendar} label="结束" value={<DateTime value={endAt} />} />
@@ -101,13 +109,11 @@ export function OverviewSection({ data, onEnterProblems }: { data: OverviewData;
           </CardContent>
         </Card>
         <Card>
-          <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-sm">管理员</CardTitle></CardHeader>
+          <CardHeader className="px-5 pb-3 pt-5">
+            <CardTitle className="text-sm">管理员</CardTitle>
+          </CardHeader>
           <CardContent className="space-y-2 px-5 pb-5 text-sm">
-            {owner ? (
-              <InfoRow icon={User} label="主管" value={owner.uname || `UID ${owner.uid}`} />
-            ) : (
-              <p className="text-muted-foreground">未知</p>
-            )}
+            {owner ? <InfoRow icon={User} label="主管" value={owner.uname || `UID ${owner.uid}`} /> : <p className="text-muted-foreground">未知</p>}
           </CardContent>
         </Card>
       </div>
@@ -115,7 +121,9 @@ export function OverviewSection({ data, onEnterProblems }: { data: OverviewData;
       {/* Problem set */}
       <Card>
         <CardHeader className="px-5 pb-3 pt-5">
-          <CardTitle className="text-sm">题目集（共 {cells.length} 道 · {totalScore} 分）</CardTitle>
+          <CardTitle className="text-sm">
+            题目集（共 {cells.length} 道 · {totalScore} 分）
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 px-5 pb-5">
           <div className="flex flex-wrap gap-2">
@@ -130,19 +138,21 @@ export function OverviewSection({ data, onEnterProblems }: { data: OverviewData;
 
       {/* You */}
       <Card>
-        <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-sm">你的状态</CardTitle></CardHeader>
+        <CardHeader className="px-5 pb-3 pt-5">
+          <CardTitle className="text-sm">你的状态</CardTitle>
+        </CardHeader>
         <CardContent className="space-y-1 px-5 pb-5 text-sm">
           <InfoRow icon={User} label="账号" value={signedInUser.name} />
-          {signedInUser.studentId && (
-            <InfoRow icon={User} label="学号" value={`${signedInUser.studentId} ${signedInUser.realName || ''}`} />
-          )}
+          {signedInUser.studentId && <InfoRow icon={User} label="学号" value={`${signedInUser.studentId} ${signedInUser.realName || ''}`} />}
         </CardContent>
       </Card>
 
       {/* Description / markdown */}
       {tdoc.content && (
         <Card>
-          <CardHeader className="px-5 pb-3 pt-5"><CardTitle className="text-sm">说明</CardTitle></CardHeader>
+          <CardHeader className="px-5 pb-3 pt-5">
+            <CardTitle className="text-sm">说明</CardTitle>
+          </CardHeader>
           <CardContent className="px-5 pb-5">
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <MarkdownView content={tdoc.content} />
@@ -211,7 +221,9 @@ export function AnnouncementsSection({ broadcasts }: { broadcasts: Array<{ _id: 
 // ─── Ranking ──────────────────────────────────────────────────────────────
 
 export function RankingSection({
-  scoreboard, showScoreboard, signedInUid,
+  scoreboard,
+  showScoreboard,
+  signedInUid,
 }: {
   scoreboard: Array<{ rank: number; uid: number; uname: string; realName?: string; studentId?: string; score: number }>;
   showScoreboard: boolean;
@@ -260,7 +272,11 @@ export function RankingSection({
                       <TableCell className="pl-5 font-mono">{r.rank}</TableCell>
                       <TableCell>
                         <span className={cn(isSelf && 'font-semibold text-primary')}>{r.uname}</span>
-                        {isSelf && <Badge variant="outline" className="ml-2 text-[10px]">你</Badge>}
+                        {isSelf && (
+                          <Badge variant="outline" className="ml-2 text-[10px]">
+                            你
+                          </Badge>
+                        )}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {r.studentId || ''} {r.realName || ''}

@@ -5,17 +5,15 @@ export interface KnownHandlers {
     NotFound: NotFoundHandler;
 }
 
-type MapHandlerEvents<N extends string, H extends Handler> =
-    Record<`handler/${HookType}/${N}`, (thisArg: H) => VoidReturn>
-    & Record<`handler/${HookWithMethod}/${N}/${Methods}`, (thisArg: H) => VoidReturn>;
+type MapHandlerEvents<N extends string, H extends Handler> = Record<`handler/${HookType}/${N}`, (thisArg: H) => VoidReturn> &
+    Record<`handler/${HookWithMethod}/${N}/${Methods}`, (thisArg: H) => VoidReturn>;
 
 type KnownHandlerEvents = {
-    [key in keyof KnownHandlers]: MapHandlerEvents<key, KnownHandlers[key]>
+    [key in keyof KnownHandlers]: MapHandlerEvents<key, KnownHandlers[key]>;
 }[keyof KnownHandlers];
 
-type HandlerEvents =
-    Record<`handler/${HookType}`, (thisArg: Handler) => VoidReturn>
-    & Record<`connection/${'create' | 'active' | 'close'}`, (thisArg: any) => VoidReturn>;
+type HandlerEvents = Record<`handler/${HookType}`, (thisArg: Handler) => VoidReturn> &
+    Record<`connection/${'create' | 'active' | 'close'}`, (thisArg: any) => VoidReturn>;
 
 export type VoidReturn = Promise<any> | any;
 export type HookType = 'before-prepare' | 'before' | 'before-operation' | 'after' | 'finish';
@@ -39,6 +37,5 @@ export interface ServerEvents extends KnownHandlerEvents, HandlerEvents {
 }
 
 declare module 'cordis' {
-    interface Events extends ServerEvents {
-    }
+    interface Events extends ServerEvents {}
 }

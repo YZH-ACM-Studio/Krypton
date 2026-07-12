@@ -10,6 +10,7 @@
     "jsx": "react-jsx",
     "sourceMap": false,
     "composite": true,
+    "skipLibCheck": true,
     "strict": false,
     "strictBindCallApply": true,
     "resolveJsonModule": true,
@@ -22,6 +23,12 @@
     },
     {
       "path": "tsconfig.ui-next.json"
+    },
+    {
+      "path": "tsconfig.ui-workers.json"
+    },
+    {
+      "path": "tsconfig.check.json"
     },
     {
       "path": "plugins/tsconfig.json"
@@ -118,6 +125,9 @@
     },
     {
       "path": "framework/framework"
+    },
+    {
+      "path": "framework/utils"
     }
   ],
   "files": []

@@ -68,7 +68,7 @@ export default class CheckService extends Service {
                 delete this.c[id];
                 return;
             }
-            // eslint-disable-next-line no-await-in-loop
+
             await check(ctx, log, warn, error);
         }
     }

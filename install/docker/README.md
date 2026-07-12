@@ -11,11 +11,11 @@
 
 1. 请选择磁盘空间富裕的位置，运行下面的命令。
 
-   `git clone https://github.com/hydro-dev/Hydro.git && cd Hydro/install/docker`
+    `git clone https://github.com/hydro-dev/Hydro.git && cd Hydro/install/docker`
 
 2. 启动服务。
 
-   `docker-compose up -d`
+    `docker-compose up -d`
 
 在本机制作 docker 镜像耗时可能会比较长。根据网络情况，大约 5 到 30 分钟就可以自动搭建完成，全程无需人工干预。
 

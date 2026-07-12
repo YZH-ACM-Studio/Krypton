@@ -37,7 +37,9 @@ export function ProblemHackPage() {
               #{String(rid).slice(-8)} · {pdoc.title || data.title || '题目'}
             </p>
           </div>
-          <Badge variant="outline" className="ml-auto">{pdoc.pid || pdoc.docId || 'Problem'}</Badge>
+          <Badge variant="outline" className="ml-auto">
+            {pdoc.pid || pdoc.docId || 'Problem'}
+          </Badge>
         </div>
 
         <Card>
@@ -50,7 +52,9 @@ export function ProblemHackPage() {
           <CardContent>
             <form method="post" encType="multipart/form-data" className="space-y-5">
               <div className="space-y-2">
-                <label htmlFor="hack-input" className="text-sm font-medium">输入数据</label>
+                <label htmlFor="hack-input" className="text-sm font-medium">
+                  输入数据
+                </label>
                 <textarea
                   id="hack-input"
                   name="input"
@@ -79,9 +83,7 @@ export function ProblemHackPage() {
               </div>
 
               <label className="flex items-start gap-3 rounded-md border p-4">
-                <Checkbox
-                  name="autoOrganizeInput" className="mt-1"
-                 />
+                <Checkbox name="autoOrganizeInput" className="mt-1" />
                 <span>
                   <span className="flex items-center gap-2 text-sm font-medium">
                     <Sparkles className="size-4 text-primary" />

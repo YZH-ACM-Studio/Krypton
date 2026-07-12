@@ -45,8 +45,12 @@ const permitsColl = {
 };
 
 const permitsModel = {
-    async grant() { throw new Error('unexpected grant'); },
-    async grantBulkViaContest() { throw new Error('unexpected contest grant'); },
+    async grant() {
+        throw new Error('unexpected grant');
+    },
+    async grantBulkViaContest() {
+        throw new Error('unexpected contest grant');
+    },
     async listForProblem(...args: any[]) {
         calls.permitList.push(args);
         return rosterProvider();
@@ -59,8 +63,12 @@ const permitsModel = {
         calls.revoke.push(args);
         return true;
     },
-    async revokeContestUser() { throw new Error('unexpected contest revoke'); },
-    async syncContestCurrentPids() { throw new Error('unexpected contest sync'); },
+    async revokeContestUser() {
+        throw new Error('unexpected contest revoke');
+    },
+    async syncContestCurrentPids() {
+        throw new Error('unexpected contest sync');
+    },
 };
 
 const hydroojStub = {
@@ -77,7 +85,9 @@ const hydroojStub = {
                 verifiers: [],
             };
         },
-        async edit() { throw new Error('unexpected contest edit'); },
+        async edit() {
+            throw new Error('unexpected contest edit');
+        },
     },
     Handler: framework.Handler,
     NotFoundError: Error,
@@ -97,7 +107,9 @@ const hydroojStub = {
             calls.problemGet.push(args);
             return pdoc;
         },
-        async getList() { return {}; },
+        async getList() {
+            return {};
+        },
         async getViewableAuthorized(...args: any[]) {
             calls.problemGet.push(args);
             return stableProblemResults.length ? stableProblemResults.shift() : pdoc;
@@ -143,9 +155,22 @@ require.cache[modelPath] = {
 } as NodeModule;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     if (request === 'hydrooj') return hydroojStub;
-    if (request === '@hydrooj/utils') return { Logger: class { error() {} } };
+    if (request === '@hydrooj/utils') {
+        return {
+            Logger: class {
+                error() {}
+            },
+        };
+    }
     if (request === 'hydrooj/src/model/message') {
-        return { default: { FLAG_UNREAD: 1, async send() { return undefined; } } };
+        return {
+            default: {
+                FLAG_UNREAD: 1,
+                async send() {
+                    return undefined;
+                },
+            },
+        };
     }
     if (request === 'hydrooj/src/model/problem-access') {
         return {
@@ -195,12 +220,14 @@ function makeHandler(route: string) {
 }
 
 function readCount() {
-    return calls.contestGet.length
-        + calls.permitFind.length
-        + calls.permitList.length
-        + calls.problemGet.length
-        + calls.userGet.length
-        + calls.userList.length;
+    return (
+        calls.contestGet.length +
+        calls.permitFind.length +
+        calls.permitList.length +
+        calls.problemGet.length +
+        calls.userGet.length +
+        calls.userList.length
+    );
 }
 
 async function capture(run: () => Promise<unknown>) {
@@ -247,12 +274,11 @@ describe('permit handler authoritative domain boundary', () => {
         expect(calls.problemGet).to.deep.equal([['system', 42, handler.user]]);
         expect(calls.permitFind[0]).to.include({ domainId: 'system', pid: 42 });
         expect(calls.revoke[0][0]).to.equal('system');
-        expect(calls.writeClaim[0]).to.deep.equal([
-            'system', 42, handler.user, 'permit-revoke',
-            { requestId: 'retry-1', selfRevokeUid: undefined },
-        ]);
+        expect(calls.writeClaim[0]).to.deep.equal(['system', 42, handler.user, 'permit-revoke', { requestId: 'retry-1', selfRevokeUid: undefined }]);
         expect(calls.revoke[0][2]).to.include({
-            requestId: 'retry-1', actor: 1, writeClaimRequestId: 'retry-1',
+            requestId: 'retry-1',
+            actor: 1,
+            writeClaimRequestId: 'retry-1',
         });
     });
 

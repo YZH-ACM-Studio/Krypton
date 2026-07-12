@@ -22,9 +22,7 @@ const ProblemModel = {
         aclDomainCalls.push(domainId);
         if (domainId !== user._problemAclDomainId) throw new Error('ACL domain mismatch');
     },
-    async assertProblemBankSelection(
-        domainId: string, pids: number[], user: any, grandfatheredPids?: number[],
-    ) {
+    async assertProblemBankSelection(domainId: string, pids: number[], user: any, grandfatheredPids?: number[]) {
         assertionCalls.push({ domainId, pids, user, grandfatheredPids });
         if (assertionFailure) throw assertionFailure;
     },
@@ -34,23 +32,43 @@ const ProblemModel = {
 };
 
 const taskModel = {
-    async getTask(domainId: string) { dbDomains.push(domainId); return existingTask; },
-    async writeAudit() { writes.audit++; },
-    async createTask(domainId: string) { dbDomains.push(domainId); writes.create++; return 'new-task'; },
-    async updateTask(domainId: string) { dbDomains.push(domainId); writes.update++; },
+    async getTask(domainId: string) {
+        dbDomains.push(domainId);
+        return existingTask;
+    },
+    async writeAudit() {
+        writes.audit++;
+    },
+    async createTask(domainId: string) {
+        dbDomains.push(domainId);
+        writes.create++;
+        return 'new-task';
+    },
+    async updateTask(domainId: string) {
+        dbDomains.push(domainId);
+        writes.update++;
+    },
 };
 
 class FakeHandler {
     user: any;
+    domain: { _id: string };
     response: Record<string, any> = {};
     request = { headers: {} };
-    url() { return '/admin/tasks'; }
+    url() {
+        return '/admin/tasks';
+    }
 }
 
 class FakeObjectId {
     constructor(private readonly value = '000000000000000000000001') {}
-    static isValid() { return true; }
-    toHexString() { return this.value; }
+    static isValid() {
+        return true;
+    }
+
+    toHexString() {
+        return this.value;
+    }
 }
 
 class FakeValidationError extends Error {}
@@ -91,10 +109,12 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
         if (request === './model') return { taskModel };
         if (request === './presets') {
             return {
-                presetSummaries: () => [{
-                    id: 'specific_problem',
-                    params: [{ name: 'problemId', type: 'problem' }],
-                }],
+                presetSummaries: () => [
+                    {
+                        id: 'specific_problem',
+                        params: [{ name: 'problemId', type: 'problem' }],
+                    },
+                ],
             };
         }
         if (request === './types') {
@@ -149,22 +169,31 @@ function task(graphValue: ReturnType<typeof graph>) {
 }
 
 function handler() {
-    const instance = Reflect.construct(adminTasksEditHandlerClass, []);
+    const instance = Reflect.construct(adminTasksEditHandlerClass, []) as FakeHandler;
     instance.user = { _id: 42, _problemAclDomainId: 'system' };
     instance.domain = { _id: 'system' };
     instance.response = {};
     return instance;
 }
 
-async function post(
-    instance: any,
-    tid: any,
-    graphValue: ReturnType<typeof graph>,
-    payloadDomainId = 'system',
-) {
+async function post(instance: any, tid: any, graphValue: ReturnType<typeof graph>, payloadDomainId = 'system') {
     return instance.post(
-        { domainId: payloadDomainId }, tid, '任务', '', '', JSON.stringify(graphValue),
-        JSON.stringify({ type: 'public' }), true, '', '', '', '', 0, false, 'auto', 0,
+        { domainId: payloadDomainId },
+        tid,
+        '任务',
+        '',
+        '',
+        JSON.stringify(graphValue),
+        JSON.stringify({ type: 'public' }),
+        true,
+        '',
+        '',
+        '',
+        '',
+        0,
+        false,
+        'auto',
+        0,
     );
 }
 

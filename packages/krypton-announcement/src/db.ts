@@ -1,9 +1,5 @@
 import { db } from 'hydrooj';
-import type {
-    AnnouncementCategory,
-    AnnouncementDoc,
-    AnnouncementReadState,
-} from './types';
+import type { AnnouncementCategory, AnnouncementDoc, AnnouncementReadState } from './types';
 
 export const docsColl = db.collection<AnnouncementDoc>('announcement.docs');
 export const categoriesColl = db.collection<AnnouncementCategory>('announcement.categories');
@@ -42,7 +38,5 @@ export const PRESET_CATEGORIES: Array<Omit<AnnouncementCategory, '_id'>> = [
 export async function seedCategoriesIfEmpty(): Promise<void> {
     const count = await categoriesColl.estimatedDocumentCount();
     if (count > 0) return;
-    await categoriesColl.insertMany(
-        PRESET_CATEGORIES.map((c) => ({ ...c } as AnnouncementCategory)),
-    );
+    await categoriesColl.insertMany(PRESET_CATEGORIES.map((c) => ({ ...c }) as AnnouncementCategory));
 }

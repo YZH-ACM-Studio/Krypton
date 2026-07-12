@@ -64,6 +64,7 @@ ssh oj-vigil 'sudo tail -100 /var/log/krypton-vigil.log'
 ```
 
 启动日志应该包含：
+
 - `init_db()` 完成
 - `start_heartbeat_watcher()` 启动
 - 没有 SQLAlchemy ALTER 失败
@@ -119,6 +120,7 @@ ssh oj 'sudo /root/.nix-profile/bin/pm2 logs hydrooj --lines 100 --nostream'
 ```
 
 启动日志应该出现：
+
 - `vigilguard migration v2_media_defaults` upgrade count
 - `check-hls-access` route loaded
 
@@ -161,6 +163,7 @@ ssh oj-vigil 'SP=jyh521315
 ```
 
 机房 GPO 配置（一次性）：
+
 - 摄像头隐私设置全局允许
 - 客户端 exe 加入杀软白名单
 - ffmpeg.exe 加入杀软白名单（防止 IDS 把 H.264 编码误报为可疑活动）
@@ -168,6 +171,7 @@ ssh oj-vigil 'SP=jyh521315
 ## 8. 端到端验证
 
 学生端：
+
 1. 启动客户端 → 登录 → 进入考试 webview
 2. 等 10 秒 — 检查 `tasklist | findstr ffmpeg` 应该有 2 个 ffmpeg.exe (screen + camera)
 3. 在 oj-vigil 上：`ls -l /data/vigil/recordings/` （如果开了 recordEnabled）
@@ -179,20 +183,12 @@ ssh oj-vigil 'SP=jyh521315
 > `/opt/srs/objs/nginx/html/recordings -> /data/vigil/recordings` 符号链接，
 > 否则 OJ 的 `/vigil-hls/recordings/*.mp4` 会被 Caddy 转发到 SRS 后返回 404。
 
-老师端：
-4. 打开 `/admin/vigil/exams/{cid}` — 学生卡片墙出现
-5. 点卡片 → 右侧抽屉滑出
-6. 点 "查看实时画面" — HLS 视频 < 5s 显示学生屏幕
-7. 点 "实时截屏" — 5s 内卡片缩略图更新
-8. 点 "锁屏" + 填 reason → 学生屏幕显示全屏遮罩
-9. 点 "解锁" → 学生 unlock
-10. 发 send_message critical → 学生屏幕全屏弹窗
-11. 群发 "考试还有 10 分钟" → 所有学生 toast
-12. 检查 `vigil.command_audit` 表中有完整审计记录
+老师端：4. 打开 `/admin/vigil/exams/{cid}` — 学生卡片墙出现 5. 点卡片 → 右侧抽屉滑出 6. 点 "查看实时画面" — HLS 视频 < 5s 显示学生屏幕 7. 点 "实时截屏" — 5s 内卡片缩略图更新 8. 点 "锁屏" + 填 reason → 学生屏幕显示全屏遮罩 9. 点 "解锁" → 学生 unlock 10. 发 send_message critical → 学生屏幕全屏弹窗 11. 群发 "考试还有 10 分钟" → 所有学生 toast 12. 检查 `vigil.command_audit` 表中有完整审计记录
 
 ## 9. 回滚
 
 按 CLAUDE.md §5 回滚流程：
+
 - 客户端：旧版 installer 重新分发
 - Vigil server: `systemctl stop krypton-vigil` + 恢复 `/opt/krypton-vigil.bak`
 - SRS：`systemctl stop srs` （不影响考试 — fail-soft）

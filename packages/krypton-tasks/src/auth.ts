@@ -21,19 +21,13 @@ export function canModifyTask(
     return false;
 }
 
-export function canCreateTask(user: {
-    hasPerm(p: bigint): boolean;
-    hasPriv(p: number): boolean;
-}): boolean {
+export function canCreateTask(user: { hasPerm(p: bigint): boolean; hasPriv(p: number): boolean }): boolean {
     if (user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) return true;
     if (user.hasPerm(PERM.PERM_MANAGE_TASKS)) return true;
     if (user.hasPerm(PERM.PERM_CREATE_TASK)) return true;
     return false;
 }
 
-export function canManageAllTasks(user: {
-    hasPerm(p: bigint): boolean;
-    hasPriv(p: number): boolean;
-}): boolean {
+export function canManageAllTasks(user: { hasPerm(p: bigint): boolean; hasPriv(p: number): boolean }): boolean {
     return user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || user.hasPerm(PERM.PERM_MANAGE_TASKS);
 }

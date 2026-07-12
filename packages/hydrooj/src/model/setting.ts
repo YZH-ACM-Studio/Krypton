@@ -1,5 +1,3 @@
-/* eslint-disable max-len */
-/* eslint-disable no-await-in-loop */
 import fs from 'fs';
 import saslPrep from '@mongodb-js/saslprep';
 import yaml from 'js-yaml';
@@ -45,11 +43,27 @@ export const DOMAIN_USER_SETTINGS_BY_KEY: SettingDict = {};
 export const DOMAIN_SETTINGS_BY_KEY: SettingDict = {};
 export const SYSTEM_SETTINGS_BY_KEY: SettingDict = {};
 
-export type SettingType = 'text' | 'yaml' | 'number' | 'float' | 'markdown' | 'password' | 'boolean' | 'textarea' | [string, string][] | Record<string, string> | 'json';
+export type SettingType =
+    | 'text'
+    | 'yaml'
+    | 'number'
+    | 'float'
+    | 'markdown'
+    | 'password'
+    | 'boolean'
+    | 'textarea'
+    | [string, string][]
+    | Record<string, string>
+    | 'json';
 
 export const Setting = (
-    family: string, key: string, value: any = null,
-    type: SettingType = 'text', name = '', desc = '', flag = 0,
+    family: string,
+    key: string,
+    value: any = null,
+    type: SettingType = 'text',
+    name = '',
+    desc = '',
+    flag = 0,
     validation?: (val: any) => boolean,
 ): _Setting => {
     let subType = '';
@@ -74,7 +88,9 @@ export const Setting = (
 
 declare global {
     namespace Schemastery {
-        interface Meta<T> { // eslint-disable-line ts/no-unused-vars
+        // The upstream declaration is generic; the merged metadata fields do not consume T.
+        // eslint-disable-next-line ts/no-unused-vars
+        interface Meta<T> {
             family?: string;
             secret?: boolean;
             flag?: number;
@@ -86,15 +102,21 @@ function schemaToSettings(schema: Schema<any>) {
     const result: _Setting[] = [];
     const processNode = (key: string, s: Schema<number> | Schema<string> | Schema<boolean>, defaultFamily = 'setting_basic') => {
         if (s.dict) throw new Error('Dict is not supported here');
-        let flag = (s.meta?.hidden ? FLAG_HIDDEN : 0)
-            | (s.meta?.disabled ? FLAG_DISABLED : 0);
+        let flag = (s.meta?.hidden ? FLAG_HIDDEN : 0) | (s.meta?.disabled ? FLAG_DISABLED : 0);
         const actualType = s.type === 'transform' ? s.inner.type : s.type;
         const actualList = s.type === 'transform' ? s.inner.list : s.list;
-        const type = actualType === 'any' ? 'json'
-            : actualType === 'number' ? 'number'
-                : actualType === 'boolean' ? 'boolean'
-                    : s.meta?.role === 'markdown' ? 'markdown'
-                        : s.meta?.role === 'textarea' ? 'textarea' : 'text';
+        const type =
+            actualType === 'any'
+                ? 'json'
+                : actualType === 'number'
+                  ? 'number'
+                  : actualType === 'boolean'
+                    ? 'boolean'
+                    : s.meta?.role === 'markdown'
+                      ? 'markdown'
+                      : s.meta?.role === 'textarea'
+                        ? 'textarea'
+                        : 'text';
         if (s.meta?.role === 'password') flag |= FLAG_SECRET;
         if (s.meta?.flag) flag |= s.meta?.flag;
         const options = {};
@@ -250,22 +272,32 @@ PreferenceSetting(
     Setting('setting_display', 'viewLang', null, langRange, 'UI Language'),
     Setting('setting_display', 'timeZone', 'Asia/Shanghai', timezones, 'Timezone'),
     LangSettingNode,
-    Setting('setting_usage', 'codeTemplate', '', 'textarea', 'Default Code Template',
-        'If left blank, the built-in template of the corresponding language will be used.'),
+    Setting(
+        'setting_usage',
+        'codeTemplate',
+        '',
+        'textarea',
+        'Default Code Template',
+        'If left blank, the built-in template of the corresponding language will be used.',
+    ),
 );
 
 AccountSetting(
-    Setting('setting_info', 'avatar', '', 'text', 'Avatar',
-        'Allow using gravatar:email qq:id github:name url:link format.'),
+    Setting('setting_info', 'avatar', '', 'text', 'Avatar', 'Allow using gravatar:email qq:id github:name url:link format.'),
     Setting('setting_info', 'qq', null, 'text', 'QQ'),
     Setting('setting_info', 'gender', builtin.USER_GENDER_OTHER, builtin.USER_GENDER_RANGE, 'Gender'),
     Setting('setting_info', 'bio', null, 'markdown', 'Bio', '', FLAG_PUBLIC),
     Setting('setting_info', 'school', '', 'text', 'School', '', FLAG_PRIVATE),
     Setting('setting_info', 'studentId', '', 'text', 'Student ID', '', FLAG_PRIVATE),
     Setting('setting_info', 'phone', null, 'text', 'Phone', null, FLAG_DISABLED | FLAG_PRIVATE),
-    Setting('setting_customize', 'backgroundImage',
-        '/components/profile/backgrounds/1.jpg', 'text', 'Profile Background Image',
-        'Choose the background image in your profile page.'),
+    Setting(
+        'setting_customize',
+        'backgroundImage',
+        '/components/profile/backgrounds/1.jpg',
+        'text',
+        'Profile Background Image',
+        'Choose the background image in your profile page.',
+    ),
     Setting('setting_storage', 'unreadMsg', 0, 'number', 'Unread Message Count', null, FLAG_DISABLED | FLAG_HIDDEN),
     Setting('setting_storage', 'badge', '', 'text', 'badge info', null, FLAG_DISABLED | FLAG_HIDDEN),
     Setting('setting_storage', 'banReason', '', 'text', 'ban reason', null, FLAG_DISABLED | FLAG_HIDDEN),
@@ -281,85 +313,132 @@ DomainSetting(
     Setting('setting_storage', 'host', '', 'text', 'Custom host', null, FLAG_HIDDEN | FLAG_DISABLED),
 );
 
-DomainUserSetting(Schema.object({
-    displayName: Schema.transform(String, (input) => saslPrep(input)).default('').description('Display Name')
-        .extra('family', 'setting_info').extra('flag', FLAG_PRIVATE),
+DomainUserSetting(
+    Schema.object({
+        displayName: Schema.transform(String, (input) => saslPrep(input))
+            .default('')
+            .description('Display Name')
+            .extra('family', 'setting_info')
+            .extra('flag', FLAG_PRIVATE),
 
-    rpInfo: Schema.any().extra('family', 'setting_storage').disabled().hidden(),
+        rpInfo: Schema.any().extra('family', 'setting_storage').disabled().hidden(),
 
-    ...Object.fromEntries(['nAccept', 'nSubmit', 'nLiked', 'rp', 'rpdelta', 'rank', 'level', 'join'].map((i) => ([
-        i, Schema.number().default(0).extra('family', 'setting_storage').disabled().hidden(),
-    ]))),
+        ...Object.fromEntries(
+            ['nAccept', 'nSubmit', 'nLiked', 'rp', 'rpdelta', 'rank', 'level', 'join'].map((i) => [
+                i,
+                Schema.number().default(0).extra('family', 'setting_storage').disabled().hidden(),
+            ]),
+        ),
+    }),
+);
 
-}));
-
-const ignoreUA = [
-    'bingbot',
-    'Gatus',
-    'Googlebot',
-    'Prometheus',
-    'Uptime',
-    'YandexBot',
-].join('\n');
+const ignoreUA = ['bingbot', 'Gatus', 'Googlebot', 'Prometheus', 'Uptime', 'YandexBot'].join('\n');
 
 // This is a showcase of how to use Schema to define settings.
-SystemSetting(Schema.object({
-    smtp: Schema.object({
-        user: Schema.string().default('').description('SMTP Username'),
-        pass: Schema.string().default('').description('SMTP Password').role('password'),
-        host: Schema.string().default('').description('SMTP Server Host'),
-        port: Schema.number().step(1).min(1).max(65535).default(465).description('SMTP Server Port'),
-        from: Schema.string().default('').description('Mail From'),
-        secure: Schema.boolean().default(false).description('SSL'),
-        verify: Schema.boolean().default(true).description('Verify register email'),
-    }).extra('family', 'setting_smtp'),
-    server: Schema.object({
-        allowInvite: Schema.boolean().default(true).description('Allow invite users'),
-        center: Schema.string().default('https://hydro.ac/center').description('Server Center').role('url').hidden(),
-        name: Schema.string().default('Hydro').description('Server Name'),
-        url: Schema.string().default('/').description('Server BaseURL'),
-        upload: Schema.string().default('256m').description('Max upload file size'),
-        cdn: Schema.string().default('/').description('CDN Prefix'),
-        cdn_dynamic: Schema.boolean().default(false).description('Dynamic CDN'),
-        ws: Schema.string().default('/').description('WebSocket Prefix'),
-        host: Schema.string().default('127.0.0.1').description('Listen host'),
-        port: Schema.number().step(1).min(1).max(65535).default(8888).description('Server Port'),
-        xff: Schema.string().default('').description('IP Header'),
-        xhost: Schema.string().default('').description('Hostname Header'),
-        xproxy: Schema.boolean().default(false).description('Use reverse_proxy'),
-        cors: Schema.string().default('').description('CORS domains'),
-        login: Schema.boolean().default(true).description('Allow builtin-login').hidden(),
-        checkUpdate: Schema.boolean().default(true).description('Daily update check'),
-        ignoreUA: Schema.string().default(ignoreUA).description('ignoredUA').role('textarea'),
-    }).extra('family', 'setting_server'),
-}));
+SystemSetting(
+    Schema.object({
+        smtp: Schema.object({
+            user: Schema.string().default('').description('SMTP Username'),
+            pass: Schema.string().default('').description('SMTP Password').role('password'),
+            host: Schema.string().default('').description('SMTP Server Host'),
+            port: Schema.number().step(1).min(1).max(65535).default(465).description('SMTP Server Port'),
+            from: Schema.string().default('').description('Mail From'),
+            secure: Schema.boolean().default(false).description('SSL'),
+            verify: Schema.boolean().default(true).description('Verify register email'),
+        }).extra('family', 'setting_smtp'),
+        server: Schema.object({
+            allowInvite: Schema.boolean().default(true).description('Allow invite users'),
+            center: Schema.string().default('https://hydro.ac/center').description('Server Center').role('url').hidden(),
+            name: Schema.string().default('Hydro').description('Server Name'),
+            url: Schema.string().default('/').description('Server BaseURL'),
+            upload: Schema.string().default('256m').description('Max upload file size'),
+            cdn: Schema.string().default('/').description('CDN Prefix'),
+            cdn_dynamic: Schema.boolean().default(false).description('Dynamic CDN'),
+            ws: Schema.string().default('/').description('WebSocket Prefix'),
+            host: Schema.string().default('127.0.0.1').description('Listen host'),
+            port: Schema.number().step(1).min(1).max(65535).default(8888).description('Server Port'),
+            xff: Schema.string().default('').description('IP Header'),
+            xhost: Schema.string().default('').description('Hostname Header'),
+            xproxy: Schema.boolean().default(false).description('Use reverse_proxy'),
+            cors: Schema.string().default('').description('CORS domains'),
+            login: Schema.boolean().default(true).description('Allow builtin-login').hidden(),
+            checkUpdate: Schema.boolean().default(true).description('Daily update check'),
+            ignoreUA: Schema.string().default(ignoreUA).description('ignoredUA').role('textarea'),
+        }).extra('family', 'setting_server'),
+    }),
+);
 // We will keep the old settings as-is until new setting ui is ready.
 SystemSetting(
     Setting('setting_server', 'server.language', 'zh_CN', langRange, 'server.language', 'Default display language'),
     ServerLangSettingNode,
-    Setting('setting_vigil', 'vigil.networkLockDefaultHosts', '', 'textarea', 'vigil.networkLockDefaultHosts',
-        'Default host allowlist for Vigil network lockdown. Whitespace, comma, or newline separated.'),
-    Setting('setting_vigil', 'vigil.networkLockDefaultIps', '', 'textarea', 'vigil.networkLockDefaultIps',
-        'Default IP/CIDR allowlist for Vigil network lockdown. Whitespace, comma, or newline separated.'),
-    Setting('setting_vigil', 'vigil.networkLockDefaultPorts', '53\n67\n68\n80\n443\n8765', 'textarea', 'vigil.networkLockDefaultPorts',
-        'Default remote ports for Vigil network lockdown. Whitespace, comma, or newline separated.'),
-    Setting('setting_vigil', 'vigil.networkLockFailurePolicy', 'strict', {
-        strict: 'strict',
-        report_only: 'report_only',
-        off: 'off',
-    }, 'vigil.networkLockFailurePolicy', 'Default network lockdown failure policy.'),
+    Setting(
+        'setting_vigil',
+        'vigil.networkLockDefaultHosts',
+        '',
+        'textarea',
+        'vigil.networkLockDefaultHosts',
+        'Default host allowlist for Vigil network lockdown. Whitespace, comma, or newline separated.',
+    ),
+    Setting(
+        'setting_vigil',
+        'vigil.networkLockDefaultIps',
+        '',
+        'textarea',
+        'vigil.networkLockDefaultIps',
+        'Default IP/CIDR allowlist for Vigil network lockdown. Whitespace, comma, or newline separated.',
+    ),
+    Setting(
+        'setting_vigil',
+        'vigil.networkLockDefaultPorts',
+        '53\n67\n68\n80\n443\n8765',
+        'textarea',
+        'vigil.networkLockDefaultPorts',
+        'Default remote ports for Vigil network lockdown. Whitespace, comma, or newline separated.',
+    ),
+    Setting(
+        'setting_vigil',
+        'vigil.networkLockFailurePolicy',
+        'strict',
+        {
+            strict: 'strict',
+            report_only: 'report_only',
+            off: 'off',
+        },
+        'vigil.networkLockFailurePolicy',
+        'Default network lockdown failure policy.',
+    ),
     // problem.hideBank remains only for configuration compatibility.
     // @deprecated This setting is not an authorization switch. P2.11 always
     // enforces the server-side ProblemModel capability and Mongo scope.
-    Setting('setting_basic', 'problem.hideBank', true, 'boolean', 'problem.hideBank',
-        'Deprecated compatibility setting; problem-bank authorization is always enforced server-side.'),
+    Setting(
+        'setting_basic',
+        'problem.hideBank',
+        true,
+        'boolean',
+        'problem.hideBank',
+        'Deprecated compatibility setting; problem-bank authorization is always enforced server-side.',
+    ),
     Setting('setting_limits', 'limit.by_user', false, 'boolean', 'limit.by_user', 'Use per-user limits instead of per ip limits'),
     Setting('setting_limits', 'limit.problem_files_max', 100, 'number', 'limit.problem_files_max', 'Max files per problem'),
-    Setting('setting_limits', 'limit.problem_files_max_size', 256 * 1024 * 1024, 'number', 'limit.problem_files_max_size', 'Max files size per problem'),
+    Setting(
+        'setting_limits',
+        'limit.problem_files_max_size',
+        256 * 1024 * 1024,
+        'number',
+        'limit.problem_files_max_size',
+        'Max files size per problem',
+    ),
     Setting('setting_limits', 'limit.user_files', 100, 'number', 'limit.user_files', 'Max files for user'),
     Setting('setting_limits', 'limit.user_files_size', 128 * 1024 * 1024, 'number', 'limit.user_files_size', 'Max total file size for user'),
     Setting('setting_limits', 'limit.contest_files', 100, 'number', 'limit.contest_files', 'Max files for contest or training'),
-    Setting('setting_limits', 'limit.contest_files_size', 128 * 1024 * 1024, 'number', 'limit.contest_files_size', 'Max total file size for contest or training'),
+    Setting(
+        'setting_limits',
+        'limit.contest_files_size',
+        128 * 1024 * 1024,
+        'number',
+        'limit.contest_files_size',
+        'Max total file size for contest or training',
+    ),
     Setting('setting_limits', 'limit.submission', 60, 'number', 'limit.submission', 'Max submission count per minute'),
     Setting('setting_limits', 'limit.submission_user', 15, 'number', 'limit.submission_user', 'Max submission count per user per minute'),
     Setting('setting_limits', 'limit.pretest', 60, 'number', 'limit.pretest', 'Max pretest count per minute'),
@@ -382,10 +461,22 @@ SystemSetting(
     Setting('setting_basic', 'hydrooj.langs', settingFile.langs.default, 'yaml', 'hydrooj.langs', 'Language config'),
     Setting('setting_session', 'session.keys', [randomstring(32)], 'text', 'session.keys', 'session.keys', FLAG_HIDDEN),
     Setting('setting_session', 'session.domain', '', 'text', 'session.domain', 'session.domain', FLAG_HIDDEN),
-    Setting('setting_session', 'session.saved_expire_seconds', 3600 * 24 * 30,
-        'number', 'session.saved_expire_seconds', 'Saved session expire seconds'),
-    Setting('setting_session', 'session.unsaved_expire_seconds', 3600 * 3,
-        'number', 'session.unsaved_expire_seconds', 'Unsaved session expire seconds'),
+    Setting(
+        'setting_session',
+        'session.saved_expire_seconds',
+        3600 * 24 * 30,
+        'number',
+        'session.saved_expire_seconds',
+        'Saved session expire seconds',
+    ),
+    Setting(
+        'setting_session',
+        'session.unsaved_expire_seconds',
+        3600 * 3,
+        'number',
+        'session.unsaved_expire_seconds',
+        'Unsaved session expire seconds',
+    ),
     Setting('setting_storage', 'db.ver', 0, 'number', 'db.ver', 'Database version', FLAG_DISABLED | FLAG_HIDDEN),
     Setting('setting_storage', 'installid', randomstring(64), 'text', 'installid', 'Installation ID', FLAG_HIDDEN | FLAG_DISABLED),
 );
@@ -413,7 +504,9 @@ export async function apply(ctx: Context) {
         for (const key in langs) range[key] = langs[key].display;
         LangSettingNode.range = range;
         ServerLangSettingNode.range = range;
-    } catch (e) { /* Ignore */ }
+    } catch (e) {
+        /* Ignore */
+    }
     ctx.on('system/setting', (args) => {
         if (!args.hydrooj?.langs) return;
         Object.assign(langs, parseLang(args.hydrooj.langs));

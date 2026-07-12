@@ -63,16 +63,17 @@ export function SubjectiveProblemEditorPage() {
     <main className="mx-auto w-full max-w-5xl space-y-5 pb-10">
       <header className="flex items-center gap-3 border-b border-border/70 pb-4">
         <Button asChild variant="ghost" size="icon" className="size-11">
-          <a href={isCreate ? '/problem/create' : `/p/${pid}`} aria-label="返回"><ArrowLeft className="size-4" /></a>
+          <a href={isCreate ? '/problem/create' : `/p/${pid}`} aria-label="返回">
+            <ArrowLeft className="size-4" />
+          </a>
         </Button>
         <div className="min-w-0 flex-1">
           <p className="text-xs text-muted-foreground">主观题编辑器</p>
-          <h1 className="truncate text-2xl font-semibold tracking-tight">
-            {isCreate ? '新建主观题' : `编辑 ${pdoc.title || '主观题'}`}
-          </h1>
+          <h1 className="truncate text-2xl font-semibold tracking-tight">{isCreate ? '新建主观题' : `编辑 ${pdoc.title || '主观题'}`}</h1>
         </div>
         <Button type="submit" form="subjective-form" disabled={saving} className="min-h-11 gap-1.5">
-          <Save className="size-4" />{saving ? '保存中…' : '保存'}
+          <Save className="size-4" />
+          {saving ? '保存中…' : '保存'}
         </Button>
       </header>
 
@@ -81,23 +82,27 @@ export function SubjectiveProblemEditorPage() {
           该题结构已锁定；仍可修改标题、标签和可见性。题面或阅卷说明调整请克隆新题。
         </p>
       ) : null}
-      {error ? <p role="alert" className="border-y border-destructive/40 px-3 py-3 text-sm text-destructive">{error}</p> : null}
+      {error ? (
+        <p role="alert" className="border-y border-destructive/40 px-3 py-3 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
 
       <form
         id="subjective-form"
         method="post"
         onSubmit={submit}
-        onChange={() => { dirtyRef.current = true; }}
+        onChange={() => {
+          dirtyRef.current = true;
+        }}
         className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]"
       >
-        {locked ? <input type="hidden" name="metadataOnly" value="true" /> : (
+        {locked ? (
+          <input type="hidden" name="metadataOnly" value="true" />
+        ) : (
           <>
             <input type="hidden" name="editorProblemKind" value={PROBLEM_KIND_TO_SLUG.subjective} />
-            <input
-              type="hidden"
-              name="structuredConfig"
-              value={JSON.stringify({ main: { gradingInstructions: instructions } })}
-            />
+            <input type="hidden" name="structuredConfig" value={JSON.stringify({ main: { gradingInstructions: instructions } })} />
             {!isCreate ? <input type="hidden" name="expectedStructureRevision" value={pdoc.structureRevision} /> : null}
           </>
         )}

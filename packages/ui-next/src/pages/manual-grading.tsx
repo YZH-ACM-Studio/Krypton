@@ -7,7 +7,7 @@ import { useBootstrap } from '@/lib/bootstrap';
 
 type R = Record<string, any>;
 
-function GradeRow({ row, pid }: { row: R, pid: number }) {
+function GradeRow({ row, pid }: { row: R; pid: number }) {
   const [grade, setGrade] = useState<R | null>(row.manualGrade);
   const [score, setScore] = useState(String(row.manualGrade?.score ?? ''));
   const [comment, setComment] = useState(String(row.manualGrade?.comment || ''));
@@ -30,7 +30,10 @@ function GradeRow({ row, pid }: { row: R, pid: number }) {
         reason,
       });
       const response = await fetch(window.location.pathname, {
-        method: 'POST', body, credentials: 'same-origin', headers: { Accept: 'application/json' },
+        method: 'POST',
+        body,
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
       });
       const result = await response.json().catch(() => null);
       if (!response.ok || result?.error) {
@@ -74,11 +77,13 @@ function GradeRow({ row, pid }: { row: R, pid: number }) {
             <Input value={reason} onChange={(e) => setReason(e.target.value)} required placeholder="改分时必填" />
           </label>
         ) : null}
-        {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+        {error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
         <div className="flex items-center justify-between gap-3">
-          <span className="text-xs text-muted-foreground">
-            {grade ? `已评分 ${grade.score}/100 · revision ${grade.revision}` : '等待首次评分'}
-          </span>
+          <span className="text-xs text-muted-foreground">{grade ? `已评分 ${grade.score}/100 · revision ${grade.revision}` : '等待首次评分'}</span>
           <Button onClick={save} disabled={saving || !score || (revision > 0 && !reason.trim())} className="gap-1.5">
             {saving ? <RefreshCw className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
             {revision ? '保存改分' : '提交评分'}
@@ -117,7 +122,9 @@ export function ManualGradingPage() {
           <span className="text-xs font-medium">按学生 UID 筛选</span>
           <Input name="uid" type="number" min={1} defaultValue={data.uid || ''} placeholder="留空查看全部学生" />
         </label>
-        <Button type="submit" variant="outline">筛选</Button>
+        <Button type="submit" variant="outline">
+          筛选
+        </Button>
       </form>
 
       {problems.find((item) => item.pid === pid)?.gradingInstructions ? (
@@ -130,7 +137,9 @@ export function ManualGradingPage() {
       ) : null}
 
       <section className="space-y-4">
-        {rows.length ? rows.map((row) => <GradeRow key={row.latestRid} row={row} pid={pid} />) : (
+        {rows.length ? (
+          rows.map((row) => <GradeRow key={row.latestRid} row={row} pid={pid} />)
+        ) : (
           <p className="border-y border-border/70 py-12 text-center text-sm text-muted-foreground">
             {problems.length ? '当前筛选下暂无提交' : '此容器没有主观题'}
           </p>

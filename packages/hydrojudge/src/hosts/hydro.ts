@@ -38,20 +38,21 @@ export default class Hydro implements Session {
 
     post(url: string, data?: any) {
         url = new URL(url, this.config.server_url).toString();
-        const t = superagent.post(url)
-            .set('Cookie', this.config.cookie)
-            .set('Accept', 'application/json');
+        const t = superagent.post(url).set('Cookie', this.config.cookie).set('Accept', 'application/json');
         return data ? t.send(data) : t;
     }
 
     async init() {
         await this.setCookie(this.config.cookie || '');
         await this.ensureLogin();
-        setInterval(() => { this.get(''); }, 30000000); // Cookie refresh only
+        setInterval(() => {
+            this.get('');
+        }, 30000000); // Cookie refresh only
     }
 
     async fetchFile<T extends string | null>(namespace: T, files: Record<string, string>, ctx: JudgeTask): Promise<T extends null ? string : null> {
-        if (!namespace) { // record-related resource (code)
+        if (!namespace) {
+            // record-related resource (code)
             const name = Object.keys(files)[0].split('#')[0];
             const res = await this.post('judge/files', { id: name });
             const target = Object.values(files)[0] || path.join(getConfig('tmp_dir'), Math.random().toString(36).substring(2));
@@ -95,7 +96,9 @@ export default class Hydro implements Session {
                 log.error('PostFile Fail: %s %s %o', target, filename, e);
                 throw e;
             }
-            await new Promise((resolve) => { setTimeout(resolve, 1000); });
+            await new Promise((resolve) => {
+                setTimeout(resolve, 1000);
+            });
             await this.postFile(target, filename, file, retry - 1);
         }
     }
@@ -142,15 +145,13 @@ export default class Hydro implements Session {
                 Authorization: `Bearer ${this.config.cookie.split('sid=')[1].split(';')[0]}`,
             },
         });
-        const config: { prio?: number, concurrency?: number, lang?: string[] } = {};
+        const config: { prio?: number; concurrency?: number; lang?: string[] } = {};
         if (this.config.minPriority !== undefined) config.prio = this.config.minPriority;
         if (this.config.concurrency !== undefined) config.concurrency = this.config.concurrency;
         if (this.config.lang?.length) config.lang = this.config.lang;
-        const content = Object.keys(config).length
-            ? JSON.stringify({ key: 'config', ...config })
-            : '{"key":"ping"}';
+        const content = Object.keys(config).length ? JSON.stringify({ key: 'config', ...config }) : '{"key":"ping"}';
         let compilers = {};
-        let sendStatus = () => { };
+        let sendStatus = () => {};
         let stackSize = 0;
         this.ws.on('message', (data) => {
             if (data.toString() === 'ping') {
@@ -160,10 +161,7 @@ export default class Hydro implements Session {
             const request = JSON.parse(data.toString());
             if (request.language) {
                 this.language = request.language;
-                Promise.allSettled([
-                    compilerVersions(this.language),
-                    getStackSize(),
-                ]).then(([compiler, stack]) => {
+                Promise.allSettled([compilerVersions(this.language), getStackSize()]).then(([compiler, stack]) => {
                     compilers = compiler.status === 'fulfilled' ? compiler.value : {};
                     stackSize = stack.status === 'fulfilled' ? stack.value : 0;
                     sendStatus();
@@ -189,12 +187,17 @@ export default class Hydro implements Session {
                     sendStatus = () => this.ws.send(JSON.stringify({ key: 'status', info: { ...info, compilers, stackSize } }));
                     const interval = setInterval(async () => {
                         const [mid, inf] = await sysinfo.update();
-                        this.ws.send(JSON.stringify({
-                            key: 'status',
-                            info: {
-                                mid, ...inf, compilers, stackSize,
-                            },
-                        }));
+                        this.ws.send(
+                            JSON.stringify({
+                                key: 'status',
+                                info: {
+                                    mid,
+                                    ...inf,
+                                    compilers,
+                                    stackSize,
+                                },
+                            }),
+                        );
                     }, 1200000);
                     let stopped = false;
                     const stop = () => {
@@ -221,7 +224,9 @@ export default class Hydro implements Session {
     async login() {
         log.info('[%s] Updating session', this.config.host);
         const res = await this.post('login', {
-            uname: this.config.uname, password: this.config.password, rememberme: 'on',
+            uname: this.config.uname,
+            password: this.config.password,
+            rememberme: 'on',
         });
         const setCookie = res.headers['set-cookie'];
         await this.setCookie(Array.isArray(setCookie) ? setCookie.join(';') : setCookie);

@@ -1,8 +1,6 @@
 import { sign } from 'jsonwebtoken';
-import { } from '@hydrooj/ui-default/backendlib/markdown-it-media';
-import {
-    Context, Handler, Schema, superagent, SystemModel, UiContextBase, ValidationError,
-} from 'hydrooj';
+import {} from '@hydrooj/ui-default/backendlib/markdown-it-media';
+import { Context, Handler, Schema, superagent, SystemModel, UiContextBase, ValidationError } from 'hydrooj';
 
 declare module 'hydrooj' {
     interface UiContextBase {
@@ -91,14 +89,19 @@ export function apply(ctx: Context) {
             },
         });
     }
-    ctx.setting.SystemSetting(Schema.object({
-        onlyoffice: Schema.object({
-            api: Schema.string().description('OnlyOffice API URL').role('url').default('https://documentserver/web-apps/apps/api/documents/api.js'),
-            jwtsecret: Schema.string().description('JWT Secret').default('secret'),
-            pdf: Schema.boolean().description('Handle pdf documents').default(false),
-            externalSign: Schema.string().description('External Sign URL').default(''),
+    ctx.setting.SystemSetting(
+        Schema.object({
+            onlyoffice: Schema.object({
+                api: Schema.string()
+                    .description('OnlyOffice API URL')
+                    .role('url')
+                    .default('https://documentserver/web-apps/apps/api/documents/api.js'),
+                jwtsecret: Schema.string().description('JWT Secret').default('secret'),
+                pdf: Schema.boolean().description('Handle pdf documents').default(false),
+                externalSign: Schema.string().description('External Sign URL').default(''),
+            }),
         }),
-    }));
+    );
     Object.defineProperty(UiContextBase, 'onlyofficeApi', {
         configurable: true,
         enumerable: true,

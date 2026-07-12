@@ -24,7 +24,7 @@ class StatusHandler extends Handler {
         const stats = await getStatus();
         const compilers = {};
         const warn = {};
-        const result: Array<{ key: string[], message: string }> = [];
+        const result: Array<{ key: string[]; message: string }> = [];
         // For each language, select the most common compiler message version,
         // then merge languages with the same message.
         for (const stat of stats) {
@@ -72,11 +72,7 @@ class StatusUpdateHandler extends Handler {
         this.checkPriv(PRIV.PRIV_JUDGE);
         args.type = 'judge';
         args.updateAt = new Date();
-        await coll.updateOne(
-            { mid: args.mid, type: 'judge' },
-            { $set: args },
-            { upsert: true },
-        );
+        await coll.updateOne({ mid: args.mid, type: 'judge' }, { $set: args }, { upsert: true });
         this.response.body = { ok: 1 };
     }
 }

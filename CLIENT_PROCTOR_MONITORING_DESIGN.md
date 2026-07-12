@@ -18,48 +18,48 @@
 
 ### 0.2 范围
 
-| 仓库 | 改动 |
-|---|---|
-| **VigilClient**（独立 repo） | `RtmpPublisher` 模块 + 8 类事件检测 + 命令处理扩展 + UI 信号路由修复 + 内置 ffmpeg.exe |
-| **VigilSystem/Server** | DB schema 扩展 + 11 个新路由 + SRS callback + WS 协议扩展 + TTL + cleanup cron |
-| **Krypton/krypton-vigilguard** | contest 字段扩展 + pushExamToVigil 透传 |
-| **Krypton/packages/ui-next** | `/admin/vigil/exams/:examId` 完全重构 + 直播/录屏/详情三个弹窗 |
-| **Krypton/packages/ui-next** | contest-manage "客户端与反作弊" tab 字段扩充 |
-| **oj** 部署 | Caddy 反代 + hydrooj forward_auth endpoint |
-| **oj-vigil** 部署 | SRS 二进制 + systemd unit + 磁盘扩容 + IP 白名单 |
+| 仓库                           | 改动                                                                                   |
+| ------------------------------ | -------------------------------------------------------------------------------------- |
+| **VigilClient**（独立 repo）   | `RtmpPublisher` 模块 + 8 类事件检测 + 命令处理扩展 + UI 信号路由修复 + 内置 ffmpeg.exe |
+| **VigilSystem/Server**         | DB schema 扩展 + 11 个新路由 + SRS callback + WS 协议扩展 + TTL + cleanup cron         |
+| **Krypton/krypton-vigilguard** | contest 字段扩展 + pushExamToVigil 透传                                                |
+| **Krypton/packages/ui-next**   | `/admin/vigil/exams/:examId` 完全重构 + 直播/录屏/详情三个弹窗                         |
+| **Krypton/packages/ui-next**   | contest-manage "客户端与反作弊" tab 字段扩充                                           |
+| **oj** 部署                    | Caddy 反代 + hydrooj forward_auth endpoint                                             |
+| **oj-vigil** 部署              | SRS 二进制 + systemd unit + 磁盘扩容 + IP 白名单                                       |
 
 ### 0.3 17 个 grill 决策一句话汇总
 
-| # | 决策 |
-|---|---|
-| Q1 | 范围 = 全做（直播 + 录屏 + 摄像头 + 控制 + 修 bug + UI 重构） |
-| Q2 | 直播策略 = 真实视频流（非缩略图伪直播） |
-| Q3 | 直播协议 = RTMP 推 + HLS-LL 拉，via SRS 媒体服务器 |
-| Q4 | 三开关粒度 = 比赛级；默认 live ON · record OFF · camera ON |
-| Q5 | 编码 = 屏幕 1080p @ 5fps @ 1.5 Mbps；摄像头 480p @ 5fps @ 400 kbps；全部软编（H.264 libx264 ultrafast） |
-| Q6 | 截屏 = 定时（带抖动）+ 事件触发 + 命令触发 三套并存；录屏开时不停定时 |
-| Q7 | 命令 = 7 个（take_screenshot / lock_screen / unlock_screen / send_message / notify_warning / restart_stream / flush_logs）；锁屏=全屏遮罩；消息 3 级；信号 bug 全量审计修复 |
-| Q8 | UI 重构 = 替换概览 tab → 卡片墙；5 级状态；右侧滑出抽屉；行为日志详情弹窗 |
-| Q9 | 直播弹窗 = PIP（屏大摄小）+ 镜像快捷按钮；录屏回放 HLS.js；摄像头授权 fail-soft + GPO |
-| Q10 | 事件 = 8 类（去任务管理器 + 键盘 hook）；进程白名单 server 全局+contest 双层；USB 仅存储；severity 4 级；客户端 60s 聚合 |
-| Q11 | 权限 = 沿用 `admin.vigil.*`；新建 `vigil.command_audit` 表；高危 + critical 二次确认 + 可选 reason；命令回执 InfoBar toast |
-| Q12 | 群发 = 仅 `send_message` / `notify_warning`；顶部固定按钮；stream key 格式 `{contestId}_{machineId}_{stream}`；SRS 仅 IP 白名单 |
-| Q13 | TTL 各类型独立（文件 7-14d，DB 30-90d）；mongo TTL index + cron 清文件；5 个新 WS 消息；contest 维度订阅；30s/60s 应用层心跳 |
-| Q14 | 推流栈 = QProcess + 内置 ffmpeg.exe（最新版）；屏幕用 ddagrab；摄像头用 dshow；启动时锁定配置；ffmpeg `-reconnect` + QProcess 重启；fail-soft 不打扰学生 |
-| Q15 | 服务器 = 11 个新 REST endpoint；HLS 走 Caddy 反代到 oj-vigil（forward_auth 鉴权）；SRS 二进制 + systemd；live-record / live-nodvr 双 application |
-| Q16 | 实施 = 5 个 Phase（MVP 直播 → 监考核心 → 事件 → 录屏 → 运维加固）；先 audit client；建本设计文档 |
-| Q17 | 性能 = 每页 30 张卡片分页；状态优先级排序；筛选 + 搜索；4 个直播弹窗上限；视频强制 cleanup；混合 WS 订阅（status 全收 / screenshot 按页） |
+| #   | 决策                                                                                                                                                                        |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q1  | 范围 = 全做（直播 + 录屏 + 摄像头 + 控制 + 修 bug + UI 重构）                                                                                                               |
+| Q2  | 直播策略 = 真实视频流（非缩略图伪直播）                                                                                                                                     |
+| Q3  | 直播协议 = RTMP 推 + HLS-LL 拉，via SRS 媒体服务器                                                                                                                          |
+| Q4  | 三开关粒度 = 比赛级；默认 live ON · record OFF · camera ON                                                                                                                  |
+| Q5  | 编码 = 屏幕 1080p @ 5fps @ 1.5 Mbps；摄像头 480p @ 5fps @ 400 kbps；全部软编（H.264 libx264 ultrafast）                                                                     |
+| Q6  | 截屏 = 定时（带抖动）+ 事件触发 + 命令触发 三套并存；录屏开时不停定时                                                                                                       |
+| Q7  | 命令 = 7 个（take_screenshot / lock_screen / unlock_screen / send_message / notify_warning / restart_stream / flush_logs）；锁屏=全屏遮罩；消息 3 级；信号 bug 全量审计修复 |
+| Q8  | UI 重构 = 替换概览 tab → 卡片墙；5 级状态；右侧滑出抽屉；行为日志详情弹窗                                                                                                   |
+| Q9  | 直播弹窗 = PIP（屏大摄小）+ 镜像快捷按钮；录屏回放 HLS.js；摄像头授权 fail-soft + GPO                                                                                       |
+| Q10 | 事件 = 8 类（去任务管理器 + 键盘 hook）；进程白名单 server 全局+contest 双层；USB 仅存储；severity 4 级；客户端 60s 聚合                                                    |
+| Q11 | 权限 = 沿用 `admin.vigil.*`；新建 `vigil.command_audit` 表；高危 + critical 二次确认 + 可选 reason；命令回执 InfoBar toast                                                  |
+| Q12 | 群发 = 仅 `send_message` / `notify_warning`；顶部固定按钮；stream key 格式 `{contestId}_{machineId}_{stream}`；SRS 仅 IP 白名单                                             |
+| Q13 | TTL 各类型独立（文件 7-14d，DB 30-90d）；mongo TTL index + cron 清文件；5 个新 WS 消息；contest 维度订阅；30s/60s 应用层心跳                                                |
+| Q14 | 推流栈 = QProcess + 内置 ffmpeg.exe（最新版）；屏幕用 ddagrab；摄像头用 dshow；启动时锁定配置；ffmpeg `-reconnect` + QProcess 重启；fail-soft 不打扰学生                    |
+| Q15 | 服务器 = 11 个新 REST endpoint；HLS 走 Caddy 反代到 oj-vigil（forward_auth 鉴权）；SRS 二进制 + systemd；live-record / live-nodvr 双 application                            |
+| Q16 | 实施 = 5 个 Phase（MVP 直播 → 监考核心 → 事件 → 录屏 → 运维加固）；先 audit client；建本设计文档                                                                            |
+| Q17 | 性能 = 每页 30 张卡片分页；状态优先级排序；筛选 + 搜索；4 个直播弹窗上限；视频强制 cleanup；混合 WS 订阅（status 全收 / screenshot 按页）                                   |
 
 ### 0.4 关键风险与对策
 
-| 风险 | 对策 |
-|---|---|
-| 300 学生 × 1080p 推流 = oj-vigil 千兆口接近饱和（570 Mbps / 940 Mbps） | systemd `CPUAffinity` 隔离 SRS 与 vigil API；机房交换机做 QoS；监控 Phase 4 加 |
-| 软编 H.264 老旧学生机 CPU 占用过高 | libx264 `-preset ultrafast` 实测 i5 8 代约 15-25% 单核，可承受；客户端预装时机房按硬件分级（老机器降 720p） |
-| 推流失败影响考试 | **强制 fail-soft 原则**：所有推流 / 编码 / 网络错误只 log + 上报 event，绝不阻塞 ExamWebview 流程 |
-| 录屏 0.5 TB / 场 | 默认 OFF；oj-vigil 扩盘到 2 TB；7d TTL；关键场次手动归档 |
-| WS 订阅消息风暴 | contest 维度订阅 + status 全收 + screenshot/event 按页订阅 + 客户端 60s 聚合 |
-| 客户端键盘 hook 触发杀软告警 | 不做键盘 hook（Q10 决策）；防绕过靠 watchdog 重启 |
+| 风险                                                                   | 对策                                                                                                        |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 300 学生 × 1080p 推流 = oj-vigil 千兆口接近饱和（570 Mbps / 940 Mbps） | systemd `CPUAffinity` 隔离 SRS 与 vigil API；机房交换机做 QoS；监控 Phase 4 加                              |
+| 软编 H.264 老旧学生机 CPU 占用过高                                     | libx264 `-preset ultrafast` 实测 i5 8 代约 15-25% 单核，可承受；客户端预装时机房按硬件分级（老机器降 720p） |
+| 推流失败影响考试                                                       | **强制 fail-soft 原则**：所有推流 / 编码 / 网络错误只 log + 上报 event，绝不阻塞 ExamWebview 流程           |
+| 录屏 0.5 TB / 场                                                       | 默认 OFF；oj-vigil 扩盘到 2 TB；7d TTL；关键场次手动归档                                                    |
+| WS 订阅消息风暴                                                        | contest 维度订阅 + status 全收 + screenshot/event 按页订阅 + 客户端 60s 聚合                                |
+| 客户端键盘 hook 触发杀软告警                                           | 不做键盘 hook（Q10 决策）；防绕过靠 watchdog 重启                                                           |
 
 ---
 
@@ -69,17 +69,17 @@
 
 ### 1.1 VigilClient 仓库目录结构
 
-| 子目录 | 职责 |
-|---|---|
-| `app/` | 顶层窗口 + 入口。`main.cpp` / `exam_shell.{h,cpp}` / `exam_webview.{h,cpp}` / `login_window.{h,cpp}` / `main_window.{h,cpp}` (legacy) / `headless_agent.{h,cpp}` (--agent mode) / `runtime_options.{h,cpp}` |
-| `core/` | `client_config.h` / `config_manager.{h,cpp}` / `app_logger.{h,cpp}` / `device_info_collector.{h,cpp}` |
-| `network/` | `server_connection.{h,cpp}` (WS client) / `command_dispatcher.{h,cpp}` / `screenshot_uploader.{h,cpp}` + queue / `network_lock_*` (WFP firewall + URL interceptor) |
-| `capture/` | `screenshot_service.{h,cpp}` (QScreen JPEG) / `media_probe.{h,cpp}` (设备**枚举**，无 capture) |
-| `monitor/` | `system_monitor.{h,cpp}` / `periodic_collector.{h,cpp}` / `risk_rule_engine.{h,cpp}` / `lockdown.{h,cpp}` + `lockdown_win.cpp` (键盘 hook) / `platform/platform_monitor_{win,linux,macos,stub}.cpp` |
-| `events/` | `event_reporter.{h,cpp}` — **已有 dedupe + rate limit + 离线缓冲（max 100）** |
-| `watchdog/` | `watchdog_supervisor.{h,cpp}` (QProcess parent) / `restart_limiter` / 等 |
-| `ui/fluent/` | Phase 1-3 Fluent infra（palette / style / backdrop / QSS） |
-| `ui/widgets/` | Phase 1-3 widgets：`frameless_dialog` / `content_dialog` / `info_bar` / `progress_ring` |
+| 子目录        | 职责                                                                                                                                                                                                        |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app/`        | 顶层窗口 + 入口。`main.cpp` / `exam_shell.{h,cpp}` / `exam_webview.{h,cpp}` / `login_window.{h,cpp}` / `main_window.{h,cpp}` (legacy) / `headless_agent.{h,cpp}` (--agent mode) / `runtime_options.{h,cpp}` |
+| `core/`       | `client_config.h` / `config_manager.{h,cpp}` / `app_logger.{h,cpp}` / `device_info_collector.{h,cpp}`                                                                                                       |
+| `network/`    | `server_connection.{h,cpp}` (WS client) / `command_dispatcher.{h,cpp}` / `screenshot_uploader.{h,cpp}` + queue / `network_lock_*` (WFP firewall + URL interceptor)                                          |
+| `capture/`    | `screenshot_service.{h,cpp}` (QScreen JPEG) / `media_probe.{h,cpp}` (设备**枚举**，无 capture)                                                                                                              |
+| `monitor/`    | `system_monitor.{h,cpp}` / `periodic_collector.{h,cpp}` / `risk_rule_engine.{h,cpp}` / `lockdown.{h,cpp}` + `lockdown_win.cpp` (键盘 hook) / `platform/platform_monitor_{win,linux,macos,stub}.cpp`         |
+| `events/`     | `event_reporter.{h,cpp}` — **已有 dedupe + rate limit + 离线缓冲（max 100）**                                                                                                                               |
+| `watchdog/`   | `watchdog_supervisor.{h,cpp}` (QProcess parent) / `restart_limiter` / 等                                                                                                                                    |
+| `ui/fluent/`  | Phase 1-3 Fluent infra（palette / style / backdrop / QSS）                                                                                                                                                  |
+| `ui/widgets/` | Phase 1-3 widgets：`frameless_dialog` / `content_dialog` / `info_bar` / `progress_ring`                                                                                                                     |
 
 ### 1.2 Qt 版本 + 第三方依赖
 
@@ -98,6 +98,7 @@
 **Client → Server 消息类型**: `heartbeat / device_info / media_devices / login_request / student_finish_request / client_event / command_result`
 
 **Server → Client 命令类型**（已实现，17 个）:
+
 ```
 ping, collect_device_info, health_check, get_config, set_config_patch,
 collect_logs, list_media_devices, test_media_devices, test_screenshot,
@@ -134,14 +135,14 @@ reload_config, restart_agent, launch_exam_webview, close_exam_webview
 
 ### 1.7 现有事件检测（5 类，全部基于轮询）
 
-| 触发位置 | 事件 type | severity | 实现 |
-|---|---|---|---|
-| `system_monitor.cpp:146` | RiskRuleEngine match | rule-defined | 进程风险匹配 |
-| `system_monitor.cpp:159` | window 标题包含禁字 | rule-defined | 窗口标题轮询 |
-| `system_monitor.cpp:180` | `window.foreground_changed` | info | 5s 轮询 `GetForegroundWindow` |
-| `system_monitor.cpp:223` | `input.hotkey` | medium | 配置内的可疑组合键 |
-| `system_monitor.cpp:244` | `clipboard.changed` | medium | 剪贴板 sha256 变化轮询 |
-| `periodic_collector.cpp` | `telemetry.*` | info/medium | 截屏失败 / 队列 / 设备快照等 |
+| 触发位置                 | 事件 type                   | severity     | 实现                          |
+| ------------------------ | --------------------------- | ------------ | ----------------------------- |
+| `system_monitor.cpp:146` | RiskRuleEngine match        | rule-defined | 进程风险匹配                  |
+| `system_monitor.cpp:159` | window 标题包含禁字         | rule-defined | 窗口标题轮询                  |
+| `system_monitor.cpp:180` | `window.foreground_changed` | info         | 5s 轮询 `GetForegroundWindow` |
+| `system_monitor.cpp:223` | `input.hotkey`              | medium       | 配置内的可疑组合键            |
+| `system_monitor.cpp:244` | `clipboard.changed`         | medium       | 剪贴板 sha256 变化轮询        |
+| `periodic_collector.cpp` | `telemetry.*`               | info/medium  | 截屏失败 / 队列 / 设备快照等  |
 
 进程检测：`CreateToolhelp32Snapshot + Process32FirstW/NextW` 轮询（`platform_monitor_win.cpp:89-104`），间隔 `processScanIntervalMs`。
 
@@ -156,18 +157,18 @@ reload_config, restart_agent, launch_exam_webview, close_exam_webview
 
 ### 1.9 可复用基础设施清单
 
-| 模块 | 用途 |
-|---|---|
-| `EventReporter` ([events/event_reporter.cpp](events/event_reporter.cpp)) | dedupe + rate limit + 离线缓冲。新 8 类事件直接复用 |
-| `Fluent::ContentDialog` / `InfoBar` / `ProgressRing` | 三级 send_message UI 直接复用 |
-| `Fluent::FramelessDialog` + Mica | LockScreenOverlay 复用 |
-| `WatchdogSupervisor` + `RestartLimiter` | 是 ffmpeg QProcess 管理的好模板 |
-| `ClientConfig` + `ConfigManager` | 配置持久化 + WS `set_config_patch` 动态变更 |
-| `ScreenshotUploader::upload` multipart 模式 | 后续若要上传录屏分片可参考 |
-| `client_event` WS 通道（generic） | 新事件类型不需要加 WS message type，只需扩展 type 字段 |
-| `Lockdown::engage()` 键盘 hook | 已 swallow 主要系统热键，复用 |
-| WFP firewall infra | 已有，可扩展到进程级 outbound 阻塞 |
-| `wtsapi32` 已 link 无调用 | 直接用于 `WTSRegisterSessionNotification` |
+| 模块                                                                     | 用途                                                   |
+| ------------------------------------------------------------------------ | ------------------------------------------------------ |
+| `EventReporter` ([events/event_reporter.cpp](events/event_reporter.cpp)) | dedupe + rate limit + 离线缓冲。新 8 类事件直接复用    |
+| `Fluent::ContentDialog` / `InfoBar` / `ProgressRing`                     | 三级 send_message UI 直接复用                          |
+| `Fluent::FramelessDialog` + Mica                                         | LockScreenOverlay 复用                                 |
+| `WatchdogSupervisor` + `RestartLimiter`                                  | 是 ffmpeg QProcess 管理的好模板                        |
+| `ClientConfig` + `ConfigManager`                                         | 配置持久化 + WS `set_config_patch` 动态变更            |
+| `ScreenshotUploader::upload` multipart 模式                              | 后续若要上传录屏分片可参考                             |
+| `client_event` WS 通道（generic）                                        | 新事件类型不需要加 WS message type，只需扩展 type 字段 |
+| `Lockdown::engage()` 键盘 hook                                           | 已 swallow 主要系统热键，复用                          |
+| WFP firewall infra                                                       | 已有，可扩展到进程级 outbound 阻塞                     |
+| `wtsapi32` 已 link 无调用                                                | 直接用于 `WTSRegisterSessionNotification`              |
 
 ### 1.10 测试 / CI 现状
 
@@ -294,30 +295,30 @@ Client 检测到 USB 插入
 
 ```ts
 interface Tdoc {
-  // ... 现有字段 (vigilEnabled, lockdownMode, etc.) ...
+    // ... 现有字段 (vigilEnabled, lockdownMode, etc.) ...
 
-  // 三个独立媒体开关（仅当 vigilEnabled = true 时生效）
-  liveEnabled?: boolean;          // default true: 客户端推屏幕 RTMP 流
-  recordEnabled?: boolean;        // default false: SRS 落地 mp4 (300 人 1080p 存储巨大)
-  cameraEnabled?: boolean;        // default true: 客户端推摄像头 RTMP 流
+    // 三个独立媒体开关（仅当 vigilEnabled = true 时生效）
+    liveEnabled?: boolean; // default true: 客户端推屏幕 RTMP 流
+    recordEnabled?: boolean; // default false: SRS 落地 mp4 (300 人 1080p 存储巨大)
+    cameraEnabled?: boolean; // default true: 客户端推摄像头 RTMP 流
 
-  // 截屏抖动 (新增，与现有 screenshotIntervalMs 配合)
-  screenshotJitterMs?: number;    // default 30000 (60s ± 30s)
+    // 截屏抖动 (新增，与现有 screenshotIntervalMs 配合)
+    screenshotJitterMs?: number; // default 30000 (60s ± 30s)
 
-  // 进程白名单 (比赛级 override，全局默认在 vigil server)
-  vigilProcessWhitelist?: string[];  // 例 ["Code.exe", "python.exe", "msedge.exe"]
+    // 进程白名单 (比赛级 override，全局默认在 vigil server)
+    vigilProcessWhitelist?: string[]; // 例 ["Code.exe", "python.exe", "msedge.exe"]
 }
 ```
 
 ### 3.2 字段语义
 
-| 字段 | 默认 | 含义 |
-|---|---|---|
-| `liveEnabled` | `true` | 客户端推 RTMP 屏幕流。`false` 时跳过整个 RTMP 屏幕推流，老师看不到实时画面 |
-| `recordEnabled` | `false` | SRS dvr 落地 mp4。**仅在 `liveEnabled=true` 时有效**；客户端推 RTMP 时 stream key prefix 用 `live-record` 而非 `live-nodvr` |
-| `cameraEnabled` | `true` | 客户端额外推一路 RTMP 摄像头流。`false` 时不调 `QCamera`，省 CPU |
-| `screenshotJitterMs` | `30000` | 客户端定时截屏的随机抖动幅度。实际间隔 = `screenshotIntervalMs ± rand(0, screenshotJitterMs)` |
-| `vigilProcessWhitelist` | `[]` (用 server 全局默认) | 比赛允许的进程名列表。客户端检测进程启动时对照此列表 + server 全局默认 |
+| 字段                    | 默认                      | 含义                                                                                                                        |
+| ----------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `liveEnabled`           | `true`                    | 客户端推 RTMP 屏幕流。`false` 时跳过整个 RTMP 屏幕推流，老师看不到实时画面                                                  |
+| `recordEnabled`         | `false`                   | SRS dvr 落地 mp4。**仅在 `liveEnabled=true` 时有效**；客户端推 RTMP 时 stream key prefix 用 `live-record` 而非 `live-nodvr` |
+| `cameraEnabled`         | `true`                    | 客户端额外推一路 RTMP 摄像头流。`false` 时不调 `QCamera`，省 CPU                                                            |
+| `screenshotJitterMs`    | `30000`                   | 客户端定时截屏的随机抖动幅度。实际间隔 = `screenshotIntervalMs ± rand(0, screenshotJitterMs)`                               |
+| `vigilProcessWhitelist` | `[]` (用 server 全局默认) | 比赛允许的进程名列表。客户端检测进程启动时对照此列表 + server 全局默认                                                      |
 
 ### 3.3 contest-manage UI 改动
 
@@ -373,10 +374,10 @@ Vigil server 收到后写到 `vigil.exams` 表（已有），客户端 launch �
 
 ### 4.1 编码参数定盘
 
-| 流 | 分辨率 | 帧率 | 码率 | 编码 | 关键帧间隔 (GOP) |
-|---|---|---|---|---|---|
-| 屏幕 | **1080p**（原生，不下采样） | 5 fps | 1500 kbps | H.264 libx264 baseline ultrafast | 5s (25 frames) |
-| 摄像头 | 480p | 5 fps | 400 kbps | H.264 libx264 baseline ultrafast | 5s |
+| 流     | 分辨率                      | 帧率  | 码率      | 编码                             | 关键帧间隔 (GOP) |
+| ------ | --------------------------- | ----- | --------- | -------------------------------- | ---------------- |
+| 屏幕   | **1080p**（原生，不下采样） | 5 fps | 1500 kbps | H.264 libx264 baseline ultrafast | 5s (25 frames)   |
+| 摄像头 | 480p                        | 5 fps | 400 kbps  | H.264 libx264 baseline ultrafast | 5s               |
 
 **理由**：1080p 是学生屏幕原生分辨率（保留代码字体清晰度）；5 fps 监考绰绰；ultrafast preset 软编 CPU 占用约 15-25% 单核（i5 8 代实测）；GOP 5s 与 HLS-LL 切片对齐。
 
@@ -391,6 +392,7 @@ streamType = screen | camera
 ```
 
 举例：
+
 - `rtmp://oj-vigil:1935/live-record/abc123_MX9F2_screen` — 屏幕，开 dvr 录屏
 - `rtmp://oj-vigil:1935/live-nodvr/abc123_MX9F2_camera` — 摄像头，不录屏
 
@@ -399,6 +401,7 @@ streamType = screen | camera
 **部署位置**：oj-vigil 同机器，独立 systemd unit。
 
 **安装路径**：
+
 ```
 /opt/srs/                      # SRS 二进制 + 静态资源
 ├── objs/srs                   # 二进制
@@ -518,6 +521,7 @@ async function checkHlsAccess(this: Handler) {
 ```
 
 老师浏览器加载 `http://oj/vigil-hls/live-record/abc123_MX9F2_screen.m3u8`：
+
 1. Caddy forward_auth → hydrooj `/api/admin/vigil/check-hls-access?path=/vigil-hls/...`
 2. hydrooj 用 Cookie 鉴权 admin 身份 → 返回 200
 3. Caddy strip_prefix → reverse_proxy 到 `http://10.1.235.155:8080/live-record/...`
@@ -591,12 +595,14 @@ ffmpeg.exe \
 ```
 
 **生命周期**（fail-soft 原则）：
+
 - 启动：`ExamWebview::showEvent` 进入全屏 lockdown 后 → `RtmpPublisher::start()`
 - 停止：学生提交答卷 / session 失效 / 应用退出 → `QProcess::terminate()` + 5s wait + `QProcess::kill()` 兜底
 - ffmpeg 进程退出（任何原因）：QProcess::finished 信号 → 5s 后重启
 - 全程错误只上报 event `stream_failed` + 写本地日志，不弹任何对话框给学生
 
 **内置 ffmpeg**：
+
 - Client 安装目录下 `ffmpeg/ffmpeg.exe`（minimal build，仅 libx264 + gdigrab + dshow + flv muxer，~30 MB）
 - CMakeLists 加 install target 把 ffmpeg.exe 拷到 bin/
 - 编译时静态链接 libx264，减少 dll 依赖
@@ -607,11 +613,11 @@ ffmpeg.exe \
 
 ### 5.1 三种触发
 
-| 触发 | 频率 | 携带 | 用途 |
-|---|---|---|---|
-| **定时** | 每 `screenshotIntervalMs ± screenshotJitterMs` ms | 仅 `ts` | 兜底证据链 |
-| **事件** | 客户端检测到异常事件时立即触发 | `eventId` (关联到 vigil.events 文档) | 行为日志详情弹窗显示当时画面 |
-| **命令** | 老师 OJ 点击"实时截屏"按钮 | `commandId` (回执用) | 老师即时查看 |
+| 触发     | 频率                                              | 携带                                 | 用途                         |
+| -------- | ------------------------------------------------- | ------------------------------------ | ---------------------------- |
+| **定时** | 每 `screenshotIntervalMs ± screenshotJitterMs` ms | 仅 `ts`                              | 兜底证据链                   |
+| **事件** | 客户端检测到异常事件时立即触发                    | `eventId` (关联到 vigil.events 文档) | 行为日志详情弹窗显示当时画面 |
+| **命令** | 老师 OJ 点击"实时截屏"按钮                        | `commandId` (回执用)                 | 老师即时查看                 |
 
 ### 5.2 客户端实现
 
@@ -681,15 +687,15 @@ Vigil server 返回：
 
 ### 6.1 完整清单
 
-| 命令 | 新增 / 扩展 | 客户端响应 | UI 形态 | 群发支持 | 二次确认 |
-|---|---|---|---|---|---|
-| `capture_screenshot` | **扩展现有**（加 reason_tag/event_id） | 立即截屏并上传 | — | ❌ | ❌ |
-| `lock_screen` | 新增 | 显示全屏 LockScreenOverlay | — | ❌ | ✅ |
-| `unlock_screen` | 新增 | 移除遮罩 | — | ❌ | ❌ |
-| `show_message` | **扩展现有**（加 severity 分级 + 修 bug #1 信号路由） | 显示消息弹窗 | InfoBar / ContentDialog / 遮罩+Dialog | ✅ | severity=critical 时 ✅ |
-| `notify_warning` | 新增（实质等价于 `show_message severity=info` 的 alias） | 显示 toast | InfoBar 角落滑入 | ✅ | ❌ |
-| `restart_stream` | 新增 | 重启 RTMP 推流 | — | ❌ | ❌ |
-| `flush_logs` | 新增 | 立即上报缓冲的事件日志 | — | ❌ | ❌ |
+| 命令                 | 新增 / 扩展                                              | 客户端响应                 | UI 形态                               | 群发支持 | 二次确认                |
+| -------------------- | -------------------------------------------------------- | -------------------------- | ------------------------------------- | -------- | ----------------------- |
+| `capture_screenshot` | **扩展现有**（加 reason_tag/event_id）                   | 立即截屏并上传             | —                                     | ❌       | ❌                      |
+| `lock_screen`        | 新增                                                     | 显示全屏 LockScreenOverlay | —                                     | ❌       | ✅                      |
+| `unlock_screen`      | 新增                                                     | 移除遮罩                   | —                                     | ❌       | ❌                      |
+| `show_message`       | **扩展现有**（加 severity 分级 + 修 bug #1 信号路由）    | 显示消息弹窗               | InfoBar / ContentDialog / 遮罩+Dialog | ✅       | severity=critical 时 ✅ |
+| `notify_warning`     | 新增（实质等价于 `show_message severity=info` 的 alias） | 显示 toast                 | InfoBar 角落滑入                      | ✅       | ❌                      |
+| `restart_stream`     | 新增                                                     | 重启 RTMP 推流             | —                                     | ❌       | ❌                      |
+| `flush_logs`         | 新增                                                     | 立即上报缓冲的事件日志     | —                                     | ❌       | ❌                      |
 
 > 实际上 `notify_warning` 与 `show_message severity=info` 等价，可以直接合并为单一 `show_message` 命令 + severity 参数。本设计保留两者命名仅是因为老师端 UI 上是两个独立按钮（"群发消息" vs "群发提醒"），后端层面无需区分。
 
@@ -697,27 +703,27 @@ Vigil server 返回：
 
 ```ts
 type Command = {
-  type: "command";
-  command_id: string;             // 由 server 生成，client 在 reply 时带回（注意 snake_case，匹配现有协议）
-  command: "capture_screenshot" | "lock_screen" | "unlock_screen" | "show_message" | "notify_warning" | "restart_stream" | "flush_logs";
-  payload?: {
-    // show_message / notify_warning
-    severity?: "info" | "warning" | "critical";
-    title?: string;
-    body?: string;
-    sender?: string;             // "监考老师" 或具体用户名
+    type: 'command';
+    command_id: string; // 由 server 生成，client 在 reply 时带回（注意 snake_case，匹配现有协议）
+    command: 'capture_screenshot' | 'lock_screen' | 'unlock_screen' | 'show_message' | 'notify_warning' | 'restart_stream' | 'flush_logs';
+    payload?: {
+        // show_message / notify_warning
+        severity?: 'info' | 'warning' | 'critical';
+        title?: string;
+        body?: string;
+        sender?: string; // "监考老师" 或具体用户名
 
-    // capture_screenshot (扩展)
-    reason_tag?: "command" | "event";
-    event_id?: string;           // 当 reason_tag=event
+        // capture_screenshot (扩展)
+        reason_tag?: 'command' | 'event';
+        event_id?: string; // 当 reason_tag=event
 
-    // restart_stream
-    stream_type?: "screen" | "camera" | "all";
+        // restart_stream
+        stream_type?: 'screen' | 'camera' | 'all';
 
-    // lock_screen
-    message?: string;            // 遮罩上的文字，例如 "请等待监考老师指示"
-  };
-  expires_at?: string;            // ISO timestamp，超过即丢弃
+        // lock_screen
+        message?: string; // 遮罩上的文字，例如 "请等待监考老师指示"
+    };
+    expires_at?: string; // ISO timestamp，超过即丢弃
 };
 ```
 
@@ -725,11 +731,11 @@ type Command = {
 
 ```ts
 type CommandResult = {
-  type: "command_result";
-  commandId: string;
-  result: "ok" | "client_offline" | "timeout" | "error";
-  errorMessage?: string;
-  data?: any;                    // 例如 take_screenshot 回 screenshotId
+    type: 'command_result';
+    commandId: string;
+    result: 'ok' | 'client_offline' | 'timeout' | 'error';
+    errorMessage?: string;
+    data?: any; // 例如 take_screenshot 回 screenshotId
 };
 ```
 
@@ -792,16 +798,16 @@ TTL index: 90 天 (`ts` field, `expireAfterSeconds: 7776000`)
 
 ### 7.1 8 类事件清单
 
-| Type | 说明 | severity | Win32 API |
-|---|---|---|---|
-| `process_started_unauthorized` | 启动了不在白名单的进程 | error | WMI `__InstanceCreationEvent` 监听 `Win32_Process` |
-| `usb_storage_changed` | USB 存储类设备插拔 | error | `RegisterDeviceNotification` + `WM_DEVICECHANGE` + `DBT_DEVTYP_VOLUME` |
-| `monitor_changed` | 多显示器配置变化（新增/移除） | error | `QGuiApplication::screensChanged` |
-| `clipboard_external_paste` | 外部应用 paste 到 ExamWebview（如果可检测） | warning | `QClipboard::dataChanged` + 推断来源（best-effort） |
-| `session_locked` | 系统会话锁定（Win+L） | warning | `WTSRegisterSessionNotification` + `WTS_SESSION_LOCK` |
-| `camera_lost` | 摄像头被拔出/驱动错误 | warning | `QCamera::errorOccurred` |
-| `network_adapter_changed` | 新网卡上线 / VPN 接入 | warning | `INetworkListManager` API |
-| `print_initiated` | 打印动作发起 | warning | Print spooler 监听（best-effort） |
+| Type                           | 说明                                        | severity | Win32 API                                                              |
+| ------------------------------ | ------------------------------------------- | -------- | ---------------------------------------------------------------------- |
+| `process_started_unauthorized` | 启动了不在白名单的进程                      | error    | WMI `__InstanceCreationEvent` 监听 `Win32_Process`                     |
+| `usb_storage_changed`          | USB 存储类设备插拔                          | error    | `RegisterDeviceNotification` + `WM_DEVICECHANGE` + `DBT_DEVTYP_VOLUME` |
+| `monitor_changed`              | 多显示器配置变化（新增/移除）               | error    | `QGuiApplication::screensChanged`                                      |
+| `clipboard_external_paste`     | 外部应用 paste 到 ExamWebview（如果可检测） | warning  | `QClipboard::dataChanged` + 推断来源（best-effort）                    |
+| `session_locked`               | 系统会话锁定（Win+L）                       | warning  | `WTSRegisterSessionNotification` + `WTS_SESSION_LOCK`                  |
+| `camera_lost`                  | 摄像头被拔出/驱动错误                       | warning  | `QCamera::errorOccurred`                                               |
+| `network_adapter_changed`      | 新网卡上线 / VPN 接入                       | warning  | `INetworkListManager` API                                              |
+| `print_initiated`              | 打印动作发起                                | warning  | Print spooler 监听（best-effort）                                      |
 
 > 不做：任务管理器启动检测、键盘异常组合键（hook 不稳）。
 
@@ -820,23 +826,22 @@ USB 键盘鼠标插拔不触发 event（机房可能有外接键鼠）。
 
 ### 7.4 severity 分级与卡片状态映射
 
-| severity | UI 卡片"异常计数" | 触发"异常"状态 |
-|---|---|---|
-| `info` | 不计 | 否 |
-| `warning` | 计 | 是 |
-| `error` | 计 | 是 |
-| `critical` | 计 | 是（紫色高亮） |
+| severity   | UI 卡片"异常计数" | 触发"异常"状态 |
+| ---------- | ----------------- | -------------- |
+| `info`     | 不计              | 否             |
+| `warning`  | 计                | 是             |
+| `error`    | 计                | 是             |
+| `critical` | 计                | 是（紫色高亮） |
 
 卡片状态计算（前端 `useStudentStatus` hook）：
 
 ```ts
 function computeStatus(student): Status {
-  if (student.lockedAt) return "locked";  // 老师手动 lock_screen
-  if (student.lastEvent && student.lastEvent.severity >= "warning" &&
-      Date.now() - student.lastEvent.ts < 5 * 60_000) return "anomaly";
-  if (!student.lastHeartbeat) return "disconnected";
-  if (Date.now() - student.lastHeartbeat > 60_000) return "offline";
-  return "online";
+    if (student.lockedAt) return 'locked'; // 老师手动 lock_screen
+    if (student.lastEvent && student.lastEvent.severity >= 'warning' && Date.now() - student.lastEvent.ts < 5 * 60_000) return 'anomaly';
+    if (!student.lastHeartbeat) return 'disconnected';
+    if (Date.now() - student.lastHeartbeat > 60_000) return 'offline';
+    return 'online';
 }
 ```
 
@@ -916,11 +921,13 @@ private:
 ```
 
 **字段**：
+
 - 缩略图：WS push `screenshot_added` 实时更新（按页订阅）
 - 状态色：5 级（绿在线 / 灰未连接 / 红离线 / 橙异常 / 紫锁定）
 - 异常计数：累积 (severity ≥ warning) 数量
 
 **交互**：
+
 - 点击 → 右侧滑出抽屉
 - 双击 → 直接打开直播弹窗（快捷）
 - 右键 → 上下文菜单（实时截屏 / 锁屏 / 发消息）
@@ -971,6 +978,7 @@ private:
 ```
 
 **关键实现**：
+
 - HLS.js + `<video>` × 2（屏幕主，摄像头 PIP `position:absolute` 右下）
 - 关闭时强制 `video.pause()` + `video.src=''` + `hls.destroy()` 防内存泄漏
 - 同屏最多 4 个并发直播弹窗（超出限制时提示）
@@ -1052,13 +1060,13 @@ private:
 const { sendCommand } = useProctorCommands(contestId);
 
 async function onScreenshotClick() {
-  const toast = showLoadingToast("正在发送...");
-  try {
-    const result = await sendCommand(machineId, "take_screenshot");
-    toast.success(`已截屏，等待上传`);
-  } catch (e) {
-    toast.error(e.message);  // "学生客户端离线" / "超时" / ...
-  }
+    const toast = showLoadingToast('正在发送...');
+    try {
+        const result = await sendCommand(machineId, 'take_screenshot');
+        toast.success(`已截屏，等待上传`);
+    } catch (e) {
+        toast.error(e.message); // "学生客户端离线" / "超时" / ...
+    }
 }
 ```
 
@@ -1069,6 +1077,7 @@ URL 状态：`/admin/vigil/exams/:cid?page=2&status=anomaly,offline&sort=status_
 每页 30 张卡片。300 学生 → 10 页。
 
 排序选项（默认状态优先）：
+
 - 状态优先（紫锁定 → 橙异常 → 红离线 → 绿在线 → 灰未连接）
 - 学号
 - 姓名
@@ -1076,6 +1085,7 @@ URL 状态：`/admin/vigil/exams/:cid?page=2&status=anomaly,offline&sort=status_
 - 异常计数（多 → 少）
 
 筛选条件：
+
 - 状态多选 checkbox
 - 搜索框（学号 / 姓名 fuzzy）
 
@@ -1086,6 +1096,7 @@ URL 状态：`/admin/vigil/exams/:cid?page=2&status=anomaly,offline&sort=status_
 ### 9.1 现有 dashboard WS（vigil server → OJ 前端）
 
 通过 `/api/admin/vigil/ws?token={dashboard_token}` 连接，现有消息：
+
 - `approval_request` / `approval_resolved`
 - `snapshot` (Stats 更新)
 
@@ -1099,13 +1110,13 @@ URL 状态：`/admin/vigil/exams/:cid?page=2&status=anomaly,offline&sort=status_
 
 ### 9.2 新增消息类型
 
-| Type | 触发 | Payload |
-|---|---|---|
-| `student_status_update` | 学生在线/离线/异常状态变化 | `{ contestId, machineId, status, lastHeartbeat, eventCount }` |
-| `screenshot_added` | 新截图入库（按页订阅） | `{ contestId, machineId, screenshotId, eventId?, ts, thumbUrl }` |
-| `event_added` | 新行为日志（按页订阅） | `{ contestId, machineId, eventId, severity, type, summary, ts }` |
-| `command_result` | 命令执行回执 | `{ commandId, machineId, result, errorMessage?, data? }` |
-| `stream_status_change` | 直播流上下线 | `{ contestId, machineId, streamType, status }` |
+| Type                    | 触发                       | Payload                                                          |
+| ----------------------- | -------------------------- | ---------------------------------------------------------------- |
+| `student_status_update` | 学生在线/离线/异常状态变化 | `{ contestId, machineId, status, lastHeartbeat, eventCount }`    |
+| `screenshot_added`      | 新截图入库（按页订阅）     | `{ contestId, machineId, screenshotId, eventId?, ts, thumbUrl }` |
+| `event_added`           | 新行为日志（按页订阅）     | `{ contestId, machineId, eventId, severity, type, summary, ts }` |
+| `command_result`        | 命令执行回执               | `{ commandId, machineId, result, errorMessage?, data? }`         |
+| `stream_status_change`  | 直播流上下线               | `{ contestId, machineId, streamType, status }`                   |
 
 ### 9.3 订阅模型
 
@@ -1139,9 +1150,9 @@ class DashboardPubsub:
 - Client → Vigil server：每 30s 发 `{ "type": "ping", "machineId": "MX9F2", "ts": "..." }`
 - Vigil server 更新 `vigil.client_sessions.last_heartbeat`
 - 后台 task 每 10s 扫描，超过 60s 无心跳的 session：
-  - 标记 `status = "offline"`
-  - WS push `student_status_update` 给该 contest 订阅者
-  - 60s 后再次扫描，仍无心跳 → 触发 `client_disconnected` event
+    - 标记 `status = "offline"`
+    - WS push `student_status_update` 给该 contest 订阅者
+    - 60s 后再次扫描，仍无心跳 → 触发 `client_disconnected` event
 
 OJ 前端心跳（dashboard WS）：客户端每 30s ping，服务器 60s 无 ping 关连接。
 
@@ -1151,16 +1162,16 @@ OJ 前端心跳（dashboard WS）：客户端每 30s ping，服务器 60s 无 pi
 
 ### 10.1 TTL 配置
 
-| Collection / 文件 | TTL | 实现 |
-|---|---|---|
-| `vigil.events` | 30 天 | MongoDB TTL index on `ts` |
-| `vigil.screenshots` (DB rec) | 14 天 | MongoDB TTL index on `ts` |
-| screenshots 文件 (`/data/vigil/screenshots/`) | 同 DB rec | cron 扫描 DB 找到过期 doc 后删文件 |
-| `vigil.recordings` (DB rec) | 7 天 | MongoDB TTL index on `ts` |
-| recordings 文件 (`/data/vigil/recordings/`) | 同 DB rec | cron 同上 |
-| `vigil.command_audit` | 90 天 | MongoDB TTL index on `ts` |
-| `vigil.client_sessions` | 比赛结束 + 30 天 | cron task，无 TTL（依赖 contest endAt） |
-| `vigil.approval_requests` | 30 天 | MongoDB TTL index on `ts` |
+| Collection / 文件                             | TTL              | 实现                                    |
+| --------------------------------------------- | ---------------- | --------------------------------------- |
+| `vigil.events`                                | 30 天            | MongoDB TTL index on `ts`               |
+| `vigil.screenshots` (DB rec)                  | 14 天            | MongoDB TTL index on `ts`               |
+| screenshots 文件 (`/data/vigil/screenshots/`) | 同 DB rec        | cron 扫描 DB 找到过期 doc 后删文件      |
+| `vigil.recordings` (DB rec)                   | 7 天             | MongoDB TTL index on `ts`               |
+| recordings 文件 (`/data/vigil/recordings/`)   | 同 DB rec        | cron 同上                               |
+| `vigil.command_audit`                         | 90 天            | MongoDB TTL index on `ts`               |
+| `vigil.client_sessions`                       | 比赛结束 + 30 天 | cron task，无 TTL（依赖 contest endAt） |
+| `vigil.approval_requests`                     | 30 天            | MongoDB TTL index on `ts`               |
 
 ### 10.2 cleanup cron 实现
 
@@ -1191,6 +1202,7 @@ User=krypton-vigil
 ```
 
 `app/scripts/cleanup.py` 任务：
+
 - 扫描 `vigil.screenshots` 中 `ts > 14 days ago` 的过期 doc，删 `/data/vigil/screenshots/...` 文件
 - 扫描 `vigil.recordings` 同上，删 mp4 文件
 - 扫描 `vigil.client_sessions` 中 contestEndAt > 30 days ago，删 doc
@@ -1208,6 +1220,7 @@ User=krypton-vigil
 ### 11.2 操作审计
 
 所有命令操作写入 `vigil.command_audit`（schema 见 §6.5），包含：
+
 - 谁（actor uid + displayName）
 - 在何时（ts）
 - 对谁（targetMachineId + targetUid）
@@ -1225,33 +1238,34 @@ User=krypton-vigil
 
 ### 12.1 新增模块
 
-| 文件 | 职责 | 复用基础 |
-|---|---|---|
-| `network/rtmp_publisher.{h,cpp}` | 管理两个 ffmpeg.exe 子进程（屏幕 + 摄像头），监控 stderr，重启失败进程，上报 `stream_failed` event | `WatchdogSupervisor` 是 QProcess+RestartLimiter 模板 |
-| `capture/camera_capture.{h,cpp}` | 不需要——摄像头直接由 ffmpeg dshow 抓帧，Qt 端不调 QMediaCaptureSession | ✗ |
-| `events/process_monitor.{h,cpp}` | WMI `__InstanceCreationEvent` 监听 `Win32_Process`，对照白名单 → emit `process_started_unauthorized` | `EventReporter` |
-| `events/device_monitor.{h,cpp}` | `RegisterDeviceNotification` + `WM_DEVICECHANGE` + `DBT_DEVTYP_VOLUME` 过滤存储类 → emit `usb_storage_changed` | `EventReporter` |
-| `events/monitor_watcher.{h,cpp}` | `QGuiApplication::screensChanged` 信号 → emit `monitor_changed` | Qt 信号，无新依赖 |
-| `events/session_watcher.{h,cpp}` | `WTSRegisterSessionNotification` + `WTS_SESSION_LOCK` → emit `session_locked` | `wtsapi32` 已 link |
-| `events/network_watcher.{h,cpp}` | `INetworkListManager` COM API → emit `network_adapter_changed` | — |
-| `events/camera_health.{h,cpp}` | `QMediaDevices::videoInputsChanged` + `QCamera::errorOccurred` → emit `camera_lost` | Qt Multimedia 已 link |
-| `events/print_watcher.{h,cpp}` | Print spooler `FindFirstPrinterChangeNotification` → emit `print_initiated` | — |
-| `events/clipboard_external.{h,cpp}` | `QClipboard::dataChanged` + 推断来源 → emit `clipboard_external_paste` (best-effort) | Qt |
-| `ui/widgets/lock_screen_overlay.{h,cpp}` | 全屏 QWidget + `WindowStaysOnTopHint` + `FramelessWindowHint`，文字消息显示，捕获键鼠事件不放行 | `FramelessDialog` |
+| 文件                                     | 职责                                                                                                           | 复用基础                                             |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `network/rtmp_publisher.{h,cpp}`         | 管理两个 ffmpeg.exe 子进程（屏幕 + 摄像头），监控 stderr，重启失败进程，上报 `stream_failed` event             | `WatchdogSupervisor` 是 QProcess+RestartLimiter 模板 |
+| `capture/camera_capture.{h,cpp}`         | 不需要——摄像头直接由 ffmpeg dshow 抓帧，Qt 端不调 QMediaCaptureSession                                         | ✗                                                    |
+| `events/process_monitor.{h,cpp}`         | WMI `__InstanceCreationEvent` 监听 `Win32_Process`，对照白名单 → emit `process_started_unauthorized`           | `EventReporter`                                      |
+| `events/device_monitor.{h,cpp}`          | `RegisterDeviceNotification` + `WM_DEVICECHANGE` + `DBT_DEVTYP_VOLUME` 过滤存储类 → emit `usb_storage_changed` | `EventReporter`                                      |
+| `events/monitor_watcher.{h,cpp}`         | `QGuiApplication::screensChanged` 信号 → emit `monitor_changed`                                                | Qt 信号，无新依赖                                    |
+| `events/session_watcher.{h,cpp}`         | `WTSRegisterSessionNotification` + `WTS_SESSION_LOCK` → emit `session_locked`                                  | `wtsapi32` 已 link                                   |
+| `events/network_watcher.{h,cpp}`         | `INetworkListManager` COM API → emit `network_adapter_changed`                                                 | —                                                    |
+| `events/camera_health.{h,cpp}`           | `QMediaDevices::videoInputsChanged` + `QCamera::errorOccurred` → emit `camera_lost`                            | Qt Multimedia 已 link                                |
+| `events/print_watcher.{h,cpp}`           | Print spooler `FindFirstPrinterChangeNotification` → emit `print_initiated`                                    | —                                                    |
+| `events/clipboard_external.{h,cpp}`      | `QClipboard::dataChanged` + 推断来源 → emit `clipboard_external_paste` (best-effort)                           | Qt                                                   |
+| `ui/widgets/lock_screen_overlay.{h,cpp}` | 全屏 QWidget + `WindowStaysOnTopHint` + `FramelessWindowHint`，文字消息显示，捕获键鼠事件不放行                | `FramelessDialog`                                    |
 
 ### 12.2 ExamShell 信号路由全量审计（修 bug #1）
 
 `ExamShell::run()` 当前仅 connect 5 个 ServerConnection 信号：
+
 - `loginResponseReceived` / `stateChanged` / `studentFinishResponseReceived` / `launchExamWebviewRequested` / `closeExamWebviewRequested`
 
 需要**新增 connect**（从 `MainWindow::setupConnections` 搬迁，仅保留学生场景相关的）：
 
-| 信号 | 来源 | 学生场景路由目标 |
-|---|---|---|
-| `userMessageRequested` | ServerConnection | 按 severity 分级路由：`info` → `InfoBar`；`warning` → `ContentDialog`；`critical` → 全屏遮罩 `LockScreenOverlay` + `ContentDialog` |
-| `commandReceived` / `commandCompleted` | ServerConnection | 用于客户端日志（debug 时学生看不到，记 AppLogger） |
-| `errorRaised` | ServerConnection | 渲染为 `InfoBar` warning（如服务器协议错误 / token 失效） |
-| `stateChanged` (已连) | ServerConnection | 离线时 `InfoBar` 提示"已断网，正在重连"；恢复时 `InfoBar` success |
+| 信号                                   | 来源             | 学生场景路由目标                                                                                                                   |
+| -------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `userMessageRequested`                 | ServerConnection | 按 severity 分级路由：`info` → `InfoBar`；`warning` → `ContentDialog`；`critical` → 全屏遮罩 `LockScreenOverlay` + `ContentDialog` |
+| `commandReceived` / `commandCompleted` | ServerConnection | 用于客户端日志（debug 时学生看不到，记 AppLogger）                                                                                 |
+| `errorRaised`                          | ServerConnection | 渲染为 `InfoBar` warning（如服务器协议错误 / token 失效）                                                                          |
+| `stateChanged` (已连)                  | ServerConnection | 离线时 `InfoBar` 提示"已断网，正在重连"；恢复时 `InfoBar` success                                                                  |
 
 ### 12.3 三级 show_message UI 路由
 
@@ -1343,11 +1357,11 @@ screenshotTimer_->setInterval(nextDelay);
 ### 12.6 ffmpeg.exe 内置策略
 
 - 安装目录布局：
-  ```
-  bin/krypton-vigil-client.exe
-  bin/ffmpeg/ffmpeg.exe            # ~30 MB minimal build
-  bin/ffmpeg/LICENSE.txt
-  ```
+    ```
+    bin/krypton-vigil-client.exe
+    bin/ffmpeg/ffmpeg.exe            # ~30 MB minimal build
+    bin/ffmpeg/LICENSE.txt
+    ```
 - CMakeLists 加 install target，把 ffmpeg.exe 拷到 `${CMAKE_INSTALL_PREFIX}/bin/ffmpeg/`
 - 第一次启动时检测 ffmpeg.exe 存在性，缺失则上报 `event=ffmpeg_missing severity=critical` 但不阻塞考试
 - RtmpPublisher 调用时拼绝对路径 `QCoreApplication::applicationDirPath() + "/ffmpeg/ffmpeg.exe"`
@@ -1355,6 +1369,7 @@ screenshotTimer_->setInterval(nextDelay);
 ### 12.7 与现有 Lockdown 的协作
 
 `Lockdown::engage` 已经 swallow Alt+Tab / Win+L 等。新增的 `LockScreenOverlay` 是 UI 层全屏遮罩，不替代键盘 hook，而是叠加：
+
 - Lockdown 引擎一直运行（防绕过）
 - 老师 lock_screen 命令 → 显示 LockScreenOverlay（UI 反馈学生"你被锁了"）
 - 老师 unlock_screen 命令 → 隐藏 LockScreenOverlay
@@ -1366,43 +1381,43 @@ screenshotTimer_->setInterval(nextDelay);
 
 ### 13.1 老师 → Vigil（dashboard-token 鉴权）
 
-| Method | Path | 用途 |
-|---|---|---|
-| POST | `/api/admin/vigil/proctor/commands` | 发命令（含群发） |
-| GET | `/api/admin/vigil/contests/:cid/students` | 学生卡片墙数据（分页） |
-| GET | `/api/admin/vigil/contests/:cid/students/:mid/screenshots` | 学生截图列表 |
-| GET | `/api/admin/vigil/contests/:cid/students/:mid/events` | 学生行为日志 |
-| GET | `/api/admin/vigil/contests/:cid/recordings` | 录屏 mp4 索引 |
-| GET | `/api/admin/vigil/contests/:cid/audit` | 操作审计 |
-| GET | `/api/admin/vigil/screenshots/:sid/file` | 截图文件（鉴权后 redirect 到本地 path） |
-| WS | `/api/admin/vigil/ws` | 实时推送（扩展现有） |
+| Method | Path                                                       | 用途                                    |
+| ------ | ---------------------------------------------------------- | --------------------------------------- |
+| POST   | `/api/admin/vigil/proctor/commands`                        | 发命令（含群发）                        |
+| GET    | `/api/admin/vigil/contests/:cid/students`                  | 学生卡片墙数据（分页）                  |
+| GET    | `/api/admin/vigil/contests/:cid/students/:mid/screenshots` | 学生截图列表                            |
+| GET    | `/api/admin/vigil/contests/:cid/students/:mid/events`      | 学生行为日志                            |
+| GET    | `/api/admin/vigil/contests/:cid/recordings`                | 录屏 mp4 索引                           |
+| GET    | `/api/admin/vigil/contests/:cid/audit`                     | 操作审计                                |
+| GET    | `/api/admin/vigil/screenshots/:sid/file`                   | 截图文件（鉴权后 redirect 到本地 path） |
+| WS     | `/api/admin/vigil/ws`                                      | 实时推送（扩展现有）                    |
 
 ### 13.2 OJ 后端 → Vigil（service-token 鉴权，已有渠道延伸）
 
-| Method | Path | 用途 |
-|---|---|---|
-| (复用已有 `/api/oj/*`) | | 新字段透传走现有 `exams/upsert` |
+| Method                 | Path | 用途                            |
+| ---------------------- | ---- | ------------------------------- |
+| (复用已有 `/api/oj/*`) |      | 新字段透传走现有 `exams/upsert` |
 
 ### 13.3 Client → Vigil（access-token 鉴权）
 
-| Method | Path | 用途 |
-|---|---|---|
-| (复用已有) | | WS + screenshot 上报 + event 上报；扩展 schema |
+| Method     | Path | 用途                                           |
+| ---------- | ---- | ---------------------------------------------- |
+| (复用已有) |      | WS + screenshot 上报 + event 上报；扩展 schema |
 
 ### 13.4 SRS → Vigil（内部 callback，仅 localhost）
 
-| Method | Path | 用途 |
-|---|---|---|
-| POST | `/api/internal/srs/on_publish` | 推流开始（仅记录） |
-| POST | `/api/internal/srs/on_unpublish` | 推流停止 |
-| POST | `/api/internal/srs/on_play` | 老师拉流（仅记录） |
-| POST | `/api/internal/srs/on_dvr` | 录屏分片落盘完成 → 写 vigil.recordings |
+| Method | Path                             | 用途                                   |
+| ------ | -------------------------------- | -------------------------------------- |
+| POST   | `/api/internal/srs/on_publish`   | 推流开始（仅记录）                     |
+| POST   | `/api/internal/srs/on_unpublish` | 推流停止                               |
+| POST   | `/api/internal/srs/on_play`      | 老师拉流（仅记录）                     |
+| POST   | `/api/internal/srs/on_dvr`       | 录屏分片落盘完成 → 写 vigil.recordings |
 
 ### 13.5 OJ → Caddy（forward_auth target）
 
-| Method | Path | 用途 |
-|---|---|---|
-| GET | `/api/admin/vigil/check-hls-access?path=...` | Caddy forward_auth 鉴权 HLS 访问 |
+| Method | Path                                         | 用途                             |
+| ------ | -------------------------------------------- | -------------------------------- |
+| GET    | `/api/admin/vigil/check-hls-access?path=...` | Caddy forward_auth 鉴权 HLS 访问 |
 
 ---
 
@@ -1410,25 +1425,27 @@ screenshotTimer_->setInterval(nextDelay);
 
 ### 14.1 300 学生场景资源估算
 
-| 资源 | 估算 | 备注 |
-|---|---|---|
-| 上行总带宽 | 300 × (1.5 + 0.4) Mbps = 570 Mbps | oj-vigil 千兆口约 60% |
-| 老师下行（同看 4 弹窗 = 8 路 HLS） | 8 × 1.9 = 15.2 Mbps | 浏览器可承受 |
-| SRS CPU | 600 路 RTMP 收 + HLS 转封装 | 4 核 100% 上限可达 |
-| oj-vigil 内存 | 4-6 GB | 8 GB 起步 |
-| 录屏 1 场存储（开启时） | 300 × 2h × 1.9 Mbps = 510 GB | 必须扩盘 |
-| WS 消息率 | status 1/s + screenshot 5/s + event ~1/s = ~7/s | 可控 |
-| 学生 CPU（软编 1080p） | i5 8 代约 15-25% 单核 | 不影响考试 |
-| 学生内存（推流 2 路 + webview） | ~400 MB | OK |
+| 资源                               | 估算                                            | 备注                  |
+| ---------------------------------- | ----------------------------------------------- | --------------------- |
+| 上行总带宽                         | 300 × (1.5 + 0.4) Mbps = 570 Mbps               | oj-vigil 千兆口约 60% |
+| 老师下行（同看 4 弹窗 = 8 路 HLS） | 8 × 1.9 = 15.2 Mbps                             | 浏览器可承受          |
+| SRS CPU                            | 600 路 RTMP 收 + HLS 转封装                     | 4 核 100% 上限可达    |
+| oj-vigil 内存                      | 4-6 GB                                          | 8 GB 起步             |
+| 录屏 1 场存储（开启时）            | 300 × 2h × 1.9 Mbps = 510 GB                    | 必须扩盘              |
+| WS 消息率                          | status 1/s + screenshot 5/s + event ~1/s = ~7/s | 可控                  |
+| 学生 CPU（软编 1080p）             | i5 8 代约 15-25% 单核                           | 不影响考试            |
+| 学生内存（推流 2 路 + webview）    | ~400 MB                                         | OK                    |
 
 ### 14.2 压测脚本（Phase 4）
 
 `scripts/load_test.py` 模拟 N 个学生客户端：
+
 - 启动 N 个 `ffmpeg -re -i sample.mp4 -f flv rtmp://...`（用预录 mp4 假装屏幕推流）
 - 启动 N 个 ws connection，按真实频率发心跳 / 截屏 / event
 - 在另一台机器跑 K 个老师 dashboard ws connection + 拉 HLS
 
 阈值：
+
 - N=30：基线，必须完全顺畅
 - N=100：常规，CPU/带宽 ≤ 70%
 - N=300：峰值，CPU/带宽 ≤ 90%，无丢包，HLS 延迟 ≤ 5s
@@ -1441,15 +1458,15 @@ screenshotTimer_->setInterval(nextDelay);
 
 闭环：1 个学生 → ffmpeg 推流 → SRS → Caddy 反代 → 老师 HLS.js 看到屏幕和摄像头。
 
-| Task | 工日 | 负责模块 |
-|---|---|---|
-| SRS 二进制 + systemd + 双 app 配置 | 2 | oj-vigil 运维 |
-| Caddy 反代 + hydrooj check-hls-access endpoint | 1 | oj 运维 + hydrooj |
-| 客户端内置 ffmpeg + RtmpPublisher（屏幕 + 摄像头） | 3 | Client |
-| SRS callback 4 个 endpoint 骨架 | 1 | Vigil server |
-| contest 字段 + UI 暴露（liveEnabled + cameraEnabled） | 1 | krypton-vigilguard + ui-next |
-| 简化版直播弹窗（无快捷按钮，仅 PIP 视频） | 1 | ui-next |
-| e2e 测试 + 文档化 | 1 | — |
+| Task                                                  | 工日 | 负责模块                     |
+| ----------------------------------------------------- | ---- | ---------------------------- |
+| SRS 二进制 + systemd + 双 app 配置                    | 2    | oj-vigil 运维                |
+| Caddy 反代 + hydrooj check-hls-access endpoint        | 1    | oj 运维 + hydrooj            |
+| 客户端内置 ffmpeg + RtmpPublisher（屏幕 + 摄像头）    | 3    | Client                       |
+| SRS callback 4 个 endpoint 骨架                       | 1    | Vigil server                 |
+| contest 字段 + UI 暴露（liveEnabled + cameraEnabled） | 1    | krypton-vigilguard + ui-next |
+| 简化版直播弹窗（无快捷按钮，仅 PIP 视频）             | 1    | ui-next                      |
+| e2e 测试 + 文档化                                     | 1    | —                            |
 
 **完成准则**：在 admin/vigil 页面打开 1 个学生抽屉，点"查看实时画面"，能看到屏幕和摄像头实时视频，延迟 < 5s。
 
@@ -1457,44 +1474,44 @@ screenshotTimer_->setInterval(nextDelay);
 
 闭环：30 学生卡片墙 + 抽屉 + 命令 + 三级消息 + 心跳 + 行为日志展示。
 
-| Task | 工日 | 负责模块 |
-|---|---|---|
-| 学生卡片墙 + 5 级状态 + 右滑抽屉 | 3 | ui-next |
-| 修 ExamShell 信号 bug（全量审计） | 1 | Client |
-| 客户端命令处理扩展（7 命令） | 2 | Client |
-| 截屏抖动 + 修 screenshotIntervalMs bug | 1 | Client |
-| Vigil schema + proctor commands + WS 扩展 + 心跳 | 3 | Vigil server |
-| 三级 send_message UI（InfoBar/Dialog/遮罩） | 1 | Client |
-| 行为日志详情弹窗 + WS 订阅 + 群发 + 回执 toast | 1 | ui-next |
+| Task                                             | 工日 | 负责模块     |
+| ------------------------------------------------ | ---- | ------------ |
+| 学生卡片墙 + 5 级状态 + 右滑抽屉                 | 3    | ui-next      |
+| 修 ExamShell 信号 bug（全量审计）                | 1    | Client       |
+| 客户端命令处理扩展（7 命令）                     | 2    | Client       |
+| 截屏抖动 + 修 screenshotIntervalMs bug           | 1    | Client       |
+| Vigil schema + proctor commands + WS 扩展 + 心跳 | 3    | Vigil server |
+| 三级 send_message UI（InfoBar/Dialog/遮罩）      | 1    | Client       |
+| 行为日志详情弹窗 + WS 订阅 + 群发 + 回执 toast   | 1    | ui-next      |
 
 ### Phase 2 — 事件检测 (~8 工日)
 
-| Task | 工日 |
-|---|---|
-| 进程白名单 + WMI 检测（process_started_unauthorized） | 2 |
-| USB 存储检测（WM_DEVICECHANGE） | 1 |
-| 多显示器 / 系统锁屏 / 摄像头掉线 / 网卡 / 打印 | 2 |
-| 事件触发截屏 + screenshotId 关联 | 1 |
-| 全屏锁屏遮罩 | 1 |
-| events/screenshots/audit listing endpoints + UI | 1 |
+| Task                                                  | 工日 |
+| ----------------------------------------------------- | ---- |
+| 进程白名单 + WMI 检测（process_started_unauthorized） | 2    |
+| USB 存储检测（WM_DEVICECHANGE）                       | 1    |
+| 多显示器 / 系统锁屏 / 摄像头掉线 / 网卡 / 打印        | 2    |
+| 事件触发截屏 + screenshotId 关联                      | 1    |
+| 全屏锁屏遮罩                                          | 1    |
+| events/screenshots/audit listing endpoints + UI       | 1    |
 
 ### Phase 3 — 录屏闭环 (~4 工日)
 
-| Task | 工日 |
-|---|---|
-| SRS dvr 配置（live-record app） | 1 |
-| contest UI 加 recordEnabled | 0.5 |
-| recordings listing endpoint + on_dvr callback 写 DB | 1 |
-| 录屏回放弹窗（HLS.js mp4 + 拖拽 + 分片） | 1.5 |
+| Task                                                | 工日 |
+| --------------------------------------------------- | ---- |
+| SRS dvr 配置（live-record app）                     | 1    |
+| contest UI 加 recordEnabled                         | 0.5  |
+| recordings listing endpoint + on_dvr callback 写 DB | 1    |
+| 录屏回放弹窗（HLS.js mp4 + 拖拽 + 分片）            | 1.5  |
 
 ### Phase 4 — 运维加固 (~3 工日)
 
-| Task | 工日 |
-|---|---|
-| MongoDB TTL index 配置 + cleanup cron + systemd timer | 1 |
-| 磁盘扩容（按场景预留 2 TB） | 0.5 |
-| 防火墙 IP 白名单（限制 SRS 推流来源） | 0.5 |
-| 压测脚本 + 30/100/300 学生测试 + 调优 | 1 |
+| Task                                                  | 工日 |
+| ----------------------------------------------------- | ---- |
+| MongoDB TTL index 配置 + cleanup cron + systemd timer | 1    |
+| 磁盘扩容（按场景预留 2 TB）                           | 0.5  |
+| 防火墙 IP 白名单（限制 SRS 推流来源）                 | 0.5  |
+| 压测脚本 + 30/100/300 学生测试 + 调优                 | 1    |
 
 ### 工期总计
 
@@ -1713,11 +1730,11 @@ vhost live-nodvr {
 
 ## 文档更新历史
 
-| 日期 | 内容 |
-|---|---|
-| 2026-05-27 | 初版，基于 17 个 grill 决策。客户端架构章节占位，待 audit 回填。 |
+| 日期       | 内容                                                                                                                                                                                                                                                 |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-05-27 | 初版，基于 17 个 grill 决策。客户端架构章节占位，待 audit 回填。                                                                                                                                                                                     |
 | 2026-05-27 | Audit 完成，回填 §1 现状基线、§5.3 上传协议、§6 命令清单（capture_screenshot/show_message 复用而非新增）、§9.1.1 client WS 现状、§12 客户端架构。**重要修订**：bug #2 比预期严重（ExamShell 不实例化 PeriodicCollector，学生模式定时截屏从未跑过）。 |
-| 2026-05-27 | Phase 0-4 实施完成。文件清单见 §16。未 commit、未 push、未部署。 |
+| 2026-05-27 | Phase 0-4 实施完成。文件清单见 §16。未 commit、未 push、未部署。                                                                                                                                                                                     |
 
 ---
 
@@ -1726,6 +1743,7 @@ vhost live-nodvr {
 ### Phase 0 — MVP "直播能看见"
 
 新建：
+
 - `ops/srs/krypton.conf` — SRS 配置（live-record / live-nodvr 双 application）
 - `ops/systemd/srs.service` — systemd unit
 - `ops/caddy/Caddyfile` — Caddy 全量配置（与生产 `/root/.hydro/Caddyfile` 同步；vigil-hls + vigil-flv 反代到 SRS，ObjectId-trust，无 forward_auth）
@@ -1734,6 +1752,7 @@ vhost live-nodvr {
 - `ecosystems/KryptonVigilSystem/Client/deploy/ffmpeg-build.md` — ffmpeg 内置说明
 
 修改：
+
 - `packages/hydrooj/src/interface.ts` — Tdoc 加 5 个新字段
 - `packages/hydrooj/src/handler/contest.ts` — postUpdate 接收 + edit() 透传
 - `packages/hydrooj/src/handler/vigil-integration.ts` — check-hls-access endpoint
@@ -1753,15 +1772,18 @@ vhost live-nodvr {
 ### Phase 1 — 核心监考链路
 
 新建（vigil server）：
+
 - `ecosystems/KryptonVigilSystem/Server/app/api/proctor_dashboard.py` — `/api/admin/vigil/proctor/*` 路由 + WS subscribe
 - `ecosystems/KryptonVigilSystem/Server/app/services/heartbeat_watcher.py` — 30s/60s 心跳后台任务
 
 修改（vigil server）：
+
 - `app/services/dashboard_broker.py` — 5 个新 publishers + ContestSubscription 模型
 - `app/api/routes.py` — client WS 扩展（heartbeat 刷新 / event_added 广播 / command_result 解析）+ screenshot upload 新字段
 - `app/storage/screenshot_storage.py` — store_bytes 接受 reason_tag/event_id/exam_session_id/oj_contest_id
 
 新建（ui-next）：
+
 - `packages/ui-next/src/pages/vigil/confirm-action-dialog.tsx`
 - `packages/ui-next/src/pages/vigil/event-detail-dialog.tsx`
 - `packages/ui-next/src/pages/vigil/live-player-dialog.tsx`
@@ -1770,20 +1792,24 @@ vhost live-nodvr {
 - `packages/ui-next/src/hooks/use-proctor-commands.ts`
 
 修改（ui-next）：
+
 - `packages/ui-next/src/lib/vigil-api.ts` — sendProctorCommandV2 + listContestStudents + etc.
 - `packages/ui-next/src/hooks/use-vigil-socket.ts` — contest 维度订阅 + 5 个新 message types
 - `packages/ui-next/src/pages/vigil/index.tsx` — AdminVigilExamDetailPage 重构（卡片墙 + 右滑抽屉）
 
 新建（客户端）：
+
 - `ecosystems/KryptonVigilSystem/Client/ui/widgets/lock_screen_overlay.{h,cpp}` — 全屏锁屏遮罩
 
 修改（客户端）：
+
 - `ecosystems/KryptonVigilSystem/Client/app/exam_shell.{h,cpp}` — 修复 bug #1 信号路由 + 三级 show_message + 持有 PeriodicCollector + RtmpPublisher
 - `ecosystems/KryptonVigilSystem/Client/monitor/periodic_collector.{h,cpp}` — setJitterMs / setExamSession / captureNow
 
 ### Phase 2 — 8 类事件检测
 
 新建（客户端）：
+
 - `events/process_monitor.{h,cpp}` — ToolHelp32 polling + 进程白名单
 - `events/device_monitor.{h,cpp}` — WM_DEVICECHANGE USB storage
 - `events/monitor_watcher.{h,cpp}` — QGuiApplication::screensChanged
@@ -1795,6 +1821,7 @@ vhost live-nodvr {
 - `events/event_aggregator.{h,cpp}` — 8 watcher 聚合 + screenshot hook + EventReporter 转发
 
 修改：
+
 - `CMakeLists.txt` — 集成 events 子目录 + winspool link
 - `app/exam_shell.{h,cpp}` — 持有 EventAggregator，启动/停止生命周期
 
@@ -1805,6 +1832,7 @@ vhost live-nodvr {
 ### Phase 4 — 运维加固
 
 新建：
+
 - `ecosystems/KryptonVigilSystem/Server/app/scripts/cleanup.py` — 文件 + DB row TTL 清理
 - `ecosystems/KryptonVigilSystem/Server/scripts/load_test.py` — N 学生压测脚本
 - `ops/systemd/vigil-cleanup.{service,timer}` — 每日 04:00 oneshot

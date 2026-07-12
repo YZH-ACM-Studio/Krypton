@@ -8,9 +8,8 @@
  *   - Anything that needs to touch `userbind.students` or
  *     `vigil.client_sessions` lives here.
  */
-import type { Tdoc } from 'hydrooj';
+import type { ObjectId, Tdoc } from 'hydrooj';
 import * as contest from 'hydrooj/src/model/contest';
-import type { ObjectId } from 'hydrooj';
 import { clientSessionsColl } from './db';
 import type { ClientSessionDoc } from './types';
 
@@ -29,9 +28,7 @@ import type { ClientSessionDoc } from './types';
  * this with the legacy Hydro access (`assign`, invite code, etc.) per
  * DESIGN §6.1. See `effectiveAccessAllowed` below.
  */
-export async function hitsParticipantScope(
-    domainId: string, tdoc: Tdoc, uid: number,
-): Promise<boolean> {
+export async function hitsParticipantScope(domainId: string, tdoc: Tdoc, uid: number): Promise<boolean> {
     if (!contest.hasParticipantScope(tdoc)) return true;
     // Admins / contest owner / maintainer should bypass — but that decision
     // belongs in the caller (it usually has the `Handler` and `User`),
@@ -101,9 +98,7 @@ export async function deleteClientSessionByVigilSessionId(vigilSessionId: string
  * "valid for contest X" iff (a) the session is not expired and (b) its
  * `contestId` matches X (single-contest binding, DESIGN §8.1).
  */
-export async function isValidClientSessionForContest(
-    sid: string, domainId: string, contestId: ObjectId, uid?: number,
-): Promise<boolean> {
+export async function isValidClientSessionForContest(sid: string, domainId: string, contestId: ObjectId, uid?: number): Promise<boolean> {
     const s = await currentClientSession(sid);
     if (!s) return false;
     if (s.domainId !== domainId) return false;
@@ -115,14 +110,14 @@ export async function isValidClientSessionForContest(
  * Sessions that are active for (`domainId`, `contestId`). Used by the
  * delete-contest pre-check and admin overview pages.
  */
-export async function listActiveSessionsForContest(
-    domainId: string, contestId: ObjectId,
-): Promise<ClientSessionDoc[]> {
-    return await clientSessionsColl.find({
-        domainId,
-        contestId,
-        expiresAt: { $gt: new Date() },
-    }).toArray();
+export async function listActiveSessionsForContest(domainId: string, contestId: ObjectId): Promise<ClientSessionDoc[]> {
+    return await clientSessionsColl
+        .find({
+            domainId,
+            contestId,
+            expiresAt: { $gt: new Date() },
+        })
+        .toArray();
 }
 
 // ── Effective contest access ──────────────────────────────────────────────
@@ -149,7 +144,9 @@ export async function listActiveSessionsForContest(
  * background job) and only the scope check applies.
  */
 export async function effectiveContestAccess(
-    domainId: string, tdoc: Tdoc, uid: number,
+    domainId: string,
+    tdoc: Tdoc,
+    uid: number,
     sidForClientCheck?: string,
 ): Promise<{ ok: true } | { ok: false; reason: 'scope_miss' | 'client_only' }> {
     // (1) Scope hit (if scope is set)
@@ -159,8 +156,7 @@ export async function effectiveContestAccess(
         // check the client session first.
         if (sidForClientCheck) {
             const sess = await currentClientSession(sidForClientCheck);
-            if (sess && sess.uid === uid && sess.domainId === domainId && sess.contestId.equals(tdoc.docId)
-                && sess.scopeOverride) {
+            if (sess && sess.uid === uid && sess.domainId === domainId && sess.contestId.equals(tdoc.docId) && sess.scopeOverride) {
                 // Scope override granted by Vigil approval (temp account).
             } else {
                 return { ok: false, reason: 'scope_miss' };

@@ -5,15 +5,13 @@ import FileSelectAutoComplete from '../autocomplete/components/FileSelectAutoCom
 import LanguageSelectAutoComplete from '../autocomplete/components/LanguageSelectAutoComplete';
 import type { RootState } from './reducer/index';
 
-export function FormItem({
-  columns, label, children, helpText = '', disableLabel = false, ...props
-}) {
+export function FormItem({ columns, label, children, helpText = '', disableLabel = false, ...props }) {
   return (
     <div {...props} className={`${columns && `medium-${columns}`} columns form__item`}>
       <label htmlFor={`${label}-form`}>
         {!disableLabel && i18n(label)}
         {children}
-        {helpText && (<p className="help-text">{i18n(helpText)}</p>)}
+        {helpText && <p className="help-text">{i18n(helpText)}</p>}
       </label>
     </div>
   );
@@ -24,7 +22,7 @@ type KeyType<K, T = string | number> = {
 }[keyof K];
 type FileSelectKey = 'checker' | 'interactor' | 'manager';
 
-export function ManagedInput({ placeholder, formKey }: { placeholder?: string, formKey: KeyType<RootState['config']> }) {
+export function ManagedInput({ placeholder, formKey }: { placeholder?: string; formKey: KeyType<RootState['config']> }) {
   const value = useSelector((state: RootState) => state.config[formKey]);
   const dispatch = useDispatch();
   return (
@@ -40,7 +38,7 @@ export function ManagedInput({ placeholder, formKey }: { placeholder?: string, f
   );
 }
 
-export function ManagedSelect({ options, formKey }: { options: string[], formKey: KeyType<RootState['config']> }) {
+export function ManagedSelect({ options, formKey }: { options: string[]; formKey: KeyType<RootState['config']> }) {
   const value = useSelector((state: RootState) => state.config[formKey]);
   const dispatch = useDispatch();
   return (
@@ -51,12 +49,16 @@ export function ManagedSelect({ options, formKey }: { options: string[], formKey
       }}
       className="select"
     >
-      {options.map((o) => (<option id={o} key={o}>{o}</option>))}
+      {options.map((o) => (
+        <option id={o} key={o}>
+          {o}
+        </option>
+      ))}
     </select>
   );
 }
 
-export function SingleFileSelect({ formKey, withLang = false, label = 'Checker' }: { formKey: FileSelectKey, withLang?: boolean, label?: string }) {
+export function SingleFileSelect({ formKey, withLang = false, label = 'Checker' }: { formKey: FileSelectKey; withLang?: boolean; label?: string }) {
   const value = useSelector((state: RootState) => state.config[formKey]);
   const Files = useSelector((state: RootState) => state.testdata);
   const dispatch = useDispatch();
@@ -67,26 +69,16 @@ export function SingleFileSelect({ formKey, withLang = false, label = 'Checker' 
     if (withLang) dispatch({ type: 'CONFIG_FORM_UPDATE', key: formKey, value: file ? { file, lang } : null });
     else dispatch({ type: 'CONFIG_FORM_UPDATE', key: formKey, value: file });
   };
-  return withLang ? (<>
-    <FormItem columns={5} label={label}>
-      <FileSelectAutoComplete
-        width="100%"
-        data={Files}
-        selectedKeys={[selectedFile]}
-        onChange={(val) => update(val, selectedLang)}
-      />
-    </FormItem>
-    <FormItem columns={3} label="Language">
-      <LanguageSelectAutoComplete
-        selectedKeys={[selectedLang]}
-        onChange={(val) => update(selectedFile, val)}
-        withAuto
-      />
-    </FormItem>
-  </>) : (<FileSelectAutoComplete
-    width="100%"
-    data={Files}
-    selectedKeys={[selectedFile]}
-    onChange={(val) => update(val, selectedLang)}
-  />);
+  return withLang ? (
+    <>
+      <FormItem columns={5} label={label}>
+        <FileSelectAutoComplete width="100%" data={Files} selectedKeys={[selectedFile]} onChange={(val) => update(val, selectedLang)} />
+      </FormItem>
+      <FormItem columns={3} label="Language">
+        <LanguageSelectAutoComplete selectedKeys={[selectedLang]} onChange={(val) => update(selectedFile, val)} withAuto />
+      </FormItem>
+    </>
+  ) : (
+    <FileSelectAutoComplete width="100%" data={Files} selectedKeys={[selectedFile]} onChange={(val) => update(val, selectedLang)} />
+  );
 }

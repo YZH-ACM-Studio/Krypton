@@ -100,11 +100,7 @@ export function requireServiceToken(handler: Handler, channel: string): void {
     }
     const matched = accepted.find((accept) => safeEqual(accept, token));
     if (!matched) {
-        logger.warn(
-            'service-token check on channel "%s" rejected: token prefix=%s not in accepted list',
-            channel,
-            token.slice(0, 8),
-        );
+        logger.warn('service-token check on channel "%s" rejected: token prefix=%s not in accepted list', channel, token.slice(0, 8));
         throw new ServiceTokenError('invalid');
     }
     logger.debug('service-token check on channel "%s" passed (prefix=%s)', channel, token.slice(0, 8));

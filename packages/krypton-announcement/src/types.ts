@@ -76,10 +76,7 @@ export interface AnnouncementReadState {
 }
 
 /** Visible-to-user computed flag, not stored. */
-export function isEffectivelyVisible(
-    doc: Pick<AnnouncementDoc, 'hidden' | 'publishAt' | 'unpublishAt'>,
-    now: Date = new Date(),
-): boolean {
+export function isEffectivelyVisible(doc: Pick<AnnouncementDoc, 'hidden' | 'publishAt' | 'unpublishAt'>, now: Date = new Date()): boolean {
     if (doc.hidden) return false;
     if (doc.publishAt && doc.publishAt > now) return false;
     if (doc.unpublishAt && doc.unpublishAt <= now) return false;

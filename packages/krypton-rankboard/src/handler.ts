@@ -12,15 +12,39 @@
  */
 import type { Context } from 'hydrooj';
 import {
-    BadRequestError, db, Handler, NotFoundError, ObjectId, param, PERM, PermissionError, PRIV,
-    PrivilegeError, Types, UserModel, ValidationError,
+    BadRequestError,
+    db,
+    Handler,
+    NotFoundError,
+    ObjectId,
+    param,
+    PERM,
+    PermissionError,
+    PRIV,
+    PrivilegeError,
+    Types,
+    UserModel,
+    ValidationError,
 } from 'hydrooj';
 import type { BatchImportRow } from './model';
 import {
-    addAwardImage, applyGpltStoreScores, buildGallery, createPerson, deleteAwardType,
-    deletePerson, getConfig, getPerson, importAwardsBatch, listAwardTypes, listImportBatches,
-    listLeaderboard, RANKBOARD_DOMAIN, rollbackImportBatch, setConfig,
-    updatePerson, upsertAwardType,
+    addAwardImage,
+    applyGpltStoreScores,
+    buildGallery,
+    createPerson,
+    deleteAwardType,
+    deletePerson,
+    getConfig,
+    getPerson,
+    importAwardsBatch,
+    listAwardTypes,
+    listImportBatches,
+    listLeaderboard,
+    RANKBOARD_DOMAIN,
+    rollbackImportBatch,
+    setConfig,
+    updatePerson,
+    upsertAwardType,
 } from './model';
 import type { Award } from './types';
 
@@ -30,11 +54,7 @@ const schoolsColl = db.collection<any>('userbind.schools');
 class RankBoardMainHandler extends Handler {
     noCheckPermView = true;
     async get() {
-        const [rows, awardTypes, config] = await Promise.all([
-            listLeaderboard(),
-            listAwardTypes(),
-            getConfig(),
-        ]);
+        const [rows, awardTypes, config] = await Promise.all([listLeaderboard(), listAwardTypes(), getConfig()]);
         this.response.template = 'rankboard_main.html';
         this.response.body = {
             rows: rows.map((r) => ({
@@ -104,8 +124,7 @@ class AdminBase extends Handler {
         // `this.args` includes query/body fields and is therefore attacker
         // controlled. Bind the singleton scope to the framework-resolved
         // request domain instead; a missing domain fails closed.
-        return this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
-            || String(this.domain?._id ?? '') === RANKBOARD_DOMAIN;
+        return this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || String(this.domain?._id ?? '') === RANKBOARD_DOMAIN;
     }
 
     protected canManageRankboard(): boolean {
@@ -138,10 +157,7 @@ class AdminBase extends Handler {
 }
 
 class AdminRankBoardListHandler extends AdminBase {
-    private async renderSection(
-        section: 'people' | 'import' | 'settings',
-        extra: Record<string, unknown> = {},
-    ) {
+    private async renderSection(section: 'people' | 'import' | 'settings', extra: Record<string, unknown> = {}) {
         const body: Record<string, unknown> = {
             section,
             canImport: this.canImportRankboard(),
@@ -164,10 +180,7 @@ class AdminRankBoardListHandler extends AdminBase {
                 },
             }));
         } else if (section === 'import') {
-            const [batches, schools] = await Promise.all([
-                listImportBatches(),
-                schoolsColl.find({ domainId: RANKBOARD_DOMAIN }).toArray(),
-            ]);
+            const [batches, schools] = await Promise.all([listImportBatches(), schoolsColl.find({ domainId: RANKBOARD_DOMAIN }).toArray()]);
             body.batches = batches.map((b) => ({ ...b, _id: String(b._id) }));
             body.schools = schools.map((s: any) => ({ _id: String(s._id), name: s.name }));
         } else {
@@ -196,7 +209,8 @@ class AdminRankBoardListHandler extends AdminBase {
         });
         if (!student) throw new NotFoundError('student', String(studentDocId));
         const person = await createPerson({
-            studentDocId, createdBy: this.user._id,
+            studentDocId,
+            createdBy: this.user._id,
         });
         this.response.redirect = this.url('admin_rankboard_person', { id: String(person._id) });
     }
@@ -233,12 +247,7 @@ class AdminRankBoardListHandler extends AdminBase {
     @param('batchTsv', Types.Content)
     @param('createMissing', Types.Boolean, true)
     @param('schoolId', Types.ObjectId, true)
-    async postBatch(
-        _ctx: any,
-        batchTsv: string,
-        createMissing?: boolean,
-        schoolId?: ObjectId,
-    ) {
+    async postBatch(_ctx: any, batchTsv: string, createMissing?: boolean, schoolId?: ObjectId) {
         this.checkDataOp();
         // Radix Select 的 required 不可靠，空值提交会让 createMissing
         // 静默失效——显式报错（对抗性审查 #11）。
@@ -259,13 +268,17 @@ class AdminRankBoardListHandler extends AdminBase {
                     schoolRank: parts[5] ? Number(parts[5]) || undefined : undefined,
                     team: (parts[6] || '').trim() || undefined,
                     teammates: parts[7]
-                        ? parts[7].split(',').map((s) => s.trim()).filter(Boolean)
+                        ? parts[7]
+                              .split(',')
+                              .map((s) => s.trim())
+                              .filter(Boolean)
                         : undefined,
                     realName: (parts[8] || '').trim() || undefined,
                 };
             });
         const report = await importAwardsBatch(rows, this.user._id, {
-            createMissing: !!createMissing, schoolId,
+            createMissing: !!createMissing,
+            schoolId,
         });
         await this.renderSection('import', { report });
     }
@@ -289,15 +302,15 @@ class AdminAwardTypesHandler extends AdminBase {
     @param('useRankDecay', Types.Boolean, true)
     @param('order', Types.Int, true)
     @param('hidden', Types.Boolean, true)
-    async postUpsert(
-        _ctx: any,
-        key: string, name: string, weight: number,
-        useRankDecay?: boolean, order?: number, hidden?: boolean,
-    ) {
+    async postUpsert(_ctx: any, key: string, name: string, weight: number, useRankDecay?: boolean, order?: number, hidden?: boolean) {
         this.checkStructuralOp();
         await upsertAwardType({
-            key, name, weight, useRankDecay: !!useRankDecay,
-            order: order || 100, hidden,
+            key,
+            name,
+            weight,
+            useRankDecay: !!useRankDecay,
+            order: order || 100,
+            hidden,
         });
         this.response.redirect = this.url('admin_rankboard_awards');
     }
@@ -327,11 +340,13 @@ class AdminPersonDetailHandler extends AdminBase {
                 _id: String(person._id),
                 studentDocId: String(person.studentDocId),
             },
-            student: student ? {
-                ...student,
-                _id: String(student._id),
-                schoolId: String(student.schoolId),
-            } : null,
+            student: student
+                ? {
+                      ...student,
+                      _id: String(student._id),
+                      schoolId: String(student.schoolId),
+                  }
+                : null,
             types,
             canImport: this.canImportRankboard(),
             canManage: this.canManageRankboard(),
@@ -341,10 +356,7 @@ class AdminPersonDetailHandler extends AdminBase {
     @param('id', Types.ObjectId)
     @param('awards', Types.Content, true)
     @param('employmentStatus', Types.String, true)
-    async postSave(
-        _ctx: any, id: ObjectId,
-        awardsJson?: string, employmentStatus?: string,
-    ) {
+    async postSave(_ctx: any, id: ObjectId, awardsJson?: string, employmentStatus?: string) {
         this.checkDataOp();
         // JSON 往返会把 importBatchId 的 ObjectId 变成 string——存回前还原，
         // 否则批次回滚的 $pull 匹配不到这些奖项。
@@ -365,10 +377,7 @@ class AdminPeopleSearchHandler extends AdminBase {
         const filter: Record<string, unknown> = { domainId: RANKBOARD_DOMAIN };
         if (q && q.trim()) {
             const safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            filter.$or = [
-                { studentId: { $regex: safe, $options: 'i' } },
-                { realName: { $regex: safe, $options: 'i' } },
-            ];
+            filter.$or = [{ studentId: { $regex: safe, $options: 'i' } }, { realName: { $regex: safe, $options: 'i' } }];
         }
         const docs = await studentsColl.find(filter).limit(20).toArray();
         this.response.body = {
@@ -421,13 +430,13 @@ class AdminUserSearchHandler extends AdminBase {
 
         // userbind.students by studentId or realName（限定 system 域，G5）。
         const safe = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const studentDocs = await studentsColl.find({
-            domainId: RANKBOARD_DOMAIN,
-            $or: [
-                { studentId: { $regex: safe, $options: 'i' } },
-                { realName: { $regex: safe, $options: 'i' } },
-            ],
-        }).limit(10).toArray();
+        const studentDocs = await studentsColl
+            .find({
+                domainId: RANKBOARD_DOMAIN,
+                $or: [{ studentId: { $regex: safe, $options: 'i' } }, { realName: { $regex: safe, $options: 'i' } }],
+            })
+            .limit(10)
+            .toArray();
         for (const s of studentDocs) {
             const label = `${s.studentId} ${s.realName}`;
             results.push({
@@ -440,9 +449,7 @@ class AdminUserSearchHandler extends AdminBase {
         }
 
         // Legacy `users` field kept for older callers.
-        const users = results
-            .filter((r) => r.kind === 'user')
-            .map((r) => ({ uid: r.uid!, uname: r.uname! }));
+        const users = results.filter((r) => r.kind === 'user').map((r) => ({ uid: r.uid!, uname: r.uname! }));
         this.response.body = { results, users };
     }
 }
@@ -477,15 +484,12 @@ class RankBoardGalleryHandler extends Handler {
     @param('url', Types.String)
     @param('expectType', Types.String, true)
     @param('setCover', Types.Boolean, true)
-    async postAddImage(
-        _ctx: any, personId: ObjectId, awardIndex: number, url: string,
-        expectType?: string, setCover?: boolean,
-    ) {
+    async postAddImage(_ctx: any, personId: ObjectId, awardIndex: number, url: string, expectType?: string, setCover?: boolean) {
         if (!this.canUpload()) throw new PermissionError(PERM.PERM_RANKBOARD_IMPORT);
         // 只收站内 /file URL 或 http(s) 外链；`/(?![/\\])` 同时挡协议相对
         // 外链 `//evil.com` 和反斜杠变体 `/\evil.com`（浏览器按 // 解析），
         // 长度限 2048（对抗性审查 #8 / G4）。
-        if (url.length > 2048 || !/^(https?:\/\/|\/(?![/\\]))/i.test(url)) {
+        if (url.length > 2048 || !/^(?:https?:\/\/|\/(?![/\\]))/i.test(url)) {
             throw new ValidationError('url', null, '图片链接无效');
         }
         // TOCTOU 防护（审查 #6/G8）：expectType 作为原子写条件传入，

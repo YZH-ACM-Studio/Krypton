@@ -32,45 +32,55 @@ describe('claimTemporaryAccount', { skip: !HAS_MEMORY_SERVER }, () => {
     const TEMP_UID = 9000001;
     const REAL_UID = 1234;
 
-    before(async () => {
-        if (!HAS_MEMORY_SERVER) return;
-        const { MongoMemoryServer } = require('mongodb-memory-server');
-        memServer = await MongoMemoryServer.create();
-        client = new MongoClient(memServer.getUri());
-        await client.connect();
-        db = client.db('claim_test');
+    before(
+        async () => {
+            if (!HAS_MEMORY_SERVER) return;
+            const { MongoMemoryServer } = require('mongodb-memory-server');
+            memServer = await MongoMemoryServer.create();
+            client = new MongoClient(memServer.getUri());
+            await client.connect();
+            db = client.db('claim_test');
 
-        await db.collection('user').insertMany([
-            {
-                _id: TEMP_UID, uname: 'temp_xxx', priv: 4, isTemporary: true,
-                tempStudentIdInput: '202301001', tempRealNameInput: '张三',
-            },
-            { _id: REAL_UID, uname: 'zhangsan', priv: 4 },
-        ]);
-        // Some records owned by the temp account.
-        for (let i = 0; i < 5; i++) {
-            await db.collection('record').insertOne({
-                _id: new ObjectId(),
+            await db.collection('user').insertMany([
+                {
+                    _id: TEMP_UID,
+                    uname: 'temp_xxx',
+                    priv: 4,
+                    isTemporary: true,
+                    tempStudentIdInput: '202301001',
+                    tempRealNameInput: '张三',
+                },
+                { _id: REAL_UID, uname: 'zhangsan', priv: 4 },
+            ]);
+            // Some records owned by the temp account.
+            for (let i = 0; i < 5; i++) {
+                await db.collection('record').insertOne({
+                    _id: new ObjectId(),
+                    uid: TEMP_UID,
+                    pid: 100 + i,
+                    lang: 'cpp',
+                    status: 1,
+                    contest: new ObjectId(),
+                });
+            }
+            // A contest status doc for the temp account.
+            await db.collection('document.status').insertOne({
+                domainId: 'system',
+                docType: 30,
+                docId: new ObjectId(),
                 uid: TEMP_UID,
-                pid: 100 + i,
-                lang: 'cpp',
-                status: 1,
-                contest: new ObjectId(),
+                score: 80,
             });
-        }
-        // A contest status doc for the temp account.
-        await db.collection('document.status').insertOne({
-            domainId: 'system',
-            docType: 30,
-            docId: new ObjectId(),
-            uid: TEMP_UID,
-            score: 80,
-        });
-        // A message to the temp account.
-        await db.collection('message').insertOne({
-            _id: new ObjectId(), to: TEMP_UID, from: 1, content: 'welcome',
-        });
-    }, { timeout: 60000 });
+            // A message to the temp account.
+            await db.collection('message').insertOne({
+                _id: new ObjectId(),
+                to: TEMP_UID,
+                from: 1,
+                content: 'welcome',
+            });
+        },
+        { timeout: 60000 },
+    );
 
     after(async () => {
         await client?.close();
@@ -79,26 +89,19 @@ describe('claimTemporaryAccount', { skip: !HAS_MEMORY_SERVER }, () => {
 
     /** Test-port of claimTemporaryAccount documented behavior. */
     async function claim(tempUid: number, realUid: number) {
-        const r1 = await db.collection('record').updateMany(
-            { uid: tempUid },
-            { $set: { uid: realUid, _claimedFromTemp: tempUid, _claimedAt: new Date() } },
-        );
-        await db.collection('document.status').updateMany(
-            { uid: tempUid },
-            { $set: { uid: realUid } },
-        );
+        const r1 = await db
+            .collection('record')
+            .updateMany({ uid: tempUid }, { $set: { uid: realUid, _claimedFromTemp: tempUid, _claimedAt: new Date() } });
+        await db.collection('document.status').updateMany({ uid: tempUid }, { $set: { uid: realUid } });
         await db.collection('message').updateMany({ to: tempUid }, { $set: { to: realUid } });
         await db.collection('message').updateMany({ from: tempUid }, { $set: { from: realUid } });
-        await db.collection('user').updateOne(
-            { _id: tempUid },
-            { $set: { priv: 0, _claimedBy: realUid, _claimedAt: new Date() } },
-        );
+        await db.collection('user').updateOne({ _id: tempUid }, { $set: { priv: 0, _claimedBy: realUid, _claimedAt: new Date() } });
         return { recordsTransferred: r1.modifiedCount };
     }
 
     it('re-points all records to the real account', async () => {
-        const before = await db.collection('record').countDocuments({ uid: TEMP_UID });
-        expect(before).to.equal(5);
+        const beforeCount = await db.collection('record').countDocuments({ uid: TEMP_UID });
+        expect(beforeCount).to.equal(5);
         const result = await claim(TEMP_UID, REAL_UID);
         expect(result.recordsTransferred).to.equal(5);
         const tempLeft = await db.collection('record').countDocuments({ uid: TEMP_UID });

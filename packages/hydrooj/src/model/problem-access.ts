@@ -38,11 +38,7 @@ export interface ProblemWriteClaim {
 const DENY_ALL_PROBLEMS: Filter<ProblemDoc> = { docId: { $in: [] } };
 const logger = new Logger('problem-access');
 /** Persistent coordination fields that must never cross a problem read boundary. */
-export const PROBLEM_ACL_INTERNAL_FIELDS = new Set([
-    'aclMutationRevision',
-    'aclMutationLocks',
-    'aclWriteClaim',
-]);
+export const PROBLEM_ACL_INTERNAL_FIELDS = new Set(['aclMutationRevision', 'aclMutationLocks', 'aclWriteClaim']);
 
 function sorted(values?: Set<number>): number[] {
     return Array.from(values || []).sort((a, b) => a - b);
@@ -99,31 +95,22 @@ export function buildProblemBankScope(user: ProblemAclUser): Filter<ProblemDoc> 
         'aclMutationLocks.uid': { $ne: user._id },
     } as Filter<ProblemDoc>;
     if (isProblemBankAdmin(user)) {
-        return fenced.length
-            ? { $and: [{ docId: { $nin: fenced } }, liveLockExclusion] }
-            : liveLockExclusion;
+        return fenced.length ? { $and: [{ docId: { $nin: fenced } }, liveLockExclusion] } : liveLockExclusion;
     }
     if (!canBrowseProblemBank(user)) return { ...DENY_ALL_PROBLEMS };
 
-    const maintained = sorted(new Set(
-        sorted(user._maintainedPids).filter((pid) => !user._aclFencedPids?.has(pid)),
-    ));
+    const maintained = sorted(new Set(sorted(user._maintainedPids).filter((pid) => !user._aclFencedPids?.has(pid))));
     const authorScope: Filter<ProblemDoc> = maintained.length
         ? {
-            $or: [
-                { owner: user._id },
-                {
-                    $and: [
-                        { docId: { $in: maintained } },
-                        { maintainer: user._id },
-                    ],
-                },
-            ],
-        }
+              $or: [
+                  { owner: user._id },
+                  {
+                      $and: [{ docId: { $in: maintained } }, { maintainer: user._id }],
+                  },
+              ],
+          }
         : { owner: user._id };
-    return fenced.length
-        ? { $and: [authorScope, { docId: { $nin: fenced } }, liveLockExclusion] }
-        : { $and: [authorScope, liveLockExclusion] };
+    return fenced.length ? { $and: [authorScope, { docId: { $nin: fenced } }, liveLockExclusion] } : { $and: [authorScope, liveLockExclusion] };
 }
 
 function denyProblemAcl(user: ProblemAclUser): void {
@@ -135,10 +122,7 @@ function denyProblemAcl(user: ProblemAclUser): void {
 }
 
 /** Reload persistent canonical/fence/ProblemDoc-lock state immediately before use. */
-export async function refreshProblemAcl(
-    user: ProblemAclUser,
-    authoritativeDomainId: string,
-): Promise<void> {
+export async function refreshProblemAcl(user: ProblemAclUser, authoritativeDomainId: string): Promise<void> {
     denyProblemAcl(user);
     try {
         const permits = (global.Hydro?.model as any)?.permits;
@@ -146,9 +130,7 @@ export async function refreshProblemAcl(
             throw new TypeError('permits.loadAclForUser is unavailable');
         }
         const loaded = await permits.loadAclForUser(authoritativeDomainId, user._id);
-        if (!(loaded?.permitPids instanceof Set)
-            || !(loaded?.maintainedPids instanceof Set)
-            || !(loaded?.fencedPids instanceof Set)) {
+        if (!(loaded?.permitPids instanceof Set) || !(loaded?.maintainedPids instanceof Set) || !(loaded?.fencedPids instanceof Set)) {
             throw new TypeError('permits.loadAclForUser returned an invalid ACL snapshot');
         }
         user._permitPids = loaded.permitPids;
@@ -158,19 +140,12 @@ export async function refreshProblemAcl(
         user._problemAclLoaded = true;
     } catch (error) {
         denyProblemAcl(user);
-        logger.error(
-            'Problem ACL reload failed domain=%s uid=%d error=%o',
-            authoritativeDomainId,
-            user._id,
-            error,
-        );
+        logger.error('Problem ACL reload failed domain=%s uid=%d error=%o', authoritativeDomainId, user._id, error);
         throw selectionDenied(error);
     }
 }
 
-export type StableProblemRead = (
-    filter?: Filter<ProblemDoc>,
-) => Promise<ProblemDoc | null>;
+export type StableProblemRead = (filter?: Filter<ProblemDoc>) => Promise<ProblemDoc | null>;
 
 /** Remove every persistent ACL coordination field from a detached ProblemDoc. */
 export function stripProblemAclInternalFields(pdoc: ProblemDoc): ProblemDoc {
@@ -179,11 +154,7 @@ export function stripProblemAclInternalFields(pdoc: ProblemDoc): ProblemDoc {
     return safe;
 }
 
-function problemAclRevisionFilter(
-    authoritativeDomainId: string,
-    user: ProblemAclUser,
-    pdoc: ProblemDoc,
-): Filter<ProblemDoc> {
+function problemAclRevisionFilter(authoritativeDomainId: string, user: ProblemAclUser, pdoc: ProblemDoc): Filter<ProblemDoc> {
     const rawRevision = (pdoc as any).aclMutationRevision;
     const revision = Number.isSafeInteger(rawRevision) && rawRevision >= 0 ? rawRevision : 0;
     return {
@@ -218,10 +189,9 @@ export async function commitProblemAclGuardedUpdate(
     $unset: Record<string, unknown>,
 ): Promise<ProblemDoc | null> {
     // Declared below with the rest of the public capability helpers.
-    // eslint-disable-next-line ts/no-use-before-define
+
     if (!canMaintainProblem(user, authorizedPdoc)) return null;
-    if ([...Object.keys($set || {}), ...Object.keys($unset || {})]
-        .some((key) => PROBLEM_ACL_INTERNAL_FIELDS.has(key))) {
+    if ([...Object.keys($set || {}), ...Object.keys($unset || {})].some((key) => PROBLEM_ACL_INTERNAL_FIELDS.has(key))) {
         throw new TypeError('ACL mutation fields cannot be written through the problem metadata entrypoint');
     }
     const rawRevision = (authorizedPdoc as any).aclMutationRevision;
@@ -252,7 +222,7 @@ export async function acquireProblemWriteClaim(
     authorizedPdoc: ProblemDoc,
     requestId: string,
     operation: string,
-    options: { selfRevokeUid?: number, now?: Date } = {},
+    options: { selfRevokeUid?: number; now?: Date } = {},
 ): Promise<ProblemWriteClaim | null> {
     if (!requestId?.trim()) throw new TypeError('problem write claim requestId is required');
     if (!operation?.trim()) throw new TypeError('problem write claim operation is required');
@@ -262,7 +232,7 @@ export async function acquireProblemWriteClaim(
         throw new TypeError('self-revoke write claim must target the current actor');
     }
     // Declared below with the rest of the public capability helpers.
-    // eslint-disable-next-line ts/no-use-before-define
+
     if (!selfRevoke && !canMaintainProblem(user, authorizedPdoc)) return null;
 
     const timestamp = options.now || new Date();
@@ -304,8 +274,7 @@ export async function commitProblemWriteClaimUpdate(
     $set: Partial<ProblemDoc>,
     $unset: Record<string, unknown> = {},
 ): Promise<ProblemDoc | null> {
-    if ([...Object.keys($set || {}), ...Object.keys($unset || {})]
-        .some((key) => PROBLEM_ACL_INTERNAL_FIELDS.has(key))) {
+    if ([...Object.keys($set || {}), ...Object.keys($unset || {})].some((key) => PROBLEM_ACL_INTERNAL_FIELDS.has(key))) {
         throw new TypeError('ACL mutation fields cannot be written through a problem write claim');
     }
     const update: any = {};
@@ -315,16 +284,11 @@ export async function commitProblemWriteClaimUpdate(
 }
 
 /** Persist a failed write; ERROR claims never expire or auto-clear. */
-export async function markProblemWriteClaimError(
-    claim: ProblemWriteClaim,
-    error: unknown,
-    now = new Date(),
-): Promise<boolean> {
+export async function markProblemWriteClaimError(claim: ProblemWriteClaim, error: unknown, now = new Date()): Promise<boolean> {
     const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-    const result = await document.coll.updateOne(
-        claimFilter(claim),
-        { $set: { 'aclWriteClaim.state': 'error', 'aclWriteClaim.lastError': message, 'aclWriteClaim.updatedAt': now } },
-    );
+    const result = await document.coll.updateOne(claimFilter(claim), {
+        $set: { 'aclWriteClaim.state': 'error', 'aclWriteClaim.lastError': message, 'aclWriteClaim.updatedAt': now },
+    });
     return result.matchedCount === 1;
 }
 
@@ -345,10 +309,7 @@ export async function clearProblemWriteClaim(claim: ProblemWriteClaim): Promise<
 }
 
 export async function inspectProblemWriteClaim(domainId: string, pid: number): Promise<ProblemWriteClaim | null> {
-    const doc = await document.coll.findOne(
-        { domainId, docType: document.TYPE_PROBLEM, docId: pid },
-        { projection: { aclWriteClaim: 1 } },
-    );
+    const doc = await document.coll.findOne({ domainId, docType: document.TYPE_PROBLEM, docId: pid }, { projection: { aclWriteClaim: 1 } });
     return doc?.aclWriteClaim ? { domainId, pid, ...doc.aclWriteClaim } : null;
 }
 
@@ -394,16 +355,14 @@ export async function readStableViewableProblem(
         throw new TypeError('stable problem reads support one or two attempts');
     }
     for (let attempt = 0; attempt < attempts; attempt++) {
-        // eslint-disable-next-line no-await-in-loop
         const initial = await read();
         if (!initial || initial.domainId !== authoritativeDomainId) return null;
 
-        // eslint-disable-next-line no-await-in-loop
         await refreshProblemAcl(user, authoritativeDomainId);
         if (!canViewProblem(user, initial)) return null;
 
         // This conditional read is the authorization linearization point.
-        // eslint-disable-next-line no-await-in-loop
+
         const stable = await read(problemAclRevisionFilter(authoritativeDomainId, user, initial));
         if (!stable) continue;
         if (!canViewProblem(user, stable)) return null;
@@ -431,11 +390,9 @@ export async function readStableMaintainableProblem(
         throw new TypeError('stable problem reads support one or two attempts');
     }
     for (let attempt = 0; attempt < attempts; attempt++) {
-        // eslint-disable-next-line no-await-in-loop
         const initial = await read();
         if (!initial || initial.domainId !== authoritativeDomainId) return null;
 
-        // eslint-disable-next-line no-await-in-loop
         await refreshProblemAcl(user, authoritativeDomainId);
         if (!canMaintainProblem(user, initial)) return null;
 
@@ -443,7 +400,7 @@ export async function readStableMaintainableProblem(
         if (!isProblemBankAdmin(user)) {
             filter.$or = [{ owner: user._id }, { maintainer: user._id }];
         }
-        // eslint-disable-next-line no-await-in-loop
+
         const stable = await read(filter);
         if (!stable) continue;
         if (!canMaintainProblem(user, stable)) return null;
@@ -471,10 +428,7 @@ export async function assertProblemBankSelection(
     if (!canBrowseProblemBank(user)) throw selectionDenied();
 
     const count = await document.count(domainId, document.TYPE_PROBLEM, {
-        $and: [
-            buildProblemBankScope(user),
-            { docId: { $in: added }, archivedAt: { $exists: false } },
-        ],
+        $and: [buildProblemBankScope(user), { docId: { $in: added }, archivedAt: { $exists: false } }],
     });
     if (count !== added.length) throw selectionDenied();
 }

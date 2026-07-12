@@ -24,17 +24,22 @@ export function register(cli: CAC) {
     const collectors: Record<string, () => [any, any] | Promise<[any, any]>> = {
         OS: () => {
             const info = fs.readFileSync('/etc/os-release', 'utf-8');
-            const prettyName = info.split('\n').find((i) => i.startsWith('PRETTY_NAME=')).split('=')[1].trim()
-                || `${baseInfo.osinfo.distro} ${baseInfo.osinfo.release} ${baseInfo.osinfo.arch}`;
+            const prettyName =
+                info
+                    .split('\n')
+                    .find((i) => i.startsWith('PRETTY_NAME='))
+                    .split('=')[1]
+                    .trim() || `${baseInfo.osinfo.distro} ${baseInfo.osinfo.release} ${baseInfo.osinfo.arch}`;
             return [`${prettyName} ${baseInfo.osinfo.kernel}`, info];
         },
         CPU: () => {
             const cpuinfo = fs.readFileSync('/proc/cpuinfo', 'utf-8');
-            const modelName = cpuinfo.split('\n').find((i) => i.startsWith('model name')).split(':')[1].trim();
-            return [
-                modelName,
-                cpuinfo.split('\n'),
-            ];
+            const modelName = cpuinfo
+                .split('\n')
+                .find((i) => i.startsWith('model name'))
+                .split(':')[1]
+                .trim();
+            return [modelName, cpuinfo.split('\n')];
         },
         Memory: () => {
             const total = Math.floor(baseInfo.memory.total / 1024 / 1024);
@@ -60,7 +65,7 @@ export function register(cli: CAC) {
                 const res = await superagent.get('https://hydro.ac/hydroac-client-version');
                 info.push(`connect: ${res.status} ${!!res.body.version}`);
                 if (res.body.endpoints?.length) endpoints = res.body.endpoints;
-            } catch (e) { }
+            } catch (e) {}
             return [info.join('\n'), info.join('\n')];
         },
         PM2: async () => {
@@ -69,24 +74,29 @@ export function register(cli: CAC) {
                 return [result.stderr.toString(), result.stderr.toString()];
             }
             const json = JSON.parse(result.stdout.toString());
-            const processes = json.map((i) => `PID=${padEnd(i.pid || 0, 7)}${padEnd(i.name, 8)}\
+            const processes = json.map(
+                (i) => `PID=${padEnd(i.pid || 0, 7)}${padEnd(i.name, 8)}\
 ${padEnd(formatSeconds(Math.floor((Date.now() - i.pm2_env.pm_uptime) / 1000), false), 8)}\
-(${i.pm2_env.pm_exec_path} ${(i.pm2_env.args || []).join(' ')})`);
+(${i.pm2_env.pm_exec_path} ${(i.pm2_env.args || []).join(' ')})`,
+            );
             return [processes, processes];
         },
         HydroOJ: () => {
             const info = `${require('hydrooj/package.json').version}${process.env.HYDRO_PROFILE ? ` (${process.env.HYDRO_PROFILE})` : ''}`;
             const addons = getAddons();
-            const addonsInfo = Object.fromEntries(addons.map((i) => {
-                try {
-                    const pkgJson = require(`${i}/package.json`);
-                    return [i, pkgJson.version];
-                } catch (e) {
-                    return [i, e.message];
-                }
-            }));
+            const addonsInfo = Object.fromEntries(
+                addons.map((i) => {
+                    try {
+                        const pkgJson = require(`${i}/package.json`);
+                        return [i, pkgJson.version];
+                    } catch (e) {
+                        return [i, e.message];
+                    }
+                }),
+            );
             return [
-                { Hydro: info, ...addonsInfo }, { Hydro: info, ...addonsInfo },
+                { Hydro: info, ...addonsInfo },
+                { Hydro: info, ...addonsInfo },
             ];
         },
         Logs: () => {
@@ -100,16 +110,18 @@ ${padEnd(formatSeconds(Math.floor((Date.now() - i.pm2_env.pm_uptime) / 1000), fa
         const infos = {};
         const infoDetails = {};
         baseInfo = await sysinfo.get();
-        await Promise.all(Object.entries(collectors).map(async ([key, value]) => {
-            try {
-                const [info, detail] = await value();
-                infos[key] = argv.options.detail ? detail : info;
-                infoDetails[key] = detail;
-            } catch (e) {
-                infos[key] = e.message;
-                infoDetails[key] = e.message;
-            }
-        }));
+        await Promise.all(
+            Object.entries(collectors).map(async ([key, value]) => {
+                try {
+                    const [info, detail] = await value();
+                    infos[key] = argv.options.detail ? detail : info;
+                    infoDetails[key] = detail;
+                } catch (e) {
+                    infos[key] = e.message;
+                    infoDetails[key] = e.message;
+                }
+            }),
+        );
         infoDetails['now'] = new Date().toISOString();
         infos['now'] = new Date().toISOString();
         logger.info('System info:');
@@ -120,10 +132,10 @@ ${padEnd(formatSeconds(Math.floor((Date.now() - i.pm2_env.pm_uptime) / 1000), fa
         if (process.env.VSCODE_INJECTION) {
             try {
                 child.exec(`code ${tmpFile}`);
-            } catch (e) { }
+            } catch (e) {}
             try {
                 child.exec(`cursor ${tmpFile}`);
-            } catch (err) { }
+            } catch (err) {}
         }
         const res = await superagent.post(`https://${endpoints[0]}/paste?code=dm`).attach('file', tmpFile);
         const [url, , ...rest] = res.text.split('\n');

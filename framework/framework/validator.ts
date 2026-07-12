@@ -11,20 +11,24 @@ export type Type<T> = Schema<T> | readonly [Converter<T>, Validator<false>?, (bo
 
 const MaybeArray = <T>(inner: Schema<T>) => Schema.union([Schema.array(inner), inner]);
 type CheckFunction = <IsNumber extends boolean>(v: IsNumber extends true ? number : string) => boolean;
-const ArrayBase = <IsNumber extends boolean>(check: CheckFunction, number: IsNumber, doSplit: boolean = number) => Schema.transform(
-    MaybeArray(Schema.union([Number, String])),
-    (v) => {
-        const input = (doSplit && typeof v === 'string') ? v.split(',') : v;
+const ArrayBase = <IsNumber extends boolean>(check: CheckFunction, number: IsNumber, doSplit: boolean = number) =>
+    Schema.transform(MaybeArray(Schema.union([Number, String])), (v) => {
+        const input = doSplit && typeof v === 'string' ? v.split(',') : v;
         const res = number
-            ? (typeof input === 'string' ? [+input] : typeof input === 'number' ? [input] : input.map(Number))
-            : typeof input === 'string' ? [input] : typeof input === 'number' ? [input.toString()] : input.map(String);
-        const locate = number
-            ? res.find((i) => !Number.isFinite(+i) || !check(+i as any))
-            : res.find((i) => !check(i as any));
+            ? typeof input === 'string'
+                ? [+input]
+                : typeof input === 'number'
+                  ? [input]
+                  : input.map(Number)
+            : typeof input === 'string'
+              ? [input]
+              : typeof input === 'number'
+                ? [input.toString()]
+                : input.map(String);
+        const locate = number ? res.find((i) => !Number.isFinite(+i) || !check(+i as any)) : res.find((i) => !check(i as any));
         if (locate !== undefined) throw new Error(`Invalid input: ${locate}`);
         return res;
-    },
-) as Schema<any, IsNumber extends true ? number[] : string[]>;
+    }) as Schema<any, IsNumber extends true ? number[] : string[]>;
 
 export interface Types {
     // String outputs
@@ -61,32 +65,34 @@ export interface Types {
     CommaSeperatedArray: Type<string[]>;
     Set: Type<Set<any>>;
     Any: Type<any>;
-    ArrayOf: <T extends Type<any>>(type: T, isOptional?: boolean) => (T extends Type<infer R> ? Type<R[]> : never);
-    AnyOf: <T extends Type<any>>(...type: T[]) => (T extends Type<infer R> ? Type<R> : never);
+    ArrayOf: <T extends Type<any>>(type: T, isOptional?: boolean) => T extends Type<infer R> ? Type<R[]> : never;
+    AnyOf: <T extends Type<any>>(...type: T[]) => T extends Type<infer R> ? Type<R> : never;
 }
 
-const basicString = <T = string>(regex?: RegExp, cb?: (i: string) => boolean, convert?: (i: string) => T) => [
-    convert || ((v) => v.toString()),
-    (v) => {
-        const res = v.toString();
-        if (regex && !regex.test(res)) return false;
-        if (cb && !cb(res)) return false;
-        return !!res.length;
-    },
-] as [(v) => string, (v) => boolean];
-const saslprepString = <T = string>(regex?: RegExp, cb?: (i: string) => boolean, convert?: (i: string) => T) => [
-    convert || ((v) => saslprep(v.toString().trim())),
-    (v) => {
-        try {
-            const res = saslprep(v.toString().trim());
+const basicString = <T = string>(regex?: RegExp, cb?: (i: string) => boolean, convert?: (i: string) => T) =>
+    [
+        convert || ((v) => v.toString()),
+        (v) => {
+            const res = v.toString();
             if (regex && !regex.test(res)) return false;
             if (cb && !cb(res)) return false;
             return !!res.length;
-        } catch (e) {
-            return false;
-        }
-    },
-] as [(v) => string, (v) => boolean];
+        },
+    ] as [(v) => string, (v) => boolean];
+const saslprepString = <T = string>(regex?: RegExp, cb?: (i: string) => boolean, convert?: (i: string) => T) =>
+    [
+        convert || ((v) => saslprep(v.toString().trim())),
+        (v) => {
+            try {
+                const res = saslprep(v.toString().trim());
+                if (regex && !regex.test(res)) return false;
+                if (cb && !cb(res)) return false;
+                return !!res.length;
+            } catch (e) {
+                return false;
+            }
+        },
+    ] as [(v) => string, (v) => boolean];
 
 export const Types = {
     Content: [(v) => v.toString().trim(), (v) => v?.toString()?.trim() && v.toString().trim().length < 65536],
@@ -97,7 +103,11 @@ export const Types = {
     UidOrName: saslprepString(/^(?:.{3,31}|[\u4E00-\u9FA5]{2}|-?[0-9]+)$/),
     Username: saslprepString(/^(?:.{3,31}|[\u4E00-\u9FA5]{2})$/),
     Password: basicString(/^.{6,255}$/),
-    ProblemId: saslprepString(/^(?:[a-z0-9]{1,10}-)?[a-z0-9]+$/i, () => true, (s) => (Number.isSafeInteger(+s) ? +s : s)),
+    ProblemId: saslprepString(
+        /^(?:[a-z0-9]{1,10}-)?[a-z0-9]+$/i,
+        () => true,
+        (s) => (Number.isSafeInteger(+s) ? +s : s),
+    ),
     Email: saslprepString(/^[\w.+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i),
     DomainId: saslprepString(/^[a-zA-Z]\w{3,31}$/),
     Role: saslprepString(/^[\w\u4E00-\u9FA5]{1,31}$/),
@@ -110,7 +120,12 @@ export const Types = {
     PositiveInt: [(v) => +v, (v) => /^\+?[1-9][0-9]*$/.test(v.toString().trim()) && Number.isSafeInteger(+v)],
     Float: [(v) => +v, (v) => Number.isFinite(+v)],
 
-    ObjectId: [() => { throw new Error('mongodb package not found'); }, () => true],
+    ObjectId: [
+        () => {
+            throw new Error('mongodb package not found');
+        },
+        () => true,
+    ],
     Boolean: [(v) => !!(v && !['false', 'off', 'no', '0'].includes(v)), null, true],
     Date: [
         (v) => {
@@ -166,39 +181,37 @@ export const Types = {
     ],
     NumericArray: ArrayBase(Number.isFinite, true),
     CommaSeperatedArray: ArrayBase(() => true, false, true),
-    Set: [(v) => {
-        if (v instanceof Array) return new Set(v);
-        return v ? new Set([v]) : new Set();
-    }, null],
-    Emoji: [
-        (v: string) => v.matchAll(emojiRegex()).next().value[0],
-        (v) => emojiRegex().test(v.toString()),
+    Set: [
+        (v) => {
+            if (v instanceof Array) return new Set(v);
+            return v ? new Set([v]) : new Set();
+        },
+        null,
     ],
+    Emoji: [(v: string) => v.matchAll(emojiRegex()).next().value[0], (v) => emojiRegex().test(v.toString())],
     Any: [(v) => v, null],
-    ArrayOf: (type, isOptional = false) => [
-        (v) => {
-            const arr = v instanceof Array ? v : [v];
-            return arr.map((i) => {
-                if (isOptional && [undefined, null, ''].includes(i)) return undefined;
-                return type[0](i);
-            });
-        },
-        (v) => {
-            if (!type[1]) return true;
-            const arr = v instanceof Array ? v : [v];
-            return arr.every((i) => {
-                if ([undefined, null, ''].includes(i)) return isOptional;
-                return type[1](i);
-            });
-        },
-    ] as any,
-    AnyOf: (...types) => [
-        (v) => types.find((type) => type[1](v))[0](v),
-        (v) => types.some((type) => type[1](v)),
-    ] as any,
+    ArrayOf: (type, isOptional = false) =>
+        [
+            (v) => {
+                const arr = v instanceof Array ? v : [v];
+                return arr.map((i) => {
+                    if (isOptional && [undefined, null, ''].includes(i)) return undefined;
+                    return type[0](i);
+                });
+            },
+            (v) => {
+                if (!type[1]) return true;
+                const arr = v instanceof Array ? v : [v];
+                return arr.every((i) => {
+                    if ([undefined, null, ''].includes(i)) return isOptional;
+                    return type[1](i);
+                });
+            },
+        ] as any,
+    AnyOf: (...types) => [(v) => types.find((type) => type[1](v))[0](v), (v) => types.some((type) => type[1](v))] as any,
 } satisfies Types;
 
 try {
     const { ObjectId } = require('mongodb');
     Types.ObjectId = [((v) => new ObjectId(v)) as any, ObjectId.isValid];
-} catch (e) { }
+} catch (e) {}

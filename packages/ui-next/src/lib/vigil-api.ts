@@ -63,7 +63,11 @@ async function getToken(): Promise<DashboardTokenResponse> {
 }
 
 function stripHtml(s: string): string {
-  return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200);
+  return s
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
 }
 
 async function vigilFetch<T = any>(path: string, init: RequestInit = {}): Promise<T> {
@@ -94,7 +98,9 @@ async function vigilFetch<T = any>(path: string, init: RequestInit = {}): Promis
 
   if (res.status >= 500) {
     let body = '';
-    try { body = await res.text(); } catch {}
+    try {
+      body = await res.text();
+    } catch {}
     throw new VigilOfflineError('server_5xx', stripHtml(body));
   }
 
@@ -183,28 +189,19 @@ export async function rejectRequest(id: string, reason: string): Promise<any> {
 export async function fetchExamSessions(): Promise<VigilExamSession[]> {
   return await vigilFetch('/api/exam-sessions');
 }
-export async function invalidateExamSession(
-  sessionId: string,
-  reason: string,
-  proctorOjUserId?: number,
-): Promise<any> {
+export async function invalidateExamSession(sessionId: string, reason: string, proctorOjUserId?: number): Promise<any> {
   return await vigilFetch(`/api/exam-sessions/${encodeURIComponent(sessionId)}/invalidate`, {
     method: 'POST',
     body: JSON.stringify({ reason, proctorOjUserId }),
   });
 }
-export async function resetStudentFinishSession(
-  sessionId: string,
-  proctorOjUserId?: number,
-): Promise<any> {
+export async function resetStudentFinishSession(sessionId: string, proctorOjUserId?: number): Promise<any> {
   return await vigilFetch('/api/proctor/reset-student-finish', {
     method: 'POST',
     body: JSON.stringify({ sessionId, proctorOjUserId }),
   });
 }
-export async function sendProctorCommand(
-  machineId: string, command: string, payload: Record<string, any> = {},
-): Promise<any> {
+export async function sendProctorCommand(machineId: string, command: string, payload: Record<string, any> = {}): Promise<any> {
   return await vigilFetch(`/api/clients/${machineId}/commands`, {
     method: 'POST',
     body: JSON.stringify({ command, payload }),
@@ -245,8 +242,10 @@ export interface VigilStudentCard {
   studentId?: string;
   /** Computed status — see §7.4 of CLIENT_PROCTOR_MONITORING_DESIGN. */
   status: VigilStudentStatus;
-  /** When status === 'ended', the specific terminal reason in Chinese
-   *  (已主动交卷 / 已作废 / 已换机 / 被强制结束 / 已结束). Null otherwise. */
+  /**
+   * When status === 'ended', the specific terminal reason in Chinese
+   *  (已主动交卷 / 已作废 / 已换机 / 被强制结束 / 已结束). Null otherwise.
+   */
   endedReason?: string | null;
   /** Most recent screenshot thumb URL (typed below, in case server omits). */
   recentScreenshotUrl?: string | null;
@@ -353,8 +352,10 @@ export interface ProctorCommandRequest {
   command: string;
   payload?: Record<string, any>;
   reason?: string;
-  /** Actor metadata is filled in server-side from the token, but we accept
-   *  an explicit override for tests. */
+  /**
+   * Actor metadata is filled in server-side from the token, but we accept
+   *  an explicit override for tests.
+   */
   actor?: { uid?: number; displayName?: string };
 }
 
@@ -366,9 +367,7 @@ export interface ProctorCommandResponse {
   rejected?: { machineId: string; reason: string }[];
 }
 
-export async function sendProctorCommandV2(
-  body: ProctorCommandRequest,
-): Promise<ProctorCommandResponse> {
+export async function sendProctorCommandV2(body: ProctorCommandRequest): Promise<ProctorCommandResponse> {
   return await vigilFetch('/api/admin/vigil/proctor/commands', {
     method: 'POST',
     body: JSON.stringify(body),
@@ -383,18 +382,10 @@ export interface ListStudentsParams {
   /** Free-text query against name + studentId. */
   q?: string;
   /** Server-side sort key; defaults to "status_priority". */
-  sort?:
-    | 'status_priority'
-    | 'student_id'
-    | 'name'
-    | 'exam_time'
-    | 'event_count';
+  sort?: 'status_priority' | 'student_id' | 'name' | 'exam_time' | 'event_count';
 }
 
-export async function listContestStudents(
-  contestId: string,
-  params: ListStudentsParams = {},
-): Promise<VigilStudentListResponse> {
+export async function listContestStudents(contestId: string, params: ListStudentsParams = {}): Promise<VigilStudentListResponse> {
   const qs = new URLSearchParams();
   if (params.page) qs.set('page', String(params.page));
   if (params.pageSize) qs.set('pageSize', String(params.pageSize));
@@ -402,9 +393,7 @@ export async function listContestStudents(
   if (params.q) qs.set('q', params.q);
   if (params.sort) qs.set('sort', params.sort);
   const suffix = qs.toString() ? `?${qs}` : '';
-  return await vigilFetch(
-    `/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/students${suffix}`,
-  );
+  return await vigilFetch(`/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/students${suffix}`);
 }
 
 export interface ListStudentEventsParams {
@@ -413,11 +402,7 @@ export interface ListStudentEventsParams {
   limit?: number;
 }
 
-export async function listStudentEvents(
-  contestId: string,
-  machineId: string,
-  params: ListStudentEventsParams = {},
-): Promise<VigilStudentEvent[]> {
+export async function listStudentEvents(contestId: string, machineId: string, params: ListStudentEventsParams = {}): Promise<VigilStudentEvent[]> {
   const qs = new URLSearchParams();
   if (params.since) qs.set('since', params.since);
   if (params.limit) qs.set('limit', String(params.limit));
@@ -446,12 +431,8 @@ export async function listStudentScreenshots(
   );
 }
 
-export async function listContestRecordings(
-  contestId: string,
-): Promise<VigilRecording[]> {
-  return await vigilFetch(
-    `/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/recordings`,
-  );
+export async function listContestRecordings(contestId: string): Promise<VigilRecording[]> {
+  return await vigilFetch(`/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/recordings`);
 }
 
 export interface ListAuditParams {
@@ -461,19 +442,14 @@ export interface ListAuditParams {
   actor?: number;
 }
 
-export async function listContestAudit(
-  contestId: string,
-  params: ListAuditParams = {},
-): Promise<VigilAuditEntry[]> {
+export async function listContestAudit(contestId: string, params: ListAuditParams = {}): Promise<VigilAuditEntry[]> {
   const qs = new URLSearchParams();
   if (params.since) qs.set('since', params.since);
   if (params.limit) qs.set('limit', String(params.limit));
   if (params.command) qs.set('command', params.command);
   if (params.actor) qs.set('actor', String(params.actor));
   const suffix = qs.toString() ? `?${qs}` : '';
-  return await vigilFetch(
-    `/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/audit${suffix}`,
-  );
+  return await vigilFetch(`/api/admin/vigil/proctor/contests/${encodeURIComponent(contestId)}/audit${suffix}`);
 }
 
 /**
@@ -501,12 +477,7 @@ export function vigilScreenshotUrl(screenshotId: string): string {
  * (forward_auth → hydrooj check-hls-access), which then reaches SRS on
  * oj-vigil. See §4.4 of CLIENT_PROCTOR_MONITORING_DESIGN.
  */
-export function buildHlsStreamUrl(
-  contestId: string,
-  machineId: string,
-  streamType: 'screen' | 'camera',
-  recordEnabled: boolean,
-): string {
+export function buildHlsStreamUrl(contestId: string, machineId: string, streamType: 'screen' | 'camera', recordEnabled: boolean): string {
   // Caddy is configured on the same host that serves the OJ frontend, so a
   // *relative* URL is enough and dodges any cross-origin auth weirdness.
   const app = recordEnabled ? 'live-record' : 'live-nodvr';
@@ -519,12 +490,7 @@ export function buildHlsStreamUrl(
  * `{app}/{stream}.flv` (SRS exposes HTTP-FLV for any RTMP app at no extra
  * cost). Same forward_auth gate as the HLS route.
  */
-export function buildFlvStreamUrl(
-  contestId: string,
-  machineId: string,
-  streamType: 'screen' | 'camera',
-  recordEnabled: boolean,
-): string {
+export function buildFlvStreamUrl(contestId: string, machineId: string, streamType: 'screen' | 'camera', recordEnabled: boolean): string {
   const app = recordEnabled ? 'live-record' : 'live-nodvr';
   return `/vigil-flv/${app}/${encodeURIComponent(contestId)}_${encodeURIComponent(machineId)}_${streamType}.flv`;
 }

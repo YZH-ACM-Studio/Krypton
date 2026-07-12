@@ -15,22 +15,9 @@ import * as YAML from 'yaml';
 /*  Types                                                             */
 /* ────────────────────────────────────────────────────────────────── */
 
-export type ProblemType =
-  | 'default'
-  | 'objective'
-  | 'submit_answer'
-  | 'interactive'
-  | 'communication'
-  | 'fill_function';
+export type ProblemType = 'default' | 'objective' | 'submit_answer' | 'interactive' | 'communication' | 'fill_function';
 
-export type CheckerType =
-  | 'default'
-  | 'strict'
-  | 'float'
-  | 'lemon'
-  | 'syzoj'
-  | 'testlib'
-  | 'custom';
+export type CheckerType = 'default' | 'strict' | 'float' | 'lemon' | 'syzoj' | 'testlib' | 'custom';
 
 export type ScoreMode = 'sum' | 'min' | 'max';
 
@@ -106,9 +93,9 @@ export function parseTimeMS(input: string | undefined | null): number | null {
   const s = String(input).trim().toLowerCase();
   if (!s) return null;
   // Allow bare numbers; default unit ms
-  const m = s.match(/^(-?\d*\.?\d+)\s*(ms|s|seconds?|second|secs?|sec)?$/);
+  const m = s.match(/^(-?(?:\d+(?:\.\d+)?|\.\d+))\s*(ms|s|seconds?|secs?)?$/);
   if (!m) return null;
-  const value = parseFloat(m[1]);
+  const value = Number.parseFloat(m[1]);
   if (!Number.isFinite(value)) return null;
   const unit = m[2] || 'ms';
   if (unit === 'ms') return Math.round(value);
@@ -120,9 +107,9 @@ export function parseMemoryMB(input: string | undefined | null): number | null {
   if (input == null) return null;
   const s = String(input).trim().toLowerCase();
   if (!s) return null;
-  const m = s.match(/^(-?\d*\.?\d+)\s*(b|k|kb|m|mb|g|gb)?$/);
+  const m = s.match(/^(-?(?:\d+(?:\.\d+)?|\.\d+))\s*([bkmg]|kb|mb|gb)?$/);
   if (!m) return null;
-  const value = parseFloat(m[1]);
+  const value = Number.parseFloat(m[1]);
   if (!Number.isFinite(value)) return null;
   const unit = m[2] || 'mb';
   if (unit === 'b') return value / (1024 * 1024);
@@ -158,7 +145,7 @@ export function formatMemory(mb: number | null | undefined, preferUnit?: 'k' | '
 export function splitTime(input: string | undefined | null): { value: string; unit: 'ms' | 's' } {
   if (!input) return { value: '', unit: 's' };
   const s = String(input).trim().toLowerCase();
-  const m = s.match(/^(-?\d*\.?\d+)\s*(ms|s)?$/);
+  const m = s.match(/^(-?(?:\d+(?:\.\d+)?|\.\d+))\s*(ms|s)?$/);
   if (!m) return { value: '', unit: 's' };
   const unit = (m[2] === 'ms' ? 'ms' : 's') as 'ms' | 's';
   return { value: m[1], unit };
@@ -168,11 +155,9 @@ export function splitTime(input: string | undefined | null): { value: string; un
 export function splitMemory(input: string | undefined | null): { value: string; unit: 'k' | 'm' | 'g' } {
   if (!input) return { value: '', unit: 'm' };
   const s = String(input).trim().toLowerCase();
-  const m = s.match(/^(-?\d*\.?\d+)\s*(b|k|kb|m|mb|g|gb)?$/);
+  const m = s.match(/^(-?(?:\d+(?:\.\d+)?|\.\d+))\s*([bkmg]|kb|mb|gb)?$/);
   if (!m) return { value: '', unit: 'm' };
-  const unit = m[2] === 'k' || m[2] === 'kb' ? 'k'
-    : m[2] === 'g' || m[2] === 'gb' ? 'g'
-      : 'm';
+  const unit = m[2] === 'k' || m[2] === 'kb' ? 'k' : m[2] === 'g' || m[2] === 'gb' ? 'g' : 'm';
   return { value: m[1], unit };
 }
 
@@ -255,7 +240,7 @@ function normalizeCase(raw: any): JudgeCase | null {
 
 function normalizeSubtask(raw: any, fallbackId: number): JudgeSubtask | null {
   if (!raw || typeof raw !== 'object') return null;
-  const cases = Array.isArray(raw.cases) ? raw.cases.map(normalizeCase).filter(Boolean) as JudgeCase[] : [];
+  const cases = Array.isArray(raw.cases) ? (raw.cases.map(normalizeCase).filter(Boolean) as JudgeCase[]) : [];
   const out: JudgeSubtask = {
     id: typeof raw.id === 'number' ? raw.id : fallbackId,
     cases,
@@ -329,9 +314,21 @@ export function serializeJudgeConfig(config: JudgeConfig, opts?: { preserveSourc
       if (!structuralChange) {
         // Update only scalar fields in-place; preserve comments.
         const scalarKeys = [
-          'type', 'time', 'memory', 'score', 'checker', 'checker_type',
-          'float_relative', 'float_absolute', 'interactor', 'user', 'manager',
-          'filename', 'langs', 'time_limit_rate', 'memory_limit_rate',
+          'type',
+          'time',
+          'memory',
+          'score',
+          'checker',
+          'checker_type',
+          'float_relative',
+          'float_absolute',
+          'interactor',
+          'user',
+          'manager',
+          'filename',
+          'langs',
+          'time_limit_rate',
+          'memory_limit_rate',
         ];
         for (const k of scalarKeys) {
           if (obj[k] !== undefined && oldTop[k] !== obj[k]) {
@@ -342,7 +339,9 @@ export function serializeJudgeConfig(config: JudgeConfig, opts?: { preserveSourc
         }
         return doc.toString();
       }
-    } catch { /* fall through to full serialize */ }
+    } catch {
+      /* fall through to full serialize */
+    }
   }
   return YAML.stringify(obj, { lineWidth: 0 });
 }
@@ -369,9 +368,6 @@ export interface PairResult {
   /** files that don't look like input/output at all (checker, interactor, …) */
   others: string[];
 }
-
-const INPUT_EXTS = ['.in', '.input', '.txt'];
-const OUTPUT_EXTS = ['.out', '.ans', '.output', '.txt'];
 
 /**
  * Heuristic auto-pair: for each file, decide if it's an input or output,
@@ -446,9 +442,9 @@ export function classify(filename: string): { kind: 'input' | 'output' | 'other'
   if (m2) return { kind: 'output', stem: normalizeStem(m2[1]) };
 
   // input01.txt / output01.txt
-  const m3 = lower.match(/^input(.*?)\.[\w]+$/);
+  const m3 = lower.match(/^input(.*?)\.\w+$/);
   if (m3) return { kind: 'input', stem: normalizeStem(m3[1]) };
-  const m4 = lower.match(/^output(.*?)\.[\w]+$/);
+  const m4 = lower.match(/^output(.*?)\.\w+$/);
   if (m4) return { kind: 'output', stem: normalizeStem(m4[1]) };
 
   // data1.in / data1.out (covered by m1/m2)
@@ -470,7 +466,7 @@ function naturalStemCompare(a: string, b: string): number {
     const pb = bParts[i] ?? '';
     const na = Number(pa);
     const nb = Number(pb);
-    if (Number.isFinite(na) && Number.isFinite(nb) && pa.match(/^\d+$/) && pb.match(/^\d+$/)) {
+    if (Number.isFinite(na) && Number.isFinite(nb) && /^\d+$/.test(pa) && /^\d+$/.test(pb)) {
       if (na !== nb) return na - nb;
     } else if (pa !== pb) {
       return pa.localeCompare(pb);
@@ -563,7 +559,9 @@ export function validateConfig(config: JudgeConfig, fileSet: Set<string>): Valid
 function hasCycle(subtasks: JudgeSubtask[]): boolean {
   const byId = new Map<number, JudgeSubtask>();
   for (const s of subtasks) if (s.id != null) byId.set(s.id, s);
-  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const WHITE = 0;
+  const GRAY = 1;
+  const BLACK = 2;
   const color = new Map<number, number>();
   for (const id of byId.keys()) color.set(id, WHITE);
   function dfs(id: number): boolean {
@@ -591,8 +589,10 @@ export function assignSequentialIds(subtasks: JudgeSubtask[]): JudgeSubtask[] {
   return subtasks.map((s, i) => ({ ...s, id: s.id ?? i + 1 }));
 }
 
-/** Build a flat pool of all cases (across cases / subtasks). Used when
- *  switching between flat and grouped modes. */
+/**
+ * Build a flat pool of all cases (across cases / subtasks). Used when
+ *  switching between flat and grouped modes.
+ */
 export function flattenCases(config: JudgeConfig): JudgeCase[] {
   if (config.subtasks && config.subtasks.length > 0) {
     return config.subtasks.flatMap((s) => s.cases);

@@ -1,38 +1,23 @@
 import { ObjectId } from 'hydrooj';
-import {
-    categoriesColl,
-    docsColl,
-    readStateColl,
-    seedCategoriesIfEmpty,
-} from './db';
-import type {
-    AnnouncementCategory,
-    AnnouncementDoc,
-    AnnouncementReadState,
-} from './types';
+import type { Filter } from 'mongodb';
+import { categoriesColl, docsColl, readStateColl, seedCategoriesIfEmpty } from './db';
+import type { AnnouncementCategory, AnnouncementDoc, AnnouncementReadState } from './types';
 import { isEffectivelyVisible } from './types';
 
 /* ---- helpers ---- */
 
-function visibilityClause(now: Date) {
+function visibilityClause(now: Date): Filter<AnnouncementDoc> {
     return {
         hidden: { $ne: true },
         publishAt: { $lte: now },
-        $or: [
-            { unpublishAt: null },
-            { unpublishAt: { $exists: false } },
-            { unpublishAt: { $gt: now } },
-        ],
-    } as const;
+        $or: [{ unpublishAt: null }, { unpublishAt: { $exists: false } }, { unpublishAt: { $gt: now } }],
+    };
 }
 
-function scopeClause(domainId: string) {
+function scopeClause(domainId: string): Filter<AnnouncementDoc> {
     return {
-        $or: [
-            { scope: 'global' as const },
-            { scope: 'domain' as const, domainId },
-        ],
-    } as const;
+        $or: [{ scope: 'global' as const }, { scope: 'domain' as const, domainId }],
+    };
 }
 
 /* ---- documents ---- */
@@ -154,13 +139,7 @@ export async function getCategory(key: string): Promise<AnnouncementCategory | n
     return await categoriesColl.findOne({ key });
 }
 
-export async function upsertCategory(input: {
-    key: string;
-    name: string;
-    color: string;
-    order: number;
-    hidden?: boolean;
-}): Promise<void> {
+export async function upsertCategory(input: { key: string; name: string; color: string; order: number; hidden?: boolean }): Promise<void> {
     await categoriesColl.updateOne(
         { key: input.key },
         {
@@ -187,44 +166,26 @@ export async function deleteCategory(key: string): Promise<void> {
 export async function markRead(uid: number, aid: ObjectId | string): Promise<void> {
     const aidObj = typeof aid === 'string' ? new ObjectId(aid) : aid;
     const _id = `${uid}:${aidObj.toString()}`;
-    await readStateColl.updateOne(
-        { _id },
-        { $set: { _id, uid, aid: aidObj, readAt: new Date() } },
-        { upsert: true },
-    );
+    await readStateColl.updateOne({ _id }, { $set: { _id, uid, aid: aidObj, readAt: new Date() } }, { upsert: true });
 }
 
-export async function listUnreadForUser(
-    uid: number,
-    domainId: string,
-    limit = 20,
-): Promise<AnnouncementDoc[]> {
+export async function listUnreadForUser(uid: number, domainId: string, limit = 20): Promise<AnnouncementDoc[]> {
     if (!uid) return [];
     const now = new Date();
-    const reads = await readStateColl
-        .find({ uid })
-        .project<Pick<AnnouncementReadState, 'aid'>>({ aid: 1, _id: 0 })
-        .toArray();
+    const reads = await readStateColl.find({ uid }).project<Pick<AnnouncementReadState, 'aid'>>({ aid: 1, _id: 0 }).toArray();
     const readIds = reads.map((r) => r.aid);
     const filter: Record<string, unknown> = {
         ...scopeClause(domainId),
         ...visibilityClause(now),
     };
     if (readIds.length) filter._id = { $nin: readIds };
-    return await docsColl
-        .find(filter)
-        .sort({ pin: -1, publishAt: -1 })
-        .limit(limit)
-        .toArray();
+    return await docsColl.find(filter).sort({ pin: -1, publishAt: -1 }).limit(limit).toArray();
 }
 
 export async function countUnreadForUser(uid: number, domainId: string): Promise<number> {
     if (!uid) return 0;
     const now = new Date();
-    const reads = await readStateColl
-        .find({ uid })
-        .project<Pick<AnnouncementReadState, 'aid'>>({ aid: 1, _id: 0 })
-        .toArray();
+    const reads = await readStateColl.find({ uid }).project<Pick<AnnouncementReadState, 'aid'>>({ aid: 1, _id: 0 }).toArray();
     const readIds = reads.map((r) => r.aid);
     const filter: Record<string, unknown> = {
         ...scopeClause(domainId),
@@ -240,10 +201,7 @@ export async function countUnreadForUser(uid: number, domainId: string): Promise
  * Pinned-first / latest-N selection used by the home page integration.
  * Returns at most `limit` (default 5) effectively-visible announcements.
  */
-export async function listForHomepage(
-    domainId: string,
-    limit = 5,
-): Promise<AnnouncementDoc[]> {
+export async function listForHomepage(domainId: string, limit = 5): Promise<AnnouncementDoc[]> {
     const now = new Date();
     return await docsColl
         .find({ ...scopeClause(domainId), ...visibilityClause(now) })

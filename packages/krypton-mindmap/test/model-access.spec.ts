@@ -85,9 +85,14 @@ describe('mindmap problem query scope', () => {
             tags: ['dynamic-programming'],
             problemIds: ['P9', '10'],
         };
-        resultDocs = [{
-            pid: 'P9', title: 'Scoped problem', nSubmit: 10, nAccept: 5,
-        }];
+        resultDocs = [
+            {
+                pid: 'P9',
+                title: 'Scoped problem',
+                nSubmit: 10,
+                nAccept: 5,
+            },
+        ];
         const scope = { $or: [{ owner: 42 }, { docId: { $in: [9] } }] };
 
         const problems = await listProblemsForNode('system', nodeId as any, scope as any);
@@ -101,24 +106,22 @@ describe('mindmap problem query scope', () => {
                         docType: 10,
                         domainId: 'system',
                         hidden: { $ne: true },
-                        $or: [
-                            { tag: { $in: ['dynamic-programming'] } },
-                            { pid: { $in: ['P9', '10'] } },
-                            { docId: { $in: [10] } },
-                        ],
+                        $or: [{ tag: { $in: ['dynamic-programming'] } }, { pid: { $in: ['P9', '10'] } }, { docId: { $in: [10] } }],
                     },
                 ],
             },
             projection: { pid: 1, docId: 1, title: 1, nSubmit: 1, nAccept: 1 },
             limit: 500,
         });
-        expect(problems).to.deep.equal([{
-            pid: 'P9',
-            title: 'Scoped problem',
-            nSubmit: 10,
-            nAccept: 5,
-            difficulty: 3,
-        }]);
+        expect(problems).to.deep.equal([
+            {
+                pid: 'P9',
+                title: 'Scoped problem',
+                nSubmit: 10,
+                nAccept: 5,
+                difficulty: 3,
+            },
+        ]);
     });
 
     it('keeps the administrator empty scope global inside the existing domain query', async () => {

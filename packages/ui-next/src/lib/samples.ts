@@ -26,9 +26,7 @@ export interface SampleCase {
  * Always returns an object so callers can iterate values; never returns
  * `null`/`undefined`.
  */
-function normalizeContent(
-  content: string | Record<string, string> | null | undefined,
-): Record<string, string> {
+function normalizeContent(content: string | Record<string, string> | null | undefined): Record<string, string> {
   if (!content) return {};
   if (typeof content === 'object') {
     const out: Record<string, string> = {};
@@ -48,7 +46,9 @@ function normalizeContent(
         }
         if (Object.keys(out).length > 0) return out;
       }
-    } catch { /* fall through and treat as raw markdown */ }
+    } catch {
+      /* fall through and treat as raw markdown */
+    }
   }
   return { default: trimmed };
 }
@@ -63,16 +63,13 @@ function normalizeContent(
  * The opening fence may use 3+ backticks and have trailing whitespace
  * before the newline. The closing fence must match the opening length.
  */
-function* iterateSampleBlocks(
-  md: string,
-): Generator<{ kind: 'input' | 'output'; id: number; body: string }> {
+function* iterateSampleBlocks(md: string): Generator<{ kind: 'input' | 'output'; id: number; body: string }> {
   // Use a tolerant pattern that accepts any 3+ backticks and optional id.
-  const re = /(^|\n)(`{3,})(input|output)(\d*)[^\S\n]*\n([\s\S]*?)\n\2(?=\s|$)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(md)) !== null) {
-    const kind = m[3].toLowerCase() as 'input' | 'output';
-    const id = m[4] ? parseInt(m[4], 10) : 1;
-    const body = m[5].replace(/\s+$/u, '');
+  const re = /(?:^|\n)(`{3,})(input|output)(\d*)[^\S\n]*\n([\s\S]*?)\n\1(?=\s|$)/gi;
+  for (let m = re.exec(md); m !== null; m = re.exec(md)) {
+    const kind = m[2].toLowerCase() as 'input' | 'output';
+    const id = m[3] ? Number.parseInt(m[3], 10) : 1;
+    const body = m[4].replace(/\s+$/u, '');
     yield { kind, id, body };
   }
 }
@@ -92,19 +89,13 @@ function* iterateSampleBlocks(
  * When multiple languages are present, the first language that yields
  * any sample is used (zh-preferred order).
  */
-export function extractSamples(
-  content: string | Record<string, string> | null | undefined,
-): SampleCase[] {
+export function extractSamples(content: string | Record<string, string> | null | undefined): SampleCase[] {
   const langs = normalizeContent(content);
   const keys = Object.keys(langs);
   if (keys.length === 0) return [];
 
   // Prefer zh-family then en, then declaration order — same as MarkdownView.
-  const ordered = [
-    ...keys.filter((k) => /^zh/i.test(k)),
-    ...keys.filter((k) => /^en/i.test(k)),
-    ...keys.filter((k) => !/^zh|^en/i.test(k)),
-  ];
+  const ordered = [...keys.filter((k) => /^zh/i.test(k)), ...keys.filter((k) => /^en/i.test(k)), ...keys.filter((k) => !/^zh|^en/i.test(k))];
 
   for (const k of ordered) {
     const samples = extractFromMarkdown(langs[k]);
@@ -133,10 +124,7 @@ export function resolveContentString(content: string | Record<string, string>): 
   const langs = normalizeContent(content);
   const keys = Object.keys(langs);
   if (keys.length === 0) return '';
-  const preferred =
-    keys.find((k) => /^zh/i.test(k))
-    || keys.find((k) => /^en/i.test(k))
-    || keys[0];
+  const preferred = keys.find((k) => /^zh/i.test(k)) || keys.find((k) => /^en/i.test(k)) || keys[0];
   return langs[preferred];
 }
 
@@ -162,20 +150,22 @@ export function splitMarkdownBySamples(md: string): MarkdownChunk[] {
   if (!md) return [];
 
   interface Blk {
-    start: number; end: number;
-    kind: 'input' | 'output'; id: number; body: string;
+    start: number;
+    end: number;
+    kind: 'input' | 'output';
+    id: number;
+    body: string;
   }
   const blocks: Blk[] = [];
   // Same regex as `iterateSampleBlocks` but with positions.
   const re = /(^|\n)(`{3,})(input|output)(\d*)[^\S\n]*\n([\s\S]*?)\n\2(?=\s|$)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(md)) !== null) {
+  for (let m = re.exec(md); m !== null; m = re.exec(md)) {
     const leadingNl = m[1] ? 1 : 0;
     blocks.push({
       start: m.index + leadingNl,
       end: m.index + m[0].length,
       kind: m[3].toLowerCase() as 'input' | 'output',
-      id: m[4] ? parseInt(m[4], 10) : 1,
+      id: m[4] ? Number.parseInt(m[4], 10) : 1,
       body: m[5].replace(/\s+$/u, ''),
     });
   }

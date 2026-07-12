@@ -1,11 +1,18 @@
 // Hydro Integration
-/* eslint-disable no-await-in-loop */
+
 import path from 'path';
 import { fs } from '@hydrooj/utils';
 import * as sysinfo from '@hydrooj/utils/lib/sysinfo';
 import {
-    Context as HydroContext, db, JudgeHandler, JudgeResultCallbackContext,
-    ObjectId, RecordModel, SettingModel, StorageModel, TaskModel,
+    Context as HydroContext,
+    db,
+    JudgeHandler,
+    JudgeResultCallbackContext,
+    ObjectId,
+    RecordModel,
+    SettingModel,
+    StorageModel,
+    TaskModel,
 } from 'hydrooj';
 import { langs } from 'hydrooj/src/model/setting';
 import { getConfig } from '../config';
@@ -72,20 +79,13 @@ export async function apply(ctx: HydroContext) {
             logger.debug('Record not found: %o', t);
             return;
         }
-        await (new JudgeTask(session, JSON.parse(JSON.stringify(Object.assign(rdoc, t))))).handle().catch(logger.error);
+        await new JudgeTask(session, JSON.parse(JSON.stringify(Object.assign(rdoc, t)))).handle().catch(logger.error);
     };
     const parallelism = getConfig('parallelism');
     async function collectInfo() {
         const coll = db.collection('status');
-        const [compilers, size] = await Promise.all([
-            compilerVersions(langs),
-            stackSize(),
-        ]);
-        await coll.updateOne(
-            { mid: info.mid, type: 'server' },
-            { $set: { compilers, stackSize: size } },
-            { upsert: true },
-        );
+        const [compilers, size] = await Promise.all([compilerVersions(langs), stackSize()]);
+        await coll.updateOne({ mid: info.mid, type: 'server' }, { $set: { compilers, stackSize: size } }, { upsert: true });
     }
     ctx.effect(() => {
         const taskConsumer = TaskModel.consume({ type: 'judge' }, handle, true, parallelism);

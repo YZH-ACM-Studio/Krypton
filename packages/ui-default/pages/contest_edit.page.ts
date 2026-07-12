@@ -13,13 +13,15 @@ const page = new NamedPage(['contest_edit', 'contest_create', 'homework_create',
   UserSelectAutoComplete.getOrConstruct<true>($('[name="maintainer"]'), { multi: true, clearDefaultValue: false });
   LanguageSelectAutoComplete.getOrConstruct($('[name=langs]'), { multi: true });
   AssignSelectAutoComplete.getOrConstruct($('[name="assign"]'), { multi: true });
-  $('[name="rule"]').on('change', () => {
-    const rule = $('[name="rule"]').val();
-    $('.contest-rule-settings input').attr('disabled', 'disabled');
-    $('.contest-rule-settings').hide();
-    $(`.contest-rule--${rule} input`).removeAttr('disabled');
-    $(`.contest-rule--${rule}`).show();
-  }).trigger('change');
+  $('[name="rule"]')
+    .on('change', () => {
+      const rule = $('[name="rule"]').val();
+      $('.contest-rule-settings input').attr('disabled', 'disabled');
+      $('.contest-rule-settings').hide();
+      $(`.contest-rule--${rule} input`).removeAttr('disabled');
+      $(`.contest-rule--${rule}`).show();
+    })
+    .trigger('change');
   $('[name="beginAtDate"], [name="beginAtTime"], [name="duration"]').on('change', () => {
     const beginAtDate = $('[name="beginAtDate"]').val();
     const beginAtTime = $('[name="beginAtTime"]').val();
@@ -27,13 +29,16 @@ const page = new NamedPage(['contest_edit', 'contest_create', 'homework_create',
     const endAt = moment(`${beginAtDate} ${beginAtTime}`).add(+duration, 'hours').toDate();
     if (endAt) $('[name="endAt"]').val(moment(endAt).format('YYYY-MM-DD HH:mm'));
   });
-  $('[name="permission"]').removeAttr('disabled').on('change', () => {
-    const type = $('[name="permission"]').val();
-    $('[data-perm] input').attr('disabled', 'disabled');
-    $('[data-perm]').hide();
-    $(`[data-perm="${type}"] input`).removeAttr('disabled');
-    $(`[data-perm="${type}"]`).show();
-  }).trigger('change');
+  $('[name="permission"]')
+    .removeAttr('disabled')
+    .on('change', () => {
+      const type = $('[name="permission"]').val();
+      $('[data-perm] input').attr('disabled', 'disabled');
+      $('[data-perm]').hide();
+      $(`[data-perm="${type}"] input`).removeAttr('disabled');
+      $(`[data-perm="${type}"]`).show();
+    })
+    .trigger('change');
   if (pagename.endsWith('edit')) {
     let confirmed = false;
     $(document).on('click', '[value="delete"]', (ev) => {

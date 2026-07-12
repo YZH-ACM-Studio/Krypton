@@ -11,11 +11,10 @@
  *
  * Used by the SendMessageDialog ("info / warning / critical" + audience).
  */
-import { forwardRef, useId, type InputHTMLAttributes, type ReactNode } from 'react';
+import { forwardRef, type InputHTMLAttributes, type ReactNode, useId } from 'react';
 import { cn } from '@/lib/cn';
 
-export interface RadioGroupItemProps
-  extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'> {
+export interface RadioGroupItemProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'> {
   size?: 'sm' | 'md';
   label?: ReactNode;
   description?: ReactNode;
@@ -24,13 +23,7 @@ export interface RadioGroupItemProps
 }
 
 export const RadioGroupItem = forwardRef<HTMLInputElement, RadioGroupItemProps>(
-  function RadioGroupItem(
-    {
-      size = 'md', label, description, wrapperClassName, className, disabled,
-      id: idProp, ...props
-    },
-    ref,
-  ) {
+  ({ size = 'md', label, description, wrapperClassName, className, disabled, id: idProp, ...props }, ref) => {
     const fallbackId = useId();
     const id = idProp || fallbackId;
     const dim = size === 'sm' ? 'size-3.5' : 'size-4';
@@ -38,11 +31,7 @@ export const RadioGroupItem = forwardRef<HTMLInputElement, RadioGroupItemProps>(
     return (
       <label
         htmlFor={id}
-        className={cn(
-          'inline-flex items-start gap-2',
-          disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-          wrapperClassName,
-        )}
+        className={cn('inline-flex items-start gap-2', disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer', wrapperClassName)}
       >
         <span className={cn('relative inline-flex shrink-0 translate-y-0.5', dim)}>
           <input
@@ -84,17 +73,11 @@ interface RadioGroupProps extends React.HTMLAttributes<HTMLDivElement> {
   orientation?: 'horizontal' | 'vertical';
 }
 
-export function RadioGroup({
-  orientation = 'vertical', className, ...props
-}: RadioGroupProps) {
+export function RadioGroup({ orientation = 'vertical', className, ...props }: RadioGroupProps) {
   return (
     <div
       role="radiogroup"
-      className={cn(
-        'flex',
-        orientation === 'horizontal' ? 'flex-row flex-wrap gap-4' : 'flex-col gap-2',
-        className,
-      )}
+      className={cn('flex', orientation === 'horizontal' ? 'flex-row flex-wrap gap-4' : 'flex-col gap-2', className)}
       {...props}
     />
   );

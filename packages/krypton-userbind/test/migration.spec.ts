@@ -27,15 +27,18 @@ describe('userbind migration v1', { skip: !HAS_MEMORY_SERVER }, () => {
     let client: MongoClient | null = null;
     let db: any = null;
 
-    before(async () => {
-        if (!HAS_MEMORY_SERVER) return;
-        // eslint-disable-next-line ts/no-require-imports
-        const { MongoMemoryServer } = require('mongodb-memory-server');
-        memServer = await MongoMemoryServer.create();
-        client = new MongoClient(memServer.getUri());
-        await client.connect();
-        db = client.db('userbind_migration_test');
-    }, { timeout: 60000 });
+    before(
+        async () => {
+            if (!HAS_MEMORY_SERVER) return;
+
+            const { MongoMemoryServer } = require('mongodb-memory-server');
+            memServer = await MongoMemoryServer.create();
+            client = new MongoClient(memServer.getUri());
+            await client.connect();
+            db = client.db('userbind_migration_test');
+        },
+        { timeout: 60000 },
+    );
 
     after(async () => {
         await client?.close();
@@ -64,9 +67,7 @@ describe('userbind migration v1', { skip: !HAS_MEMORY_SERVER }, () => {
             createdBy: 1,
             parentSchoolId: schoolId,
             groupType: 0,
-            students: [
-                { studentId: '202301001', realName: '张三', bound: true, boundBy: 100 },
-            ],
+            students: [{ studentId: '202301001', realName: '张三', bound: true, boundBy: 100 }],
         });
         await db.collection('user_groups').insertOne({
             _id: contestOnlyGroupId,
@@ -75,9 +76,7 @@ describe('userbind migration v1', { skip: !HAS_MEMORY_SERVER }, () => {
             createdBy: 1,
             parentSchoolId: schoolId,
             groupType: 1,
-            students: [
-                { studentId: '202301001', realName: '张三' },
-            ],
+            students: [{ studentId: '202301001', realName: '张三' }],
         });
         return { schoolId, groupId, contestOnlyGroupId };
     }
@@ -93,8 +92,11 @@ describe('userbind migration v1', { skip: !HAS_MEMORY_SERVER }, () => {
         for await (const old of db.collection('school_groups').find({})) {
             const newId = new ObjectId();
             await db.collection('userbind.schools').insertOne({
-                _id: newId, domainId, name: old.name,
-                createdAt: old.createdAt, createdBy: old.createdBy,
+                _id: newId,
+                domainId,
+                name: old.name,
+                createdAt: old.createdAt,
+                createdBy: old.createdBy,
             });
             schoolMap.set(old._id.toString(), newId);
             for (const member of old.members || []) {
@@ -107,7 +109,8 @@ describe('userbind migration v1', { skip: !HAS_MEMORY_SERVER }, () => {
                     groupIds: [],
                     boundUserId: member.bound ? member.boundBy : null,
                     boundAt: member.bound && member.boundAt ? member.boundAt : null,
-                    createdAt: old.createdAt, createdBy: old.createdBy,
+                    createdAt: old.createdAt,
+                    createdBy: old.createdBy,
                 });
             }
         }
@@ -130,13 +133,12 @@ describe('userbind migration v1', { skip: !HAS_MEMORY_SERVER }, () => {
             });
             for (const m of old.students || []) {
                 const sid = await db.collection('userbind.students').findOne({
-                    domainId, schoolId: newSchoolId, studentId: m.studentId,
+                    domainId,
+                    schoolId: newSchoolId,
+                    studentId: m.studentId,
                 });
                 if (sid) {
-                    await db.collection('userbind.students').updateOne(
-                        { _id: sid._id },
-                        { $addToSet: { groupIds: newGroupId } },
-                    );
+                    await db.collection('userbind.students').updateOne({ _id: sid._id }, { $addToSet: { groupIds: newGroupId } });
                 }
             }
         }
@@ -154,7 +156,7 @@ describe('userbind migration v1', { skip: !HAS_MEMORY_SERVER }, () => {
         const boundStudent = students.find((s: any) => s.studentId === '202301001');
         expect(boundStudent.boundUserId).to.equal(100);
         const unboundStudent = students.find((s: any) => s.studentId === '202301002');
-        expect(unboundStudent.boundUserId).to.be.null;
+        expect(unboundStudent.boundUserId).to.equal(null);
     });
 
     it('migrates user groups (groupType=0) and links inline students by groupId', async () => {

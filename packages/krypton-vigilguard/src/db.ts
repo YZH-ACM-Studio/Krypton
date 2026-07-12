@@ -35,9 +35,6 @@ export async function ensureIndexes(): Promise<void> {
         clientSessionsColl.createIndex({ uid: 1 }),
         // TTL: drop 24h after expiresAt. Wall-clock TTL with a 24h grace
         // keeps the row around for late audit reads without bloating storage.
-        clientSessionsColl.createIndex(
-            { expiresAt: 1 },
-            { expireAfterSeconds: 24 * 60 * 60 },
-        ),
+        clientSessionsColl.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 24 * 60 * 60 }),
     ]);
 }

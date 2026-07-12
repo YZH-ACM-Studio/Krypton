@@ -18,9 +18,7 @@
  *   POST /api/tagger/retag     { from:[...], to:string|null, dryRun? } → { from, to, count, affectedDocIds }
  */
 import yaml from 'js-yaml';
-import {
-    Context, Handler, OplogModel, param, PERM, PermissionError, Types,
-} from 'hydrooj';
+import { Context, Handler, OplogModel, param, PERM, PermissionError, Types } from 'hydrooj';
 import { requireAuthToken } from '../lib/auth-token';
 import { Logger } from '../logger';
 import * as document from '../model/document';
@@ -57,9 +55,7 @@ async function loadTaggerProblemAcl(user: any, domainId: string): Promise<void> 
         const permits = (global.Hydro?.model as any)?.permits;
         if (typeof permits?.loadAclForUser !== 'function') throw new Error('permits.loadAclForUser is unavailable');
         const loaded = await permits.loadAclForUser(domainId, Number(user?._id) || 0);
-        if (!(loaded?.permitPids instanceof Set)
-            || !(loaded?.maintainedPids instanceof Set)
-            || !(loaded?.fencedPids instanceof Set)) {
+        if (!(loaded?.permitPids instanceof Set) || !(loaded?.maintainedPids instanceof Set) || !(loaded?.fencedPids instanceof Set)) {
             throw new TypeError('permits.loadAclForUser returned an invalid ACL snapshot');
         }
         Object.assign(user, {
@@ -71,10 +67,7 @@ async function loadTaggerProblemAcl(user: any, domainId: string): Promise<void> 
         });
     } catch (error) {
         denyProblemAcl(user);
-        logger.error(
-            'Tagger ACL preload failed domain=%s uid=%d error=%s',
-            domainId, Number(user?._id) || 0, error,
-        );
+        logger.error('Tagger ACL preload failed domain=%s uid=%d error=%s', domainId, Number(user?._id) || 0, error);
         throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
     }
 }
@@ -87,7 +80,9 @@ function normalizeTags(input: any): string[] {
     else return [];
     const out: string[] = [];
     for (const raw of arr) {
-        const t = String(raw ?? '').replace(/，/g, ',').trim();
+        const t = String(raw ?? '')
+            .replace(/，/g, ',')
+            .trim();
         if (t && !out.includes(t)) out.push(t);
     }
     return out;
@@ -120,7 +115,7 @@ function readCategories(): Record<string, string[]> {
  * No config at all = default judging, treated as OK. Present-but-unparseable
  * is the actionable signal (`ok=false`).
  */
-function auditConfig(raw: any): { ok: boolean, time: string | null, memory: string | null, scoreSum: number | null } {
+function auditConfig(raw: any): { ok: boolean; time: string | null; memory: string | null; scoreSum: number | null } {
     if (raw === undefined || raw === null || raw === '') {
         return { ok: true, time: null, memory: null, scoreSum: null };
     }
@@ -145,7 +140,10 @@ function auditConfig(raw: any): { ok: boolean, time: string | null, memory: stri
         for (const st of cfg.subtasks) {
             const s = Number(st?.score);
             if (Number.isFinite(s)) sum += s;
-            else { allScored = false; break; }
+            else {
+                allScored = false;
+                break;
+            }
         }
         scoreSum = allScored ? sum : null;
     }
@@ -166,10 +164,7 @@ class TaggerApiHandler extends Handler {
         const domainId = taggerDomain();
         if (doc.domainId !== domainId) {
             denyProblemAcl(this.user);
-            logger.error(
-                'Tagger token domain mismatch configured=%s token=%s uid=%d',
-                domainId, doc.domainId, Number(this.user?._id) || 0,
-            );
+            logger.error('Tagger token domain mismatch configured=%s token=%s uid=%d', domainId, doc.domainId, Number(this.user?._id) || 0);
             throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
         }
         await loadTaggerProblemAcl(this.user, domainId);
@@ -195,11 +190,7 @@ class TaggerProblemsHandler extends TaggerApiHandler {
         const scope = await this.problemBankScope();
         this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
-        const pdocs = await problem.getMulti(
-            domainId,
-            { $and: [scope, { hidden: { $ne: true } }] },
-            ['docId', 'pid', 'title', 'tag'],
-        ).toArray();
+        const pdocs = await problem.getMulti(domainId, { $and: [scope, { hidden: { $ne: true } }] }, ['docId', 'pid', 'title', 'tag']).toArray();
         this.response.body = {
             domainId,
             problems: pdocs.map((p) => ({
@@ -219,17 +210,19 @@ class TaggerVocabHandler extends TaggerApiHandler {
         const scope = await this.problemBankScope();
         this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
-        const agg = await document.coll.aggregate([
-            {
-                $match: {
-                    domainId,
-                    docType: document.TYPE_PROBLEM,
-                    $and: [scope, { hidden: { $ne: true } }],
+        const agg = await document.coll
+            .aggregate([
+                {
+                    $match: {
+                        domainId,
+                        docType: document.TYPE_PROBLEM,
+                        $and: [scope, { hidden: { $ne: true } }],
+                    },
                 },
-            },
-            { $unwind: '$tag' },
-            { $group: { _id: '$tag', count: { $sum: 1 } } },
-        ]).toArray();
+                { $unwind: '$tag' },
+                { $group: { _id: '$tag', count: { $sum: 1 } } },
+            ])
+            .toArray();
         const tagCounts: Record<string, number> = {};
         for (const row of agg) {
             const t = String((row as any)._id ?? '').trim();
@@ -252,9 +245,9 @@ class TaggerAuditHandler extends TaggerApiHandler {
         const scope = await this.problemBankScope();
         this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
-        const pdocs = await problem.getMulti(domainId, scope, [
-            'docId', 'pid', 'title', 'tag', 'hidden', 'difficulty', 'nSubmit', 'nAccept', 'config', 'data',
-        ]).toArray();
+        const pdocs = await problem
+            .getMulti(domainId, scope, ['docId', 'pid', 'title', 'tag', 'hidden', 'difficulty', 'nSubmit', 'nAccept', 'config', 'data'])
+            .toArray();
         this.response.body = {
             domainId,
             problems: pdocs.map((p) => {
@@ -319,23 +312,20 @@ class TaggerApplyHandler extends TaggerApiHandler {
                 patch.title = title;
             }
             try {
-                // eslint-disable-next-line no-await-in-loop
-                const old = await problem.get(
-                    domainId, docId, ['domainId', 'docId', 'pid', 'owner', 'tag', 'title'],
-                );
+                const old = await problem.get(domainId, docId, ['domainId', 'docId', 'pid', 'owner', 'tag', 'title']);
                 if (!old || !problem.canMaintainProblem(this.user as any, old)) {
                     results.push({ docId, ok: false, error: 'not_found' });
                     continue;
                 }
-                // eslint-disable-next-line no-await-in-loop
+
                 await problem.editAuthorized(domainId, docId, patch, this.user as any);
                 changes.push({
                     docId,
                     pid: old.pid,
                     before: { tag: old.tag || [], title: old.title || '' },
                     after: {
-                        tag: hasTag ? patch.tag : (old.tag || []),
-                        title: hasTitle ? patch.title : (old.title || ''),
+                        tag: hasTag ? patch.tag : old.tag || [],
+                        title: hasTitle ? patch.title : old.title || '',
                     },
                 });
                 results.push({ docId, ok: true });
@@ -345,7 +335,10 @@ class TaggerApplyHandler extends TaggerApiHandler {
         }
         if (changes.length) {
             await OplogModel.log(this as any, 'tagger.apply', {
-                worker: this.workerLabel, domainId, count: changes.length, changes,
+                worker: this.workerLabel,
+                domainId,
+                count: changes.length,
+                changes,
             });
         }
         this.response.body = { results };
@@ -367,8 +360,7 @@ class TaggerRetagHandler extends TaggerApiHandler {
             this.response.body = { error: 'from_required' };
             return;
         }
-        const toTag = (to === null || to === undefined || to === '')
-            ? null : String(to).replace(/，/g, ',').trim();
+        const toTag = to === null || to === undefined || to === '' ? null : String(to).replace(/，/g, ',').trim();
         if (toTag !== null && (!toTag || toTag.includes(','))) {
             this.response.status = 400;
             this.response.body = { error: 'bad_to' };
@@ -378,11 +370,9 @@ class TaggerRetagHandler extends TaggerApiHandler {
         const domainId = taggerDomain();
         const fromSet = new Set(fromTags);
 
-        const pdocs = await problem.getMulti(
-            domainId,
-            { $and: [scope, { tag: { $in: fromTags }, hidden: { $ne: true } }] },
-            ['domainId', 'docId', 'pid', 'owner', 'tag'],
-        ).toArray();
+        const pdocs = await problem
+            .getMulti(domainId, { $and: [scope, { tag: { $in: fromTags }, hidden: { $ne: true } }] }, ['domainId', 'docId', 'pid', 'owner', 'tag'])
+            .toArray();
         const affectedDocIds = pdocs.map((p) => p.docId);
 
         if (isDryRun) {
@@ -397,20 +387,20 @@ class TaggerRetagHandler extends TaggerApiHandler {
             const kept = before.filter((t) => !fromSet.has(t));
             const after = toTag && !kept.includes(toTag) ? [...kept, toTag] : kept;
             try {
-                // eslint-disable-next-line no-await-in-loop
                 await problem.editAuthorized(domainId, p.docId, { tag: after }, this.user as any);
                 changes.push({ docId: p.docId, pid: p.pid, before, after });
                 edited++;
             } catch (error) {
-                logger.error(
-                    'Tagger retag edit failed domain=%s docId=%d uid=%d error=%s',
-                    domainId, p.docId, Number(this.user?._id) || 0, error,
-                );
+                logger.error('Tagger retag edit failed domain=%s docId=%d uid=%d error=%s', domainId, p.docId, Number(this.user?._id) || 0, error);
                 throw error;
             }
         }
         await OplogModel.log(this as any, 'tagger.retag', {
-            worker: this.workerLabel, domainId, from: fromTags, to: toTag, count: edited,
+            worker: this.workerLabel,
+            domainId,
+            from: fromTags,
+            to: toTag,
+            count: edited,
             affectedDocIds,
             changes: changes.slice(0, OPLOG_CHANGE_CAP),
             changesTruncated: changes.length > OPLOG_CHANGE_CAP,

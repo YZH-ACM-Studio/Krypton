@@ -13,10 +13,7 @@ let indexesEnsured = false;
 export async function ensureIndexes(): Promise<void> {
     if (indexesEnsured) return;
     indexesEnsured = true;
-    await Promise.all([
-        nodesColl.createIndex({ parentId: 1, order: 1 }),
-        nodesColl.createIndex({ tags: 1 }),
-    ]);
+    await Promise.all([nodesColl.createIndex({ parentId: 1, order: 1 }), nodesColl.createIndex({ tags: 1 })]);
 }
 
 /**
@@ -30,7 +27,9 @@ function readProblemCategories(): Map<string, string[]> {
     let raw: any = SystemModel.get('problem.categories');
     if (!raw) return out;
     if (typeof raw === 'string') {
-        try { raw = yaml.load(raw); } catch (e) {
+        try {
+            raw = yaml.load(raw);
+        } catch (e) {
             logger.warn('failed to parse problem.categories yaml: %s', (e as Error).message);
             return out;
         }
@@ -40,9 +39,7 @@ function readProblemCategories(): Map<string, string[]> {
         const name = String(cat).trim();
         if (!name) continue;
         if (Array.isArray(subs)) {
-            const leaves = subs
-                .filter((s): s is string => typeof s === 'string' && !!s.trim())
-                .map((s) => s.trim());
+            const leaves = subs.filter((s): s is string => typeof s === 'string' && !!s.trim()).map((s) => s.trim());
             out.set(name, leaves);
         } else {
             // Category with no subtags (e.g. `贪心: []` or `贪心:` in yaml).
@@ -74,16 +71,17 @@ function fallbackCategories(): Map<string, string[]> {
 /** Internal: build & insert a fresh tree from the given category map. */
 async function buildTreeFromCategories(cats: Map<string, string[]>): Promise<ObjectId> {
     const now = new Date();
-    const mk = (parentId: any, topic: string, order: number, tags: string[] = []) => ({
-        _id: new ObjectId(),
-        parentId,
-        topic,
-        tags,
-        problemIds: [],
-        order,
-        createdAt: now,
-        updatedAt: now,
-    } as MindmapNode);
+    const mk = (parentId: any, topic: string, order: number, tags: string[] = []) =>
+        ({
+            _id: new ObjectId(),
+            parentId,
+            topic,
+            tags,
+            problemIds: [],
+            order,
+            createdAt: now,
+            updatedAt: now,
+        }) as MindmapNode;
 
     const root = mk(null, '算法', 0);
     const all: MindmapNode[] = [root];
@@ -147,8 +145,7 @@ export async function rebuildFromCategories(): Promise<{ categories: number; lea
     await buildTreeFromCategories(cats);
     let leaves = 0;
     for (const ls of cats.values()) leaves += ls.length;
-    logger.info('mindmap rebuilt from problem.categories: %d categories, %d leaves',
-        cats.size, leaves);
+    logger.info('mindmap rebuilt from problem.categories: %d categories, %d leaves', cats.size, leaves);
     return { categories: cats.size, leaves };
 }
 

@@ -142,9 +142,7 @@ export function invalidateLockoutCache(domainId?: string, uid?: number): void {
     lockoutCache.clear();
 }
 
-export async function getBrowserLockoutDecision(
-    domainId: string, uid: number, session?: any,
-): Promise<CacheEntry['decision']> {
+export async function getBrowserLockoutDecision(domainId: string, uid: number, session?: any): Promise<CacheEntry['decision']> {
     const sid = session ? clientSessionKeyFromSession(session) : '';
     if (sid) {
         const sess = await currentClientSession(sid);
@@ -181,9 +179,7 @@ async function hitsLegacyHydroAccess(domainId: string, tdoc: Tdoc, uid: number):
  * in `domainId`. Returns the picked contest (soonest blockEnd) when
  * locked, else `null`.
  */
-async function computeLockoutDecision(
-    domainId: string, uid: number,
-): Promise<CacheEntry['decision']> {
+async function computeLockoutDecision(domainId: string, uid: number): Promise<CacheEntry['decision']> {
     const userbind = (global as any).Hydro?.model?.userbind;
     if (!userbind?.findStudentsByUserIds) return null; // userbind not loaded
 
@@ -252,20 +248,35 @@ export const vigilGuardLockoutLayer = async (ctx: KoaContext, next: () => Promis
     // and admins close those independently. (We also skip if HydroContext
     // isn't ready yet — e.g., the setup wizard before db is online.)
     const path = ctx.request?.path || '';
-    if (matchesWhitelist(path)) { await next(); return; }
+    if (matchesWhitelist(path)) {
+        await next();
+        return;
+    }
 
     const hctx = (ctx as any).HydroContext;
-    if (!hctx) { await next(); return; }
+    if (!hctx) {
+        await next();
+        return;
+    }
     const { user, domain } = hctx;
 
     // Anonymous & admin bypasses
-    if (!user || user._id === 0) { await next(); return; }
-    if (user.hasPriv?.(PRIV.PRIV_EDIT_SYSTEM)) { await next(); return; }
+    if (!user || user._id === 0) {
+        await next();
+        return;
+    }
+    if (user.hasPriv?.(PRIV.PRIV_EDIT_SYSTEM)) {
+        await next();
+        return;
+    }
 
     const domainId = domain?._id || 'system';
 
     const decision = await getBrowserLockoutDecision(domainId, user._id, ctx.session);
-    if (!decision) { await next(); return; }
+    if (!decision) {
+        await next();
+        return;
+    }
 
     // Locked out: drop the session and redirect. Koa's `ctx.redirect()`
     // takes a URL string; we also set status 302 explicitly so the chain

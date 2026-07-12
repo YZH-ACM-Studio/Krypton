@@ -9,10 +9,7 @@ import { isProblemConfigFilename } from './problem-config';
  * model. Validate config.yaml at the model boundary so HTTP, zip, Hydro import,
  * FPS import, and plugin callers cannot recreate it through different paths.
  */
-export async function normalizeProblemTestdataUpload(
-    name: string,
-    source: Readable | Buffer | string,
-): Promise<Readable | Buffer | string> {
+export async function normalizeProblemTestdataUpload(name: string, source: Readable | Buffer | string): Promise<Readable | Buffer | string> {
     if (!isProblemConfigFilename(name)) return source;
     const readStream = async (stream: Readable) => {
         const chunks: Buffer[] = [];
@@ -21,11 +18,7 @@ export async function normalizeProblemTestdataUpload(
         }
         return Buffer.concat(chunks);
     };
-    const content = Buffer.isBuffer(source)
-        ? source
-        : typeof source === 'string'
-            ? await fs.readFile(source)
-            : await readStream(source);
+    const content = Buffer.isBuffer(source) ? source : typeof source === 'string' ? await fs.readFile(source) : await readStream(source);
     let parsed: any;
     try {
         parsed = yaml.load(content.toString('utf8'));
@@ -36,10 +29,7 @@ export async function normalizeProblemTestdataUpload(
         throw new ValidationError('config', null, '配置 YAML 必须是对象');
     }
     if (['objective', 'fill_function'].includes(parsed.type)) {
-        throw new ValidationError(
-            'config', null,
-            '复合客观题与旧函数填空配置已下线，请从创建题目页选择独立题型',
-        );
+        throw new ValidationError('config', null, '复合客观题与旧函数填空配置已下线，请从创建题目页选择独立题型');
     }
     return content;
 }

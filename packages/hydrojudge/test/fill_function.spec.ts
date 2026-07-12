@@ -15,7 +15,9 @@ require.cache[defaultPath] = {
     filename: defaultPath,
     loaded: true,
     exports: {
-        async judge(ctx: any) { delegated = ctx; },
+        async judge(ctx: any) {
+            delegated = ctx;
+        },
     },
 } as NodeModule;
 require.cache[hydroojPath] = {
@@ -24,8 +26,7 @@ require.cache[hydroojPath] = {
     loaded: true,
     exports: {
         spliceFillFunction: require('../../hydrooj/src/lib/problem-config.ts').spliceFillFunction,
-        validateFillFunctionJudgeConfig:
-            require('../../hydrooj/src/lib/problem-config.ts').validateFillFunctionJudgeConfig,
+        validateFillFunctionJudgeConfig: require('../../hydrooj/src/lib/problem-config.ts').validateFillFunctionJudgeConfig,
     },
 } as NodeModule;
 delete require.cache[fillFunctionPath];
@@ -45,16 +46,22 @@ function context(overrides: Record<string, unknown> = {}) {
                 template: {
                     lang: 'cc.cc17',
                     source: 'int main() {\nreturn 0;\n}',
-                    regions: [{
-                        id: 'main', start: { line: 1, col: 0 }, end: { line: 1, col: 9 },
-                    }],
+                    regions: [
+                        {
+                            id: 'main',
+                            start: { line: 1, col: 0 },
+                            end: { line: 1, col: 9 },
+                        },
+                    ],
                 },
                 cases: [{ input: '1.in', output: '1.out' }],
             },
             lang: 'cc.cc17',
             code: { content: JSON.stringify({ main: 'return 1;' }) },
             next() {},
-            end(payload: any) { ended.push(payload); },
+            end(payload: any) {
+                ended.push(payload);
+            },
             ...overrides,
         } as any,
         ended,

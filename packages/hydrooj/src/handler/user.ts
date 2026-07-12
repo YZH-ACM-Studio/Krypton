@@ -6,10 +6,19 @@ import Schema from 'schemastery';
 import { randomstring } from '@hydrooj/utils';
 import type { Context } from '../context';
 import {
-    AuthOperationError, BadRequestError, BlacklistedError, BuiltinLoginError,
-    ForbiddenError, InvalidTokenError, NotFoundError,
-    SystemError, UserAlreadyExistError, UserFacingError,
-    UserNotFoundError, ValidationError, VerifyPasswordError,
+    AuthOperationError,
+    BadRequestError,
+    BlacklistedError,
+    BuiltinLoginError,
+    ForbiddenError,
+    InvalidTokenError,
+    NotFoundError,
+    SystemError,
+    UserAlreadyExistError,
+    UserFacingError,
+    UserNotFoundError,
+    ValidationError,
+    VerifyPasswordError,
 } from '../error';
 import { TokenDoc, Udoc, User } from '../interface';
 import avatar from '../lib/avatar';
@@ -27,9 +36,7 @@ import SolutionModel from '../model/solution';
 import system from '../model/system';
 import token from '../model/token';
 import user, { deleteUserCache } from '../model/user';
-import {
-    Handler, param, post, Query, Types,
-} from '../service/server';
+import { Handler, param, post, Query, Types } from '../service/server';
 
 async function successfulAuth(this: Handler, udoc: User) {
     if (udoc._id !== 0) await user.setById(udoc._id, { loginat: new Date(), loginip: this.request.ip });
@@ -76,10 +83,7 @@ class UserLoginHandler extends Handler {
     @param('redirect', Types.String, true)
     @param('tfa', Types.String, true)
     @param('authnChallenge', Types.String, true)
-    async post(
-        domainId: string, uname: string, password: string, rememberme = false, redirect = '',
-        tfa = '', authnChallenge = '',
-    ) {
+    async post(domainId: string, uname: string, password: string, rememberme = false, redirect = '', tfa = '', authnChallenge = '') {
         let udoc = await user.getByEmail(domainId, uname);
         udoc ||= await user.getByUname(domainId, uname);
         if (!udoc) throw new UserNotFoundError(uname);
@@ -110,8 +114,7 @@ class UserLoginHandler extends Handler {
         if (await blockNormalBrowserLoginIfNeeded.call(this, domainId, udoc)) return;
         await successfulAuth.call(this, udoc);
         this.session.save = rememberme;
-        this.response.redirect = redirect || ((this.request.referer || '/login').endsWith('/login')
-            ? this.url('homepage') : this.request.referer);
+        this.response.redirect = redirect || ((this.request.referer || '/login').endsWith('/login') ? this.url('homepage') : this.request.referer);
     }
 }
 
@@ -126,10 +129,7 @@ class UserSudoHandler extends Handler {
     @param('authnChallenge', Types.String, true)
     async post(domainId: string, password = '', tfa = '', authnChallenge = '') {
         if (!this.session.sudoArgs?.method) throw new ForbiddenError();
-        await Promise.all([
-            this.limitRate('user_sudo', 60, 5, '{{user}}'),
-            oplog.log(this, 'user.sudo', {}),
-        ]);
+        await Promise.all([this.limitRate('user_sudo', 60, 5, '{{user}}'), oplog.log(this, 'user.sudo', {})]);
         if (this.user.authn && authnChallenge) {
             const challenge = await token.get(authnChallenge, token.TYPE_WEBAUTHN);
             if (challenge?.uid !== this.user._id) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_WEBAUTHN]);
@@ -151,7 +151,7 @@ class UserTFAHandler extends Handler {
     noCheckPermView = true;
 
     @param('q', Types.String)
-    async get({ }, q: string) {
+    async get({}, q: string) {
         let udoc = await user.getByUname('system', q);
         udoc ||= await user.getByEmail('system', q);
         if (!udoc) this.response.body = { tfa: false, authn: false };
@@ -164,7 +164,8 @@ class UserWebauthnHandler extends Handler {
 
     getAuthnHost() {
         return system.get('authn.host') && this.request.hostname.includes(system.get('authn.host'))
-            ? system.get('authn.host') : this.request.hostname;
+            ? system.get('authn.host')
+            : this.request.hostname;
     }
 
     @param('uname', Types.Username, true)
@@ -173,7 +174,7 @@ class UserWebauthnHandler extends Handler {
         let allowCredentials = [];
         let uid = 0;
         if (!login) {
-            const udoc = this.user._id ? this.user : ((await user.getByEmail(domainId, uname)) || await user.getByUname(domainId, uname));
+            const udoc = this.user._id ? this.user : (await user.getByEmail(domainId, uname)) || (await user.getByUname(domainId, uname));
             if (!udoc._id) throw new UserNotFoundError(uname || 'user');
             if (!udoc.authn) throw new AuthOperationError('authn', 'disabled');
             allowCredentials = udoc._authenticators.map((authenticator) => ({
@@ -198,9 +199,9 @@ class UserWebauthnHandler extends Handler {
         if (!tdoc) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_WEBAUTHN]);
         const udoc = await (tdoc.uid === 'login'
             ? (async () => {
-                const u = await user.coll.findOne({ 'authenticators.credentialID': Binary.createFromBase64(result.id) });
-                return u ? await user.getById(domainId, u._id) : null;
-            })()
+                  const u = await user.coll.findOne({ 'authenticators.credentialID': Binary.createFromBase64(result.id) });
+                  return u ? await user.getById(domainId, u._id) : null;
+              })()
             : user.getById(domainId, tdoc.uid));
         if (!udoc) throw new NotFoundError();
         const parseId = (id: Binary) => Buffer.from(id.toString('hex'), 'hex').toString('base64url');
@@ -225,8 +226,8 @@ class UserWebauthnHandler extends Handler {
             const loginUser = await user.getById(domainId, udoc._id);
             if (await blockNormalBrowserLoginIfNeeded.call(this, domainId, loginUser)) return;
             await successfulAuth.call(this, loginUser);
-            this.response.redirect = redirect || ((this.request.referer || '/login').endsWith('/login')
-                ? this.url('homepage') : this.request.referer);
+            this.response.redirect =
+                redirect || ((this.request.referer || '/login').endsWith('/login') ? this.url('homepage') : this.request.referer);
         } else {
             await token.update(challenge, token.TYPE_WEBAUTHN, 60, { verified: true });
             this.back();
@@ -259,31 +260,21 @@ export class UserRegisterHandler extends Handler {
     }
 
     @post('mail', Types.Email)
-    async post({ }, mail: string) {
+    async post({}, mail: string) {
         if (await user.getByEmail('system', mail)) throw new UserAlreadyExistError(mail);
         const mailDomain = mail.split('@')[1];
         if (await BlackListModel.get(`mail::${mailDomain}`)) throw new BlacklistedError(mailDomain);
-        await Promise.all([
-            this.limitRate('send_mail', 60, 1, mail),
-            this.limitRate('send_mail', 3600, 30),
-            oplog.log(this, 'user.register', {}),
-        ]);
-        const t = await token.add(
-            token.TYPE_REGISTRATION,
-            system.get('session.unsaved_expire_seconds'),
-            {
-                mail,
-                redirect: this.domain.registerRedirect,
-                identity: {
-                    provider: 'mail',
-                    platform: 'mail',
-                    id: mail,
-                },
+        await Promise.all([this.limitRate('send_mail', 60, 1, mail), this.limitRate('send_mail', 3600, 30), oplog.log(this, 'user.register', {})]);
+        const t = await token.add(token.TYPE_REGISTRATION, system.get('session.unsaved_expire_seconds'), {
+            mail,
+            redirect: this.domain.registerRedirect,
+            identity: {
+                provider: 'mail',
+                platform: 'mail',
+                id: mail,
             },
-        );
-        const prefix = this.domain.host
-            ? `${this.domain.host instanceof Array ? this.domain.host[0] : this.domain.host}`
-            : system.get('server.url');
+        });
+        const prefix = this.domain.host ? `${this.domain.host instanceof Array ? this.domain.host[0] : this.domain.host}` : system.get('server.url');
         if (system.get('smtp.verify') && system.get('smtp.user')) {
             const m = await this.renderHTML('user_register_mail.html', {
                 path: `/register/${t[0]}`,
@@ -301,7 +292,7 @@ class UserRegisterWithCodeHandler extends Handler {
     tdoc: TokenDoc;
 
     @param('code', Types.String)
-    async prepare({ }, code: string) {
+    async prepare({}, code: string) {
         this.tdoc = await token.get(code, token.TYPE_REGISTRATION);
         if (!this.tdoc?.identity) {
             // prevent brute forcing tokens
@@ -319,10 +310,7 @@ class UserRegisterWithCodeHandler extends Handler {
     @param('verifyPassword', Types.Password)
     @param('uname', Types.Username, true)
     @param('code', Types.String)
-    async post(
-        domainId: string, password: string, verify: string,
-        uname = '', code: string,
-    ) {
+    async post(domainId: string, password: string, verify: string, uname = '', code: string) {
         const provider = this.ctx.oauth.providers[this.tdoc.identity.provider];
         if (!provider) throw new SystemError(`OAuth provider ${this.tdoc.identity.provider} not found`);
         if (provider.lockUsername) uname = this.tdoc.identity.username;
@@ -358,19 +346,9 @@ class UserLostPassHandler extends Handler {
         if (!system.get('smtp.user')) throw new SystemError('Cannot send mail');
         const udoc = await user.getByEmail('system', mail);
         if (!udoc) throw new UserNotFoundError(mail);
-        await Promise.all([
-            this.limitRate('send_mail', 3600, 30),
-            this.limitRate('send_mail', 60, 1, mail),
-            oplog.log(this, 'user.lostpass', {}),
-        ]);
-        const [tid] = await token.add(
-            token.TYPE_LOSTPASS,
-            system.get('session.unsaved_expire_seconds'),
-            { uid: udoc._id },
-        );
-        const prefix = this.domain.host
-            ? `${this.domain.host instanceof Array ? this.domain.host[0] : this.domain.host}`
-            : system.get('server.url');
+        await Promise.all([this.limitRate('send_mail', 3600, 30), this.limitRate('send_mail', 60, 1, mail), oplog.log(this, 'user.lostpass', {})]);
+        const [tid] = await token.add(token.TYPE_LOSTPASS, system.get('session.unsaved_expire_seconds'), { uid: udoc._id });
+        const prefix = this.domain.host ? `${this.domain.host instanceof Array ? this.domain.host[0] : this.domain.host}` : system.get('server.url');
         const m = await this.renderHTML('user_lostpass_mail.html', {
             url: `/lostpass/${tid}`,
             url_prefix: prefix.endsWith('/') ? prefix.slice(0, -1) : prefix,
@@ -411,22 +389,25 @@ class UserDetailHandler extends Handler {
     async get(domainId: string, uid: number) {
         if (uid === 0) throw new UserNotFoundError(0);
         const isSelfProfile = this.user._id === uid;
-        const [udoc, sdoc] = await Promise.all([
-            user.getById(domainId, uid),
-            token.getMostRecentSessionByUid(uid, ['createAt', 'updateAt']),
-        ]);
+        const [udoc, sdoc] = await Promise.all([user.getById(domainId, uid), token.getMostRecentSessionByUid(uid, ['createAt', 'updateAt'])]);
         if (!udoc) throw new UserNotFoundError(uid);
         const pdocs: ProblemDoc[] = [];
         const acInfo: Record<string, number> = {};
         const canViewHidden = this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN) || this.user._id;
         if (this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) {
             const psdocs = await problem.getMultiStatus(domainId, { uid, status: STATUS.STATUS_ACCEPTED }).toArray();
-            pdocs.push(...Object.values(
-                await problem.getList(
-                    domainId, psdocs.map((i) => i.docId), canViewHidden,
-                    false, problem.PROJECTION_LIST, true,
+            pdocs.push(
+                ...Object.values(
+                    await problem.getList(
+                        domainId,
+                        psdocs.map((i) => i.docId),
+                        canViewHidden,
+                        false,
+                        problem.PROJECTION_LIST,
+                        true,
+                    ),
                 ),
-            ));
+            );
         }
         for (const pdoc of pdocs) {
             for (const tag of pdoc.tag) {
@@ -434,10 +415,16 @@ class UserDetailHandler extends Handler {
                 else acInfo[tag] = 1;
             }
         }
-        const tags = Object.entries(acInfo).sort((a, b) => b[1] - a[1]).slice(0, 20);
-        const tsdocs = await ContestModel.getMultiStatus(domainId, { uid, attend: { $exists: true } }).project({ docId: 1 }).toArray();
+        const tags = Object.entries(acInfo)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 20);
+        const tsdocs = await ContestModel.getMultiStatus(domainId, { uid, attend: { $exists: true } })
+            .project({ docId: 1 })
+            .toArray();
         const tdocs = await ContestModel.getMulti(domainId, { docId: { $in: tsdocs.map((i) => i.docId) } })
-            .project({ docId: 1, title: 1, rule: 1 }).sort({ _id: -1 }).toArray();
+            .project({ docId: 1, title: 1, rule: 1 })
+            .sort({ _id: -1 })
+            .toArray();
         // Daily submission heatmap — past ~53 weeks aligned to today.
         // Range: from the Sunday before "today - 364 days" up to today
         // (inclusive). Each cell is a YYYY-MM-DD string -> submission count.
@@ -451,40 +438,50 @@ class UserDetailHandler extends Handler {
             startDay.setDate(startDay.getDate() - 364);
             startDay.setHours(0, 0, 0, 0);
             const minId = ObjectId.createFromTime(Math.floor(startDay.getTime() / 1000));
-            const rows = await RecordModel.coll.aggregate([
-                { $match: { domainId, uid, _id: { $gte: minId } } },
-                {
-                    $group: {
-                        _id: {
-                            $dateToString: {
-                                format: '%Y-%m-%d',
-                                date: { $toDate: '$_id' },
-                                // Use the user's recorded timezone if any, otherwise server TZ.
-                                ...(udoc.timezone ? { timezone: String(udoc.timezone) } : {}),
+            const rows = await RecordModel.coll
+                .aggregate([
+                    { $match: { domainId, uid, _id: { $gte: minId } } },
+                    {
+                        $group: {
+                            _id: {
+                                $dateToString: {
+                                    format: '%Y-%m-%d',
+                                    date: { $toDate: '$_id' },
+                                    // Use the user's recorded timezone if any, otherwise server TZ.
+                                    ...(udoc.timezone ? { timezone: String(udoc.timezone) } : {}),
+                                },
                             },
+                            count: { $sum: 1 },
                         },
-                        count: { $sum: 1 },
                     },
-                },
-            ]).toArray();
+                ])
+                .toArray();
             for (const r of rows) daily[r._id as string] = r.count as number;
         } catch (e) {
             // Heatmap is non-critical: if aggregation fails (e.g. permissions),
             // we just render an empty grid rather than blowing up the page.
-            daily;
         }
 
         this.response.template = 'user_detail.html';
         this.response.body = {
-            isSelfProfile, udoc, sdoc, pdocs, tags, tdocs, daily,
+            isSelfProfile,
+            udoc,
+            sdoc,
+            pdocs,
+            tags,
+            tdocs,
+            daily,
         };
         if (this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_SOLUTION)) {
             const psdocs = await SolutionModel.getByUser(domainId, uid).limit(10).toArray();
             this.response.body.psdocs = psdocs;
             if (this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) {
                 this.response.body.pdict = await problem.getList(
-                    domainId, psdocs.map((i) => i.parentId), canViewHidden,
-                    false, problem.PROJECTION_LIST,
+                    domainId,
+                    psdocs.map((i) => i.parentId),
+                    canViewHidden,
+                    false,
+                    problem.PROJECTION_LIST,
                 );
             }
         }
@@ -558,7 +555,6 @@ class OauthCallbackHandler extends Handler {
         const mailDomain = r.email.split('@')[1];
         if (await BlackListModel.get(`mail::${mailDomain}`)) throw new BlacklistedError(mailDomain);
         for (const uname of r.uname) {
-            // eslint-disable-next-line no-await-in-loop
             const nudoc = await user.getByUname('system', uname);
             if (!nudoc) {
                 username = uname;
@@ -569,30 +565,28 @@ class OauthCallbackHandler extends Handler {
         if (r.bio) set.bio = r.bio;
         if (r.viewLang) set.viewLang = r.viewLang;
         if (r.avatar) set.avatar = r.avatar;
-        const [t] = await token.add(
-            token.TYPE_REGISTRATION,
-            system.get('session.unsaved_expire_seconds'),
-            {
-                mail: r.email,
-                username,
-                redirect: this.domain.registerRedirect,
-                set,
-                setInDomain: r.setInDomain,
-                identity: {
-                    provider: args.type,
-                    platform: args.type,
-                    id: r._id,
-                },
+        const [t] = await token.add(token.TYPE_REGISTRATION, system.get('session.unsaved_expire_seconds'), {
+            mail: r.email,
+            username,
+            redirect: this.domain.registerRedirect,
+            set,
+            setInDomain: r.setInDomain,
+            identity: {
+                provider: args.type,
+                platform: args.type,
+                id: r._id,
             },
-        );
+        });
         this.response.redirect = this.url('user_register_with_code', { code: t });
     }
 }
 
 class ContestModeHandler extends Handler {
     async get() {
-        const bindings = await user.getMulti({ loginip: { $exists: true } })
-            .project<{ _id: number, loginip: string }>({ _id: 1, loginip: 1 }).toArray();
+        const bindings = await user
+            .getMulti({ loginip: { $exists: true } })
+            .project<{ _id: number; loginip: string }>({ _id: 1, loginip: 1 })
+            .toArray();
         this.response.body = { bindings };
         this.response.template = 'contest_mode.html';
     }
@@ -610,58 +604,65 @@ class ContestModeHandler extends Handler {
 export const inject = ['oauth'];
 
 const UserApi = {
-    user: Query(Schema.object({
-        id: Schema.number().step(1),
-        uname: Schema.string(),
-        mail: Schema.string(),
-        domainId: Schema.string().required(),
-    }), (c, arg) => {
-        if (arg.id) return user.getById(arg.domainId, arg.id);
-        if (arg.mail) return user.getByEmail(arg.domainId, arg.mail);
-        if (arg.uname) return user.getByUname(arg.domainId, arg.uname);
-        return user.getById(arg.domainId, c.user._id);
-    }),
-    users: Query(Schema.object({
-        ids: Schema.array(Schema.number().step(1)),
-        auto: Schema.array(Schema.string()),
-        search: Schema.string(),
-        limit: Schema.number().step(1),
-        exact: Schema.boolean(),
-    }), async (c, arg) => {
-        const auto = (arg.ids?.length && arg.ids) || arg.auto || [];
-        if (auto.length) {
-            const maybeId = auto.filter((i) => !Number.isNaN(+i));
-            const result = [];
-            if (maybeId.length) {
-                const udocs = await user.getList(arg.domainId, maybeId.map((i) => +i));
-                for (const i in udocs) udocs[i].avatarUrl = avatar(udocs[i].avatar);
-                result.push(...Object.values(udocs));
+    user: Query(
+        Schema.object({
+            id: Schema.number().step(1),
+            uname: Schema.string(),
+            mail: Schema.string(),
+            domainId: Schema.string().required(),
+        }),
+        (c, arg) => {
+            if (arg.id) return user.getById(arg.domainId, arg.id);
+            if (arg.mail) return user.getByEmail(arg.domainId, arg.mail);
+            if (arg.uname) return user.getByUname(arg.domainId, arg.uname);
+            return user.getById(arg.domainId, c.user._id);
+        },
+    ),
+    users: Query(
+        Schema.object({
+            ids: Schema.array(Schema.number().step(1)),
+            auto: Schema.array(Schema.string()),
+            search: Schema.string(),
+            limit: Schema.number().step(1),
+            exact: Schema.boolean(),
+        }),
+        async (c, arg) => {
+            const auto = (arg.ids?.length && arg.ids) || arg.auto || [];
+            if (auto.length) {
+                const maybeId = auto.filter((i) => !Number.isNaN(+i));
+                const result = [];
+                if (maybeId.length) {
+                    const udocs = await user.getList(
+                        arg.domainId,
+                        maybeId.map((i) => +i),
+                    );
+                    for (const i in udocs) udocs[i].avatarUrl = avatar(udocs[i].avatar);
+                    result.push(...Object.values(udocs));
+                }
+                const notFound = auto.filter((i) => !result.find((j) => j._id === +i));
+                if (notFound.length > 50) return result; // reject if too many
+                for (const i of notFound) {
+                    const udoc = (await user.getByUname(arg.domainId, i.toString())) || (await user.getByEmail(arg.domainId, i.toString()));
+                    if (udoc) result.push(udoc);
+                }
+                return result;
             }
-            const notFound = auto.filter((i) => !result.find((j) => j._id === +i));
-            if (notFound.length > 50) return result; // reject if too many
-            for (const i of notFound) {
-                // eslint-disable-next-line no-await-in-loop
-                const udoc = await user.getByUname(arg.domainId, i.toString()) || await user.getByEmail(arg.domainId, i.toString());
-                if (udoc) result.push(udoc);
+            if (!arg.search) return [];
+            const udoc =
+                (await user.getById(arg.domainId, +arg.search)) ||
+                (await user.getByUname(arg.domainId, arg.search)) ||
+                (await user.getByEmail(arg.domainId, arg.search));
+            const udocs: User[] = arg.exact ? [] : await user.getPrefixList(arg.domainId, arg.search, Math.min(arg.limit || 10, 10));
+            if (udoc && !udocs.find((i) => i._id === udoc._id)) {
+                udocs.pop();
+                udocs.unshift(udoc);
             }
-            return result;
-        }
-        if (!arg.search) return [];
-        const udoc = await user.getById(arg.domainId, +arg.search)
-            || await user.getByUname(arg.domainId, arg.search)
-            || await user.getByEmail(arg.domainId, arg.search);
-        const udocs: User[] = arg.exact
-            ? []
-            : await user.getPrefixList(arg.domainId, arg.search, Math.min(arg.limit || 10, 10));
-        if (udoc && !udocs.find((i) => i._id === udoc._id)) {
-            udocs.pop();
-            udocs.unshift(udoc);
-        }
-        for (const i in udocs) {
-            udocs[i].avatarUrl = avatar(udocs[i].avatar);
-        }
-        return udocs;
-    }),
+            for (const i in udocs) {
+                udocs[i].avatarUrl = avatar(udocs[i].avatar);
+            }
+            return udocs;
+        },
+    ),
 } as const;
 
 declare module '@hydrooj/framework' {

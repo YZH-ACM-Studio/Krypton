@@ -17,16 +17,18 @@ export = async function terminal() {
     log.info('Starting /bin/bash, double press Ctrl+C to kill all child processes.');
     log.info(`Current memory limit is ${Math.floor(memoryLimit / 1024 / 1024)}m`);
     const stream = client.stream({
-        cmd: [{
-            args: ['/bin/bash'],
-            env: ['PATH=/usr/local/bin:/usr/bin:/bin', 'HOME=/tmp', `TERM=${process.env['TERM']}`],
-            files: [{ streamIn: true }, { streamOut: true }, { streamOut: true }],
-            cpuLimit: (120 * 1e9),
-            clockLimit: (30 * 120 * 1e9),
-            memoryLimit,
-            procLimit: 128,
-            tty: true,
-        }],
+        cmd: [
+            {
+                args: ['/bin/bash'],
+                env: ['PATH=/usr/local/bin:/usr/bin:/bin', 'HOME=/tmp', `TERM=${process.env['TERM']}`],
+                files: [{ streamIn: true }, { streamOut: true }, { streamOut: true }],
+                cpuLimit: 120 * 1e9,
+                clockLimit: 30 * 120 * 1e9,
+                memoryLimit,
+                procLimit: 128,
+                tty: true,
+            },
+        ],
     });
     stream.on('output', (output) => {
         process.stdout.write(output.content);

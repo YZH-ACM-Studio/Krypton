@@ -125,189 +125,184 @@ const getDefaultChecker = (strict: boolean) => async (config: CheckConfig) => {
     };
 };
 
-const checkers: Record<string, Checker> = new Proxy({
-    default: getDefaultChecker(false),
-    strict: getDefaultChecker(true),
+const checkers: Record<string, Checker> = new Proxy(
+    {
+        default: getDefaultChecker(false),
+        strict: getDefaultChecker(true),
 
-    /*
-     * argv[1]：输入
-     * argv[2]：标准输出
-     * argv[3]：选手输出
-     * exit code：返回判断结果
-     */
-    async hustoj(config) {
-        const { code, stdout } = await runQueued(`${config.execute} input answer usrout`, {
-            copyIn: {
-                usrout: config.user_stdout,
-                answer: config.output,
-                input: config.input,
-                ...config.copyIn,
-            },
-        });
-        const status = code ? STATUS.STATUS_WRONG_ANSWER : STATUS.STATUS_ACCEPTED;
-        return {
-            status,
-            score: status === STATUS.STATUS_ACCEPTED ? config.score : 0,
-            message: config.detail === 'full' ? stdout : '',
-        };
-    },
-
-    /*
-     * argv[1]：输入文件
-     * argv[2]：选手输出文件
-     * argv[3]：标准输出文件
-     * argv[4]：单个测试点分值
-     * argv[5]：输出最终得分的文件
-     * argv[6]：输出错误报告的文件
-     */
-    async lemon(config) {
-        const { files, code } = await runQueued(`${config.execute} input usrout answer ${config.score} score message`, {
-            copyIn: {
-                usrout: config.user_stdout,
-                answer: config.output,
-                input: config.input,
-                ...config.copyIn,
-            },
-            copyOut: ['score?', 'message?'],
-            env: config.env,
-        });
-        if (code) {
+        /*
+         * argv[1]：输入
+         * argv[2]：标准输出
+         * argv[3]：选手输出
+         * exit code：返回判断结果
+         */
+        async hustoj(config) {
+            const { code, stdout } = await runQueued(`${config.execute} input answer usrout`, {
+                copyIn: {
+                    usrout: config.user_stdout,
+                    answer: config.output,
+                    input: config.input,
+                    ...config.copyIn,
+                },
+            });
+            const status = code ? STATUS.STATUS_WRONG_ANSWER : STATUS.STATUS_ACCEPTED;
             return {
-                score: 0,
-                message: `Checker returned with status ${code}`,
-                status: STATUS.STATUS_SYSTEM_ERROR,
+                status,
+                score: status === STATUS.STATUS_ACCEPTED ? config.score : 0,
+                message: config.detail === 'full' ? stdout : '',
             };
-        }
-        const score = Math.floor(+files.score) || 0;
-        return {
-            score,
-            message: config.detail === 'full' ? files.message : '',
-            status: score === config.score
-                ? STATUS.STATUS_ACCEPTED
-                : STATUS.STATUS_WRONG_ANSWER,
-        };
-    },
+        },
 
-    /*
-     * argv[1]：输入
-     * argv[2]：选手输出
-     * exit code：返回判断结果
-     */
-    async qduoj(config) {
-        const { status, stdout } = await runQueued(`${config.execute} input usrout`, {
-            copyIn: {
-                usrout: config.user_stdout,
-                input: config.input,
-                ...config.copyIn,
-            },
-        });
-        const st = (status === STATUS.STATUS_ACCEPTED)
-            ? STATUS.STATUS_ACCEPTED : STATUS.STATUS_WRONG_ANSWER;
-        return {
-            status: st,
-            score: (status === STATUS.STATUS_ACCEPTED) ? config.score : 0,
-            message: config.detail === 'full' ? stdout : '',
-        };
-    },
-
-    /*
-     * input：输入
-     * user_out：选手输出
-     * answer：标准输出
-     * code：选手代码
-     * stdout：输出最终得分
-     * stderr：输出错误报告
-     */
-    async syzoj(config) {
-        let { status, stdout, stderr } = await runQueued(config.execute, {
-            copyIn: {
-                input: config.input,
-                user_out: config.user_stdout,
-                answer: config.output,
-                code: config.code,
-                ...config.copyIn,
-            },
-        });
-        if (status !== STATUS.STATUS_ACCEPTED) throw new SystemError('Checker returned {0}.', [status]);
-        const score = +stdout;
-        status = score === 100 ? STATUS.STATUS_ACCEPTED : STATUS.STATUS_WRONG_ANSWER;
-        return { status, score: Math.floor((score * config.score) / 100), message: config.detail === 'full' ? stderr : '' };
-    },
-
-    async testlib(config) {
-        const { stderr, status, code } = await runQueued(`${config.execute} /w/in /w/user_out /w/answer`, {
-            copyIn: {
-                in: config.input,
-                user_out: config.user_stdout,
-                answer: config.output,
-                user_code: config.code,
-                ...config.copyIn,
-            },
-            env: config.env,
-        });
-        if ([STATUS.STATUS_SYSTEM_ERROR, STATUS.STATUS_TIME_LIMIT_EXCEEDED, STATUS.STATUS_MEMORY_LIMIT_EXCEEDED].includes(status)) {
-            const message = {
-                [STATUS.STATUS_SYSTEM_ERROR]: stderr,
-                [STATUS.STATUS_TIME_LIMIT_EXCEEDED]: 'Checker Time Limit Exceeded',
-                [STATUS.STATUS_MEMORY_LIMIT_EXCEEDED]: 'Checker Memory Limit Exceeded',
-            }[status];
+        /*
+         * argv[1]：输入文件
+         * argv[2]：选手输出文件
+         * argv[3]：标准输出文件
+         * argv[4]：单个测试点分值
+         * argv[5]：输出最终得分的文件
+         * argv[6]：输出错误报告的文件
+         */
+        async lemon(config) {
+            const { files, code } = await runQueued(`${config.execute} input usrout answer ${config.score} score message`, {
+                copyIn: {
+                    usrout: config.user_stdout,
+                    answer: config.output,
+                    input: config.input,
+                    ...config.copyIn,
+                },
+                copyOut: ['score?', 'message?'],
+                env: config.env,
+            });
+            if (code) {
+                return {
+                    score: 0,
+                    message: `Checker returned with status ${code}`,
+                    status: STATUS.STATUS_SYSTEM_ERROR,
+                };
+            }
+            const score = Math.floor(+files.score) || 0;
             return {
-                status: STATUS.STATUS_SYSTEM_ERROR,
-                score: 0,
-                message,
+                score,
+                message: config.detail === 'full' ? files.message : '',
+                status: score === config.score ? STATUS.STATUS_ACCEPTED : STATUS.STATUS_WRONG_ANSWER,
             };
-        }
-        if (status === STATUS.STATUS_RUNTIME_ERROR && !stderr?.trim()) {
+        },
+
+        /*
+         * argv[1]：输入
+         * argv[2]：选手输出
+         * exit code：返回判断结果
+         */
+        async qduoj(config) {
+            const { status, stdout } = await runQueued(`${config.execute} input usrout`, {
+                copyIn: {
+                    usrout: config.user_stdout,
+                    input: config.input,
+                    ...config.copyIn,
+                },
+            });
+            const st = status === STATUS.STATUS_ACCEPTED ? STATUS.STATUS_ACCEPTED : STATUS.STATUS_WRONG_ANSWER;
             return {
-                status: STATUS.STATUS_SYSTEM_ERROR,
-                score: 0,
-                message: `Checker exited with code ${code}`,
+                status: st,
+                score: status === STATUS.STATUS_ACCEPTED ? config.score : 0,
+                message: config.detail === 'full' ? stdout : '',
             };
-        }
-        return parse(stderr, config.score, config.detail);
+        },
+
+        /*
+         * input：输入
+         * user_out：选手输出
+         * answer：标准输出
+         * code：选手代码
+         * stdout：输出最终得分
+         * stderr：输出错误报告
+         */
+        async syzoj(config) {
+            let { status, stdout, stderr } = await runQueued(config.execute, {
+                copyIn: {
+                    input: config.input,
+                    user_out: config.user_stdout,
+                    answer: config.output,
+                    code: config.code,
+                    ...config.copyIn,
+                },
+            });
+            if (status !== STATUS.STATUS_ACCEPTED) throw new SystemError('Checker returned {0}.', [status]);
+            const score = +stdout;
+            status = score === 100 ? STATUS.STATUS_ACCEPTED : STATUS.STATUS_WRONG_ANSWER;
+            return { status, score: Math.floor((score * config.score) / 100), message: config.detail === 'full' ? stderr : '' };
+        },
+
+        async testlib(config) {
+            const { stderr, status, code } = await runQueued(`${config.execute} /w/in /w/user_out /w/answer`, {
+                copyIn: {
+                    in: config.input,
+                    user_out: config.user_stdout,
+                    answer: config.output,
+                    user_code: config.code,
+                    ...config.copyIn,
+                },
+                env: config.env,
+            });
+            if ([STATUS.STATUS_SYSTEM_ERROR, STATUS.STATUS_TIME_LIMIT_EXCEEDED, STATUS.STATUS_MEMORY_LIMIT_EXCEEDED].includes(status)) {
+                const message = {
+                    [STATUS.STATUS_SYSTEM_ERROR]: stderr,
+                    [STATUS.STATUS_TIME_LIMIT_EXCEEDED]: 'Checker Time Limit Exceeded',
+                    [STATUS.STATUS_MEMORY_LIMIT_EXCEEDED]: 'Checker Memory Limit Exceeded',
+                }[status];
+                return {
+                    status: STATUS.STATUS_SYSTEM_ERROR,
+                    score: 0,
+                    message,
+                };
+            }
+            if (status === STATUS.STATUS_RUNTIME_ERROR && !stderr?.trim()) {
+                return {
+                    status: STATUS.STATUS_SYSTEM_ERROR,
+                    score: 0,
+                    message: `Checker exited with code ${code}`,
+                };
+            }
+            return parse(stderr, config.score, config.detail);
+        },
+
+        // https://www.kattis.com/problem-package-format/spec/2023-07-draft.html#output-validator
+        async kattis(config) {
+            const { files, code } = await runQueued(`${config.execute} input answer_file feedback_dir`, {
+                copyIn: {
+                    input: config.input,
+                    answer_file: config.output,
+                    'feedback_dir/placeholder': { content: '' },
+                    ...config.copyIn,
+                },
+                stdin: config.user_stdout,
+                copyOut: [
+                    'feedback_dir/score.txt?',
+                    'feedback_dir/judgemessage.txt?',
+                    'feedback_dir/teammessage.txt?',
+                    'feedback_dir/judgeerror.txt?',
+                ],
+            });
+
+            const status = code === 42 ? STATUS.STATUS_ACCEPTED : code === 43 ? STATUS.STATUS_WRONG_ANSWER : STATUS.STATUS_SYSTEM_ERROR;
+
+            const score = status === STATUS.STATUS_ACCEPTED ? config.score : +files['feedback_dir/score.txt'] || 0;
+
+            const message =
+                status === STATUS.STATUS_SYSTEM_ERROR
+                    ? files['feedback_dir/judgeerror.txt'] || `Checker exited with code ${code}`
+                    : config.detail === 'full'
+                      ? files['feedback_dir/teammessage.txt'] || files['feedback_dir/judgemessage.txt'] || ''
+                      : '';
+
+            return { status, score, message };
+        },
     },
-
-    // https://www.kattis.com/problem-package-format/spec/2023-07-draft.html#output-validator
-    async kattis(config) {
-        const { files, code } = await runQueued(`${config.execute} input answer_file feedback_dir`, {
-            copyIn: {
-                input: config.input,
-                answer_file: config.output,
-                'feedback_dir/placeholder': { content: '' },
-                ...config.copyIn,
-            },
-            stdin: config.user_stdout,
-            copyOut: [
-                'feedback_dir/score.txt?',
-                'feedback_dir/judgemessage.txt?',
-                'feedback_dir/teammessage.txt?',
-                'feedback_dir/judgeerror.txt?',
-            ],
-        });
-
-        const status = code === 42
-            ? STATUS.STATUS_ACCEPTED
-            : code === 43
-                ? STATUS.STATUS_WRONG_ANSWER
-                : STATUS.STATUS_SYSTEM_ERROR;
-
-        const score = status === STATUS.STATUS_ACCEPTED
-            ? config.score
-            : +files['feedback_dir/score.txt'] || 0;
-
-        const message = status === STATUS.STATUS_SYSTEM_ERROR
-            ? files['feedback_dir/judgeerror.txt'] || `Checker exited with code ${code}`
-            : config.detail === 'full'
-                ? files['feedback_dir/teammessage.txt'] || files['feedback_dir/judgemessage.txt'] || ''
-                : '';
-
-        return { status, score, message };
+    {
+        get(self, key) {
+            if (!self[key]) throw new FormatError('Unknown checker type {0}', [key]);
+            return self[key];
+        },
     },
-}, {
-    get(self, key) {
-        if (!self[key]) throw new FormatError('Unknown checker type {0}', [key]);
-        return self[key];
-    },
-});
+);
 
 export default checkers;

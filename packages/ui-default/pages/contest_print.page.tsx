@@ -22,9 +22,9 @@ const apis = {
   allocatePrintTask: () => request.post('', { operation: 'allocate_print_task' }),
 } as const;
 
-const callApi = async <T extends keyof typeof apis>(api: T, ...args: Parameters<typeof apis[T]> & any[]) => {
+const callApi = async <T extends keyof typeof apis>(api: T, ...args: Parameters<(typeof apis)[T]> & any[]) => {
   try {
-    return (await apis[api].call(apis[api], ...args)) as Awaited<ReturnType<typeof apis[T]>>;
+    return (await apis[api].call(apis[api], ...args)) as Awaited<ReturnType<(typeof apis)[T]>>;
   } catch (error) {
     console.error(`Failed to call API ${api}:`, error);
     return null;
@@ -49,7 +49,6 @@ function inlineStyles(element: HTMLElement) {
   Array.from(element.children).forEach((child) => inlineStyles(child as HTMLElement));
 }
 
-// eslint-disable-next-line react-refresh/only-export-components
 const PrintKiosk = ({ isAdmin }: { isAdmin: boolean }) => {
   const [printTasks, setPrintTasks] = useState<PrintTask[]>([]);
   const [isKioskActive, setIsKioskActive] = useState(false);
@@ -91,15 +90,17 @@ const PrintKiosk = ({ isAdmin }: { isAdmin: boolean }) => {
     const highlightedContent = pre.outerHTML;
     document.body.removeChild(tempDiv);
 
-    const header = tpl(<div className="header">
-      <p>
-        [{udoc.uname}] {udoc.school || ''} {udoc.displayName || ''} &nbsp;
-        <span style={{ float: 'right' }}>{new Date(mongoId(task._id).timestamp * 1000).toLocaleString()}</span>
-        <br />
-        Filename: {task.title}
-        <span style={{ float: 'right' }}>By Hydro</span>
-      </p>
-    </div>);
+    const header = tpl(
+      <div className="header">
+        <p>
+          [{udoc.uname}] {udoc.school || ''} {udoc.displayName || ''} &nbsp;
+          <span style={{ float: 'right' }}>{new Date(mongoId(task._id).timestamp * 1000).toLocaleString()}</span>
+          <br />
+          Filename: {task.title}
+          <span style={{ float: 'right' }}>By Hydro</span>
+        </p>
+      </div>,
+    );
 
     printWindow.document.write(`
       <!DOCTYPE html>
@@ -132,7 +133,7 @@ const PrintKiosk = ({ isAdmin }: { isAdmin: boolean }) => {
     let active = true;
     if (isKioskActive) {
       (async () => {
-        while (active) { // eslint-disable-line no-unmodified-loop-condition
+        while (active) {
           const task = await callApi('allocatePrintTask');
           if (!task?.task) await delay(5000);
           else {
@@ -155,43 +156,51 @@ const PrintKiosk = ({ isAdmin }: { isAdmin: boolean }) => {
     };
   }, []);
 
-  return <div className="print-kiosk">
-    {isKioskActive && <p style={{ textAlign: 'center' }}>Print Kiosk is enabled</p>}
+  return (
+    <div className="print-kiosk">
+      {isKioskActive && <p style={{ textAlign: 'center' }}>Print Kiosk is enabled</p>}
 
-    <div className="table-container">
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>User</th>
-            <th>Title</th>
-            <th>Time</th>
-            <th>Status</th>
-            {isAdmin && <th>Action</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {printTasks.length === 0
-            && <tr><td colSpan={isAdmin ? 5 : 4}><p style={{ textAlign: 'center' }}>No pending print tasks.</p></td></tr>}
-          {printTasks.map((task) => (
-            <tr key={task._id}>
-              <td><a href={`/user/${task.owner}`}>{udict[task.owner]?.uname}</a></td>
-              <td>{task.title}</td>
-              <td>{new Date(mongoId(task._id).timestamp * 1000).toLocaleString()}</td>
-              <td>{task.status}</td>
-              {isAdmin && <td>
-                <button
-                  onClick={() => callApi('updatePrintTask', task._id, 'pending').then(() => pollPrintTasks())}
-                  className="typo-a"
-                >
-                  Re-Print
-                </button>
-              </td>}
+      <div className="table-container">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Title</th>
+              <th>Time</th>
+              <th>Status</th>
+              {isAdmin && <th>Action</th>}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {printTasks.length === 0 && (
+              <tr>
+                <td colSpan={isAdmin ? 5 : 4}>
+                  <p style={{ textAlign: 'center' }}>No pending print tasks.</p>
+                </td>
+              </tr>
+            )}
+            {printTasks.map((task) => (
+              <tr key={task._id}>
+                <td>
+                  <a href={`/user/${task.owner}`}>{udict[task.owner]?.uname}</a>
+                </td>
+                <td>{task.title}</td>
+                <td>{new Date(mongoId(task._id).timestamp * 1000).toLocaleString()}</td>
+                <td>{task.status}</td>
+                {isAdmin && (
+                  <td>
+                    <button onClick={() => callApi('updatePrintTask', task._id, 'pending').then(() => pollPrintTasks())} className="typo-a">
+                      Re-Print
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
-  </div>;
+  );
 };
 
 const page = new NamedPage('contest_print', () => {
@@ -208,12 +217,19 @@ const page = new NamedPage('contest_print', () => {
     formData.append('operation', 'print');
     const language = file.name.split('.').pop()?.toLowerCase();
     const dialog = new ConfirmDialog({
-      $body: tpl(<div className="typo">
-        <h3>{i18n('Are you sure to print this file?')}<span style={{ float: 'right' }}>{i18n('Filename: {0}', file.name)}</span></h3>
-        <div style={{ maxHeight: '60vh', overflow: 'scroll' }}>
-          <pre><code className={`language-${language}`}>{await file.text()}</code></pre>
-        </div>
-      </div>),
+      $body: tpl(
+        <div className="typo">
+          <h3>
+            {i18n('Are you sure to print this file?')}
+            <span style={{ float: 'right' }}>{i18n('Filename: {0}', file.name)}</span>
+          </h3>
+          <div style={{ maxHeight: '60vh', overflow: 'scroll' }}>
+            <pre>
+              <code className={`language-${language}`}>{await file.text()}</code>
+            </pre>
+          </div>
+        </div>,
+      ),
     });
     const action = await dialog.open();
     if (action !== 'yes') return;

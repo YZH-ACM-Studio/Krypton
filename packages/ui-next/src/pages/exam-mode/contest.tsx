@@ -46,22 +46,16 @@ function ClarificationCard({
       <CardHeader className="pb-2">
         <CardTitle className="flex flex-wrap items-center gap-2 text-base">
           {isBroadcast ? <Bell className="size-4 text-primary" /> : <MessageSquare className="size-4 text-primary" />}
-          <Badge variant={isBroadcast ? 'default' : 'outline'}>
-            {isBroadcast ? '比赛公告' : '我的提问'}
-          </Badge>
+          <Badge variant={isBroadcast ? 'default' : 'outline'}>{isBroadcast ? '比赛公告' : '我的提问'}</Badge>
           <Badge variant="outline">{clarificationSubjectLabel(tdoc, pdict, tc.subject)}</Badge>
-          <span className="text-xs font-normal text-muted-foreground">
-            {tc.updateAt ? formatRelativeTime(tc.updateAt, locale) : ''}
-          </span>
+          <span className="text-xs font-normal text-muted-foreground">{tc.updateAt ? formatRelativeTime(tc.updateAt, locale) : ''}</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <MarkdownView content={tc.content || ''} preferredLang={locale} />
         {Array.isArray(tc.reply) && tc.reply.length > 0 ? (
           <div className="space-y-2 border-t pt-3">
-            <p className="text-xs font-medium text-muted-foreground">
-              {isBroadcast ? '补充说明' : '裁判回复'}
-            </p>
+            <p className="text-xs font-medium text-muted-foreground">{isBroadcast ? '补充说明' : '裁判回复'}</p>
             {tc.reply.map((reply: R, index: number) => (
               <div key={String(reply._id || index)} className="rounded-md bg-muted/40 p-3">
                 <MarkdownView content={reply.content || ''} preferredLang={locale} />
@@ -103,15 +97,11 @@ function ExamAnnouncementsPage() {
             <input type="hidden" name="operation" value="clarification" />
             <label className="block space-y-1.5 text-sm">
               <span className="font-medium">主题</span>
-              <select
-                name="subject"
-                className="h-9 rounded-md border bg-background px-3 text-sm"
-                defaultValue="0"
-            >
-              <option value="0">比赛整体</option>
-              <option value="-1">技术问题</option>
-              {pids.map((pid, index) => (
-                <option key={String(pid)} value={String(pid)}>
+              <select name="subject" className="h-9 rounded-md border bg-background px-3 text-sm" defaultValue="0">
+                <option value="0">比赛整体</option>
+                <option value="-1">技术问题</option>
+                {pids.map((pid, index) => (
+                  <option key={String(pid)} value={String(pid)}>
                     {String.fromCharCode(65 + index)}. {pdict[String(pid)]?.title || `P${pid}`}
                   </option>
                 ))}
@@ -131,9 +121,9 @@ function ExamAnnouncementsPage() {
           <h2 className="text-base font-semibold">比赛公告</h2>
           <p className="text-xs text-muted-foreground">裁判广播与公开说明</p>
         </div>
-        {broadcasts.length ? broadcasts.map((tc) => (
-          <ClarificationCard key={String(tc._id)} tc={tc} tdoc={tdoc} pdict={pdict} locale={bs.locale} kind="broadcast" />
-        )) : (
+        {broadcasts.length ? (
+          broadcasts.map((tc) => <ClarificationCard key={String(tc._id)} tc={tc} tdoc={tdoc} pdict={pdict} locale={bs.locale} kind="broadcast" />)
+        ) : (
           <Card>
             <CardContent className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
               <HelpCircle className="size-4" />
@@ -148,9 +138,9 @@ function ExamAnnouncementsPage() {
           <h2 className="text-base font-semibold">我的提问 / 答疑</h2>
           <p className="text-xs text-muted-foreground">仅显示与你相关的问题和回复</p>
         </div>
-        {questions.length ? questions.map((tc) => (
-          <ClarificationCard key={String(tc._id)} tc={tc} tdoc={tdoc} pdict={pdict} locale={bs.locale} kind="question" />
-        )) : (
+        {questions.length ? (
+          questions.map((tc) => <ClarificationCard key={String(tc._id)} tc={tc} tdoc={tdoc} pdict={pdict} locale={bs.locale} kind="question" />)
+        ) : (
           <Card>
             <CardContent className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
               <HelpCircle className="size-4" />
@@ -163,11 +153,7 @@ function ExamAnnouncementsPage() {
   );
 }
 
-const START_GATED_TEMPLATES = new Set([
-  'contest_problemlist.html',
-  'problem_detail.html',
-  'contest_print.html',
-]);
+const START_GATED_TEMPLATES = new Set(['contest_problemlist.html', 'problem_detail.html', 'contest_print.html']);
 
 function isContestBeforeStart(tdoc: R) {
   const begin = new Date(tdoc?.beginAt).getTime();
@@ -187,7 +173,8 @@ function BeforeStartGate({ tdoc }: { tdoc: R }) {
         <p>题目、题面和打印将在开赛后开放。</p>
         {tdoc?.beginAt && (
           <p>
-            开始时间：<DateTime value={tdoc.beginAt} />
+            开始时间：
+            <DateTime value={tdoc.beginAt} />
           </p>
         )}
       </CardContent>
@@ -230,9 +217,5 @@ export function ExamContestPage() {
   const bs = useBootstrap();
   const data = bs.page.data || {};
   const template = String(data.examMode?.contentTemplate || 'contest_workspace.html');
-  return (
-    <ExamContestShell>
-      {renderExamContestContent(template, data)}
-    </ExamContestShell>
-  );
+  return <ExamContestShell>{renderExamContestContent(template, data)}</ExamContestShell>;
 }

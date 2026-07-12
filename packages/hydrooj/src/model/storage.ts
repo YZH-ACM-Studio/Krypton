@@ -24,12 +24,18 @@ export class StorageModel {
         meta['Content-Type'] = mime(path);
         let _id = StorageModel.generateId(extname(path));
         // Make sure id is not used
-        // eslint-disable-next-line no-await-in-loop
+
         while (await StorageModel.coll.findOne({ _id })) _id = StorageModel.generateId(extname(path));
         await storage.put(_id, file, meta);
         const { metaData, size, etag } = await storage.getMeta(_id);
         await StorageModel.coll.insertOne({
-            _id, meta: metaData, path, size, etag, lastModified: new Date(), owner,
+            _id,
+            meta: metaData,
+            path,
+            size,
+            etag,
+            lastModified: new Date(),
+            owner,
         });
         return path;
     }
@@ -78,25 +84,25 @@ export class StorageModel {
                 fileIds.push(i._id);
                 continue;
             }
-            await StorageModel._swapId(i, affected[0]); // eslint-disable-line no-await-in-loop
+            await StorageModel._swapId(i, affected[0]);
             fileIds.push(affected[0]._id); // we already swapped the two files, so we need to delete the other one
         }
         const autoDelete = moment().add(7, 'day').toDate();
-        await StorageModel.coll.updateMany(
-            { _id: { $in: fileIds } },
-            { $set: { autoDelete }, $push: { operator } },
-        );
+        await StorageModel.coll.updateMany({ _id: { $in: fileIds } }, { $set: { autoDelete }, $push: { operator } });
     }
 
     static async list(target: string, recursive = true) {
         if (target.includes('..') || target.includes('//')) throw new Error('Invalid path');
         if (target.length && !target.endsWith('/')) target += '/';
-        const results = await StorageModel.coll.find({
-            path: { $regex: `^${escapeRegExp(target)}${recursive ? '' : '[^/]+$'}` },
-            autoDelete: null,
-        }).toArray();
+        const results = await StorageModel.coll
+            .find({
+                path: { $regex: `^${escapeRegExp(target)}${recursive ? '' : '[^/]+$'}` },
+                autoDelete: null,
+            })
+            .toArray();
         return results.map((i) => ({
-            ...i, name: i.path.split(target)[1],
+            ...i,
+            name: i.path.split(target)[1],
         }));
     }
 
@@ -116,18 +122,12 @@ export class StorageModel {
     }
 
     static async signDownloadLink(target: string, filename?: string, noExpire = false, useAlternativeEndpointFor?: 'user' | 'judge') {
-        const res = await StorageModel.coll.findOneAndUpdate(
-            { path: target, autoDelete: null },
-            { $set: { lastUsage: new Date() } },
-        );
+        const res = await StorageModel.coll.findOneAndUpdate({ path: target, autoDelete: null }, { $set: { lastUsage: new Date() } });
         return await storage.signDownloadLink(res?.link || res?._id || target, filename, noExpire, useAlternativeEndpointFor);
     }
 
     static async move(src: string, dst: string) {
-        const res = await StorageModel.coll.findOneAndUpdate(
-            { path: src, autoDelete: null },
-            { $set: { path: dst } },
-        );
+        const res = await StorageModel.coll.findOneAndUpdate({ path: src, autoDelete: null }, { $set: { path: dst } });
         return !!res;
     }
 
@@ -148,10 +148,15 @@ export class StorageModel {
         meta['Content-Type'] = mime(dst);
         let _id = StorageModel.generateId(extname(dst));
         // Make sure id is not used
-        // eslint-disable-next-line no-await-in-loop
+
         while (await StorageModel.coll.findOne({ _id })) _id = StorageModel.generateId(extname(dst));
         await StorageModel.coll.insertOne({
-            ...value, _id, path: dst, link: value.link || value._id, lastModified: new Date(), owner: value.owner || 1,
+            ...value,
+            _id,
+            path: dst,
+            link: value.link || value._id,
+            lastModified: new Date(),
+            owner: value.owner || 1,
         });
         return _id;
     }
@@ -161,19 +166,20 @@ async function cleanFiles() {
     const submissionKeepDate = system.get('submission.saveDays');
     if (submissionKeepDate) {
         const shouldDelete = moment().subtract(submissionKeepDate, 'day').toDate();
-        const res = await StorageModel.coll.find({
-            path: /^submission\//g,
-            lastModified: { $lt: shouldDelete },
-        }).toArray();
+        const res = await StorageModel.coll
+            .find({
+                path: /^submission\//g,
+                lastModified: { $lt: shouldDelete },
+            })
+            .toArray();
         const paths = res.map((i) => i.path);
         await StorageModel.del(paths);
     }
     if (system.get('server.keepFiles')) return;
     let res = await StorageModel.coll.findOneAndDelete({ autoDelete: { $lte: new Date() } });
     while (res) {
-        // eslint-disable-next-line no-await-in-loop
         if (!res.link) await storage.del(res._id);
-        // eslint-disable-next-line no-await-in-loop
+
         res = await StorageModel.coll.findOneAndDelete({ autoDelete: { $lte: new Date() } });
     }
 }
@@ -185,7 +191,12 @@ export async function apply(ctx: Context) {
             StorageModel.list(`contest/${domainId}`),
             StorageModel.list(`training/${domainId}`),
         ]);
-        await StorageModel.del(problemFiles.concat(contestFiles).concat(trainingFiles).map((i) => i.path));
+        await StorageModel.del(
+            problemFiles
+                .concat(contestFiles)
+                .concat(trainingFiles)
+                .map((i) => i.path),
+        );
     });
     await ctx.inject(['worker'], (c) => {
         c.worker.addHandler('storage.prune', cleanFiles);
@@ -197,7 +208,7 @@ export async function apply(ctx: Context) {
         { key: { path: 1, autoDelete: 1 }, sparse: true, name: 'autoDelete' },
         { key: { link: 1 }, sparse: true, name: 'link' },
     );
-    if (!await ScheduleModel.count({ type: 'schedule', subType: 'storage.prune' })) {
+    if (!(await ScheduleModel.count({ type: 'schedule', subType: 'storage.prune' }))) {
         await ScheduleModel.add({
             type: 'schedule',
             subType: 'storage.prune',

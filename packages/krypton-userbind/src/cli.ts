@@ -54,7 +54,9 @@ export function registerCommands(ctx: any): void {
                 raw = await new Promise<string>((resolve, reject) => {
                     let buf = '';
                     process.stdin.setEncoding('utf-8');
-                    process.stdin.on('data', (chunk: string) => { buf += chunk; });
+                    process.stdin.on('data', (chunk: string) => {
+                        buf += chunk;
+                    });
                     process.stdin.on('end', () => resolve(buf));
                     process.stdin.on('error', reject);
                 });

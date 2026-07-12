@@ -18,9 +18,7 @@
  *   └─────────────────────────────────────┘
  */
 import { useCallback, useEffect, useState } from 'react';
-import {
-  Camera, FileText, Film, Lock, MessageSquare, Monitor, ChevronRight, AlertCircle,
-} from 'lucide-react';
+import { Camera, FileText, Film, Lock, MessageSquare, Monitor, ChevronRight } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -30,10 +28,7 @@ import { Badge } from '@/components/ui/badge';
 // so heartbeat + event log timestamps render in the proctor's local zone.
 import { VigilDateTime as DateTime } from '@/pages/vigil/timestamp';
 import { translateEventType } from '@/pages/vigil/i18n';
-import {
-  listStudentEvents, VigilOfflineError,
-  type VigilStudentCard, type VigilStudentEvent,
-} from '@/lib/vigil-api';
+import { listStudentEvents, VigilOfflineError, type VigilStudentCard, type VigilStudentEvent } from '@/lib/vigil-api';
 import { useProctorCommands } from '@/hooks/use-proctor-commands';
 import { StatusPill, statusLabel } from '@/pages/vigil/student-card';
 import { ConfirmActionDialog } from '@/pages/vigil/confirm-action-dialog';
@@ -54,9 +49,7 @@ interface StudentDetailSheetProps {
   newEventVersion?: number;
 }
 
-export function StudentDetailSheet({
-  open, onOpenChange, contestId, student, recordEnabled, newEventVersion,
-}: StudentDetailSheetProps) {
+export function StudentDetailSheet({ open, onOpenChange, contestId, student, recordEnabled, newEventVersion }: StudentDetailSheetProps) {
   const { sendCommand } = useProctorCommands({ contestId });
   const [events, setEvents] = useState<VigilStudentEvent[]>([]);
   const [eventsErr, setEventsErr] = useState<string | null>(null);
@@ -91,7 +84,9 @@ export function StudentDetailSheet({
         }
         setEventsLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [open, student, contestId, newEventVersion]);
 
   // Local handlers; all UI confirmations wrap sendCommand.
@@ -104,24 +99,30 @@ export function StudentDetailSheet({
     });
   }, [sendCommand, student]);
 
-  const handleFlush = useCallback(async (reason: string) => {
-    if (!student) return;
-    await sendCommand({
-      targetMachineId: student.machineId,
-      command: 'flush_logs',
-      reason: reason || undefined,
-    });
-  }, [sendCommand, student]);
+  const handleFlush = useCallback(
+    async (reason: string) => {
+      if (!student) return;
+      await sendCommand({
+        targetMachineId: student.machineId,
+        command: 'flush_logs',
+        reason: reason || undefined,
+      });
+    },
+    [sendCommand, student],
+  );
 
-  const handleLock = useCallback(async (reason: string) => {
-    if (!student) return;
-    await sendCommand({
-      targetMachineId: student.machineId,
-      command: 'lock_screen',
-      payload: { message: '请等待监考老师指示' },
-      reason: reason || undefined,
-    });
-  }, [sendCommand, student]);
+  const handleLock = useCallback(
+    async (reason: string) => {
+      if (!student) return;
+      await sendCommand({
+        targetMachineId: student.machineId,
+        command: 'lock_screen',
+        payload: { message: '请等待监考老师指示' },
+        reason: reason || undefined,
+      });
+    },
+    [sendCommand, student],
+  );
 
   if (!student) {
     return (
@@ -138,9 +139,7 @@ export function StudentDetailSheet({
           <SheetHeader className="px-6 py-4">
             <div className="flex items-baseline gap-2 pr-8">
               <h2 className="truncate text-lg font-semibold">{student.name}</h2>
-              {student.studentId && (
-                <span className="font-mono text-sm text-muted-foreground">{student.studentId}</span>
-              )}
+              {student.studentId && <span className="font-mono text-sm text-muted-foreground">{student.studentId}</span>}
             </div>
             <p className="font-mono text-[11px] text-muted-foreground">{student.machineId}</p>
           </SheetHeader>
@@ -153,16 +152,10 @@ export function StudentDetailSheet({
                   <div className="flex items-center gap-2">
                     <StatusPill status={student.status} />
                     {student.status === 'ended' && student.endedReason && (
-                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                        {student.endedReason}
-                      </span>
+                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{student.endedReason}</span>
                     )}
                   </div>
-                  {student.examSeconds != null && (
-                    <span className="text-xs text-muted-foreground">
-                      已考 {formatExamTime(student.examSeconds)}
-                    </span>
-                  )}
+                  {student.examSeconds != null && <span className="text-xs text-muted-foreground">已考 {formatExamTime(student.examSeconds)}</span>}
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-[11px]">
                   <StreamLabel name="屏幕" status={student.streamState?.screen} />
@@ -178,22 +171,14 @@ export function StudentDetailSheet({
 
               {/* Quick actions grid */}
               <div className="grid grid-cols-2 gap-2">
-                <ActionButton
-                  icon={Camera}
-                  label="实时截屏"
-                  onClick={handleScreenshot}
-                />
+                <ActionButton icon={Camera} label="实时截屏" onClick={handleScreenshot} />
                 <ActionButton
                   icon={Monitor}
                   label="查看实时画面"
                   onClick={() => setLiveOpen(true)}
                   disabled={student.streamState?.screen !== 'started'}
                 />
-                <ActionButton
-                  icon={MessageSquare}
-                  label="发消息"
-                  onClick={() => setMessageOpen(true)}
-                />
+                <ActionButton icon={MessageSquare} label="发消息" onClick={() => setMessageOpen(true)} />
                 <ActionButton
                   icon={Lock}
                   label={student.status === 'locked' ? '解锁屏幕' : '锁屏'}
@@ -209,24 +194,13 @@ export function StudentDetailSheet({
                     }
                   }}
                 />
-                <ActionButton
-                  icon={FileText}
-                  label="导出日志"
-                  onClick={() => setConfirmFlush(true)}
-                />
-                <ActionButton
-                  icon={Film}
-                  label="录屏回放"
-                  onClick={() => setRecordingOpen(true)}
-                  disabled={!recordEnabled}
-                />
+                <ActionButton icon={FileText} label="导出日志" onClick={() => setConfirmFlush(true)} />
+                <ActionButton icon={Film} label="录屏回放" onClick={() => setRecordingOpen(true)} disabled={!recordEnabled} />
               </div>
 
               {/* Event log */}
               <div>
-                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  行为日志
-                </p>
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">行为日志</p>
                 {eventsLoading && !events.length ? (
                   <div className="space-y-1">
                     {Array.from({ length: 4 }).map((_, i) => (
@@ -238,9 +212,7 @@ export function StudentDetailSheet({
                     {eventsErr}
                   </div>
                 ) : !events.length ? (
-                  <p className="rounded-md border border-dashed py-6 text-center text-xs text-muted-foreground">
-                    暂无行为日志
-                  </p>
+                  <p className="rounded-md border border-dashed py-6 text-center text-xs text-muted-foreground">暂无行为日志</p>
                 ) : (
                   <ul className="space-y-1.5">
                     {events.map((e) => (
@@ -257,11 +229,11 @@ export function StudentDetailSheet({
                           <div className="min-w-0 flex-1 space-y-1">
                             {/* Row 1: localized event type + count badge */}
                             <div className="flex items-center gap-2">
-                              <span className="truncate text-sm font-medium leading-tight">
-                                {translateEventType(e.type)}
-                              </span>
+                              <span className="truncate text-sm font-medium leading-tight">{translateEventType(e.type)}</span>
                               {e.count > 1 && (
-                                <Badge variant="outline" className="h-4 shrink-0 px-1 text-[9px]">×{e.count}</Badge>
+                                <Badge variant="outline" className="h-4 shrink-0 px-1 text-[9px]">
+                                  ×{e.count}
+                                </Badge>
                               )}
                             </div>
                             {/* Row 2: timestamp + summary (raw client message), wraps if long */}
@@ -269,9 +241,7 @@ export function StudentDetailSheet({
                               <span className="font-mono">
                                 <DateTime value={e.ts} mode="datetime" />
                               </span>
-                              {e.summary && (
-                                <span className="break-words">· {e.summary}</span>
-                              )}
+                              {e.summary && <span className="break-words">· {e.summary}</span>}
                             </div>
                           </div>
                           <ChevronRight className="mt-1 size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5" />
@@ -290,13 +260,13 @@ export function StudentDetailSheet({
         open={confirmLock}
         onOpenChange={setConfirmLock}
         title="锁定学生屏幕"
-        description={(
+        description={
           <>
             确定要锁定 <strong>{student.name}</strong>
-            {student.studentId && <span className="ml-1 font-mono text-xs">{student.studentId}</span>}
-            {' '}的屏幕吗？学生将看到全屏遮罩，无法答题，直到解锁。
+            {student.studentId && <span className="ml-1 font-mono text-xs">{student.studentId}</span>}{' '}
+            的屏幕吗？学生将看到全屏遮罩，无法答题，直到解锁。
           </>
-        )}
+        }
         confirmLabel="确认锁屏"
         confirmVariant="destructive"
         onConfirm={handleLock}
@@ -312,12 +282,7 @@ export function StudentDetailSheet({
         onConfirm={handleFlush}
       />
 
-      <SendMessageDialog
-        open={messageOpen}
-        onOpenChange={setMessageOpen}
-        student={student}
-        sendCommand={sendCommand}
-      />
+      <SendMessageDialog open={messageOpen} onOpenChange={setMessageOpen} student={student} sendCommand={sendCommand} />
 
       <LivePlayerDialog
         open={liveOpen}
@@ -330,16 +295,13 @@ export function StudentDetailSheet({
         onSendMessage={() => setMessageOpen(true)}
       />
 
-      <RecordingPlaybackDialog
-        open={recordingOpen}
-        onOpenChange={setRecordingOpen}
-        contestId={contestId}
-        student={student}
-      />
+      <RecordingPlaybackDialog open={recordingOpen} onOpenChange={setRecordingOpen} contestId={contestId} student={student} />
 
       <EventDetailDialog
         open={!!selectedEvent}
-        onOpenChange={(o) => { if (!o) setSelectedEvent(null); }}
+        onOpenChange={(o) => {
+          if (!o) setSelectedEvent(null);
+        }}
         event={selectedEvent}
       />
     </>
@@ -349,7 +311,11 @@ export function StudentDetailSheet({
 /* ─── Subcomponents ────────────────────────────────────────────────────── */
 
 function ActionButton({
-  icon: Icon, label, onClick, disabled, variant = 'outline',
+  icon: Icon,
+  label,
+  onClick,
+  disabled,
+  variant = 'outline',
 }: {
   icon: any;
   label: string;
@@ -358,37 +324,24 @@ function ActionButton({
   variant?: 'default' | 'outline' | 'destructive';
 }) {
   return (
-    <Button
-      type="button"
-      variant={variant}
-      size="sm"
-      onClick={onClick}
-      disabled={disabled}
-      className="h-12 justify-start gap-2 text-xs"
-    >
+    <Button type="button" variant={variant} size="sm" onClick={onClick} disabled={disabled} className="h-12 justify-start gap-2 text-xs">
       <Icon className="size-4" />
       {label}
     </Button>
   );
 }
 
-function StreamLabel({
-  name, status,
-}: { name: string; status?: 'started' | 'stopped' | 'failed' | undefined }) {
+function StreamLabel({ name, status }: { name: string; status?: 'started' | 'stopped' | 'failed' | undefined }) {
   const colors: Record<string, string> = {
     started: 'text-emerald-600',
     stopped: 'text-muted-foreground',
     failed: 'text-destructive',
   };
-  const text = status ? (
-    status === 'started' ? 'ON' : status === 'failed' ? 'FAIL' : 'OFF'
-  ) : 'OFF';
+  const text = status ? (status === 'started' ? 'ON' : status === 'failed' ? 'FAIL' : 'OFF') : 'OFF';
   return (
     <div className="flex items-center justify-between rounded-md border bg-background px-2 py-1">
       <span className="text-muted-foreground">{name}</span>
-      <span className={cn('font-mono text-[10px] font-semibold', colors[status || 'stopped'])}>
-        {text}
-      </span>
+      <span className={cn('font-mono text-[10px] font-semibold', colors[status || 'stopped'])}>{text}</span>
     </div>
   );
 }

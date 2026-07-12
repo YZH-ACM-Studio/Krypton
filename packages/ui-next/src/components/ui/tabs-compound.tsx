@@ -1,10 +1,4 @@
-import {
-  createContext,
-  type ReactNode,
-  useCallback,
-  useContext,
-  useState,
-} from 'react';
+import { createContext, type ReactNode, useCallback, useContext, useState } from 'react';
 import { cn } from '@/lib/cn';
 
 /* ------------------------------------------------------------------ */
@@ -59,38 +53,15 @@ export function Tabs({
 /*  TabsList — horizontal container for triggers                       */
 /* ------------------------------------------------------------------ */
 
-export function TabsList({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        'inline-flex h-9 items-center justify-start rounded-lg bg-muted p-1 text-muted-foreground',
-        className,
-      )}
-    >
-      {children}
-    </div>
-  );
+export function TabsList({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn('inline-flex h-9 items-center justify-start rounded-lg bg-muted p-1 text-muted-foreground', className)}>{children}</div>;
 }
 
 /* ------------------------------------------------------------------ */
 /*  TabsTrigger                                                        */
 /* ------------------------------------------------------------------ */
 
-export function TabsTrigger({
-  value,
-  children,
-  className,
-}: {
-  value: string;
-  children: ReactNode;
-  className?: string;
-}) {
+export function TabsTrigger({ value, children, className }: { value: string; children: ReactNode; className?: string }) {
   const ctx = useContext(TabsContext);
   const active = ctx.value === value;
   return (
@@ -114,15 +85,7 @@ export function TabsTrigger({
 /*  TabsContent                                                        */
 /* ------------------------------------------------------------------ */
 
-export function TabsContent({
-  value,
-  children,
-  className,
-}: {
-  value: string;
-  children: ReactNode;
-  className?: string;
-}) {
+export function TabsContent({ value, children, className }: { value: string; children: ReactNode; className?: string }) {
   const ctx = useContext(TabsContext);
   if (ctx.value !== value) return null;
   return <div className={className}>{children}</div>;

@@ -83,27 +83,31 @@ export default class Calendar {
     const $newBody = this.buildBody();
     $newBody.appendTo(this.$dom.find('.calendar__body-container'));
     if (this.$lastBody !== null) {
-      this.$lastBody
-        .addClass('exit')
-        .transition({
+      this.$lastBody.addClass('exit').transition(
+        {
           y: direction * 100,
           opacity: 0,
-        }, {
+        },
+        {
           duration: 500,
           easing: 'easeOutCubic',
-        });
+        },
+      );
       await $newBody
         .css({
           y: -direction * 100,
           opacity: 0,
         })
-        .transition({
-          y: 0,
-          opacity: 1,
-        }, {
-          duration: 500,
-          easing: 'easeOutCubic',
-        })
+        .transition(
+          {
+            y: 0,
+            opacity: 1,
+          },
+          {
+            duration: 500,
+            easing: 'easeOutCubic',
+          },
+        )
         .promise();
       this.$lastBody.remove();
     }
@@ -127,7 +131,11 @@ export default class Calendar {
         const isCurrentDay = day.current ? 'is-current-day' : '';
         const today = day.current ? ' (TODAY)' : '';
         $bgContainer.append($('<td></td>').addClass(isInactive).addClass(isCurrentDay));
-        $numContainer.append($(tpl`<th>${day.date.format('D')}${today}</th>`).addClass(isInactive).addClass(isCurrentDay));
+        $numContainer.append(
+          $(tpl`<th>${day.date.format('D')}${today}</th>`)
+            .addClass(isInactive)
+            .addClass(isCurrentDay),
+        );
       });
       week.banners.forEach((banners) => {
         const $tr = $('<tr/>');
@@ -260,29 +268,25 @@ export default class Calendar {
 
     // layout banners
     const layout = bannersByWeek
-      .map((banners) => _
-        .sortBy(banners, [
+      .map((banners) =>
+        _.sortBy(banners, [
           (banner) => banner.beginAt.valueOf(),
           (banner) => (banner.beginTrunc ? 0 : 1), // truncated events first
           (banner) => -banner.endAt.valueOf(), // long events first
-        ]))
+        ]),
+      )
       .map((banners) => {
-        const dayBitmap = _
-          .fill(Array.from({ length: 7 }), 1)
-          .map(() => []);
+        const dayBitmap = _.fill(Array.from({ length: 7 }), 1).map(() => []);
         banners.forEach((banner) => {
           const beginDay = banner.beginAt.day();
           const endDay = banner.endAt.day();
           // find available space
-          const vIndexMax = _.max(_
-            .range(beginDay, endDay + 1)
-            .map((day) => dayBitmap[day].length));
+          const vIndexMax = _.max(_.range(beginDay, endDay + 1).map((day) => dayBitmap[day].length));
           let vIndex = 0;
           for (; vIndex < vIndexMax; ++vIndex) {
-            if (_.every(_
-              .range(beginDay, endDay + 1)
-              .map((day) => !dayBitmap[day][vIndex]), // eslint-disable-line
-            )) break;
+            if (_.every(_.range(beginDay, endDay + 1).map((day) => !dayBitmap[day][vIndex]))) {
+              break;
+            }
           }
           // fill space
           for (let i = beginDay; i <= endDay; ++i) {
@@ -291,9 +295,7 @@ export default class Calendar {
         });
         // merge adjacent cells and arrange banners by vertical index
         const vMaxLength = _.max(_.range(0, 7).map((day) => dayBitmap[day].length));
-        const weekBanners = _
-          .fill(Array.from({ length: vMaxLength }), 1)
-          .map(() => []);
+        const weekBanners = _.fill(Array.from({ length: vMaxLength }), 1).map(() => []);
         for (let vIndex = 0; vIndex < vMaxLength; ++vIndex) {
           let last = { span: 1, banner: dayBitmap[0][vIndex] };
           weekBanners[vIndex].push(last);
@@ -358,10 +360,9 @@ export default class Calendar {
         });
         return weekBanners;
       });
-    return daysByWeek
-      .map((daysInWeek, weekIndex) => ({
-        days: daysInWeek,
-        banners: layout[weekIndex],
-      }));
+    return daysByWeek.map((daysInWeek, weekIndex) => ({
+      days: daysInWeek,
+      banners: layout[weekIndex],
+    }));
   }
 }

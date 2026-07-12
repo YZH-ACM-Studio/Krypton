@@ -6,7 +6,7 @@ export default function DomComponent(props: React.HTMLAttributes<HTMLDivElement>
   React.useEffect(() => {
     if (!dom) return;
     dom.appendChild(props.childDom);
-    return () => { // eslint-disable-line consistent-return
+    return () => {
       dom.removeChild(props.childDom);
     };
   }, [dom]);

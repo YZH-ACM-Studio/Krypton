@@ -28,11 +28,7 @@ export interface ModuleWorkspaceProps {
   children: ReactNode;
 }
 
-function resolveModuleWorkspaceActiveKey(
-  items: readonly ModuleWorkspaceNavItem[],
-  templateName: string,
-  activeKey?: string,
-): string {
+function resolveModuleWorkspaceActiveKey(items: readonly ModuleWorkspaceNavItem[], templateName: string, activeKey?: string): string {
   if (activeKey !== undefined) {
     if (!items.some((item) => item.key === activeKey)) {
       throw new Error(`Unknown module workspace active key: ${activeKey}`);
@@ -66,12 +62,7 @@ export function ModuleWorkspace({
   const resolvedActiveKey = resolveModuleWorkspaceActiveKey(navItems, templateName, activeKey);
 
   return (
-    <AdminPage
-      requiredPriv={requiredPriv}
-      bypassPrivGate={bypassPrivGate}
-      hideSidebar
-      contentClassName="min-w-0"
-    >
+    <AdminPage requiredPriv={requiredPriv} bypassPrivGate={bypassPrivGate} hideSidebar contentClassName="min-w-0">
       <section aria-labelledby={titleId} className="min-w-0 max-w-full space-y-5 overflow-x-clip">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0 space-y-1">
@@ -110,10 +101,7 @@ export function ModuleWorkspace({
         </nav>
 
         {toolbar ? (
-          <section
-            aria-label={toolbarLabel}
-            className="flex min-h-11 flex-wrap items-center gap-2 border-y border-border/70 py-2"
-          >
+          <section aria-label={toolbarLabel} className="flex min-h-11 flex-wrap items-center gap-2 border-y border-border/70 py-2">
             {toolbar}
           </section>
         ) : null}

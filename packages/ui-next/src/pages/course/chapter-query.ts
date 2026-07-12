@@ -35,12 +35,15 @@ export function useChapterQuery(chapters: Array<{ _id: number }>) {
     return () => window.removeEventListener('popstate', syncFromLocation);
   }, [firstId, idsKey]);
 
-  const selectChapter = useCallback((chapterId: number, replace = false) => {
-    if (typeof window === 'undefined' || !ids.includes(chapterId)) return;
-    setActiveId(chapterId);
-    const href = withChapterQuery(window.location.href, chapterId);
-    window.history[replace ? 'replaceState' : 'pushState'](null, '', href);
-  }, [idsKey]);
+  const selectChapter = useCallback(
+    (chapterId: number, replace = false) => {
+      if (typeof window === 'undefined' || !ids.includes(chapterId)) return;
+      setActiveId(chapterId);
+      const href = withChapterQuery(window.location.href, chapterId);
+      window.history[replace ? 'replaceState' : 'pushState'](null, '', href);
+    },
+    [idsKey],
+  );
 
   return { activeId, selectChapter };
 }

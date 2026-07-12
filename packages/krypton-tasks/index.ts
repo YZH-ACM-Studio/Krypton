@@ -20,10 +20,10 @@ import { i18n_en, i18n_zh } from './src/i18n';
 import { migrationScripts } from './src/migration';
 import { taskModel } from './src/model';
 
-export * from './src/types';
-export { taskModel } from './src/model';
-export { taskPointPresets, presetSummaries, runChecker } from './src/presets';
 export { canCreateTask, canManageAllTasks, canModifyTask } from './src/auth';
+export { taskModel } from './src/model';
+export { presetSummaries, runChecker, taskPointPresets } from './src/presets';
+export * from './src/types';
 
 export function apply(ctx: Context) {
     applyHandlers(ctx);

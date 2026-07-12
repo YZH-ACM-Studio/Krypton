@@ -18,20 +18,21 @@
  * `claimTemporaryAccount` lets a real account "absorb" a temp account's records.
  */
 import type { Filter } from 'mongodb';
-import {
-    ObjectId, ValidationError, UserModel, NotFoundError,
-} from 'hydrooj';
+import { ObjectId, ValidationError, UserModel, NotFoundError } from 'hydrooj';
 import RecordModel from 'hydrooj/src/model/record';
 import { randomBytes } from 'node:crypto';
-import {
-    bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl, userGroupsColl,
-} from './db';
-import {
-    deriveEnrollmentYear, userBindModel,
-} from './model';
+import { bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl, userGroupsColl } from './db';
+import { deriveEnrollmentYear, userBindModel } from './model';
 import type {
-    BindToken, BindTokenKind, BindingRequest, LookupStudentResult,
-    RosterLookupOutcome, School, SchoolBindToken, StudentBindToken, StudentRecord,
+    BindToken,
+    BindTokenKind,
+    BindingRequest,
+    LookupStudentResult,
+    RosterLookupOutcome,
+    School,
+    SchoolBindToken,
+    StudentBindToken,
+    StudentRecord,
     UserGroupBindToken,
 } from './types';
 
@@ -46,14 +47,15 @@ function nowDate(): Date {
 // ─── Path ① — invite tokens: generation ───────────────────────────────────
 
 export async function generateStudentInviteToken(
-    domainId: string, studentRecordId: ObjectId, createdBy: number, ttlMs?: number,
+    domainId: string,
+    studentRecordId: ObjectId,
+    createdBy: number,
+    ttlMs?: number,
 ): Promise<StudentBindToken> {
     const student = await studentsColl.findOne({ domainId, _id: studentRecordId });
     if (!student) throw new NotFoundError('Student record');
     if (student.boundUserId) {
-        throw new ValidationError(
-            'studentRecord', null, 'This student is already bound; cannot generate a new invite token',
-        );
+        throw new ValidationError('studentRecord', null, 'This student is already bound; cannot generate a new invite token');
     }
     const doc: StudentBindToken = {
         _id: randomTokenId(),
@@ -71,9 +73,7 @@ export async function generateStudentInviteToken(
     return doc;
 }
 
-export async function generateSchoolInviteToken(
-    domainId: string, schoolId: ObjectId, createdBy: number, ttlMs?: number,
-): Promise<SchoolBindToken> {
+export async function generateSchoolInviteToken(domainId: string, schoolId: ObjectId, createdBy: number, ttlMs?: number): Promise<SchoolBindToken> {
     const school = await schoolsColl.findOne({ domainId, _id: schoolId });
     if (!school) throw new NotFoundError('School');
     const doc: SchoolBindToken = {
@@ -93,7 +93,10 @@ export async function generateSchoolInviteToken(
 }
 
 export async function generateUserGroupInviteToken(
-    domainId: string, userGroupId: ObjectId, createdBy: number, ttlMs?: number,
+    domainId: string,
+    userGroupId: ObjectId,
+    createdBy: number,
+    ttlMs?: number,
 ): Promise<UserGroupBindToken> {
     const group = await userGroupsColl.findOne({ domainId, _id: userGroupId });
     if (!group) throw new NotFoundError('UserGroup');
@@ -140,11 +143,15 @@ export async function getInviteToken(tokenId: string): Promise<BindToken> {
  * Used by `school` and `user_group` token landing flows.
  */
 export async function rosterLookup(
-    domainId: string, schoolId: ObjectId, studentIdInput: string, realNameInput: string,
+    domainId: string,
+    schoolId: ObjectId,
+    studentIdInput: string,
+    realNameInput: string,
     callerUid: number,
 ): Promise<RosterLookupOutcome> {
     const record = await studentsColl.findOne({
-        domainId, schoolId,
+        domainId,
+        schoolId,
         studentId: studentIdInput.trim(),
         realName: realNameInput.trim(),
     });
@@ -156,9 +163,7 @@ export async function rosterLookup(
 
 // ─── Path ① — invite tokens: consumption ──────────────────────────────────
 
-export async function consumeStudentInviteToken(
-    tokenId: string, userId: number,
-): Promise<{ studentRecord: StudentRecord; school: School }> {
+export async function consumeStudentInviteToken(tokenId: string, userId: number): Promise<{ studentRecord: StudentRecord; school: School }> {
     const token = await bindTokensColl.findOne({ _id: tokenId, kind: 'student' });
     if (!token) throw new NotFoundError('Bind token');
     if (token.used) throw new ValidationError('token', null, 'Token already used');
@@ -177,30 +182,35 @@ export async function consumeStudentInviteToken(
 
     const existing = await UserModel.coll.findOne({ _id: userId });
     if (existing?.studentId && existing.studentId !== student.studentId) {
-        throw new ValidationError(
-            'user', null, `Your account is already bound to studentId "${existing.studentId}"`,
-        );
+        throw new ValidationError('user', null, `Your account is already bound to studentId "${existing.studentId}"`);
     }
 
     await Promise.all([
-        bindTokensColl.updateOne({ _id: tokenId }, {
-            $set: { used: true, usedBy: userId, usedAt: nowDate() },
-        }),
-        studentsColl.updateOne({ _id: student._id }, {
-            $set: { boundUserId: userId, boundAt: nowDate() },
-        }),
-        UserModel.coll.updateOne({ _id: userId }, {
-            $set: {
-                studentId: student.studentId,
-                realName: student.realName,
+        bindTokensColl.updateOne(
+            { _id: tokenId },
+            {
+                $set: { used: true, usedBy: userId, usedAt: nowDate() },
             },
-            $addToSet: {
-                parentSchoolId: school._id,
-                ...(student.groupIds.length > 0
-                    ? { parentUserGroupId: { $each: student.groupIds } as any }
-                    : {}),
-            } as any,
-        }),
+        ),
+        studentsColl.updateOne(
+            { _id: student._id },
+            {
+                $set: { boundUserId: userId, boundAt: nowDate() },
+            },
+        ),
+        UserModel.coll.updateOne(
+            { _id: userId },
+            {
+                $set: {
+                    studentId: student.studentId,
+                    realName: student.realName,
+                },
+                $addToSet: {
+                    parentSchoolId: school._id,
+                    ...(student.groupIds.length > 0 ? { parentUserGroupId: { $each: student.groupIds } as any } : {}),
+                } as any,
+            },
+        ),
     ]);
 
     const refreshed = await studentsColl.findOne({ _id: student._id });
@@ -209,16 +219,16 @@ export async function consumeStudentInviteToken(
 
 /** Consume a school-kind token after a successful roster match. Binds + sets school. */
 export async function bindMatchedStudent(
-    record: StudentRecord, userId: number, extraGroupId?: ObjectId,
+    record: StudentRecord,
+    userId: number,
+    extraGroupId?: ObjectId,
 ): Promise<{ studentRecord: StudentRecord; school: School }> {
     if (record.boundUserId && record.boundUserId !== userId) {
         throw new ValidationError('studentRecord', null, 'Already bound to another user');
     }
     const existingUser = await UserModel.coll.findOne({ _id: userId });
     if (existingUser?.studentId && existingUser.studentId !== record.studentId) {
-        throw new ValidationError(
-            'user', null, `Your account is already bound to studentId "${existingUser.studentId}"`,
-        );
+        throw new ValidationError('user', null, `Your account is already bound to studentId "${existingUser.studentId}"`);
     }
     const school = await schoolsColl.findOne({ _id: record.schoolId });
     if (!school) throw new NotFoundError('School');
@@ -238,19 +248,23 @@ export async function bindMatchedStudent(
     }
     await Promise.all([
         // Bind student record to the user (idempotent if already bound to same user).
-        studentsColl.updateOne({ _id: record._id }, {
-            $set: { boundUserId: userId, boundAt: nowDate() },
-            $addToSet: extraGroupId ? { groupIds: extraGroupId as any } : {} as any,
-        }),
-        UserModel.coll.updateOne({ _id: userId }, {
-            $set: { studentId: record.studentId, realName: record.realName },
-            $addToSet: {
-                parentSchoolId: school._id,
-                ...(groupIdsToAdd.length > 0
-                    ? { parentUserGroupId: { $each: groupIdsToAdd } as any }
-                    : {}),
-            } as any,
-        }),
+        studentsColl.updateOne(
+            { _id: record._id },
+            {
+                $set: { boundUserId: userId, boundAt: nowDate() },
+                $addToSet: extraGroupId ? { groupIds: extraGroupId as any } : ({} as any),
+            },
+        ),
+        UserModel.coll.updateOne(
+            { _id: userId },
+            {
+                $set: { studentId: record.studentId, realName: record.realName },
+                $addToSet: {
+                    parentSchoolId: school._id,
+                    ...(groupIdsToAdd.length > 0 ? { parentUserGroupId: { $each: groupIdsToAdd } as any } : {}),
+                } as any,
+            },
+        ),
     ]);
     const refreshed = await studentsColl.findOne({ _id: record._id });
     return { studentRecord: refreshed!, school };
@@ -260,21 +274,13 @@ export async function bindMatchedStudent(
  * Consume a user_group-kind token for a user who already has a matching student record.
  * (i.e. roster matched 'matched_self'.) Just adds the group to user + student.
  */
-export async function joinUserGroup(
-    userId: number, studentRecord: StudentRecord, userGroupId: ObjectId,
-): Promise<void> {
+export async function joinUserGroup(userId: number, studentRecord: StudentRecord, userGroupId: ObjectId): Promise<void> {
     // 兜底防线：无论从哪条 claim/审批路径走到这里，归档组一律拒绝加人。
     const group = await userGroupsColl.findOne({ _id: userGroupId });
     if (group?.archivedAt) throw new ValidationError('userGroupId', null, '该用户组已归档，无法加入');
     await Promise.all([
-        studentsColl.updateOne(
-            { _id: studentRecord._id },
-            { $addToSet: { groupIds: userGroupId as any } },
-        ),
-        UserModel.coll.updateOne(
-            { _id: userId },
-            { $addToSet: { parentUserGroupId: userGroupId as any } },
-        ),
+        studentsColl.updateOne({ _id: studentRecord._id }, { $addToSet: { groupIds: userGroupId as any } }),
+        UserModel.coll.updateOne({ _id: userId }, { $addToSet: { parentUserGroupId: userGroupId as any } }),
     ]);
 }
 
@@ -282,16 +288,11 @@ export async function joinUserGroup(
  * Legacy entry point preserved for callers still on the old single-kind API.
  * Routes to `consumeStudentInviteToken` for kind='student' tokens; rejects others.
  */
-export async function consumeInviteToken(
-    tokenId: string, userId: number,
-): Promise<{ studentRecord: StudentRecord; school: School }> {
+export async function consumeInviteToken(tokenId: string, userId: number): Promise<{ studentRecord: StudentRecord; school: School }> {
     const token = await bindTokensColl.findOne({ _id: tokenId });
     if (!token) throw new NotFoundError('Bind token');
     if (token.kind && token.kind !== 'student') {
-        throw new ValidationError(
-            'token', null,
-            'This invite link requires the new landing flow; visit it in a browser instead.',
-        );
+        throw new ValidationError('token', null, 'This invite link requires the new landing flow; visit it in a browser instead.');
     }
     return await consumeStudentInviteToken(tokenId, userId);
 }
@@ -305,9 +306,7 @@ export interface ListInviteTokensFilter {
     unusedOnly?: boolean;
 }
 
-export async function listInviteTokens(
-    domainId: string, filter: ListInviteTokensFilter = {},
-): Promise<BindToken[]> {
+export async function listInviteTokens(domainId: string, filter: ListInviteTokensFilter = {}): Promise<BindToken[]> {
     const mongo: Filter<BindToken> = { domainId } as any;
     if (filter.studentRecordId) (mongo as any).studentRecordId = filter.studentRecordId;
     if (filter.schoolId) (mongo as any).schoolId = filter.schoolId;
@@ -315,7 +314,7 @@ export async function listInviteTokens(
     if (filter.kind) (mongo as any).kind = filter.kind;
     if (filter.usedOnly) (mongo as any).used = true;
     if (filter.unusedOnly) (mongo as any).used = false;
-    return await bindTokensColl.find(mongo).sort({ createdAt: -1 }).toArray() as BindToken[];
+    return (await bindTokensColl.find(mongo).sort({ createdAt: -1 }).toArray()) as BindToken[];
 }
 
 export async function revokeInviteToken(tokenId: string): Promise<void> {
@@ -333,8 +332,11 @@ export interface SubmitBindingRequestOpts {
 }
 
 export async function submitBindingRequest(
-    domainId: string, userId: number, schoolId: ObjectId,
-    studentIdInput: string, realNameInput: string,
+    domainId: string,
+    userId: number,
+    schoolId: ObjectId,
+    studentIdInput: string,
+    realNameInput: string,
     opts: SubmitBindingRequestOpts = {},
 ): Promise<BindingRequest> {
     studentIdInput = (studentIdInput || '').trim();
@@ -347,13 +349,12 @@ export async function submitBindingRequest(
 
     // Reject if the same user already has a *pending* request.
     const pending = await bindingRequestsColl.findOne({
-        domainId, userId, status: 'pending',
+        domainId,
+        userId,
+        status: 'pending',
     });
     if (pending) {
-        throw new ValidationError(
-            'request', null,
-            'You already have a pending binding application. Please wait for the admin review.',
-        );
+        throw new ValidationError('request', null, 'You already have a pending binding application. Please wait for the admin review.');
     }
 
     const doc: BindingRequest = {
@@ -385,14 +386,16 @@ export interface ListBindingRequestsFilter {
 }
 
 export async function listBindingRequests(
-    domainId: string, filter: ListBindingRequestsFilter = {},
+    domainId: string,
+    filter: ListBindingRequestsFilter = {},
 ): Promise<{ docs: BindingRequest[]; total: number }> {
     const mongo: Filter<BindingRequest> = { domainId };
     if (filter.status) mongo.status = filter.status;
     if (filter.userId !== undefined) mongo.userId = filter.userId;
     if (filter.schoolId) mongo.schoolId = filter.schoolId;
     const total = await bindingRequestsColl.countDocuments(mongo);
-    const docs = await bindingRequestsColl.find(mongo)
+    const docs = await bindingRequestsColl
+        .find(mongo)
         .sort({ createdAt: -1 })
         .skip(filter.skip || 0)
         .limit(filter.limit || 30)
@@ -404,9 +407,7 @@ export async function getBindingRequest(id: ObjectId): Promise<BindingRequest | 
     return await bindingRequestsColl.findOne({ _id: id });
 }
 
-export async function approveBindingRequest(
-    requestId: ObjectId, reviewerUid: number,
-): Promise<void> {
+export async function approveBindingRequest(requestId: ObjectId, reviewerUid: number): Promise<void> {
     const req = await bindingRequestsColl.findOne({ _id: requestId });
     if (!req) throw new NotFoundError('BindingRequest');
     if (req.status !== 'pending') {
@@ -415,7 +416,9 @@ export async function approveBindingRequest(
 
     // Locate or create the student record.
     let record = await studentsColl.findOne({
-        domainId: req.domainId, schoolId: req.schoolId, studentId: req.studentIdInput,
+        domainId: req.domainId,
+        schoolId: req.schoolId,
+        studentId: req.studentIdInput,
     });
     if (!record) {
         // Create a fresh record under the named school.
@@ -436,14 +439,12 @@ export async function approveBindingRequest(
     } else if (record.realName !== req.realNameInput) {
         // Existing record found but name differs — flag for the admin
         throw new ValidationError(
-            'realName', null,
+            'realName',
+            null,
             `Found existing record with studentId ${req.studentIdInput} but different realName "${record.realName}"; resolve manually.`,
         );
     } else if (record.boundUserId && record.boundUserId !== req.userId) {
-        throw new ValidationError(
-            'studentRecord', null,
-            `Student record already bound to another uid (${record.boundUserId}).`,
-        );
+        throw new ValidationError('studentRecord', null, `Student record already bound to another uid (${record.boundUserId}).`);
     }
 
     // Special path: claim temp user — instead of binding the requester user,
@@ -456,15 +457,10 @@ export async function approveBindingRequest(
         await bindMatchedStudent(record, req.userId, req.targetUserGroupId || undefined);
     }
 
-    await bindingRequestsColl.updateOne(
-        { _id: requestId },
-        { $set: { status: 'approved', reviewedBy: reviewerUid, reviewedAt: nowDate() } },
-    );
+    await bindingRequestsColl.updateOne({ _id: requestId }, { $set: { status: 'approved', reviewedBy: reviewerUid, reviewedAt: nowDate() } });
 }
 
-export async function rejectBindingRequest(
-    requestId: ObjectId, reviewerUid: number, reason: string,
-): Promise<void> {
+export async function rejectBindingRequest(requestId: ObjectId, reviewerUid: number, reason: string): Promise<void> {
     const trimmed = (reason || '').trim();
     if (!trimmed) {
         throw new ValidationError('reason', null, 'Reject reason is required');
@@ -478,8 +474,10 @@ export async function rejectBindingRequest(
         { _id: requestId },
         {
             $set: {
-                status: 'rejected', reviewedBy: reviewerUid,
-                reviewedAt: nowDate(), rejectReason: trimmed,
+                status: 'rejected',
+                reviewedBy: reviewerUid,
+                reviewedAt: nowDate(),
+                rejectReason: trimmed,
             },
         },
     );
@@ -515,18 +513,13 @@ function uniqueObjectIds(ids: ObjectId[]): ObjectId[] {
     return out;
 }
 
-async function buildLookupResultFromRecords(
-    records: StudentRecord[],
-    requestedContestId?: string,
-): Promise<LookupStudentResult> {
+async function buildLookupResultFromRecords(records: StudentRecord[], requestedContestId?: string): Promise<LookupStudentResult> {
     const boundRecords = records.filter((r) => !!r.boundUserId);
     if (boundRecords.length === 0) {
         return { found: false, eligibleContestIds: [], reason: 'not_bound' };
     }
 
-    const requestedContestObjectId = requestedContestId && ObjectId.isValid(requestedContestId)
-        ? new ObjectId(requestedContestId)
-        : null;
+    const requestedContestObjectId = requestedContestId && ObjectId.isValid(requestedContestId) ? new ObjectId(requestedContestId) : null;
     const candidates: Array<{
         record: StudentRecord;
         userId: number;
@@ -572,15 +565,18 @@ async function buildLookupResultFromRecords(
 }
 
 export async function lookupStudent(
-    domainId: string, studentIdInput: string, realNameInput: string,
+    domainId: string,
+    studentIdInput: string,
+    realNameInput: string,
     options: { contestId?: string } = {},
 ): Promise<LookupStudentResult> {
     const sid = normalizeLookupStudentId(studentIdInput);
     const name = normalizeLookupRealName(realNameInput);
     if (!sid || !name) return { found: false, eligibleContestIds: [], reason: 'no_match' };
 
-    const sameDomainRecords = (await studentsColl.find({ domainId, studentId: sid }).toArray())
-        .filter((r) => normalizeLookupRealName(r.realName) === name);
+    const sameDomainRecords = (await studentsColl.find({ domainId, studentId: sid }).toArray()).filter(
+        (r) => normalizeLookupRealName(r.realName) === name,
+    );
     if (sameDomainRecords.length > 0) {
         const sameDomainResult = await buildLookupResultFromRecords(sameDomainRecords, options.contestId);
         if (sameDomainResult.found) return sameDomainResult;
@@ -591,8 +587,7 @@ export async function lookupStudent(
     // fall back to a global lookup only when it resolves to one unambiguous
     // bound OJ user. This keeps existing strict behavior for ambiguous data
     // while preventing valid client login requests from becoming "未知考生".
-    const allDomainRecords = (await studentsColl.find({ studentId: sid }).toArray())
-        .filter((r) => normalizeLookupRealName(r.realName) === name);
+    const allDomainRecords = (await studentsColl.find({ studentId: sid }).toArray()).filter((r) => normalizeLookupRealName(r.realName) === name);
     if (allDomainRecords.length === 0) {
         return { found: false, eligibleContestIds: [], reason: 'no_match' };
     }
@@ -660,9 +655,7 @@ function isClientCandidateTime(contestModel: any, tdoc: any, now: number): boole
  * The legacy name `computeEligibleExamContests` is retained as an alias
  * for back-compat — Vigil server pinned to the old name still works.
  */
-export async function computeEligibleContests(
-    domainId: string, uid: number,
-): Promise<ObjectId[]> {
+export async function computeEligibleContests(domainId: string, uid: number): Promise<ObjectId[]> {
     const contest = require('hydrooj/src/model/contest');
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
@@ -686,15 +679,15 @@ export async function computeEligibleContests(
     return eligible;
 }
 
-/** @deprecated use `computeEligibleContests`. Retained for callers
- *  pinned to the old API (Vigil Server pre-v2 lookup-student). */
+/**
+ * @deprecated use `computeEligibleContests`. Retained for callers
+ *  pinned to the old API (Vigil Server pre-v2 lookup-student).
+ */
 export const computeEligibleExamContests = computeEligibleContests;
 
 // ─── Claim temporary account (Task 2 / Phase 1.6) ─────────────────────────
 
-export async function claimTemporaryAccount(
-    tempUid: number, realUid: number,
-): Promise<{ recordsTransferred: number }> {
+export async function claimTemporaryAccount(tempUid: number, realUid: number): Promise<{ recordsTransferred: number }> {
     const tempUser = await UserModel.coll.findOne({ _id: tempUid });
     if (!tempUser) throw new NotFoundError('Temp user');
     if (!(tempUser as any).isTemporary) {
@@ -704,19 +697,14 @@ export async function claimTemporaryAccount(
     let recordsTransferred = 0;
     try {
         if (RecordModel?.coll) {
-            const res = await RecordModel.coll.updateMany(
-                { uid: tempUid }, { $set: { uid: realUid } },
-            );
+            const res = await RecordModel.coll.updateMany({ uid: tempUid }, { $set: { uid: realUid } });
             recordsTransferred = res.modifiedCount || 0;
         }
     } catch {
         // RecordModel might not be exposed in all builds; best-effort.
     }
     // Mark temp user as claimed (we don't delete to preserve audit trail).
-    await UserModel.coll.updateOne(
-        { _id: tempUid },
-        { $set: { isTemporary: true, claimedBy: realUid, claimedAt: nowDate() } as any },
-    );
+    await UserModel.coll.updateOne({ _id: tempUid }, { $set: { isTemporary: true, claimedBy: realUid, claimedAt: nowDate() } as any });
     return { recordsTransferred };
 }
 
@@ -725,18 +713,23 @@ export async function claimTemporaryAccount(
  * Used by the 2-step claim form.
  */
 export async function findClaimCandidates(
-    domainId: string, studentIdInput: string, realNameInput: string,
+    domainId: string,
+    studentIdInput: string,
+    realNameInput: string,
 ): Promise<Array<{ uid: number; uname: string; createdAt: Date; schoolId: ObjectId | null }>> {
     const sid = (studentIdInput || '').trim();
     const name = (realNameInput || '').trim();
     if (!sid || !name) return [];
     // Temporary users are stored in UserModel with isTemporary=true; their studentId/realName
     // are populated by Vigil at temp-account creation time.
-    const users = await UserModel.coll.find({
-        isTemporary: true,
-        studentId: sid,
-        realName: name,
-    } as any).limit(20).toArray();
+    const users = await UserModel.coll
+        .find({
+            isTemporary: true,
+            studentId: sid,
+            realName: name,
+        } as any)
+        .limit(20)
+        .toArray();
     return users.map((u: any) => ({
         uid: u._id,
         uname: u.uname,

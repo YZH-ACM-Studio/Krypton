@@ -1,10 +1,21 @@
-/* eslint-disable no-await-in-loop */
 import os from 'os';
 import { LangConfig, STATUS } from '@hydrooj/common';
 import {
-    Context, db, DomainModel, JudgeResultCallbackContext, Logger,
-    ProblemModel, RecordModel, Service, SettingModel,
-    sleep, SolutionModel, SystemModel, TaskModel, Time, yaml,
+    Context,
+    db,
+    DomainModel,
+    JudgeResultCallbackContext,
+    Logger,
+    ProblemModel,
+    RecordModel,
+    Service,
+    SettingModel,
+    sleep,
+    SolutionModel,
+    SystemModel,
+    TaskModel,
+    Time,
+    yaml,
 } from 'hydrooj';
 import { BasicProvider, IBasicProvider, RemoteAccount } from './interface';
 import providers from './providers/index';
@@ -23,7 +34,11 @@ class AccountService {
     working = false;
     error = '';
 
-    constructor(public Provider: BasicProvider, public account: RemoteAccount, public ctx: Context) {
+    constructor(
+        public Provider: BasicProvider,
+        public account: RemoteAccount,
+        public ctx: Context,
+    ) {
         this.api = new Provider(account, async (data) => {
             await coll.updateOne({ _id: account._id }, { $set: data });
         });
@@ -97,14 +112,12 @@ class AccountService {
                 const normalizedPid = pid.replace(/[_-]/g, '');
                 const meta = JSON.parse(metastr);
                 const targetPid = namespaceId ? `${namespaceId}-${normalizedPid}` : normalizedPid;
-                if (await ProblemModel.get(domainId, targetPid) || syncing[`${domainId}/${pid}`]) continue;
+                if ((await ProblemModel.get(domainId, targetPid)) || syncing[`${domainId}/${pid}`]) continue;
                 syncing[`${domainId}/${pid}`] = true;
                 try {
                     const res = await this.api.getProblem(pid, meta);
                     if (!res) continue;
-                    const docId = await ProblemModel.add(
-                        domainId, targetPid, res.title, res.content, 1, res.tag, { problemKind: 'programming' },
-                    );
+                    const docId = await ProblemModel.add(domainId, targetPid, res.title, res.content, 1, res.tag, { problemKind: 'programming' });
                     if (res.difficulty) await ProblemModel.edit(domainId, docId, { difficulty: res.difficulty });
                     for (const key in res.files) {
                         await ProblemModel.addAdditionalFile(domainId, docId, key, res.files[key]);
@@ -201,7 +214,7 @@ class VJudgeService extends Service {
     }
 
     addProvider(type: string, provider: BasicProvider, override = false) {
-        if (process.env.VJUDGE_DEBUG && !(`,${process.env.VJUDGE_DEBUG},`).includes(`,${type},`)) return;
+        if (process.env.VJUDGE_DEBUG && !`,${process.env.VJUDGE_DEBUG},`.includes(`,${type},`)) return;
         if (!override && this.providers[type]) throw new Error(`duplicate provider ${type}`);
         this.ctx.effect(() => {
             this.providers[type] = provider;
@@ -253,7 +266,7 @@ class VJudgeService extends Service {
     }
 
     async checkStatus(onCheckFunc = false) {
-        const res: Record<string, { working: boolean, error?: string, status?: any }> = {};
+        const res: Record<string, { working: boolean; error?: string; status?: any }> = {};
         for (const [k, v] of Object.entries(this.pool)) {
             res[k] = {
                 working: v.working,
@@ -276,7 +289,7 @@ export async function apply(ctx: Context) {
     if (process.env.HYDRO_CLI) return;
     ctx.inject(['migration'], async (c) => {
         c.migration.registerChannel('vjudge', [
-            async function init() { }, // eslint-disable-line
+            async function init() {}, // eslint-disable-line
             c.migration.dontWait(async () => {
                 const rewrite = (from: string[], to: string) => RecordModel.coll.updateMany({ lang: { $in: from } }, { $set: { lang: to } });
                 await Promise.all([

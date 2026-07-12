@@ -63,7 +63,10 @@ export function AddTestcase() {
 
   function auto() {
     const state = store.getState();
-    const subtasks = readSubtasksFromFiles(state.testdata.map((i) => i.name), {});
+    const subtasks = readSubtasksFromFiles(
+      state.testdata.map((i) => i.name),
+      {},
+    );
     const current = state.config.subtasks.flatMap((i) => i.cases).concat(state.config.__cases);
     const pending = [];
     for (const c of subtasks.flatMap((s) => s.cases)) {
@@ -80,58 +83,64 @@ export function AddTestcase() {
     });
   }
 
-  return (<>
-    <div
-      style={{ cursor: 'pointer', padding: '6px 0' }}
-      onClick={auto}
-    >
-      <Text><i className="icon icon-wrench" /> {i18n('Auto detect')}</Text>
-    </div>
-    <div
-      style={{ cursor: 'pointer', padding: '6px 0' }}
-      onClick={() => {
-        setInput('');
-        setOutput('');
-        setAutoInput(true);
-        setAutoOutput(true);
-        setOpen(true);
-      }}
-    >
-      <Text><i className="icon icon-add" /> {i18n('Add testcase')}</Text>
-    </div>
-    <Modal
-      opened={open}
-      onClose={() => setOpen(false)}
-      title={i18n('Add testcase')}
-      styles={{ body: { overflow: 'visible' }, content: { overflow: 'visible' } }}
-    >
-      <div className="row" style={{ overflow: 'visible' }}>
-        <div className="columns medium-6" style={{ overflow: 'visible' }}>
-          <FileSelectAutoComplete
-            ref={refInput}
-            data={testdata}
-            label="Input"
-            width="100%"
-            onChange={(e) => setInput(e)}
-            placeholder={i18n('Input')}
-            value={input || ''}
-          />
-        </div>
-        <div className="columns medium-6" style={{ overflow: 'visible' }}>
-          <FileSelectAutoComplete
-            ref={refOutput}
-            data={testdata}
-            label="Output"
-            width="100%"
-            onChange={(e) => setOutput(e)}
-            placeholder={i18n('Output')}
-            value={output || ''}
-          />
-        </div>
+  return (
+    <>
+      <div style={{ cursor: 'pointer', padding: '6px 0' }} onClick={auto}>
+        <Text>
+          <i className="icon icon-wrench" /> {i18n('Auto detect')}
+        </Text>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-        <Button onClick={onConfirm} disabled={!valid}> {i18n('Save')}</Button>
+      <div
+        style={{ cursor: 'pointer', padding: '6px 0' }}
+        onClick={() => {
+          setInput('');
+          setOutput('');
+          setAutoInput(true);
+          setAutoOutput(true);
+          setOpen(true);
+        }}
+      >
+        <Text>
+          <i className="icon icon-add" /> {i18n('Add testcase')}
+        </Text>
       </div>
-    </Modal>
-  </>);
+      <Modal
+        opened={open}
+        onClose={() => setOpen(false)}
+        title={i18n('Add testcase')}
+        styles={{ body: { overflow: 'visible' }, content: { overflow: 'visible' } }}
+      >
+        <div className="row" style={{ overflow: 'visible' }}>
+          <div className="columns medium-6" style={{ overflow: 'visible' }}>
+            <FileSelectAutoComplete
+              ref={refInput}
+              data={testdata}
+              label="Input"
+              width="100%"
+              onChange={(e) => setInput(e)}
+              placeholder={i18n('Input')}
+              value={input || ''}
+            />
+          </div>
+          <div className="columns medium-6" style={{ overflow: 'visible' }}>
+            <FileSelectAutoComplete
+              ref={refOutput}
+              data={testdata}
+              label="Output"
+              width="100%"
+              onChange={(e) => setOutput(e)}
+              placeholder={i18n('Output')}
+              value={output || ''}
+            />
+          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+          <Button onClick={onConfirm} disabled={!valid}>
+            {' '}
+            {i18n('Save')}
+          </Button>
+        </div>
+      </Modal>
+    </>
+  );
 }

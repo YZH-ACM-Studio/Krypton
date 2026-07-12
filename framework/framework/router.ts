@@ -15,7 +15,10 @@ export class WebSocketLayer {
     regexp: RegExp;
     keys: Keys;
 
-    constructor(path: Parameters<typeof pathToRegexp>[0], public callback?: WebSocketCallback) {
+    constructor(
+        path: Parameters<typeof pathToRegexp>[0],
+        public callback?: WebSocketCallback,
+    ) {
         const r = pathToRegexp(path);
         this.regexp = r.regexp;
         this.keys = r.keys;

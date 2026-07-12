@@ -1,4 +1,3 @@
-/* eslint-disable no-await-in-loop */
 import { createReadStream } from 'fs';
 import path from 'path';
 import { Readable } from 'stream';
@@ -7,9 +6,7 @@ import PQueue from 'p-queue';
 import superagent from 'superagent';
 import WebSocket from 'ws';
 import { JudgeResultBody, parseLang, STATUS } from '@hydrooj/common';
-import {
-    extractZip, findFileSync, fs, noop,
-} from '@hydrooj/utils';
+import { extractZip, findFileSync, fs, noop } from '@hydrooj/utils';
 import { getConfig } from '../config';
 import { FormatError, SystemError } from '../error';
 import { Session } from '../interface';
@@ -121,18 +118,24 @@ export default class VJ4 implements Session {
     async init() {
         await this.setCookie(this.config.cookie || '');
         await this.ensureLogin();
-        setInterval(() => { this.get('judge/noop'); }, 30000000);
+        setInterval(() => {
+            this.get('judge/noop');
+        }, 30000000);
     }
 
     async problemDataVersion(domainId: string, pid: string) {
         let location: string;
         await this.ensureLogin();
-        const res = await this.get(`d/${domainId}/p/${pid}/data`).redirects(0).ok((r) => r.status === 302 || r.status === 404);
+        const res = await this.get(`d/${domainId}/p/${pid}/data`)
+            .redirects(0)
+            .ok((r) => r.status === 302 || r.status === 404);
         if (res.status === 404) throw new FormatError(`没有找到测试数据 ${domainId}/${pid}`);
         if (res.status === 302) {
             location = res.headers.location;
             if (!location.includes('/fs/')) {
-                const _res = await this.get(location).redirects(0).ok((r) => r.status === 302 || r.status === 404);
+                const _res = await this.get(location)
+                    .redirects(0)
+                    .ok((r) => r.status === 302 || r.status === 404);
                 if (_res.status === 404) throw new FormatError(`没有找到测试数据 ${domainId}/${pid}`);
                 if (_res.status === 302) {
                     location = _res.headers.location;
@@ -150,10 +153,7 @@ export default class VJ4 implements Session {
         if (next) next({ judge_text: '正在同步测试数据，请稍后' });
         const tmpFilePath = path.resolve(getConfig('cache_dir'), `download_${this.config.host}_${domainId}_${pid}`);
         try {
-            await pipeRequest(
-                this.get(`${this.config.server_url}d/${domainId}/p/${pid}/data`),
-                fs.createWriteStream(tmpFilePath),
-            );
+            await pipeRequest(this.get(`${this.config.server_url}d/${domainId}/p/${pid}/data`), fs.createWriteStream(tmpFilePath));
             fs.ensureDirSync(path.dirname(savePath));
             const zip = new ZipReader(Readable.toWeb(createReadStream(tmpFilePath)));
             const entries = await zip.getEntries();
@@ -216,7 +216,9 @@ export default class VJ4 implements Session {
             }, 30000);
         });
         await new Promise((resolve) => {
-            this.ws.once('open', () => { resolve(null); });
+            this.ws.once('open', () => {
+                resolve(null);
+            });
         });
         log.info(`[${this.config.host}] 已连接`);
     }
@@ -228,8 +230,12 @@ export default class VJ4 implements Session {
     async login() {
         log.info('[%s] Updating session', this.config.host);
         const res = await this.post('/login', {
-            uname: this.config.uname, password: this.config.password, rememberme: 'on',
-        }).redirects(0).ok((i) => i.status === 302);
+            uname: this.config.uname,
+            password: this.config.password,
+            rememberme: 'on',
+        })
+            .redirects(0)
+            .ok((i) => i.status === 302);
         await this.setCookie(res.headers['set-cookie']);
     }
 
@@ -285,7 +291,9 @@ export default class VJ4 implements Session {
             let ver;
             try {
                 ver = fs.readFileSync(path.join(filePath, 'version')).toString();
-            } catch (e) { /* ignore */ }
+            } catch (e) {
+                /* ignore */
+            }
             if (version === ver) {
                 fs.writeFileSync(path.join(filePath, 'lastUsage'), Date.now().toString());
                 return filePath;
@@ -307,5 +315,5 @@ export default class VJ4 implements Session {
         });
     }
 
-    dispose() { }
+    dispose() {}
 }

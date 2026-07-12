@@ -8,21 +8,22 @@ import * as document from './document';
 const recordColl = db.collection('record');
 const recordStatColl = db.collection('record.stat');
 
-const FORBIDDEN_STATEMENT_FIELDS = new Set([
-    'prompt', 'statement', 'description', 'instructions', 'introduction', 'preface',
-]);
+const FORBIDDEN_STATEMENT_FIELDS = new Set(['prompt', 'statement', 'description', 'instructions', 'introduction', 'preface']);
 
-export const PROBLEM_STRUCTURAL_FIELDS = new Set([
-    'content', 'config', 'problemKind', 'data', 'additional_file', 'reference',
-]);
+export const PROBLEM_STRUCTURAL_FIELDS = new Set(['content', 'config', 'problemKind', 'data', 'additional_file', 'reference']);
 
-export function problemCreateChangedFields(
-    problemKind: ProblemKind,
-    created: { pid?: string, difficulty?: number, reference?: unknown },
-): string[] {
+export function problemCreateChangedFields(problemKind: ProblemKind, created: { pid?: string; difficulty?: number; reference?: unknown }): string[] {
     return [
-        'title', 'content', 'owner', 'tag', 'hidden', 'problemKind',
-        'structureRevision', 'sort', 'data', 'additional_file',
+        'title',
+        'content',
+        'owner',
+        'tag',
+        'hidden',
+        'problemKind',
+        'structureRevision',
+        'sort',
+        'data',
+        'additional_file',
         ...(created.pid ? ['pid'] : []),
         ...(created.difficulty ? ['difficulty'] : []),
         ...(created.reference ? ['reference'] : []),
@@ -59,7 +60,7 @@ function assertNoSecondaryStatement(value: unknown, path = 'config'): void {
     }
 }
 
-function normalizeCases(value: unknown): Array<{ input: string, output: string, score?: number }> {
+function normalizeCases(value: unknown): Array<{ input: string; output: string; score?: number }> {
     if (!Array.isArray(value) || !value.length) throw new ValidationError('config', null, '至少需要一个测试点');
     return value.map((item, index) => {
         if (!isPlainObject(item)) throw new ValidationError('config', null, `测试点 ${index + 1} 格式错误`);
@@ -80,10 +81,12 @@ function normalizeCompilableStructured(kind: 'program_fill' | 'function', main: 
     const lang = typeof main.lang === 'string' ? main.lang.trim() : '';
     if (!lang || !/^[A-Za-z0-9_.+-]{1,64}$/.test(lang)) throw new ValidationError('config', null, '必须选择唯一评测语言');
     const markerSource = typeof main.markerSource === 'string' ? main.markerSource : '';
-    const metadata = Array.isArray(main.regions) ? main.regions.map((item) => ({
-        id: isPlainObject(item) && typeof item.id === 'string' ? item.id : '',
-        ...(isPlainObject(item) && item.prompt !== undefined ? { prompt: item.prompt as string } : {}),
-    })) : [];
+    const metadata = Array.isArray(main.regions)
+        ? main.regions.map((item) => ({
+              id: isPlainObject(item) && typeof item.id === 'string' ? item.id : '',
+              ...(isPlainObject(item) && item.prompt !== undefined ? { prompt: item.prompt as string } : {}),
+          }))
+        : [];
     let template;
     try {
         template = parseRegionMarkers(markerSource, metadata);
@@ -137,13 +140,13 @@ function optionKey(index: number): string {
 function normalizeBasicObjective(kind: ProblemKind, main: Record<string, unknown>): Record<string, unknown> {
     if (kind === 'single') {
         const options = normalizeOptions(main.options);
-        if (!Number.isSafeInteger(main.answerIndex) || Number(main.answerIndex) < 0
-            || Number(main.answerIndex) >= options.length) {
+        if (!Number.isSafeInteger(main.answerIndex) || Number(main.answerIndex) < 0 || Number(main.answerIndex) >= options.length) {
             throw new ValidationError('config', null, '单选题正确项必须属于选项');
         }
         const answerIndex = Number(main.answerIndex);
         return {
-            type: 'objective', score: 100,
+            type: 'objective',
+            score: 100,
             main: { options, answerIndex },
             answers: { main: [optionKey(answerIndex), 100, { kind: 'single', choices: options }] },
             options: { main: options },
@@ -155,12 +158,19 @@ function normalizeBasicObjective(kind: ProblemKind, main: Record<string, unknown
         }
         const options = ['正确', '错误'];
         return {
-            type: 'objective', score: 100,
+            type: 'objective',
+            score: 100,
             main: { answer: main.answer },
             answers: {
-                main: [main.answer ? 'A' : 'B', 100, {
-                    kind: 'single', choices: options, presentation: 'truefalse',
-                }],
+                main: [
+                    main.answer ? 'A' : 'B',
+                    100,
+                    {
+                        kind: 'single',
+                        choices: options,
+                        presentation: 'truefalse',
+                    },
+                ],
             },
             options: { main: options },
         };
@@ -170,7 +180,8 @@ function normalizeBasicObjective(kind: ProblemKind, main: Record<string, unknown
             throw new ValidationError('config', null, '填空题可接受答案不能为空');
         }
         return {
-            type: 'objective', score: 100,
+            type: 'objective',
+            score: 100,
             main: { answer: main.answer },
             answers: { main: [main.answer, 100, { kind: 'blank' }] },
         };
@@ -181,15 +192,18 @@ function normalizeBasicObjective(kind: ProblemKind, main: Record<string, unknown
         }
         const gradingInstructions = String(main.gradingInstructions || '').trim();
         return {
-            type: 'objective', score: 100,
+            type: 'objective',
+            score: 100,
             main: { ...(gradingInstructions ? { gradingInstructions } : {}) },
             answers: { main: ['', 100, { kind: 'subjective' }] },
         };
     }
     const options = normalizeOptions(main.options);
-    if (!Array.isArray(main.answerIndexes) || !main.answerIndexes.length
-        || main.answerIndexes.some((index) => !Number.isSafeInteger(index)
-            || Number(index) < 0 || Number(index) >= options.length)) {
+    if (
+        !Array.isArray(main.answerIndexes) ||
+        !main.answerIndexes.length ||
+        main.answerIndexes.some((index) => !Number.isSafeInteger(index) || Number(index) < 0 || Number(index) >= options.length)
+    ) {
         throw new ValidationError('config', null, '多选题正确项必须是非空选项子集');
     }
     const answerIndexes = Array.from(new Set(main.answerIndexes.map(Number))).sort((a, b) => a - b);
@@ -197,27 +211,30 @@ function normalizeBasicObjective(kind: ProblemKind, main: Record<string, unknown
         throw new ValidationError('config', null, '多选题正确项不能重复');
     }
     const rawPartialCreditPercent = main.partialCreditPercent ?? 0;
-    if (!Number.isSafeInteger(rawPartialCreditPercent)
-        || Number(rawPartialCreditPercent) < 0 || Number(rawPartialCreditPercent) > 100) {
+    if (!Number.isSafeInteger(rawPartialCreditPercent) || Number(rawPartialCreditPercent) < 0 || Number(rawPartialCreditPercent) > 100) {
         throw new ValidationError('config', null, '多选题部分分比例必须是 0–100 整数');
     }
     const partialCreditPercent = Number(rawPartialCreditPercent);
     return {
-        type: 'objective', score: 100,
+        type: 'objective',
+        score: 100,
         main: { options, answerIndexes, partialCreditPercent },
         answers: {
-            main: [answerIndexes.map(optionKey), 100, {
-                kind: 'multi', choices: options, partialCreditPercent,
-            }],
+            main: [
+                answerIndexes.map(optionKey),
+                100,
+                {
+                    kind: 'multi',
+                    choices: options,
+                    partialCreditPercent,
+                },
+            ],
         },
         options: { main: options },
     };
 }
 
-export function normalizeStructuredProblemConfig(
-    kind: ProblemKind,
-    config: unknown,
-): Record<string, unknown> {
+export function normalizeStructuredProblemConfig(kind: ProblemKind, config: unknown): Record<string, unknown> {
     parseProblemKind(kind);
     if (kind === 'programming') {
         throw new ValidationError('problemKind', null, '编程题继续使用现有 config.yaml/testdata 编辑链路');
@@ -240,7 +257,9 @@ export function normalizeStructuredProblemConfig(
                 throw new ValidationError('config', null, '文本程序填空答案必须是非空单行文本');
             }
             return {
-                type: 'objective', subType: 'program_fill_text', score: 100,
+                type: 'objective',
+                subType: 'program_fill_text',
+                score: 100,
                 main: { mode: 'text', answer: config.main.answer },
                 answers: { main: [config.main.answer, 100, { kind: 'fill_program' }] },
             };
@@ -256,19 +275,12 @@ export function normalizeStructuredProblemConfig(
 }
 
 export function structuredProblemUsesTestdata(kind: ProblemKind, config: any): boolean {
-    return kind === 'function'
-        || (kind === 'program_fill'
-            && (config?.main?.mode === 'compile' || config?.subType === 'program_fill_compile'));
+    return kind === 'function' || (kind === 'program_fill' && (config?.main?.mode === 'compile' || config?.subType === 'program_fill_compile'));
 }
 
-export function cloneStructuredProblemForLanguage(
-    kind: ProblemKind,
-    config: unknown,
-    language: string,
-): Record<string, unknown> {
+export function cloneStructuredProblemForLanguage(kind: ProblemKind, config: unknown, language: string): Record<string, unknown> {
     if (!['program_fill', 'function'].includes(kind)) throw new ValidationError('cloneLang');
-    if (!isPlainObject(config) || !isPlainObject(config.main)
-        || !structuredProblemUsesTestdata(kind, config)) throw new ValidationError('cloneLang');
+    if (!isPlainObject(config) || !isPlainObject(config.main) || !structuredProblemUsesTestdata(kind, config)) throw new ValidationError('cloneLang');
     if (config.main.lang === language) throw new ValidationError('cloneLang');
     return normalizeStructuredProblemConfig(kind, {
         main: { ...config.main, lang: language },
@@ -282,12 +294,15 @@ export function assertStructureRevision(value: unknown): asserts value is number
 }
 
 export async function hasStartedProblemContainer(domainId: string, pid: number): Promise<boolean> {
-    return !!await document.coll.findOne({
-        domainId,
-        docType: document.TYPE_CONTEST,
-        pids: pid,
-        beginAt: { $lte: new Date() },
-    }, { projection: { _id: 1 } });
+    return !!(await document.coll.findOne(
+        {
+            domainId,
+            docType: document.TYPE_CONTEST,
+            pids: pid,
+            beginAt: { $lte: new Date() },
+        },
+        { projection: { _id: 1 } },
+    ));
 }
 
 export interface ProblemReferenceReport {
@@ -313,11 +328,7 @@ export function problemReferenceCount(report: ProblemReferenceReport): number {
  * errors are intentionally allowed to propagate so a partial scan can never
  * be mistaken for permission to delete.
  */
-export async function findProblemReferences(
-    domainId: string,
-    pid: number,
-    publicPid?: string,
-): Promise<ProblemReferenceReport> {
+export async function findProblemReferences(domainId: string, pid: number, publicPid?: string): Promise<ProblemReferenceReport> {
     const aliases = Array.from(new Set([String(pid), publicPid].filter(Boolean)));
     const [
         containers,

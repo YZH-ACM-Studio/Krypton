@@ -24,16 +24,13 @@ export function DiscussionCreatePage() {
   const backUrl = data.examMode?.urls?.discussion || null;
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center gap-3">
         {backUrl ? (
           <Button asChild variant="ghost" size="icon">
-            <a href={backUrl}><ArrowLeft className="size-4" /></a>
+            <a href={backUrl}>
+              <ArrowLeft className="size-4" />
+            </a>
           </Button>
         ) : (
           <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
@@ -50,7 +47,9 @@ export function DiscussionCreatePage() {
         <CardContent className="p-6">
           <form method="post" className="space-y-4">
             <div className="space-y-1.5">
-              <label htmlFor="title" className="text-sm font-medium">标题</label>
+              <label htmlFor="title" className="text-sm font-medium">
+                标题
+              </label>
               <Input id="title" name="title" required autoFocus placeholder="讨论标题" />
             </div>
 
@@ -61,16 +60,19 @@ export function DiscussionCreatePage() {
 
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="highlight" value="true"  />
+                <Checkbox name="highlight" value="true" />
                 高亮
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="pin" value="true"  />
+                <Checkbox name="pin" value="true" />
                 置顶
               </label>
             </div>
 
-            <Button type="submit"><Save className="mr-1 size-4" />发布</Button>
+            <Button type="submit">
+              <Save className="mr-1 size-4" />
+              发布
+            </Button>
           </form>
         </CardContent>
       </Card>
@@ -87,15 +89,12 @@ export function DiscussionEditPage() {
   const detailUrl = replaceRouteTokens(bs.urls.discussionDetail, { DID: String(ddoc._id) });
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center gap-3">
         <Button asChild variant="ghost" size="icon">
-          <a href={detailUrl}><ArrowLeft className="size-4" /></a>
+          <a href={detailUrl}>
+            <ArrowLeft className="size-4" />
+          </a>
         </Button>
         <h1 className="text-xl font-semibold">编辑讨论</h1>
       </div>
@@ -104,7 +103,9 @@ export function DiscussionEditPage() {
         <CardContent className="p-6">
           <form method="post" className="space-y-4">
             <div className="space-y-1.5">
-              <label htmlFor="title" className="text-sm font-medium">标题</label>
+              <label htmlFor="title" className="text-sm font-medium">
+                标题
+              </label>
               <Input id="title" name="title" defaultValue={ddoc.title || ''} required />
             </div>
 
@@ -115,11 +116,11 @@ export function DiscussionEditPage() {
 
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="highlight" value="true" defaultChecked={ddoc.highlight}  />
+                <Checkbox name="highlight" value="true" defaultChecked={ddoc.highlight} />
                 高亮
               </label>
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="pin" value="true" defaultChecked={ddoc.pin}  />
+                <Checkbox name="pin" value="true" defaultChecked={ddoc.pin} />
                 置顶
               </label>
             </div>
@@ -127,7 +128,10 @@ export function DiscussionEditPage() {
             <Separator />
 
             <div className="flex items-center gap-3">
-              <Button type="submit" name="operation" value="update"><Save className="mr-1 size-4" />保存</Button>
+              <Button type="submit" name="operation" value="update">
+                <Save className="mr-1 size-4" />
+                保存
+              </Button>
               <Button
                 type="submit"
                 name="operation"
@@ -135,9 +139,12 @@ export function DiscussionEditPage() {
                 variant="destructive"
                 size="sm"
                 formNoValidate
-                onClick={(e) => { if (!confirm('确定要删除此讨论吗？')) e.preventDefault(); }}
+                onClick={(e) => {
+                  if (!confirm('确定要删除此讨论吗？')) e.preventDefault();
+                }}
               >
-                <Trash2 className="mr-1 size-3" />删除
+                <Trash2 className="mr-1 size-3" />
+                删除
               </Button>
             </div>
           </form>

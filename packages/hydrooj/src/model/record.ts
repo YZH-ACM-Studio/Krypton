@@ -1,17 +1,12 @@
 import { pick, sum } from 'lodash';
 import moment from 'moment-timezone';
-import {
-    Filter, FindOptions, MatchKeysAndValues,
-    ObjectId, OnlyFieldsOfType, PushOperator, UpdateFilter,
-} from 'mongodb';
+import { Filter, FindOptions, MatchKeysAndValues, ObjectId, OnlyFieldsOfType, PushOperator, UpdateFilter } from 'mongodb';
 import { effectiveProblemKind, ProblemConfigFile, STATUS_TEXTS } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
 import { Context } from '../context';
 import { ProblemNotFoundError, ValidationError } from '../error';
 import { JudgeMeta, RecordDoc } from '../interface';
-import {
-    parseProblemConfigObject, validateCompiledStructuredConfig, validateFillFunctionJudgeConfig,
-} from '../lib/problem-config';
+import { parseProblemConfigObject, validateCompiledStructuredConfig, validateFillFunctionJudgeConfig } from '../lib/problem-config';
 import db from '../service/db';
 import { MaybeArray, NumberKeys } from '../typeutils';
 import { ArgMethod, buildProjection, Time } from '../utils';
@@ -29,10 +24,23 @@ export default class RecordModel {
     static collStat = db.collection('record.stat');
     static collHistory = db.collection('record.history');
     static PROJECTION_LIST: (keyof RecordDoc)[] = [
-        '_id', 'score', 'time', 'memory', 'lang',
-        'uid', 'pid', 'rejudged', 'progress', 'domainId',
-        'contest', 'judger', 'judgeAt', 'status', 'source',
-        'files', 'hackTarget',
+        '_id',
+        'score',
+        'time',
+        'memory',
+        'lang',
+        'uid',
+        'pid',
+        'rejudged',
+        'progress',
+        'domainId',
+        'contest',
+        'judger',
+        'judgeAt',
+        'status',
+        'source',
+        'files',
+        'hackTarget',
     ];
 
     static STAT_QUERY = {
@@ -48,10 +56,12 @@ export default class RecordModel {
     static async submissionPriority(uid: number, base: number = 0) {
         const timeRecent = await RecordModel.coll
             .find({ _id: { $gte: Time.getObjectID(moment().add(-30, 'minutes')) }, uid, rejudged: { $ne: true } })
-            .project({ time: 1, status: 1, manualPending: 1 }).toArray();
-        const pending = timeRecent.filter((i) => [
-            STATUS.STATUS_WAITING, STATUS.STATUS_FETCHED, STATUS.STATUS_COMPILING, STATUS.STATUS_JUDGING,
-        ].includes(i.status) && !i.manualPending).length;
+            .project({ time: 1, status: 1, manualPending: 1 })
+            .toArray();
+        const pending = timeRecent.filter(
+            (i) =>
+                [STATUS.STATUS_WAITING, STATUS.STATUS_FETCHED, STATUS.STATUS_COMPILING, STATUS.STATUS_JUDGING].includes(i.status) && !i.manualPending,
+        ).length;
         return Math.max(base - 10000, base - (pending * 1000 + 1) * (sum(timeRecent.map((i) => i.time || 0)) / 10000 + 1));
     }
 
@@ -70,7 +80,7 @@ export default class RecordModel {
     static async stat(domainId?: string, tid?: ObjectId) {
         // Optional contest scope (PLAN 2026-07-02 §8): same window shape so
         // the ui-next statistics card renders both scopes unchanged.
-        const scope = { ...domainId ? { domainId } : {}, ...tid ? { contest: tid } : {} };
+        const scope = { ...(domainId ? { domainId } : {}), ...(tid ? { contest: tid } : {}) };
         const [d5min, d1h, day, week, month, year, total] = await Promise.all([
             RecordModel.coll.countDocuments({ _id: { $gte: Time.getObjectID(moment().add(-5, 'minutes')) }, ...scope }),
             RecordModel.coll.countDocuments({ _id: { $gte: Time.getObjectID(moment().add(-1, 'hour')) }, ...scope }),
@@ -78,7 +88,7 @@ export default class RecordModel {
             RecordModel.coll.countDocuments({ _id: { $gte: Time.getObjectID(moment().add(-1, 'week')) }, ...scope }),
             RecordModel.coll.countDocuments({ _id: { $gte: Time.getObjectID(moment().add(-1, 'month')) }, ...scope }),
             RecordModel.coll.countDocuments({ _id: { $gte: Time.getObjectID(moment().add(-1, 'year')) }, ...scope }),
-            (domainId || tid) ? RecordModel.coll.countDocuments(scope) : RecordModel.coll.estimatedDocumentCount(),
+            domainId || tid ? RecordModel.coll.countDocuments(scope) : RecordModel.coll.estimatedDocumentCount(),
         ]);
         if (!tid) return { d5min, d1h, day, week, month, year, total };
         const [accepted, participants] = await Promise.all([
@@ -86,18 +96,27 @@ export default class RecordModel {
             RecordModel.coll.distinct('uid', scope).then((u) => u.length),
         ]);
         return {
-            d5min, d1h, day, week, month, year, total, accepted, participants,
+            d5min,
+            d1h,
+            day,
+            week,
+            month,
+            year,
+            total,
+            accepted,
+            participants,
         };
     }
 
     static async judge(
-        domainId: string, rids: MaybeArray<ObjectId> | RecordDoc, priority = 0,
-        config: ProblemConfigFile = {}, meta: Partial<JudgeMeta> = {},
+        domainId: string,
+        rids: MaybeArray<ObjectId> | RecordDoc,
+        priority = 0,
+        config: ProblemConfigFile = {},
+        meta: Partial<JudgeMeta> = {},
     ) {
         let rdocs: RecordDoc[];
-        const _rids = rids instanceof Array ? rids
-            : (rids instanceof ObjectId) ? [rids]
-                : [rids._id];
+        const _rids = rids instanceof Array ? rids : rids instanceof ObjectId ? [rids] : [rids._id];
         if (!_rids.length) return null;
         if (rids instanceof Array || rids instanceof ObjectId || ObjectId.isValid(rids.toString())) {
             rdocs = await RecordModel.getMulti(domainId, { _id: { $in: _rids } }, { readPreference: 'primary' }).toArray();
@@ -107,18 +126,15 @@ export default class RecordModel {
             throw new ValidationError('rid', null, '人工阅卷记录不能进入自动评测队列');
         }
         let source = `${domainId}/${rdocs[0].pid}`;
-        let [pdoc] = await Promise.all([
-            problem.get(domainId, rdocs[0].pid, undefined, true),
-            task.deleteMany({ rid: { $in: _rids } }),
-        ]);
+        let [pdoc] = await Promise.all([problem.get(domainId, rdocs[0].pid, undefined, true), task.deleteMany({ rid: { $in: _rids } })]);
         if (!pdoc) throw new ProblemNotFoundError(domainId, rdocs[0].pid);
         if (pdoc.reference) {
             pdoc = await problem.get(pdoc.reference.domainId, pdoc.reference.pid, undefined, true);
             if (!pdoc) throw new ProblemNotFoundError(domainId, rdocs[0].pid);
             source = `${pdoc.domainId}/${pdoc.docId}`;
         }
-        const judgeConfig = parseProblemConfigObject(pdoc)
-            ?? (pdoc.config == null || (typeof pdoc.config === 'string' && !pdoc.config.trim()) ? {} : null);
+        const judgeConfig =
+            parseProblemConfigObject(pdoc) ?? (pdoc.config == null || (typeof pdoc.config === 'string' && !pdoc.config.trim()) ? {} : null);
         if (!judgeConfig) throw new Error(`Cannot parse problem config: ${pdoc.domainId}/${pdoc.docId}`);
         const problemKind = effectiveProblemKind(pdoc);
         try {
@@ -126,46 +142,59 @@ export default class RecordModel {
                 validateFillFunctionJudgeConfig(judgeConfig);
             }
             validateCompiledStructuredConfig(problemKind, judgeConfig);
-            if (judgeConfig.type === 'fill_function' && ['program_fill', 'function'].includes(problemKind)
-                && rdocs.some((rdoc) => rdoc.lang !== judgeConfig.template?.lang)) {
+            if (
+                judgeConfig.type === 'fill_function' &&
+                ['program_fill', 'function'].includes(problemKind) &&
+                rdocs.some((rdoc) => rdoc.lang !== judgeConfig.template?.lang)
+            ) {
                 throw new Error(`${problemKind}: submission language mismatch`);
             }
         } catch (error) {
             logger.error(
                 'Structured judge config rejected domain=%s pid=%d kind=%s revision=%s rids=%s error=%o',
-                pdoc.domainId, pdoc.docId, problemKind, pdoc.structureRevision,
-                rdocs.map((rdoc) => rdoc._id).join(','), error,
+                pdoc.domainId,
+                pdoc.docId,
+                problemKind,
+                pdoc.structureRevision,
+                rdocs.map((rdoc) => rdoc._id).join(','),
+                error,
             );
             throw error;
         }
         meta = { ...meta, problemOwner: pdoc.owner };
         const ddoc = await DomainModel.get(pdoc.domainId);
-        return await task.addMany(rdocs.map((rdoc) => {
-            let type = 'judge';
-            if (judgeConfig.type === 'remote_judge' && rdoc.contest?.toHexString() !== '0'.repeat(24)) type = 'remotejudge';
-            else if (meta?.type === 'generate') type = 'generate';
-            return ({
-                ...rdoc,
-                ...judgeConfig, // TODO deprecate this
-                priority,
-                type,
-                rid: rdoc._id,
-                domainId,
-                config: {
-                    ...judgeConfig,
-                    ...config,
-                },
-                data: pdoc.data,
-                source,
-                trusted: ddoc.isTrusted,
-                meta,
-            } as any);
-        }));
+        return await task.addMany(
+            rdocs.map((rdoc) => {
+                let type = 'judge';
+                if (judgeConfig.type === 'remote_judge' && rdoc.contest?.toHexString() !== '0'.repeat(24)) type = 'remotejudge';
+                else if (meta?.type === 'generate') type = 'generate';
+                return {
+                    ...rdoc,
+                    ...judgeConfig, // TODO deprecate this
+                    priority,
+                    type,
+                    rid: rdoc._id,
+                    domainId,
+                    config: {
+                        ...judgeConfig,
+                        ...config,
+                    },
+                    data: pdoc.data,
+                    source,
+                    trusted: ddoc.isTrusted,
+                    meta,
+                } as any;
+            }),
+        );
     }
 
     static async add(
-        domainId: string, pid: number, uid: number,
-        lang: string, code: string, addTask: boolean,
+        domainId: string,
+        pid: number,
+        uid: number,
+        lang: string,
+        code: string,
+        addTask: boolean,
         args: {
             contest?: ObjectId;
             input?: string[];
@@ -221,13 +250,17 @@ export default class RecordModel {
         } catch (error) {
             logger.error(
                 'Record insert failed after conservative structure lock domain=%s pid=%d uid=%d rid=%s error=%o',
-                domainId, pid, uid, data._id, error,
+                domainId,
+                pid,
+                uid,
+                data._id,
+                error,
             );
             throw error;
         }
         bus.broadcast('record/change', data);
         if (addTask) {
-            const priority = await RecordModel.submissionPriority(uid, args.type === 'pretest' ? -20 : (isContest ? 50 : 0));
+            const priority = await RecordModel.submissionPriority(uid, args.type === 'pretest' ? -20 : isContest ? 50 : 0);
             await RecordModel.judge(domainId, data, priority, isContest ? { detail: false } : {}, {
                 type: args.type,
                 rejudge: data.rejudged,
@@ -246,7 +279,8 @@ export default class RecordModel {
     }
 
     static async update(
-        domainId: string, _id: MaybeArray<ObjectId>,
+        domainId: string,
+        _id: MaybeArray<ObjectId>,
         $set?: MatchKeysAndValues<RecordDoc>,
         $push?: PushOperator<RecordDoc>,
         $unset?: OnlyFieldsOfType<RecordDoc, any, true | '' | 1>,
@@ -262,17 +296,14 @@ export default class RecordModel {
             return null;
         }
         if (Object.keys($update).length) {
-            return await RecordModel.coll.findOneAndUpdate(
-                { _id, domainId },
-                $update,
-                { returnDocument: 'after' },
-            );
+            return await RecordModel.coll.findOneAndUpdate({ _id, domainId }, $update, { returnDocument: 'after' });
         }
         return await RecordModel.coll.findOne({ _id }, { readPreference: 'primary' });
     }
 
     static async updateMulti(
-        domainId: string, $match: Filter<RecordDoc>,
+        domainId: string,
+        $match: Filter<RecordDoc>,
         $set?: MatchKeysAndValues<RecordDoc>,
         $push?: PushOperator<RecordDoc>,
         $unset?: OnlyFieldsOfType<RecordDoc, any, true | '' | 1>,
@@ -287,10 +318,13 @@ export default class RecordModel {
 
     static async reset(domainId: string, rid: MaybeArray<ObjectId>, isRejudge: boolean) {
         const rids = Array.isArray(rid) ? rid : [rid];
-        const manual = await RecordModel.coll.findOne({
-            _id: { $in: rids },
-            $or: [{ manualPending: true }, { manualGrade: { $exists: true } }],
-        }, { projection: { _id: 1 } });
+        const manual = await RecordModel.coll.findOne(
+            {
+                _id: { $in: rids },
+                $or: [{ manualPending: true }, { manualGrade: { $exists: true } }],
+            },
+            { projection: { _id: 1 } },
+        );
         if (manual) throw new ValidationError('rid', null, '人工阅卷记录不能重判');
         const upd: any = {
             score: 0,
@@ -311,14 +345,13 @@ export default class RecordModel {
             task.deleteMany({ rid: { $in: rids } }),
         ]);
         if (rdocs.length) {
-            await RecordModel.collHistory.insertMany(rdocs.map((rdoc) => ({
-                ...pick(rdoc, [
-                    'compilerTexts', 'judgeTexts', 'testCases', 'subtasks',
-                    'score', 'time', 'memory', 'status', 'judgeAt', 'judger',
-                ]),
-                rid: rdoc._id,
-                _id: new ObjectId(),
-            })));
+            await RecordModel.collHistory.insertMany(
+                rdocs.map((rdoc) => ({
+                    ...pick(rdoc, ['compilerTexts', 'judgeTexts', 'testCases', 'subtasks', 'score', 'time', 'memory', 'status', 'judgeAt', 'judger']),
+                    rid: rdoc._id,
+                    _id: new ObjectId(),
+                })),
+            );
         }
         return RecordModel.update(domainId, rid, upd);
     }
@@ -327,9 +360,7 @@ export default class RecordModel {
         return RecordModel.coll.countDocuments({ domainId, ...query });
     }
 
-    static async getList(
-        domainId: string, rids: ObjectId[], fields?: (keyof RecordDoc)[],
-    ): Promise<Record<string, Partial<RecordDoc>>> {
+    static async getList(domainId: string, rids: ObjectId[], fields?: (keyof RecordDoc)[]): Promise<Record<string, Partial<RecordDoc>>> {
         const r: Record<string, RecordDoc> = {};
         rids = Array.from(new Set(rids));
         let cursor = RecordModel.coll.find({ domainId, _id: { $in: rids } });
@@ -342,19 +373,23 @@ export default class RecordModel {
 
 export async function apply(ctx: Context) {
     // Mark problem as deleted
-    ctx.on('problem/delete', (domainId, docId) => Promise.all([
-        RecordModel.coll.deleteMany({ domainId, pid: docId }),
-        RecordModel.collStat.deleteMany({ domainId, pid: docId }),
-    ]));
+    ctx.on('problem/delete', (domainId, docId) =>
+        Promise.all([RecordModel.coll.deleteMany({ domainId, pid: docId }), RecordModel.collStat.deleteMany({ domainId, pid: docId })]),
+    );
     ctx.on('domain/delete', (domainId) => RecordModel.coll.deleteMany({ domainId }));
     ctx.on('record/judge', async (rdoc, updated) => {
         if (rdoc.contest?.toHexString().startsWith('0'.repeat(23))) return;
         if (rdoc.notify) {
             const pdoc = await Hydro.model.problem.get(rdoc.domainId, rdoc.pid);
-            await MessageModel.send(1, rdoc.uid, JSON.stringify({
-                message: 'Judge Result\n{0}: {1}',
-                params: [pdoc.title, STATUS_TEXTS[rdoc.status]],
-            }), MessageModel.FLAG_I18N);
+            await MessageModel.send(
+                1,
+                rdoc.uid,
+                JSON.stringify({
+                    message: 'Judge Result\n{0}: {1}',
+                    params: [pdoc.title, STATUS_TEXTS[rdoc.status]],
+                }),
+                MessageModel.FLAG_I18N,
+            );
         }
         if (rdoc.status === STATUS.STATUS_ACCEPTED && updated) {
             if (SystemModel.get('record.statMode') === 'unique') {
@@ -365,19 +400,23 @@ export async function apply(ctx: Context) {
                     domainId: rdoc.domainId,
                 });
             }
-            await RecordModel.collStat.updateOne({
-                _id: rdoc._id,
-            }, {
-                $set: {
-                    domainId: rdoc.domainId,
-                    pid: rdoc.pid,
-                    uid: rdoc.uid,
-                    time: rdoc.time,
-                    memory: rdoc.memory,
-                    length: rdoc.code?.length || 0,
-                    lang: rdoc.lang,
+            await RecordModel.collStat.updateOne(
+                {
+                    _id: rdoc._id,
                 },
-            }, { upsert: true });
+                {
+                    $set: {
+                        domainId: rdoc.domainId,
+                        pid: rdoc.pid,
+                        uid: rdoc.uid,
+                        time: rdoc.time,
+                        memory: rdoc.memory,
+                        length: rdoc.code?.length || 0,
+                        lang: rdoc.lang,
+                    },
+                },
+                { upsert: true },
+            );
         }
     });
     await Promise.all([
@@ -397,10 +436,7 @@ export async function apply(ctx: Context) {
             { key: { domainId: 1, pid: 1, uid: 1, memory: 1 }, name: 'memory' },
             { key: { domainId: 1, pid: 1, uid: 1, length: 1 }, name: 'length' },
         ),
-        db.ensureIndexes(
-            RecordModel.collHistory,
-            { key: { rid: 1, _id: -1 }, name: 'basic' },
-        ),
+        db.ensureIndexes(RecordModel.collHistory, { key: { rid: 1, _id: -1 }, name: 'basic' }),
     ]);
 }
 global.Hydro.model.record = RecordModel;

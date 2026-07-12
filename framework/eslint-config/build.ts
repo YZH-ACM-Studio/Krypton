@@ -5,12 +5,12 @@ const base = yaml.load(fs.readFileSync('base.yaml', 'utf8')) as any;
 const react = yaml.load(fs.readFileSync('react.yaml', 'utf8')) as any;
 
 function sort<T>(obj: Record<string, T>): Record<string, T> {
-    return Object.keys(obj).sort().reduce(
-        (acc, key) => {
+    return Object.keys(obj)
+        .sort()
+        .reduce((acc, key) => {
             acc[key] = obj[key];
             return acc;
-        },
-    ) as any;
+        }) as any;
 }
 
 // NOTE: oxlint doesn't support most stylistic rules
@@ -42,19 +42,26 @@ const rules = sort({
 
 delete rules['@typescript-eslint/no-unused-vars'];
 
-fs.writeFileSync('.oxlintrc.json', JSON.stringify({
-    $schema: './node_modules/oxlint/configuration_schema.json',
-    rules,
-    env: {
-        browser: true,
-        es6: true,
-        jquery: true,
-        node: true,
-    },
-    globals: {
-        UiContext: 'readonly',
-        UserContext: 'readonly',
-        externalModules: 'readonly',
-        LOCALES: 'readonly',
-    },
-}, null, 2));
+fs.writeFileSync(
+    '.oxlintrc.json',
+    JSON.stringify(
+        {
+            $schema: './node_modules/oxlint/configuration_schema.json',
+            rules,
+            env: {
+                browser: true,
+                es6: true,
+                jquery: true,
+                node: true,
+            },
+            globals: {
+                UiContext: 'readonly',
+                UserContext: 'readonly',
+                externalModules: 'readonly',
+                LOCALES: 'readonly',
+            },
+        },
+        null,
+        2,
+    ),
+);

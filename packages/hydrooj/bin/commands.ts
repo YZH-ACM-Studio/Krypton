@@ -26,7 +26,7 @@ if (!argv.args[0] || argv.args[0] === 'cli') {
             } catch (e) {
                 try {
                     require(`${i}/command.js`).register(cli);
-                } catch (err) { }
+                } catch (err) {}
             }
         }
         cli.parse();

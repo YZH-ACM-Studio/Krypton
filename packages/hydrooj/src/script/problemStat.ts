@@ -7,7 +7,7 @@ import db from '../service/db';
 const sumStatus = (status) => ({ $sum: { $cond: [{ $eq: ['$status', status] }, 1, 0] } });
 
 export async function udoc(report) {
-    const userStats = new Map<string, { nLiked?: number, nAccept?: number, nSubmit?: number }>();
+    const userStats = new Map<string, { nLiked?: number; nAccept?: number; nSubmit?: number }>();
 
     report({ message: 'Udoc nLiked' });
     const likedPipeline = [
@@ -71,7 +71,7 @@ export async function udoc(report) {
             },
         });
         if (bulk.batches.length > 100) {
-            await bulk.execute(); // eslint-disable-line no-await-in-loop
+            await bulk.execute();
             bulk = db.collection('domain.user').initializeUnorderedBulkOp();
         }
     }
@@ -120,12 +120,13 @@ export async function pdoc(report) {
     for (let i = 0; i <= 100; i++) {
         pipeline[1].$group[`s${i}`] = {
             $sum: {
-                $cond: [{
-                    $and: [
-                        { $gte: ['$score', i] },
-                        { $lt: ['$score', i + 1] },
-                    ],
-                }, 1, 0],
+                $cond: [
+                    {
+                        $and: [{ $gte: ['$score', i] }, { $lt: ['$score', i + 1] }],
+                    },
+                    1,
+                    0,
+                ],
             },
         };
         pipeline[2].$group[`s${i}`] = { $sum: `$s${i}` };
@@ -164,24 +165,26 @@ export async function pdoc(report) {
     if (bulk.batches.length) await bulk.execute();
 }
 
-export const apply = (ctx) => ctx.addScript(
-    'problemStat', 'Recalculates nSubmit and nAccept in problem status.',
-    Schema.object({
-        udoc: Schema.boolean(),
-        pdoc: Schema.boolean(),
-        psdoc: Schema.boolean(),
-    }),
-    async (arg, report) => {
-        if (arg.pdoc === undefined || arg.pdoc) {
-            const start = Date.now();
-            await pdoc(report);
-            report({ message: `pdoc finished in ${Date.now() - start}ms` });
-        }
-        if (arg.udoc === undefined || arg.udoc) {
-            const start = Date.now();
-            await udoc(report);
-            report({ message: `udoc finished in ${Date.now() - start}ms` });
-        }
-        return true;
-    },
-);
+export const apply = (ctx) =>
+    ctx.addScript(
+        'problemStat',
+        'Recalculates nSubmit and nAccept in problem status.',
+        Schema.object({
+            udoc: Schema.boolean(),
+            pdoc: Schema.boolean(),
+            psdoc: Schema.boolean(),
+        }),
+        async (arg, report) => {
+            if (arg.pdoc === undefined || arg.pdoc) {
+                const start = Date.now();
+                await pdoc(report);
+                report({ message: `pdoc finished in ${Date.now() - start}ms` });
+            }
+            if (arg.udoc === undefined || arg.udoc) {
+                const start = Date.now();
+                await udoc(report);
+                report({ message: `udoc finished in ${Date.now() - start}ms` });
+            }
+            return true;
+        },
+    );

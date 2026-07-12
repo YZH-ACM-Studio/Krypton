@@ -21,10 +21,8 @@ describe('P3.11 paper structured submit contract', () => {
         const finalizeStart = source.indexOf('export async function finalizePaperForUser');
         const immediate = source.slice(immediateStart, finalizeStart);
         const finalize = source.slice(finalizeStart, source.indexOf('class PaperFinalizeHandler'));
-        expect(immediate.indexOf("stage: 'immediate-submit'"))
-            .to.be.lessThan(immediate.indexOf('record.add('));
-        expect(finalize.indexOf("stage: 'finalize'"))
-            .to.be.lessThan(finalize.indexOf('record.add(', finalize.indexOf("type === 'fill_function'")));
+        expect(immediate.indexOf("stage: 'immediate-submit'")).to.be.lessThan(immediate.indexOf('record.add('));
+        expect(finalize.indexOf("stage: 'finalize'")).to.be.lessThan(finalize.indexOf('record.add(', finalize.indexOf("type === 'fill_function'")));
     });
 
     it('separates objective text program-fill from compile program-fill cells', () => {
@@ -44,8 +42,7 @@ describe('P3.11 paper structured submit contract', () => {
         const lockStart = source.indexOf('class PaperLockKindHandler');
         const lockEnd = source.indexOf('class PaperSubmitCodeHandler');
         const lock = source.slice(lockStart, lockEnd);
-        expect(lock.indexOf("stage: 'lock-kind'"))
-            .to.be.lessThan(lock.indexOf('lockKindForUser('));
+        expect(lock.indexOf("stage: 'lock-kind'")).to.be.lessThan(lock.indexOf('lockKindForUser('));
     });
 
     it('preflights every text program-fill before finalize performs any write', () => {

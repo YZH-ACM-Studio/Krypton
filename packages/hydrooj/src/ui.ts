@@ -54,4 +54,7 @@ export const useReadline = (callback: (str: string) => any) => {
     if (readlineCallback) throw new Error('Already waiting for input.');
     readlineCallback = callback;
 };
-export const readline = () => new Promise<string>((resolve) => { useReadline(resolve); });
+export const readline = () =>
+    new Promise<string>((resolve) => {
+        useReadline(resolve);
+    });

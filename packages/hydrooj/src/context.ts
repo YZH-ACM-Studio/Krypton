@@ -1,5 +1,5 @@
-import type { } from '@cordisjs/plugin-logger';
-import type { } from '@cordisjs/plugin-timer';
+import type {} from '@cordisjs/plugin-logger';
+import type {} from '@cordisjs/plugin-timer';
 import { Service } from 'cordis';
 import Schema from 'schemastery';
 import type { DomainDoc, GeoIP, ModuleInterfaces } from './interface';
@@ -7,12 +7,12 @@ import { inject } from './lib/ui';
 import { Loader } from './loader';
 import type { EventMap } from './service/bus';
 import type CheckService from './service/check';
-import type { } from './service/migration';
+import type {} from './service/migration';
 
 export { EventMap as Events };
 
 declare module 'cordis' {
-    export interface Events extends EventMap { }
+    export interface Events extends EventMap {}
     interface Context {
         domain?: DomainDoc;
         loader: Loader;

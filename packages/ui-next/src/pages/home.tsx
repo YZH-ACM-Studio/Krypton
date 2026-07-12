@@ -23,15 +23,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { AnnouncementHomeBlock } from '@/components/announcement-home-block';
 import { type GenericUserDoc, useBootstrap } from '@/lib/bootstrap';
-import {
-  formatDateTime,
-  formatPlainTextSummary,
-  formatRelativeTime,
-  formatShortDate,
-  makeInitials,
-  replaceRouteTokens,
-  toDate,
-} from '@/lib/format';
+import { formatDateTime, formatPlainTextSummary, formatRelativeTime, formatShortDate, makeInitials, replaceRouteTokens, toDate } from '@/lib/format';
 
 type R = Record<string, any>;
 
@@ -49,14 +41,17 @@ function readTuple<A, B>(v: unknown, fb: [A, B]): [A, B] {
 function collectSections(cols: Array<{ sections: Array<[string, unknown]> }>) {
   const map = new Map<string, unknown>();
   const errors: string[] = [];
-  for (const col of cols)
-    for (const [k, v] of col.sections)
-      k === 'error' ? errors.push(String(v)) : map.set(k, v);
+  for (const col of cols) {
+    for (const [k, v] of col.sections) {
+      if (k === 'error') errors.push(String(v));
+      else map.set(k, v);
+    }
+  }
   return { sections: map, errors };
 }
 
 function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | undefined) {
-  return uid != null ? udict[String(uid)] ?? null : null;
+  return uid != null ? (udict[String(uid)] ?? null) : null;
 }
 
 function contestState(c: R) {
@@ -81,9 +76,7 @@ function homeworkState(h: R) {
 
 function trainingProgress(t: R, st: R) {
   if (!st?.enroll) return null;
-  const total = Array.isArray(t.dag)
-    ? t.dag.reduce((n: number, s: R) => n + (Array.isArray(s.pids) ? s.pids.length : 0), 0)
-    : 0;
+  const total = Array.isArray(t.dag) ? t.dag.reduce((n: number, s: R) => n + (Array.isArray(s.pids) ? s.pids.length : 0), 0) : 0;
   const done = Array.isArray(st.donePids) ? st.donePids.length : 0;
   if (!total) return 0;
   return Math.round((done / total) * 100);
@@ -91,16 +84,9 @@ function trainingProgress(t: R, st: R) {
 
 // ── tiny building blocks ──────────────────────────────────
 
-function StatCard({ icon: Icon, label, value, href, index }: {
-  icon: LucideIcon; label: string; value: number; href: string; index: number;
-}) {
+function StatCard({ icon: Icon, label, value, href, index }: { icon: LucideIcon; label: string; value: number; href: string; index: number }) {
   return (
-    <motion.a
-      href={href}
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, delay: 0.05 * index }}
-    >
+    <motion.a href={href} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.05 * index }}>
       <Card className="transition-colors hover:bg-accent/50">
         <CardContent className="flex items-center gap-4 p-4">
           <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -116,15 +102,9 @@ function StatCard({ icon: Icon, label, value, href, index }: {
   );
 }
 
-function SectionShell({ title, action, delay = 0, children }: {
-  title: string; action?: ReactNode; delay?: number; children: ReactNode;
-}) {
+function SectionShell({ title, action, delay = 0, children }: { title: string; action?: ReactNode; delay?: number; children: ReactNode }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 14 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, delay }}
-    >
+    <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay }}>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
           <CardTitle className="text-base">{title}</CardTitle>
@@ -137,9 +117,7 @@ function SectionShell({ title, action, delay = 0, children }: {
 }
 
 function Empty({ text }: { text: string }) {
-  return (
-    <p className="py-6 text-center text-sm text-muted-foreground">{text}</p>
-  );
+  return <p className="py-6 text-center text-sm text-muted-foreground">{text}</p>;
 }
 
 // ── page ──────────────────────────────────────────────────
@@ -152,9 +130,9 @@ export function KryptonHomePage() {
 
   // unpack sections
   const [contests] = readTuple(sections.get('contest'), [[], {}] as [R[], Record<string, R>]);
-  const [homework, hwStatus] = readTuple(sections.get('homework'), [[], {}] as [R[], Record<string, R>]);
+  const [homework] = readTuple(sections.get('homework'), [[], {}] as [R[], Record<string, R>]);
   const [training, trStatus] = readTuple(sections.get('training'), [[], {}] as [R[], Record<string, R>]);
-  const [discussions, discNodes] = readTuple(sections.get('discussion'), [[], {}] as [R[], Record<string, Record<string, R>>]);
+  const [discussions] = readTuple(sections.get('discussion'), [[], {}] as [R[], Record<string, Record<string, R>>]);
   const ranking = readList<number>(sections.get('ranking'));
   const [starred] = readTuple(sections.get('starred_problems'), [[], null] as [R[], null]);
   const [recent] = readTuple(sections.get('recent_problems'), [[], null] as [R[], null]);
@@ -162,23 +140,19 @@ export function KryptonHomePage() {
   // search
   const [search, setSearch] = useState('');
   const deferred = useDeferredValue(search);
-  const allProblems = [...starred, ...recent].filter(
-    (p, i, a) => a.findIndex((q) => `${q.docId}` === `${p.docId}`) === i,
-  );
+  const allProblems = [...starred, ...recent].filter((p, i, a) => a.findIndex((q) => `${q.docId}` === `${p.docId}`) === i);
   const matched = deferred
     ? allProblems
-      .filter((p) => {
-        const kw = deferred.trim().toLowerCase();
-        return `${p.docId}`.includes(kw) || `${p.title || ''}`.toLowerCase().includes(kw);
-      })
-      .slice(0, 5)
+        .filter((p) => {
+          const kw = deferred.trim().toLowerCase();
+          return `${p.docId}`.includes(kw) || `${p.title || ''}`.toLowerCase().includes(kw);
+        })
+        .slice(0, 5)
     : [];
 
   const submitSearch = (q: string) => {
     const kw = q.trim();
-    window.location.assign(
-      kw ? `${bs.urls.problems}?q=${encodeURIComponent(kw)}` : bs.urls.problems,
-    );
+    window.location.assign(kw ? `${bs.urls.problems}?q=${encodeURIComponent(kw)}` : bs.urls.problems);
   };
 
   const stats: Array<{ icon: LucideIcon; label: string; value: number; href: string }> = [
@@ -194,18 +168,12 @@ export function KryptonHomePage() {
       <AnnouncementHomeBlock />
 
       {/* ── Hero ────────────────────────────────── */}
-      <motion.section
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-      >
+      <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
         <Card className="overflow-hidden border-primary/20 bg-linear-to-br from-primary/5 via-background to-background">
           <CardContent className="grid gap-6 p-6 lg:grid-cols-[1fr_340px]">
             <div className="flex flex-col justify-center gap-4">
               <div>
-                <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                  {bs.domain.name}
-                </h1>
+                <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{bs.domain.name}</h1>
               </div>
               {bs.domain.bulletin ? (
                 <div className="max-w-xl text-sm leading-relaxed text-foreground/80">
@@ -244,7 +212,9 @@ export function KryptonHomePage() {
                     className="pl-8"
                   />
                 </div>
-                <Button type="submit" size="sm">搜索</Button>
+                <Button type="submit" size="sm">
+                  搜索
+                </Button>
               </form>
               {matched.length > 0 ? (
                 <div className="flex flex-col gap-0.5 rounded-md border p-1">
@@ -254,7 +224,9 @@ export function KryptonHomePage() {
                       className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
                       href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(p.docId) })}
                     >
-                      <span className="truncate">{p.docId}. {p.title || '未命名'}</span>
+                      <span className="truncate">
+                        {p.docId}. {p.title || '未命名'}
+                      </span>
                       <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
                     </a>
                   ))}
@@ -278,7 +250,9 @@ export function KryptonHomePage() {
           <CardContent className="p-4">
             <p className="mb-2 text-sm font-medium text-destructive">部分模块加载失败</p>
             {errors.map((msg) => (
-              <p key={msg} className="text-sm text-muted-foreground">{msg}</p>
+              <p key={msg} className="text-sm text-muted-foreground">
+                {msg}
+              </p>
             ))}
           </CardContent>
         </Card>
@@ -294,11 +268,15 @@ export function KryptonHomePage() {
             delay={0.1}
             action={
               <Button asChild variant="ghost" size="sm">
-                <a href={bs.urls.contests}>全部 <ChevronRight className="size-4" /></a>
+                <a href={bs.urls.contests}>
+                  全部 <ChevronRight className="size-4" />
+                </a>
               </Button>
             }
           >
-            {contests.length === 0 ? <Empty text="暂无比赛" /> : (
+            {contests.length === 0 ? (
+              <Empty text="暂无比赛" />
+            ) : (
               <div className="divide-y">
                 {contests.slice(0, 5).map((c) => {
                   const st = contestState(c);
@@ -311,13 +289,15 @@ export function KryptonHomePage() {
                       <div className="flex-1 min-w-0">
                         <p className="truncate text-sm font-medium">{c.title || '未命名比赛'}</p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
-                          {formatDateTime(c.beginAt, locale)}{c.rule ? ` · ${c.rule}` : ''}
+                          {formatDateTime(c.beginAt, locale)}
+                          {c.rule ? ` · ${c.rule}` : ''}
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         {c.attend ? (
                           <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <Users className="size-3" />{c.attend}
+                            <Users className="size-3" />
+                            {c.attend}
                           </span>
                         ) : null}
                         <Badge variant={st.color}>{st.label}</Badge>
@@ -335,11 +315,15 @@ export function KryptonHomePage() {
             delay={0.15}
             action={
               <Button asChild variant="ghost" size="sm">
-                <a href={bs.urls.homework}>全部 <ChevronRight className="size-4" /></a>
+                <a href={bs.urls.homework}>
+                  全部 <ChevronRight className="size-4" />
+                </a>
               </Button>
             }
           >
-            {homework.length === 0 ? <Empty text="暂无作业" /> : (
+            {homework.length === 0 ? (
+              <Empty text="暂无作业" />
+            ) : (
               <div className="divide-y">
                 {homework.slice(0, 4).map((h) => (
                   <a
@@ -367,11 +351,15 @@ export function KryptonHomePage() {
             delay={0.2}
             action={
               <Button asChild variant="ghost" size="sm">
-                <a href={bs.urls.training}>全部 <ChevronRight className="size-4" /></a>
+                <a href={bs.urls.training}>
+                  全部 <ChevronRight className="size-4" />
+                </a>
               </Button>
             }
           >
-            {training.length === 0 ? <Empty text="暂无训练计划" /> : (
+            {training.length === 0 ? (
+              <Empty text="暂无训练计划" />
+            ) : (
               <div className="grid gap-3 sm:grid-cols-2">
                 {training.slice(0, 4).map((t) => {
                   const pct = trainingProgress(t, trStatus[t.docId] || {});
@@ -386,12 +374,11 @@ export function KryptonHomePage() {
                         {formatPlainTextSummary(t.content || t.desc) || '一组精选题目'}
                       </p>
                       <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1"><Users className="size-3" />{t.attend || 0}</span>
-                        {pct !== null ? (
-                          <span className="font-medium text-primary">{pct}%</span>
-                        ) : (
-                          <span>未参加</span>
-                        )}
+                        <span className="flex items-center gap-1">
+                          <Users className="size-3" />
+                          {t.attend || 0}
+                        </span>
+                        {pct !== null ? <span className="font-medium text-primary">{pct}%</span> : <span>未参加</span>}
                       </div>
                     </a>
                   );
@@ -406,11 +393,15 @@ export function KryptonHomePage() {
             delay={0.25}
             action={
               <Button asChild variant="ghost" size="sm">
-                <a href={bs.urls.discussions}>全部 <ChevronRight className="size-4" /></a>
+                <a href={bs.urls.discussions}>
+                  全部 <ChevronRight className="size-4" />
+                </a>
               </Button>
             }
           >
-            {discussions.length === 0 ? <Empty text="暂无讨论" /> : (
+            {discussions.length === 0 ? (
+              <Empty text="暂无讨论" />
+            ) : (
               <div className="divide-y">
                 {discussions.slice(0, 5).map((d) => {
                   const owner = getUser(bs.udict, d.owner);
@@ -422,9 +413,7 @@ export function KryptonHomePage() {
                     >
                       <Avatar className="mt-0.5 size-7">
                         {owner?.avatarUrl ? <AvatarImage src={String(owner.avatarUrl)} alt={String(owner.uname || '')} /> : null}
-                        <AvatarFallback className="text-[10px]">
-                          {makeInitials(owner?.uname || '?')}
-                        </AvatarFallback>
+                        <AvatarFallback className="text-[10px]">{makeInitials(owner?.uname || '?')}</AvatarFallback>
                       </Avatar>
                       <div className="flex-1 min-w-0">
                         <p className="truncate text-sm font-medium">{d.title || '无标题'}</p>
@@ -451,18 +440,21 @@ export function KryptonHomePage() {
               </Avatar>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{bs.user.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {bs.user.signedIn ? `${bs.user.unreadMessages} 条未读` : '游客'}
-                </p>
+                <p className="text-xs text-muted-foreground">{bs.user.signedIn ? `${bs.user.unreadMessages} 条未读` : '游客'}</p>
               </div>
             </div>
             {bs.user.signedIn ? (
               <div className="mt-3 flex gap-2">
                 <Button asChild variant="outline" size="sm" className="flex-1">
-                  <a href={bs.urls.messages}><MessageSquare className="size-4" />消息</a>
+                  <a href={bs.urls.messages}>
+                    <MessageSquare className="size-4" />
+                    消息
+                  </a>
                 </Button>
                 <Button asChild variant="outline" size="sm" className="flex-1">
-                  <a href={bs.urls.domains}><Compass className="size-4" />域</a>
+                  <a href={bs.urls.domains}>
+                    <Compass className="size-4" />域
+                  </a>
                 </Button>
               </div>
             ) : (
@@ -487,7 +479,9 @@ export function KryptonHomePage() {
               </Button>
             }
           >
-            {ranking.length === 0 ? <Empty text="暂无排名" /> : (
+            {ranking.length === 0 ? (
+              <Empty text="暂无排名" />
+            ) : (
               <div className="space-y-1">
                 {ranking.slice(0, 8).map((uid, i) => {
                   const u = getUser(bs.udict, uid);
@@ -517,7 +511,9 @@ export function KryptonHomePage() {
                     className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
                     href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(p.docId) })}
                   >
-                    <span className="truncate">{p.docId}. {p.title || '未命名'}</span>
+                    <span className="truncate">
+                      {p.docId}. {p.title || '未命名'}
+                    </span>
                     <Star className="size-3.5 shrink-0 text-yellow-500" />
                   </a>
                 ))}
@@ -535,7 +531,9 @@ export function KryptonHomePage() {
                     className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
                     href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(p.docId) })}
                   >
-                    <span className="truncate">{p.docId}. {p.title || '未命名'}</span>
+                    <span className="truncate">
+                      {p.docId}. {p.title || '未命名'}
+                    </span>
                     <span className="shrink-0 text-xs text-muted-foreground">{formatShortDate(p._id, locale)}</span>
                   </a>
                 ))}

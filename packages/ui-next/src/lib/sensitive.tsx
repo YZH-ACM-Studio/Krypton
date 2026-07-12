@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type PropsWithChildren } from 'react';
+import { createContext, type PropsWithChildren, useContext, useState } from 'react';
 
 const STORAGE_KEY = 'krypton:sensitive-visible';
 
@@ -14,22 +14,24 @@ const SensitiveContext = createContext<SensitiveContextValue>({
 
 export function SensitiveProvider({ children }: PropsWithChildren) {
   const [visible, setVisible] = useState(() => {
-    try { return localStorage.getItem(STORAGE_KEY) === '1'; } catch { return false; }
+    try {
+      return localStorage.getItem(STORAGE_KEY) === '1';
+    } catch {
+      return false;
+    }
   });
 
   const toggle = () => {
     setVisible((prev) => {
       const next = !prev;
-      try { localStorage.setItem(STORAGE_KEY, next ? '1' : '0'); } catch {}
+      try {
+        localStorage.setItem(STORAGE_KEY, next ? '1' : '0');
+      } catch {}
       return next;
     });
   };
 
-  return (
-    <SensitiveContext.Provider value={{ visible, toggle }}>
-      {children}
-    </SensitiveContext.Provider>
-  );
+  return <SensitiveContext.Provider value={{ visible, toggle }}>{children}</SensitiveContext.Provider>;
 }
 
 export function useSensitive() {

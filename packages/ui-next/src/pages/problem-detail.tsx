@@ -99,9 +99,7 @@ function objectIdTimestamp(value: unknown): number | null {
 
 function dateTimestamp(value: unknown): number | null {
   if (!value) return null;
-  const raw = typeof value === 'object' && value && '$date' in value
-    ? (value as { $date?: unknown }).$date
-    : value;
+  const raw = typeof value === 'object' && value && '$date' in value ? (value as { $date?: unknown }).$date : value;
   const ts = new Date(raw as any).getTime();
   return Number.isFinite(ts) ? ts : null;
 }
@@ -160,13 +158,11 @@ function recordEntryFromRdoc(rdoc: R, recordDetailRoute: string): RecordEntry | 
     time: typeof rdoc.time === 'number' ? rdoc.time : undefined,
     memory: typeof rdoc.memory === 'number' ? rdoc.memory : undefined,
     score: Number.isFinite(score) ? score : undefined,
-    timestamp: objectIdTimestamp(rdoc._id ?? rdoc.rid)
-      ?? dateTimestamp(rdoc.submitAt ?? rdoc.judgeAt ?? rdoc.timestamp)
-      ?? Date.now(),
+    timestamp: objectIdTimestamp(rdoc._id ?? rdoc.rid) ?? dateTimestamp(rdoc.submitAt ?? rdoc.judgeAt ?? rdoc.timestamp) ?? Date.now(),
   };
 }
 
-function origStatChipValue(os: { accepted: number, submitted: number }) {
+function origStatChipValue(os: { accepted: number; submitted: number }) {
   const rate = os.submitted > 0 ? Math.round((os.accepted / os.submitted) * 100) : 0;
   return `${os.accepted}/${os.submitted} (${rate}%)`;
 }
@@ -189,22 +185,17 @@ function difficultyBadge(d: number | undefined) {
 }
 
 /** Contest entry banner with live countdown and a back-to-contest link. */
-function ContestBanner({ tdoc, mode, letter, contestUrl }: {
-  tdoc: R;
-  mode: string;
-  letter: string | null;
-  contestUrl: string;
-}) {
+function ContestBanner({ tdoc, mode, letter, contestUrl }: { tdoc: R; mode: string; letter: string | null; contestUrl: string }) {
   const isHomework = tdoc.rule === 'homework';
   const begin = (() => {
     if (!tdoc.beginAt) return 0;
     const d = new Date(tdoc.beginAt);
-    return isNaN(d.getTime()) ? 0 : d.getTime();
+    return Number.isNaN(d.getTime()) ? 0 : d.getTime();
   })();
   const end = (() => {
     if (!tdoc.endAt) return 0;
     const d = new Date(tdoc.endAt);
-    return isNaN(d.getTime()) ? 0 : d.getTime();
+    return Number.isNaN(d.getTime()) ? 0 : d.getTime();
   })();
   const now = Date.now();
   const running = now >= begin && now < end;
@@ -234,11 +225,28 @@ function ContestBanner({ tdoc, mode, letter, contestUrl }: {
 
   const modeBadge = (() => {
     switch (mode) {
-      case 'contest': return <Badge variant="default" className="text-[10px]">比赛中</Badge>;
-      case 'view': return <Badge variant="outline" className="text-[10px]">观看模式</Badge>;
-      case 'correction': return <Badge variant="secondary" className="text-[10px]">订正模式</Badge>;
-      case 'none': return null;
-      default: return null;
+      case 'contest':
+        return (
+          <Badge variant="default" className="text-[10px]">
+            比赛中
+          </Badge>
+        );
+      case 'view':
+        return (
+          <Badge variant="outline" className="text-[10px]">
+            观看模式
+          </Badge>
+        );
+      case 'correction':
+        return (
+          <Badge variant="secondary" className="text-[10px]">
+            订正模式
+          </Badge>
+        );
+      case 'none':
+        return null;
+      default:
+        return null;
     }
   })();
 
@@ -252,7 +260,9 @@ function ContestBanner({ tdoc, mode, letter, contestUrl }: {
         <span className="text-muted-foreground">|</span>
         <span className="text-sm font-medium truncate min-w-0 max-w-[40ch]">{tdoc.title || '比赛'}</span>
         {letter ? (
-          <Badge variant="outline" className="text-[10px] font-mono">题 {letter}</Badge>
+          <Badge variant="outline" className="text-[10px] font-mono">
+            题 {letter}
+          </Badge>
         ) : null}
         {modeBadge}
         <div className="ml-auto flex items-center gap-2">
@@ -260,7 +270,8 @@ function ContestBanner({ tdoc, mode, letter, contestUrl }: {
             <span className="flex items-center gap-1 text-sm">
               <Clock className="size-3.5" />
               <span className="font-mono tabular-nums">
-                {remH > 0 ? `${remH}:` : ''}{pad(remM)}:{pad(remS)}
+                {remH > 0 ? `${remH}:` : ''}
+                {pad(remM)}:{pad(remS)}
               </span>
               <span className="text-xs text-muted-foreground">剩余</span>
             </span>
@@ -331,9 +342,7 @@ function ResizableSplit({
           document.body.style.userSelect = 'none';
         }}
       />
-      <div className="krypton-split-pane flex-1 overflow-hidden">
-        {right}
-      </div>
+      <div className="krypton-split-pane flex-1 overflow-hidden">{right}</div>
     </div>
   );
 }
@@ -342,7 +351,7 @@ function ResizableSplit({
 /*  Info bar — dense row of stats                                      */
 /* ------------------------------------------------------------------ */
 
-function InfoChip({ icon: Icon, label, value }: { icon: any, label: string, value: React.ReactNode }) {
+function InfoChip({ icon: Icon, label, value }: { icon: any; label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-center gap-1.5 text-xs">
       <Icon className="size-3.5 text-muted-foreground" />
@@ -366,7 +375,7 @@ function langLabel(id: string): string {
 interface LangGroup {
   family: string;
   familyLabel: string;
-  variants: { id: string, suffix: string, fullLabel: string }[];
+  variants: { id: string; suffix: string; fullLabel: string }[];
 }
 
 /**
@@ -426,10 +435,8 @@ function LimitsSection({ config }: { config: R }) {
 
   // Per-language absolute limits, derived from the rates the editor wrote.
   // Display only when both a base value and a rate map exist.
-  const timeRates: Record<string, number> = (config.time_limit_rate && typeof config.time_limit_rate === 'object')
-    ? config.time_limit_rate : {};
-  const memRates: Record<string, number> = (config.memory_limit_rate && typeof config.memory_limit_rate === 'object')
-    ? config.memory_limit_rate : {};
+  const timeRates: Record<string, number> = config.time_limit_rate && typeof config.time_limit_rate === 'object' ? config.time_limit_rate : {};
+  const memRates: Record<string, number> = config.memory_limit_rate && typeof config.memory_limit_rate === 'object' ? config.memory_limit_rate : {};
   const perLangKeys = Array.from(new Set([...Object.keys(timeRates), ...Object.keys(memRates)]));
 
   const hasTimeVariation = baseTimeMs == null && displayTimeMin !== displayTimeMax;
@@ -447,9 +454,7 @@ function LimitsSection({ config }: { config: R }) {
           <div>
             <p className="text-[11px] text-muted-foreground">时间</p>
             <p className="font-mono text-xs font-medium">
-              {hasTimeVariation
-                ? `${formatTime(displayTimeMin)} — ${formatTime(displayTimeMax)}`
-                : formatTime(displayTimeMax ?? displayTimeMin)}
+              {hasTimeVariation ? `${formatTime(displayTimeMin)} — ${formatTime(displayTimeMax)}` : formatTime(displayTimeMax ?? displayTimeMin)}
             </p>
           </div>
         </div>
@@ -487,16 +492,10 @@ function LimitsSection({ config }: { config: R }) {
                     <tr key={id} className="border-t">
                       <td className="px-2 py-1">
                         <span className="font-medium">{langLabel(id)}</span>
-                        {langLabel(id) !== id ? (
-                          <span className="ml-1 font-mono text-[9px] text-muted-foreground">{id}</span>
-                        ) : null}
+                        {langLabel(id) !== id ? <span className="ml-1 font-mono text-[9px] text-muted-foreground">{id}</span> : null}
                       </td>
-                      <td className="px-2 py-1 text-right font-mono tabular-nums">
-                        {absMs != null ? formatHumanTime(absMs) : '默认'}
-                      </td>
-                      <td className="px-2 py-1 text-right font-mono tabular-nums">
-                        {absMb != null ? formatHumanMemory(absMb) : '默认'}
-                      </td>
+                      <td className="px-2 py-1 text-right font-mono tabular-nums">{absMs != null ? formatHumanTime(absMs) : '默认'}</td>
+                      <td className="px-2 py-1 text-right font-mono tabular-nums">{absMb != null ? formatHumanMemory(absMb) : '默认'}</td>
                     </tr>
                   );
                 })}
@@ -507,14 +506,8 @@ function LimitsSection({ config }: { config: R }) {
       ) : null}
       {langs.length > 0 && (
         <div className="mt-2 rounded-md border bg-muted/30 px-3 py-2">
-          <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            允许的语言
-          </p>
-          {langs.includes('_') ? (
-            <div className="text-[11px] text-muted-foreground">任意语言</div>
-          ) : (
-            <AllowedLangs ids={langs} />
-          )}
+          <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">允许的语言</p>
+          {langs.includes('_') ? <div className="text-[11px] text-muted-foreground">任意语言</div> : <AllowedLangs ids={langs} />}
         </div>
       )}
     </div>
@@ -541,12 +534,7 @@ function AllowedLangs({ ids }: { ids: string[] }) {
             ) : (
               <div className="flex flex-wrap gap-1">
                 {g.variants.map((v) => (
-                  <Badge
-                    key={v.id}
-                    variant="outline"
-                    className="px-1.5 py-0 text-[10px]"
-                    title={v.fullLabel}
-                  >
+                  <Badge key={v.id} variant="outline" className="px-1.5 py-0 text-[10px]" title={v.fullLabel}>
                     {v.suffix || v.fullLabel}
                   </Badge>
                 ))}
@@ -568,7 +556,7 @@ function parseConfigTimeMS(input: any): number | null {
   if (!m) return null;
   const v = Number.parseFloat(m[1]);
   if (!Number.isFinite(v)) return null;
-  return (m[2] === 'ms' || !m[2]) ? Math.round(v) : Math.round(v * 1000);
+  return m[2] === 'ms' || !m[2] ? Math.round(v) : Math.round(v * 1000);
 }
 
 function parseConfigMemoryMB(input: any): number | null {
@@ -627,7 +615,6 @@ export function ProblemDetailPage() {
 
   /* ── Contest mode ── */
   const tdoc: R | null = data.tdoc || null;
-  const tsdoc: R | null = data.tsdoc || null;
   const examMode: R | null = data.examMode || null;
   const examUrls: R = examMode?.urls || {};
   const mode: string = data.mode || 'normal';
@@ -636,9 +623,7 @@ export function ProblemDetailPage() {
   const inContest = !!tdoc && tdoc.docId && mode !== 'normal';
   const isHomework = tdoc?.rule === 'homework';
   const tid = tdoc?.docId ? String(tdoc.docId) : null;
-  const contestUrl = tid
-    ? (examUrls.overview || replaceRouteTokens(isHomework ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid }))
-    : null;
+  const contestUrl = tid ? examUrls.overview || replaceRouteTokens(isHomework ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid }) : null;
   const recordDetailRoute = examUrls.record || bs.urls.recordDetail;
   const pretestRecordRoute = buildUrlWithQuery(bs.urls.recordDetail, { tid });
   // Alphabetic id "A" / "B" / "C" from contest problem order
@@ -660,11 +645,9 @@ export function ProblemDetailPage() {
   const problemCanPretest = config.type === 'default' || config.type === undefined || config.type == null;
   // 客观题结构化作答（PLAN P3.2 Rev.11）：服务端 parseConfig 对
   // type=objective 下发无答案的 questions 描述符，走面板作答提交。
-  const objectiveQuestions: ObjectiveClientQuestion[] = (config.type === 'objective' && Array.isArray(config.questions))
-    ? config.questions : [];
+  const objectiveQuestions: ObjectiveClientQuestion[] = config.type === 'objective' && Array.isArray(config.questions) ? config.questions : [];
   const isObjective = objectiveQuestions.length > 0;
-  const isStructuredCompile = config.type === 'fill_function'
-    && ['program_fill', 'function'].includes(String(pdoc.problemKind));
+  const isStructuredCompile = config.type === 'fill_function' && ['program_fill', 'function'].includes(String(pdoc.problemKind));
   const isSubjective = pdoc.problemKind === 'subjective';
   const canPreviewSubjective = !!data.canPreviewSubjective;
   const objectiveDraftKey = `objective-draft:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pdoc.docId || pid}${tid ? `@${tid}` : ''}`;
@@ -708,14 +691,8 @@ export function ProblemDetailPage() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      const rdocs = Array.isArray(json.rdocs)
-        ? json.rdocs
-        : Array.isArray(json.page?.data?.rdocs)
-          ? json.page.data.rdocs
-          : [];
-      const entries = rdocs
-        .map((rdoc: R) => recordEntryFromRdoc(rdoc, recordDetailRoute))
-        .filter(Boolean) as RecordEntry[];
+      const rdocs = Array.isArray(json.rdocs) ? json.rdocs : Array.isArray(json.page?.data?.rdocs) ? json.page.data.rdocs : [];
+      const entries = rdocs.map((rdoc: R) => recordEntryFromRdoc(rdoc, recordDetailRoute)).filter(Boolean) as RecordEntry[];
       setIdeRecords((prev) => mergeRecordEntries(prev, entries));
       setIdeRecordsLoaded(true);
     } catch (e: any) {
@@ -779,12 +756,7 @@ export function ProblemDetailPage() {
           <span className="text-sm font-medium">{title}</span>
           <span className="text-xs text-muted-foreground">— {pid}</span>
           <div className="flex-1" />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1 text-xs"
-            onClick={() => setIdeMode(false)}
-          >
+          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => setIdeMode(false)}>
             <X className="size-3.5" />
             退出 IDE
           </Button>
@@ -794,10 +766,7 @@ export function ProblemDetailPage() {
           left={
             <div ref={recordsPanelRef} className="flex h-full flex-col">
               {/* Problem content area */}
-              <ScrollArea
-                viewportClassName="p-4 sm:p-6 space-y-4"
-                style={{ height: showIdeRecords ? `${ideRecordsPct}%` : '100%' }}
-              >
+              <ScrollArea viewportClassName="p-4 sm:p-6 space-y-4" style={{ height: showIdeRecords ? `${ideRecordsPct}%` : '100%' }}>
                 {/* Problem header */}
                 <div>
                   <div className="flex items-center gap-2">
@@ -823,13 +792,7 @@ export function ProblemDetailPage() {
                   <InfoChip icon={Send} label="提交" value={nSubmit} />
                   <InfoChip icon={CheckCircle2} label="通过" value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>} />
                   <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} />
-                  {!inContest && pdoc.origStat ? (
-                    <InfoChip
-                      icon={BarChart3}
-                      label="赛时通过率"
-                      value={origStatChipValue(pdoc.origStat)}
-                    />
-                  ) : null}
+                  {!inContest && pdoc.origStat ? <InfoChip icon={BarChart3} label="赛时通过率" value={origStatChipValue(pdoc.origStat)} /> : null}
                 </div>
 
                 {/* Limits */}
@@ -857,11 +820,7 @@ export function ProblemDetailPage() {
                       <span className="text-xs font-medium">提交记录</span>
                       <span className="text-[10px] text-muted-foreground">({ideRecords.length})</span>
                       <div className="flex-1" />
-                      <button
-                        type="button"
-                        onClick={() => setShowIdeRecords(false)}
-                        className="text-xs text-muted-foreground hover:text-foreground"
-                      >
+                      <button type="button" onClick={() => setShowIdeRecords(false)} className="text-xs text-muted-foreground hover:text-foreground">
                         收起
                       </button>
                     </div>
@@ -877,9 +836,7 @@ export function ProblemDetailPage() {
                           {ideRecordsError}
                         </div>
                       ) : ideRecords.length === 0 ? (
-                        <div className="flex h-full items-center justify-center px-4 text-xs text-muted-foreground">
-                          暂无个人提交记录
-                        </div>
+                        <div className="flex h-full items-center justify-center px-4 text-xs text-muted-foreground">暂无个人提交记录</div>
                       ) : (
                         <table className="min-w-[620px] w-full text-xs">
                           <thead>
@@ -909,23 +866,12 @@ export function ProblemDetailPage() {
                                     )}
                                   </td>
                                   <td className="whitespace-nowrap px-3 py-1.5">{getLangEntry(r.lang).label}</td>
-                                  <td className="px-3 py-1.5 text-right font-mono tabular-nums">
-                                    {r.score ?? '—'}
-                                  </td>
-                                  <td className="px-3 py-1.5 text-right font-mono tabular-nums">
-                                    {r.time != null ? `${r.time} ms` : '—'}
-                                  </td>
-                                  <td className="px-3 py-1.5 text-right font-mono tabular-nums">
-                                    {r.memory != null ? formatMemory(r.memory) : '—'}
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">
-                                    {formatRecordTimestamp(r.timestamp)}
-                                  </td>
+                                  <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.score ?? '—'}</td>
+                                  <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.time != null ? `${r.time} ms` : '—'}</td>
+                                  <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.memory != null ? formatMemory(r.memory) : '—'}</td>
+                                  <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{formatRecordTimestamp(r.timestamp)}</td>
                                   <td className="px-3 py-1.5">
-                                    <a
-                                      href={r.url}
-                                      className="text-primary hover:underline"
-                                    >
+                                    <a href={r.url} className="text-primary hover:underline">
                                       详情
                                     </a>
                                   </td>
@@ -967,21 +913,9 @@ export function ProblemDetailPage() {
   }
 
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
-    >
+    <motion.div className="space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
       {/* Contest mode banner — visible whenever we entered via a contest tid */}
-      {inContest && contestUrl ? (
-        <ContestBanner
-          tdoc={tdoc!}
-          mode={mode}
-          letter={contestLetter}
-          contestUrl={contestUrl}
-        />
-      ) : null}
+      {inContest && contestUrl ? <ContestBanner tdoc={tdoc!} mode={mode} letter={contestLetter} contestUrl={contestUrl} /> : null}
 
       {/* Breadcrumb + title row */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -989,15 +923,21 @@ export function ProblemDetailPage() {
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             {inContest && contestUrl ? (
               <>
-                <a href={examUrls.overview || (isHomework ? bs.urls.homework : bs.urls.contests)} className="hover:text-primary">{isHomework ? '作业' : '比赛'}</a>
+                <a href={examUrls.overview || (isHomework ? bs.urls.homework : bs.urls.contests)} className="hover:text-primary">
+                  {isHomework ? '作业' : '比赛'}
+                </a>
                 <ChevronRight className="size-3" />
-                <a href={contestUrl} className="hover:text-primary truncate max-w-[200px]">{tdoc?.title || '比赛'}</a>
+                <a href={contestUrl} className="hover:text-primary truncate max-w-[200px]">
+                  {tdoc?.title || '比赛'}
+                </a>
                 <ChevronRight className="size-3" />
                 <span className="font-mono">{contestLetter || pid}</span>
               </>
             ) : (
               <>
-                <a href={bs.urls.problems} className="hover:text-primary">题库</a>
+                <a href={bs.urls.problems} className="hover:text-primary">
+                  题库
+                </a>
                 <ChevronRight className="size-3" />
                 <span className="font-mono">{pid}</span>
               </>
@@ -1029,12 +969,14 @@ export function ProblemDetailPage() {
               IDE 模式
             </Button>
           ) : null}
-          {!examMode?.enabled ? <Button asChild size="sm" variant="outline">
-            <a href={submitUrl}>
-              <Send className="mr-1 size-3.5" />
-              提交
-            </a>
-          </Button> : null}
+          {!examMode?.enabled ? (
+            <Button asChild size="sm" variant="outline">
+              <a href={submitUrl}>
+                <Send className="mr-1 size-3.5" />
+                提交
+              </a>
+            </Button>
+          ) : null}
           {!inContest ? (
             <Button asChild size="sm" variant="ghost">
               <a href={`${problemUrl}/edit`}>
@@ -1051,13 +993,7 @@ export function ProblemDetailPage() {
         <InfoChip icon={Send} label="提交" value={nSubmit} />
         <InfoChip icon={CheckCircle2} label="通过" value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>} />
         <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} />
-        {!inContest && pdoc.origStat ? (
-          <InfoChip
-            icon={BarChart3}
-            label="赛时通过率"
-            value={origStatChipValue(pdoc.origStat)}
-          />
-        ) : null}
+        {!inContest && pdoc.origStat ? <InfoChip icon={BarChart3} label="赛时通过率" value={origStatChipValue(pdoc.origStat)} /> : null}
         {!inContest ? <InfoChip icon={User} label="出题人" value={udoc.uname || `UID ${udoc._id || '?'}`} /> : null}
         {showExternals && solutionCount > 0 && <InfoChip icon={BookOpen} label="题解" value={solutionCount} />}
         {showExternals && discussionCount > 0 && <InfoChip icon={MessageSquare} label="讨论" value={discussionCount} />}
@@ -1086,10 +1022,11 @@ export function ProblemDetailPage() {
             <Card>
               <CardContent className="flex items-center justify-between gap-3 p-4 text-sm">
                 <span className="flex items-center gap-1.5 text-muted-foreground">
-                  <BookOpen className="size-3.5" />
-                  共 {solutionCount} 篇题解
+                  <BookOpen className="size-3.5" />共 {solutionCount} 篇题解
                 </span>
-                <a href={`${problemUrl}/solution`} className="text-primary hover:underline">查看全部 →</a>
+                <a href={`${problemUrl}/solution`} className="text-primary hover:underline">
+                  查看全部 →
+                </a>
               </CardContent>
             </Card>
           ) : null}

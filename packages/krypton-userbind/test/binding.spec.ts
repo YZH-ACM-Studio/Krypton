@@ -10,22 +10,16 @@ describe('userbind binding pure logic', () => {
         // duplicate the algorithm here as documentation; tweak both sides if
         // the canonical implementation evolves.
         const parse = (text: string) =>
-            text.split('\n')
+            text
+                .split('\n')
                 .map((line) => line.trim())
                 .filter((line) => line && !line.startsWith('#'))
                 .map((line) => {
-                    const parts = line.split(/[\s,;\t]+/).filter(Boolean);
+                    const parts = line.split(/[\s,;]+/).filter(Boolean);
                     return { studentId: parts[0] || '', realName: parts.slice(1).join(' ') || '' };
                 });
 
-        const result = parse([
-            '202301001 张三',
-            '202301002, 李四',
-            '# comment',
-            '',
-            '202301003;王五明',
-            '202301004\t赵六',
-        ].join('\n'));
+        const result = parse(['202301001 张三', '202301002, 李四', '# comment', '', '202301003;王五明', '202301004\t赵六'].join('\n'));
         expect(result).to.have.lengthOf(4);
         expect(result[0]).to.deep.equal({ studentId: '202301001', realName: '张三' });
         expect(result[1]).to.deep.equal({ studentId: '202301002', realName: '李四' });
@@ -35,11 +29,12 @@ describe('userbind binding pure logic', () => {
 
     it('three-word names are joined into realName', () => {
         const parse = (line: string) => {
-            const parts = line.split(/[\s,;\t]+/).filter(Boolean);
+            const parts = line.split(/[\s,;]+/).filter(Boolean);
             return { studentId: parts[0] || '', realName: parts.slice(1).join(' ') || '' };
         };
         expect(parse('202301005 欧阳 一')).to.deep.equal({
-            studentId: '202301005', realName: '欧阳 一',
+            studentId: '202301005',
+            realName: '欧阳 一',
         });
     });
 });

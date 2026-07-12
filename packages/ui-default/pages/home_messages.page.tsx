@@ -52,12 +52,14 @@ const page = new NamedPage('home_messages', () => {
 
     const sock = new WebSocket(`${UiContext.ws_prefix}websocket`);
     sock.onopen = () => {
-      sock.send(JSON.stringify({
-        operation: 'subscribe',
-        request_id: Math.random().toString(16).substring(2),
-        credential: document.cookie.split('sid=')[1].split(';')[0],
-        channels: ['message'],
-      }));
+      sock.send(
+        JSON.stringify({
+          operation: 'subscribe',
+          request_id: Math.random().toString(16).substring(2),
+          credential: document.cookie.split('sid=')[1].split(';')[0],
+          channels: ['message'],
+        }),
+      );
     };
     sock.onmessage = (message) => {
       const msg = JSON.parse(message.data);
@@ -101,10 +103,7 @@ const page = new NamedPage('home_messages', () => {
   async function loadSendTarget() {
     const target = new URL(window.location.href).searchParams.get('target');
     if (!target) return;
-    const user = await api(
-      'users', { search: target, exact: true },
-      ['_id', 'uname', 'avatarUrl', 'mail'],
-    );
+    const user = await api('users', { search: target, exact: true }, ['_id', 'uname', 'avatarUrl', 'mail']);
     if (!user?.length) return;
     createDialog(user[0]);
   }

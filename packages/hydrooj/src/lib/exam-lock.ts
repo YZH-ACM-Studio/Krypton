@@ -23,31 +23,33 @@ const TYPE_CONTEST = document.TYPE_CONTEST;
  * passed — even after endAt, edits would invalidate existing records, so we
  * keep the lock until an explicit force-unlock + rejudge).
  */
-export async function lockingExamContests(
-    domainId: string, pid: number,
-): Promise<ObjectId[]> {
+export async function lockingExamContests(domainId: string, pid: number): Promise<ObjectId[]> {
     const now = new Date();
-    const cursor = db.collection('document').find({
-        domainId,
-        docType: TYPE_CONTEST,
-        rule: 'exam',
-        pids: pid,
-        beginAt: { $lte: now },
-    }, { projection: { _id: 1, docId: 1 } });
+    const cursor = db.collection('document').find(
+        {
+            domainId,
+            docType: TYPE_CONTEST,
+            rule: 'exam',
+            pids: pid,
+            beginAt: { $lte: now },
+        },
+        { projection: { _id: 1, docId: 1 } },
+    );
     const docs = await cursor.toArray();
     return docs.map((d) => (d as any).docId);
 }
 
-export async function isProblemLockedByExam(
-    domainId: string, pid: number,
-): Promise<boolean> {
+export async function isProblemLockedByExam(domainId: string, pid: number): Promise<boolean> {
     const ids = await lockingExamContests(domainId, pid);
     return ids.length > 0;
 }
 
 export class ExamLockError extends Error {
     code = 423; // Locked
-    constructor(public pid: number, public lockingTids: ObjectId[]) {
+    constructor(
+        public pid: number,
+        public lockingTids: ObjectId[],
+    ) {
         super(`Problem ${pid} is locked by ${lockingTids.length} active/past exam contest(s); force-unlock required to edit.`);
         this.name = 'ExamLockError';
     }
@@ -61,7 +63,9 @@ export class ExamLockError extends Error {
  * to filter `patch` before calling, or to pre-check via `isProblemLockedByExam`.
  */
 export async function assertProblemEditable(
-    domainId: string, pid: number, patch: { config?: any; [k: string]: any },
+    domainId: string,
+    pid: number,
+    patch: { config?: any; [k: string]: any },
     bypassExamLock = false,
 ): Promise<void> {
     if (bypassExamLock) return;

@@ -44,11 +44,7 @@
  *   });
  */
 import { useCallback } from 'react';
-import {
-  sendProctorCommandV2,
-  type ProctorCommandRequest,
-  type ProctorCommandResponse,
-} from '@/lib/vigil-api';
+import { sendProctorCommandV2, type ProctorCommandRequest, type ProctorCommandResponse } from '@/lib/vigil-api';
 import type { CommandResultMsg } from '@/hooks/use-vigil-socket';
 import { toast } from '@/components/ui/toast';
 
@@ -99,8 +95,7 @@ export function notifyCommandResult(msg: CommandResultMsg): void {
 
 /* ─── Hook ─────────────────────────────────────────────────────────────── */
 
-export interface SendCommandInput
-  extends Omit<ProctorCommandRequest, 'contestId'> {
+export interface SendCommandInput extends Omit<ProctorCommandRequest, 'contestId'> {
   /** Free-form label shown in the toast. Defaults to a friendly name from the command. */
   label?: string;
 }
@@ -119,79 +114,82 @@ interface UseProctorCommandsOptions {
 }
 
 export function useProctorCommands({ contestId }: UseProctorCommandsOptions) {
-  const sendCommand = useCallback(async (input: SendCommandInput): Promise<SendCommandOutcome> => {
-    const { label: rawLabel, ...requestBody } = input;
-    const label = rawLabel || commandLabel(input.command);
-    const isGroup = !input.targetMachineId && Boolean(input.targetMachineIds?.length || input.audienceFilter);
-    const toastId = toast.loading(`${isGroup ? '群发' : ''}${label}…`);
+  const sendCommand = useCallback(
+    async (input: SendCommandInput): Promise<SendCommandOutcome> => {
+      const { label: rawLabel, ...requestBody } = input;
+      const label = rawLabel || commandLabel(input.command);
+      const isGroup = !input.targetMachineId && Boolean(input.targetMachineIds?.length || input.audienceFilter);
+      const toastId = toast.loading(`${isGroup ? '群发' : ''}${label}…`);
 
-    let response: ProctorCommandResponse;
-    try {
-      response = await sendProctorCommandV2({ contestId, ...requestBody });
-    } catch (e: any) {
-      toast.error(`${label}失败`, { id: toastId, description: e?.message || '网络错误' });
-      throw e;
-    }
+      let response: ProctorCommandResponse;
+      try {
+        response = await sendProctorCommandV2({ contestId, ...requestBody });
+      } catch (e: any) {
+        toast.error(`${label}失败`, { id: toastId, description: e?.message || '网络错误' });
+        throw e;
+      }
 
-    // Group send: we don't wait for individual command_result messages — the
-    // server's accepted/rejected breakdown is sufficient for the toast.
-    if (isGroup) {
-      const rejected = response.rejected || [];
-      if (response.accepted > 0 && rejected.length === 0) {
-        toast.success(`${label}已下发`, {
-          id: toastId,
-          description: `共 ${response.accepted} 名学生`,
-        });
-      } else if (response.accepted > 0 && rejected.length > 0) {
-        toast.info(`${label}部分下发`, {
-          id: toastId,
-          description: `成功 ${response.accepted} · 失败 ${rejected.length}`,
-        });
+      // Group send: we don't wait for individual command_result messages — the
+      // server's accepted/rejected breakdown is sufficient for the toast.
+      if (isGroup) {
+        const rejected = response.rejected || [];
+        if (response.accepted > 0 && rejected.length === 0) {
+          toast.success(`${label}已下发`, {
+            id: toastId,
+            description: `共 ${response.accepted} 名学生`,
+          });
+        } else if (response.accepted > 0 && rejected.length > 0) {
+          toast.info(`${label}部分下发`, {
+            id: toastId,
+            description: `成功 ${response.accepted} · 失败 ${rejected.length}`,
+          });
+        } else {
+          toast.error(`${label}下发失败`, {
+            id: toastId,
+            description: rejected[0]?.reason || '没有可达的学生',
+          });
+        }
+        return { accepted: response.accepted, result: null, rejected };
+      }
+
+      // Single-target send: wait up to 5s for the WS command_result.
+      const commandId = response.commandId;
+      if (!commandId) {
+        // Server didn't acknowledge — surface raw response as-is.
+        toast.success(`${label}已下发`, { id: toastId });
+        return { accepted: response.accepted, result: null };
+      }
+
+      const result = await new Promise<CommandResultMsg>((resolve) => {
+        const timer = setTimeout(() => {
+          pending.delete(commandId);
+          resolve({
+            type: 'command_result',
+            commandId,
+            machineId: input.targetMachineId || '',
+            result: 'timeout',
+            errorMessage: '客户端在 5 秒内未回执',
+          });
+        }, COMMAND_TIMEOUT_MS);
+        pending.set(commandId, { toastId, label, resolve, timer });
+      });
+
+      if (result.result === 'ok') {
+        toast.success(`${label}已完成`, { id: toastId });
+      } else if (result.result === 'client_offline') {
+        toast.error(`${label}失败`, { id: toastId, description: '学生客户端离线' });
+      } else if (result.result === 'timeout') {
+        toast.error(`${label}超时`, { id: toastId, description: result.errorMessage });
       } else {
-        toast.error(`${label}下发失败`, {
+        toast.error(`${label}失败`, {
           id: toastId,
-          description: rejected[0]?.reason || '没有可达的学生',
+          description: result.errorMessage || '客户端返回错误',
         });
       }
-      return { accepted: response.accepted, result: null, rejected };
-    }
-
-    // Single-target send: wait up to 5s for the WS command_result.
-    const commandId = response.commandId;
-    if (!commandId) {
-      // Server didn't acknowledge — surface raw response as-is.
-      toast.success(`${label}已下发`, { id: toastId });
-      return { accepted: response.accepted, result: null };
-    }
-
-    const result = await new Promise<CommandResultMsg>((resolve) => {
-      const timer = setTimeout(() => {
-        pending.delete(commandId);
-        resolve({
-          type: 'command_result',
-          commandId,
-          machineId: input.targetMachineId || '',
-          result: 'timeout',
-          errorMessage: '客户端在 5 秒内未回执',
-        });
-      }, COMMAND_TIMEOUT_MS);
-      pending.set(commandId, { toastId, label, resolve, timer });
-    });
-
-    if (result.result === 'ok') {
-      toast.success(`${label}已完成`, { id: toastId });
-    } else if (result.result === 'client_offline') {
-      toast.error(`${label}失败`, { id: toastId, description: '学生客户端离线' });
-    } else if (result.result === 'timeout') {
-      toast.error(`${label}超时`, { id: toastId, description: result.errorMessage });
-    } else {
-      toast.error(`${label}失败`, {
-        id: toastId,
-        description: result.errorMessage || '客户端返回错误',
-      });
-    }
-    return { accepted: response.accepted, result };
-  }, [contestId]);
+      return { accepted: response.accepted, result };
+    },
+    [contestId],
+  );
 
   return { sendCommand };
 }

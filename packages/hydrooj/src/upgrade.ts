@@ -1,7 +1,5 @@
-/* eslint-disable consistent-return */
 /* eslint-disable ts/no-unused-vars */
-/* eslint-disable no-await-in-loop */
-/* eslint-disable ts/naming-convention */
+
 import yaml from 'js-yaml';
 import { ObjectId } from 'mongodb';
 import { randomstring, sleep } from '@hydrooj/utils';
@@ -21,17 +19,17 @@ import system from './model/system';
 import TaskModel from './model/task';
 import * as training from './model/training';
 import user, { handleMailLower } from './model/user';
-import {
-    iterateAllContest, iterateAllDomain, iterateAllProblem, iterateAllUser,
-} from './pipelineUtils';
+import { iterateAllContest, iterateAllDomain, iterateAllProblem, iterateAllUser } from './pipelineUtils';
 import db from './service/db';
 import { MigrationScript } from './service/migration';
 import welcome from './welcome';
 
 const logger = new Logger('upgrade');
 const unsupportedUpgrade = async function _26_27() {
-    throw new Error('This upgrade was no longer supported in hydrooj@5. \
-Please use hydrooj@4 to perform these upgrades before upgrading to v5');
+    throw new Error(
+        'This upgrade was no longer supported in hydrooj@5. \
+Please use hydrooj@4 to perform these upgrades before upgrading to v5',
+    );
 };
 
 const onPrimary = { readPreference: 'primary' } as const;
@@ -39,10 +37,10 @@ const onPrimary = { readPreference: 'primary' } as const;
 export const coreScripts: MigrationScript[] = [
     // Mark as used
     async function init() {
-        if (!await user.getById('system', 0)) {
+        if (!(await user.getById('system', 0))) {
             await user.create('Guest@hydro.local', 'Guest', randomstring(32), 0, '127.0.0.1', PRIV.PRIV_REGISTER_USER);
         }
-        if (!await user.getById('system', 1)) {
+        if (!(await user.getById('system', 1))) {
             await user.create('Hydro@hydro.local', 'Hydro', randomstring(32), 1, '127.0.0.1', PRIV.PRIV_USER_PROFILE);
         }
         const ddoc = await domain.get('system');
@@ -51,7 +49,7 @@ export const coreScripts: MigrationScript[] = [
         return true;
     },
     // Init
-    ...Array.from({ length: 47 }).fill(unsupportedUpgrade) as any,
+    ...(Array.from({ length: 47 }).fill(unsupportedUpgrade) as any),
     async function _48_49() {
         await RecordModel.coll.updateMany({ input: { $exists: true } }, { $set: { contest: new ObjectId('000000000000000000000000') } });
         return true;
@@ -87,20 +85,12 @@ export const coreScripts: MigrationScript[] = [
                     const pdoc = await getProblem(doc.domainId, pid);
                     if (pdoc) {
                         pids.push(pdoc.docId);
-                        await RecordModel.updateMulti(
-                            doc.domainId,
-                            { contest: doc.docId, pid },
-                            { pid: pdoc.docId },
-                            {},
-                            { pdomain: '' },
-                        );
+                        await RecordModel.updateMulti(doc.domainId, { contest: doc.docId, pid }, { pid: pdoc.docId }, {}, { pdomain: '' });
                     }
                 } else pids.push(pid);
             }
             if (mark) {
-                const ctdocs = await document.getMultiStatus(
-                    doc.domainId, document.TYPE_CONTEST, { docId: doc.docId },
-                ).toArray();
+                const ctdocs = await document.getMultiStatus(doc.domainId, document.TYPE_CONTEST, { docId: doc.docId }).toArray();
                 for (const ctdoc of ctdocs) {
                     if (!ctdoc.journal?.filter((i) => isStringPid(i.pid)).length) continue;
                     const journal = [];
@@ -134,8 +124,7 @@ export const coreScripts: MigrationScript[] = [
         return true;
     },
     async function _53_54() {
-        let ddocs = await db.collection('document').find({ docType: 21, parentType: 10 })
-            .project({ _id: 1, parentId: 1 }).toArray();
+        let ddocs = await db.collection('document').find({ docType: 21, parentType: 10 }).project({ _id: 1, parentId: 1 }).toArray();
         ddocs = ddocs.filter((i) => Number.isSafeInteger(+i.parentId));
         if (ddocs.length) {
             const bulk = db.collection('document').initializeUnorderedBulkOp();
@@ -149,7 +138,7 @@ export const coreScripts: MigrationScript[] = [
     async function _54_55() {
         const bulk = db.collection('document').initializeUnorderedBulkOp();
         function sortable(source: string) {
-            return source.replace(/(\d+)/g, (str) => (str.length >= 6 ? str : ('0'.repeat(6 - str.length) + str)));
+            return source.replace(/(\d+)/g, (str) => (str.length >= 6 ? str : '0'.repeat(6 - str.length) + str));
         }
         await iterateAllProblem(['pid', '_id'], async (pdoc) => {
             bulk.find({ _id: pdoc._id }).updateOne({ $set: { sort: sortable(pdoc.pid || `P${pdoc.docId}`) } });
@@ -183,12 +172,19 @@ export const coreScripts: MigrationScript[] = [
         const config = await system.get('hydrooj.homepage');
         const data = yaml.load(config) as any;
         if (!(data instanceof Array)) {
-            await system.set('hydrooj.homepage', yaml.dump([
-                { width: 9, bulletin: true, ...data },
-                {
-                    width: 3, hitokoto: true, starred_problems: 50, discussion_nodes: true, suggestion: true,
-                },
-            ]));
+            await system.set(
+                'hydrooj.homepage',
+                yaml.dump([
+                    { width: 9, bulletin: true, ...data },
+                    {
+                        width: 3,
+                        hitokoto: true,
+                        starred_problems: 50,
+                        discussion_nodes: true,
+                        suggestion: true,
+                    },
+                ]),
+            );
         }
         return true;
     },
@@ -206,10 +202,15 @@ export const coreScripts: MigrationScript[] = [
     async function _62_63() {
         const uids = new Set<number>();
         await iterateAllDomain(async (ddoc) => {
-            const pdocs = await problem.getMulti(ddoc._id, { config: /type: objective/ })
+            const pdocs = await problem
+                .getMulti(ddoc._id, { config: /type: objective/ })
                 .project({
-                    config: 1, content: 1, docId: 1, owner: 1,
-                }).toArray();
+                    config: 1,
+                    content: 1,
+                    docId: 1,
+                    owner: 1,
+                })
+                .toArray();
             for (const pdoc of pdocs) {
                 try {
                     const config = yaml.load(pdoc.config as string) as any;
@@ -242,7 +243,10 @@ export const coreScripts: MigrationScript[] = [
                                 } else text += `{{ input(${scnt}) }}\n`;
                                 text += '\n';
                             }
-                        } catch (e) { console.error(e); return content; }
+                        } catch (e) {
+                            console.error(e);
+                            return content;
+                        }
                         return text;
                     }
 
@@ -262,7 +266,9 @@ export const coreScripts: MigrationScript[] = [
                     uids.add(pdoc.owner);
                     delete config.outputs;
                     await problem.addTestdata(ddoc._id, pdoc.docId, 'config.yaml', Buffer.from(yaml.dump(config)));
-                } catch (e) { console.error(e); }
+                } catch (e) {
+                    console.error(e);
+                }
             }
         });
         for (const uid of uids) {
@@ -271,21 +277,21 @@ export const coreScripts: MigrationScript[] = [
         return true;
     },
     async function _63_64() {
-        await db.collection('document').updateMany(
-            { rule: 'homework', penaltySince: { $exists: false } },
-            { $set: { penaltySince: new Date() } },
-        );
+        await db.collection('document').updateMany({ rule: 'homework', penaltySince: { $exists: false } }, { $set: { penaltySince: new Date() } });
         return true;
     },
     null,
     null,
     async function _66_67() {
-        const [
-            endPoint, accessKey, secretKey, bucket, region,
-            pathStyle, endPointForUser, endPointForJudge,
-        ] = system.getMany([
-            'file.endPoint', 'file.accessKey', 'file.secretKey', 'file.bucket', 'file.region',
-            'file.pathStyle', 'file.endPointForUser', 'file.endPointForJudge',
+        const [endPoint, accessKey, secretKey, bucket, region, pathStyle, endPointForUser, endPointForJudge] = system.getMany([
+            'file.endPoint',
+            'file.accessKey',
+            'file.secretKey',
+            'file.bucket',
+            'file.region',
+            'file.pathStyle',
+            'file.endPointForUser',
+            'file.endPointForJudge',
         ] as any[]) as any;
         if ((endPoint && accessKey) || process.env.MINIO_ACCESS_KEY) {
             await app.get('setting').setConfig('file', {
@@ -355,15 +361,15 @@ export const coreScripts: MigrationScript[] = [
         }
         await system.set('default.priv', defaultPriv);
         for (const key in list) {
-            await user.coll.updateMany(
-                { priv: { $bitsAllSet: list[key] } },
-                { $inc: { priv: -list[key] } },
-            );
+            await user.coll.updateMany({ priv: { $bitsAllSet: list[key] } }, { $inc: { priv: -list[key] } });
         }
         return true;
     },
     async function _75_76() {
-        const messages = await db.collection('message').find({ content: { $type: 'object' } }).toArray();
+        const messages = await db
+            .collection('message')
+            .find({ content: { $type: 'object' } })
+            .toArray();
         for (const m of messages) {
             let content = '';
             for (const key in m) content += m[key];
@@ -374,7 +380,12 @@ export const coreScripts: MigrationScript[] = [
     async function _76_77() {
         return await iterateAllProblem(['domainId', 'title', 'docId', 'data'], async (pdoc, current, total) => {
             if (!pdoc.data?.find((i) => i.name.includes('/'))) return;
-            logger.info(pdoc.domainId, pdoc.docId, pdoc.title, pdoc.data.map((i) => i._id));
+            logger.info(
+                pdoc.domainId,
+                pdoc.docId,
+                pdoc.title,
+                pdoc.data.map((i) => i._id),
+            );
             const prefix = `problem/${pdoc.domainId}/${pdoc.docId}/testdata/`;
             for (const file of pdoc.data) {
                 if (!file._id.includes('/')) continue;
@@ -394,9 +405,12 @@ export const coreScripts: MigrationScript[] = [
         return true;
     },
     async function _78_79() {
-        const t = await document.collStatus.find({
-            docType: document.TYPE_CONTEST, journal: { $elemMatch: { rid: null } },
-        }).toArray();
+        const t = await document.collStatus
+            .find({
+                docType: document.TYPE_CONTEST,
+                journal: { $elemMatch: { rid: null } },
+            })
+            .toArray();
         for (const r of t) {
             r.journal = r.journal.filter((i) => i.rid !== null);
             await document.collStatus.updateOne({ _id: r._id }, { $set: { journal: r.journal } });
@@ -446,9 +460,21 @@ export const coreScripts: MigrationScript[] = [
             logger.info(tdoc.domainId, tdoc.title);
             const rdocs = await RecordModel.coll.find({ domainId: tdoc.domainId, contest: tdoc.docId }).toArray();
             for (const rdoc of rdocs) {
-                await document.revPushStatus(tdoc.domainId, document.TYPE_CONTEST, tdoc.docId, rdoc.uid, 'journal', {
-                    rid: rdoc._id, pid: rdoc.pid, status: rdoc.status, score: rdoc.score, subtasks: rdoc.subtasks,
-                }, 'rid');
+                await document.revPushStatus(
+                    tdoc.domainId,
+                    document.TYPE_CONTEST,
+                    tdoc.docId,
+                    rdoc.uid,
+                    'journal',
+                    {
+                        rid: rdoc._id,
+                        pid: rdoc.pid,
+                        status: rdoc.status,
+                        score: rdoc.score,
+                        subtasks: rdoc.subtasks,
+                    },
+                    'rid',
+                );
             }
             await contest.recalcStatus(tdoc.domainId, tdoc.docId);
         }
@@ -502,17 +528,19 @@ export const coreScripts: MigrationScript[] = [
         });
         let bulk = RecordModel.collStat.initializeUnorderedBulkOp();
         for await (const doc of cursor) {
-            bulk.find({ _id: doc._id }).upsert().updateOne({
-                $set: {
-                    domainId: doc.domainId,
-                    pid: doc.pid,
-                    uid: doc.uid,
-                    time: doc.time,
-                    memory: doc.memory,
-                    length: doc.code?.length || 0,
-                    lang: doc.lang,
-                },
-            });
+            bulk.find({ _id: doc._id })
+                .upsert()
+                .updateOne({
+                    $set: {
+                        domainId: doc.domainId,
+                        pid: doc.pid,
+                        uid: doc.uid,
+                        time: doc.time,
+                        memory: doc.memory,
+                        length: doc.code?.length || 0,
+                        lang: doc.lang,
+                    },
+                });
             if (bulk.batches.length > 500) {
                 await bulk.execute();
                 bulk = RecordModel.collStat.initializeUnorderedBulkOp();
@@ -535,8 +563,10 @@ export const coreScripts: MigrationScript[] = [
     },
     async function _90_91() {
         await document.collStatus.updateMany({ docType: document.TYPE_PROBLEM }, { $unset: { nSubmit: '', nAccept: '' } });
-        const psdocs = await document.coll.find({ docType: document.TYPE_PROBLEM_SOLUTION, vote: { $ne: 0 } })
-            .project({ docId: 1, domainId: 1 }).toArray();
+        const psdocs = await document.coll
+            .find({ docType: document.TYPE_PROBLEM_SOLUTION, vote: { $ne: 0 } })
+            .project({ docId: 1, domainId: 1 })
+            .toArray();
         for (const psdoc of psdocs) {
             const filter = { docType: document.TYPE_PROBLEM_SOLUTION, domainId: psdoc.domainId, docId: psdoc.docId };
             const [upvote, downvote] = await Promise.all([
@@ -567,7 +597,7 @@ export const coreScripts: MigrationScript[] = [
                     else res[key] = buildContent(parsed[key]);
                 }
                 return { content: JSON.stringify(res) };
-            } catch { }
+            } catch {}
         });
     },
     // Start Hydro v5
@@ -577,10 +607,11 @@ export const coreScripts: MigrationScript[] = [
             { $or: [{ _join: { $exists: false } }, { _join: { $eq: null } }, { '_join.method': domain.JOIN_METHOD_NONE }] },
             { $set: { _join: { method: domain.JOIN_METHOD_ALL, role: 'default', expire: null }, _migratedJoin: true } },
         );
-        const domainUser = await domain.collUser.find({ domainId: 'system', join: true }, onPrimary)
-            .project({ uid: 1 }).toArray();
-        const otherUsers = await user.coll.find({ _id: { $gt: 1, $nin: domainUser.map((u) => u.uid) } }, onPrimary)
-            .project({ _id: 1 }).toArray();
+        const domainUser = await domain.collUser.find({ domainId: 'system', join: true }, onPrimary).project({ uid: 1 }).toArray();
+        const otherUsers = await user.coll
+            .find({ _id: { $gt: 1, $nin: domainUser.map((u) => u.uid) } }, onPrimary)
+            .project({ _id: 1 })
+            .toArray();
         await domain.collUser.updateMany(
             { uid: { $in: otherUsers.map((u) => u._id) }, domainId: 'system' },
             { $set: { join: true } },

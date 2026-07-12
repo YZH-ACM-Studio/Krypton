@@ -1,26 +1,26 @@
 export interface RankboardCapabilityUser {
-    hasPriv?: (privilege: any) => boolean;
-    hasPerm?: (permission: any) => boolean;
+  hasPriv?: (privilege: any) => boolean;
+  hasPerm?: (permission: any) => boolean;
 }
 
 export interface RankboardCapabilityInput {
-    user?: RankboardCapabilityUser | null;
-    domainId: string;
-    editSystemPriv: any;
-    importPerm: any;
-    managePerm: any;
-    /** Required so fail-closed errors can never become silent. */
-    onError: (error: unknown) => void;
+  user?: RankboardCapabilityUser | null;
+  domainId: string;
+  editSystemPriv: any;
+  importPerm: any;
+  managePerm: any;
+  /** Required so fail-closed errors can never become silent. */
+  onError: (error: unknown) => void;
 }
 
 export interface RankboardCapabilities {
-    canImportRankboard: boolean;
-    canManageRankboard: boolean;
+  canImportRankboard: boolean;
+  canManageRankboard: boolean;
 }
 
 const NO_RANKBOARD_CAPABILITIES: RankboardCapabilities = {
-    canImportRankboard: false,
-    canManageRankboard: false,
+  canImportRankboard: false,
+  canManageRankboard: false,
 };
 
 /**
@@ -30,28 +30,28 @@ const NO_RANKBOARD_CAPABILITIES: RankboardCapabilities = {
  * into a management link.
  */
 export function resolveRankboardCapabilities({
-    user,
-    domainId,
-    editSystemPriv,
-    importPerm,
-    managePerm,
-    onError,
+  user,
+  domainId,
+  editSystemPriv,
+  importPerm,
+  managePerm,
+  onError,
 }: RankboardCapabilityInput): RankboardCapabilities {
-    if (!user || typeof user.hasPriv !== 'function') return { ...NO_RANKBOARD_CAPABILITIES };
-    try {
-        if (user.hasPriv(editSystemPriv)) {
-            return { canImportRankboard: true, canManageRankboard: true };
-        }
-        // Rankboard is a system-domain singleton. A domain owner has PERM_ALL
-        // in their own domain, which must not leak into this capability.
-        if (domainId !== 'system' || typeof user.hasPerm !== 'function') {
-            return { ...NO_RANKBOARD_CAPABILITIES };
-        }
-        const canManageRankboard = !!user.hasPerm(managePerm);
-        const canImportRankboard = canManageRankboard || !!user.hasPerm(importPerm);
-        return { canImportRankboard, canManageRankboard };
-    } catch (error) {
-        onError(error);
-        return { ...NO_RANKBOARD_CAPABILITIES };
+  if (!user || typeof user.hasPriv !== 'function') return { ...NO_RANKBOARD_CAPABILITIES };
+  try {
+    if (user.hasPriv(editSystemPriv)) {
+      return { canImportRankboard: true, canManageRankboard: true };
     }
+    // Rankboard is a system-domain singleton. A domain owner has PERM_ALL
+    // in their own domain, which must not leak into this capability.
+    if (domainId !== 'system' || typeof user.hasPerm !== 'function') {
+      return { ...NO_RANKBOARD_CAPABILITIES };
+    }
+    const canManageRankboard = !!user.hasPerm(managePerm);
+    const canImportRankboard = canManageRankboard || !!user.hasPerm(importPerm);
+    return { canImportRankboard, canManageRankboard };
+  } catch (error) {
+    onError(error);
+    return { ...NO_RANKBOARD_CAPABILITIES };
+  }
 }

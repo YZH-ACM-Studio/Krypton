@@ -14,11 +14,27 @@
  * @xyflow/react. See ~/Krypton/packages/krypton-tasks/src/types.ts for
  * the canonical schema and grill rationale.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  AlertCircle, ArrowLeft, ChevronRight, ClipboardList, Copy, FileDown, Flag,
-  Layers, ListChecks, Loader2, Lock, Maximize2, Minimize2, Network, Plus, RefreshCw, Save,
-  Settings, Star, Tag, Target, Trash2, Trophy, UserCheck, Users, X,
+  ArrowLeft,
+  ClipboardList,
+  Copy,
+  FileDown,
+  ListChecks,
+  Maximize2,
+  Minimize2,
+  Network,
+  Plus,
+  RefreshCw,
+  Save,
+  Settings,
+  Tag,
+  Target,
+  Trash2,
+  Trophy,
+  UserCheck,
+  Users,
+  X,
 } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
@@ -40,8 +56,11 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  TaskGraphRenderer, TOOLBOX_MIME,
-  type PresetSummary, type TaskGraph, type TaskGraphNode,
+  TaskGraphRenderer,
+  TOOLBOX_MIME,
+  type PresetSummary,
+  type TaskGraph,
+  type TaskGraphNode,
   type TaskPointResult,
 } from '@/components/task-graph';
 
@@ -54,8 +73,17 @@ registerAdminNavSection({
   requiredPriv: PRIV.PRIV_USER_PROFILE,
   items: [
     {
-      key: 'tasks', label: '任务列表', href: '/admin/tasks', icon: ClipboardList,
-      templateNames: ['admin_tasks.html', 'admin_tasks_edit.html', 'admin_tasks_assign.html', 'admin_tasks_stats.html', 'admin_tasks_candidates.html'],
+      key: 'tasks',
+      label: '任务列表',
+      href: '/admin/tasks',
+      icon: ClipboardList,
+      templateNames: [
+        'admin_tasks.html',
+        'admin_tasks_edit.html',
+        'admin_tasks_assign.html',
+        'admin_tasks_stats.html',
+        'admin_tasks_candidates.html',
+      ],
     },
     { key: 'scores', label: '比赛分数', href: '/admin/tasks/scores', icon: Trophy, templateNames: ['admin_tasks_scores.html'] },
     { key: 'settings', label: '系统设置', href: '/admin/tasks/settings', icon: Settings, templateNames: ['admin_tasks_settings.html'] },
@@ -96,8 +124,16 @@ interface TaskDoc {
   createdBy: number;
 }
 
-interface SchoolRef { _id: string; name: string }
-interface GroupRef { _id: string; schoolId: string; name: string; archivedAt?: string }
+interface SchoolRef {
+  _id: string;
+  name: string;
+}
+interface GroupRef {
+  _id: string;
+  schoolId: string;
+  name: string;
+  archivedAt?: string;
+}
 
 /**
  * 用户组下拉选项：常规选择器过滤已归档组（PLAN 2026-07-02 §9）；
@@ -112,9 +148,21 @@ function groupSelectOptions(userGroups: GroupRef[], schools: SchoolRef[], select
       return { value: g._id, label: g.archivedAt ? `${base}（已归档）` : base };
     });
 }
-interface ContestRef { _id: string; title: string; beginAt?: string; rule?: string }
-interface HomeworkRef { _id: string; title: string; beginAt?: string }
-interface TrainingRef { _id: string; title: string }
+interface ContestRef {
+  _id: string;
+  title: string;
+  beginAt?: string;
+  rule?: string;
+}
+interface HomeworkRef {
+  _id: string;
+  title: string;
+  beginAt?: string;
+}
+interface TrainingRef {
+  _id: string;
+  title: string;
+}
 
 interface AssignmentEntry {
   _id: string;
@@ -172,18 +220,28 @@ function toCstDateTimeLocal(value?: string | null): string {
   return `${cst.getUTCFullYear()}-${pad(cst.getUTCMonth() + 1)}-${pad(cst.getUTCDate())}T${pad(cst.getUTCHours())}:${pad(cst.getUTCMinutes())}`;
 }
 
-function WindowLine({
-  start, end, emptyText,
-}: {
-  start?: string | null;
-  end?: string | null;
-  emptyText: string;
-}) {
+function WindowLine({ start, end, emptyText }: { start?: string | null; end?: string | null; emptyText: string }) {
   if (!start && !end) return <span className="text-muted-foreground">{emptyText}</span>;
   return (
     <div className="space-y-0.5 text-xs">
-      <div>{start ? <><DateTime value={start} mode="datetime" /> 开始</> : <span className="text-muted-foreground">不限开始</span>}</div>
-      <div>{end ? <><DateTime value={end} mode="datetime" /> 截止</> : <span className="text-muted-foreground">不限截止</span>}</div>
+      <div>
+        {start ? (
+          <>
+            <DateTime value={start} mode="datetime" /> 开始
+          </>
+        ) : (
+          <span className="text-muted-foreground">不限开始</span>
+        )}
+      </div>
+      <div>
+        {end ? (
+          <>
+            <DateTime value={end} mode="datetime" /> 截止
+          </>
+        ) : (
+          <span className="text-muted-foreground">不限截止</span>
+        )}
+      </div>
     </div>
   );
 }
@@ -214,8 +272,18 @@ export function AdminTasksListPage() {
       description="基于流程图的任务系统：从 START 经过若干任务点到 END，存在一条全亮路径即任务完成。"
       actions={
         <div className="flex gap-2">
-          <Button asChild variant="outline"><a href="/admin/tasks/scores"><Trophy className="mr-1 size-4" />比赛分数</a></Button>
-          <Button asChild><a href="/admin/tasks/create"><Plus className="mr-1 size-4" />新建任务</a></Button>
+          <Button asChild variant="outline">
+            <a href="/admin/tasks/scores">
+              <Trophy className="mr-1 size-4" />
+              比赛分数
+            </a>
+          </Button>
+          <Button asChild>
+            <a href="/admin/tasks/create">
+              <Plus className="mr-1 size-4" />
+              新建任务
+            </a>
+          </Button>
         </div>
       }
     >
@@ -227,14 +295,24 @@ export function AdminTasksListPage() {
               <Tag className="size-3.5 text-muted-foreground" />
               <button
                 onClick={() => setActiveTag(null)}
-                className={cn('rounded-md px-2 py-0.5 text-xs', activeTag === null ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80')}
-              >全部</button>
+                className={cn(
+                  'rounded-md px-2 py-0.5 text-xs',
+                  activeTag === null ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80',
+                )}
+              >
+                全部
+              </button>
               {data.tagOptions.map((t) => (
                 <button
                   key={t}
                   onClick={() => setActiveTag(t === activeTag ? null : t)}
-                  className={cn('rounded-md px-2 py-0.5 text-xs', activeTag === t ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80')}
-                >{t}</button>
+                  className={cn(
+                    'rounded-md px-2 py-0.5 text-xs',
+                    activeTag === t ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80',
+                  )}
+                >
+                  {t}
+                </button>
               ))}
             </div>
           )}
@@ -262,68 +340,81 @@ export function AdminTasksListPage() {
                     {data.tasks.length === 0 ? '还没有任务，点击右上角"新建任务"开始创建' : '没有匹配的任务'}
                   </TableCell>
                 </TableRow>
-              ) : filtered.map((task) => {
-                const taskNodes = (task.graph?.nodes || []).filter((n) => n.type === 'task');
-                return (
-                  <TableRow key={task._id}>
-                    <TableCell>
-                      <div className="space-y-0.5">
-                        <a href={`/admin/tasks/${task._id}/edit`} className="font-medium hover:underline">{task.title}</a>
-                        <p className="line-clamp-1 text-xs text-muted-foreground">{task.description || '暂无描述'}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {task.tags.map((t) => <Badge key={t} variant="secondary" className="text-[10px]">{t}</Badge>)}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="gap-1 text-[10px]"><Network className="size-3" />{taskNodes.length}</Badge>
-                    </TableCell>
-                    <TableCell className="text-xs">
-                      <div className="font-medium">
-                        {task.currentAssignments}
-                        {task.maxAssignments && <span className="text-muted-foreground"> / {task.maxAssignments}</span>}
-                      </div>
-                      <WindowLine start={task.claimStartAt} end={task.claimEndAt} emptyText="认领不限时间" />
-                    </TableCell>
-                    <TableCell>
-                      {task.admissionMode === 'quota'
-                        ? <Badge variant="outline" className="gap-1 text-[10px]"><Users className="size-3" />配额 {task.quota ?? '?'}</Badge>
-                        : <Badge variant="outline" className="text-[10px]">自动</Badge>}
-                    </TableCell>
-                    <TableCell>
-                      {task.isActive ? (
-                        <Badge className="bg-emerald-500 text-white hover:bg-emerald-500/90">启用</Badge>
-                      ) : <Badge variant="outline">停用</Badge>}
-                    </TableCell>
-                    <TableCell>
-                      <TableActions>
-                        {task.admissionMode === 'quota' && (
-                          <TableAction href={`/admin/tasks/${task._id}/candidates`}>候选池</TableAction>
+              ) : (
+                filtered.map((task) => {
+                  const taskNodes = (task.graph?.nodes || []).filter((n) => n.type === 'task');
+                  return (
+                    <TableRow key={task._id}>
+                      <TableCell>
+                        <div className="space-y-0.5">
+                          <a href={`/admin/tasks/${task._id}/edit`} className="font-medium hover:underline">
+                            {task.title}
+                          </a>
+                          <p className="line-clamp-1 text-xs text-muted-foreground">{task.description || '暂无描述'}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {task.tags.map((t) => (
+                            <Badge key={t} variant="secondary" className="text-[10px]">
+                              {t}
+                            </Badge>
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="gap-1 text-[10px]">
+                          <Network className="size-3" />
+                          {taskNodes.length}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <div className="font-medium">
+                          {task.currentAssignments}
+                          {task.maxAssignments && <span className="text-muted-foreground"> / {task.maxAssignments}</span>}
+                        </div>
+                        <WindowLine start={task.claimStartAt} end={task.claimEndAt} emptyText="认领不限时间" />
+                      </TableCell>
+                      <TableCell>
+                        {task.admissionMode === 'quota' ? (
+                          <Badge variant="outline" className="gap-1 text-[10px]">
+                            <Users className="size-3" />
+                            配额 {task.quota ?? '?'}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[10px]">
+                            自动
+                          </Badge>
                         )}
-                        <TableAction href={`/admin/tasks/${task._id}/stats`}>统计</TableAction>
-                        <TableAction href={`/admin/tasks/${task._id}/assign`}>分配</TableAction>
-                        <TableAction href={`/admin/tasks/${task._id}/edit`}>编辑</TableAction>
-                        <TableAction
-                          formAction="/admin/tasks"
-                          hidden={{ operation: 'clone', tid: task._id }}
-                          icon={Copy}
-                          hint="复制"
-                        />
-                        <TableAction
-                          formAction="/admin/tasks"
-                          hidden={{ operation: 'delete', tid: task._id }}
-                          icon={Trash2}
-                          variant="destructive"
-                          hint="删除"
-                          confirm={`确定删除任务"${task.title}"？这将一并删除所有用户的分配记录。`}
-                        />
-                      </TableActions>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+                      </TableCell>
+                      <TableCell>
+                        {task.isActive ? (
+                          <Badge className="bg-emerald-500 text-white hover:bg-emerald-500/90">启用</Badge>
+                        ) : (
+                          <Badge variant="outline">停用</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <TableActions>
+                          {task.admissionMode === 'quota' && <TableAction href={`/admin/tasks/${task._id}/candidates`}>候选池</TableAction>}
+                          <TableAction href={`/admin/tasks/${task._id}/stats`}>统计</TableAction>
+                          <TableAction href={`/admin/tasks/${task._id}/assign`}>分配</TableAction>
+                          <TableAction href={`/admin/tasks/${task._id}/edit`}>编辑</TableAction>
+                          <TableAction formAction="/admin/tasks" hidden={{ operation: 'clone', tid: task._id }} icon={Copy} hint="复制" />
+                          <TableAction
+                            formAction="/admin/tasks"
+                            hidden={{ operation: 'delete', tid: task._id }}
+                            icon={Trash2}
+                            variant="destructive"
+                            hint="删除"
+                            confirm={`确定删除任务"${task.title}"？这将一并删除所有用户的分配记录。`}
+                          />
+                        </TableActions>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
             </TableBody>
           </Table>
         </CardContent>
@@ -362,23 +453,23 @@ export function AdminTasksEditPage() {
   const [maxAssignments, setMaxAssignments] = useState(initial?.maxAssignments?.toString() || '');
   const [accessType, setAccessType] = useState<TaskAccess['type']>(initial?.access.type || 'public');
   const [accessTargetId, setAccessTargetId] = useState(
-    (initial?.access.type === 'user_group' || initial?.access.type === 'school')
-      ? (initial.access as any).targetId : '',
+    initial?.access.type === 'user_group' || initial?.access.type === 'school' ? (initial.access as any).targetId : '',
   );
-  const [accessYears, setAccessYears] = useState<number[]>(
-    initial?.access.type === 'grade' ? initial.access.years : [],
-  );
+  const [accessYears, setAccessYears] = useState<number[]>(initial?.access.type === 'grade' ? initial.access.years : []);
   const [admissionMode, setAdmissionMode] = useState<AdmissionMode>(initial?.admissionMode || 'auto');
   const [quota, setQuota] = useState<string>(initial?.quota?.toString() || '');
 
   // ── Graph state
-  const [graph, setGraph] = useState<TaskGraph>(() => initial?.graph || {
-    nodes: [
-      { id: 'start', type: 'start', position: { x: 0, y: 0 } },
-      { id: 'end', type: 'end', position: { x: 400, y: 0 } },
-    ],
-    edges: [],
-  });
+  const [graph, setGraph] = useState<TaskGraph>(
+    () =>
+      initial?.graph || {
+        nodes: [
+          { id: 'start', type: 'start', position: { x: 0, y: 0 } },
+          { id: 'end', type: 'end', position: { x: 400, y: 0 } },
+        ],
+        edges: [],
+      },
+  );
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const selectedNode = useMemo(() => graph.nodes.find((n) => n.id === selectedNodeId), [graph, selectedNodeId]);
 
@@ -391,7 +482,9 @@ export function AdminTasksEditPage() {
   const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => {
     if (!fullscreen) return;
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setFullscreen(false); };
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFullscreen(false);
+    };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [fullscreen]);
@@ -435,7 +528,14 @@ export function AdminTasksEditPage() {
   return (
     <AdminPage
       title={data.isEdit ? '编辑任务' : '新建任务'}
-      actions={<Button asChild variant="outline"><a href="/admin/tasks"><ArrowLeft className="mr-1 size-4" />返回列表</a></Button>}
+      actions={
+        <Button asChild variant="outline">
+          <a href="/admin/tasks">
+            <ArrowLeft className="mr-1 size-4" />
+            返回列表
+          </a>
+        </Button>
+      }
     >
       <form method="post" className="space-y-4">
         <input type="hidden" name="graph" value={JSON.stringify(graph)} />
@@ -446,12 +546,20 @@ export function AdminTasksEditPage() {
 
         {/* Top: basic info + access + admission */}
         <Card>
-          <CardHeader><CardTitle className="text-sm">基本信息</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-sm">基本信息</CardTitle>
+          </CardHeader>
           <CardContent>
             <FormSection>
               <FormRow columns={2}>
                 <FormField label="任务名称" required>
-                  <Input name="title" value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="例如：ICPC 2026 区域赛参赛资格" />
+                  <Input
+                    name="title"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    required
+                    placeholder="例如：ICPC 2026 区域赛参赛资格"
+                  />
                 </FormField>
                 <FormField label="标签" hint="逗号分隔，便于筛选">
                   <Input name="tags" value={tagsCsv} onChange={(e) => setTagsCsv(e.target.value)} placeholder="例如：ICPC, 2026, 资格审核" />
@@ -491,7 +599,10 @@ export function AdminTasksEditPage() {
                   </label>
                 </FormField>
               </FormRow>
-              <FormField label="完成后计入留校次数" hint="勾选后：任务进入 completed 状态时，自动 +1 留校（idempotent）。配额模式下只有 admin 点「确认录取」后才触发。">
+              <FormField
+                label="完成后计入留校次数"
+                hint="勾选后：任务进入 completed 状态时，自动 +1 留校（idempotent）。配额模式下只有 admin 点「确认录取」后才触发。"
+              >
                 <label className="flex items-center gap-2 text-sm">
                   <Checkbox checked={countsAsStay} onChange={(e) => setCountsAsStay(e.target.checked)} />
                   完成此任务计 1 次留校
@@ -503,7 +614,9 @@ export function AdminTasksEditPage() {
 
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
-            <CardHeader><CardTitle className="text-sm">可见范围</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-sm">可见范围</CardTitle>
+            </CardHeader>
             <CardContent>
               <MiniTabs
                 size="md"
@@ -523,10 +636,14 @@ export function AdminTasksEditPage() {
                 <FormField label="允许的入学年" className="mt-3">
                   <Input
                     value={accessYears.join(' ')}
-                    onChange={(e) => setAccessYears(
-                      e.target.value.split(/[\s,，]+/).map((s) => parseInt(s.trim(), 10))
-                        .filter((n) => Number.isInteger(n) && n >= 1900 && n <= 2099),
-                    )}
+                    onChange={(e) =>
+                      setAccessYears(
+                        e.target.value
+                          .split(/[\s,，]+/)
+                          .map((s) => Number.parseInt(s.trim(), 10))
+                          .filter((n) => Number.isInteger(n) && n >= 1900 && n <= 2099),
+                      )
+                    }
                     placeholder="例如：2023 2024"
                   />
                 </FormField>
@@ -537,10 +654,7 @@ export function AdminTasksEditPage() {
                     value={accessTargetId}
                     onValueChange={setAccessTargetId}
                     placeholder="— 选择 —"
-                    options={[
-                      { value: '', label: '— 选择 —' },
-                      ...data.schools.map((s) => ({ value: s._id, label: s.name })),
-                    ]}
+                    options={[{ value: '', label: '— 选择 —' }, ...data.schools.map((s) => ({ value: s._id, label: s.name }))]}
                   />
                 </FormField>
               )}
@@ -550,10 +664,7 @@ export function AdminTasksEditPage() {
                     value={accessTargetId}
                     onValueChange={setAccessTargetId}
                     placeholder="— 选择 —"
-                    options={[
-                      { value: '', label: '— 选择 —' },
-                      ...groupSelectOptions(data.userGroups, data.schools, accessTargetId),
-                    ]}
+                    options={[{ value: '', label: '— 选择 —' }, ...groupSelectOptions(data.userGroups, data.schools, accessTargetId)]}
                   />
                 </FormField>
               )}
@@ -561,7 +672,9 @@ export function AdminTasksEditPage() {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle className="text-sm">完成模式</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-sm">完成模式</CardTitle>
+            </CardHeader>
             <CardContent>
               <MiniTabs
                 size="md"
@@ -574,14 +687,7 @@ export function AdminTasksEditPage() {
               />
               {admissionMode === 'quota' && (
                 <FormField label="名额数（quota）" className="mt-3" hint="软上限——超额录取会警告但不阻止">
-                  <Input
-                    type="number"
-                    name="quota"
-                    min={1}
-                    value={quota}
-                    onChange={(e) => setQuota(e.target.value)}
-                    placeholder="例如 30"
-                  />
+                  <Input type="number" name="quota" min={1} value={quota} onChange={(e) => setQuota(e.target.value)} placeholder="例如 30" />
                 </FormField>
               )}
               {admissionMode === 'auto' && (
@@ -590,9 +696,7 @@ export function AdminTasksEditPage() {
                 </p>
               )}
               {admissionMode === 'quota' && !quota && (
-                <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                  未填名额数 — 留空 = 不设上限（仍走候选池流程，admin 自行控制）
-                </p>
+                <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">未填名额数 — 留空 = 不设上限（仍走候选池流程，admin 自行控制）</p>
               )}
             </CardContent>
           </Card>
@@ -603,19 +707,12 @@ export function AdminTasksEditPage() {
             `fixed inset-0 z-50` (same trick as krypton-ide). The inner flex
             layout is unchanged, so the side panel keeps tracking the canvas's
             right edge — which is the screen's right edge in fullscreen. */}
-        <Card
-          className={cn(
-            'overflow-hidden',
-            fullscreen && 'fixed inset-0 z-50 rounded-none border-0',
-          )}
-        >
+        <Card className={cn('overflow-hidden', fullscreen && 'fixed inset-0 z-50 rounded-none border-0')}>
           <CardHeader>
             <div className="flex items-center justify-between gap-2">
               <div>
                 <CardTitle className="text-sm">任务流程图</CardTitle>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  从左侧拖拽节点到画布；连线拖动节点边上的圆点；删除连线双击它或选中后按 Delete。
-                </p>
+                <p className="mt-1 text-xs text-muted-foreground">从左侧拖拽节点到画布；连线拖动节点边上的圆点；删除连线双击它或选中后按 Delete。</p>
               </div>
               {/* Header keeps just the fullscreen toggle. Save lives in the
                   bottom action card so the form follows natural top-down flow
@@ -632,18 +729,13 @@ export function AdminTasksEditPage() {
             </div>
           </CardHeader>
           <CardContent
-            className={cn(
-              'p-0',
-              fullscreen ? 'flex-1 min-h-0' : '',
-            )}
+            className={cn('p-0', fullscreen ? 'flex-1 min-h-0' : '')}
             // In fullscreen, the Card is `fixed inset-0` and uses default
             // CardContent height. Force flex-col on the Card so the canvas
             // row can flex-1 fill remaining viewport height.
             style={fullscreen ? { height: 'calc(100% - 4rem)' } : undefined}
           >
-            <div
-              className={cn('flex', fullscreen ? 'h-full' : 'h-[68vh]')}
-            >
+            <div className={cn('flex', fullscreen ? 'h-full' : 'h-[68vh]')}>
               <Toolbox presetsByCategory={presetsByCategory} />
               <div className="flex min-w-0 flex-1">
                 <TaskGraphRenderer
@@ -659,9 +751,7 @@ export function AdminTasksEditPage() {
                 <aside className="flex w-[400px] shrink-0 flex-col border-l bg-background">
                   <div className="flex shrink-0 items-center justify-between border-b px-5 py-3">
                     <h3 className="text-sm font-semibold">
-                      {selectedNode.type === 'start' ? '开始节点'
-                        : selectedNode.type === 'end' ? '完成节点'
-                        : '编辑任务点'}
+                      {selectedNode.type === 'start' ? '开始节点' : selectedNode.type === 'end' ? '完成节点' : '编辑任务点'}
                     </h3>
                     <button
                       type="button"
@@ -689,7 +779,9 @@ export function AdminTasksEditPage() {
                         />
                       ) : (
                         <p className="text-xs text-muted-foreground">
-                          {selectedNode.type === 'start' ? '开始节点：所有路径的起点，不可删除。可拖动调整位置。' : '完成节点：所有路径的终点，不可删除。可拖动调整位置。'}
+                          {selectedNode.type === 'start'
+                            ? '开始节点：所有路径的起点，不可删除。可拖动调整位置。'
+                            : '完成节点：所有路径的终点，不可删除。可拖动调整位置。'}
                         </p>
                       )}
                     </div>
@@ -706,10 +798,14 @@ export function AdminTasksEditPage() {
         <Card>
           <CardContent className="flex items-center justify-end gap-2 py-4">
             <Button asChild type="button" variant="outline">
-              <a href="/admin/tasks"><X className="mr-1 size-4" />取消</a>
+              <a href="/admin/tasks">
+                <X className="mr-1 size-4" />
+                取消
+              </a>
             </Button>
             <Button type="submit">
-              <Save className="mr-1 size-4" />{data.isEdit ? '保存修改' : '创建任务'}
+              <Save className="mr-1 size-4" />
+              {data.isEdit ? '保存修改' : '创建任务'}
             </Button>
           </CardContent>
         </Card>
@@ -788,7 +884,8 @@ function NodeEditor(props: NodeEditorProps) {
       <div className="space-y-2 text-xs text-muted-foreground">
         <p>未知的 preset：{props.node.presetId}</p>
         <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={props.onDelete}>
-          <Trash2 className="mr-1 size-3.5" />删除节点
+          <Trash2 className="mr-1 size-3.5" />
+          删除节点
         </Button>
       </div>
     );
@@ -817,7 +914,8 @@ function NodeEditor(props: NodeEditorProps) {
       ))}
       <div className="pt-2">
         <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={props.onDelete}>
-          <Trash2 className="mr-1 size-3.5" />删除节点
+          <Trash2 className="mr-1 size-3.5" />
+          删除节点
         </Button>
       </div>
     </div>
@@ -843,10 +941,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
           value={value || ''}
           onValueChange={onChange}
           placeholder="—"
-          options={[
-            { value: '', label: '—' },
-            ...(spec.options?.map((o) => ({ value: o.value, label: o.label })) || []),
-          ]}
+          options={[{ value: '', label: '—' }, ...(spec.options?.map((o) => ({ value: o.value, label: o.label })) || [])]}
         />
       </FormField>
     );
@@ -865,10 +960,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
           value={value || ''}
           onValueChange={onChange}
           placeholder="— 选择比赛 —"
-          options={[
-            { value: '', label: '— 选择比赛 —' },
-            ...contests.map((c) => ({ value: c._id, label: c.title })),
-          ]}
+          options={[{ value: '', label: '— 选择比赛 —' }, ...contests.map((c) => ({ value: c._id, label: c.title }))]}
         />
       </FormField>
     );
@@ -880,10 +972,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
           value={value || ''}
           onValueChange={onChange}
           placeholder="— 选择 homework —"
-          options={[
-            { value: '', label: '— 选择 homework —' },
-            ...homeworks.map((c) => ({ value: c._id, label: c.title })),
-          ]}
+          options={[{ value: '', label: '— 选择 homework —' }, ...homeworks.map((c) => ({ value: c._id, label: c.title }))]}
         />
       </FormField>
     );
@@ -895,10 +984,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
           value={value || ''}
           onValueChange={onChange}
           placeholder="— 选择 training —"
-          options={[
-            { value: '', label: '— 选择 training —' },
-            ...trainings.map((c) => ({ value: c._id, label: c.title })),
-          ]}
+          options={[{ value: '', label: '— 选择 training —' }, ...trainings.map((c) => ({ value: c._id, label: c.title }))]}
         />
       </FormField>
     );
@@ -910,10 +996,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
           value={value || ''}
           onValueChange={onChange}
           placeholder="— 选择学校 —"
-          options={[
-            { value: '', label: '— 选择学校 —' },
-            ...schools.map((c) => ({ value: c._id, label: c.name })),
-          ]}
+          options={[{ value: '', label: '— 选择学校 —' }, ...schools.map((c) => ({ value: c._id, label: c.name }))]}
         />
       </FormField>
     );
@@ -925,10 +1008,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
           value={value || ''}
           onValueChange={onChange}
           placeholder="— 选择用户组 —"
-          options={[
-            { value: '', label: '— 选择用户组 —' },
-            ...groupSelectOptions(userGroups, schools, value || ''),
-          ]}
+          options={[{ value: '', label: '— 选择用户组 —' }, ...groupSelectOptions(userGroups, schools, value || '')]}
         />
       </FormField>
     );
@@ -936,11 +1016,7 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
   if (spec.type === 'problem') {
     return (
       <FormField label={spec.label} hint={spec.helper || '题目 ID / pid（v2: 后续接入 autocomplete）'} required={spec.required}>
-        <Input
-          value={value || ''}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="例如 1001 或 P1001"
-        />
+        <Input value={value || ''} onChange={(e) => onChange(e.target.value)} placeholder="例如 1001 或 P1001" />
       </FormField>
     );
   }
@@ -950,11 +1026,14 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
       <FormField label={spec.label} hint={spec.helper} required={spec.required}>
         <Input
           value={years.join(' ')}
-          onChange={(e) => onChange(
-            e.target.value.split(/[\s,，]+/)
-              .map((s) => parseInt(s.trim(), 10))
-              .filter((n) => Number.isInteger(n) && n >= 1900 && n <= 2099),
-          )}
+          onChange={(e) =>
+            onChange(
+              e.target.value
+                .split(/[\s,，]+/)
+                .map((s) => Number.parseInt(s.trim(), 10))
+                .filter((n) => Number.isInteger(n) && n >= 1900 && n <= 2099),
+            )
+          }
           placeholder="例如 2023 2024"
         />
       </FormField>
@@ -991,10 +1070,19 @@ export function AdminTasksAssignPage() {
   return (
     <AdminPage
       title={`分配 — ${data.task.title}`}
-      actions={<Button asChild variant="outline"><a href="/admin/tasks"><ArrowLeft className="mr-1 size-4" />返回列表</a></Button>}
+      actions={
+        <Button asChild variant="outline">
+          <a href="/admin/tasks">
+            <ArrowLeft className="mr-1 size-4" />
+            返回列表
+          </a>
+        </Button>
+      }
     >
       <Card>
-        <CardHeader><CardTitle className="text-sm">分配任务</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-sm">分配任务</CardTitle>
+        </CardHeader>
         <CardContent>
           <form method="post" className="space-y-3">
             <input type="hidden" name="operation" value="batch" />
@@ -1021,10 +1109,7 @@ export function AdminTasksAssignPage() {
                   value={targetId}
                   onValueChange={setTargetId}
                   placeholder="— 选择 —"
-                  options={[
-                    { value: '', label: '— 选择 —' },
-                    ...groupSelectOptions(data.userGroups, data.schools, targetId),
-                  ]}
+                  options={[{ value: '', label: '— 选择 —' }, ...groupSelectOptions(data.userGroups, data.schools, targetId)]}
                 />
               </FormField>
             )}
@@ -1035,17 +1120,17 @@ export function AdminTasksAssignPage() {
                   value={targetId}
                   onValueChange={setTargetId}
                   placeholder="— 选择 —"
-                  options={[
-                    { value: '', label: '— 选择 —' },
-                    ...data.schools.map((s) => ({ value: s._id, label: s.name })),
-                  ]}
+                  options={[{ value: '', label: '— 选择 —' }, ...data.schools.map((s) => ({ value: s._id, label: s.name }))]}
                 />
               </FormField>
             )}
             <FormField label="备注">
               <Input name="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="例如：你们班今年的必做任务" />
             </FormField>
-            <Button type="submit"><Users className="mr-1 size-4" />分配</Button>
+            <Button type="submit">
+              <Users className="mr-1 size-4" />
+              分配
+            </Button>
           </form>
         </CardContent>
       </Card>
@@ -1075,8 +1160,12 @@ export function AdminTasksAssignPage() {
                     <TableRow key={a._id}>
                       <TableCell>{u?.uname || `uid:${a.userId}`}</TableCell>
                       <TableCell>{a.canCancel ? '自主认领' : '管理员分配'}</TableCell>
-                      <TableCell><StatusBadge status={a.status} /></TableCell>
-                      <TableCell className="text-xs text-muted-foreground"><DateTime value={a.assignedAt} /></TableCell>
+                      <TableCell>
+                        <StatusBadge status={a.status} />
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        <DateTime value={a.assignedAt} />
+                      </TableCell>
                       <TableCell className="text-xs">{a.note || '—'}</TableCell>
                     </TableRow>
                   );
@@ -1119,39 +1208,68 @@ export function AdminTasksStatsPage() {
         <div className="flex gap-2">
           {data.task.admissionMode === 'quota' && (
             <Button asChild variant="outline">
-              <a href={`/admin/tasks/${data.task._id}/candidates`}><Users className="mr-1 size-4" />候选池</a>
+              <a href={`/admin/tasks/${data.task._id}/candidates`}>
+                <Users className="mr-1 size-4" />
+                候选池
+              </a>
             </Button>
           )}
           <form
             method="post"
             action={`/admin/tasks/${data.task._id}/stats`}
-            onSubmit={(e) => { if (!confirm('对该任务所有「未完成」的分配强制重算进度？已完成的不受影响。')) e.preventDefault(); }}
+            onSubmit={(e) => {
+              if (!confirm('对该任务所有「未完成」的分配强制重算进度？已完成的不受影响。')) e.preventDefault();
+            }}
           >
             <input type="hidden" name="operation" value="recheck_all" />
-            <Button type="submit" variant="outline"><RefreshCw className="mr-1 size-4" />全部重算</Button>
+            <Button type="submit" variant="outline">
+              <RefreshCw className="mr-1 size-4" />
+              全部重算
+            </Button>
           </form>
-          <Button asChild variant="outline"><a href={`/admin/tasks/${data.task._id}/stats?format=csv`}><FileDown className="mr-1 size-4" />导出 CSV</a></Button>
-          <Button asChild variant="outline"><a href="/admin/tasks"><ArrowLeft className="mr-1 size-4" />返回列表</a></Button>
+          <Button asChild variant="outline">
+            <a href={`/admin/tasks/${data.task._id}/stats?format=csv`}>
+              <FileDown className="mr-1 size-4" />
+              导出 CSV
+            </a>
+          </Button>
+          <Button asChild variant="outline">
+            <a href="/admin/tasks">
+              <ArrowLeft className="mr-1 size-4" />
+              返回列表
+            </a>
+          </Button>
         </div>
       }
     >
       <div className="grid gap-4 sm:grid-cols-4">
-        <Card><CardContent>
-          <p className="text-xs text-muted-foreground">总分配</p>
-          <p className="mt-1 text-2xl font-semibold">{total}</p>
-        </CardContent></Card>
-        <Card><CardContent>
-          <p className="text-xs text-muted-foreground">候选 / 已录取</p>
-          <p className="mt-1 text-2xl font-semibold">{qualified}<span className="text-base text-muted-foreground"> / {admitted}</span></p>
-        </CardContent></Card>
-        <Card><CardContent>
-          <p className="text-xs text-muted-foreground">已完成</p>
-          <p className="mt-1 text-2xl font-semibold">{completed}</p>
-        </CardContent></Card>
-        <Card><CardContent>
-          <p className="text-xs text-muted-foreground">完成率</p>
-          <p className="mt-1 text-2xl font-semibold">{total > 0 ? Math.round((completed / total) * 100) : 0}%</p>
-        </CardContent></Card>
+        <Card>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">总分配</p>
+            <p className="mt-1 text-2xl font-semibold">{total}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">候选 / 已录取</p>
+            <p className="mt-1 text-2xl font-semibold">
+              {qualified}
+              <span className="text-base text-muted-foreground"> / {admitted}</span>
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">已完成</p>
+            <p className="mt-1 text-2xl font-semibold">{completed}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">完成率</p>
+            <p className="mt-1 text-2xl font-semibold">{total > 0 ? Math.round((completed / total) * 100) : 0}%</p>
+          </CardContent>
+        </Card>
       </div>
 
       <Card>
@@ -1203,10 +1321,14 @@ export function AdminTasksStatsPage() {
                                 style={{ width: `${taskNodes.length ? (done / taskNodes.length) * 100 : 0}%` }}
                               />
                             </div>
-                            <span className="text-xs text-muted-foreground">{done}/{taskNodes.length}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {done}/{taskNodes.length}
+                            </span>
                           </div>
                         </TableCell>
-                        <TableCell><StatusBadge status={a.status} /></TableCell>
+                        <TableCell>
+                          <StatusBadge status={a.status} />
+                        </TableCell>
                         <TableCell className="text-xs">{a.completedAt ? <DateTime value={a.completedAt} mode="date" /> : '—'}</TableCell>
                       </TableRow>
                     );
@@ -1218,27 +1340,36 @@ export function AdminTasksStatsPage() {
             <div className="space-y-2">
               {data.audit.length === 0 ? (
                 <p className="py-8 text-center text-sm text-muted-foreground">暂无审计日志</p>
-              ) : data.audit.map((row) => (
-                <div key={row._id} className="rounded-md border p-2 text-xs">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-[10px]">{row.eventType}</Badge>
-                    {row.pointId ? <span className="font-mono text-muted-foreground">{row.pointId}</span> : null}
-                    <span className="ml-auto text-muted-foreground"><DateTime value={row.createdAt} /></span>
+              ) : (
+                data.audit.map((row) => (
+                  <div key={row._id} className="rounded-md border p-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[10px]">
+                        {row.eventType}
+                      </Badge>
+                      {row.pointId ? <span className="font-mono text-muted-foreground">{row.pointId}</span> : null}
+                      <span className="ml-auto text-muted-foreground">
+                        <DateTime value={row.createdAt} />
+                      </span>
+                    </div>
+                    {row.reason && <p className="mt-1 text-muted-foreground">原因：{row.reason}</p>}
                   </div>
-                  {row.reason && <p className="mt-1 text-muted-foreground">原因：{row.reason}</p>}
-                </div>
-              ))}
+                ))
+              )}
             </div>
           )}
         </CardContent>
       </Card>
 
-      <Sheet open={!!drillIn} onOpenChange={(o) => { if (!o) setDrillIn(null); }}>
+      <Sheet
+        open={!!drillIn}
+        onOpenChange={(o) => {
+          if (!o) setDrillIn(null);
+        }}
+      >
         <SheetContent side="right" className="w-[640px] sm:max-w-[640px]">
           <SheetHeader>
-            <SheetTitle>
-              {drillIn ? (drillUser?.uname || `uid:${drillIn.userId}`) : '—'}
-            </SheetTitle>
+            <SheetTitle>{drillIn ? drillUser?.uname || `uid:${drillIn.userId}` : '—'}</SheetTitle>
             {drillStudent ? (
               <p className="text-xs text-muted-foreground">
                 {drillStudent.studentId} · {drillStudent.realName}
@@ -1250,17 +1381,12 @@ export function AdminTasksStatsPage() {
               <div className="space-y-4 px-6 py-5">
                 <div className="flex items-center gap-2">
                   <StatusBadge status={drillIn.status} />
-                  <span className="text-xs text-muted-foreground">认领于 <DateTime value={drillIn.assignedAt} /></span>
+                  <span className="text-xs text-muted-foreground">
+                    认领于 <DateTime value={drillIn.assignedAt} />
+                  </span>
                 </div>
-                {drillIn.note && (
-                  <div className="rounded-md bg-muted/40 px-3 py-2 text-xs">📝 {drillIn.note}</div>
-                )}
-                <TaskGraphRenderer
-                  graph={data.task.graph}
-                  presets={data.presets}
-                  progress={drillIn.progress}
-                  height="45vh"
-                />
+                {drillIn.note && <div className="rounded-md bg-muted/40 px-3 py-2 text-xs">📝 {drillIn.note}</div>}
+                <TaskGraphRenderer graph={data.task.graph} presets={data.presets} progress={drillIn.progress} height="45vh" />
                 <div className="space-y-1.5">
                   {taskNodes.map((n) => {
                     const r = drillIn.progress?.[n.id];
@@ -1349,34 +1475,32 @@ export function AdminTasksCandidatesPage() {
         <div className="flex items-center gap-2">
           <Badge
             variant="outline"
-            className={cn('gap-1',
-              data.task.quota && data.counts.admitted > data.task.quota && 'border-rose-500 text-rose-700')}
+            className={cn('gap-1', data.task.quota && data.counts.admitted > data.task.quota && 'border-rose-500 text-rose-700')}
           >
             <Users className="size-3" />
             已选 {data.counts.admitted + data.counts.completed}
             {data.task.quota != null ? ` / ${data.task.quota}` : ''}
           </Badge>
-          <Button asChild variant="outline"><a href={`/admin/tasks/${data.task._id}/stats`}>统计</a></Button>
-          <Button asChild variant="outline"><a href="/admin/tasks"><ArrowLeft className="mr-1 size-4" />返回</a></Button>
+          <Button asChild variant="outline">
+            <a href={`/admin/tasks/${data.task._id}/stats`}>统计</a>
+          </Button>
+          <Button asChild variant="outline">
+            <a href="/admin/tasks">
+              <ArrowLeft className="mr-1 size-4" />
+              返回
+            </a>
+          </Button>
         </div>
       }
     >
       {/* Filter bar */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3">
-          <Input
-            placeholder="搜索 用户名 / 真实姓名 / 学号…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="max-w-xs"
-          />
+          <Input placeholder="搜索 用户名 / 真实姓名 / 学号…" value={query} onChange={(e) => setQuery(e.target.value)} className="max-w-xs" />
           <SimpleSelect
             value={schoolFilter}
             onValueChange={setSchoolFilter}
-            options={[
-              { value: '', label: '所有学校' },
-              ...data.schools.map((s) => ({ value: s._id, label: s.name })),
-            ]}
+            options={[{ value: '', label: '所有学校' }, ...data.schools.map((s) => ({ value: s._id, label: s.name }))]}
             className="w-40"
           />
           <MiniTabs
@@ -1399,20 +1523,8 @@ export function AdminTasksCandidatesPage() {
       {selected.size > 0 && (
         <Card className="border-primary/50 bg-primary/5">
           <CardContent className="flex flex-wrap items-center gap-2 py-2">
-            <BulkActionForm
-              taskId={data.task._id}
-              operation="admit"
-              aids={Array.from(selected)}
-              label="批量录取"
-              variant="default"
-            />
-            <BulkActionForm
-              taskId={data.task._id}
-              operation="unadmit"
-              aids={Array.from(selected)}
-              label="撤销录取"
-              variant="outline"
-            />
+            <BulkActionForm taskId={data.task._id} operation="admit" aids={Array.from(selected)} label="批量录取" variant="default" />
+            <BulkActionForm taskId={data.task._id} operation="unadmit" aids={Array.from(selected)} label="撤销录取" variant="outline" />
             <BulkActionForm
               taskId={data.task._id}
               operation="confirm"
@@ -1422,7 +1534,8 @@ export function AdminTasksCandidatesPage() {
               confirm={`确定让这 ${selected.size} 人进入 completed 状态？此操作不可逆，将触发留校 +1 等副作用。`}
             />
             <Button type="button" size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
-              <X className="mr-1 size-3.5" />清空选择
+              <X className="mr-1 size-3.5" />
+              清空选择
             </Button>
             <div className="ml-auto flex gap-2">
               <ExportCSV taskId={data.task._id} filter={{ status: 'admitted' }} label="导出录取名单" />
@@ -1462,17 +1575,10 @@ export function AdminTasksCandidatesPage() {
                   return (
                     <TableRow key={a._id}>
                       <TableCell>
-                        <Checkbox
-                          checked={selected.has(a._id)}
-                          onChange={() => toggleOne(a._id)}
-                        />
+                        <Checkbox checked={selected.has(a._id)} onChange={() => toggleOne(a._id)} />
                       </TableCell>
                       <TableCell>
-                        <button
-                          type="button"
-                          className="text-left hover:underline"
-                          onClick={() => setDrillIn(a)}
-                        >
+                        <button type="button" className="text-left hover:underline" onClick={() => setDrillIn(a)}>
                           <div className="font-medium">{u?.uname || `uid:${a.userId}`}</div>
                           {st && (
                             <div className="text-xs text-muted-foreground">
@@ -1488,10 +1594,10 @@ export function AdminTasksCandidatesPage() {
                       <TableCell>
                         <DotMatrix nodes={taskNodes} progress={a.progress} />
                       </TableCell>
-                      <TableCell><StatusBadge status={a.status} /></TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {a.qualifiedAt ? <DateTime value={a.qualifiedAt} /> : '—'}
+                      <TableCell>
+                        <StatusBadge status={a.status} />
                       </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{a.qualifiedAt ? <DateTime value={a.qualifiedAt} /> : '—'}</TableCell>
                       <TableCell className="text-xs">{a.admissionNote || a.note || '—'}</TableCell>
                     </TableRow>
                   );
@@ -1503,12 +1609,15 @@ export function AdminTasksCandidatesPage() {
       </Card>
 
       {/* Drill-in sheet */}
-      <Sheet open={!!drillIn} onOpenChange={(o) => { if (!o) setDrillIn(null); }}>
+      <Sheet
+        open={!!drillIn}
+        onOpenChange={(o) => {
+          if (!o) setDrillIn(null);
+        }}
+      >
         <SheetContent side="right" className="w-[680px] sm:max-w-[680px]">
           <SheetHeader>
-            <SheetTitle>
-              {drillIn ? (data.udict[drillIn.userId]?.uname || `uid:${drillIn.userId}`) : '—'}
-            </SheetTitle>
+            <SheetTitle>{drillIn ? data.udict[drillIn.userId]?.uname || `uid:${drillIn.userId}` : '—'}</SheetTitle>
           </SheetHeader>
           {drillIn && (
             <ScrollArea className="min-h-0 flex-1">
@@ -1521,12 +1630,7 @@ export function AdminTasksCandidatesPage() {
                     </span>
                   )}
                 </div>
-                <TaskGraphRenderer
-                  graph={data.task.graph}
-                  presets={data.presets}
-                  progress={drillIn.progress}
-                  height="40vh"
-                />
+                <TaskGraphRenderer graph={data.task.graph} presets={data.presets} progress={drillIn.progress} height="40vh" />
                 <div className="space-y-1.5">
                   {taskNodes.map((n) => {
                     const r = drillIn.progress?.[n.id];
@@ -1545,13 +1649,7 @@ export function AdminTasksCandidatesPage() {
                 </div>
                 <div className="flex flex-wrap gap-2 border-t pt-3">
                   {drillIn.status === 'qualified' && (
-                    <BulkActionForm
-                      taskId={data.task._id}
-                      operation="admit"
-                      aids={[drillIn._id]}
-                      label="录取此人"
-                      variant="default"
-                    />
+                    <BulkActionForm taskId={data.task._id} operation="admit" aids={[drillIn._id]} label="录取此人" variant="default" />
                   )}
                   {drillIn.status === 'admitted' && (
                     <>
@@ -1563,13 +1661,7 @@ export function AdminTasksCandidatesPage() {
                         variant="default"
                         confirm="确认后此人状态变 completed，触发留校等副作用。"
                       />
-                      <BulkActionForm
-                        taskId={data.task._id}
-                        operation="unadmit"
-                        aids={[drillIn._id]}
-                        label="撤销录取"
-                        variant="outline"
-                      />
+                      <BulkActionForm taskId={data.task._id} operation="unadmit" aids={[drillIn._id]} label="撤销录取" variant="outline" />
                     </>
                   )}
                 </div>
@@ -1582,10 +1674,7 @@ export function AdminTasksCandidatesPage() {
   );
 }
 
-function DotMatrix({ nodes, progress }: {
-  nodes: TaskGraphNode[];
-  progress: Record<string, TaskPointResult>;
-}) {
+function DotMatrix({ nodes, progress }: { nodes: TaskGraphNode[]; progress: Record<string, TaskPointResult> }) {
   return (
     <div className="flex flex-wrap gap-0.5">
       {nodes.map((n) => {
@@ -1597,10 +1686,7 @@ function DotMatrix({ nodes, progress }: {
           <span
             key={n.id}
             title={detail}
-            className={cn(
-              'inline-block size-2.5 rounded-full',
-              r?.completed ? 'bg-emerald-500' : 'bg-muted-foreground/30',
-            )}
+            className={cn('inline-block size-2.5 rounded-full', r?.completed ? 'bg-emerald-500' : 'bg-muted-foreground/30')}
           />
         );
       })}
@@ -1609,7 +1695,12 @@ function DotMatrix({ nodes, progress }: {
 }
 
 function AdminNodeProgressRow({
-  taskId, assignment, node, preset, result, redirectTo,
+  taskId,
+  assignment,
+  node,
+  preset,
+  result,
+  redirectTo,
 }: {
   taskId: string;
   assignment: AssignmentEntry;
@@ -1621,25 +1712,37 @@ function AdminNodeProgressRow({
   const completed = !!result?.completed;
   const isManualConfirm = node.presetId === 'manual_confirm';
   const canOverride = assignment.status !== 'completed' && assignment.status !== 'cancelled';
-  const reason = completed
-    ? '从管理端进度抽屉撤销人工判定'
-    : isManualConfirm ? '管理员手动确认' : '从管理端进度抽屉人工判定完成';
+  const reason = completed ? '从管理端进度抽屉撤销人工判定' : isManualConfirm ? '管理员手动确认' : '从管理端进度抽屉人工判定完成';
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-md border px-3 py-2 text-xs">
       <div className="min-w-0 space-y-1">
         <div className="flex min-w-0 items-center gap-2">
-          <span className={cn('inline-flex size-4 shrink-0 items-center justify-center rounded-full',
-            completed ? 'bg-emerald-500 text-white' : 'bg-muted text-muted-foreground')}>
+          <span
+            className={cn(
+              'inline-flex size-4 shrink-0 items-center justify-center rounded-full',
+              completed ? 'bg-emerald-500 text-white' : 'bg-muted text-muted-foreground',
+            )}
+          >
             {completed ? '✓' : '○'}
           </span>
           <span className="truncate font-medium">{node.name || preset?.name || node.presetId}</span>
-          {isManualConfirm && <Badge variant="secondary" className="shrink-0 text-[10px]">手动确认</Badge>}
-          {result?.overridden && <Badge variant="outline" className="shrink-0 text-[10px]">人工</Badge>}
+          {isManualConfirm && (
+            <Badge variant="secondary" className="shrink-0 text-[10px]">
+              手动确认
+            </Badge>
+          )}
+          {result?.overridden && (
+            <Badge variant="outline" className="shrink-0 text-[10px]">
+              人工
+            </Badge>
+          )}
         </div>
         <div className="pl-6 text-[11px] text-muted-foreground">
           {result?.details || preset?.description || '尚未评估'}
           {result && result.target > 1 && (
-            <span className="ml-2 tabular-nums">{result.current}/{result.target}</span>
+            <span className="ml-2 tabular-nums">
+              {result.current}/{result.target}
+            </span>
           )}
         </div>
       </div>
@@ -1651,12 +1754,7 @@ function AdminNodeProgressRow({
             <input type="hidden" name="completed" value={completed ? 'false' : 'true'} />
             <input type="hidden" name="reason" value={reason} />
             <input type="hidden" name="redirect" value={redirectTo} />
-            <Button
-              type="submit"
-              size="sm"
-              variant={completed ? 'outline' : 'default'}
-              className="h-7 px-2 text-xs"
-            >
+            <Button type="submit" size="sm" variant={completed ? 'outline' : 'default'} className="h-7 px-2 text-xs">
               {completed ? '撤销判定' : isManualConfirm ? '确认完成' : '判定完成'}
             </Button>
           </form>
@@ -1668,7 +1766,14 @@ function AdminNodeProgressRow({
   );
 }
 
-function BulkActionForm({ taskId, operation, aids, label, variant, confirm }: {
+function BulkActionForm({
+  taskId,
+  operation,
+  aids,
+  label,
+  variant,
+  confirm,
+}: {
   taskId: string;
   operation: 'admit' | 'unadmit' | 'confirm';
   aids: string[];
@@ -1680,7 +1785,9 @@ function BulkActionForm({ taskId, operation, aids, label, variant, confirm }: {
     <form
       method="post"
       action={`/admin/tasks/${taskId}/candidates`}
-      onSubmit={(e) => { if (confirm && !window.confirm(confirm)) e.preventDefault(); }}
+      onSubmit={(e) => {
+        if (confirm && !window.confirm(confirm)) e.preventDefault();
+      }}
     >
       <input type="hidden" name="operation" value={operation} />
       <input type="hidden" name="aids" value={aids.join(',')} />
@@ -1694,17 +1801,14 @@ function BulkActionForm({ taskId, operation, aids, label, variant, confirm }: {
   );
 }
 
-function ExportCSV({ taskId, filter, label }: {
-  taskId: string;
-  filter: { status: string };
-  label: string;
-}) {
+function ExportCSV({ taskId, filter: _filter, label }: { taskId: string; filter: { status: string }; label: string }) {
   // CSV export piggy-backs on stats?format=csv for now; future endpoint can
   // narrow by status (TODO).
   return (
     <Button asChild size="sm" variant="outline">
       <a href={`/admin/tasks/${taskId}/stats?format=csv`}>
-        <FileDown className="mr-1 size-3.5" />{label}
+        <FileDown className="mr-1 size-3.5" />
+        {label}
       </a>
     </Button>
   );
@@ -1712,15 +1816,45 @@ function ExportCSV({ taskId, filter, label }: {
 
 // ─── Admin Tasks Scores ──────────────────────────────────────────────────
 
-interface PatScore { _id: string; studentDocId: string; level: string; year: number; season: string; score: number; createdAt: string }
-interface GpltScore { _id: string; studentDocId: string; level: string; year: number; score: number; rank: number | null; createdAt: string }
-interface CspScore { _id: string; studentDocId: string; round: number; score: number; createdAt: string }
-
-interface DomainSettings {
-  maxPatScore: number; maxGpltScore: number; maxCspScore: number;
+interface PatScore {
+  _id: string;
+  studentDocId: string;
+  level: string;
+  year: number;
+  season: string;
+  score: number;
+  createdAt: string;
+}
+interface GpltScore {
+  _id: string;
+  studentDocId: string;
+  level: string;
+  year: number;
+  score: number;
+  rank: number | null;
+  createdAt: string;
+}
+interface CspScore {
+  _id: string;
+  studentDocId: string;
+  round: number;
+  score: number;
+  createdAt: string;
 }
 
-interface StayEvent { _id: string; userId: number; year: number; source: string; createdAt: string }
+interface DomainSettings {
+  maxPatScore: number;
+  maxGpltScore: number;
+  maxCspScore: number;
+}
+
+interface StayEvent {
+  _id: string;
+  userId: number;
+  year: number;
+  source: string;
+  createdAt: string;
+}
 
 export function AdminTasksScoresPage() {
   const data = useBootstrap().page.data as {
@@ -1742,10 +1876,7 @@ export function AdminTasksScoresPage() {
   ];
 
   return (
-    <AdminPage
-      title="比赛分数管理"
-      description="录入 PAT / GPLT / CSP 等外部比赛成绩 — 这些分数会被任务点用作完成判定的输入。"
-    >
+    <AdminPage title="比赛分数管理" description="录入 PAT / GPLT / CSP 等外部比赛成绩 — 这些分数会被任务点用作完成判定的输入。">
       <MiniTabs
         size="md"
         value={data.tab}
@@ -1755,13 +1886,7 @@ export function AdminTasksScoresPage() {
       {data.tab === 'pat' && <PatScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
       {data.tab === 'gplt' && <GpltScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
       {data.tab === 'csp' && <CspScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
-      {data.tab === 'stay' && (
-        <StayCountTab
-          events={data.stayEvents || []}
-          schools={data.schools || []}
-          udict={data.udict}
-        />
-      )}
+      {data.tab === 'stay' && <StayCountTab events={data.stayEvents || []} schools={data.schools || []} udict={data.udict} />}
     </AdminPage>
   );
 }
@@ -1779,8 +1904,10 @@ function StudentCell({ studentDict, udict, studentDocId }: { studentDict: any; u
   );
 }
 
-/** Fetch-based bulk score import (studentId-keyed). Posts operation+text and
- *  shows imported count + per-row errors; reloads on a clean import. */
+/**
+ * Fetch-based bulk score import (studentId-keyed). Posts operation+text and
+ *  shows imported count + per-row errors; reloads on a clean import.
+ */
 function BulkScoreImport({ action, operation, formatHint }: { action: string; operation: string; formatHint: string }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1805,7 +1932,9 @@ function BulkScoreImport({ action, operation, formatHint }: { action: string; op
   };
   return (
     <Card>
-      <CardHeader><CardTitle className="text-sm">批量导入</CardTitle></CardHeader>
+      <CardHeader>
+        <CardTitle className="text-sm">批量导入</CardTitle>
+      </CardHeader>
       <CardContent className="space-y-2">
         <p className="text-xs text-muted-foreground">每行一条，逗号 / Tab / 空格分隔：{formatHint}（# 开头的行忽略）</p>
         <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={6} placeholder={formatHint} className="font-mono text-xs" />
@@ -1815,11 +1944,15 @@ function BulkScoreImport({ action, operation, formatHint }: { action: string; op
         {result ? (
           <div className="text-xs">
             {typeof result.imported === 'number' ? (
-              <p className="text-green-600">成功导入 {result.imported} 条{result.errors?.length ? '，部分失败见下' : '，即将刷新…'}</p>
+              <p className="text-green-600">
+                成功导入 {result.imported} 条{result.errors?.length ? '，部分失败见下' : '，即将刷新…'}
+              </p>
             ) : null}
             {result.errors?.length ? (
               <ul className="mt-1 max-h-40 list-disc overflow-auto rounded bg-muted/30 p-2 pl-5 text-red-600">
-                {result.errors.map((er, i) => <li key={i}>{er}</li>)}
+                {result.errors.map((er, i) => (
+                  <li key={i}>{er}</li>
+                ))}
               </ul>
             ) : null}
           </div>
@@ -1838,7 +1971,9 @@ function PatScoreTab({ scores, udict, studentDict, settings }: { scores: PatScor
         formatHint="学号,advanced|basic,年,spring|summer|autumn|winter,分"
       />
       <Card>
-        <CardHeader><CardTitle className="text-sm">添加 / 更新 PAT 成绩</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-sm">添加 / 更新 PAT 成绩</CardTitle>
+        </CardHeader>
         <CardContent>
           <form method="post" action="/admin/tasks/scores?tab=pat" className="space-y-3">
             <input type="hidden" name="operation" value="pat" />
@@ -1879,30 +2014,45 @@ function PatScoreTab({ scores, udict, studentDict, settings }: { scores: PatScor
                 <Input name="score" type="number" min={0} max={settings.maxPatScore} step={1} required />
               </FormField>
             </FormRow>
-            <Button type="submit"><Plus className="mr-1 size-4" />保存</Button>
+            <Button type="submit">
+              <Plus className="mr-1 size-4" />
+              保存
+            </Button>
           </form>
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle className="text-sm">已录入成绩 ({scores.length})</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-sm">已录入成绩 ({scores.length})</CardTitle>
+        </CardHeader>
         <CardContent className="p-0">
           {scores.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">还没有 PAT 成绩</p>
           ) : (
             <Table>
-              <TableHeader><TableRow>
-                <TableHead>学号 / 姓名</TableHead><TableHead>等级</TableHead><TableHead>年份</TableHead>
-                <TableHead>季节</TableHead><TableHead>分数</TableHead><TableHead>录入时间</TableHead>
-              </TableRow></TableHeader>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>学号 / 姓名</TableHead>
+                  <TableHead>等级</TableHead>
+                  <TableHead>年份</TableHead>
+                  <TableHead>季节</TableHead>
+                  <TableHead>分数</TableHead>
+                  <TableHead>录入时间</TableHead>
+                </TableRow>
+              </TableHeader>
               <TableBody>
                 {scores.map((s) => (
                   <TableRow key={s._id}>
-                    <TableCell><StudentCell studentDict={studentDict} udict={udict} studentDocId={s.studentDocId} /></TableCell>
+                    <TableCell>
+                      <StudentCell studentDict={studentDict} udict={udict} studentDocId={s.studentDocId} />
+                    </TableCell>
                     <TableCell>{s.level === 'advanced' ? '甲级' : '乙级'}</TableCell>
                     <TableCell>{s.year}</TableCell>
                     <TableCell>{{ spring: '春', summer: '夏', autumn: '秋', winter: '冬' }[s.season] || s.season}</TableCell>
                     <TableCell className="font-medium">{s.score}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground"><DateTime value={s.createdAt} mode="date" /></TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      <DateTime value={s.createdAt} mode="date" />
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -1917,18 +2067,18 @@ function PatScoreTab({ scores, udict, studentDict, settings }: { scores: PatScor
 function GpltScoreTab({ scores, udict, studentDict, settings }: { scores: GpltScore[]; udict: any; studentDict: any; settings: DomainSettings }) {
   return (
     <>
-      <BulkScoreImport
-        action="/admin/tasks/scores?tab=gplt"
-        operation="gplt_import"
-        formatHint="学号,school|national,年,分"
-      />
+      <BulkScoreImport action="/admin/tasks/scores?tab=gplt" operation="gplt_import" formatHint="学号,school|national,年,分" />
       <Card>
-        <CardHeader><CardTitle className="text-sm">添加 / 更新天梯赛成绩</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-sm">添加 / 更新天梯赛成绩</CardTitle>
+        </CardHeader>
         <CardContent>
           <form method="post" action="/admin/tasks/scores?tab=gplt" className="space-y-3">
             <input type="hidden" name="operation" value="gplt" />
             <FormRow columns={4}>
-              <FormField label="学号" required><Input name="studentId" required placeholder="学号" /></FormField>
+              <FormField label="学号" required>
+                <Input name="studentId" required placeholder="学号" />
+              </FormField>
               <FormField label="比赛级别" required>
                 <SimpleSelect
                   name="level"
@@ -1940,34 +2090,55 @@ function GpltScoreTab({ scores, udict, studentDict, settings }: { scores: GpltSc
                   ]}
                 />
               </FormField>
-              <FormField label="年份" required><Input name="year" type="number" min={2010} max={2100} defaultValue={new Date().getFullYear()} required /></FormField>
+              <FormField label="年份" required>
+                <Input name="year" type="number" min={2010} max={2100} defaultValue={new Date().getFullYear()} required />
+              </FormField>
               <FormField label={`分数 (0-${settings.maxGpltScore})`} required>
                 <Input name="score" type="number" min={0} max={settings.maxGpltScore} step={1} required />
               </FormField>
             </FormRow>
-            <FormField label="排名（可选）"><Input name="rank" type="number" min={1} /></FormField>
-            <Button type="submit"><Plus className="mr-1 size-4" />保存</Button>
+            <FormField label="排名（可选）">
+              <Input name="rank" type="number" min={1} />
+            </FormField>
+            <Button type="submit">
+              <Plus className="mr-1 size-4" />
+              保存
+            </Button>
           </form>
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle className="text-sm">已录入成绩 ({scores.length})</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-sm">已录入成绩 ({scores.length})</CardTitle>
+        </CardHeader>
         <CardContent className="p-0">
-          {scores.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">还没有天梯赛成绩</p> : (
+          {scores.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">还没有天梯赛成绩</p>
+          ) : (
             <Table>
-              <TableHeader><TableRow>
-                <TableHead>学号 / 姓名</TableHead><TableHead>级别</TableHead><TableHead>年份</TableHead>
-                <TableHead>分数</TableHead><TableHead>排名</TableHead><TableHead>录入时间</TableHead>
-              </TableRow></TableHeader>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>学号 / 姓名</TableHead>
+                  <TableHead>级别</TableHead>
+                  <TableHead>年份</TableHead>
+                  <TableHead>分数</TableHead>
+                  <TableHead>排名</TableHead>
+                  <TableHead>录入时间</TableHead>
+                </TableRow>
+              </TableHeader>
               <TableBody>
                 {scores.map((s) => (
                   <TableRow key={s._id}>
-                    <TableCell><StudentCell studentDict={studentDict} udict={udict} studentDocId={s.studentDocId} /></TableCell>
+                    <TableCell>
+                      <StudentCell studentDict={studentDict} udict={udict} studentDocId={s.studentDocId} />
+                    </TableCell>
                     <TableCell>{s.level === 'school' ? '校赛' : '国赛'}</TableCell>
                     <TableCell>{s.year}</TableCell>
                     <TableCell className="font-medium">{s.score}</TableCell>
                     <TableCell>{s.rank || '—'}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground"><DateTime value={s.createdAt} mode="date" /></TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      <DateTime value={s.createdAt} mode="date" />
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -1982,42 +2153,60 @@ function GpltScoreTab({ scores, udict, studentDict, settings }: { scores: GpltSc
 function CspScoreTab({ scores, udict, studentDict, settings }: { scores: CspScore[]; udict: any; studentDict: any; settings: DomainSettings }) {
   return (
     <>
-      <BulkScoreImport
-        action="/admin/tasks/scores?tab=csp"
-        operation="csp_import"
-        formatHint="学号,轮次,分"
-      />
+      <BulkScoreImport action="/admin/tasks/scores?tab=csp" operation="csp_import" formatHint="学号,轮次,分" />
       <Card>
-        <CardHeader><CardTitle className="text-sm">添加 / 更新 CSP 成绩</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-sm">添加 / 更新 CSP 成绩</CardTitle>
+        </CardHeader>
         <CardContent>
           <form method="post" action="/admin/tasks/scores?tab=csp" className="space-y-3">
             <input type="hidden" name="operation" value="csp" />
             <FormRow columns={3}>
-              <FormField label="学号" required><Input name="studentId" required placeholder="学号" /></FormField>
-              <FormField label="认证次数（第几次）" required><Input name="round" type="number" min={1} max={100} required placeholder="例如 37" /></FormField>
+              <FormField label="学号" required>
+                <Input name="studentId" required placeholder="学号" />
+              </FormField>
+              <FormField label="认证次数（第几次）" required>
+                <Input name="round" type="number" min={1} max={100} required placeholder="例如 37" />
+              </FormField>
               <FormField label={`分数 (0-${settings.maxCspScore})`} required>
                 <Input name="score" type="number" min={0} max={settings.maxCspScore} step={1} required />
               </FormField>
             </FormRow>
-            <Button type="submit"><Plus className="mr-1 size-4" />保存</Button>
+            <Button type="submit">
+              <Plus className="mr-1 size-4" />
+              保存
+            </Button>
           </form>
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle className="text-sm">已录入成绩 ({scores.length})</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-sm">已录入成绩 ({scores.length})</CardTitle>
+        </CardHeader>
         <CardContent className="p-0">
-          {scores.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">还没有 CSP 成绩</p> : (
+          {scores.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">还没有 CSP 成绩</p>
+          ) : (
             <Table>
-              <TableHeader><TableRow>
-                <TableHead>学号 / 姓名</TableHead><TableHead>次数</TableHead><TableHead>分数</TableHead><TableHead>录入时间</TableHead>
-              </TableRow></TableHeader>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>学号 / 姓名</TableHead>
+                  <TableHead>次数</TableHead>
+                  <TableHead>分数</TableHead>
+                  <TableHead>录入时间</TableHead>
+                </TableRow>
+              </TableHeader>
               <TableBody>
                 {scores.map((s) => (
                   <TableRow key={s._id}>
-                    <TableCell><StudentCell studentDict={studentDict} udict={udict} studentDocId={s.studentDocId} /></TableCell>
+                    <TableCell>
+                      <StudentCell studentDict={studentDict} udict={udict} studentDocId={s.studentDocId} />
+                    </TableCell>
                     <TableCell>第 {s.round} 次</TableCell>
                     <TableCell className="font-medium">{s.score}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground"><DateTime value={s.createdAt} mode="date" /></TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      <DateTime value={s.createdAt} mode="date" />
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -2029,17 +2218,13 @@ function CspScoreTab({ scores, udict, studentDict, settings }: { scores: CspScor
   );
 }
 
-function StayCountTab({
-  events, schools, udict,
-}: {
-  events: StayEvent[];
-  schools: { _id: string; name: string }[];
-  udict: any;
-}) {
+function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools: { _id: string; name: string }[]; udict: any }) {
   return (
     <>
       <Card>
-        <CardHeader><CardTitle className="text-sm">单条录入留校事件</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-sm">单条录入留校事件</CardTitle>
+        </CardHeader>
         <CardContent>
           <form method="post" action="/admin/tasks/scores?tab=stay" className="space-y-3">
             <input type="hidden" name="operation" value="stay" />
@@ -2050,25 +2235,31 @@ function StayCountTab({
                   required
                   defaultValue=""
                   placeholder="选择"
-                  options={[
-                    { value: '', label: '选择学校' },
-                    ...schools.map((s) => ({ value: s._id, label: s.name })),
-                  ]}
+                  options={[{ value: '', label: '选择学校' }, ...schools.map((s) => ({ value: s._id, label: s.name }))]}
                 />
               </FormField>
-              <FormField label="学号" required><Input name="studentId" required /></FormField>
-              <FormField label="姓名" required><Input name="realName" required /></FormField>
+              <FormField label="学号" required>
+                <Input name="studentId" required />
+              </FormField>
+              <FormField label="姓名" required>
+                <Input name="realName" required />
+              </FormField>
               <FormField label="年份" required>
                 <Input name="year" type="number" min={2010} max={2100} defaultValue={new Date().getFullYear()} required />
               </FormField>
             </FormRow>
-            <Button type="submit"><Plus className="mr-1 size-4" />添加</Button>
+            <Button type="submit">
+              <Plus className="mr-1 size-4" />
+              添加
+            </Button>
           </form>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-sm">TSV 批量导入</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-sm">TSV 批量导入</CardTitle>
+        </CardHeader>
         <CardContent>
           <form method="post" action="/admin/tasks/scores?tab=stay" className="space-y-3">
             <input type="hidden" name="operation" value="stayImport" />
@@ -2078,21 +2269,25 @@ function StayCountTab({
                 required
                 defaultValue=""
                 placeholder="选择"
-                options={[
-                  { value: '', label: '选择学校' },
-                  ...schools.map((s) => ({ value: s._id, label: s.name })),
-                ]}
+                options={[{ value: '', label: '选择学校' }, ...schools.map((s) => ({ value: s._id, label: s.name }))]}
               />
             </FormField>
-            <FormField label="粘贴 TSV：每行「学号 姓名 年份」" hint="字段用 Tab 或空格分隔；重复的行 = 重复 +1。每行不匹配学生档案 / 未绑定 OJ 都会跳过并报错">
+            <FormField
+              label="粘贴 TSV：每行「学号 姓名 年份」"
+              hint="字段用 Tab 或空格分隔；重复的行 = 重复 +1。每行不匹配学生档案 / 未绑定 OJ 都会跳过并报错"
+            >
               <textarea
-                name="text" rows={6}
+                name="text"
+                rows={6}
                 className="w-full rounded-md border bg-background px-3 py-2 font-mono text-xs"
                 placeholder={'240340179\t张三\t2024\n240340180\t李四\t2024'}
                 required
               />
             </FormField>
-            <Button type="submit"><FileDown className="mr-1 size-4" />批量导入</Button>
+            <Button type="submit">
+              <FileDown className="mr-1 size-4" />
+              批量导入
+            </Button>
           </form>
         </CardContent>
       </Card>
@@ -2106,13 +2301,15 @@ function StayCountTab({
             <p className="py-8 text-center text-sm text-muted-foreground">还没有留校事件</p>
           ) : (
             <Table>
-              <TableHeader><TableRow>
-                <TableHead>用户</TableHead>
-                <TableHead>年份</TableHead>
-                <TableHead>来源</TableHead>
-                <TableHead>录入时间</TableHead>
-                <TableHead></TableHead>
-              </TableRow></TableHeader>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>用户</TableHead>
+                  <TableHead>年份</TableHead>
+                  <TableHead>来源</TableHead>
+                  <TableHead>录入时间</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
               <TableBody>
                 {events.map((e) => {
                   const isManual = e.source.startsWith('manual:');
@@ -2125,16 +2322,23 @@ function StayCountTab({
                           {isManual ? '手动录入' : `自动（${e.source.slice(0, 16)}…）`}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground"><DateTime value={e.createdAt} mode="date" /></TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        <DateTime value={e.createdAt} mode="date" />
+                      </TableCell>
                       <TableCell>
                         <form
-                          method="post" action="/admin/tasks/scores?tab=stay"
+                          method="post"
+                          action="/admin/tasks/scores?tab=stay"
                           className="inline"
-                          onSubmit={(ev) => { if (!confirm('确定删除该事件？此操作不会撤销已完成的任务')) ev.preventDefault(); }}
+                          onSubmit={(ev) => {
+                            if (!confirm('确定删除该事件？此操作不会撤销已完成的任务')) ev.preventDefault();
+                          }}
                         >
                           <input type="hidden" name="operation" value="stayDelete" />
                           <input type="hidden" name="id" value={e._id} />
-                          <Button type="submit" size="sm" variant="ghost" className="h-7 text-xs text-destructive">删除</Button>
+                          <Button type="submit" size="sm" variant="ghost" className="h-7 text-xs text-destructive">
+                            删除
+                          </Button>
                         </form>
                       </TableCell>
                     </TableRow>
@@ -2154,12 +2358,11 @@ function StayCountTab({
 export function AdminTasksSettingsPage() {
   const data = useBootstrap().page.data as { settings: DomainSettings };
   return (
-    <AdminPage
-      title="任务系统设置"
-      description="配置 PAT / GPLT / CSP 分数录入的上限。这些上限会被任务点的 minScore 校验时强制约束。"
-    >
+    <AdminPage title="任务系统设置" description="配置 PAT / GPLT / CSP 分数录入的上限。这些上限会被任务点的 minScore 校验时强制约束。">
       <Card>
-        <CardHeader><CardTitle className="text-sm">分数上限</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-sm">分数上限</CardTitle>
+        </CardHeader>
         <CardContent>
           <form method="post" className="space-y-3">
             <FormRow columns={3}>
@@ -2173,7 +2376,10 @@ export function AdminTasksSettingsPage() {
                 <Input name="maxCspScore" type="number" min={0} defaultValue={data.settings.maxCspScore} />
               </FormField>
             </FormRow>
-            <Button type="submit"><Settings className="mr-1 size-4" />保存设置</Button>
+            <Button type="submit">
+              <Settings className="mr-1 size-4" />
+              保存设置
+            </Button>
           </form>
         </CardContent>
       </Card>

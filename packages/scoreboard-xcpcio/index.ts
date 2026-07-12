@@ -1,8 +1,21 @@
 import path from 'path';
 import { LRUCache } from 'lru-cache';
 import {
-    avatar, ContestModel, Context, fs, getAlphabeticId, Logger, ObjectId,
-    PERM, RecordDoc, Schema, STATUS, superagent, Tdoc, Types, UserModel,
+    avatar,
+    ContestModel,
+    Context,
+    fs,
+    getAlphabeticId,
+    Logger,
+    ObjectId,
+    PERM,
+    RecordDoc,
+    Schema,
+    STATUS,
+    superagent,
+    Tdoc,
+    Types,
+    UserModel,
 } from 'hydrooj';
 
 const logger = new Logger('scoreboard-xcpcio');
@@ -60,7 +73,10 @@ function submissionBase(tdoc: Tdoc, rdoc: RecordDoc, uid?: number) {
 async function loadContestState(tdoc: Tdoc, realtime: boolean) {
     const tsdocs = await ContestModel.getMultiStatus(tdoc.domainId, { docId: tdoc.docId }).toArray();
     const ended = ContestModel.isDone(tdoc);
-    const udict = await UserModel.getList(tdoc.domainId, tsdocs.map((i) => i.uid));
+    const udict = await UserModel.getList(
+        tdoc.domainId,
+        tsdocs.map((i) => i.uid),
+    );
     const teams = tsdocs.map((i) => {
         const udoc = udict[i.uid];
         return {
@@ -70,23 +86,20 @@ async function loadContestState(tdoc: Tdoc, realtime: boolean) {
             members: 'members' in udoc ? (typeof udoc.members === 'string' ? udoc.members.split(',').filter((t) => t) : udoc.members) : [],
             coach: udoc.coach,
             badge: { url: avatar(udoc.avatar) },
-            group: [
-                ...((udoc.group || []).filter((g) => !Number.isSafeInteger(+g))),
-                i.unrank ? 'unofficial' : 'official',
-            ],
+            group: [...(udoc.group || []).filter((g) => !Number.isSafeInteger(+g)), i.unrank ? 'unofficial' : 'official'],
         };
     });
     return {
-        submissions: tsdocs.flatMap((i) => (i.journal || []).map((j) => {
-            const submit = new ObjectId(j.rid as string).getTimestamp().getTime();
-            const curStatus = (ended ? status : statusPrivate)[j.status] || 'SYSTEM_ERROR';
-            return {
-                ...submissionBase(tdoc, j, i.uid),
-                status: (ContestModel.isLocked(tdoc) && submit > tdoc.lockAt.getTime() && !realtime)
-                    ? 'FROZEN'
-                    : curStatus,
-            };
-        })),
+        submissions: tsdocs.flatMap((i) =>
+            (i.journal || []).map((j) => {
+                const submit = new ObjectId(j.rid as string).getTimestamp().getTime();
+                const curStatus = (ended ? status : statusPrivate)[j.status] || 'SYSTEM_ERROR';
+                return {
+                    ...submissionBase(tdoc, j, i.uid),
+                    status: ContestModel.isLocked(tdoc) && submit > tdoc.lockAt.getTime() && !realtime ? 'FROZEN' : curStatus,
+                };
+            }),
+        ),
         teams,
     };
 }
@@ -145,7 +158,6 @@ export async function apply(ctx: Context, config: ReturnType<typeof Config>) {
     }
 
     if (config.asDefault) {
-        // eslint-disable-next-line consistent-return
         ctx.on('handler/before/ContestScoreboard#get', (that) => {
             if (that.request.path.endsWith('/scoreboard') && that.tdoc?.rule === 'acm') {
                 that.response.redirect = `${that.request.originalPath}/xcpcio`;
@@ -156,8 +168,8 @@ export async function apply(ctx: Context, config: ReturnType<typeof Config>) {
 
     const getJson = async (tdoc, realtime: boolean, cfg: Partial<ReturnType<typeof PublishConfig>>) => {
         const isLocked = ContestModel.isLocked(tdoc);
-        const cacheKey = `${tdoc.docId.toHexString()}/${(isLocked && realtime) ? 'realtime' : 'public'}`;
-        const state = lru.get(cacheKey) || await loadContestState(tdoc, realtime);
+        const cacheKey = `${tdoc.docId.toHexString()}/${isLocked && realtime ? 'realtime' : 'public'}`;
+        const state = lru.get(cacheKey) || (await loadContestState(tdoc, realtime));
         if (cfg.cacheTTL) lru.set(cacheKey, state);
         const relatedGroups = state.teams.flatMap((i) => i.group);
         return {
@@ -183,10 +195,12 @@ export async function apply(ctx: Context, config: ReturnType<typeof Config>) {
                 },
                 medal: (cfg.preset || 'ICPC').toLowerCase(),
                 balloon_color: tdoc.balloon
-                    ? tdoc.pids.filter((i) => tdoc.balloon[i]).map((i) => ({
-                        color: '#000',
-                        background_color: typeof tdoc.balloon[i] === 'string' ? tdoc.balloon[i] : tdoc.balloon[i].color,
-                    }))
+                    ? tdoc.pids
+                          .filter((i) => tdoc.balloon[i])
+                          .map((i) => ({
+                              color: '#000',
+                              background_color: typeof tdoc.balloon[i] === 'string' ? tdoc.balloon[i] : tdoc.balloon[i].color,
+                          }))
                     : [],
                 logo: {
                     preset: cfg.preset || 'ICPC',
@@ -205,64 +219,71 @@ export async function apply(ctx: Context, config: ReturnType<typeof Config>) {
         const done = [];
         const unlocked = [];
         logger.debug('Will publish scoreboards', config.publish);
-        ctx.effect(() => ctx.setInterval(() => {
-            Promise.allSettled(config.publish.map(async (i) => {
-                const key = `${i.domainId}/${i.contestId}`;
-                if (unlocked.includes(key)) return;
-                const tdoc = await ContestModel.get(i.domainId, new ObjectId(i.contestId));
-                if (ContestModel.isDone(tdoc) && ContestModel.isLocked(tdoc) && done.includes(key)) return;
-                if (ContestModel.isDone(tdoc) && !ContestModel.isLocked(tdoc)) unlocked.push(key);
-                if (ContestModel.isDone(tdoc)) done.push(key);
-                const groups = await UserModel.listGroup(i.domainId);
-                const json = await getJson(tdoc, false, { ...i, groups });
-                logger.info(`Publishing scoreboard ${i.domainId}/${i.contestId} to ${i.publishEndpoint}`);
-                const res = await superagent.post(i.publishEndpoint).send({
-                    path: i.publishPath,
-                    token: i.publishToken,
-                    json,
-                });
-                logger.info(`Published scoreboard ${i.domainId}/${i.contestId} to ${i.publishEndpoint}`, res.body);
-            })).catch(console.error);
-        }, 30000));
+        ctx.effect(() =>
+            ctx.setInterval(() => {
+                Promise.allSettled(
+                    config.publish.map(async (i) => {
+                        const key = `${i.domainId}/${i.contestId}`;
+                        if (unlocked.includes(key)) return;
+                        const tdoc = await ContestModel.get(i.domainId, new ObjectId(i.contestId));
+                        if (ContestModel.isDone(tdoc) && ContestModel.isLocked(tdoc) && done.includes(key)) return;
+                        if (ContestModel.isDone(tdoc) && !ContestModel.isLocked(tdoc)) unlocked.push(key);
+                        if (ContestModel.isDone(tdoc)) done.push(key);
+                        const groups = await UserModel.listGroup(i.domainId);
+                        const json = await getJson(tdoc, false, { ...i, groups });
+                        logger.info(`Publishing scoreboard ${i.domainId}/${i.contestId} to ${i.publishEndpoint}`);
+                        const res = await superagent.post(i.publishEndpoint).send({
+                            path: i.publishPath,
+                            token: i.publishToken,
+                            json,
+                        });
+                        logger.info(`Published scoreboard ${i.domainId}/${i.contestId} to ${i.publishEndpoint}`, res.body);
+                    }),
+                ).catch(console.error);
+            }, 30000),
+        );
     }
 
     ctx.inject(['scoreboard'], ({ scoreboard }) => {
-        scoreboard.addView('xcpcio', 'XCPCIO', {
-            tdoc: 'tdoc',
-            groups: 'groups',
-            json: Types.Boolean,
-            realtime: Types.Boolean,
-            badge: Types.Boolean,
-            banner: [...Types.String, true],
-            gold: Schema.transform(Schema.union([Schema.string(), Schema.number().step(1).min(0)]), (v) => +v).default(0),
-            silver: Schema.transform(Schema.union([Schema.string(), Schema.number().step(1).min(0)]), (v) => +v).default(0),
-            bronze: Schema.transform(Schema.union([Schema.string(), Schema.number().step(1).min(0)]), (v) => +v).default(0),
-        }, {
-            async display({
-                tdoc, groups, json, realtime, gold, silver, bronze, badge = true, banner = false,
-            }) {
-                if (realtime && !this.user.own(tdoc)) this.checkPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
-                if (json || this.request.json) {
-                    this.response.body = await getJson(tdoc, realtime, { badge, banner, groups, medals: { gold, silver, bronze } });
-                } else {
-                    this.response.template = 'xcpcio_board.html';
-                    let query = '';
-                    if (gold || silver || bronze) query = `&gold=${gold}&silver=${silver}&bronze=${bronze}`;
-                    if (badge) query += '&badge=true';
-                    if (banner) query += '&banner=true';
-                    if (realtime) query += '&realtime=true';
-                    const endpoint = `/d/${tdoc.domainId}/contest/${tdoc.docId}/scoreboard/xcpcio`;
-                    this.response.body = {
-                        dataSource: `${endpoint}?json=true${query}#allInOne=true`,
-                        js: indexJs,
-                        css: indexCss,
-                        realtime,
-                        refreshInterval: ContestModel.isOngoing(tdoc) ? 30000 : 0,
-                        tdoc: this.tdoc,
-                    };
-                }
+        scoreboard.addView(
+            'xcpcio',
+            'XCPCIO',
+            {
+                tdoc: 'tdoc',
+                groups: 'groups',
+                json: Types.Boolean,
+                realtime: Types.Boolean,
+                badge: Types.Boolean,
+                banner: [...Types.String, true],
+                gold: Schema.transform(Schema.union([Schema.string(), Schema.number().step(1).min(0)]), (v) => +v).default(0),
+                silver: Schema.transform(Schema.union([Schema.string(), Schema.number().step(1).min(0)]), (v) => +v).default(0),
+                bronze: Schema.transform(Schema.union([Schema.string(), Schema.number().step(1).min(0)]), (v) => +v).default(0),
             },
-            supportedRules: ['acm'],
-        });
+            {
+                async display({ tdoc, groups, json, realtime, gold, silver, bronze, badge = true, banner = false }) {
+                    if (realtime && !this.user.own(tdoc)) this.checkPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
+                    if (json || this.request.json) {
+                        this.response.body = await getJson(tdoc, realtime, { badge, banner, groups, medals: { gold, silver, bronze } });
+                    } else {
+                        this.response.template = 'xcpcio_board.html';
+                        let query = '';
+                        if (gold || silver || bronze) query = `&gold=${gold}&silver=${silver}&bronze=${bronze}`;
+                        if (badge) query += '&badge=true';
+                        if (banner) query += '&banner=true';
+                        if (realtime) query += '&realtime=true';
+                        const endpoint = `/d/${tdoc.domainId}/contest/${tdoc.docId}/scoreboard/xcpcio`;
+                        this.response.body = {
+                            dataSource: `${endpoint}?json=true${query}#allInOne=true`,
+                            js: indexJs,
+                            css: indexCss,
+                            realtime,
+                            refreshInterval: ContestModel.isOngoing(tdoc) ? 30000 : 0,
+                            tdoc: this.tdoc,
+                        };
+                    }
+                },
+                supportedRules: ['acm'],
+            },
+        );
     });
 }

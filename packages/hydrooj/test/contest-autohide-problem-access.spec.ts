@@ -20,7 +20,7 @@ class TestPermissionError extends Error {
 class TestValidationError extends Error {
     name = 'ValidationError';
 }
-class UnexpectedProblemWrite extends Error { }
+class UnexpectedProblemWrite extends Error {}
 
 const calls = {
     contestEdits: [] as any[],
@@ -54,9 +54,17 @@ const contestStub: any = {
     isClientRequired: () => false,
     isClientFinished: () => false,
     canShowSelfRecord: () => false,
-    async edit(...args: any[]) { calls.events.push('contest.edit'); calls.contestEdits.push(args); },
-    async add() { calls.events.push('contest.add'); return 'new-contest'; },
-    async recalcStatus() { return undefined; },
+    async edit(...args: any[]) {
+        calls.events.push('contest.edit');
+        calls.contestEdits.push(args);
+    },
+    async add() {
+        calls.events.push('contest.add');
+        return 'new-contest';
+    },
+    async recalcStatus() {
+        return undefined;
+    },
 };
 
 const problemStub = {
@@ -69,7 +77,10 @@ const problemStub = {
         calls.modelDomains.push({ model: 'problem.getList', domainId });
         calls.getLists.push({ domainId, pids: [...pids] });
         return Object.fromEntries(
-            pids.map((pid) => problemDocs.get(pid)).filter(Boolean).map((doc) => [doc.docId, doc]),
+            pids
+                .map((pid) => problemDocs.get(pid))
+                .filter(Boolean)
+                .map((doc) => [doc.docId, doc]),
         );
     },
     canMaintainProblem(user: any, pdoc: any) {
@@ -104,39 +115,53 @@ const problemAccessStub = {
 function noopDecorator() {
     return (_target: unknown, _key: string, descriptor: PropertyDescriptor) => descriptor;
 }
-class HandlerStub { }
+class HandlerStub {}
 const serverStub = {
     Handler: HandlerStub,
     param: noopDecorator,
     post: noopDecorator,
-    Type: class { },
+    Type: class {},
     Types: new Proxy({}, { get: () => () => ({}) }),
 };
 class ServiceStub {
     ctx: any;
-    constructor(ctx: any) { this.ctx = ctx; }
+    constructor(ctx: any) {
+        this.ctx = ctx;
+    }
 }
 
-const genericModel = new Proxy({}, {
-    get: () => async () => undefined,
-});
+const genericModel = new Proxy(
+    {},
+    {
+        get: () => async () => undefined,
+    },
+);
 const scheduleStub = {
-    async deleteMany() { return undefined; },
-    async add() { return undefined; },
+    async deleteMany() {
+        return undefined;
+    },
+    async add() {
+        return undefined;
+    },
 };
-const errors = new Proxy({
-    PermissionError: TestPermissionError,
-    ValidationError: TestValidationError,
-}, {
-    get(target, key: string) { return target[key] || class extends Error { }; },
-});
+const errors = new Proxy(
+    {
+        PermissionError: TestPermissionError,
+        ValidationError: TestValidationError,
+    },
+    {
+        get(target, key: string) {
+            return target[key] || class extends Error {};
+        },
+    },
+);
 
 const contestPath = require.resolve('../src/handler/contest.ts');
 const paperPath = require.resolve('../src/handler/paper.ts');
 const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     const fromContest = parent?.filename === contestPath;
-    if (fromContest && request === '../context') return { Context: class { }, Service: ServiceStub };
+    if (fromContest && request === '../context') return { Context: class {}, Service: ServiceStub };
     if (fromContest && request === '../error') return errors;
     if (fromContest && request === '../model/builtin') return { PERM, PRIV, STATUS: {} };
     if (fromContest && request === '../model/contest') return contestStub;
@@ -176,8 +201,13 @@ function makeHandler() {
         domain: { _id: 'system' },
         user: makeUser(),
         tdoc: {
-            domainId: 'system', docId: 'contest', owner: 42, rule: 'acm', pids: [11, 22],
-            beginAt: new Date('2099-01-01T00:00:00Z'), endAt: new Date('2099-01-01T02:00:00Z'),
+            domainId: 'system',
+            docId: 'contest',
+            owner: 42,
+            rule: 'acm',
+            pids: [11, 22],
+            beginAt: new Date('2099-01-01T00:00:00Z'),
+            endAt: new Date('2099-01-01T02:00:00Z'),
             lockAt: null,
         },
         response: { body: {} },
@@ -202,10 +232,7 @@ function makeDetailHandler(HandlerClass: any) {
 }
 
 async function update(handler: any) {
-    return handler.postUpdate(
-        'forged-domain', 'contest', '2099-01-01', '08:00', 2,
-        'Contest', 'Body', 'acm', '11,22', false, '', true,
-    );
+    return handler.postUpdate('forged-domain', 'contest', '2099-01-01', '08:00', 2, 'Contest', 'Body', 'acm', '11,22', false, '', true);
 }
 
 async function captureFailure(callback: () => Promise<unknown>) {
@@ -221,9 +248,18 @@ beforeEach(() => {
     for (const value of Object.values(calls)) value.length = 0;
     problemDocs.clear();
     currentContest = {
-        domainId: 'system', docId: { toHexString: () => 'contest' }, owner: 42,
-        rule: 'acm', title: 'Contest', content: '', pids: [11], assign: [],
-        privateFiles: [], files: [], maintainer: [], score: {},
+        domainId: 'system',
+        docId: { toHexString: () => 'contest' },
+        owner: 42,
+        rule: 'acm',
+        title: 'Contest',
+        content: '',
+        pids: [11],
+        assign: [],
+        privateFiles: [],
+        files: [],
+        maintainer: [],
+        score: {},
     };
     currentStatus = null;
 });
@@ -269,7 +305,10 @@ describe('contest detail authoritative domain', () => {
         await handler.get('forged-domain', tid);
 
         expect(calls.modelDomains.map((call) => call.model)).to.include.members([
-            'contest.get', 'contest.getStatus', 'user.getList', 'problem.getList',
+            'contest.get',
+            'contest.getStatus',
+            'user.getList',
+            'problem.getList',
         ]);
         expect(calls.modelDomains.filter((call) => call.domainId !== 'system')).to.deep.equal([]);
         expect(handler.response.body.tdoc).to.equal(currentContest);
@@ -283,9 +322,7 @@ describe('contest detail authoritative domain', () => {
         await handler.__prepare('forged-domain', tid);
         await handler.get('forged-domain', tid);
 
-        expect(calls.modelDomains.map((call) => call.model)).to.include.members([
-            'problem.getList', 'user.getList', 'contest.getMultiClarification',
-        ]);
+        expect(calls.modelDomains.map((call) => call.model)).to.include.members(['problem.getList', 'user.getList', 'contest.getMultiClarification']);
         expect(calls.modelDomains.filter((call) => call.domainId !== 'system')).to.deep.equal([]);
         expect(handler.response.body.pdict).to.be.an('object');
     });

@@ -5,9 +5,7 @@ import { ActionDialog, confirm, prompt } from 'vj/components/dialog/index';
 import Notification from 'vj/components/notification';
 import uploadFiles from 'vj/components/upload';
 import { NamedPage } from 'vj/misc/Page';
-import {
-  i18n, pjax, request, tpl,
-} from 'vj/utils';
+import { i18n, pjax, request, tpl } from 'vj/utils';
 
 let endpoint = '';
 
@@ -48,7 +46,9 @@ async function handleClickUpload(
     input.type = 'file';
     input.multiple = true;
     input.click();
-    await new Promise((resolve) => { input.onchange = resolve; });
+    await new Promise((resolve) => {
+      input.onchange = resolve;
+    });
     files = input.files;
   }
   if (!files.length) {
@@ -102,9 +102,11 @@ async function handleClickRenameSelected(ev) {
 
     React.useEffect(() => {
       const load = import('../components/highlighter/prismjs');
-      load.then(({ default: p }) => {
-        setPrism(p.Prism);
-      }).catch(() => { });
+      load
+        .then(({ default: p }) => {
+          setPrism(p.Prism);
+        })
+        .catch(() => {});
     }, []);
 
     React.useEffect(() => {
@@ -131,10 +133,12 @@ async function handleClickRenameSelected(ev) {
           }
         }
       }
-      setNewNames(selectedFiles.map((file) => {
-        if (s) file = file.replace(s, replace);
-        return prefix + file + suffix;
-      }));
+      setNewNames(
+        selectedFiles.map((file) => {
+          if (s) file = file.replace(s, replace);
+          return prefix + file + suffix;
+        }),
+      );
     }, [original, replace, prefix, suffix, prism]);
 
     onActionButton = (action) => {
@@ -148,17 +152,20 @@ async function handleClickRenameSelected(ev) {
           setPreview(true);
           return false;
         }
-        request.post(endpoint, {
-          operation: 'rename_files',
-          files: selectedFiles,
-          newNames,
-          type,
-        }).then(() => {
-          Notification.success(i18n('Selected files have been renamed.'));
-          pjax.request({ url: getUrl(type, sidebar), push: false });
-        }).catch((error) => {
-          Notification.error(error.message);
-        });
+        request
+          .post(endpoint, {
+            operation: 'rename_files',
+            files: selectedFiles,
+            newNames,
+            type,
+          })
+          .then(() => {
+            Notification.success(i18n('Selected files have been renamed.'));
+            pjax.request({ url: getUrl(type, sidebar), push: false });
+          })
+          .catch((error) => {
+            Notification.error(error.message);
+          });
         return true;
       }
       if (preview) {
@@ -170,90 +177,117 @@ async function handleClickRenameSelected(ev) {
 
     const style = { fontFamily: 'var(--code-font-family)' };
 
-    return <div className="typo" style={{ maxHeight: '60vh', overflow: 'scroll' }}>
-      {!preview ? <>
-        <div className="row">
-          <div className="medium-6 small-6 columns">
-            <h2>{i18n('Batch replacement')}</h2>
-            <label>{i18n('Original content')}
-              <div style={{ position: 'relative' }}>
-                <div className="textbox-container" style={{ zIndex: 1, position: 'relative' }}>
-                  <input
-                    className="textbox"
-                    type="text"
-                    style={{ ...style, ...(highlight ? { color: 'transparent', background: 'transparent', caretColor: 'black' } : {}) }}
-                    value={original}
-                    onChange={(e) => setOriginal(e.currentTarget.value)}
-                  />
-                </div>
-                <div
-                  className="textbox-container"
-                  style={{
-                    position: 'absolute', top: 0, left: 0, zIndex: 0,
-                  }}
-                >
-                  {highlight && <span
-                    className="textbox"
-                    style={{
-                      ...style, border: 'none', display: 'inline-flex', alignItems: 'center',
-                    }}
-                    dangerouslySetInnerHTML={{ __html: highlight }}
-                  />}
-                </div>
+    return (
+      <div className="typo" style={{ maxHeight: '60vh', overflow: 'scroll' }}>
+        {!preview ? (
+          <>
+            <div className="row">
+              <div className="medium-6 small-6 columns">
+                <h2>{i18n('Batch replacement')}</h2>
+                <label>
+                  {i18n('Original content')}
+                  <div style={{ position: 'relative' }}>
+                    <div className="textbox-container" style={{ zIndex: 1, position: 'relative' }}>
+                      <input
+                        className="textbox"
+                        type="text"
+                        style={{
+                          ...style,
+                          ...(highlight ? { color: 'transparent', background: 'transparent', caretColor: 'black' } : {}),
+                        }}
+                        value={original}
+                        onChange={(e) => setOriginal(e.currentTarget.value)}
+                      />
+                    </div>
+                    <div
+                      className="textbox-container"
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        zIndex: 0,
+                      }}
+                    >
+                      {highlight && (
+                        <span
+                          className="textbox"
+                          style={{
+                            ...style,
+                            border: 'none',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                          }}
+                          dangerouslySetInnerHTML={{ __html: highlight }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </label>
+                <label>
+                  {i18n('Replace with')}
+                  <div className="textbox-container">
+                    <input className="textbox" type="text" value={replace} onChange={(e) => setReplace(e.currentTarget.value)}></input>
+                  </div>
+                </label>
               </div>
-            </label>
-            <label>{i18n('Replace with')}
-              <div className="textbox-container">
-                <input className="textbox" type="text" value={replace} onChange={(e) => setReplace(e.currentTarget.value)}></input>
+              <div className="medium-6 small-6 columns">
+                <h2>{i18n('Add prefix/suffix')}</h2>
+                <label>
+                  {i18n('Add prefix')}
+                  <div className="textbox-container">
+                    <input className="textbox" type="text" value={prefix} onChange={(e) => setPrefix(e.currentTarget.value)}></input>
+                  </div>
+                </label>
+                <label>
+                  {i18n('Add suffix')}
+                  <div className="textbox-container">
+                    <input className="textbox" type="text" value={suffix} onChange={(e) => setSuffix(e.currentTarget.value)}></input>
+                  </div>
+                </label>
               </div>
-            </label>
+            </div>
+            <div className="row">
+              <div className="medium-12 columns">
+                <p>{!regexValid ? i18n('Invalid RegExp') : wantNext ? i18n('No changes to make.') : i18n('RegExp supported, quote with "/"')}</p>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div>
+            <p>{i18n('Are you sure to rename the following file?')}</p>
+            <ul>
+              {original && (
+                <li>
+                  Replace {original} with {replace}
+                </li>
+              )}
+              {prefix && <li>Add {prefix} as prefix</li>}
+              {suffix && <li>Add {suffix} as suffix</li>}
+            </ul>
+            <table className="data-table rename-confirm-table">
+              <colgroup>
+                <col className="col--origin" />
+                <col className="col--new" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th className="col--origin">{i18n('Original filename(s)')}</th>
+                  <th className="col--new">{i18n('New filename(s)')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {selectedFiles.map((file, index) => (
+                  <tr key={file}>
+                    <td className="col--origin">{file}</td>
+                    <td className="col--new">{newNames[index]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <div className="medium-6 small-6 columns">
-            <h2>{i18n('Add prefix/suffix')}</h2>
-            <label>{i18n('Add prefix')}
-              <div className="textbox-container">
-                <input className="textbox" type="text" value={prefix} onChange={(e) => setPrefix(e.currentTarget.value)}></input>
-              </div>
-            </label>
-            <label>{i18n('Add suffix')}
-              <div className="textbox-container">
-                <input className="textbox" type="text" value={suffix} onChange={(e) => setSuffix(e.currentTarget.value)}></input>
-              </div>
-            </label>
-          </div>
-        </div>
-        <div className="row">
-          <div className="medium-12 columns">
-            <p>{!regexValid ? i18n('Invalid RegExp') : wantNext ? i18n('No changes to make.') : i18n('RegExp supported, quote with "/"')}</p>
-          </div>
-        </div>
-      </> : <div>
-        <p>{i18n('Are you sure to rename the following file?')}</p>
-        <ul>
-          {original && <li>Replace {original} with {replace}</li>}
-          {prefix && <li>Add {prefix} as prefix</li>}
-          {suffix && <li>Add {suffix} as suffix</li>}
-        </ul>
-        <table className="data-table rename-confirm-table">
-          <colgroup>
-            <col className="col--origin" />
-            <col className="col--new" />
-          </colgroup>
-          <thead>
-            <tr>
-              <th className="col--origin">{i18n('Original filename(s)')}</th>
-              <th className="col--new">{i18n('New filename(s)')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {selectedFiles.map((file, index) => <tr key={file}>
-              <td className="col--origin">{file}</td>
-              <td className="col--new">{newNames[index]}</td>
-            </tr>)}
-          </tbody>
-        </table>
-      </div>}
-    </div>;
+        )}
+      </div>
+    );
   }
 
   const promise = new ActionDialog({
@@ -331,19 +365,19 @@ function handleDrop(e: JQuery.DropEvent<Document, undefined, HTMLElement, HTMLEl
   handleClickUpload(e, files);
 }
 
-const page = new NamedPage([
-  'problem_config', 'problem_files', 'problem_edit', 'contest_edit', 'contest_manage',
-  'home_files', 'training_files', 'homework_files',
-], (pageName) => {
-  if (pageName === 'problem_config' || pageName === 'problem_edit') endpoint = './files';
-  if (pageName === 'contest_edit') endpoint = './management';
-  $(document).on('click', '[name="file_rename"]', (ev) => handleClickRename(ev));
-  $(document).on('click', '[name="file_remove"]', (ev) => handleClickRemove(ev));
-  $(document).on('click', '[name="upload_file"]', (ev) => handleClickUpload(ev));
-  $(document).on('click', '[name="rename_selected"]', (ev) => handleClickRenameSelected(ev));
-  $(document).on('click', '[name="remove_selected"]', (ev) => handleClickRemoveSelected(ev));
-  $(document).on('dragover', '.files', (ev) => handleDragOver(ev));
-  $(document).on('drop', '.files', (ev) => handleDrop(ev));
-});
+const page = new NamedPage(
+  ['problem_config', 'problem_files', 'problem_edit', 'contest_edit', 'contest_manage', 'home_files', 'training_files', 'homework_files'],
+  (pageName) => {
+    if (pageName === 'problem_config' || pageName === 'problem_edit') endpoint = './files';
+    if (pageName === 'contest_edit') endpoint = './management';
+    $(document).on('click', '[name="file_rename"]', (ev) => handleClickRename(ev));
+    $(document).on('click', '[name="file_remove"]', (ev) => handleClickRemove(ev));
+    $(document).on('click', '[name="upload_file"]', (ev) => handleClickUpload(ev));
+    $(document).on('click', '[name="rename_selected"]', (ev) => handleClickRenameSelected(ev));
+    $(document).on('click', '[name="remove_selected"]', (ev) => handleClickRemoveSelected(ev));
+    $(document).on('dragover', '.files', (ev) => handleDragOver(ev));
+    $(document).on('drop', '.files', (ev) => handleDrop(ev));
+  },
+);
 
 export default page;

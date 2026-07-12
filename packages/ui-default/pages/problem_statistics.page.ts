@@ -39,13 +39,15 @@ const page = new NamedPage('problem_statistics', () => {
       tooltip: { trigger: 'item' },
       xAxis: { data: x },
       yAxis: {},
-      series: [{
-        data: x.map((i) => ({
-          value: UiContext.pdoc.stats[`s${i}`],
-          itemStyle: { color: getScoreColor(i) },
-        })),
-        type: 'bar',
-      }],
+      series: [
+        {
+          data: x.map((i) => ({
+            value: UiContext.pdoc.stats[`s${i}`],
+            itemStyle: { color: getScoreColor(i) },
+          })),
+          type: 'bar',
+        },
+      ],
     });
 
     window.onresize = function () {
@@ -56,8 +58,7 @@ const page = new NamedPage('problem_statistics', () => {
   }
 
   const availableLangs = getAvailableLangs(UiContext.pdoc.config.langs);
-  Object.keys(availableLangs).map(
-    (i) => ($('select[name="lang"]').append(tpl`<option value="${i}" key="${i}">${availableLangs[i].display}</option>`)));
+  Object.keys(availableLangs).map((i) => $('select[name="lang"]').append(tpl`<option value="${i}" key="${i}">${availableLangs[i].display}</option>`));
   const lang = new URL(window.location.href).searchParams.get('lang');
   if (lang) $('select[name="lang"]').val(lang);
   initChart();

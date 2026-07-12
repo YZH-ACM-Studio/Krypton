@@ -18,14 +18,15 @@ export function FpsImportPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-xl">
-              <FileArchive className="size-5 text-primary" />
-              从 FPS 文件导入题目
+              <FileArchive className="size-5 text-primary" />从 FPS 文件导入题目
             </CardTitle>
           </CardHeader>
           <CardContent>
             <form method="post" encType="multipart/form-data" className="space-y-5">
               <div className="rounded-md border bg-muted/30 p-5">
-                <label htmlFor="fps-file" className="text-sm font-medium">FPS / XML / ZIP 文件</label>
+                <label htmlFor="fps-file" className="text-sm font-medium">
+                  FPS / XML / ZIP 文件
+                </label>
                 <p className="mt-1 text-sm text-muted-foreground">选择由 HUSTOJ/FPS 工具导出的题目包，系统会导入题面、标签、测试数据和题解。</p>
                 <input
                   id="fps-file"
@@ -101,9 +102,7 @@ export function TelegramLoginPage() {
           <h1 className="mt-4 text-xl font-semibold">使用 Telegram 登录</h1>
           <p className="mt-2 text-sm text-muted-foreground">请在弹出的 Telegram 授权组件中确认身份。</p>
           <div id="telegram-login-widget" className="mt-6 min-h-10" />
-          {!botLogin ? (
-            <p className="mt-4 text-sm text-destructive">Telegram Bot 尚未配置。</p>
-          ) : null}
+          {!botLogin ? <p className="mt-4 text-sm text-destructive">Telegram Bot 尚未配置。</p> : null}
         </CardContent>
       </Card>
     </motion.div>
@@ -148,21 +147,14 @@ export function XcpcioBoardPage() {
   }, [bs.locale, cssHref, data.dataSource, data.refreshInterval, scriptSrc]);
 
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold">
             <Trophy className="size-5 text-primary" />
             XCPCIO 榜单
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {data.tdoc?.title || '比赛榜单'} · 外榜视图
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{data.tdoc?.title || '比赛榜单'} · 外榜视图</p>
         </div>
         {data.realtime ? <Badge variant="secondary">实时</Badge> : <Badge variant="outline">封榜/静态</Badge>}
       </div>

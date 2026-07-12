@@ -37,12 +37,16 @@ function disposable<T extends object>(value: T): T & { [Symbol.asyncDispose]: ()
 
 async function runBinary(executable: string, input: string) {
     const { spawn } = await import('node:child_process');
-    return new Promise<{ code: number, stdout: string, stderr: string }>((resolve, reject) => {
+    return new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
         const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'pipe'] });
         let stdout = '';
         let stderr = '';
-        child.stdout.on('data', (chunk) => { stdout += chunk; });
-        child.stderr.on('data', (chunk) => { stderr += chunk; });
+        child.stdout.on('data', (chunk) => {
+            stdout += chunk;
+        });
+        child.stderr.on('data', (chunk) => {
+            stderr += chunk;
+        });
         child.on('error', reject);
         child.on('close', (code) => resolve({ code: code || 0, stdout, stderr }));
         child.stdin.end(input);
@@ -82,11 +86,13 @@ require.cache[configPath] = {
     id: configPath,
     filename: configPath,
     loaded: true,
-    exports: { getConfig: (key: string) => key === 'singleTaskParallelism' ? 1 : 0 },
+    exports: { getConfig: (key: string) => (key === 'singleTaskParallelism' ? 1 : 0) },
 } as NodeModule;
 const problemConfig = require('../../hydrooj/src/lib/problem-config.ts');
 require.cache[hydroojPath] = {
-    id: hydroojPath, filename: hydroojPath, loaded: true,
+    id: hydroojPath,
+    filename: hydroojPath,
+    loaded: true,
     exports: {
         spliceFillFunction: problemConfig.spliceFillFunction,
         validateFillFunctionJudgeConfig: problemConfig.validateFillFunctionJudgeConfig,
@@ -97,7 +103,7 @@ delete require.cache[defaultPath];
 delete require.cache[fillFunctionPath];
 const { judge } = require(fillFunctionPath) as typeof import('../src/judge/fill_function');
 
-class LocalCompileError extends Error { }
+class LocalCompileError extends Error {}
 
 async function runSubmission(regionCode: string) {
     const folder = await mkdtemp(join(tmpdir(), 'krypton-fill-function-'));
@@ -109,24 +115,21 @@ async function runSubmission(regionCode: string) {
         type: 'fill_function',
         template: {
             lang: 'cc.cc17',
-            source: [
-                '#include <iostream>',
-                'int main() {',
-                'int value = 0;',
-                'std::cin >> value;',
-                'std::cout << value;',
-                '}',
-            ].join('\n'),
+            source: ['#include <iostream>', 'int main() {', 'int value = 0;', 'std::cin >> value;', 'std::cout << value;', '}'].join('\n'),
             regions: [{ id: 'main', start: { line: 4, col: 0 }, end: { line: 4, col: 19 } }],
         },
         cases: [{ input: '1.in', output: '1.out' }],
         count: 1,
         checker_type: 'default',
         detail: 'full',
-        subtasks: [{
-            id: 1, type: 'min', score: 100,
-            cases: [{ id: 1, input, output, time: 1000, memory: 256, score: 100 }],
-        }],
+        subtasks: [
+            {
+                id: 1,
+                type: 'min',
+                score: 100,
+                cases: [{ id: 1, input, output, time: 1000, memory: 256, score: 100 }],
+            },
+        ],
     };
     const context: any = {
         config,
@@ -137,7 +140,9 @@ async function runSubmission(regionCode: string) {
         env: {},
         session: { getLang: () => ({ address_space_limit: 0, process_limit: 1 }) },
         next() {},
-        end(payload: any) { result = payload; },
+        end(payload: any) {
+            result = payload;
+        },
         startChildSpan() {
             return { setAttributes() {}, [Symbol.dispose]() {} };
         },
@@ -155,7 +160,9 @@ async function runSubmission(regionCode: string) {
         async compileLocalFile() {
             return disposable({ execute: '', copyIn: {}, clean: async () => undefined });
         },
-        async runAnalysis() { return undefined; },
+        async runAnalysis() {
+            return undefined;
+        },
     };
     try {
         await judge(context);
@@ -171,12 +178,9 @@ async function runSubmission(regionCode: string) {
 
 describe('fill-function real compiler and testdata integration', () => {
     it('maps a spliced answer to AC, CE, and WA through the real default judge flow', async () => {
-        expect(await runSubmission('std::cout << value + 1;'))
-            .to.deep.include({ status: STATUS.STATUS_ACCEPTED, score: 100 });
-        expect(await runSubmission('std::cout << ;'))
-            .to.deep.include({ status: STATUS.STATUS_COMPILE_ERROR, score: 0 });
-        expect(await runSubmission('std::cout << value + 2;'))
-            .to.deep.include({ status: STATUS.STATUS_WRONG_ANSWER, score: 0 });
+        expect(await runSubmission('std::cout << value + 1;')).to.deep.include({ status: STATUS.STATUS_ACCEPTED, score: 100 });
+        expect(await runSubmission('std::cout << ;')).to.deep.include({ status: STATUS.STATUS_COMPILE_ERROR, score: 0 });
+        expect(await runSubmission('std::cout << value + 2;')).to.deep.include({ status: STATUS.STATUS_WRONG_ANSWER, score: 0 });
     });
 });
 

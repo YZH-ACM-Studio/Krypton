@@ -13,19 +13,7 @@
  * created" and disable any action button that would write data.
  */
 import { motion } from 'motion/react';
-import {
-  BookOpen,
-  CheckCircle2,
-  ChevronRight,
-  Clock,
-  Code,
-  Eye,
-  ListChecks,
-  Lock,
-  MessageCircle,
-  Printer,
-  Trophy,
-} from 'lucide-react';
+import { BookOpen, CheckCircle2, ChevronRight, Clock, Code, Eye, ListChecks, Lock, MessageCircle, Printer, Trophy } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -98,140 +86,147 @@ export function ContestWorkspaceContent() {
 
   return (
     <div className="space-y-6">
-        {previewMode && (
-          <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
-            <Eye className="size-5 shrink-0 text-amber-500" />
-            <div className="flex-1">
-              <p className="font-medium text-amber-700 dark:text-amber-200">管理员预览模式</p>
-              <p className="text-amber-700/80 dark:text-amber-200/80">
-                未通过 Qt Client 接入。不会创建 Vigil 会话；提交按钮已禁用。
-              </p>
-            </div>
+      {previewMode && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
+          <Eye className="size-5 shrink-0 text-amber-500" />
+          <div className="flex-1">
+            <p className="font-medium text-amber-700 dark:text-amber-200">管理员预览模式</p>
+            <p className="text-amber-700/80 dark:text-amber-200/80">未通过 Qt Client 接入。不会创建 Vigil 会话；提交按钮已禁用。</p>
           </div>
-        )}
+        </div>
+      )}
 
-        <motion.header
-          initial={{ opacity: 0, y: -6 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25 }}
-          className="rounded-xl border bg-card p-6 shadow-sm"
-        >
-          <div className="flex flex-wrap items-center gap-3">
-            <Badge variant="outline" className="font-mono text-xs">{ruleLabel}</Badge>
-            {notStarted && <Badge variant="outline" className="border-blue-500/40 text-blue-500">未开始</Badge>}
-            {inWindow && <Badge className="bg-emerald-500/20 text-emerald-700 dark:text-emerald-300">进行中</Badge>}
-            {ended && <Badge variant="outline" className="border-muted-foreground/40 text-muted-foreground">已结束</Badge>}
-            {tdoc.entryMode === 'client_required' && (
-              <Badge variant="outline" className="border-rose-500/40 text-rose-500">客户端强制</Badge>
-            )}
-          </div>
-          <h1 className="mt-3 text-2xl font-semibold">{tdoc.title}</h1>
-          <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5">
-              <Clock className="size-3.5" />
-              <DateTime value={tdoc.beginAt} />
-              <span>～</span>
-              <DateTime value={tdoc.endAt} />
-            </span>
-          </div>
-        </motion.header>
+      <motion.header
+        initial={{ opacity: 0, y: -6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.25 }}
+        className="rounded-xl border bg-card p-6 shadow-sm"
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <Badge variant="outline" className="font-mono text-xs">
+            {ruleLabel}
+          </Badge>
+          {notStarted && (
+            <Badge variant="outline" className="border-blue-500/40 text-blue-500">
+              未开始
+            </Badge>
+          )}
+          {inWindow && <Badge className="bg-emerald-500/20 text-emerald-700 dark:text-emerald-300">进行中</Badge>}
+          {ended && (
+            <Badge variant="outline" className="border-muted-foreground/40 text-muted-foreground">
+              已结束
+            </Badge>
+          )}
+          {tdoc.entryMode === 'client_required' && (
+            <Badge variant="outline" className="border-rose-500/40 text-rose-500">
+              客户端强制
+            </Badge>
+          )}
+        </div>
+        <h1 className="mt-3 text-2xl font-semibold">{tdoc.title}</h1>
+        <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            <Clock className="size-3.5" />
+            <DateTime value={tdoc.beginAt} />
+            <span>～</span>
+            <DateTime value={tdoc.endAt} />
+          </span>
+        </div>
+      </motion.header>
 
-        {tdoc.content && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <BookOpen className="size-4" />
-                比赛说明
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <MarkdownView content={tdoc.content} />
-            </CardContent>
-          </Card>
-        )}
-
+      {tdoc.content && (
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <ListChecks className="size-4" />
-              题目列表
+              <BookOpen className="size-4" />
+              比赛说明
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {shouldHideProblems ? (
-              <div className="flex items-start gap-3 rounded-lg border border-blue-500/25 bg-blue-500/5 p-4 text-sm">
-                <Lock className="mt-0.5 size-4 shrink-0 text-blue-500" />
-                <div className="space-y-1">
-                  <p className="font-medium text-blue-700 dark:text-blue-200">考试尚未开始</p>
-                  <p className="text-muted-foreground">
-                    题目将在 <DateTime value={tdoc.beginAt} /> 后开放，请先停留在概览等待开赛。
-                  </p>
-                </div>
-              </div>
-            ) : (!tdoc.pids || tdoc.pids.length === 0) ? (
-              <p className="text-sm text-muted-foreground">该比赛没有题目</p>
-            ) : (
-              <ul className="divide-y">
-                {tdoc.pids.map((pid, index) => {
-                  const pdoc = pdict[String(pid)];
-                  const label = getAlphabeticId(index);
-                  const href = urls.problem
-                    ? String(urls.problem).replace('__PID__', String(pid))
-                    : `/p/${pid}?tid=${tid}`;
-                  return (
-                    <li key={pid}>
-                      <a
-                        href={href}
-                        className="flex items-center gap-3 py-3 hover:bg-muted/40"
-                      >
-                        <span className="font-mono text-sm font-semibold text-muted-foreground">{label}</span>
-                        <span className="flex-1 truncate text-sm">{pdoc?.title || `P${pid}`}</span>
-                        <ChevronRight className="size-4 text-muted-foreground" />
-                      </a>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+            <MarkdownView content={tdoc.content} />
           </CardContent>
         </Card>
+      )}
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Button asChild variant="outline" className="justify-start gap-2 h-auto py-3">
-            <a href={urls.ranking || `/contest/${tid}/scoreboard`}>
-              <Trophy className="size-4" />
-              榜单
-            </a>
-          </Button>
-          <Button asChild variant="outline" className="justify-start gap-2 h-auto py-3">
-            <a href={urls.announcements || `/contest/${tid}/clarification`}>
-              <MessageCircle className="size-4" />
-              澄清
-            </a>
-          </Button>
-          {tdoc.allowPrint && !shouldHideProblems && (
-            <Button asChild variant="outline" className="justify-start gap-2 h-auto py-3">
-              <a href={urls.print || `/contest/${tid}/print`}>
-                <Printer className="size-4" />
-                打印
-              </a>
-            </Button>
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <ListChecks className="size-4" />
+            题目列表
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {shouldHideProblems ? (
+            <div className="flex items-start gap-3 rounded-lg border border-blue-500/25 bg-blue-500/5 p-4 text-sm">
+              <Lock className="mt-0.5 size-4 shrink-0 text-blue-500" />
+              <div className="space-y-1">
+                <p className="font-medium text-blue-700 dark:text-blue-200">考试尚未开始</p>
+                <p className="text-muted-foreground">
+                  题目将在 <DateTime value={tdoc.beginAt} /> 后开放，请先停留在概览等待开赛。
+                </p>
+              </div>
+            </div>
+          ) : !tdoc.pids || tdoc.pids.length === 0 ? (
+            <p className="text-sm text-muted-foreground">该比赛没有题目</p>
+          ) : (
+            <ul className="divide-y">
+              {tdoc.pids.map((pid, index) => {
+                const pdoc = pdict[String(pid)];
+                const label = getAlphabeticId(index);
+                const href = urls.problem ? String(urls.problem).replace('__PID__', String(pid)) : `/p/${pid}?tid=${tid}`;
+                return (
+                  <li key={pid}>
+                    <a href={href} className="flex items-center gap-3 py-3 hover:bg-muted/40">
+                      <span className="font-mono text-sm font-semibold text-muted-foreground">{label}</span>
+                      <span className="flex-1 truncate text-sm">{pdoc?.title || `P${pid}`}</span>
+                      <ChevronRight className="size-4 text-muted-foreground" />
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
           )}
-          {/* Legacy standalone workspace only. Client shell keeps personal submissions inside the IDE/history panel. */}
-          {!examMode.enabled ? <Button asChild variant="outline" className="justify-start gap-2 h-auto py-3">
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Button asChild variant="outline" className="justify-start gap-2 h-auto py-3">
+          <a href={urls.ranking || `/contest/${tid}/scoreboard`}>
+            <Trophy className="size-4" />
+            榜单
+          </a>
+        </Button>
+        <Button asChild variant="outline" className="justify-start gap-2 h-auto py-3">
+          <a href={urls.announcements || `/contest/${tid}/clarification`}>
+            <MessageCircle className="size-4" />
+            澄清
+          </a>
+        </Button>
+        {tdoc.allowPrint && !shouldHideProblems && (
+          <Button asChild variant="outline" className="justify-start gap-2 h-auto py-3">
+            <a href={urls.print || `/contest/${tid}/print`}>
+              <Printer className="size-4" />
+              打印
+            </a>
+          </Button>
+        )}
+        {/* Legacy standalone workspace only. Client shell keeps personal submissions inside the IDE/history panel. */}
+        {!examMode.enabled ? (
+          <Button asChild variant="outline" className="justify-start gap-2 h-auto py-3">
             <a href={`/record?tid=${tid}&uidOrName=${currentUserId}`}>
               <Code className="size-4" />
               我的提交
             </a>
-          </Button> : null}
-        </div>
+          </Button>
+        ) : null}
+      </div>
 
-        {ended && (
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-            <CheckCircle2 className="size-4" />
-            该比赛已经结束。仍可查看题目与榜单，但无法提交。
-          </div>
-        )}
+      {ended && (
+        <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+          <CheckCircle2 className="size-4" />
+          该比赛已经结束。仍可查看题目与榜单，但无法提交。
+        </div>
+      )}
     </div>
   );
 }

@@ -6,8 +6,8 @@ const Module = require('module');
 const modelPath = require.resolve('../src/model/manual-grade.ts');
 const originalLoad = Module._load;
 
-class ConflictError extends Error { }
-class TestValidationError extends Error { }
+class ConflictError extends Error {}
+class TestValidationError extends Error {}
 
 const tid = new ObjectId();
 const rid = new ObjectId();
@@ -57,7 +57,13 @@ const recordStub = {
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     if (parent?.filename !== modelPath) return originalLoad.call(this, request, parent, isMain);
     if (request === '@hydrooj/utils') {
-        return { Logger: class { error(...args: any[]) { loggedErrors.push(args); } } };
+        return {
+            Logger: class {
+                error(...args: any[]) {
+                    loggedErrors.push(args);
+                }
+            },
+        };
     }
     if (request === '../error') {
         return { ManualGradeConflictError: ConflictError, ValidationError: TestValidationError };
@@ -85,7 +91,13 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             },
         };
     }
-    if (request === './oplog') return { add: async (entry: any) => { oplogs.push(entry); } };
+    if (request === './oplog') {
+        return {
+            add: async (entry: any) => {
+                oplogs.push(entry);
+            },
+        };
+    }
     if (request === './problem') {
         return {
             updateManualStatusLatest: async (...args: any[]) => {
@@ -123,8 +135,16 @@ try {
 
 function input(overrides: Record<string, unknown> = {}) {
     return {
-        domainId: 'system', tid, pid: 7, uid: 42, latestRid: rid,
-        expectedRevision: 0, score: 80, comment: 'Good', reason: '', actor: 1,
+        domainId: 'system',
+        tid,
+        pid: 7,
+        uid: 42,
+        latestRid: rid,
+        expectedRevision: 0,
+        score: 80,
+        comment: 'Good',
+        reason: '',
+        actor: 1,
         ...overrides,
     } as any;
 }
@@ -135,7 +155,9 @@ function queryFailureCase(stage: 'before-record-write' | 'after-record-write', c
         let error: unknown;
         try {
             await gradeLatestManualRecord(input());
-        } catch (caught) { error = caught; }
+        } catch (caught) {
+            error = caught;
+        }
         expect(error).to.be.instanceOf(Error);
         expect(loggedErrors).to.have.length(1);
         expect(String(loggedErrors[0][0])).to.include('Manual grade latest record query failed');
@@ -150,9 +172,16 @@ function queryFailureCase(stage: 'before-record-write' | 'after-record-write', c
 
 beforeEach(() => {
     current = {
-        _id: rid, domainId: 'system', contest: tid, pid: 7, uid: 42,
-        code: 'original answer\r\n', status: 0, score: 0,
-        manualPending: true, judgeAt: new Date(),
+        _id: rid,
+        domainId: 'system',
+        contest: tid,
+        pid: 7,
+        uid: 42,
+        code: 'original answer\r\n',
+        status: 0,
+        score: 0,
+        manualPending: true,
+        judgeAt: new Date(),
     };
     replacementLatest = null;
     oplogs.length = 0;
@@ -190,10 +219,7 @@ describe('single-problem manual grading', () => {
     });
 
     it('allows only one of two concurrent windows to consume the same revision', async () => {
-        const results = await Promise.allSettled([
-            gradeLatestManualRecord(input({ score: 70 })),
-            gradeLatestManualRecord(input({ score: 90 })),
-        ]);
+        const results = await Promise.allSettled([gradeLatestManualRecord(input({ score: 70 })), gradeLatestManualRecord(input({ score: 90 }))]);
         expect(results.filter((result) => result.status === 'fulfilled')).to.have.length(1);
         expect(results.filter((result) => result.status === 'rejected')).to.have.length(1);
         expect(current.manualGrade.revision).to.equal(1);
@@ -203,7 +229,7 @@ describe('single-problem manual grading', () => {
         const newerRid = new ObjectId();
         replacementLatest = null;
         const originalUpdate = recordStub.coll.findOneAndUpdate;
-        recordStub.coll.findOneAndUpdate = async (...args: any[]) => {
+        recordStub.coll.findOneAndUpdate = async (...args: Parameters<typeof originalUpdate>) => {
             const result = await originalUpdate(...args);
             replacementLatest = { ...current, _id: newerRid, manualGrade: undefined, manualPending: true };
             return result;
@@ -241,7 +267,9 @@ describe('single-problem manual grading', () => {
         let error: unknown;
         try {
             await gradeLatestManualRecord(input());
-        } catch (caught) { error = caught; }
+        } catch (caught) {
+            error = caught;
+        }
         expect(error).to.be.instanceOf(ConflictError);
         expect(problemStatusState).to.deep.include({ rid: newerRid, status: 0, score: 0 });
         expect(contestStatusState).to.deep.include({ rid: newerRid, status: 0, score: 0 });
@@ -254,7 +282,9 @@ describe('single-problem manual grading', () => {
         let error: unknown;
         try {
             await gradeLatestManualRecord(input({ expectedRevision: 1, score: 70, reason: '' }));
-        } catch (caught) { error = caught; }
+        } catch (caught) {
+            error = caught;
+        }
         expect(error).to.be.instanceOf(TestValidationError);
         expect(oplogs).to.deep.equal([]);
     });
@@ -264,7 +294,9 @@ describe('single-problem manual grading', () => {
         let error: unknown;
         try {
             await markManualPending({ domainId: 'system', tid, pid: 7, uid: 42, rid });
-        } catch (caught) { error = caught; }
+        } catch (caught) {
+            error = caught;
+        }
         expect(error).to.be.instanceOf(Error);
         expect(loggedErrors).to.have.length(1);
         expect(String(loggedErrors[0][0])).to.include('Manual pending projection failed');
@@ -275,7 +307,9 @@ describe('single-problem manual grading', () => {
         let error: unknown;
         try {
             await gradeLatestManualRecord(input());
-        } catch (caught) { error = caught; }
+        } catch (caught) {
+            error = caught;
+        }
         expect(error).to.be.instanceOf(ConflictError);
         expect(loggedErrors).to.have.length(1);
         expect(String(loggedErrors[0][0])).to.include('Manual grade projection failed');

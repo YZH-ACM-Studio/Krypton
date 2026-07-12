@@ -4,8 +4,16 @@ import moment from 'moment-timezone';
 import Schema from 'schemastery';
 import type { Context } from '../context';
 import {
-    CannotDeleteSystemDomainError, DomainJoinAlreadyMemberError, DomainJoinForbiddenError, ForbiddenError,
-    InvalidJoinInvitationCodeError, NotFoundError, OnlyOwnerCanDeleteDomainError, PermissionError, RoleAlreadyExistError, ValidationError,
+    CannotDeleteSystemDomainError,
+    DomainJoinAlreadyMemberError,
+    DomainJoinForbiddenError,
+    ForbiddenError,
+    InvalidJoinInvitationCodeError,
+    NotFoundError,
+    OnlyOwnerCanDeleteDomainError,
+    PermissionError,
+    RoleAlreadyExistError,
+    ValidationError,
 } from '../error';
 import type { DomainDoc } from '../interface';
 import avatar from '../lib/avatar';
@@ -17,9 +25,7 @@ import * as oplog from '../model/oplog';
 import { DOMAIN_SETTINGS, DOMAIN_SETTINGS_BY_KEY } from '../model/setting';
 import system from '../model/system';
 import user from '../model/user';
-import {
-    Handler, Mutation, param, post, Query, query, requireSudo, Types,
-} from '../service/server';
+import { Handler, Mutation, param, post, Query, query, requireSudo, Types } from '../service/server';
 import { log2 } from '../utils';
 
 class DomainRankHandler extends Handler {
@@ -30,7 +36,10 @@ class DomainRankHandler extends Handler {
             page,
             'ranking',
         );
-        const udict = await user.getList(domainId, dudocs.map((dudoc) => dudoc.uid));
+        const udict = await user.getList(
+            domainId,
+            dudocs.map((dudoc) => dudoc.uid),
+        );
         // Per-domain stats (rp / nAccept / rank / rpInfo) live on the dudoc, not
         // the global user doc. Merge them so the frontend can render real values
         // instead of zeroes pulled from the user-level fallback.
@@ -42,19 +51,20 @@ class DomainRankHandler extends Handler {
             nAccept: i.nAccept ?? 0,
             nSubmit: i.nSubmit ?? 0,
         }));
-        const rpDefinitions = Object.fromEntries(Object.entries(global.Hydro.model.rp || {})
-            .map(([key, def]: [string, any]) => [key, { hidden: !!def.hidden }]));
+        const rpDefinitions = Object.fromEntries(
+            Object.entries(global.Hydro.model.rp || {}).map(([key, def]: [string, any]) => [key, { hidden: !!def.hidden }]),
+        );
         const self = this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
             ? {
-                _id: this.user._id,
-                uname: this.user.uname,
-                avatar: this.user.avatar,
-                rp: this.user.rp,
-                rpInfo: this.user.rpInfo,
-                nAccept: this.user.nAccept,
-                rank: this.user.rank,
-                bio: this.user.bio,
-            }
+                  _id: this.user._id,
+                  uname: this.user.uname,
+                  avatar: this.user.avatar,
+                  rp: this.user.rp,
+                  rpInfo: this.user.rpInfo,
+                  nAccept: this.user.nAccept,
+                  rank: this.user.rank,
+                  bio: this.user.bio,
+              }
             : null;
         // Admin-only column data: studentId / realName looked up via userbind
         // for all visible users. Populated only when viewer has system priv
@@ -63,13 +73,19 @@ class DomainRankHandler extends Handler {
         if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && global.Hydro?.model?.userbind?.findStudentsByUserIds) {
             const uids = dudocs.map((d) => d.uid).filter((u) => u && u > 1);
             const students = await global.Hydro.model.userbind.findStudentsByUserIds(domainId, uids);
-            studentDict = Object.fromEntries(Object.entries(students).map(
-                ([uid, s]: [string, any]) => [uid, { studentId: s.studentId, realName: s.realName }],
-            ));
+            studentDict = Object.fromEntries(
+                Object.entries(students).map(([uid, s]: [string, any]) => [uid, { studentId: s.studentId, realName: s.realName }]),
+            );
         }
         this.response.template = 'ranking.html';
         this.response.body = {
-            udocs, upcount, ucount, page, rpDefinitions, self, studentDict,
+            udocs,
+            upcount,
+            ucount,
+            page,
+            rpDefinitions,
+            self,
+            studentDict,
         };
     }
 }
@@ -113,9 +129,8 @@ class DomainDashboardHandler extends ManageHandler {
         await discussion.flushNodes(domainId);
         for (const category of Object.keys(nodes)) {
             for (const item of nodes[category]) {
-                // eslint-disable-next-line no-await-in-loop
                 const curr = await discussion.getNode(domainId, item.name);
-                // eslint-disable-next-line no-await-in-loop
+
                 if (!curr) await discussion.addNode(domainId, item.name, category, item.pic ? { pic: item.pic } : undefined);
             }
         }
@@ -126,10 +141,7 @@ class DomainDashboardHandler extends ManageHandler {
     async postDelete({ domainId }) {
         if (domainId === 'system') throw new CannotDeleteSystemDomainError();
         if (this.domain.owner !== this.user._id) throw new OnlyOwnerCanDeleteDomainError();
-        await Promise.all([
-            domain.del(domainId),
-            oplog.log(this, 'domain.delete', {}),
-        ]);
+        await Promise.all([domain.del(domainId), oplog.log(this, 'domain.delete', {})]);
         this.response.redirect = this.url('home_domain', { domainId: 'system' });
     }
 }
@@ -139,49 +151,51 @@ class DomainUserHandler extends ManageHandler {
     @param('format', Types.Range(['default', 'raw']), true)
     async get({ domainId }, format = 'default') {
         const [dudocs, roles] = await Promise.all([
-            domain.collUser.aggregate([
-                {
-                    $match: {
-                        // TODO: add a page to display users who joined but with default role
-                        role: {
-                            $nin: ['default', 'guest'],
-                            $ne: null,
+            domain.collUser
+                .aggregate([
+                    {
+                        $match: {
+                            // TODO: add a page to display users who joined but with default role
+                            role: {
+                                $nin: ['default', 'guest'],
+                                $ne: null,
+                            },
+                            domainId,
                         },
-                        domainId,
                     },
-                },
-                {
-                    $lookup: {
-                        from: 'user',
-                        let: { uid: '$uid' },
-                        pipeline: [
-                            {
-                                $match: {
-                                    $expr: { $eq: ['$_id', '$$uid'] },
-                                    priv: { $bitsAllSet: PRIV.PRIV_USER_PROFILE },
+                    {
+                        $lookup: {
+                            from: 'user',
+                            let: { uid: '$uid' },
+                            pipeline: [
+                                {
+                                    $match: {
+                                        $expr: { $eq: ['$_id', '$$uid'] },
+                                        priv: { $bitsAllSet: PRIV.PRIV_USER_PROFILE },
+                                    },
                                 },
-                            },
-                            {
-                                $project: {
-                                    _id: 1,
-                                    uname: 1,
-                                    avatar: 1,
+                                {
+                                    $project: {
+                                        _id: 1,
+                                        uname: 1,
+                                        avatar: 1,
+                                    },
                                 },
-                            },
-                        ],
-                        as: 'user',
+                            ],
+                            as: 'user',
+                        },
                     },
-                },
-                { $unwind: '$user' },
-                {
-                    $project: {
-                        user: 1,
-                        role: 1,
-                        join: 1,
-                        ...(this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO) ? { displayName: 1 } : {}),
+                    { $unwind: '$user' },
+                    {
+                        $project: {
+                            user: 1,
+                            role: 1,
+                            join: 1,
+                            ...(this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO) ? { displayName: 1 } : {}),
+                        },
                     },
-                },
-            ]).toArray(),
+                ])
+                .toArray(),
             domain.getRoles(domainId),
         ]);
         const users = dudocs.map((dudoc) => {
@@ -196,12 +210,14 @@ class DomainUserHandler extends ManageHandler {
         for (const role of roles) rudocs[role._id] = users.filter((udoc) => udoc.role === role._id);
         this.response.template = format === 'raw' ? 'domain_user_raw.html' : 'domain_user.html';
         this.response.body = {
-            roles, rudocs, domain: this.domain,
+            roles,
+            rudocs,
+            domain: this.domain,
         };
     }
 
     @param('uids', Types.NumericArray)
-    async post({ }, uids: number[]) {
+    async post({}, uids: number[]) {
         if (uids.includes(this.domain.owner)) throw new ForbiddenError();
     }
 
@@ -211,10 +227,7 @@ class DomainUserHandler extends ManageHandler {
     @param('join', Types.Boolean)
     async postSetUsers(domainId: string, uid: number[], role: string, join = false) {
         if (join && !system.get('server.allowInvite')) this.checkPriv(PRIV.PRIV_MANAGE_ALL_DOMAIN);
-        await Promise.all([
-            domain.setUserRole(domainId, uid, role),
-            oplog.log(this, 'domain.setRole', { uid, role, join }),
-        ]);
+        await Promise.all([domain.setUserRole(domainId, uid, role), oplog.log(this, 'domain.setRole', { uid, role, join })]);
         if (join) await domain.setJoin(domainId, uid, true);
         this.back();
     }
@@ -246,7 +259,10 @@ class DomainPermissionHandler extends ManageHandler {
         const roles = await domain.getRoles(domainId);
         this.response.template = 'domain_permission.html';
         this.response.body = {
-            roles, PERMS_BY_FAMILY, domain: this.domain, log2,
+            roles,
+            PERMS_BY_FAMILY,
+            domain: this.domain,
+            log2,
         };
     }
 
@@ -255,19 +271,14 @@ class DomainPermissionHandler extends ManageHandler {
         const roles = {};
         for (const [role, list] of Object.entries(this.request.body)) {
             if (role === 'root') continue; // root role is not editable
-            const perms = Array.isArray(list) ? list
-                : (typeof list === 'object' && list)
-                    ? Object.values(list) : [list];
+            const perms = Array.isArray(list) ? list : typeof list === 'object' && list ? Object.values(list) : [list];
             roles[role] = 0n;
             for (const r of perms) {
                 if (+r === 1000) continue; // skip placeholder value
                 roles[role] |= 1n << BigInt(r);
             }
         }
-        await Promise.all([
-            domain.setRoles(domainId, roles),
-            oplog.log(this, 'domain.setRoles', { roles }),
-        ]);
+        await Promise.all([domain.setRoles(domainId, roles), oplog.log(this, 'domain.setRoles', { roles })]);
         this.back();
     }
 }
@@ -286,10 +297,7 @@ class DomainRoleHandler extends ManageHandler {
         const rdict: Dictionary<any> = {};
         for (const r of roles) rdict[r._id] = r.perm;
         if (rdict[role]) throw new RoleAlreadyExistError(role);
-        await Promise.all([
-            domain.addRole(domainId, role, rdict.default),
-            oplog.log(this, 'domain.addRole', { role }),
-        ]);
+        await Promise.all([domain.addRole(domainId, role, rdict.default), oplog.log(this, 'domain.addRole', { role })]);
         this.back();
     }
 
@@ -299,10 +307,7 @@ class DomainRoleHandler extends ManageHandler {
         if (new Set(roles).intersection(new Set(['root', 'default', 'guest'])).size > 0) {
             throw new ValidationError('role', null, 'You cannot delete root, default or guest roles');
         }
-        await Promise.all([
-            domain.deleteRoles(domainId, roles),
-            oplog.log(this, 'domain.deleteRoles', { roles }),
-        ]);
+        await Promise.all([domain.deleteRoles(domainId, roles), oplog.log(this, 'domain.deleteRoles', { roles })]);
         this.back();
     }
 }
@@ -378,14 +383,9 @@ class DomainJoinHandler extends Handler {
 
     @param('target', Types.DomainId, true)
     async prepare({ domainId }, target: string = domainId) {
-        const [ddoc, dudoc] = await Promise.all([
-            domain.get(target),
-            domain.collUser.findOne({ domainId: target, uid: this.user._id }),
-        ]);
+        const [ddoc, dudoc] = await Promise.all([domain.get(target), domain.collUser.findOne({ domainId: target, uid: this.user._id })]);
         if (!ddoc) throw new NotFoundError(target);
-        const assignedRole = this.user.hasPriv(PRIV.PRIV_MANAGE_ALL_DOMAIN)
-            ? 'root'
-            : dudoc?.role || 'default';
+        const assignedRole = this.user.hasPriv(PRIV.PRIV_MANAGE_ALL_DOMAIN) ? 'root' : dudoc?.role || 'default';
         if (dudoc?.join) throw new DomainJoinAlreadyMemberError(target, this.user._id);
         const r = await domain.getRoles(ddoc);
         const roles = r.map((role) => role._id);

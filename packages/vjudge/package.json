@@ -8,13 +8,20 @@
     "license": "AGPL-3.0-or-later",
     "preferUnplugged": true,
     "dependencies": {
+        "@hydrooj/common": "workspace:^",
         "@hydrooj/utils": "workspace:^",
+        "cordis": "4.0.0-rc.3",
+        "hydrooj": "workspace:^",
+        "js-yaml": "^4.1.1",
         "jsdom": "^29.0.2",
+        "superagent": "^10.3.0",
         "superagent-charset": "^1.2.0",
         "superagent-proxy": "^3.0.0"
     },
     "devDependencies": {
+        "@types/js-yaml": "^4.0.9",
         "@types/jsdom": "^28.0.1",
+        "@types/superagent": "^8.1.9",
         "@types/superagent-proxy": "^3.0.4"
     }
 }

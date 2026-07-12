@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 import { getAlphabeticId } from '@hydrooj/utils/lib/common';
 import yaml from 'js-yaml';
 import React from 'react';
@@ -6,9 +5,7 @@ import { HexColorInput, HexColorPicker } from 'react-colorful';
 import { ActionDialog } from 'vj/components/dialog';
 import Notification from 'vj/components/notification';
 import { NamedPage } from 'vj/misc/Page';
-import {
-  i18n, pjax, request, tpl,
-} from 'vj/utils';
+import { i18n, pjax, request, tpl } from 'vj/utils';
 
 function Balloon({ tdoc, val }) {
   const [color, setColor] = React.useState('');
@@ -22,7 +19,9 @@ function Balloon({ tdoc, val }) {
               <th>{i18n('Problem')}</th>
               <th>{i18n('Color')}</th>
               <th>{i18n('Name')}</th>
-              <th><span className="icon icon-wrench"></span></th>
+              <th>
+                <span className="icon icon-wrench"></span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -30,17 +29,19 @@ function Balloon({ tdoc, val }) {
               const { color: c, name } = val[+pid];
               return (
                 <tr key={pid}>
-                  <td>
-                    {now === pid
-                      ? (<b>{getAlphabeticId(tdoc.pids.indexOf(+pid))}</b>)
-                      : (<span>{getAlphabeticId(tdoc.pids.indexOf(+pid))}</span>)}
-                  </td>
+                  <td>{now === pid ? <b>{getAlphabeticId(tdoc.pids.indexOf(+pid))}</b> : <span>{getAlphabeticId(tdoc.pids.indexOf(+pid))}</span>}</td>
                   <td>
                     <HexColorInput
                       className="textbox"
                       color={c}
-                      onFocus={() => { setNow(pid); setColor(c); }}
-                      onChange={(e) => { val[+pid].color = e; setColor(e); }}
+                      onFocus={() => {
+                        setNow(pid);
+                        setColor(c);
+                      }}
+                      onChange={(e) => {
+                        val[+pid].color = e;
+                        setColor(e);
+                      }}
                     />
                   </td>
                   <td>
@@ -48,13 +49,29 @@ function Balloon({ tdoc, val }) {
                       type="text"
                       className="textbox"
                       defaultValue={name}
-                      onFocus={() => { setNow(pid); setColor(c); }}
-                      onChange={(e) => { val[+pid].name = e.target.value; }}
+                      onFocus={() => {
+                        setNow(pid);
+                        setColor(c);
+                      }}
+                      onChange={(e) => {
+                        val[+pid].name = e.target.value;
+                      }}
                     />
                   </td>
-                  {tdoc.pids.indexOf(+pid) === 0 && <td rowSpan={0}>
-                    {now && <HexColorPicker color={color} onChange={(e) => { val[+now].color = e; setColor(e); }} style={{ padding: '1rem' }} />}
-                  </td>}
+                  {tdoc.pids.indexOf(+pid) === 0 && (
+                    <td rowSpan={0}>
+                      {now && (
+                        <HexColorPicker
+                          color={color}
+                          onChange={(e) => {
+                            val[+now].color = e;
+                            setColor(e);
+                          }}
+                          style={{ padding: '1rem' }}
+                        />
+                      )}
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -70,12 +87,17 @@ async function handleSetColor(tdoc) {
   for (const pid of tdoc.pids) val[+pid] ||= { color: '#ffffff', name: '' };
   Notification.info(i18n('Loading...'));
   const action = await new ActionDialog({
-    $body: tpl(<>
-      <div className="row"><div className="columns">
-        <h1>{i18n('Set Color')}</h1>
-      </div></div>
-      <Balloon tdoc={tdoc} val={val} />
-    </>, true),
+    $body: tpl(
+      <>
+        <div className="row">
+          <div className="columns">
+            <h1>{i18n('Set Color')}</h1>
+          </div>
+        </div>
+        <Balloon tdoc={tdoc} val={val} />
+      </>,
+      true,
+    ),
   }).open();
   if (action !== 'ok') return;
   Notification.info(i18n('Updating...'));

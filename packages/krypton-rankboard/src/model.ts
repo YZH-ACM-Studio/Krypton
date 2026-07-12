@@ -1,11 +1,7 @@
 import { createHash } from 'crypto';
-import { NotFoundError, ObjectId, UserModel, db } from 'hydrooj';
-import {
-    awardTypesColl, importBatchesColl, peopleColl, seedAwardTypesIfEmpty, getConfig, setConfig,
-} from './db';
-import type {
-    Award, AwardType, ImportBatch, LeaderboardRow, PersonRecord,
-} from './types';
+import { db, NotFoundError, ObjectId, UserModel } from 'hydrooj';
+import { awardTypesColl, getConfig, importBatchesColl, peopleColl, seedAwardTypesIfEmpty, setConfig } from './db';
+import type { Award, AwardType, ImportBatch, LeaderboardRow, PersonRecord } from './types';
 
 const studentsColl = db.collection<any>('userbind.students');
 const schoolsColl = db.collection<any>('userbind.schools');
@@ -26,8 +22,12 @@ export async function listAwardTypes(opts: { includeHidden?: boolean } = {}): Pr
 }
 
 export async function upsertAwardType(input: {
-    key: string; name: string; weight: number; useRankDecay: boolean;
-    order: number; hidden?: boolean;
+    key: string;
+    name: string;
+    weight: number;
+    useRankDecay: boolean;
+    order: number;
+    hidden?: boolean;
 }): Promise<void> {
     await awardTypesColl.updateOne(
         { key: input.key },
@@ -70,13 +70,18 @@ function personObjectId(id: ObjectId | string): ObjectId {
 
 /** Bulk scope guard used by every list/batch path. */
 async function listScopedPeople(filter: Record<string, unknown> = {}): Promise<PersonRecord[]> {
-    const people = await peopleColl.find(filter as any).sort({ updatedAt: -1 }).toArray();
+    const people = await peopleColl
+        .find(filter as any)
+        .sort({ updatedAt: -1 })
+        .toArray();
     if (!people.length) return [];
     const studentIds = people.map((person) => person.studentDocId);
-    const students = await studentsColl.find({
-        _id: { $in: studentIds },
-        domainId: RANKBOARD_DOMAIN,
-    }).toArray();
+    const students = await studentsColl
+        .find({
+            _id: { $in: studentIds },
+            domainId: RANKBOARD_DOMAIN,
+        })
+        .toArray();
     const validStudentIds = new Set(students.map((student: any) => String(student._id)));
     return people.filter((person) => validStudentIds.has(String(person.studentDocId)));
 }
@@ -143,15 +148,9 @@ export async function createPerson(input: {
     return doc;
 }
 
-export async function updatePerson(
-    id: ObjectId | string,
-    patch: Partial<Pick<PersonRecord, 'awards' | 'employmentStatus'>>,
-): Promise<void> {
+export async function updatePerson(id: ObjectId | string, patch: Partial<Pick<PersonRecord, 'awards' | 'employmentStatus'>>): Promise<void> {
     const person = await requireScopedPerson(id);
-    await peopleColl.updateOne(
-        { _id: person._id, studentDocId: person.studentDocId },
-        { $set: { ...patch, updatedAt: new Date() } },
-    );
+    await peopleColl.updateOne({ _id: person._id, studentDocId: person.studentDocId }, { $set: { ...patch, updatedAt: new Date() } });
 }
 
 export async function deletePerson(id: ObjectId | string): Promise<void> {
@@ -171,19 +170,13 @@ export async function updateAwardAt(id: ObjectId | string, index: number, award:
     const person = await requireScopedPerson(id);
     const setObj: Record<string, any> = { updatedAt: new Date() };
     setObj[`awards.${index}`] = award;
-    await peopleColl.updateOne(
-        { _id: person._id, studentDocId: person.studentDocId },
-        { $set: setObj },
-    );
+    await peopleColl.updateOne({ _id: person._id, studentDocId: person.studentDocId }, { $set: setObj });
 }
 
 export async function removeAwardAt(id: ObjectId | string, index: number): Promise<void> {
     const person = await requireScopedPerson(id);
     const next = (person.awards || []).filter((_, i) => i !== index);
-    await peopleColl.updateOne(
-        { _id: person._id, studentDocId: person.studentDocId },
-        { $set: { awards: next, updatedAt: new Date() } },
-    );
+    await peopleColl.updateOne({ _id: person._id, studentDocId: person.studentDocId }, { $set: { awards: next, updatedAt: new Date() } });
 }
 
 /* ─── batch import ─── */
@@ -203,8 +196,8 @@ export interface BatchImportRow {
 
 export interface BatchImportReport {
     ok: number;
-    notFound: string[];   // studentId for which no student doc exists
-    unknownType: string[];  // award type key not found
+    notFound: string[]; // studentId for which no student doc exists
+    unknownType: string[]; // award type key not found
     errors: Array<{ line: number; reason: string }>;
     /** createMissing 开启时自动建档的学生数。 */
     createdStudents: number;
@@ -238,14 +231,14 @@ function batchContentHash(rows: BatchImportRow[]): string {
  * With `createMissing`, rows whose 学号 has no student record get a record
  * created via userbind's importStudents (full validation reused) first.
  */
-export async function importAwardsBatch(
-    rows: BatchImportRow[],
-    actor: number,
-    opts: BatchImportOptions = {},
-): Promise<BatchImportReport> {
+export async function importAwardsBatch(rows: BatchImportRow[], actor: number, opts: BatchImportOptions = {}): Promise<BatchImportReport> {
     const domainId = RANKBOARD_DOMAIN;
     const report: BatchImportReport = {
-        ok: 0, notFound: [], unknownType: [], errors: [], createdStudents: 0,
+        ok: 0,
+        notFound: [],
+        unknownType: [],
+        errors: [],
+        createdStudents: 0,
     };
     const contentHash = batchContentHash(rows);
     const batchId = new ObjectId();
@@ -333,9 +326,12 @@ export async function importAwardsBatch(
                 importBatchId: batchId,
             };
             // Ensure a person row exists, then push the award.
-            const personId = (await createPerson({
-                studentDocId: student._id, createdBy: actor,
-            }))._id;
+            const personId = (
+                await createPerson({
+                    studentDocId: student._id,
+                    createdBy: actor,
+                })
+            )._id;
             await addAward(personId, award);
             report.ok++;
         }
@@ -345,7 +341,9 @@ export async function importAwardsBatch(
         // 然后把异常抛给上层（对抗性审查 G3/焦点 B）。已落部分奖项则保留批次
         // 供回滚。
         if (report.ok === 0 && report.createdStudents === 0) {
-            await importBatchesColl.deleteOne({ _id: batchId }).catch(() => { /* best-effort */ });
+            await importBatchesColl.deleteOne({ _id: batchId }).catch(() => {
+                /* best-effort */
+            });
         }
         throw e;
     }
@@ -355,18 +353,21 @@ export async function importAwardsBatch(
         await importBatchesColl.deleteOne({ _id: batchId });
         return report;
     }
-    await importBatchesColl.updateOne({ _id: batchId }, {
-        $set: {
-            okCount: report.ok,
-            createdStudents: report.createdStudents,
-            report: {
-                ok: report.ok,
-                notFound: report.notFound,
-                unknownType: report.unknownType,
-                errors: report.errors,
+    await importBatchesColl.updateOne(
+        { _id: batchId },
+        {
+            $set: {
+                okCount: report.ok,
+                createdStudents: report.createdStudents,
+                report: {
+                    ok: report.ok,
+                    notFound: report.notFound,
+                    unknownType: report.unknownType,
+                    errors: report.errors,
+                },
             },
         },
-    });
+    );
     report.batchId = String(batchId);
     return report;
 }
@@ -389,14 +390,11 @@ export async function rollbackImportBatch(batchId: ObjectId, actor: number): Pro
     const scopedPersonIds = scopedPeople.map((person) => person._id);
     const res = scopedPersonIds.length
         ? await peopleColl.updateMany(
-            { _id: { $in: scopedPersonIds }, 'awards.importBatchId': batchId },
-            { $pull: { awards: { importBatchId: batchId } } as any, $set: { updatedAt: new Date() } },
-        )
+              { _id: { $in: scopedPersonIds }, 'awards.importBatchId': batchId },
+              { $pull: { awards: { importBatchId: batchId } } as any, $set: { updatedAt: new Date() } },
+          )
         : { modifiedCount: 0 };
-    await importBatchesColl.updateOne(
-        { _id: batchId },
-        { $set: { rolledBack: true, rolledBackAt: new Date(), rolledBackBy: actor } },
-    );
+    await importBatchesColl.updateOne({ _id: batchId }, { $set: { rolledBack: true, rolledBackAt: new Date(), rolledBackBy: actor } });
     return { pulled: res.modifiedCount };
 }
 
@@ -424,9 +422,7 @@ export async function rollbackImportBatch(batchId: ObjectId, actor: number): Pro
  * `award.score` (PAT exam grade) is also ignored — it's displayed
  * separately as the "实际考试得分".
  */
-export function computeAwardScore(
-    _award: Award, type: AwardType, baseScore: number, _decayFactor: number,
-): number {
+export function computeAwardScore(_award: Award, type: AwardType, baseScore: number, _decayFactor: number): number {
     return type.weight * baseScore;
 }
 
@@ -439,7 +435,7 @@ export function gpltYearFromContest(contest?: string): number | null {
     if (!contest) return null;
     const m = contest.match(/(\d{4})\s*年/);
     if (m) return Number.parseInt(m[1], 10);
-    const ed = contest.match(/第\s*0*(\d+)\s*届/);
+    const ed = contest.match(/第\s*(\d+)\s*届/);
     if (ed) return 2015 + Number.parseInt(ed[1], 10);
     return null;
 }
@@ -478,11 +474,7 @@ export async function applyGpltStoreScores(people: PersonRecord[]): Promise<void
 
 /** Resolve a list of people into joined leaderboard rows. */
 export async function listLeaderboard(): Promise<LeaderboardRow[]> {
-    const [people, awardTypes, config] = await Promise.all([
-        listPeople(),
-        listAwardTypes({ includeHidden: true }),
-        getConfig(),
-    ]);
+    const [people, awardTypes, config] = await Promise.all([listPeople(), listAwardTypes({ includeHidden: true }), getConfig()]);
     const typeMap = new Map(awardTypes.map((t) => [t.key, t]));
 
     // Overlay 天梯赛 numeric scores from the single source of truth (tasks
@@ -492,26 +484,24 @@ export async function listLeaderboard(): Promise<LeaderboardRow[]> {
     // Pull student + school + groups + udoc in bulk.
     const studentIds = people.map((p) => p.studentDocId);
     const students = studentIds.length
-        ? await studentsColl.find({
-            _id: { $in: studentIds },
-            domainId: RANKBOARD_DOMAIN,
-        }).toArray()
+        ? await studentsColl
+              .find({
+                  _id: { $in: studentIds },
+                  domainId: RANKBOARD_DOMAIN,
+              })
+              .toArray()
         : [];
     const studentMap = new Map<string, any>(students.map((s) => [String(s._id), s]));
 
     const schoolIds = Array.from(new Set(students.map((s) => String(s.schoolId)))).filter(Boolean);
-    const schools = schoolIds.length
-        ? await schoolsColl.find({ _id: { $in: schoolIds.map((id) => new ObjectId(id)) } }).toArray()
-        : [];
+    const schools = schoolIds.length ? await schoolsColl.find({ _id: { $in: schoolIds.map((id) => new ObjectId(id)) } }).toArray() : [];
     const schoolMap = new Map<string, any>(schools.map((s) => [String(s._id), s]));
 
     const allGroupIds: ObjectId[] = [];
     for (const s of students) {
         for (const g of s.groupIds || []) allGroupIds.push(g);
     }
-    const groups = allGroupIds.length
-        ? await userGroupsColl.find({ _id: { $in: allGroupIds } }).toArray()
-        : [];
+    const groups = allGroupIds.length ? await userGroupsColl.find({ _id: { $in: allGroupIds } }).toArray() : [];
     const groupMap = new Map<string, any>(groups.map((g) => [String(g._id), g]));
 
     const uids = students.map((s) => s.boundUserId).filter((u) => u && u > 0) as number[];
@@ -521,9 +511,7 @@ export async function listLeaderboard(): Promise<LeaderboardRow[]> {
         const student = studentMap.get(String(person.studentDocId));
         const school = student ? schoolMap.get(String(student.schoolId)) : null;
         const groupNames: string[] = student
-            ? (student.groupIds || [])
-                .map((gid: ObjectId) => groupMap.get(String(gid))?.name)
-                .filter((n: string | undefined) => !!n) as string[]
+            ? ((student.groupIds || []).map((gid: ObjectId) => groupMap.get(String(gid))?.name).filter((n: string | undefined) => !!n) as string[])
             : [];
         const udoc = student?.boundUserId ? (udocs as any)[student.boundUserId] : null;
         // Legacy algorithm: each award is independent (no occurrence grouping).
@@ -537,30 +525,34 @@ export async function listLeaderboard(): Promise<LeaderboardRow[]> {
         });
         return {
             person,
-            student: student ? {
-                _id: student._id,
-                studentId: student.studentId,
-                realName: student.realName,
-                schoolId: student.schoolId,
-                schoolName: school?.name || '—',
-                groupNames,
-                boundUserId: student.boundUserId,
-                enrollmentYear: student.enrollmentYear ?? null,
-            } : {
-                _id: person.studentDocId,
-                studentId: '—',
-                realName: '（学生档案已删除）',
-                schoolId: person.studentDocId,
-                schoolName: '—',
-                groupNames: [],
-                boundUserId: null,
-                enrollmentYear: null,
-            },
-            user: udoc ? {
-                uname: udoc.uname,
-                nAccept: udoc.nAccept || 0,
-                avatarUrl: (udoc as any).avatarUrl || '',
-            } : null,
+            student: student
+                ? {
+                      _id: student._id,
+                      studentId: student.studentId,
+                      realName: student.realName,
+                      schoolId: student.schoolId,
+                      schoolName: school?.name || '—',
+                      groupNames,
+                      boundUserId: student.boundUserId,
+                      enrollmentYear: student.enrollmentYear ?? null,
+                  }
+                : {
+                      _id: person.studentDocId,
+                      studentId: '—',
+                      realName: '（学生档案已删除）',
+                      schoolId: person.studentDocId,
+                      schoolName: '—',
+                      groupNames: [],
+                      boundUserId: null,
+                      enrollmentYear: null,
+                  },
+            user: udoc
+                ? {
+                      uname: udoc.uname,
+                      nAccept: udoc.nAccept || 0,
+                      avatarUrl: (udoc as any).avatarUrl || '',
+                  }
+                : null,
             totalScore,
             awardCount: (person.awards || []).length,
             rank: 0, // assigned below
@@ -589,7 +581,11 @@ export async function listLeaderboard(): Promise<LeaderboardRow[]> {
  * 回 409（对抗性审查 G8）。
  */
 export async function addAwardImage(
-    personId: ObjectId, awardIndex: number, url: string, setCover = false, expectType?: string,
+    personId: ObjectId,
+    awardIndex: number,
+    url: string,
+    setCover = false,
+    expectType?: string,
 ): Promise<string[] | null> {
     const scopedPerson = await requireScopedPerson(personId);
     const filter: Record<string, unknown> = {
@@ -653,25 +649,24 @@ export interface GalleryCard {
  * gpltYear），两者皆缺进 year=null 分组。照片取组内所有成员奖项的并集。
  */
 export async function buildGallery(): Promise<{ years: Array<{ year: number | null; ladder: GalleryCard[]; icpc: GalleryCard[] }> }> {
-    const [people, awardTypes] = await Promise.all([
-        listPeople(),
-        listAwardTypes({ includeHidden: true }),
-    ]);
+    const [people, awardTypes] = await Promise.all([listPeople(), listAwardTypes({ includeHidden: true })]);
     await applyGpltStoreScores(people);
     const typeMap = new Map(awardTypes.map((t) => [t.key, t]));
 
     const studentIds = people.map((p) => p.studentDocId);
     const students = studentIds.length
-        ? await studentsColl.find({
-            _id: { $in: studentIds },
-            domainId: RANKBOARD_DOMAIN,
-        }).toArray()
+        ? await studentsColl
+              .find({
+                  _id: { $in: studentIds },
+                  domainId: RANKBOARD_DOMAIN,
+              })
+              .toArray()
         : [];
     const studentMap = new Map<string, any>(students.map((s) => [String(s._id), s]));
 
     const awardYear = (a: Award): number | null => {
         if (a.gpltYear) return a.gpltYear;
-        const y = a.date ? Number.parseInt(String(a.date).slice(0, 4), 10) : NaN;
+        const y = a.date ? Number.parseInt(String(a.date).slice(0, 4), 10) : Number.NaN;
         return Number.isInteger(y) && y >= 2000 && y <= 2100 ? y : gpltYearFromContest(a.contest);
     };
 
@@ -683,21 +678,19 @@ export async function buildGallery(): Promise<{ years: Array<{ year: number | nu
         const student = studentMap.get(String(p.studentDocId));
         (p.awards || []).forEach((a, awardIndex) => {
             const isLadderTeam = String(a.type).startsWith('ladder_team');
-            const isIcpc = /^(icpc|ccpc)/.test(String(a.type));
+            const isIcpc = /^(?:icpc|ccpc)/.test(String(a.type));
             if (!isLadderTeam && !isIcpc) return;
             const year = awardYear(a);
             const t = typeMap.get(a.type);
             // ICPC key 必须含奖级（a.type）：同场比赛里 team 都为空的金奖队和
             // 铜奖队成员否则会混进同一张卡（对抗性审查 #5）。
-            const key = isLadderTeam
-                ? `L|${year}|${a.type}|${a.team || ''}`
-                : `I|${year}|${a.contest || ''}|${a.type}|${a.team || ''}`;
+            const key = isLadderTeam ? `L|${year}|${a.type}|${a.team || ''}` : `I|${year}|${a.contest || ''}|${a.type}|${a.team || ''}`;
             let card = cards.get(key);
             if (!card) {
                 card = {
                     kind: isLadderTeam ? 'ladder' : 'icpc',
                     year,
-                    title: isLadderTeam ? (t?.name || a.type) : (a.contest || t?.name || a.type),
+                    title: isLadderTeam ? t?.name || a.type : a.contest || t?.name || a.type,
                     typeKey: a.type,
                     typeName: t?.name || a.type,
                     team: a.team || null,
@@ -750,8 +743,12 @@ export async function buildGallery(): Promise<{ years: Array<{ year: number | nu
     });
     for (const y of years) {
         // 奖级高的排前面（order 小 = 奖级高），同级按队名稳定排序。
-        y.ladder.sort((a, b) => (typeMap.get(a.typeKey)?.order ?? 999) - (typeMap.get(b.typeKey)?.order ?? 999) || (a.team || '').localeCompare(b.team || ''));
-        y.icpc.sort((a, b) => (typeMap.get(a.typeKey)?.order ?? 999) - (typeMap.get(b.typeKey)?.order ?? 999) || (a.title || '').localeCompare(b.title || ''));
+        y.ladder.sort(
+            (a, b) => (typeMap.get(a.typeKey)?.order ?? 999) - (typeMap.get(b.typeKey)?.order ?? 999) || (a.team || '').localeCompare(b.team || ''),
+        );
+        y.icpc.sort(
+            (a, b) => (typeMap.get(a.typeKey)?.order ?? 999) - (typeMap.get(b.typeKey)?.order ?? 999) || (a.title || '').localeCompare(b.title || ''),
+        );
     }
     return { years };
 }

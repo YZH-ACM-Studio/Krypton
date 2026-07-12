@@ -1,8 +1,4 @@
-import {
-  createContext,
-  type PropsWithChildren,
-  useContext,
-} from 'react';
+import { createContext, type PropsWithChildren, useContext } from 'react';
 
 export interface KryptonUrls {
   home: string;
@@ -111,15 +107,8 @@ declare global {
 
 const BootstrapContext = createContext<KryptonBootstrap | null>(null);
 
-export function BootstrapProvider({
-  bootstrap,
-  children,
-}: PropsWithChildren<{ bootstrap: KryptonBootstrap }>) {
-  return (
-    <BootstrapContext.Provider value={bootstrap}>
-      {children}
-    </BootstrapContext.Provider>
-  );
+export function BootstrapProvider({ bootstrap, children }: PropsWithChildren<{ bootstrap: KryptonBootstrap }>) {
+  return <BootstrapContext.Provider value={bootstrap}>{children}</BootstrapContext.Provider>;
 }
 
 export function useBootstrap() {

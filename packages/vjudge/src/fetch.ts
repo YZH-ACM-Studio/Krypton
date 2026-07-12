@@ -19,8 +19,10 @@ export class BasicFetcher {
     UA: string = defaultUA;
 
     constructor(
-        public account: RemoteAccount, private defaultEndpoint: string,
-        private formType: 'form' | 'json', public logger: Logger,
+        public account: RemoteAccount,
+        private defaultEndpoint: string,
+        private formType: 'form' | 'json',
+        public logger: Logger,
         public fetchOptions: FetchOptions = {},
     ) {
         if (account.cookie) this.cookie = account.cookie;
@@ -41,7 +43,7 @@ export class BasicFetcher {
         const $dom = new JSDOM(html);
         $dom.window.html = html;
         $dom.window.headers = headers;
-        return $dom.window as DOMWindow & { html: string, headers: any };
+        return $dom.window as DOMWindow & { html: string; headers: any };
     }
 
     post(url: string, type = this.formType) {

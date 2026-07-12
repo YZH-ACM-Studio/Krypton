@@ -15,8 +15,16 @@ const collectionStub = {
     countDocuments: async () => 0,
     distinct: async () => [],
     estimatedDocumentCount: async () => 0,
-    find: () => ({ project() { return this; }, toArray: async () => [] }),
-    insertOne: async (doc: any) => { insertedRecords.push(doc); return { insertedId: doc._id }; },
+    find: () => ({
+        project() {
+            return this;
+        },
+        toArray: async () => [],
+    }),
+    insertOne: async (doc: any) => {
+        insertedRecords.push(doc);
+        return { insertedId: doc._id };
+    },
 };
 
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
@@ -24,7 +32,13 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '@hydrooj/common') {
         return { ...originalLoad.call(this, request, parent, isMain), STATUS_TEXTS: {} };
     }
-    if (request === '@hydrooj/utils') return { Logger: class { error() {} } };
+    if (request === '@hydrooj/utils') {
+        return {
+            Logger: class {
+                error() {}
+            },
+        };
+    }
     if (request === '../context') return { Context: class {} };
     if (request === '../error') {
         return { ProblemNotFoundError: class extends Error {}, ValidationError: class extends Error {} };
@@ -47,8 +61,13 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
         return {
             claimStructureLockForSubmission: async () => undefined,
             get: async () => ({
-                domainId: 'system', docId: 7, owner: 1, reference: null,
-                data: ['1.in', '1.out'], config: problemConfig, problemKind,
+                domainId: 'system',
+                docId: 7,
+                owner: 1,
+                reference: null,
+                data: ['1.in', '1.out'],
+                config: problemConfig,
+                problemKind,
             }),
         };
     }
@@ -56,7 +75,10 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === './task') {
         return {
             deleteMany: async () => undefined,
-            addMany: async (tasks: any[]) => { queuedTasks.push(...tasks); return tasks; },
+            addMany: async (tasks: any[]) => {
+                queuedTasks.push(...tasks);
+                return tasks;
+            },
         };
     }
     return originalLoad.call(this, request, parent, isMain);
@@ -82,8 +104,12 @@ beforeEach(() => {
 describe('record judge problem config', () => {
     it('queues programming problems without config.yaml for automatic testdata discovery', async () => {
         const record = {
-            _id: new ObjectId(), domainId: 'system', pid: 7, uid: 42,
-            lang: 'cc', code: 'int main() {}',
+            _id: new ObjectId(),
+            domainId: 'system',
+            pid: 7,
+            uid: 42,
+            lang: 'cc',
+            code: 'int main() {}',
         } as any;
 
         await recordModel.judge('system', record);
@@ -96,8 +122,12 @@ describe('record judge problem config', () => {
     it('fails fast instead of queueing a malformed non-empty config', async () => {
         problemConfig = 'type: [invalid';
         const record = {
-            _id: new ObjectId(), domainId: 'system', pid: 7, uid: 42,
-            lang: 'cc', code: 'int main() {}',
+            _id: new ObjectId(),
+            domainId: 'system',
+            pid: 7,
+            uid: 42,
+            lang: 'cc',
+            code: 'int main() {}',
         } as any;
 
         let error: unknown;
@@ -114,19 +144,31 @@ describe('record judge problem config', () => {
     it('queues a valid function problem with its private template and physical testdata', async () => {
         problemKind = 'function';
         problemConfig = {
-            type: 'fill_function', subType: 'function', langs: ['cc.cc17'],
+            type: 'fill_function',
+            subType: 'function',
+            langs: ['cc.cc17'],
             main: { mode: 'function', lang: 'cc.cc17' },
             template: {
-                lang: 'cc.cc17', source: 'int solve() { return 1; }', sourceHash: 'hash',
-                regions: [{
-                    id: 'solve', start: { line: 0, col: 0 }, end: { line: 0, col: 25 },
-                }],
+                lang: 'cc.cc17',
+                source: 'int solve() { return 1; }',
+                sourceHash: 'hash',
+                regions: [
+                    {
+                        id: 'solve',
+                        start: { line: 0, col: 0 },
+                        end: { line: 0, col: 25 },
+                    },
+                ],
             },
             cases: [{ input: '1.in', output: '1.out' }],
         };
         const record = {
-            _id: new ObjectId(), domainId: 'system', pid: 7, uid: 42,
-            lang: 'cc.cc17', code: JSON.stringify({ solve: 'int solve() { return 2; }' }),
+            _id: new ObjectId(),
+            domainId: 'system',
+            pid: 7,
+            uid: 42,
+            lang: 'cc.cc17',
+            code: JSON.stringify({ solve: 'int solve() { return 2; }' }),
         } as any;
 
         await recordModel.judge('system', record);
@@ -139,19 +181,31 @@ describe('record judge problem config', () => {
     it('rejects a function submission whose language differs from the immutable template', async () => {
         problemKind = 'function';
         problemConfig = {
-            type: 'fill_function', subType: 'function', langs: ['cc.cc17'],
+            type: 'fill_function',
+            subType: 'function',
+            langs: ['cc.cc17'],
             main: { mode: 'function', lang: 'cc.cc17' },
             template: {
-                lang: 'cc.cc17', source: 'int solve() { return 1; }', sourceHash: 'hash',
-                regions: [{
-                    id: 'solve', start: { line: 0, col: 0 }, end: { line: 0, col: 25 },
-                }],
+                lang: 'cc.cc17',
+                source: 'int solve() { return 1; }',
+                sourceHash: 'hash',
+                regions: [
+                    {
+                        id: 'solve',
+                        start: { line: 0, col: 0 },
+                        end: { line: 0, col: 25 },
+                    },
+                ],
             },
             cases: [{ input: '1.in', output: '1.out' }],
         };
         const record = {
-            _id: new ObjectId(), domainId: 'system', pid: 7, uid: 42,
-            lang: 'py.py3', code: JSON.stringify({ solve: 'def solve(): return 2' }),
+            _id: new ObjectId(),
+            domainId: 'system',
+            pid: 7,
+            uid: 42,
+            lang: 'py.py3',
+            code: JSON.stringify({ solve: 'def solve(): return 2' }),
         } as any;
 
         const error = await recordModel.judge('system', record).catch((caught) => caught);
@@ -162,13 +216,12 @@ describe('record judge problem config', () => {
 
     it('inserts a manual submission as already-judged waiting without enqueueing a task', async () => {
         const before = new Date();
-        await recordModel.add(
-            'system', 7, 42, '_', 'answer\r\nkept', true,
-            { contest: new ObjectId(), type: 'manual' },
-        );
+        await recordModel.add('system', 7, 42, '_', 'answer\r\nkept', true, { contest: new ObjectId(), type: 'manual' });
         expect(insertedRecords).to.have.length(1);
         expect(insertedRecords[0]).to.include({
-            status: 0, code: 'answer\r\nkept', manualPending: true,
+            status: 0,
+            code: 'answer\r\nkept',
+            manualPending: true,
         });
         expect(insertedRecords[0].judgeAt).to.be.instanceOf(Date);
         expect(insertedRecords[0].judgeAt.getTime()).to.be.at.least(before.getTime());

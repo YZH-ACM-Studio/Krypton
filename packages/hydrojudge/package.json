@@ -13,6 +13,8 @@
         "@opentelemetry/sdk-node": "^0.215.0",
         "@zip.js/zip.js": "^2.8.26",
         "cac": "^7.0.0",
+        "fs-extra": "^11.3.4",
+        "hydrooj": "workspace:^",
         "p-queue": "^9.1.2",
         "schemastery": "^3.18.0",
         "semver": "^7.7.4",
@@ -24,6 +26,7 @@
     "license": "AGPL-3.0-or-later",
     "devDependencies": {
         "@types/shell-quote": "^1.7.5",
+        "@types/superagent": "^8.1.9",
         "@types/ws": "^8.18.1"
     }
 }

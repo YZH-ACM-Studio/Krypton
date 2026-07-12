@@ -10,7 +10,9 @@ class TestPermissionError extends Error {
     name = 'PermissionError';
     status = 403;
 }
-class TestForbiddenError extends Error { status = 403; }
+class TestForbiddenError extends Error {
+    status = 403;
+}
 
 const calls = {
     adds: [] as any[],
@@ -42,12 +44,16 @@ const importColl = {
     async insertOne() {
         if (insertError) throw insertError;
     },
-    async updateOne(...args: any[]) { calls.updates.push(args); },
+    async updateOne(...args: any[]) {
+        calls.updates.push(args);
+    },
 };
 
 const dbStub = {
     collection: () => importColl,
-    async ensureIndexes() { return undefined; },
+    async ensureIndexes() {
+        return undefined;
+    },
 };
 
 const problemStub = {
@@ -56,11 +62,13 @@ const problemStub = {
     },
     canMaintainProblem(user: any, pdoc: any) {
         calls.events.push(`maintain:${pdoc?.docId || 'missing'}`);
-        return !!pdoc
-            && user._problemAclLoaded === true
-            && user._problemAclDomainId === pdoc.domainId
-            && !user._aclFencedPids.has(pdoc.docId)
-            && (pdoc.owner === user._id || user._maintainedPids.has(pdoc.docId));
+        return (
+            !!pdoc &&
+            user._problemAclLoaded === true &&
+            user._problemAclDomainId === pdoc.domainId &&
+            !user._aclFencedPids.has(pdoc.docId) &&
+            (pdoc.owner === user._id || user._maintainedPids.has(pdoc.docId))
+        );
     },
     async get(domainId: string, docId: number) {
         calls.gets.push({ domainId, docId });
@@ -79,9 +87,7 @@ const problemStub = {
         calls.events.push(`edit:${claim.pid}:claim:${claim.requestId}`);
         calls.edits.push({ domainId: claim.domainId, docId: claim.pid, patch, claim });
     },
-    async withAuthorizedWriteClaim(
-        domainId: string, docId: number, user: any, operation: string, work: (claim: any) => Promise<any>,
-    ) {
+    async withAuthorizedWriteClaim(domainId: string, docId: number, user: any, operation: string, work: (claim: any) => Promise<any>) {
         const loaded = await (global as any).Hydro.model.permits.loadAclForUser(domainId, user._id);
         Object.assign(user, {
             _permitPids: loaded.permitPids,
@@ -95,13 +101,7 @@ const problemStub = {
         calls.events.push(`claim:${operation}:${docId}`);
         return work({ domainId, pid: docId, actor: user._id, requestId: `claim-${docId}` });
     },
-    async withAuthorizedStructuralWriteClaim(
-        domainId: string,
-        docId: number,
-        user: any,
-        operation: string,
-        work: (claim: any) => Promise<any>,
-    ) {
+    async withAuthorizedStructuralWriteClaim(domainId: string, docId: number, user: any, operation: string, work: (claim: any) => Promise<any>) {
         return problemStub.withAuthorizedWriteClaim(domainId, docId, user, operation, work);
     },
     async add(...args: any[]) {
@@ -109,7 +109,10 @@ const problemStub = {
         calls.adds.push(args);
         return 500;
     },
-    async del(...args: any[]) { calls.events.push('del'); calls.dels.push(args); },
+    async del(...args: any[]) {
+        calls.events.push('del');
+        calls.dels.push(args);
+    },
     async addTestdata(...args: any[]) {
         calls.events.push(`addTestdata:${args[2]}`);
         calls.addTestdata.push(args);
@@ -131,11 +134,15 @@ const problemStub = {
 function noopDecorator() {
     return (_target: unknown, _key: string, descriptor: PropertyDescriptor) => descriptor;
 }
-class HandlerStub { }
+class HandlerStub {}
 const hydroojStub = {
-    Context: class { },
+    Context: class {},
     Handler: HandlerStub,
-    OplogModel: { async log(...args: any[]) { calls.oplogs.push(args); } },
+    OplogModel: {
+        async log(...args: any[]) {
+            calls.oplogs.push(args);
+        },
+    },
     param: noopDecorator,
     PERM,
     PermissionError: TestPermissionError,
@@ -149,7 +156,9 @@ async function requireAuthTokenStub(handler: any, channel: string) {
 }
 
 class TestLogger {
-    error() { return undefined; }
+    error() {
+        return undefined;
+    }
 }
 
 const routes: Record<string, any> = {};
@@ -177,7 +186,9 @@ try {
 }
 
 void crawlerModule.apply({
-    Route(name: string, _path: string, HandlerClass: any) { routes[name] = HandlerClass; },
+    Route(name: string, _path: string, HandlerClass: any) {
+        routes[name] = HandlerClass;
+    },
 } as any);
 
 function makeUser(uid = 42, overrides: Record<string, unknown> = {}) {
@@ -255,7 +266,9 @@ describe('crawler problem ACL', () => {
             _maintainedPids: new Set([99]),
             _aclFencedPids: new Set<number>(),
         });
-        (global as any).Hydro.model.permits.loadAclForUser = async () => { throw new Error('db down'); };
+        (global as any).Hydro.model.permits.loadAclForUser = async () => {
+            throw new Error('db down');
+        };
         const handler = makeHandler('crawler_problem');
         const error = await captureFailure(() => handler.prepare());
         expect(error?.name).to.equal('PermissionError');
@@ -274,9 +287,7 @@ describe('crawler problem ACL', () => {
             if (pdoc) problemDocs.set(20, pdoc);
             const handler = makeHandler('crawler_problem');
             await handler.prepare();
-            return captureFailure(() => handler.post(
-                {}, 'Title', 'Content', 'https://source', 'src', '', 1, 'A', '1000ms', '256m',
-            ));
+            return captureFailure(() => handler.post({}, 'Title', 'Content', 'https://source', 'src', '', 1, 'A', '1000ms', '256m'));
         };
         const missing = await run(null);
         const unauthorized = await run({ domainId: 'token-domain', docId: 20, owner: 7, hidden: true });
@@ -292,9 +303,7 @@ describe('crawler problem ACL', () => {
         const handler = makeHandler('crawler_testdata');
         await handler.prepare();
         await handler.post({}, [{ cid: 1, problemId: 'A', cases: [{ input: '1', output: '2' }] }]);
-        expect(handler.response.body.results).to.deep.equal([
-            { cid: 1, problemId: 'A', ok: false, error: 'not_found' },
-        ]);
+        expect(handler.response.body.results).to.deep.equal([{ cid: 1, problemId: 'A', ok: false, error: 'not_found' }]);
         expect(calls.delTestdata).to.deep.equal([]);
         expect(calls.addTestdata).to.deep.equal([]);
         expect(calls.edits).to.deep.equal([]);
@@ -304,7 +313,10 @@ describe('crawler problem ACL', () => {
         loadedAcl.maintainedPids.add(30);
         keyRecord = { domainId: 'token-domain', cid: 1, problemId: 'A', docId: 30, timeLimit: '1s', memoryLimit: '256m' };
         problemDocs.set(30, {
-            domainId: 'token-domain', docId: 30, owner: 7, hidden: true,
+            domainId: 'token-domain',
+            docId: 30,
+            owner: 7,
+            hidden: true,
             data: [{ name: 'old.in' }],
         });
         const handler = makeHandler('crawler_testdata');
@@ -313,9 +325,7 @@ describe('crawler problem ACL', () => {
         const firstMutation = calls.events.findIndex((event) => event.startsWith('delTestdata') || event.startsWith('addTestdata'));
         const claim = calls.events.indexOf('claim:crawler-testdata-replace:30');
         const publish = calls.events.findIndex((event) => event.startsWith('edit:30:claim:'));
-        const maintainIndexes = calls.events
-            .map((event, index) => event === 'maintain:30' ? index : -1)
-            .filter((index) => index >= 0);
+        const maintainIndexes = calls.events.map((event, index) => (event === 'maintain:30' ? index : -1)).filter((index) => index >= 0);
         expect(maintainIndexes).to.have.length.at.least(2);
         expect(maintainIndexes[0]).to.be.lessThan(firstMutation);
         expect(maintainIndexes.at(-1)).to.be.lessThan(claim);
@@ -326,10 +336,14 @@ describe('crawler problem ACL', () => {
 
     it('loses the write-claim race to a newly fenced target before any storage mutation', async () => {
         const maintained = {
-            permitPids: new Set([30]), maintainedPids: new Set([30]), fencedPids: new Set<number>(),
+            permitPids: new Set([30]),
+            maintainedPids: new Set([30]),
+            fencedPids: new Set<number>(),
         };
         const fenced = {
-            permitPids: new Set([30]), maintainedPids: new Set([30]), fencedPids: new Set([30]),
+            permitPids: new Set([30]),
+            maintainedPids: new Set([30]),
+            fencedPids: new Set([30]),
         };
         // prepare, target preflight, atomic write-claim authorization
         loadedAclSequence = [maintained, maintained, fenced];
@@ -352,9 +366,7 @@ describe('crawler problem ACL', () => {
         insertError = Object.assign(new Error('duplicate'), { code: 11000 });
         const handler = makeHandler('crawler_problem');
         await handler.prepare();
-        const error = await captureFailure(() => handler.post(
-            {}, 'Title', 'Content', 'https://source', 'src', '', 1, 'A', '1000ms', '256m',
-        ));
+        const error = await captureFailure(() => handler.post({}, 'Title', 'Content', 'https://source', 'src', '', 1, 'A', '1000ms', '256m'));
         expect(error?.name).to.equal('PermissionError');
         expect(calls.edits).to.deep.equal([]);
         expect(calls.dels).to.have.length(1);

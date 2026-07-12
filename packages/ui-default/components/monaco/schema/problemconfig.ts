@@ -1,9 +1,27 @@
 import type { JSONSchema7 } from 'json-schema';
 
 export const testlibCheckers = [
-  'acmp', 'caseicmp', 'casencmp', 'casewcmp', 'dcmp', 'fcmp', 'hcmp',
-  'icmp', 'lcmp', 'ncmp', 'nyesno', 'pointscmp', 'pointsinfo',
-  'rcmp', 'rcmp4', 'rcmp6', 'rcmp9', 'rncmp', 'uncmp', 'wcmp', 'yesno',
+  'acmp',
+  'caseicmp',
+  'casencmp',
+  'casewcmp',
+  'dcmp',
+  'fcmp',
+  'hcmp',
+  'icmp',
+  'lcmp',
+  'ncmp',
+  'nyesno',
+  'pointscmp',
+  'pointsinfo',
+  'rcmp',
+  'rcmp4',
+  'rcmp6',
+  'rcmp9',
+  'rncmp',
+  'uncmp',
+  'wcmp',
+  'yesno',
 ];
 
 const problemConfigSchema: JSONSchema7 = {
@@ -72,10 +90,7 @@ const problemConfigSchema: JSONSchema7 = {
     target: { type: 'string' },
     checker_type: { enum: ['default', 'lemon', 'syzoj', 'hustoj', 'testlib', 'strict', 'qduoj', 'kattis'] },
     checker: {
-      oneOf: [
-        { type: 'string', enum: testlibCheckers },
-        { $ref: '#/definitions/compilableFile' },
-      ],
+      oneOf: [{ type: 'string', enum: testlibCheckers }, { $ref: '#/definitions/compilableFile' }],
     },
     interactor: { $ref: '#/definitions/compilableFile' },
     manager: { $ref: '#/definitions/compilableFile' },

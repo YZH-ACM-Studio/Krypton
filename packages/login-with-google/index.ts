@@ -1,6 +1,4 @@
-import {
-    Context, Handler, Schema, Service, superagent, SystemModel, TokenModel, UserFacingError,
-} from 'hydrooj';
+import { Context, Handler, Schema, Service, superagent, SystemModel, TokenModel, UserFacingError } from 'hydrooj';
 
 function unescapedString(escapedString: string) {
     escapedString += Array.from({ length: 5 - (escapedString.length % 4) }).join('=');
@@ -40,22 +38,16 @@ export default class GoogleOAuthService extends Service {
             text: 'Login with Google',
             name: 'Google',
             canRegister: config.canRegister,
-            callback: async function callback(this: Handler, {
-                state, code, error,
-            }) {
+            callback: async function callback(this: Handler, { state, code, error }) {
                 if (error) throw new UserFacingError(error);
-                const [url, s] = await Promise.all([
-                    SystemModel.get('server.url'),
-                    TokenModel.get(state, TokenModel.TYPE_OAUTH),
-                ]);
-                const res = await superagent.post('https://oauth2.googleapis.com/token')
-                    .send({
-                        client_id: config.id,
-                        client_secret: config.secret,
-                        code,
-                        grant_type: 'authorization_code',
-                        redirect_uri: `${url}oauth/google/callback`,
-                    });
+                const [url, s] = await Promise.all([SystemModel.get('server.url'), TokenModel.get(state, TokenModel.TYPE_OAUTH)]);
+                const res = await superagent.post('https://oauth2.googleapis.com/token').send({
+                    client_id: config.id,
+                    client_secret: config.secret,
+                    code,
+                    grant_type: 'authorization_code',
+                    redirect_uri: `${url}oauth/google/callback`,
+                });
                 const payload = decodeJWT(res.body.id_token).payload;
                 await TokenModel.del(state, TokenModel.TYPE_OAUTH);
                 this.response.redirect = s.redirect;
@@ -70,7 +62,7 @@ export default class GoogleOAuthService extends Service {
                 const [state] = await TokenModel.add(TokenModel.TYPE_OAUTH, 600, { redirect: this.request.referer });
                 const url = SystemModel.get('server.url');
                 const scope = encodeURIComponent('https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile');
-                // eslint-disable-next-line max-len
+
                 this.response.redirect = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${config.id}&response_type=code&redirect_uri=${url}oauth/google/callback&scope=${scope}&state=${state}`;
             },
         });

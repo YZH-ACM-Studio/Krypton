@@ -49,7 +49,8 @@ export default class OauthModel extends Service {
     }
 
     async [Service.init]() {
-        await this.ctx.db.ensureIndexes(this.coll,
+        await this.ctx.db.ensureIndexes(
+            this.coll,
             { key: { platform: 1, id: 1 }, name: 'platform_id', unique: true },
             { key: { uid: 1, platform: 1 }, name: 'uid_platform' },
         );
@@ -62,11 +63,7 @@ export default class OauthModel extends Service {
     }
 
     async set(platform: string, id: string, uid: number) {
-        const res = await this.coll.findOneAndUpdate(
-            { platform, id },
-            { $set: { uid } },
-            { upsert: true, returnDocument: 'after' },
-        );
+        const res = await this.coll.findOneAndUpdate({ platform, id }, { $set: { uid } }, { upsert: true, returnDocument: 'after' });
         return res?.uid;
     }
 

@@ -21,8 +21,7 @@ import * as React from 'react';
 import * as RScrollArea from '@radix-ui/react-scroll-area';
 import { cn } from '@/lib/cn';
 
-export interface ScrollAreaProps
-  extends React.ComponentPropsWithoutRef<typeof RScrollArea.Root> {
+export interface ScrollAreaProps extends React.ComponentPropsWithoutRef<typeof RScrollArea.Root> {
   /** Class applied to the inner viewport (the actual scroll node). */
   viewportClassName?: string;
   /** Show both bars (`'both'`), only vertical (default), or only horizontal. */
@@ -52,20 +51,9 @@ const viewportLayoutClass = (layout: 'table' | 'block' | 'flex') => {
 };
 
 export const ScrollArea = React.forwardRef<HTMLDivElement, ScrollAreaProps>(
-  function ScrollArea(
-    {
-      className, viewportClassName, orientation = 'vertical',
-      type = 'auto', children, viewportRef, viewportLayout = 'table', ...props
-    },
-    ref,
-  ) {
+  ({ className, viewportClassName, orientation = 'vertical', type = 'auto', children, viewportRef, viewportLayout = 'table', ...props }, ref) => {
     return (
-      <RScrollArea.Root
-        ref={ref}
-        type={type}
-        className={cn('relative overflow-hidden', className)}
-        {...props}
-      >
+      <RScrollArea.Root ref={ref} type={type} className={cn('relative overflow-hidden', className)} {...props}>
         <RScrollArea.Viewport
           ref={viewportRef}
           className={cn(
@@ -82,41 +70,31 @@ export const ScrollArea = React.forwardRef<HTMLDivElement, ScrollAreaProps>(
         >
           {children}
         </RScrollArea.Viewport>
-        {(orientation === 'vertical' || orientation === 'both') ? (
-          <ScrollBar orientation="vertical" />
-        ) : null}
-        {(orientation === 'horizontal' || orientation === 'both') ? (
-          <ScrollBar orientation="horizontal" />
-        ) : null}
+        {orientation === 'vertical' || orientation === 'both' ? <ScrollBar orientation="vertical" /> : null}
+        {orientation === 'horizontal' || orientation === 'both' ? <ScrollBar orientation="horizontal" /> : null}
         <RScrollArea.Corner className="bg-transparent" />
       </RScrollArea.Root>
     );
   },
 );
 
-export const ScrollBar = React.forwardRef<
-  HTMLDivElement,
-  React.ComponentPropsWithoutRef<typeof RScrollArea.ScrollAreaScrollbar>
->(function ScrollBar({ className, orientation = 'vertical', ...props }, ref) {
-  return (
-    <RScrollArea.ScrollAreaScrollbar
-      ref={ref}
-      orientation={orientation}
-      className={cn(
-        'flex touch-none select-none transition-colors',
-        orientation === 'vertical'
-          ? 'h-full w-2.5 border-l border-l-transparent p-px'
-          : 'h-2.5 w-full flex-col border-t border-t-transparent p-px',
-        className,
-      )}
-      {...props}
-    >
-      <RScrollArea.ScrollAreaThumb
+export const ScrollBar = React.forwardRef<HTMLDivElement, React.ComponentPropsWithoutRef<typeof RScrollArea.ScrollAreaScrollbar>>(
+  ({ className, orientation = 'vertical', ...props }, ref) => {
+    return (
+      <RScrollArea.ScrollAreaScrollbar
+        ref={ref}
+        orientation={orientation}
         className={cn(
-          'relative flex-1 rounded-full bg-muted-foreground/30 transition-colors',
-          'hover:bg-muted-foreground/55',
+          'flex touch-none select-none transition-colors',
+          orientation === 'vertical' ? 'h-full w-2.5 border-l border-l-transparent p-px' : 'h-2.5 w-full flex-col border-t border-t-transparent p-px',
+          className,
         )}
-      />
-    </RScrollArea.ScrollAreaScrollbar>
-  );
-});
+        {...props}
+      >
+        <RScrollArea.ScrollAreaThumb
+          className={cn('relative flex-1 rounded-full bg-muted-foreground/30 transition-colors', 'hover:bg-muted-foreground/55')}
+        />
+      </RScrollArea.ScrollAreaScrollbar>
+    );
+  },
+);

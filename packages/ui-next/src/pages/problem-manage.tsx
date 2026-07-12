@@ -39,7 +39,7 @@ import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } 
 type R = Record<string, any>;
 
 function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | undefined) {
-  return uid != null ? udict[String(uid)] ?? null : null;
+  return uid != null ? (udict[String(uid)] ?? null) : null;
 }
 
 function formatSize(bytes: number) {
@@ -70,16 +70,14 @@ export function ProblemFilesPage() {
   const [renamingType, setRenamingType] = useState<'testdata' | 'additional_file'>('testdata');
   const [showGenerate, setShowGenerate] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<'testdata' | 'additional_file' | null>(null);
-  const generatorCandidates = testdata.filter((file) => (
-    !file.name.endsWith('.in')
-    && !file.name.endsWith('.out')
-    && !file.name.endsWith('.ans')
-    && file.name !== 'config.yaml'
-  ));
+  const generatorCandidates = testdata.filter(
+    (file) => !file.name.endsWith('.in') && !file.name.endsWith('.out') && !file.name.endsWith('.ans') && file.name !== 'config.yaml',
+  );
 
   const toggleFile = (set: Set<string>, setFn: (s: Set<string>) => void, name: string) => {
     const next = new Set(set);
-    if (next.has(name)) next.delete(name); else next.add(name);
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
     setFn(next);
   };
 
@@ -121,10 +119,11 @@ export function ProblemFilesPage() {
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => setUploadTarget((current) => current === type ? null : type as 'testdata' | 'additional_file')}
+              onClick={() => setUploadTarget((current) => (current === type ? null : (type as 'testdata' | 'additional_file')))}
               aria-expanded={uploadTarget === type}
             >
-              <Upload className="mr-1 size-3" />上传
+              <Upload className="mr-1 size-3" />
+              上传
             </Button>
           )}
           {selected.size > 0 && (
@@ -137,13 +136,15 @@ export function ProblemFilesPage() {
                   <input key={f} type="hidden" name="files" value={f} />
                 ))}
                 <Button type="submit" size="sm" variant="outline">
-                  <Download className="mr-1 size-3" />下载 ({selected.size})
+                  <Download className="mr-1 size-3" />
+                  下载 ({selected.size})
                 </Button>
               </form>
               {/* Rename */}
               {!reference && (
                 <Button size="sm" variant="outline" onClick={() => startRename(selected, type as 'testdata' | 'additional_file')}>
-                  <Pencil className="mr-1 size-3" />重命名
+                  <Pencil className="mr-1 size-3" />
+                  重命名
                 </Button>
               )}
               {/* Delete */}
@@ -155,7 +156,8 @@ export function ProblemFilesPage() {
                     <input key={f} type="hidden" name="files" value={f} />
                   ))}
                   <Button type="submit" size="sm" variant="destructive">
-                    <Trash2 className="mr-1 size-3" />删除 ({selected.size})
+                    <Trash2 className="mr-1 size-3" />
+                    删除 ({selected.size})
                   </Button>
                 </form>
               )}
@@ -183,10 +185,7 @@ export function ProblemFilesPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-8">
-                  <Checkbox
-                    checked={selected.size === files.length && files.length > 0}
-                    onChange={() => toggleAll(files, selected, setSelected)}
-                  />
+                  <Checkbox checked={selected.size === files.length && files.length > 0} onChange={() => toggleAll(files, selected, setSelected)} />
                 </TableHead>
                 <TableHead>文件名</TableHead>
                 <TableHead className="w-28 text-right">大小</TableHead>
@@ -197,16 +196,10 @@ export function ProblemFilesPage() {
               {files.map((f) => (
                 <TableRow key={f.name} className={selected.has(f.name) ? 'bg-muted/50' : ''}>
                   <TableCell>
-                    <Checkbox
-                      checked={selected.has(f.name)}
-                      onChange={() => toggleFile(selected, setSelected, f.name)}
-                    />
+                    <Checkbox checked={selected.has(f.name)} onChange={() => toggleFile(selected, setSelected, f.name)} />
                   </TableCell>
                   <TableCell>
-                    <a
-                      href={`${problemUrl}/file/${f.name}?type=${type}`}
-                      className="font-mono text-sm text-primary hover:underline"
-                    >
+                    <a href={`${problemUrl}/file/${f.name}?type=${type}`} className="font-mono text-sm text-primary hover:underline">
                       {f.name}
                     </a>
                   </TableCell>
@@ -234,16 +227,21 @@ export function ProblemFilesPage() {
       problemUrl={problemUrl}
       title={pdoc.title || String(pid)}
       pid={String(pid)}
-      actions={(
+      actions={
         <Button asChild variant="outline" size="sm">
-          <a href={problemUrl}><ArrowLeft className="mr-1 size-3.5" />查看题目</a>
+          <a href={problemUrl}>
+            <ArrowLeft className="mr-1 size-3.5" />
+            查看题目
+          </a>
         </Button>
-      )}
+      }
     >
       <div className="space-y-6">
         {renameKeys.length > 0 ? (
           <section aria-labelledby="rename-heading" className="rounded-2xl border border-primary/30 bg-primary/[0.025] p-5">
-            <h2 id="rename-heading" className="mb-4 text-sm font-semibold">重命名文件</h2>
+            <h2 id="rename-heading" className="mb-4 text-sm font-semibold">
+              重命名文件
+            </h2>
             <form method="post" className="space-y-3">
               <input type="hidden" name="operation" value="rename_files" />
               <input type="hidden" name="type" value={renamingType} />
@@ -261,8 +259,12 @@ export function ProblemFilesPage() {
                 </div>
               ))}
               <div className="flex gap-2">
-                <Button type="submit" size="sm">确认重命名</Button>
-                <Button type="button" size="sm" variant="outline" onClick={() => setRenamingFiles({})}>取消</Button>
+                <Button type="submit" size="sm">
+                  确认重命名
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => setRenamingFiles({})}>
+                  取消
+                </Button>
               </div>
             </form>
           </section>
@@ -275,13 +277,22 @@ export function ProblemFilesPage() {
         ) : null}
 
         <FileSection title="测试数据" files={testdata} type="testdata" selected={selectedTestdata} setSelected={setSelectedTestdata} />
-        <FileSection title="附加文件" files={additionalFile} type="additional_file" selected={selectedAdditional} setSelected={setSelectedAdditional} />
+        <FileSection
+          title="附加文件"
+          files={additionalFile}
+          type="additional_file"
+          selected={selectedAdditional}
+          setSelected={setSelectedAdditional}
+        />
 
         {!reference && testdata.length > 0 ? (
           <section className="rounded-2xl border border-border/70 bg-card/30">
             <header className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="flex items-center gap-2 text-base font-semibold"><Play className="size-4" />生成测试数据</h2>
+                <h2 className="flex items-center gap-2 text-base font-semibold">
+                  <Play className="size-4" />
+                  生成测试数据
+                </h2>
                 <p className="mt-1 text-xs text-muted-foreground">复用现有生成器与标准程序队列。</p>
               </div>
               <Button size="sm" variant="ghost" onClick={() => setShowGenerate((value) => !value)} aria-expanded={showGenerate}>
@@ -322,7 +333,10 @@ export function ProblemFilesPage() {
                       <p className="text-xs text-muted-foreground">输出答案到 stdout 的程序</p>
                     </div>
                   </div>
-                  <Button type="submit" size="sm"><RefreshCw className="mr-1 size-3.5" />生成数据</Button>
+                  <Button type="submit" size="sm">
+                    <RefreshCw className="mr-1 size-3.5" />
+                    生成数据
+                  </Button>
                 </form>
               </div>
             ) : null}
@@ -349,16 +363,13 @@ export function ProblemSolutionPage() {
   const [showForm, setShowForm] = useState(false);
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Button asChild variant="ghost" size="icon">
-            <a href={problemUrl}><ArrowLeft className="size-4" /></a>
+            <a href={problemUrl}>
+              <ArrowLeft className="size-4" />
+            </a>
           </Button>
           <div>
             <h1 className="text-xl font-semibold">题解</h1>
@@ -366,7 +377,8 @@ export function ProblemSolutionPage() {
           </div>
         </div>
         <Button onClick={() => setShowForm((p) => !p)}>
-          <MessageSquare className="mr-1 size-4" />发布题解
+          <MessageSquare className="mr-1 size-4" />
+          发布题解
         </Button>
       </div>
 
@@ -380,7 +392,9 @@ export function ProblemSolutionPage() {
                 <MarkdownEditor name="content" value="" minHeight={320} preferredLang={bs.locale} />
               </div>
               <div className="flex justify-end gap-2">
-                <Button variant="outline" type="button" onClick={() => setShowForm(false)}>取消</Button>
+                <Button variant="outline" type="button" onClick={() => setShowForm(false)}>
+                  取消
+                </Button>
                 <Button type="submit">提交</Button>
               </div>
             </form>
@@ -405,16 +419,15 @@ export function ProblemSolutionPage() {
                     </Avatar>
                     <div>
                       <p className="text-sm font-medium">{owner?.uname || `UID ${ps.owner}`}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {ps.updateAt ? formatRelativeTime(ps.updateAt, bs.locale) : ''}
-                      </p>
+                      <p className="text-xs text-muted-foreground">{ps.updateAt ? formatRelativeTime(ps.updateAt, bs.locale) : ''}</p>
                     </div>
                     <div className="ml-auto flex items-center gap-3">
                       <form method="post" className="inline">
                         <input type="hidden" name="operation" value="upvote" />
                         <input type="hidden" name="psid" value={String(ps._id)} />
                         <button type="submit" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-primary">
-                          <ThumbsUp className="size-3.5" />{ps.vote || 0}
+                          <ThumbsUp className="size-3.5" />
+                          {ps.vote || 0}
                         </button>
                       </form>
                       <form method="post" className="inline">
@@ -438,11 +451,7 @@ export function ProblemSolutionPage() {
 
       {pcount > 1 && (
         <div className="flex justify-center">
-          <Pagination
-            current={page}
-            total={pcount}
-            baseUrl="?"
-          />
+          <Pagination current={page} total={pcount} baseUrl="?" />
         </div>
       )}
     </motion.div>
@@ -482,15 +491,12 @@ export function ProblemStatisticsPage() {
   };
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center gap-3">
         <Button asChild variant="ghost" size="icon">
-          <a href={problemUrl}><ArrowLeft className="size-4" /></a>
+          <a href={problemUrl}>
+            <ArrowLeft className="size-4" />
+          </a>
         </Button>
         <div>
           <h1 className="text-xl font-semibold">提交统计</h1>
@@ -503,11 +509,7 @@ export function ProblemStatisticsPage() {
           <form method="get" className="grid gap-3 sm:grid-cols-[1fr_140px_180px_auto] sm:items-end">
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">排序字段</label>
-              <SimpleSelect
-                name="sort"
-                defaultValue={sort}
-                options={types.map((type) => ({ value: type, label: SORT_LABELS[type] || type }))}
-              />
+              <SimpleSelect name="sort" defaultValue={sort} options={types.map((type) => ({ value: type, label: SORT_LABELS[type] || type }))} />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">方向</label>
@@ -534,19 +536,16 @@ export function ProblemStatisticsPage() {
                 ]}
               />
             </div>
-            <Button type="submit" size="sm">筛选</Button>
+            <Button type="submit" size="sm">
+              筛选
+            </Button>
           </form>
         </CardContent>
       </Card>
 
       <div className="flex flex-wrap gap-2">
         {types.map((t) => (
-          <Button
-            key={t}
-            asChild
-            variant={sort === t ? 'default' : 'outline'}
-            size="sm"
-          >
+          <Button key={t} asChild variant={sort === t ? 'default' : 'outline'} size="sm">
             <a href={statQuery(t, sort === t ? -direction : 1)}>
               {SORT_LABELS[t] || t}
               {sort === t && (direction === 1 ? <ChevronUp className="ml-1 size-3" /> : <ChevronDown className="ml-1 size-3" />)}
@@ -581,7 +580,11 @@ export function ProblemStatisticsPage() {
                       <TableCell className="text-right font-mono text-sm">{r.time != null ? `${r.time}ms` : '-'}</TableCell>
                       <TableCell className="text-right font-mono text-sm">{r.memory != null ? `${(r.memory / 1024).toFixed(0)}KB` : '-'}</TableCell>
                       <TableCell className="text-right font-mono text-sm">{r.length != null ? `${r.length}B` : '-'}</TableCell>
-                      <TableCell className="text-right"><Badge variant="outline" className="text-xs">{r.lang || '-'}</Badge></TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant="outline" className="text-xs">
+                          {r.lang || '-'}
+                        </Badge>
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -606,11 +609,7 @@ export function ProblemStatisticsPage() {
 
 export function ProblemImportPage() {
   return (
-    <AdminPage
-      bypassPrivGate
-      title="导入题目"
-      description="从 Hydro 格式压缩包批量导入题目"
-    >
+    <AdminPage bypassPrivGate title="导入题目" description="从 Hydro 格式压缩包批量导入题目">
       <Card>
         <CardContent className="p-6">
           <form method="post" encType="multipart/form-data" className="grid gap-4 sm:max-w-xl">
@@ -620,7 +619,9 @@ export function ProblemImportPage() {
               <p className="text-xs text-muted-foreground">支持 .zip 格式的 Hydro 题目包</p>
             </div>
             <div className="space-y-1.5">
-              <label htmlFor="prefix" className="text-sm font-medium">题号前缀 (可选)</label>
+              <label htmlFor="prefix" className="text-sm font-medium">
+                题号前缀 (可选)
+              </label>
               <Input id="prefix" name="preferredPrefix" placeholder="例如 A, P, CF" pattern="[a-zA-Z]*" />
             </div>
             <div className="flex items-center gap-4">
@@ -635,7 +636,8 @@ export function ProblemImportPage() {
             </div>
             <div className="flex justify-end">
               <Button type="submit">
-                <Import className="mr-1 size-4" />导入
+                <Import className="mr-1 size-4" />
+                导入
               </Button>
             </div>
           </form>

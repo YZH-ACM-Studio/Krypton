@@ -1,11 +1,6 @@
 import { tmpdir } from 'os';
-import {
-  basename, join, relative, resolve,
-} from 'path';
-import {
-  Context, fs, Handler, Logger, NotFoundError, param, SettingModel, sha1,
-  size, SystemModel, Types, UiContextBase,
-} from 'hydrooj';
+import { basename, join, relative, resolve } from 'path';
+import { Context, fs, Handler, Logger, NotFoundError, param, SettingModel, sha1, size, SystemModel, Types, UiContextBase } from 'hydrooj';
 import esbuild from 'esbuild';
 
 declare module 'hydrooj' {
@@ -70,10 +65,7 @@ const build = async (contents: string) => {
     splitting: false,
     write: false,
     target: ['chrome65'],
-    plugins: [
-      ...(global.Hydro.ui.esbuildPlugins || []),
-      federationPlugin,
-    ],
+    plugins: [...(global.Hydro.ui.esbuildPlugins || []), federationPlugin],
     minify: !process.env.DEV,
     stdin: {
       contents,
@@ -119,7 +111,10 @@ export async function buildUI() {
   for (const m of lazyModules) {
     const name = basename(m).split('.')[0];
     const { outputFiles } = await build(`window.lazyModuleResolver['${name}'](require('${relative(tmp, m).replace(/\\/g, '\\\\')}'))`);
-    const css = outputFiles.filter((i) => i.path.endsWith('.css')).map((i) => i.text).join('\n');
+    const css = outputFiles
+      .filter((i) => i.path.endsWith('.css'))
+      .map((i) => i.text)
+      .join('\n');
     for (const file of outputFiles) {
       if (file.path.endsWith('.css')) continue;
       addFile(basename(m).replace(/\.[tj]sx?$/, '.js'), (css ? applyCss(css) : '') + file.text);
@@ -131,17 +126,22 @@ export async function buildUI() {
     const str = `window.LOCALES=${JSON.stringify(global.Hydro.locales[lang][Symbol.for('iterate')])};`;
     addFile(`lang-${lang}.js`, str);
   }
-  const entry = await build([
-    `window.lazyloadMetadata = ${JSON.stringify(hashes)};`,
-    `window.LANGS=${JSON.stringify(SettingModel.langs)};`,
-    ...entryPoints.map((i) => `import '${relative(tmp, i).replace(/\\/g, '\\\\')}';`),
-  ].join('\n'));
+  const entry = await build(
+    [
+      `window.lazyloadMetadata = ${JSON.stringify(hashes)};`,
+      `window.LANGS=${JSON.stringify(SettingModel.langs)};`,
+      ...entryPoints.map((i) => `import '${relative(tmp, i).replace(/\\/g, '\\\\')}';`),
+    ].join('\n'),
+  );
   const pages = entry.outputFiles.filter((i) => i.path.endsWith('.js')).map((i) => i.text);
   const css = entry.outputFiles.filter((i) => i.path.endsWith('.css')).map((i) => i.text);
-  addFile('entry.js', `window._hydroLoad=()=>{
+  addFile(
+    'entry.js',
+    `window._hydroLoad=()=>{
     ${css.length ? applyCss(css.join('\n')) : ''}
     ${pages.join('\n')}
-  };`);
+  };`,
+  );
   UiContextBase.constantVersion = hashes['entry.js'];
   for (const key in vfs) {
     if (newFiles.includes(key)) continue;

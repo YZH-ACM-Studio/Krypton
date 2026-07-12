@@ -1,7 +1,4 @@
-/* eslint-disable no-await-in-loop */
-import {
-    Collection, Db, FindCursor, IndexDescription, MongoClient,
-} from 'mongodb';
+import { Collection, Db, FindCursor, IndexDescription, MongoClient } from 'mongodb';
 import mongoUri from 'mongodb-uri';
 import { Time } from '@hydrooj/utils';
 import { Context, Service } from '../context';
@@ -11,7 +8,7 @@ import { load } from '../options';
 import bus from './bus';
 
 const logger = new Logger('mongo');
-export interface Collections { }
+export interface Collections {}
 
 interface MongoConfig {
     protocol?: string;
@@ -36,7 +33,10 @@ export class MongoService extends Service {
     public client: MongoClient;
     public db: Db;
 
-    constructor(ctx: Context, private config: MongoConfig = {}) {
+    constructor(
+        ctx: Context,
+        private config: MongoConfig = {},
+    ) {
         super(ctx, 'db');
     }
 
@@ -65,10 +65,12 @@ export class MongoService extends Service {
         yield this.ctx.interval(() => this.fixExpireAfter(), Time.hour);
     }
 
-    public collection<K extends keyof Collections>(c: K) {
+    public collection<K extends keyof Collections>(c: K): Collection<Collections[K]>;
+    public collection<T>(c: string): Collection<T>;
+    public collection<T>(c: string): Collection<T> {
         let coll = this.config.prefix ? `${this.config.prefix}.${c}` : c;
         if (this.config.collectionMap?.[coll]) coll = this.config.collectionMap[coll];
-        return this.db.collection<Collections[K]>(coll);
+        return this.db.collection<T>(coll);
     }
 
     public async fixExpireAfter() {
@@ -114,7 +116,12 @@ export class MongoService extends Service {
         }
         for (const index of args) {
             let i = existed.find((t) => t.name === index.name || JSON.stringify(t.key) === JSON.stringify(index.key));
-            if (!i && Object.keys(index.key).map((k) => index.key[k]).includes('text')) {
+            if (
+                !i &&
+                Object.keys(index.key)
+                    .map((k) => index.key[k])
+                    .includes('text')
+            ) {
                 i = existed.find((t) => t.textIndexVersion);
             }
             index.background = true;
@@ -134,7 +141,9 @@ export class MongoService extends Service {
             };
             if (isDifferent()) {
                 if (i.textIndexVersion) {
-                    const cur = Object.keys(i.key).filter((t) => !t.startsWith('_')).map((k) => `${k}:${i.key[k]}`);
+                    const cur = Object.keys(i.key)
+                        .filter((t) => !t.startsWith('_'))
+                        .map((k) => `${k}:${i.key[k]}`);
                     for (const key of Object.keys(i.weights)) cur.push(`${key}:text`);
                     const wanted = Object.keys(index.key).map((key) => `${key}:${index.key[key]}`);
                     if (cur.sort().join(' ') === wanted.sort().join(' ') && i.name === index.name) continue;
@@ -150,16 +159,17 @@ export class MongoService extends Service {
         }
     }
 
-    async paginate<T>(
-        cursor: FindCursor<T>, page: number, pageSize: number,
-    ): Promise<[docs: T[], numPages: number, count: number]> {
+    async paginate<T>(cursor: FindCursor<T>, page: number, pageSize: number): Promise<[docs: T[], numPages: number, count: number]> {
         if (page <= 0) throw new ValidationError('page');
         // this is for mongodb driver v6
         const filter = (cursor as any).cursorFilter;
         const coll = this.db.collection(cursor.namespace.collection as any);
         const [count, pageDocs] = await Promise.all([
             Object.keys(filter).length ? coll.count(filter) : coll.countDocuments(filter),
-            cursor.skip((page - 1) * pageSize).limit(pageSize).toArray(),
+            cursor
+                .skip((page - 1) * pageSize)
+                .limit(pageSize)
+                .toArray(),
         ]);
         const numPages = Math.floor((count + pageSize - 1) / pageSize);
         return [pageDocs, numPages, count];

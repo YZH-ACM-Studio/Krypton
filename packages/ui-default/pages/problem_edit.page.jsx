@@ -33,9 +33,7 @@ async function updateSelection() {
       else _.pull(selections, selectionName);
     }
   }
-  const requestCategoryTags = _.uniq(selections
-    .filter((s) => s.includes(','))
-    .map((s) => s.split(',')[0]));
+  const requestCategoryTags = _.uniq(selections.filter((s) => s.includes(',')).map((s) => s.split(',')[0]));
   // drop the category if its subcategory is selected
   const requestTags = _.uniq(_.pullAll(selections, requestCategoryTags));
   dirtyCategories.length = 0;
@@ -56,7 +54,10 @@ function findCategory(name) {
 function parseCategorySelection() {
   const $txt = $('[name="tag"]');
   tags.length = 0;
-  for (const name of $txt.val().split(',').map((i) => i.trim())) {
+  for (const name of $txt
+    .val()
+    .split(',')
+    .map((i) => i.trim())) {
     if (!name) return;
     const [category, subcategory] = findCategory(name);
     if (!category) tags.push(name);
@@ -76,17 +77,10 @@ function buildCategoryFilter() {
   if (!$container) return;
   $container.attr('class', 'widget--category-filter row small-up-3 medium-up-2');
   for (const category of $container.children('li').get()) {
-    const $category = $(category)
-      .attr('class', 'widget--category-filter__category column');
-    const $categoryTag = $category
-      .find('.section__title a')
-      .remove()
-      .attr('class', 'widget--category-filter__tag');
+    const $category = $(category).attr('class', 'widget--category-filter__category column');
+    const $categoryTag = $category.find('.section__title a').remove().attr('class', 'widget--category-filter__tag');
     const categoryText = $categoryTag.text();
-    const $drop = $category
-      .children('.chip-list')
-      .remove()
-      .attr('class', 'widget--category-filter__drop');
+    const $drop = $category.children('.chip-list').remove().attr('class', 'widget--category-filter__drop');
     const treeItem = {
       select: false,
       $tag: $categoryTag,
@@ -119,9 +113,7 @@ function buildCategoryFilter() {
     // the effect should be cancelSelect if it is shown as selected when clicking
     const shouldSelect = treeItem.$tag.hasClass('selected') ? false : !treeItem.select;
     treeItem.select = shouldSelect;
-    dirtyCategories.push(category
-      ? { type: 'subcategory', subcategory: tag, category }
-      : { type: 'category', category: tag });
+    dirtyCategories.push(category ? { type: 'subcategory', subcategory: tag, category } : { type: 'category', category: tag });
     if (!category && !shouldSelect) {
       // de-select children
       _.forEach(treeItem.children, (treeSubItem, subcategory) => {
@@ -141,11 +133,14 @@ export default new NamedPage(['problem_create', 'problem_edit'], () => {
   $(document).on('click', '[name="operation"]', (ev) => {
     ev.preventDefault();
     if (confirmed) {
-      return request.post('.', { operation: 'delete' }).then((res) => {
-        window.location.href = res.url;
-      }).catch((e) => {
-        Notification.error(e.message);
-      });
+      return request
+        .post('.', { operation: 'delete' })
+        .then((res) => {
+          window.location.href = res.url;
+        })
+        .catch((e) => {
+          Notification.error(e.message);
+        });
     }
     return confirm(i18n('Confirm deleting this problem? Its files, submissions, discussions and solutions will be deleted as well.')).then((yes) => {
       if (!yes) return;
@@ -166,7 +161,7 @@ export default new NamedPage(['problem_create', 'problem_edit'], () => {
     content = JSON.parse(content);
     isObject = !(content instanceof Array);
     if (!isObject) content = JSON.stringify(content);
-  } catch (e) { }
+  } catch (e) {}
   if (!isObject) content = { [activeTab]: content };
   function getContent(lang) {
     let c = '';
@@ -183,7 +178,7 @@ export default new NamedPage(['problem_create', 'problem_edit'], () => {
     try {
       val = JSON.parse(val);
       if (!(val instanceof Array)) val = JSON.stringify(val);
-    } catch { }
+    } catch {}
     const empty = /^\s*$/.test(val);
     if (empty) delete content[activeTab];
     else content[activeTab] = val;
@@ -203,11 +198,7 @@ export default new NamedPage(['problem_create', 'problem_edit'], () => {
     if (!$('[name="title"]').val().toString().length) {
       Notification.error(i18n('Title is required.'));
       $('body').scrollTop();
-      $('html, body').animate(
-        { scrollTop: 0 },
-        300,
-        () => $('[name="title"]').focus(),
-      );
+      $('html, body').animate({ scrollTop: 0 }, 300, () => $('[name="title"]').focus());
       ev.preventDefault();
     }
   });
@@ -219,11 +210,20 @@ export default new NamedPage(['problem_create', 'problem_edit'], () => {
     root.unmount();
     localStorage.setItem('polyhedron-hint', 'dismiss');
   }
-  /* eslint-disable max-len */
-  root.render(<blockquote className="note">
-    <p>{i18n('For better problem version management and validation, we suggest using Polyhedron to prepare problems.')}</p>
-    <p>{i18n('Polyhedron supports managing problem version history, testing solutions, checking time limits, composing contest statements, cooperation and much more.')}</p>
-    <p>{i18n('Problems created in polyhedron can be directly imported into any Hydro based online judge system.')}</p>
-    <a href="https://polyhedron.hydro.ac/" target="_blank">{i18n('Open Polyhedron')}</a> / <a onClick={() => root.unmount()}>{i18n('Dismiss')}</a> / <a onClick={ignore}>{i18n("Don't show again")}</a>
-  </blockquote>);
+
+  root.render(
+    <blockquote className="note">
+      <p>{i18n('For better problem version management and validation, we suggest using Polyhedron to prepare problems.')}</p>
+      <p>
+        {i18n(
+          'Polyhedron supports managing problem version history, testing solutions, checking time limits, composing contest statements, cooperation and much more.',
+        )}
+      </p>
+      <p>{i18n('Problems created in polyhedron can be directly imported into any Hydro based online judge system.')}</p>
+      <a href="https://polyhedron.hydro.ac/" target="_blank">
+        {i18n('Open Polyhedron')}
+      </a>{' '}
+      / <a onClick={() => root.unmount()}>{i18n('Dismiss')}</a> / <a onClick={ignore}>{i18n("Don't show again")}</a>
+    </blockquote>,
+  );
 });

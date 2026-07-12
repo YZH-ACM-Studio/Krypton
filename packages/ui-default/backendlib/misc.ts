@@ -49,6 +49,8 @@ export function* paginate(page: number, numPages: number) {
 }
 
 export function buildQueryString(obj: Record<string, any>) {
-  return Object.entries(obj).filter(([key, value]) => value && !key.startsWith('__'))
-    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join('&');
+  return Object.entries(obj)
+    .filter(([key, value]) => value && !key.startsWith('__'))
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .join('&');
 }

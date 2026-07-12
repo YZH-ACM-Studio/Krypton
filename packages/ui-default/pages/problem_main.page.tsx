@@ -11,9 +11,7 @@ import createHint from 'vj/components/hint';
 import Notification from 'vj/components/notification';
 import { downloadProblemSet } from 'vj/components/zipDownloader';
 import { NamedPage } from 'vj/misc/Page';
-import {
-  addSpeculationRules, delay, i18n, pjax, request,
-} from 'vj/utils';
+import { addSpeculationRules, delay, i18n, pjax, request } from 'vj/utils';
 
 const keywords = ['category', 'difficulty', 'namespace'];
 const list = [];
@@ -45,11 +43,14 @@ const parserOptions = {
 function writeSelectionToInput() {
   const currentValue = $('[name="q"]').val() as string;
   const parsedCurrentValue = parser.parse(currentValue, parserOptions) as SearchParserResult;
-  const q = parser.stringify({
-    ...parsedCurrentValue,
-    ...keywords.reduce((acc, keyword) => ({ ...acc, [keyword]: selectedTags[keyword] }), {}),
-    text: parsedCurrentValue.text,
-  }, parserOptions);
+  const q = parser.stringify(
+    {
+      ...parsedCurrentValue,
+      ...keywords.reduce((acc, keyword) => ({ ...acc, [keyword]: selectedTags[keyword] }), {}),
+      text: parsedCurrentValue.text,
+    },
+    parserOptions,
+  );
   $('[name="q"]').val(q);
 }
 
@@ -67,7 +68,7 @@ function updateSelection() {
         childSelected ||= childShouldSelect;
         if (childIsSelected !== childShouldSelect) setDomSelected(item.children[subcategory].$tag, childShouldSelect);
       }
-      if (item.$legacy) setDomSelected(item.$legacy, (shouldSelect || childSelected));
+      if (item.$legacy) setDomSelected(item.$legacy, shouldSelect || childSelected);
       if (isSelected !== shouldSelect) {
         if (pinned[type].includes(selection)) {
           setDomSelected(item.$tag, shouldSelect, '<span class="icon icon-check"></span>');
@@ -118,17 +119,10 @@ function buildLegacyCategoryFilter() {
   if (!$container) return;
   $container.attr('class', 'widget--category-filter row small-up-3 medium-up-2');
   for (const category of $container.children('li').get()) {
-    const $category = $(category)
-      .attr('class', 'widget--category-filter__category column');
-    const $categoryTag = $category
-      .find('.section__title a')
-      .remove()
-      .attr('class', 'widget--category-filter__tag');
+    const $category = $(category).attr('class', 'widget--category-filter__category column');
+    const $categoryTag = $category.find('.section__title a').remove().attr('class', 'widget--category-filter__tag');
     const categoryText = $categoryTag.text();
-    const $drop = $category
-      .children('.chip-list')
-      .remove()
-      .attr('class', 'widget--category-filter__drop');
+    const $drop = $category.children('.chip-list').remove().attr('class', 'widget--category-filter__drop');
     if (selections.category[categoryText]) {
       selections.category[categoryText].$legacy = $categoryTag;
     } else {
@@ -166,7 +160,7 @@ function buildLegacyCategoryFilter() {
 }
 
 function parseCategorySelection() {
-  const parsed = parser.parse($('[name="q"]').val() as string || '', parserOptions) as SearchParserResult;
+  const parsed = parser.parse(($('[name="q"]').val() as string) || '', parserOptions) as SearchParserResult;
   selectedTags.category = _.uniq(parsed.category || []);
   selectedTags.difficulty = _.uniq(parsed.difficulty || []);
 }
@@ -286,14 +280,18 @@ function processElement(ele) {
 }
 
 function getAllPids() {
-  return $('[data-checkbox-group="problem"]').map((_index, i) => $(i).closest('tr').attr('data-pid')).get();
+  return $('[data-checkbox-group="problem"]')
+    .map((_index, i) => $(i).closest('tr').attr('data-pid'))
+    .get();
 }
 
 function getSelectedPids() {
-  return $('[data-checkbox-group="problem"]:checked').map((_index, i) => $(i).closest('tr').attr('data-pid')).get();
+  return $('[data-checkbox-group="problem"]:checked')
+    .map((_index, i) => $(i).closest('tr').attr('data-pid'))
+    .get();
 }
 
-function ProblemSelectionDisplay(props) { // eslint-disable-line
+function ProblemSelectionDisplay(props) {
   const [pids, setPids] = React.useState<string[]>([]);
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [copyIdRef, setCopyIdRef] = React.useState(null);
@@ -307,15 +305,16 @@ function ProblemSelectionDisplay(props) { // eslint-disable-line
   }, [props.onClear]);
 
   React.useEffect(() => {
-    const cb = () => queueMicrotask(() => {
-      const all = getAllPids();
-      const selected = getSelectedPids();
-      setPids((o) => {
-        const ret = o.filter((i) => !all.includes(i) || selected.includes(i));
-        for (const val of selected) if (!ret.includes(val)) ret.push(val);
-        return ret;
+    const cb = () =>
+      queueMicrotask(() => {
+        const all = getAllPids();
+        const selected = getSelectedPids();
+        setPids((o) => {
+          const ret = o.filter((i) => !all.includes(i) || selected.includes(i));
+          for (const val of selected) if (!ret.includes(val)) ret.push(val);
+          return ret;
+        });
       });
-    });
     $(document).on('click', '[data-checkbox-group="problem"]', cb);
     $(document).on('click', '[data-checkbox-toggle="problem"]', cb);
     return () => {
@@ -330,7 +329,11 @@ function ProblemSelectionDisplay(props) { // eslint-disable-line
   React.useEffect(() => {
     if (!copyIdRef) return;
     const clip = new Clipboard(copyIdRef, {
-      text: () => problemSelectAutoCompleteRef.current.getSelectedItems().map((i) => i.docId).join(','),
+      text: () =>
+        problemSelectAutoCompleteRef.current
+          .getSelectedItems()
+          .map((i) => i.docId)
+          .join(','),
     });
     clip.on('success', () => {
       Notification.success(i18n('Problem ids copied to clipboard!'));
@@ -342,7 +345,11 @@ function ProblemSelectionDisplay(props) { // eslint-disable-line
   React.useEffect(() => {
     if (!copyPidRef) return;
     const clip = new Clipboard(copyPidRef, {
-      text: () => problemSelectAutoCompleteRef.current.getSelectedItems().map((i) => i.pid || i.docId).join(','),
+      text: () =>
+        problemSelectAutoCompleteRef.current
+          .getSelectedItems()
+          .map((i) => i.pid || i.docId)
+          .join(','),
     });
     clip.on('success', () => {
       Notification.success(i18n('Problem ids copied to clipboard!'));
@@ -372,44 +379,53 @@ function ProblemSelectionDisplay(props) { // eslint-disable-line
     };
   }, [pids]);
 
-  return (<>
-    <a className="menu__link display-mode-hide" onClick={() => setDialogOpen(true)}>
-      <span className="icon icon-stack"></span>
-      {' '}{i18n('{0} problem(s) selected', pids.length)}
-    </a>
-    <div className="dialog withBg" style={{ display: dialogOpen ? 'flex' : 'none', zIndex: 1000, opacity: 1 }} onClick={() => setDialogOpen(false)}>
-      <div className="dialog__content" style={{ transform: 'scale(1, 1)' }} onClick={(ev) => ev.stopPropagation()}>
-        <div className="dialog__body" style={{ height: 'calc(100% - 45px)' }}>
-          <div className="row">
-            <div className="columns">
-              <h1>{i18n('Select Problems')}</h1>
+  return (
+    <>
+      <a className="menu__link display-mode-hide" onClick={() => setDialogOpen(true)}>
+        <span className="icon icon-stack"></span> {i18n('{0} problem(s) selected', pids.length)}
+      </a>
+      <div className="dialog withBg" style={{ display: dialogOpen ? 'flex' : 'none', zIndex: 1000, opacity: 1 }} onClick={() => setDialogOpen(false)}>
+        <div className="dialog__content" style={{ transform: 'scale(1, 1)' }} onClick={(ev) => ev.stopPropagation()}>
+          <div className="dialog__body" style={{ height: 'calc(100% - 45px)' }}>
+            <div className="row">
+              <div className="columns">
+                <h1>{i18n('Select Problems')}</h1>
+              </div>
+            </div>
+            <div className="row">
+              <div className="columns">
+                <ProblemSelectAutoComplete
+                  multi
+                  ref={problemSelectAutoCompleteRef}
+                  onChange={(v) => setPids(v.split(',').filter((i) => i.trim()))}
+                  selectedKeys={pids}
+                />
+                <style>{'.autocomplete-wrapper { max-height: 50vh; }'}</style>
+              </div>
             </div>
           </div>
           <div className="row">
-            <div className="columns">
-              <ProblemSelectAutoComplete
-                multi
-                ref={problemSelectAutoCompleteRef}
-                onChange={(v) => setPids(v.split(',').filter((i) => i.trim()))}
-                selectedKeys={pids}
-              />
-              <style>{'.autocomplete-wrapper { max-height: 50vh; }'}</style>
-            </div>
-          </div>
-        </div>
-        <div className="row">
-          <div className="columns clearfix">
-            <div className="float-right dialog__action">
-              <button className="rounded button" ref={setCopyIdRef}>{i18n('Copy IDs')}</button>{' '}
-              <button className="rounded button" ref={setCopyPidRef}>{i18n('Copy pids')}</button>{' '}
-              <button className="rounded button" onClick={() => setPids([])}>{i18n('Clear')}</button>{' '}
-              <button className="primary rounded button" onClick={() => setDialogOpen(false)}>{i18n('Ok')}</button>
+            <div className="columns clearfix">
+              <div className="float-right dialog__action">
+                <button className="rounded button" ref={setCopyIdRef}>
+                  {i18n('Copy IDs')}
+                </button>{' '}
+                <button className="rounded button" ref={setCopyPidRef}>
+                  {i18n('Copy pids')}
+                </button>{' '}
+                <button className="rounded button" onClick={() => setPids([])}>
+                  {i18n('Clear')}
+                </button>{' '}
+                <button className="primary rounded button" onClick={() => setDialogOpen(false)}>
+                  {i18n('Ok')}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
-  </>);
+    </>
+  );
 }
 
 const page = new NamedPage(['problem_main'], () => {
@@ -462,21 +478,24 @@ const page = new NamedPage(['problem_main'], () => {
   if (selection) {
     ReactDOM.createRoot(selection).render(
       <ProblemSelectionDisplay
-        onChange={(pids) => { selectedPids = pids; }}
-        onClear={(handler) => { clearSelectionHandler = handler; }}
+        onChange={(pids) => {
+          selectedPids = pids;
+        }}
+        onClear={(handler) => {
+          clearSelectionHandler = handler;
+        }}
       />,
     );
   }
 
   addSpeculationRules({
-    prerender: [{
-      where: {
-        or: [
-          { href_matches: '/p/*' },
-          { href_matches: '/d/*/p/*' },
-        ],
+    prerender: [
+      {
+        where: {
+          or: [{ href_matches: '/p/*' }, { href_matches: '/d/*/p/*' }],
+        },
       },
-    }],
+    ],
   });
 });
 

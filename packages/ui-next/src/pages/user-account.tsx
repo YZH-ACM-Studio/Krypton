@@ -37,15 +37,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { AvatarUpload } from '@/components/uploader';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { useBootstrap } from '@/lib/bootstrap';
 import { makeInitials, formatRelativeTime, formatDateTime, replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
@@ -87,8 +80,7 @@ function renderMessageContent(message: R, linkClassName: string) {
   const parts: React.ReactNode[] = [];
   let cursor = 0;
   const regex = /\{([^{}]+)\}/g;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(system.message))) {
+  for (let match = regex.exec(system.message); match; match = regex.exec(system.message)) {
     if (match.index > cursor) parts.push(system.message.slice(cursor, match.index));
     const key = match[1];
     const index = Number.parseInt(key.split(':')[0], 10);
@@ -100,7 +92,11 @@ function renderMessageContent(message: R, linkClassName: string) {
         </a>,
       );
     } else {
-      parts.push(<span key={`${match.index}-${key}`} className="font-medium">{param}</span>);
+      parts.push(
+        <span key={`${match.index}-${key}`} className="font-medium">
+          {param}
+        </span>,
+      );
     }
     cursor = match.index + match[0].length;
   }
@@ -117,7 +113,9 @@ function binaryIdToBase64(value: any) {
   if (Array.isArray(data)) {
     const bytes = new Uint8Array(data);
     let binary = '';
-    bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+    bytes.forEach((byte) => {
+      binary += String.fromCharCode(byte);
+    });
     return window.btoa(binary);
   }
   return String(value.buffer || value);
@@ -176,12 +174,7 @@ export function UserAccountPage() {
   else content = <SettingsPanel />;
 
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
-    >
+    <motion.div className="space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
       <h1 className="text-lg font-semibold">账号设置</h1>
 
       {/* Tab bar */}
@@ -192,9 +185,7 @@ export function UserAccountPage() {
             href={tab.href}
             className={cn(
               'flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
-              activeId === tab.id
-                ? 'bg-background text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground hover:bg-background/50',
+              activeId === tab.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-background/50',
             )}
           >
             <tab.icon className="size-3.5" />
@@ -247,9 +238,7 @@ function SettingsPanel() {
         <form method="post" className="space-y-6">
           {Array.from(families.entries()).map(([fam, items]) => (
             <fieldset key={fam} className="space-y-4">
-              <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                {familyLabels[fam] || fam}
-              </legend>
+              <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{familyLabels[fam] || fam}</legend>
               {items.map((setting) => (
                 <SettingField key={setting.key} setting={setting} value={current[setting.key]} />
               ))}
@@ -284,16 +273,10 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
       <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
         <div>
           <label className="text-sm font-medium">{setting.name || setting.key}</label>
-          {setting.desc ? (
-            <p className="text-[11px] leading-tight text-muted-foreground">{setting.desc}</p>
-          ) : null}
+          {setting.desc ? <p className="text-[11px] leading-tight text-muted-foreground">{setting.desc}</p> : null}
         </div>
         <div>
-          <AvatarUpload
-            uname={uname}
-            currentUrl={avatarUrl || (typeof value === 'string' && /^https?:|^\//.test(value) ? value : null)}
-            size={96}
-          />
+          <AvatarUpload uname={uname} currentUrl={avatarUrl || (typeof value === 'string' && /^https?:|^\//.test(value) ? value : null)} size={96} />
           {/* Preserve the existing text value when posting the rest of the form. */}
           <input type="hidden" name={setting.key} value={value ?? ''} readOnly />
         </div>
@@ -305,18 +288,12 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
     <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
       <div>
         <label className="text-sm font-medium">{setting.name || setting.key}</label>
-        {setting.desc ? (
-          <p className="text-[11px] leading-tight text-muted-foreground">{setting.desc}</p>
-        ) : null}
+        {setting.desc ? <p className="text-[11px] leading-tight text-muted-foreground">{setting.desc}</p> : null}
       </div>
       <div>
         {setting.type === 'boolean' || setting.type === 'checkbox' ? (
           <label className="inline-flex cursor-pointer items-center gap-2">
-            <Checkbox
-              name={setting.key}
-              defaultChecked={!!value}
-              disabled={isDisabled}
-             />
+            <Checkbox name={setting.key} defaultChecked={!!value} disabled={isDisabled} />
             <span className="text-sm text-muted-foreground">{setting.ui || '启用'}</span>
           </label>
         ) : setting.type === 'select' ? (
@@ -327,11 +304,7 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
             options={rangeOptions(setting.range)}
           />
         ) : setting.type === 'markdown' && !isDisabled ? (
-          <MarkdownEditor
-            name={setting.key}
-            value={value ?? setting.value ?? ''}
-            minHeight={260}
-          />
+          <MarkdownEditor name={setting.key} value={value ?? setting.value ?? ''} minHeight={260} />
         ) : setting.type === 'textarea' || setting.type === 'markdown' ? (
           <textarea
             name={setting.key}
@@ -350,14 +323,7 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
             className="max-w-xs"
           />
         ) : setting.type === 'password' ? (
-          <Input
-            type="password"
-            name={setting.key}
-            defaultValue=""
-            disabled={isDisabled}
-            autoComplete="new-password"
-            className="max-w-xs"
-          />
+          <Input type="password" name={setting.key} defaultValue="" disabled={isDisabled} autoComplete="new-password" className="max-w-xs" />
         ) : (
           <Input
             name={setting.key}
@@ -377,7 +343,7 @@ function rangeOptions(range: any): { value: string; label: string }[] {
   if (Array.isArray(range)) {
     return range.map((opt: any) => {
       const val = Array.isArray(opt) ? opt[0] : opt;
-      const label = Array.isArray(opt) ? (opt[1] || opt[0]) : opt;
+      const label = Array.isArray(opt) ? opt[1] || opt[0] : opt;
       return { value: String(val), label: String(label) };
     });
   }
@@ -429,7 +395,9 @@ function SecurityPanel() {
                 <Input name="verifyPassword" type="password" autoComplete="new-password" />
               </div>
             </div>
-            <Button type="submit" size="sm">更新密码</Button>
+            <Button type="submit" size="sm">
+              更新密码
+            </Button>
           </form>
         </CardContent>
       </Card>
@@ -455,7 +423,9 @@ function SecurityPanel() {
                 <Input name="mail" type="email" />
               </div>
             </div>
-            <Button type="submit" size="sm">更换邮箱</Button>
+            <Button type="submit" size="sm">
+              更换邮箱
+            </Button>
           </form>
         </CardContent>
       </Card>
@@ -474,20 +444,25 @@ function SecurityPanel() {
               <span className="font-medium">{bs.user.mail}</span>
             </div>
           ) : null}
-          {relations.filter((relation) => relation.platform !== 'mail').map((relation) => (
-            <div key={`${relation.platform}-${relation.id}`} className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2 text-sm">
-              <div className="min-w-0">
-                <p className="font-medium">{relation.name || relation.platform}</p>
-                <p className="truncate text-xs text-muted-foreground">{relation.id}</p>
+          {relations
+            .filter((relation) => relation.platform !== 'mail')
+            .map((relation) => (
+              <div
+                key={`${relation.platform}-${relation.id}`}
+                className="flex items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2 text-sm"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium">{relation.name || relation.platform}</p>
+                  <p className="truncate text-xs text-muted-foreground">{relation.id}</p>
+                </div>
+                <form method="post">
+                  <input type="hidden" name="operation" value="unlink_account" />
+                  <Button type="submit" name="platform" value={relation.platform} size="sm" variant="outline">
+                    解绑
+                  </Button>
+                </form>
               </div>
-              <form method="post">
-                <input type="hidden" name="operation" value="unlink_account" />
-                <Button type="submit" name="platform" value={relation.platform} size="sm" variant="outline">
-                  解绑
-                </Button>
-              </form>
-            </div>
-          ))}
+            ))}
           {methodsToLink.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {methodsToLink.map((method) => (
@@ -519,7 +494,9 @@ function SecurityPanel() {
               </div>
               <form method="post">
                 <input type="hidden" name="operation" value="disable_tfa" />
-                <Button type="submit" size="sm" variant="outline">移除</Button>
+                <Button type="submit" size="sm" variant="outline">
+                  移除
+                </Button>
               </form>
             </div>
           )}
@@ -537,14 +514,14 @@ function SecurityPanel() {
                 <form method="post">
                   <input type="hidden" name="operation" value="disable_authn" />
                   <input type="hidden" name="id" value={id} />
-                  <Button type="submit" size="sm" variant="outline">移除</Button>
+                  <Button type="submit" size="sm" variant="outline">
+                    移除
+                  </Button>
                 </form>
               </div>
             );
           })}
-          {!bs.user.tfa && authenticators.length === 0 && (
-            <p className="text-sm text-muted-foreground">暂无认证器</p>
-          )}
+          {!bs.user.tfa && authenticators.length === 0 && <p className="text-sm text-muted-foreground">暂无认证器</p>}
         </CardContent>
       </Card>
 
@@ -578,15 +555,17 @@ function SecurityPanel() {
                     <TableRow key={s._id}>
                       <TableCell className="pl-5">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm">{browser} {os ? `(${os})` : ''}</span>
+                          <span className="text-sm">
+                            {browser} {os ? `(${os})` : ''}
+                          </span>
                           {s.isCurrent && (
-                            <Badge variant="secondary" className="text-[10px]">当前</Badge>
+                            <Badge variant="secondary" className="text-[10px]">
+                              当前
+                            </Badge>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground font-mono">
-                        {s.updateIp || s.createIp || '—'}
-                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground font-mono">{s.updateIp || s.createIp || '—'}</TableCell>
                       <TableCell className="text-right pr-5">
                         {!s.isCurrent && (
                           <form method="post" className="inline">
@@ -641,7 +620,11 @@ function SecurityPanel() {
 /*  Messages panel — data.messages is { [uid]: { udoc, messages[] } }  */
 /* ------------------------------------------------------------------ */
 
-type Conv = { uid: number; udoc: R; messages: R[] };
+interface Conv {
+  uid: number;
+  udoc: R;
+  messages: R[];
+}
 
 function parseConversations(raw: any): Conv[] {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
@@ -710,22 +693,32 @@ function MessagesPanel() {
         let newIncoming = 0;
         const prevIds = new Set<string>();
         for (const c of conversations) for (const m of c.messages) prevIds.add(String(m._id));
-        for (const c of fresh) for (const m of c.messages) {
-          if (!prevIds.has(String(m._id)) && m.from !== selfUid) newIncoming += 1;
+        for (const c of fresh) {
+          for (const m of c.messages) {
+            if (!prevIds.has(String(m._id)) && m.from !== selfUid) newIncoming += 1;
+          }
         }
         setConversations(fresh);
-        if (newIncoming > 0 && typeof window !== 'undefined' && 'Notification' in window
-          && Notification.permission === 'granted' && document.visibilityState === 'hidden') {
-          new Notification('Krypton', { body: `${newIncoming} 条新消息` });
+        if (
+          newIncoming > 0 &&
+          typeof window !== 'undefined' &&
+          'Notification' in window &&
+          Notification.permission === 'granted' &&
+          document.visibilityState === 'hidden'
+        ) {
+          void new Notification('Krypton', { body: `${newIncoming} 条新消息` });
         }
-      } catch { /* network blips ignored */ }
-      finally {
+      } catch {
+        /* network blips ignored */
+      } finally {
         if (!cancelled) timer = setTimeout(tick, 15000);
       }
     };
     timer = setTimeout(tick, 15000);
-    return () => { cancelled = true; if (timer) clearTimeout(timer); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   /* Ask for notification permission once (best-effort). */
@@ -740,7 +733,11 @@ function MessagesPanel() {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     if ((c.udoc.uname || '').toLowerCase().includes(q)) return true;
-    return c.messages.some((m) => String(m.content || '').toLowerCase().includes(q));
+    return c.messages.some((m) =>
+      String(m.content || '')
+        .toLowerCase()
+        .includes(q),
+    );
   });
 
   const activeConv = conversations.find((c) => c.uid === selectedUid) || null;
@@ -748,7 +745,10 @@ function MessagesPanel() {
   const insertQuote = (m: R) => {
     if (!activeConv) return;
     const uname = activeConv.udoc.uname || `UID ${activeConv.uid}`;
-    const body = String(m.content || '').split('\n').map((l) => `> ${l}`).join('\n');
+    const body = String(m.content || '')
+      .split('\n')
+      .map((l) => `> ${l}`)
+      .join('\n');
     const quote = `> @${uname} 写道：\n${body}\n\n`;
     setDraftContent((cur) => cur + (cur && !cur.endsWith('\n') ? '\n' : '') + quote);
     requestAnimationFrame(() => draftRef.current?.focus());
@@ -764,7 +764,9 @@ function MessagesPanel() {
       form.append('uid', String(activeConv.uid));
       form.append('content', draftContent);
       const res = await fetch('/home/messages', {
-        method: 'POST', body: form, credentials: 'include',
+        method: 'POST',
+        body: form,
+        credentials: 'include',
         headers: { Accept: 'application/json' },
       });
       if (res.ok || res.redirected) {
@@ -776,7 +778,9 @@ function MessagesPanel() {
           setConversations(parseConversations(data3.messages));
         }
       }
-    } finally { setSending(false); }
+    } finally {
+      setSending(false);
+    }
   };
 
   const confirmDelete = async (msg: R) => {
@@ -787,15 +791,23 @@ function MessagesPanel() {
     form.append('messageId', String(msg._id));
     try {
       await fetch('/home/messages', {
-        method: 'POST', body: form, credentials: 'include',
+        method: 'POST',
+        body: form,
+        credentials: 'include',
         headers: { Accept: 'application/json' },
       });
       // Drop locally
-      setConversations((cur) => cur.map((c) => ({
-        ...c,
-        messages: c.messages.filter((m) => String(m._id) !== String(msg._id)),
-      })).filter((c) => c.messages.length > 0));
-    } catch { /* ignore */ }
+      setConversations((cur) =>
+        cur
+          .map((c) => ({
+            ...c,
+            messages: c.messages.filter((m) => String(m._id) !== String(msg._id)),
+          }))
+          .filter((c) => c.messages.length > 0),
+      );
+    } catch {
+      /* ignore */
+    }
   };
 
   return (
@@ -808,19 +820,12 @@ function MessagesPanel() {
         <div className="border-r bg-muted/20 flex flex-col min-h-0">
           <div className="p-3 border-b space-y-2">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">会话</h3>
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索用户 / 内容…"
-              className="h-8 text-xs"
-            />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="搜索用户 / 内容…" className="h-8 text-xs" />
           </div>
           {filteredConvs.length === 0 ? (
             <div className="px-3 py-6 text-center">
               <Mail className="mx-auto size-8 text-muted-foreground/40" />
-              <p className="mt-2 text-xs text-muted-foreground">
-                {conversations.length === 0 ? '暂无消息' : '无匹配会话'}
-              </p>
+              <p className="mt-2 text-xs text-muted-foreground">{conversations.length === 0 ? '暂无消息' : '无匹配会话'}</p>
             </div>
           ) : (
             <ScrollArea className="flex-1" viewportClassName="space-y-0.5 p-1">
@@ -845,13 +850,9 @@ function MessagesPanel() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-1.5">
                         <p className="truncate text-sm font-medium">{name}</p>
-                        {unread > 0 ? (
-                          <Badge className="shrink-0 h-4 min-w-4 px-1 text-[10px]">{unread > 99 ? '99+' : unread}</Badge>
-                        ) : null}
+                        {unread > 0 ? <Badge className="shrink-0 h-4 min-w-4 px-1 text-[10px]">{unread > 99 ? '99+' : unread}</Badge> : null}
                       </div>
-                      {last && (
-                        <p className="truncate text-[11px] text-muted-foreground">{getMessagePreview(last)}</p>
-                      )}
+                      {last && <p className="truncate text-[11px] text-muted-foreground">{getMessagePreview(last)}</p>}
                     </div>
                   </button>
                 );
@@ -876,10 +877,7 @@ function MessagesPanel() {
                     <p className="text-[10px] text-muted-foreground">{activeConv.messages.length} 条消息</p>
                   </div>
                 </div>
-                <a
-                  href={replaceRouteTokens(bs.urls.userDetail, { UID: String(activeConv.uid) })}
-                  className="text-xs text-primary hover:underline"
-                >
+                <a href={replaceRouteTokens(bs.urls.userDetail, { UID: String(activeConv.uid) })} className="text-xs text-primary hover:underline">
                   资料 →
                 </a>
               </div>
@@ -904,7 +902,8 @@ function MessagesPanel() {
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[10px] text-muted-foreground">{draftContent.length} 字符</span>
                   <Button type="button" size="sm" disabled={!draftContent.trim() || sending} onClick={sendMessage}>
-                    <Send className="mr-1 size-3.5" />{sending ? '发送中…' : '发送'}
+                    <Send className="mr-1 size-3.5" />
+                    {sending ? '发送中…' : '发送'}
                   </Button>
                 </div>
               </div>
@@ -925,8 +924,12 @@ function MessagesPanel() {
           </DialogHeader>
           <p className="text-sm text-muted-foreground">此操作无法撤销。该消息将从你和对方的会话中移除。</p>
           <div className="mt-4 flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setPendingDelete(null)}>取消</Button>
-            <Button variant="destructive" onClick={() => pendingDelete && confirmDelete(pendingDelete)}>删除</Button>
+            <Button variant="outline" onClick={() => setPendingDelete(null)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={() => pendingDelete && confirmDelete(pendingDelete)}>
+              删除
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -939,13 +942,7 @@ function MessagesPanel() {
  * first message of each minute-bucket) and per-message quote / delete
  * affordances.
  */
-function renderGroupedMessages(
-  messages: R[],
-  selfUid: number,
-  locale: string,
-  onQuote: (m: R) => void,
-  onAskDelete: (m: R) => void,
-) {
+function renderGroupedMessages(messages: R[], selfUid: number, locale: string, onQuote: (m: R) => void, onAskDelete: (m: R) => void) {
   return messages.map((m, i) => {
     const fromMe = m.from === selfUid;
     const time = objectIdDate(m._id);
@@ -953,33 +950,41 @@ function renderGroupedMessages(
     const showTime = !prevTime || (time && prevTime && Math.abs(time.getTime() - prevTime.getTime()) > 60_000);
     return (
       <div key={String(m._id) || i} className="space-y-1">
-        {showTime && time ? (
-          <p className="my-1 text-center text-[10px] text-muted-foreground/70">
-            {formatRelativeTime(time, locale)}
-          </p>
-        ) : null}
+        {showTime && time ? <p className="my-1 text-center text-[10px] text-muted-foreground/70">{formatRelativeTime(time, locale)}</p> : null}
         <div className={cn('group flex items-center gap-1.5', fromMe ? 'justify-end' : 'justify-start')}>
           {fromMe ? (
             <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button type="button" onClick={() => onQuote(m)} title="引用" className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+              <button
+                type="button"
+                onClick={() => onQuote(m)}
+                title="引用"
+                className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
                 <Quote className="size-3" />
               </button>
-              <button type="button" onClick={() => onAskDelete(m)} title="删除" className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
+              <button
+                type="button"
+                onClick={() => onAskDelete(m)}
+                title="删除"
+                className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              >
                 <Trash2 className="size-3" />
               </button>
             </div>
           ) : null}
-          <div className={cn(
-            'max-w-[75%] rounded-lg px-3 py-2 text-sm leading-6',
-            fromMe ? 'bg-primary text-primary-foreground' : 'bg-muted',
-          )}>
+          <div className={cn('max-w-[75%] rounded-lg px-3 py-2 text-sm leading-6', fromMe ? 'bg-primary text-primary-foreground' : 'bg-muted')}>
             <div className={cn('break-words whitespace-pre-wrap', fromMe ? '[&_a]:underline' : '')}>
               {renderMessageContent(m, fromMe ? 'font-medium underline underline-offset-2' : 'font-medium text-primary underline underline-offset-2')}
             </div>
           </div>
           {!fromMe ? (
             <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button type="button" onClick={() => onQuote(m)} title="引用" className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+              <button
+                type="button"
+                onClick={() => onQuote(m)}
+                title="引用"
+                className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
                 <Quote className="size-3" />
               </button>
             </div>
@@ -1020,7 +1025,9 @@ function FilesPanel() {
         <CardContent>
           <form method="post" encType="multipart/form-data" className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
             <div className="space-y-1.5">
-              <label htmlFor="user-file" className="text-xs text-muted-foreground">选择文件</label>
+              <label htmlFor="user-file" className="text-xs text-muted-foreground">
+                选择文件
+              </label>
               <input
                 id="user-file"
                 type="file"
@@ -1033,7 +1040,9 @@ function FilesPanel() {
               />
             </div>
             <div className="space-y-1.5">
-              <label htmlFor="user-filename" className="text-xs text-muted-foreground">保存为</label>
+              <label htmlFor="user-filename" className="text-xs text-muted-foreground">
+                保存为
+              </label>
               <Input
                 id="user-filename"
                 name="filename"
@@ -1062,7 +1071,9 @@ function FilesPanel() {
               }}
             >
               <input type="hidden" name="operation" value="delete_files" />
-              {selectedList.map((name) => <input key={name} type="hidden" name="files" value={name} />)}
+              {selectedList.map((name) => (
+                <input key={name} type="hidden" name="files" value={name} />
+              ))}
               <Button type="submit" size="sm" variant="destructive">
                 删除选中
               </Button>
@@ -1093,40 +1104,37 @@ function FilesPanel() {
                 files.map((f) => {
                   const name = String(f.name || f.filename);
                   return (
-                  <TableRow key={String(f.name || f._id)}>
-                    <TableCell className="pl-5">
-                      <Checkbox
-                        checked={selectedFiles.has(name)}
-                        onChange={() => toggleFile(name)}
-                       />
-                    </TableCell>
-                    <TableCell className="font-medium text-sm">{f.name || f.filename}</TableCell>
-                    <TableCell className="text-right text-xs text-muted-foreground tabular-nums">
-                      {f.size != null ? formatFileSize(f.size) : '—'}
-                    </TableCell>
-                    <TableCell className="text-center pr-5">
-                      <div className="flex justify-center gap-1">
-                        <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
-                          <a href={`/file/${bs.user.id}/${f.name || f.filename}`}>下载</a>
-                        </Button>
-                        <form method="post" className="inline">
-                          <input type="hidden" name="operation" value="delete_files" />
-                          <input type="hidden" name="files" value={f.name || f.filename} />
-                          <Button
-                            type="submit"
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-destructive"
-                            onClick={(event) => {
-                              if (!window.confirm(`确认删除 ${f.name || f.filename}？`)) event.preventDefault();
-                            }}
-                          >
-                            <Trash2 className="size-3.5" />
+                    <TableRow key={String(f.name || f._id)}>
+                      <TableCell className="pl-5">
+                        <Checkbox checked={selectedFiles.has(name)} onChange={() => toggleFile(name)} />
+                      </TableCell>
+                      <TableCell className="font-medium text-sm">{f.name || f.filename}</TableCell>
+                      <TableCell className="text-right text-xs text-muted-foreground tabular-nums">
+                        {f.size != null ? formatFileSize(f.size) : '—'}
+                      </TableCell>
+                      <TableCell className="text-center pr-5">
+                        <div className="flex justify-center gap-1">
+                          <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
+                            <a href={`/file/${bs.user.id}/${f.name || f.filename}`}>下载</a>
                           </Button>
-                        </form>
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                          <form method="post" className="inline">
+                            <input type="hidden" name="operation" value="delete_files" />
+                            <input type="hidden" name="files" value={f.name || f.filename} />
+                            <Button
+                              type="submit"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-destructive"
+                              onClick={(event) => {
+                                if (!window.confirm(`确认删除 ${f.name || f.filename}？`)) event.preventDefault();
+                              }}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </form>
+                        </div>
+                      </TableCell>
+                    </TableRow>
                   );
                 })
               )}

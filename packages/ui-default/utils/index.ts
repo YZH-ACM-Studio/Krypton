@@ -9,11 +9,15 @@ export async function api(method: string, args: Record<string, any>, projection:
 }
 
 export function getAvailableLangs(langsList?: string[]) {
-  const prefixes = new Set(Object.keys(window.LANGS).filter((i) => i.includes('.')).map((i) => i.split('.')[0]));
+  const prefixes = new Set(
+    Object.keys(window.LANGS)
+      .filter((i) => i.includes('.'))
+      .map((i) => i.split('.')[0]),
+  );
   const Langs = {};
   for (const key in window.LANGS) {
     if (prefixes.has(key)) continue;
-    if ((langsList instanceof Array) && !langsList.includes(key)) continue;
+    if (langsList instanceof Array && !langsList.includes(key)) continue;
     if (window.LANGS[key].hidden && !langsList?.includes(key)) continue;
     if (window.LANGS[key].disabled) continue;
     Langs[key] = window.LANGS[key];
@@ -60,7 +64,7 @@ export function mongoId(idstring: string) {
 export function emulateAnchorClick(ev: KeyboardEvent, targetUrl: string, alwaysOpenInNewWindow = false) {
   let openInNewWindow;
   if (alwaysOpenInNewWindow) openInNewWindow = true;
-  else openInNewWindow = (ev.ctrlKey || ev.shiftKey || ev.metaKey);
+  else openInNewWindow = ev.ctrlKey || ev.shiftKey || ev.metaKey;
   if (openInNewWindow) window.open(targetUrl);
   else window.location.href = targetUrl;
 }

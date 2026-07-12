@@ -8,20 +8,18 @@ import SystemModel from '../model/system';
 import { load as loadOptions } from '../options';
 import { MongoService } from '../service/db';
 import { SettingService } from '../settings';
-import {
-    addon, builtinModel, locale, model, service,
-} from './common';
+import { addon, builtinModel, locale, model, service } from './common';
 
 const argv = cac().parse();
 const tmpdir = path.resolve(os.tmpdir(), 'hydro');
 const COMMENTS = /((\/\/.*$)|(\/\*[\s\S]*?\*\/))/gm;
 const ARR = /=>.*$/gm;
 function parseParameters(fn: Function) {
-    const code = fn.toString()
-        .replace(COMMENTS, '')
-        .replace(ARR, '');
-    const result = code.slice(code.indexOf('(') + 1, code.indexOf(')'))
-        .match(/([^,]+)/g)?.map((i) => i.trim());
+    const code = fn.toString().replace(COMMENTS, '').replace(ARR, '');
+    const result = code
+        .slice(code.indexOf('(') + 1, code.indexOf(')'))
+        .match(/([^,]+)/g)
+        ?.map((i) => i.trim());
     return result ?? [];
 }
 
@@ -77,7 +75,7 @@ async function cli() {
         return console.error(parameters.join(', '));
     }
     for (let i = 0; i < args.length; i++) {
-        if ("'\"".includes(args[i][0]) && "'\"".includes(args[i].at(-1))) {
+        if ('\'"'.includes(args[i][0]) && '\'"'.includes(args[i].at(-1))) {
             args[i] = args[i].substr(1, args[i].length - 2);
         } else if (args[i].length === 24 && ObjectId.isValid(args[i])) {
             args[i] = new ObjectId(args[i]);
@@ -135,7 +133,6 @@ export async function load(ctx: Context) {
     });
     await addon(pending, fail, ctx);
     const scriptDir = path.resolve(__dirname, '..', 'script');
-    await Promise.all((await fs.readdir(scriptDir))
-        .map((h) => ctx.loader.reloadPlugin(path.resolve(scriptDir, h), '')));
+    await Promise.all((await fs.readdir(scriptDir)).map((h) => ctx.loader.reloadPlugin(path.resolve(scriptDir, h), '')));
     await cli();
 }

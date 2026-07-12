@@ -33,7 +33,10 @@ export function ProblemMinePage() {
         <span className="ml-2 text-xs text-muted-foreground">共 {data.pcount ?? pdocs.length} 题</span>
         {data.canCreate ? (
           <Button asChild size="sm" className="ml-auto gap-1">
-            <a href="/problem/create"><Plus className="size-3.5" />新建题目</a>
+            <a href="/problem/create">
+              <Plus className="size-3.5" />
+              新建题目
+            </a>
           </Button>
         ) : null}
       </header>
@@ -57,36 +60,49 @@ export function ProblemMinePage() {
                     你还没有出过题目。{data.canCreate ? '点击右上角「新建题目」开始。' : ''}
                   </TableCell>
                 </TableRow>
-              ) : pdocs.map((p) => (
-                <TableRow key={String(p.docId)}>
-                  <TableCell className="pl-5 font-mono text-xs">{p.pid || `P${p.docId}`}</TableCell>
-                  <TableCell>
-                    <a href={`/p/${p.pid || p.docId}`} className="text-sm font-medium hover:text-primary hover:underline">
-                      {p.title}
-                    </a>
-                    <div className="mt-0.5 flex flex-wrap gap-1">
-                      {(p.tag || []).slice(0, 4).map((t: string) => (
-                        <Badge key={t} variant="outline" className="text-[10px]">{t}</Badge>
-                      ))}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-center">
-                    {p.hidden ? (
-                      <Badge variant="outline" className="gap-1 text-[10px] text-muted-foreground"><EyeOff className="size-2.5" />隐藏</Badge>
-                    ) : (
-                      <Badge variant="secondary" className="gap-1 text-[10px]"><Eye className="size-2.5" />可见</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                    {p.nAccept ?? 0} / {p.nSubmit ?? 0}
-                  </TableCell>
-                  <TableCell className="pr-5 text-right">
-                    <Button asChild variant="outline" size="sm" className="gap-1">
-                      <a href={`/p/${p.pid || p.docId}/edit`}><Pencil className="size-3" />编辑</a>
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
+              ) : (
+                pdocs.map((p) => (
+                  <TableRow key={String(p.docId)}>
+                    <TableCell className="pl-5 font-mono text-xs">{p.pid || `P${p.docId}`}</TableCell>
+                    <TableCell>
+                      <a href={`/p/${p.pid || p.docId}`} className="text-sm font-medium hover:text-primary hover:underline">
+                        {p.title}
+                      </a>
+                      <div className="mt-0.5 flex flex-wrap gap-1">
+                        {(p.tag || []).slice(0, 4).map((t: string) => (
+                          <Badge key={t} variant="outline" className="text-[10px]">
+                            {t}
+                          </Badge>
+                        ))}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {p.hidden ? (
+                        <Badge variant="outline" className="gap-1 text-[10px] text-muted-foreground">
+                          <EyeOff className="size-2.5" />
+                          隐藏
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="gap-1 text-[10px]">
+                          <Eye className="size-2.5" />
+                          可见
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                      {p.nAccept ?? 0} / {p.nSubmit ?? 0}
+                    </TableCell>
+                    <TableCell className="pr-5 text-right">
+                      <Button asChild variant="outline" size="sm" className="gap-1">
+                        <a href={`/p/${p.pid || p.docId}/edit`}>
+                          <Pencil className="size-3" />
+                          编辑
+                        </a>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
         </CardContent>
@@ -95,12 +111,26 @@ export function ProblemMinePage() {
       {(data.ppcount || 1) > 1 ? (
         <div className="flex items-center justify-center gap-2">
           {page > 1 ? (
-            <Button asChild variant="outline" size="sm"><a href={`/problem/mine?page=${page - 1}`}>上一页</a></Button>
-          ) : <Button variant="outline" size="sm" disabled>上一页</Button>}
-          <span className="text-xs text-muted-foreground">{page} / {data.ppcount}</span>
+            <Button asChild variant="outline" size="sm">
+              <a href={`/problem/mine?page=${page - 1}`}>上一页</a>
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" disabled>
+              上一页
+            </Button>
+          )}
+          <span className="text-xs text-muted-foreground">
+            {page} / {data.ppcount}
+          </span>
           {page < data.ppcount ? (
-            <Button asChild variant="outline" size="sm"><a href={`/problem/mine?page=${page + 1}`}>下一页</a></Button>
-          ) : <Button variant="outline" size="sm" disabled>下一页</Button>}
+            <Button asChild variant="outline" size="sm">
+              <a href={`/problem/mine?page=${page + 1}`}>下一页</a>
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" disabled>
+              下一页
+            </Button>
+          )}
         </div>
       ) : null}
     </div>

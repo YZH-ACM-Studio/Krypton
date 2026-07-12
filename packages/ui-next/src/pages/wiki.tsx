@@ -1,15 +1,5 @@
 import { motion } from 'motion/react';
-import {
-  BookOpen,
-  CircleHelp,
-  Code2,
-  Database,
-  Flag,
-  Gauge,
-  Info,
-  MessageSquareText,
-  Trophy,
-} from 'lucide-react';
+import { BookOpen, CircleHelp, Code2, Database, Flag, Gauge, Info, MessageSquareText, Trophy } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { MarkdownView } from '@/components/markdown-renderer';
@@ -80,28 +70,19 @@ export function AboutPage() {
   const sections: R[] = bs.page.data.sections || [];
   const nav = sections.length
     ? sections.map((section) => ({
-      id: sectionId(section),
-      title: section.title || '说明',
-    }))
+        id: sectionId(section),
+        title: section.title || '说明',
+      }))
     : [{ id: 'about', title: bs.siteName || 'Krypton' }];
 
   return (
     <WikiShell title={`关于 ${bs.siteName || bs.domain.name}`} icon={Info} nav={nav}>
       {sections.length ? (
         sections.map((section) => (
-          <ArticleSection
-            key={sectionId(section)}
-            id={sectionId(section)}
-            title={section.title || '说明'}
-            content={section.content || ''}
-          />
+          <ArticleSection key={sectionId(section)} id={sectionId(section)} title={section.title || '说明'} content={section.content || ''} />
         ))
       ) : (
-        <ArticleSection
-          id="about"
-          title={bs.siteName || 'Krypton'}
-          content={`${bs.siteName || 'Krypton'} 是面向信息学教学与竞赛的在线评测系统。`}
-        />
+        <ArticleSection id="about" title={bs.siteName || 'Krypton'} content={`${bs.siteName || 'Krypton'} 是面向信息学教学与竞赛的在线评测系统。`} />
       )}
     </WikiShell>
   );
@@ -109,11 +90,7 @@ export function AboutPage() {
 
 export function WikiHelpPage() {
   return (
-    <WikiShell
-      title="帮助中心"
-      icon={CircleHelp}
-      nav={HELP_SECTIONS.map((section) => ({ id: section.id, title: section.title }))}
-    >
+    <WikiShell title="帮助中心" icon={CircleHelp} nav={HELP_SECTIONS.map((section) => ({ id: section.id, title: section.title }))}>
       <div className="grid gap-4">
         {HELP_SECTIONS.map((section) => (
           <Card key={section.id} id={section.id}>
@@ -125,10 +102,14 @@ export function WikiHelpPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <h2 className="text-base font-semibold">{section.title}</h2>
-                    <Badge variant="outline" className="font-mono text-[10px]">#{section.id}</Badge>
+                    <Badge variant="outline" className="font-mono text-[10px]">
+                      #{section.id}
+                    </Badge>
                   </div>
                   <div className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
-                    {section.body.map((line) => <p key={line}>{line}</p>)}
+                    {section.body.map((line) => (
+                      <p key={line}>{line}</p>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -203,5 +184,10 @@ function ArticleSection({ id, title, content }: { id?: string; title: string; co
 }
 
 function sectionId(section: R) {
-  return section.id || String(section.title || 'section').toLowerCase().replace(/\s+/g, '-');
+  return (
+    section.id ||
+    String(section.title || 'section')
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+  );
 }

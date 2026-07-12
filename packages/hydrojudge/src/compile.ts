@@ -1,20 +1,20 @@
 import { LangConfig, STATUS } from '@hydrooj/common';
 import { CompileError } from './error';
 import { Execute } from './interface';
-import {
-    CopyIn, CopyInFile, runQueued,
-} from './sandbox';
+import { CopyIn, CopyInFile, runQueued } from './sandbox';
 import { compilerText } from './utils';
 
-export default async function compile(
-    lang: LangConfig, code: CopyInFile, copyIn: CopyIn = {}, next?: Function,
-): Promise<Execute> {
+export default async function compile(lang: LangConfig, code: CopyInFile, copyIn: CopyIn = {}, next?: Function): Promise<Execute> {
     const target = lang.target || 'foo';
     const execute = copyIn['execute.sh'] ? '/bin/bash execute.sh' : lang.execute;
     const command = copyIn['compile.sh'] ? '/bin/bash compile.sh' : lang.compile;
     if (command) {
         const {
-            status, stdout, stderr, fileIds, [Symbol.asyncDispose]: cleanup,
+            status,
+            stdout,
+            stderr,
+            fileIds,
+            [Symbol.asyncDispose]: cleanup,
         } = await runQueued(
             command,
             {

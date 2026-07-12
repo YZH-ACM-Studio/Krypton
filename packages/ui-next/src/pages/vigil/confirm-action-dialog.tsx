@@ -26,8 +26,13 @@ interface ConfirmActionDialogProps {
 }
 
 export function ConfirmActionDialog({
-  open, onOpenChange, title, description, confirmLabel,
-  confirmVariant = 'default', requireReason = true,
+  open,
+  onOpenChange,
+  title,
+  description,
+  confirmLabel,
+  confirmVariant = 'default',
+  requireReason = true,
   reasonPlaceholder = '（可选）写入审计日志',
   onConfirm,
 }: ConfirmActionDialogProps) {
@@ -55,10 +60,7 @@ export function ConfirmActionDialog({
 
   return (
     <Dialog open={open} onOpenChange={busy ? () => {} : onOpenChange}>
-      <DialogContent
-        className="w-[90vw] max-w-[480px]"
-        onClose={() => !busy && onOpenChange(false)}
-      >
+      <DialogContent className="w-[90vw] max-w-[480px]" onClose={() => !busy && onOpenChange(false)}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShieldAlert className={confirmVariant === 'destructive' ? 'size-4 text-destructive' : 'size-4 text-amber-500'} />
@@ -67,20 +69,16 @@ export function ConfirmActionDialog({
         </DialogHeader>
         <form
           className="space-y-4 p-5"
-          onSubmit={(e) => { e.preventDefault(); submit(); }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
         >
           <div className="text-sm text-muted-foreground">{description}</div>
           {requireReason && (
             <div className="space-y-1.5">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                原因（可选）
-              </label>
-              <Textarea
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder={reasonPlaceholder}
-                rows={3}
-              />
+              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">原因（可选）</label>
+              <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder={reasonPlaceholder} rows={3} />
             </div>
           )}
           <div className="flex justify-end gap-2 border-t pt-3">

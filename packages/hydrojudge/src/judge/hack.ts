@@ -47,9 +47,7 @@ export async function judge(ctx: Context) {
         },
         `hack[${ctx.rid}]`,
     );
-    const {
-        code, signalled, time, memory,
-    } = res;
+    const { code, signalled, time, memory } = res;
     let { status } = res;
     let message: any = '';
     if (status === STATUS.STATUS_ACCEPTED) {

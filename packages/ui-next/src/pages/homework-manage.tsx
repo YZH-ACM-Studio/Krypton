@@ -4,14 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import {
-  ArrowLeft,
-  FolderOpen,
-  Plus,
-  Save,
-  Trash2,
-  Upload,
-} from 'lucide-react';
+import { ArrowLeft, FolderOpen, Plus, Save, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -21,15 +14,24 @@ import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Checkbox } from '@/components/ui/checkbox';
 import { MultiSelect } from '@/components/ui/multi-select';
 import {
-  COMMON_LANG_OPTIONS, type LangOption, resolveLangs,
-  searchProblems, fetchProblemsByIds, type ProblemOption,
+  COMMON_LANG_OPTIONS,
+  type LangOption,
+  resolveLangs,
+  searchProblems,
+  fetchProblemsByIds,
+  type ProblemOption,
 } from '@/lib/multi-select-presets';
 import { Badge } from '@/components/ui/badge';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens } from '@/lib/format';
 
-interface R { [key: string]: any }
-interface ScopeOption { _id: string, name: string }
+interface R {
+  [key: string]: any;
+}
+interface ScopeOption {
+  _id: string;
+  name: string;
+}
 
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -88,24 +90,37 @@ export function HomeworkEditPage() {
     setPenaltyRules((rows) => rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
   };
   const confirmDelete = (event: { preventDefault: () => void }) => {
-    // eslint-disable-next-line no-alert
     if (!confirm('确定要删除此作业吗？')) event.preventDefault();
   };
 
   /* MultiSelect state — pids resolved async on mount, langs sync. */
   const initialPidCsv: string = (typeof data.pids === 'string' ? data.pids : '') || '';
-  const initialPidIds = initialPidCsv.split(',').map((s) => s.trim()).filter(Boolean);
-  const [pidValue, setPidValue] = useState<ProblemOption[]>(() => initialPidIds.map((id) => ({
-    docId: Number(id) || 0, pid: id, title: '',
-  })));
+  const initialPidIds = initialPidCsv
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const [pidValue, setPidValue] = useState<ProblemOption[]>(() =>
+    initialPidIds.map((id) => ({
+      docId: Number(id) || 0,
+      pid: id,
+      title: '',
+    })),
+  );
   useEffect(() => {
     if (!initialPidIds.length) return;
     let cancelled = false;
-    fetchProblemsByIds(initialPidIds).then((res) => { if (!cancelled) setPidValue(res); });
-    return () => { cancelled = true; };
+    fetchProblemsByIds(initialPidIds).then((res) => {
+      if (!cancelled) setPidValue(res);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
-  const initialLangIds: string[] = Array.isArray(tdoc.langs) ? tdoc.langs
-    : typeof tdoc.langs === 'string' ? tdoc.langs.split(',').filter(Boolean) : [];
+  const initialLangIds: string[] = Array.isArray(tdoc.langs)
+    ? tdoc.langs
+    : typeof tdoc.langs === 'string'
+      ? tdoc.langs.split(',').filter(Boolean)
+      : [];
   const [langValue, setLangValue] = useState<LangOption[]>(() => resolveLangs(initialLangIds));
   const initialGroupIds: string[] = (data.participantGroupIds || tdoc.participantGroupIds || []).map(String);
   const groupCatalog: ScopeOption[] = (data.scopeGroups || [])
@@ -115,21 +130,16 @@ export function HomeworkEditPage() {
       name: group.archivedAt ? `${group.name}（已归档）` : group.name,
     }));
   const [participantGroups, setParticipantGroups] = useState<ScopeOption[]>(
-    initialGroupIds.map((groupId) => (
-      groupCatalog.find((group) => group._id === groupId) || { _id: groupId, name: groupId }
-    )),
+    initialGroupIds.map((groupId) => groupCatalog.find((group) => group._id === groupId) || { _id: groupId, name: groupId }),
   );
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center gap-3">
         <Button asChild variant="ghost" size="icon">
-          <a href={hwUrl}><ArrowLeft className="size-4" /></a>
+          <a href={hwUrl}>
+            <ArrowLeft className="size-4" />
+          </a>
         </Button>
         <div>
           <h1 className="text-xl font-semibold">{isEdit ? '编辑作业' : '创建作业'}</h1>
@@ -151,40 +161,54 @@ export function HomeworkEditPage() {
               </>
             ) : null}
             <div className="space-y-1.5">
-              <label htmlFor="title" className="text-sm font-medium">作业标题</label>
+              <label htmlFor="title" className="text-sm font-medium">
+                作业标题
+              </label>
               <Input id="title" name="title" defaultValue={tdoc.title || ''} required />
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <label htmlFor="beginAtDate" className="text-sm font-medium">开始日期</label>
+                <label htmlFor="beginAtDate" className="text-sm font-medium">
+                  开始日期
+                </label>
                 <Input id="beginAtDate" name="beginAtDate" type="date" defaultValue={data.dateBeginText || ''} required />
               </div>
               <div className="space-y-1.5">
-                <label htmlFor="beginAtTime" className="text-sm font-medium">开始时间</label>
+                <label htmlFor="beginAtTime" className="text-sm font-medium">
+                  开始时间
+                </label>
                 <Input id="beginAtTime" name="beginAtTime" type="time" defaultValue={data.timeBeginText || ''} required />
               </div>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <label htmlFor="penaltySinceDate" className="text-sm font-medium">截止日期</label>
+                <label htmlFor="penaltySinceDate" className="text-sm font-medium">
+                  截止日期
+                </label>
                 <Input id="penaltySinceDate" name="penaltySinceDate" type="date" defaultValue={data.datePenaltyText || ''} required />
               </div>
               <div className="space-y-1.5">
-                <label htmlFor="penaltySinceTime" className="text-sm font-medium">截止时间</label>
+                <label htmlFor="penaltySinceTime" className="text-sm font-medium">
+                  截止时间
+                </label>
                 <Input id="penaltySinceTime" name="penaltySinceTime" type="time" defaultValue={data.timePenaltyText || ''} required />
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="extensionDays" className="text-sm font-medium">延期天数</label>
+              <label htmlFor="extensionDays" className="text-sm font-medium">
+                延期天数
+              </label>
               <Input id="extensionDays" name="extensionDays" type="number" step="0.5" min="0" defaultValue={data.extensionDays || 1} />
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-1.5">
-                <label htmlFor="assign" className="text-sm font-medium">分配给</label>
+                <label htmlFor="assign" className="text-sm font-medium">
+                  分配给
+                </label>
                 <Input
                   id="assign"
                   name="assign"
@@ -193,7 +217,9 @@ export function HomeworkEditPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <label htmlFor="maintainer" className="text-sm font-medium">作业维护者</label>
+                <label htmlFor="maintainer" className="text-sm font-medium">
+                  作业维护者
+                </label>
                 <Input
                   id="maintainer"
                   name="maintainer"
@@ -205,18 +231,12 @@ export function HomeworkEditPage() {
 
             <div className="space-y-1.5">
               <label className="text-sm font-medium">可见班级</label>
-              <input
-                type="hidden"
-                name="participantScopeMode"
-                value={participantGroups.length ? 'groups' : 'none'}
-              />
+              <input type="hidden" name="participantScopeMode" value={participantGroups.length ? 'groups' : 'none'} />
               {data.courseContext ? (
                 <>
                   <input type="hidden" name="participantGroupIds" value={participantGroups.map((group) => group._id).join(',')} />
                   <div className="border-y border-border/70 py-2 text-sm text-muted-foreground">
-                    {participantGroups.length
-                      ? participantGroups.map((group) => group.name).join('、')
-                      : '课程未限定班级，本作业对全域用户开放。'}
+                    {participantGroups.length ? participantGroups.map((group) => group.name).join('、') : '课程未限定班级，本作业对全域用户开放。'}
                   </div>
                   <p className="text-xs text-muted-foreground">范围跟随课程设置，创建时由服务端再次校验。</p>
                 </>
@@ -254,9 +274,15 @@ export function HomeworkEditPage() {
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="font-mono text-[11px] text-muted-foreground shrink-0">{p.pid || p.docId}</span>
                     <span className="truncate flex-1">{p.title || '—'}</span>
-                    {p.difficulty ? <Badge variant="outline" className="text-[10px] shrink-0">Lv.{p.difficulty}</Badge> : null}
+                    {p.difficulty ? (
+                      <Badge variant="outline" className="text-[10px] shrink-0">
+                        Lv.{p.difficulty}
+                      </Badge>
+                    ) : null}
                     {p.nSubmit ? (
-                      <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">{p.nAccept ?? 0}/{p.nSubmit}</span>
+                      <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+                        {p.nAccept ?? 0}/{p.nSubmit}
+                      </span>
                     ) : null}
                   </div>
                 )}
@@ -287,7 +313,9 @@ export function HomeworkEditPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="content" className="text-sm font-medium">作业说明 (Markdown)</label>
+              <label htmlFor="content" className="text-sm font-medium">
+                作业说明 (Markdown)
+              </label>
               <MarkdownEditor name="content" value={tdoc.content || ''} minHeight={280} preferredLang={bs.locale} />
             </div>
 
@@ -303,7 +331,8 @@ export function HomeworkEditPage() {
                   size="sm"
                   onClick={() => setPenaltyRules((rows) => [...rows, { id: `new-${Date.now()}`, hours: '', coefficient: '1' }])}
                 >
-                  <Plus className="mr-1 size-3" />添加规则
+                  <Plus className="mr-1 size-3" />
+                  添加规则
                 </Button>
               </div>
               <input type="hidden" name="penaltyRules" value={serializePenaltyRules(penaltyRules)} readOnly />
@@ -357,19 +386,13 @@ export function HomeworkEditPage() {
 
             <div className="flex items-center gap-3">
               <Button type="submit" name="operation" value="update">
-                <Save className="mr-1 size-4" />{isEdit ? '保存修改' : '创建作业'}
+                <Save className="mr-1 size-4" />
+                {isEdit ? '保存修改' : '创建作业'}
               </Button>
               {isEdit && (
-                <Button
-                  type="submit"
-                  name="operation"
-                  value="delete"
-                  variant="destructive"
-                  size="sm"
-                  formNoValidate
-                  onClick={confirmDelete}
-                >
-                  <Trash2 className="mr-1 size-3" />删除
+                <Button type="submit" name="operation" value="delete" variant="destructive" size="sm" formNoValidate onClick={confirmDelete}>
+                  <Trash2 className="mr-1 size-3" />
+                  删除
                 </Button>
               )}
             </div>
@@ -391,15 +414,12 @@ export function HomeworkFilesPage() {
   const hwUrl = replaceRouteTokens(bs.urls.homeworkDetail, { TID: String(tid) });
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center gap-3">
         <Button asChild variant="ghost" size="icon">
-          <a href={hwUrl}><ArrowLeft className="size-4" /></a>
+          <a href={hwUrl}>
+            <ArrowLeft className="size-4" />
+          </a>
         </Button>
         <div>
           <h1 className="text-xl font-semibold">作业文件</h1>
@@ -410,12 +430,14 @@ export function HomeworkFilesPage() {
       <Card>
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="flex items-center gap-2 text-base">
-            <FolderOpen className="size-4" />文件 ({files.length})
+            <FolderOpen className="size-4" />
+            文件 ({files.length})
           </CardTitle>
           <form method="post" encType="multipart/form-data" className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             <input type="file" name="file" className="text-xs" />
             <Button type="submit" name="operation" value="upload_file" size="sm" variant="outline">
-              <Upload className="mr-1 size-3" />上传
+              <Upload className="mr-1 size-3" />
+              上传
             </Button>
           </form>
         </CardHeader>

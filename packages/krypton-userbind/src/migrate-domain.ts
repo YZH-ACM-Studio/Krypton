@@ -12,12 +12,8 @@
  * (e.g. by re-issuing invite tokens or letting students self-request).
  */
 import { ObjectId } from 'hydrooj';
-import {
-    bindTokensColl, schoolsColl, studentsColl, userGroupsColl,
-} from './db';
-import type {
-    ExportPackage, ImportConflictPolicy, ImportReport, School, StudentRecord, UserGroup,
-} from './types';
+import { bindTokensColl, schoolsColl, studentsColl, userGroupsColl } from './db';
+import type { ExportPackage, ImportConflictPolicy, ImportReport } from './types';
 import { deriveEnrollmentYear, userBindModel } from './model';
 
 export async function exportDomain(domainId: string): Promise<ExportPackage> {
@@ -42,9 +38,7 @@ export async function exportDomain(domainId: string): Promise<ExportPackage> {
     };
 }
 
-export async function importDomain(
-    targetDomainId: string, pkg: ExportPackage, policy: ImportConflictPolicy,
-): Promise<ImportReport> {
+export async function importDomain(targetDomainId: string, pkg: ExportPackage, policy: ImportConflictPolicy): Promise<ImportReport> {
     if (!pkg || pkg.version !== 1) {
         throw new Error('Unsupported export package version');
     }
@@ -64,7 +58,8 @@ export async function importDomain(
     // Schools
     for (const oldSchool of pkg.schools) {
         const existing = await schoolsColl.findOne({
-            domainId: targetDomainId, name: oldSchool.name,
+            domainId: targetDomainId,
+            name: oldSchool.name,
         });
         if (existing) {
             const action = handleConflict('school', oldSchool.name, policy);
@@ -97,7 +92,9 @@ export async function importDomain(
         const newSchoolId = schoolIdMap.get(oldGroup.schoolId.toString());
         if (!newSchoolId) continue;
         const existing = await userGroupsColl.findOne({
-            domainId: targetDomainId, schoolId: newSchoolId, name: oldGroup.name,
+            domainId: targetDomainId,
+            schoolId: newSchoolId,
+            name: oldGroup.name,
         });
         if (existing) {
             const action = handleConflict('group', oldGroup.name, policy);
@@ -129,11 +126,11 @@ export async function importDomain(
     for (const oldStudent of pkg.students) {
         const newSchoolId = schoolIdMap.get(oldStudent.schoolId.toString());
         if (!newSchoolId) continue;
-        const newGroupIds = oldStudent.groupIds
-            .map((gid) => groupIdMap.get(gid.toString()))
-            .filter((id): id is ObjectId => !!id);
+        const newGroupIds = oldStudent.groupIds.map((gid) => groupIdMap.get(gid.toString())).filter((id): id is ObjectId => !!id);
         const existing = await studentsColl.findOne({
-            domainId: targetDomainId, schoolId: newSchoolId, studentId: oldStudent.studentId,
+            domainId: targetDomainId,
+            schoolId: newSchoolId,
+            studentId: oldStudent.studentId,
         });
         if (existing) {
             const action = handleConflict('student', oldStudent.studentId, policy);
@@ -142,10 +139,7 @@ export async function importDomain(
                 throw new Error(`Conflict: student "${oldStudent.studentId}" exists in target school`);
             }
             if (action === 'overwritten') {
-                await studentsColl.updateOne(
-                    { _id: existing._id },
-                    { $set: { realName: oldStudent.realName, groupIds: newGroupIds } },
-                );
+                await studentsColl.updateOne({ _id: existing._id }, { $set: { realName: oldStudent.realName, groupIds: newGroupIds } });
             }
             studentIdMap.set(oldStudent._id.toString(), existing._id);
         } else {
@@ -180,6 +174,7 @@ export async function importDomain(
         }
         await bindTokensColl.insertOne({
             _id: oldToken._id,
+            kind: 'student',
             domainId: targetDomainId,
             studentRecordId: newStudentId,
             createdAt: new Date(),
@@ -195,14 +190,15 @@ export async function importDomain(
     return report;
 }
 
-function handleConflict(
-    _kind: string, _ident: string, policy: ImportConflictPolicy,
-): 'skipped' | 'overwritten' | 'errored' {
+function handleConflict(_kind: string, _ident: string, policy: ImportConflictPolicy): 'skipped' | 'overwritten' | 'errored' {
     switch (policy) {
-        case 'skip': return 'skipped';
-        case 'overwrite': return 'overwritten';
+        case 'skip':
+            return 'skipped';
+        case 'overwrite':
+            return 'overwritten';
         case 'error':
-        default: return 'errored';
+        default:
+            return 'errored';
     }
 }
 

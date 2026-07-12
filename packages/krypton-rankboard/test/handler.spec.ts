@@ -64,8 +64,7 @@ const reads = {
 
 const studentsColl = {
     async findOne(filter: any) {
-        if (String(filter?._id) === String(studentDocId)
-            && (filter.domainId === undefined || filter.domainId === 'system')) {
+        if (String(filter?._id) === String(studentDocId) && (filter.domainId === undefined || filter.domainId === 'system')) {
             return {
                 _id: studentDocId,
                 domainId: 'system',
@@ -74,8 +73,7 @@ const studentsColl = {
                 schoolId: new ObjectId(),
             };
         }
-        if (String(filter?._id) === String(outerStudentDocId)
-            && (filter.domainId === undefined || filter.domainId === 'owned-course')) {
+        if (String(filter?._id) === String(outerStudentDocId) && (filter.domainId === undefined || filter.domainId === 'owned-course')) {
             return {
                 _id: outerStudentDocId,
                 domainId: 'owned-course',
@@ -88,8 +86,12 @@ const studentsColl = {
     },
     find() {
         return {
-            limit() { return this; },
-            async toArray() { return []; },
+            limit() {
+                return this;
+            },
+            async toArray() {
+                return [];
+            },
         };
     },
 };
@@ -97,20 +99,28 @@ const studentsColl = {
 const schoolsColl = {
     find() {
         return {
-            async toArray() { return []; },
+            async toArray() {
+                return [];
+            },
         };
     },
 };
 
 const modelStub = {
     RANKBOARD_DOMAIN: 'system',
-    async addAward() { return undefined; },
+    async addAward() {
+        return undefined;
+    },
     async addAwardImage(...args: any[]) {
         calls.addAwardImage.push(args);
         return [];
     },
-    async applyGpltStoreScores() { return undefined; },
-    async buildGallery() { return { years: [] }; },
+    async applyGpltStoreScores() {
+        return undefined;
+    },
+    async buildGallery() {
+        return { years: [] };
+    },
     async createPerson(input: any) {
         calls.createPerson.push(input);
         return { _id: createdPersonId, studentDocId: input.studentDocId, awards: [] };
@@ -154,16 +164,20 @@ const modelStub = {
         reads.listLeaderboard++;
         return [];
     },
-    async removeAwardAt() { return undefined; },
+    async removeAwardAt() {
+        return undefined;
+    },
     async rollbackImportBatch(id: any, actor: number) {
         calls.rollbackImportBatch.push({ id, actor });
         return { pulled: 3 };
     },
-    async setConfig(next: { baseScore: number, decayFactor: number }) {
+    async setConfig(next: { baseScore: number; decayFactor: number }) {
         calls.setConfig.push(next);
         config = { ...next };
     },
-    async updateAwardAt() { return undefined; },
+    async updateAwardAt() {
+        return undefined;
+    },
     async updatePerson(id: any, patch: any) {
         calls.updatePerson.push({ id, patch });
     },
@@ -191,7 +205,9 @@ const hydroojStub = {
     PermissionError,
     PrivilegeError,
     UserModel: {
-        async getPrefixList() { return []; },
+        async getPrefixList() {
+            return [];
+        },
     },
 };
 
@@ -316,20 +332,22 @@ async function dispatchClass(
                     };
                 }
             },
-            async serial() { return undefined; },
+            async serial() {
+                return undefined;
+            },
         },
     };
     const savedContext = {
         plugin() {
             return {
                 ctx: { server: { renderers: {} } },
-                async dispose() { return undefined; },
+                async dispose() {
+                    return undefined;
+                },
             };
         },
     };
-    await (framework.WebService.prototype as any).handleHttp.call(
-        service, koaContext, HandlerClass, () => {}, savedContext,
-    );
+    await (framework.WebService.prototype as any).handleHttp.call(service, koaContext, HandlerClass, () => {}, savedContext);
     return response;
 }
 
@@ -371,7 +389,9 @@ describe('framework operation dispatch contract', () => {
     it('rejects an operation when a handler only declares generic post()', async () => {
         let genericWrites = 0;
         class GenericOnlyHandler extends framework.Handler {
-            async post() { genericWrites++; }
+            async post() {
+                genericWrites++;
+            }
         }
 
         const response = await dispatchClass(GenericOnlyHandler, { operation: 'add' });
@@ -384,7 +404,9 @@ describe('framework operation dispatch contract', () => {
     it('dispatches an operation to postX exactly once when generic post is absent', async () => {
         let operationWrites = 0;
         class NativeOperationHandler extends framework.Handler {
-            async postAdd() { operationWrites++; }
+            async postAdd() {
+                operationWrites++;
+            }
         }
 
         const response = await dispatchClass(NativeOperationHandler, { operation: 'add' });
@@ -412,9 +434,14 @@ describe('rankboard handler operation contract', () => {
     });
 
     it('postAdd creates one person and redirects to the editor', async () => {
-        const response = await dispatch('admin_rankboard', {
-            operation: 'add', studentDocId: String(studentDocId),
-        }, makeUser('import'));
+        const response = await dispatch(
+            'admin_rankboard',
+            {
+                operation: 'add',
+                studentDocId: String(studentDocId),
+            },
+            makeUser('import'),
+        );
 
         expect(response.status).to.equal(200);
         expect(calls.createPerson).to.have.lengthOf(1);
@@ -423,9 +450,14 @@ describe('rankboard handler operation contract', () => {
     });
 
     it('postAdd does not reveal or create a person for an outer-domain student id', async () => {
-        const response = await dispatch('admin_rankboard', {
-            operation: 'add', studentDocId: String(outerStudentDocId),
-        }, makeUser('import'));
+        const response = await dispatch(
+            'admin_rankboard',
+            {
+                operation: 'add',
+                studentDocId: String(outerStudentDocId),
+            },
+            makeUser('import'),
+        );
 
         expect(response.status).to.equal(404);
         expect(response.body.error.name).to.equal('NotFoundError');
@@ -433,9 +465,14 @@ describe('rankboard handler operation contract', () => {
     });
 
     it('postDelete removes one person and redirects to the list', async () => {
-        const response = await dispatch('admin_rankboard', {
-            operation: 'delete', personId: String(personId),
-        }, makeUser('manage'));
+        const response = await dispatch(
+            'admin_rankboard',
+            {
+                operation: 'delete',
+                personId: String(personId),
+            },
+            makeUser('manage'),
+        );
 
         expect(response.status).to.equal(200);
         expect(calls.deletePerson).to.have.lengthOf(1);
@@ -444,9 +481,15 @@ describe('rankboard handler operation contract', () => {
     });
 
     it('postConfig persists one merged config and redirects', async () => {
-        const response = await dispatch('admin_rankboard', {
-            operation: 'config', baseScore: '125', decayFactor: '0.8',
-        }, makeUser('manage'));
+        const response = await dispatch(
+            'admin_rankboard',
+            {
+                operation: 'config',
+                baseScore: '125',
+                decayFactor: '0.8',
+            },
+            makeUser('manage'),
+        );
 
         expect(response.status).to.equal(200);
         expect(calls.setConfig).to.deep.equal([{ baseScore: 125, decayFactor: 0.8 }]);
@@ -454,9 +497,14 @@ describe('rankboard handler operation contract', () => {
     });
 
     it('postRollbackBatch rolls one batch back and reports its write count', async () => {
-        const response = await dispatch('admin_rankboard', {
-            operation: 'rollbackBatch', batchId: String(batchId),
-        }, makeUser('import'));
+        const response = await dispatch(
+            'admin_rankboard',
+            {
+                operation: 'rollbackBatch',
+                batchId: String(batchId),
+            },
+            makeUser('import'),
+        );
 
         expect(response.status).to.equal(200);
         expect(calls.rollbackImportBatch).to.have.lengthOf(1);
@@ -466,56 +514,73 @@ describe('rankboard handler operation contract', () => {
     });
 
     it('postBatch parses TSV once and returns refreshed page data', async () => {
-        const response = await dispatch('admin_rankboard', {
-            operation: 'batch',
-            batchTsv: '20230001\ticpc_gold\tICPC 北京站\t2026-04\t12\t1\t队名\t队友甲,队友乙',
-        }, makeUser('import'));
+        const response = await dispatch(
+            'admin_rankboard',
+            {
+                operation: 'batch',
+                batchTsv: '20230001\ticpc_gold\tICPC 北京站\t2026-04\t12\t1\t队名\t队友甲,队友乙',
+            },
+            makeUser('import'),
+        );
 
         expect(response.status).to.equal(200);
         expect(calls.importAwardsBatch).to.have.lengthOf(1);
-        expect(calls.importAwardsBatch[0].rows).to.deep.equal([{
-            studentId: '20230001',
-            type: 'icpc_gold',
-            contest: 'ICPC 北京站',
-            date: '2026-04',
-            liveRank: 12,
-            schoolRank: 1,
-            team: '队名',
-            teammates: ['队友甲', '队友乙'],
-            realName: undefined,
-        }]);
+        expect(calls.importAwardsBatch[0].rows).to.deep.equal([
+            {
+                studentId: '20230001',
+                type: 'icpc_gold',
+                contest: 'ICPC 北京站',
+                date: '2026-04',
+                liveRank: 12,
+                schoolRank: 1,
+                team: '队名',
+                teammates: ['队友甲', '队友乙'],
+                realName: undefined,
+            },
+        ]);
         expect(response.template).to.equal('admin_rankboard.html');
         expect(response.body.section).to.equal('import');
         expect(response.body.report.ok).to.equal(1);
     });
 
     it('postUpsert writes one complete award type and redirects', async () => {
-        const response = await dispatch('admin_rankboard_awards', {
-            operation: 'upsert',
-            key: 'custom_award',
-            name: '自定义奖项',
-            weight: '1.5',
-            useRankDecay: 'true',
-            order: '20',
-            hidden: 'true',
-        }, makeUser('manage'));
+        const response = await dispatch(
+            'admin_rankboard_awards',
+            {
+                operation: 'upsert',
+                key: 'custom_award',
+                name: '自定义奖项',
+                weight: '1.5',
+                useRankDecay: 'true',
+                order: '20',
+                hidden: 'true',
+            },
+            makeUser('manage'),
+        );
 
         expect(response.status).to.equal(200);
-        expect(calls.upsertAwardType).to.deep.equal([{
-            key: 'custom_award',
-            name: '自定义奖项',
-            weight: 1.5,
-            useRankDecay: true,
-            order: 20,
-            hidden: true,
-        }]);
+        expect(calls.upsertAwardType).to.deep.equal([
+            {
+                key: 'custom_award',
+                name: '自定义奖项',
+                weight: 1.5,
+                useRankDecay: true,
+                order: 20,
+                hidden: true,
+            },
+        ]);
         expect(response.redirect).to.equal('/admin/rankboard/awards');
     });
 
     it('award-type postDelete deletes one key and redirects', async () => {
-        const response = await dispatch('admin_rankboard_awards', {
-            operation: 'delete', key: 'custom_award',
-        }, makeUser('manage'));
+        const response = await dispatch(
+            'admin_rankboard_awards',
+            {
+                operation: 'delete',
+                key: 'custom_award',
+            },
+            makeUser('manage'),
+        );
 
         expect(response.status).to.equal(200);
         expect(calls.deleteAwardType).to.deep.equal(['custom_award']);
@@ -523,11 +588,16 @@ describe('rankboard handler operation contract', () => {
     });
 
     it('postSave restores ObjectId fields, writes once and redirects', async () => {
-        const response = await dispatch('admin_rankboard_person', {
-            operation: 'save',
-            awards: JSON.stringify([{ type: 'icpc_gold', importBatchId: String(batchId) }]),
-            employmentStatus: '测试去向',
-        }, makeUser('import'), { id: String(personId) });
+        const response = await dispatch(
+            'admin_rankboard_person',
+            {
+                operation: 'save',
+                awards: JSON.stringify([{ type: 'icpc_gold', importBatchId: String(batchId) }]),
+                employmentStatus: '测试去向',
+            },
+            makeUser('import'),
+            { id: String(personId) },
+        );
 
         expect(response.status).to.equal(200);
         expect(calls.updatePerson).to.have.lengthOf(1);
@@ -543,9 +613,17 @@ describe('rankboard handler operation contract', () => {
         ['config', 'admin_rankboard', { operation: 'config', baseScore: '120' }, {}],
         ['rollbackBatch', 'admin_rankboard', { operation: 'rollbackBatch', batchId: String(batchId) }, {}],
         ['batch', 'admin_rankboard', { operation: 'batch', batchTsv: '20230001\ticpc_gold' }, {}],
-        ['upsert award type', 'admin_rankboard_awards', {
-            operation: 'upsert', key: 'x', name: 'X', weight: '1',
-        }, {}],
+        [
+            'upsert award type',
+            'admin_rankboard_awards',
+            {
+                operation: 'upsert',
+                key: 'x',
+                name: 'X',
+                weight: '1',
+            },
+            {},
+        ],
         ['delete award type', 'admin_rankboard_awards', { operation: 'delete', key: 'x' }, {}],
         ['save', 'admin_rankboard_person', { operation: 'save', awards: '[]' }, { id: String(personId) }],
     ];
@@ -562,9 +640,16 @@ describe('rankboard handler operation contract', () => {
     for (const [label, routeName, body] of [
         ['delete person', 'admin_rankboard', { operation: 'delete', personId: String(personId) }],
         ['config', 'admin_rankboard', { operation: 'config', baseScore: '120' }],
-        ['upsert award type', 'admin_rankboard_awards', {
-            operation: 'upsert', key: 'x', name: 'X', weight: '1',
-        }],
+        [
+            'upsert award type',
+            'admin_rankboard_awards',
+            {
+                operation: 'upsert',
+                key: 'x',
+                name: 'X',
+                weight: '1',
+            },
+        ],
         ['delete award type', 'admin_rankboard_awards', { operation: 'delete', key: 'x' }],
     ] as Array<[string, string, Record<string, any>]>) {
         it(`keeps ${label} behind the structural MANAGE gate`, async () => {
@@ -584,9 +669,14 @@ describe('rankboard handler operation contract', () => {
     });
 
     it('returns 405 for the removed pseudo upload operation', async () => {
-        const response = await dispatch('admin_rankboard_person', {
-            operation: 'upload',
-        }, makeUser('admin'), { id: String(personId) });
+        const response = await dispatch(
+            'admin_rankboard_person',
+            {
+                operation: 'upload',
+            },
+            makeUser('admin'),
+            { id: String(personId) },
+        );
 
         expect(response.status).to.equal(405);
         expect(response.body.error.name).to.equal('InvalidOperationError');
@@ -642,18 +732,20 @@ describe('rankboard management GET capability and section contract', () => {
 
     it('uses the authoritative request domain and rejects injected system args', async () => {
         const domainOwner = { _id: 42, hasPriv: () => false, hasPerm: () => true };
-        const getResponse = await dispatchGet(
-            'admin_rankboard', domainOwner, { domainId: 'system' }, {}, 'owned-course',
-        );
+        const getResponse = await dispatchGet('admin_rankboard', domainOwner, { domainId: 'system' }, {}, 'owned-course');
         expect(getResponse.status).to.equal(403);
         expect(reads.listLeaderboard + reads.listImportBatches + reads.getConfig).to.equal(0);
 
         const postResponse = await dispatch(
-            'admin_rankboard', {
+            'admin_rankboard',
+            {
                 operation: 'add',
                 studentDocId: String(studentDocId),
                 domainId: 'system',
-            }, domainOwner, {}, 'owned-course',
+            },
+            domainOwner,
+            {},
+            'owned-course',
         );
         expect(postResponse.status).to.equal(403);
         expect(mutationCount()).to.equal(0);
@@ -661,9 +753,7 @@ describe('rankboard management GET capability and section contract', () => {
     });
 
     it('does not let forged non-system args revoke a real system-domain capability', async () => {
-        const response = await dispatchGet(
-            'admin_rankboard', makeUser('import'), { domainId: 'owned-course' }, {}, 'system',
-        );
+        const response = await dispatchGet('admin_rankboard', makeUser('import'), { domainId: 'owned-course' }, {}, 'system');
 
         expect(response.status).to.equal(200);
         expect(response.body.section).to.equal('people');
@@ -683,9 +773,7 @@ describe('rankboard management GET capability and section contract', () => {
     });
 
     it('returns capabilities on person GET and keeps the people context', async () => {
-        const response = await dispatchGet(
-            'admin_rankboard_person', makeUser('import'), {}, { id: String(personId), domainId: 'system' },
-        );
+        const response = await dispatchGet('admin_rankboard_person', makeUser('import'), {}, { id: String(personId), domainId: 'system' });
 
         expect(response.status).to.equal(200);
         expect(response.body.canImport).to.equal(true);
@@ -698,40 +786,44 @@ describe('rankboard gallery upload authoritative-domain contract', () => {
     const domainOwner = { _id: 42, hasPriv: () => false, hasPerm: () => true };
 
     it('rejects an outer-domain owner even when GET and POST args forge system', async () => {
-        const getResponse = await dispatchGet(
-            'rankboard_gallery', domainOwner, { domainId: 'system' }, {}, 'owned-course',
-        );
+        const getResponse = await dispatchGet('rankboard_gallery', domainOwner, { domainId: 'system' }, {}, 'owned-course');
         expect(getResponse.status).to.equal(200);
         expect(getResponse.body.canUpload).to.equal(false);
 
         const postResponse = await dispatch(
-            'rankboard_gallery', {
+            'rankboard_gallery',
+            {
                 operation: 'addImage',
                 personId: String(personId),
                 awardIndex: '0',
                 url: '/file/42/award.jpg',
                 domainId: 'system',
-            }, domainOwner, {}, 'owned-course',
+            },
+            domainOwner,
+            {},
+            'owned-course',
         );
         expect(postResponse.status).to.equal(403);
         expect(calls.addAwardImage).to.have.lengthOf(0);
     });
 
     it('keeps a real system-domain IMPORT capability despite forged outer-domain args', async () => {
-        const getResponse = await dispatchGet(
-            'rankboard_gallery', makeUser('import'), { domainId: 'owned-course' }, {}, 'system',
-        );
+        const getResponse = await dispatchGet('rankboard_gallery', makeUser('import'), { domainId: 'owned-course' }, {}, 'system');
         expect(getResponse.status).to.equal(200);
         expect(getResponse.body.canUpload).to.equal(true);
 
         const postResponse = await dispatch(
-            'rankboard_gallery', {
+            'rankboard_gallery',
+            {
                 operation: 'addImage',
                 personId: String(personId),
                 awardIndex: '0',
                 url: '/file/42/award.jpg',
                 domainId: 'owned-course',
-            }, makeUser('import'), {}, 'system',
+            },
+            makeUser('import'),
+            {},
+            'system',
         );
         expect(postResponse.status).to.equal(200);
         expect(calls.addAwardImage).to.have.lengthOf(1);

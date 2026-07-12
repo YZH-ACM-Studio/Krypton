@@ -8,11 +8,13 @@
         "cordis": "*"
     },
     "dependencies": {
+        "@cordisjs/plugin-timer": "1.1.1",
         "@hydrooj/utils": "workspace:^",
         "@koa/router": "^15.4.0",
         "@mongodb-js/saslprep": "^1.4.8",
         "emoji-regex": "^10.6.0",
         "fs-extra": "^11.3.4",
+        "formidable": "^3.5.4",
         "koa": "^3.2.0",
         "koa-body": "^7.0.1",
         "koa-compress": "5.1.1",
@@ -24,6 +26,7 @@
         "ws": "^8.20.0"
     },
     "devDependencies": {
+        "@types/formidable": "^3.5.1",
         "@types/fs-extra": "^11.0.4",
         "@types/koa": "^3.0.2",
         "@types/koa-compress": "^4.0.7",

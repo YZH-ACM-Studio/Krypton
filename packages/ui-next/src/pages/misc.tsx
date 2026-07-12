@@ -18,12 +18,7 @@ export function DomainsPage() {
   const pinnedDomains = new Set((bs.user.pinnedDomains || []).map(String));
 
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <Globe className="size-5 text-primary" />
@@ -70,7 +65,9 @@ export function DomainsPage() {
                     <div className="min-w-0">
                       <h3 className="truncate font-medium">{d.name || id}</h3>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        <Badge variant="outline" className="text-[10px]">{id}</Badge>
+                        <Badge variant="outline" className="text-[10px]">
+                          {id}
+                        </Badge>
                         <Badge variant="secondary" className="text-[10px]">
                           {roles[id] || 'default'}
                         </Badge>
@@ -92,9 +89,7 @@ export function DomainsPage() {
                     </form>
                   </div>
                   {d.bulletin ? (
-                    <p className="line-clamp-3 text-xs text-muted-foreground">
-                      {formatPlainTextSummary(d.bulletin)}
-                    </p>
+                    <p className="line-clamp-3 text-xs text-muted-foreground">{formatPlainTextSummary(d.bulletin)}</p>
                   ) : (
                     <p className="text-xs text-muted-foreground">暂无描述</p>
                   )}
@@ -114,9 +109,12 @@ export function DomainsPage() {
                       </Button>
                     ) : null}
                     {id !== 'system' && d.owner !== bs.user.id ? (
-                      <form method="post" onSubmit={(event) => {
-                        if (!window.confirm(`确定离开域 ${id}？`)) event.preventDefault();
-                      }}>
+                      <form
+                        method="post"
+                        onSubmit={(event) => {
+                          if (!window.confirm(`确定离开域 ${id}？`)) event.preventDefault();
+                        }}
+                      >
                         <input type="hidden" name="operation" value="leave" />
                         <input type="hidden" name="id" value={id} />
                         <Button type="submit" variant="ghost" size="sm" className="h-8 text-destructive">
@@ -142,12 +140,7 @@ export function FilesPage() {
   const files: R[] = data.files || [];
 
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center gap-2">
         <FolderOpen className="size-5 text-primary" />
         <h1 className="text-xl font-semibold">文件管理</h1>
@@ -160,7 +153,9 @@ export function FilesPage() {
         <CardContent>
           <form method="post" encType="multipart/form-data" className="flex items-center gap-3">
             <input type="file" name="file" className="text-sm" />
-            <Button type="submit" size="sm">上传</Button>
+            <Button type="submit" size="sm">
+              上传
+            </Button>
           </form>
         </CardContent>
       </Card>
@@ -186,9 +181,7 @@ export function FilesPage() {
                 files.map((f) => (
                   <TableRow key={String(f.name || f._id)}>
                     <TableCell className="font-medium">{f.name || f.filename}</TableCell>
-                    <TableCell className="text-right text-sm text-muted-foreground">
-                      {f.size ? `${Math.round(f.size / 1024)} KB` : '—'}
-                    </TableCell>
+                    <TableCell className="text-right text-sm text-muted-foreground">{f.size ? `${Math.round(f.size / 1024)} KB` : '—'}</TableCell>
                     <TableCell className="text-center">
                       <Button asChild variant="ghost" size="sm">
                         <a href={`/file/${bs.user.id}/${f.name || f.filename}`}>下载</a>

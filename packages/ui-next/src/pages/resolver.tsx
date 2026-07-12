@@ -12,39 +12,40 @@ import {
 import {
   AdminAnnounceCategoriesPage,
   AdminAnnounceEditorPage,
-  AdminAnnounceListPage, AnnounceDetailPage,
-  AnnounceListPage } from '@/pages/announcement';
+  AdminAnnounceListPage,
+  AnnounceDetailPage,
+  AnnounceListPage,
+} from '@/pages/announcement';
 import {
   ChangeMailSentPage,
-  LoginPage, LogoutPage, LostPasswordMailSentPage, LostPasswordPage,
+  LoginPage,
+  LogoutPage,
+  LostPasswordMailSentPage,
+  LostPasswordPage,
   LostPasswordWithCodePage,
-  RegisterMailSentPage, RegisterPage, UserDeletePendingPage } from '@/pages/auth';
+  RegisterMailSentPage,
+  RegisterPage,
+  UserDeletePendingPage,
+} from '@/pages/auth';
 import { AdminAuthTokenPage } from '@/pages/authtoken';
-import {
-  BlankProblemEditorPage, MultiProblemEditorPage, SingleProblemEditorPage, TrueFalseProblemEditorPage,
-} from '@/pages/basic-objective-editors';
+import { BlankProblemEditorPage, MultiProblemEditorPage, SingleProblemEditorPage, TrueFalseProblemEditorPage } from '@/pages/basic-objective-editors';
 import { BlogDetailPage, BlogEditPage, BlogMainPage } from '@/pages/blog';
 import { ClientRequiredNoticePage } from '@/pages/client-required-notice';
 import {
-  ContestBalloonPage, ContestClarificationPage,
-  ContestEditPage, ContestManagePage, ContestPrintPage,
+  ContestBalloonPage,
+  ContestClarificationPage,
+  ContestEditPage,
+  ContestManagePage,
+  ContestPrintPage,
   ContestProblemListPage,
-  ContestUserPage } from '@/pages/contest-manage';
+  ContestUserPage,
+} from '@/pages/contest-manage';
 import { ContestDetailPage, ContestScoreboardPage, ContestsPage } from '@/pages/contests';
 import { CourseDetailPage, CourseEditPage, CoursePage } from '@/pages/course';
 import { DiscussionCreatePage, DiscussionEditPage } from '@/pages/discussion-manage';
 import { DiscussionDetailPage, DiscussionsPage } from '@/pages/discussions';
-import {
-  DomainEditPage,
-  DomainGroupPage,
-  DomainPermissionPage,
-  DomainRolePage,
-  DomainUserPage,
-} from '@/pages/domain-manage';
-import {
-  ContestModePage,
-  DomainCreatePage, DomainJoinApplicationsPage,
-  DomainJoinPage } from '@/pages/domain-misc';
+import { DomainEditPage, DomainGroupPage, DomainPermissionPage, DomainRolePage, DomainUserPage } from '@/pages/domain-manage';
+import { ContestModePage, DomainCreatePage, DomainJoinApplicationsPage, DomainJoinPage } from '@/pages/domain-misc';
 import { BsodPage, ErrorPage } from '@/pages/error';
 import { ExamContestPage } from '@/pages/exam-mode/contest';
 import { ExamModeHomePage } from '@/pages/exam-mode/index';
@@ -63,17 +64,12 @@ import { ProblemDetailPage } from '@/pages/problem-detail';
 import { ProblemCreateHubPage } from '@/pages/problem-create-hub';
 import { ProblemEditPage } from '@/pages/problem-edit';
 import { ProblemHackPage } from '@/pages/problem-hack';
-import {
-  ProblemConfigPage, ProblemFilesPage, ProblemImportPage,
-  ProblemSolutionPage,
-  ProblemStatisticsPage } from '@/pages/problem-manage';
+import { ProblemConfigPage, ProblemFilesPage, ProblemImportPage, ProblemSolutionPage, ProblemStatisticsPage } from '@/pages/problem-manage';
 import { ProblemMinePage } from '@/pages/problem-mine';
 import { ProblemSubmitPage } from '@/pages/problem-submit';
 import { ProblemsPage } from '@/pages/problems';
 import { RankBoardDetailPage, RankBoardMainPage } from '@/pages/rankboard';
-import {
-  AdminAwardTypesPage, AdminRankBoardListPage, AdminRankBoardPersonPage,
-} from '@/pages/rankboard/admin';
+import { AdminAwardTypesPage, AdminRankBoardListPage, AdminRankBoardPersonPage } from '@/pages/rankboard/admin';
 import { RankBoardGalleryPage } from '@/pages/rankboard/gallery';
 import { RankingPage } from '@/pages/ranking';
 import { RealPassManagePage } from '@/pages/realpass-manage';
@@ -82,13 +78,7 @@ import { SpikeWebViewProbePage } from '@/pages/spike-webview';
 import { FunctionProblemEditorPage, ProgramFillProblemEditorPage } from '@/pages/structured-code-editors';
 import { SubjectiveProblemEditorPage } from '@/pages/subjective-editor';
 import { SudoPage, SudoRedirectPage } from '@/pages/sudo';
-import {
-  ManageConfigPage,
-  ManageScriptPage,
-  ManageSettingPage,
-  ManageUserImportPage,
-  ManageUserPrivPage,
-} from '@/pages/system-manage';
+import { ManageConfigPage, ManageScriptPage, ManageSettingPage, ManageUserImportPage, ManageUserPrivPage } from '@/pages/system-manage';
 import { TaskCenterPage, TaskDetailPage, TaskMyPage } from '@/pages/tasks';
 import { TrainingDetailPage, TrainingPage } from '@/pages/training';
 import { TrainingEditPage, TrainingFilesPage } from '@/pages/training-manage';
@@ -110,10 +100,7 @@ import {
   UserBindPage,
   UserBindSuccessPage,
 } from '@/pages/userbind';
-import {
-  AdminVigilExamDetailPage,
-  AdminVigilOverviewPage,
-} from '@/pages/vigil';
+import { AdminVigilExamDetailPage, AdminVigilOverviewPage } from '@/pages/vigil';
 import { AboutPage, WikiHelpPage } from '@/pages/wiki';
 
 type PageComponent = React.ComponentType;

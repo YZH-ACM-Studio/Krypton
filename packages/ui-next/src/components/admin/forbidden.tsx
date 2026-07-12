@@ -13,9 +13,7 @@ export function ForbiddenPanel({ message }: { message?: string }) {
             <ShieldAlert className="size-7 text-destructive" />
           </div>
           <p className="text-base font-semibold">无权访问</p>
-          <p className="text-sm text-muted-foreground">
-            {message || '当前账号缺少访问该管理页面所需的权限。请联系管理员。'}
-          </p>
+          <p className="text-sm text-muted-foreground">{message || '当前账号缺少访问该管理页面所需的权限。请联系管理员。'}</p>
           <div className="flex gap-2 pt-2">
             <Button variant="outline" size="sm" onClick={() => window.history.back()}>
               返回上一页

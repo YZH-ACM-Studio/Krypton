@@ -8,9 +8,7 @@ import { getConfig } from './config';
 import { FormatError, SystemError } from './error';
 import { Logger } from './log';
 import client from './sandbox/client';
-import {
-    Cmd, CopyIn, CopyInFile, PipeMap, SandboxResult, SandboxStatus,
-} from './sandbox/interface';
+import { Cmd, CopyIn, CopyInFile, PipeMap, SandboxResult, SandboxStatus } from './sandbox/interface';
 import { cmd, parseMemoryMB } from './utils';
 
 const argv = cac().parse();
@@ -75,9 +73,7 @@ function parseArgs(execute: string): string[] {
 }
 
 function proc(params: Parameter): Cmd {
-    const copyOut = supportOptional
-        ? (params.copyOut || [])
-        : (params.copyOut || []).map((i) => (i.endsWith('?') ? i.substring(0, i.length - 1) : i));
+    const copyOut = supportOptional ? params.copyOut || [] : (params.copyOut || []).map((i) => (i.endsWith('?') ? i.substring(0, i.length - 1) : i));
     const stdioLimit = parseMemoryMB(getConfig('stdio_size'));
     const stdioSize = params.cacheStdoutAndStderr ? stdioLimit : 4;
     const copyOutCached = [...(params.copyOutCached || [])];
@@ -94,7 +90,10 @@ function proc(params: Parameter): Cmd {
     return {
         args: parseArgs(params.execute || ''),
         env: [
-            ...getConfig('env').split('\n').map((i) => i.trim()).filter((i) => !i.startsWith('#')),
+            ...getConfig('env')
+                .split('\n')
+                .map((i) => i.trim())
+                .filter((i) => !i.startsWith('#')),
             ...Object.entries(params.env || {}).map(([k, v]) => `${k}=${v.replace(/=/g, '\\=')}`),
         ],
         files: [
@@ -148,7 +147,10 @@ function adaptResult(result: SandboxResult, params: Parameter): SandboxAdaptedRe
 }
 
 export async function runPiped(
-    execute: Parameter[], pipeMapping: Pick<PipeMap, 'in' | 'out' | 'name'>[], params: Parameter = {}, trace: string = '',
+    execute: Parameter[],
+    pipeMapping: Pick<PipeMap, 'in' | 'out' | 'name'>[],
+    params: Parameter = {},
+    trace: string = '',
 ): Promise<SandboxAdaptedResult[]> {
     let res: SandboxResult[];
     const size = parseMemoryMB(getConfig('stdio_size'));
@@ -193,26 +195,33 @@ export async function get(fileId: string, dest?: string) {
 const queue = new PQueue({ concurrency: getConfig('concurrency') || getConfig('parallelism') });
 
 export function runQueued(
-    execute: Parameter[], pipeMapping: Pick<PipeMap, 'in' | 'out' | 'name'>[],
-    params: Parameter, trace?: string, priority?: number,
+    execute: Parameter[],
+    pipeMapping: Pick<PipeMap, 'in' | 'out' | 'name'>[],
+    params: Parameter,
+    trace?: string,
+    priority?: number,
 ): Promise<SandboxAdaptedResult[] & AsyncDisposable>;
+export function runQueued(execute: string, params: Parameter, trace?: string, priority?: number): Promise<SandboxAdaptedResult & AsyncDisposable>;
 export function runQueued(
-    execute: string, params: Parameter, trace?: string, priority?: number,
-): Promise<SandboxAdaptedResult & AsyncDisposable>;
-export function runQueued(
-    arg0: string | Parameter[], arg1: Pick<PipeMap, 'in' | 'out' | 'name'>[] | Parameter,
-    arg2?: string | Parameter, arg3?: string | number, arg4?: number,
+    arg0: string | Parameter[],
+    arg1: Pick<PipeMap, 'in' | 'out' | 'name'>[] | Parameter,
+    arg2?: string | Parameter,
+    arg3?: string | number,
+    arg4?: number,
 ) {
     const single = !Array.isArray(arg0);
     const [execute, pipeMapping, params, trace, priority] = single
-        ? [[{ execute: arg0 }], [], arg1 || {}, arg2 || '', arg3 || 0] as any
+        ? ([[{ execute: arg0 }], [], arg1 || {}, arg2 || '', arg3 || 0] as any)
         : [arg0, arg1, arg2 || {}, arg3 || '', arg4 || 0];
-    return queue.add(async () => {
-        const res = await runPiped(execute, pipeMapping, params, trace);
-        const ret = single ? res[0] : res;
-        (ret as any)[Symbol.asyncDispose] = () => Promise.allSettled(res.flatMap((t) => Object.values(t.fileIds || {}).map(del)));
-        return ret;
-    }, { priority });
+    return queue.add(
+        async () => {
+            const res = await runPiped(execute, pipeMapping, params, trace);
+            const ret = single ? res[0] : res;
+            (ret as any)[Symbol.asyncDispose] = () => Promise.allSettled(res.flatMap((t) => Object.values(t.fileIds || {}).map(del)));
+            return ret;
+        },
+        { priority },
+    );
 }
 
 export async function versionCheck(reportWarn: (str: string) => void, reportError = reportWarn) {

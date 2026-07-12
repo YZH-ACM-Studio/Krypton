@@ -38,9 +38,11 @@ async function legacyLoadExternalModule(target: string) {
 
 export { load };
 export async function getFeatures(name: string) {
-  const legacy = Object.keys(window.externalModules).filter((i) => i === name || i.startsWith(`${name}@`))
+  const legacy = Object.keys(window.externalModules)
+    .filter((i) => i === name || i.startsWith(`${name}@`))
     .map((i) => window.externalModules[i]);
-  const c = Object.keys(features).filter((i) => i === name || i.startsWith(`${name}@`))
+  const c = Object.keys(features)
+    .filter((i) => i === name || i.startsWith(`${name}@`))
     .map((i) => features[i]);
   console.log('query features for:', name, 'legacy:', legacy, 'selected:', c, 'all:', features);
   return [...c, ...legacy];
@@ -51,11 +53,12 @@ export async function loadFeatures(name: string, ...args: any[]) {
   if (loaded.includes(name)) return;
   loaded.push(name);
   for (const item of await getFeatures(name)) {
-    let apply = typeof item === 'function'
-      ? item
-      : (item.startsWith('http') || item.startsWith('/'))
-        ? await legacyLoadExternalModule(item)
-        : (await load(item)).apply;
+    let apply =
+      typeof item === 'function'
+        ? item
+        : item.startsWith('http') || item.startsWith('/')
+          ? await legacyLoadExternalModule(item)
+          : (await load(item)).apply;
     if (typeof apply !== 'function') apply = apply.default || apply.apply;
     if (typeof apply === 'function') await apply(...args);
   }

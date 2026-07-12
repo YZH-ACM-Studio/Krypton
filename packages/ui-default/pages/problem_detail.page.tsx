@@ -6,9 +6,7 @@ import { confirm } from 'vj/components/dialog';
 import Notification from 'vj/components/notification';
 import { downloadProblemSet } from 'vj/components/zipDownloader';
 import { NamedPage } from 'vj/misc/Page';
-import {
-  delay, i18n, loadReactRedux, pjax, request, tpl,
-} from 'vj/utils';
+import { delay, i18n, loadReactRedux, pjax, request, tpl } from 'vj/utils';
 import { openDB } from 'vj/utils/db';
 
 class ProblemPageExtender {
@@ -23,9 +21,7 @@ class ProblemPageExtender {
     if (this.isExtended) return;
     this.inProgress = true;
 
-    const bound = this.$contentBound
-      .get(0)
-      .getBoundingClientRect();
+    const bound = this.$contentBound.get(0).getBoundingClientRect();
 
     // @ts-ignore
     this.$content.transition({ opacity: 0 }, { duration: 100 });
@@ -40,16 +36,19 @@ class ProblemPageExtender {
         height: bound.height,
       })
       .show()
-      .transition({
-        // @ts-ignore
-        left: 0,
-        top: 0,
-        width: '100%',
-        height: '100%',
-      }, {
-        duration: 500,
-        easing: 'easeOutCubic',
-      })
+      .transition(
+        {
+          // @ts-ignore
+          left: 0,
+          top: 0,
+          width: '100%',
+          height: '100%',
+        },
+        {
+          duration: 500,
+          easing: 'easeOutCubic',
+        },
+      )
       .promise();
 
     $('.main > .row').hide();
@@ -70,23 +69,24 @@ class ProblemPageExtender {
     $('.main > .row').show();
     $('.footer').show();
 
-    const bound = this.$contentBound
-      .get(0)
-      .getBoundingClientRect();
+    const bound = this.$contentBound.get(0).getBoundingClientRect();
 
     $('body').removeClass('header--collapsed mode--scratchpad');
 
     await this.$scratchpadContainer
-      .transition({
-        // @ts-ignore
-        left: bound.left,
-        top: bound.top,
-        width: bound.width,
-        height: bound.height,
-      }, {
-        duration: 500,
-        easing: 'easeOutCubic',
-      })
+      .transition(
+        {
+          // @ts-ignore
+          left: bound.left,
+          top: bound.top,
+          width: bound.width,
+          height: bound.height,
+        },
+        {
+          duration: 500,
+          easing: 'easeOutCubic',
+        },
+      )
       .promise();
 
     this.$scratchpadContainer.hide();
@@ -117,20 +117,14 @@ const page = new NamedPage(['problem_detail', 'contest_detail_problem', 'homewor
   async function scratchpadFadeIn() {
     await $('#scratchpad')
       // @ts-ignore
-      .transition(
-        { opacity: 1 },
-        { duration: 200, easing: 'easeOutCubic' },
-      )
+      .transition({ opacity: 1 }, { duration: 200, easing: 'easeOutCubic' })
       .promise();
   }
 
   async function scratchpadFadeOut() {
     await $('#scratchpad')
       // @ts-ignore
-      .transition(
-        { opacity: 0 },
-        { duration: 200, easing: 'easeOutCubic' },
-      )
+      .transition({ opacity: 0 }, { duration: 200, easing: 'easeOutCubic' })
       .promise();
   }
 
@@ -195,45 +189,64 @@ const page = new NamedPage(['problem_detail', 'contest_detail_problem', 'homewor
     const pids = [];
     let cnt = 0;
     const reg = /\{\{ (input|select|multiselect|textarea)\(\d+(-\d+)?\) \}\}/g;
-    $('.problem-content .typo').children().each((i, e) => {
-      if (e.tagName === 'PRE' && !e.children[0].className.includes('#input')) return;
-      const questions = [];
-      let q;
-      while (q = reg.exec(e.textContent)) questions.push(q); // eslint-disable-line no-cond-assign
-      for (const [info, type] of questions) {
-        cnt++;
-        const id = info.replace(/\{\{ (input|select|multiselect|textarea)\((\d+(-\d+)?)\) \}\}/, '$2');
-        pids.push(id);
-        if (type === 'input') {
-          $(e).html($(e).html().replace(info, tpl`
+    $('.problem-content .typo')
+      .children()
+      .each((i, e) => {
+        if (e.tagName === 'PRE' && !e.children[0].className.includes('#input')) return;
+        const questions = [];
+        let q;
+        while ((q = reg.exec(e.textContent))) questions.push(q); // eslint-disable-line no-cond-assign
+        for (const [info, type] of questions) {
+          cnt++;
+          const id = info.replace(/\{\{ (input|select|multiselect|textarea)\((\d+(-\d+)?)\) \}\}/, '$2');
+          pids.push(id);
+          if (type === 'input') {
+            $(e).html(
+              $(e)
+                .html()
+                .replace(
+                  info,
+                  tpl`
             <div class="objective_${id} medium-3" id="p${id}" style="display: inline-block;">
               <input type="text" name="${id}" class="textbox objective-input">
             </div>
-          `));
-        } else if (type === 'textarea') {
-          $(e).html($(e).html().replace(info, tpl`
+          `,
+                ),
+            );
+          } else if (type === 'textarea') {
+            $(e).html(
+              $(e)
+                .html()
+                .replace(
+                  info,
+                  tpl`
             <div class="objective_${id} medium-6" id="p${id}">
               <textarea name="${id}" class="textbox objective-input"></textarea>
             </div>
-          `));
-        } else {
-          if ($(e).next()[0]?.tagName !== 'UL') {
-            cnt--;
-            return;
-          }
-          $(e).html($(e).html().replace(info, ''));
-          $(e).next('ul').children().each((j, ele) => {
-            $(ele).after(tpl`
+          `,
+                ),
+            );
+          } else {
+            if ($(e).next()[0]?.tagName !== 'UL') {
+              cnt--;
+              return;
+            }
+            $(e).html($(e).html().replace(info, ''));
+            $(e)
+              .next('ul')
+              .children()
+              .each((j, ele) => {
+                $(ele).after(tpl`
               <label class="objective_${id} radiobox" id="p${id}">
                 <input type="${type === 'select' ? 'radio' : 'checkbox'}" name="${id}" class="objective-input" value="${String.fromCharCode(65 + j)}">
                 ${String.fromCharCode(65 + j)}. ${{ templateRaw: true, html: ele.innerHTML }}
               </label>
             `);
-            $(ele).remove();
-          });
+                $(ele).remove();
+              });
+          }
         }
-      }
-    });
+      });
 
     let cacheKey = `${UserContext._id}/${UiContext.pdoc.domainId}/${UiContext.pdoc.docId}`;
     if (UiContext.tdoc?._id && UiContext.tdoc.rule !== 'homework') cacheKey += `@${UiContext.tdoc._id}`;
@@ -254,7 +267,9 @@ const page = new NamedPage(['problem_detail', 'contest_detail_problem', 'homewor
 
     function ProblemNavigation() {
       [, setUpdate] = React.useState(0);
-      const update = React.useCallback(() => { setUpdate?.((v) => v + 1); }, []);
+      const update = React.useCallback(() => {
+        setUpdate?.((v) => v + 1);
+      }, []);
       React.useEffect(() => {
         $(document).on('click', update);
         $(document).on('input', update);
@@ -263,18 +278,22 @@ const page = new NamedPage(['problem_detail', 'contest_detail_problem', 'homewor
           $(document).off('input', update);
         };
       }, [update]);
-      return <>
-        <div className="contest-problems" style={{ margin: '1em' }}>
-          {pids.map((i) => <a href={`#p${i}`} key={i} className={ans[i] ? 'pending ' : ''}>
-            <span className="id">{i}</span>
-          </a>)}
-        </div>
-        <li className="menu__item">
-          <button className="menu__link" onClick={clearAns}>
-            <span className="icon icon-erase" /> {i18n('Clear answers')}
-          </button>
-        </li>
-      </>;
+      return (
+        <>
+          <div className="contest-problems" style={{ margin: '1em' }}>
+            {pids.map((i) => (
+              <a href={`#p${i}`} key={i} className={ans[i] ? 'pending ' : ''}>
+                <span className="id">{i}</span>
+              </a>
+            ))}
+          </div>
+          <li className="menu__item">
+            <button className="menu__link" onClick={clearAns}>
+              <span className="icon icon-erase" /> {i18n('Clear answers')}
+            </button>
+          </li>
+        </>
+      );
     }
 
     async function loadAns() {
@@ -297,9 +316,11 @@ const page = new NamedPage(['problem_detail', 'contest_detail_problem', 'homewor
 
     if (cnt) {
       await loadAns();
-      $('.problem-content .typo').append(document.getElementsByClassName('nav__item--round').length
-        ? `<input type="submit" disabled class="button rounded primary disabled" value="${i18n('Login to Submit')}" />`
-        : `<input type="submit" class="button rounded primary" value="${i18n('Submit')}" />`);
+      $('.problem-content .typo').append(
+        document.getElementsByClassName('nav__item--round').length
+          ? `<input type="submit" disabled class="button rounded primary disabled" value="${i18n('Login to Submit')}" />`
+          : `<input type="submit" class="button rounded primary" value="${i18n('Submit')}" />`,
+      );
       $('.objective-input[type!=checkbox]').on('input', (e: JQuery.TriggeredEvent<HTMLInputElement>) => {
         ans[e.target.name] = e.target.value;
         saveAns();

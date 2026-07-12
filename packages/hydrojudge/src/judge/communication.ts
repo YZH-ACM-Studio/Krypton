@@ -8,14 +8,16 @@ function judgeCase(c: NormalizedCase) {
     return async (ctx: Context, ctxSubtask: ContextSubTask) => {
         const { address_space_limit, process_limit } = ctx.session.getLang(ctx.lang);
         let managerArgs = '';
-        const execute: Parameter[] = [{
-            execute: ctx.executeManager.execute,
-            stdin: c.input ? { src: c.input } : { content: '' },
-            copyIn: ctx.executeManager.copyIn,
-            time: c.time * 2,
-            memory: c.memory * 2,
-            env: { ...ctx.env, HYDRO_TESTCASE: c.id.toString() },
-        }];
+        const execute: Parameter[] = [
+            {
+                execute: ctx.executeManager.execute,
+                stdin: c.input ? { src: c.input } : { content: '' },
+                copyIn: ctx.executeManager.copyIn,
+                time: c.time * 2,
+                memory: c.memory * 2,
+                env: { ...ctx.env, HYDRO_TESTCASE: c.id.toString() },
+            },
+        ];
         const pipeMapping = [];
         for (let i = 0; i < ctx.config.num_processes; i++) {
             managerArgs += ` /proc/self/fd/${i * 2 + 3} /proc/self/fd/${i * 2 + 4}`;
@@ -52,7 +54,7 @@ function judgeCase(c: NormalizedCase) {
             memory = Math.max(memory, result.memory);
             if (result.time > c.time) status = STATUS.STATUS_TIME_LIMIT_EXCEEDED;
             else if (result.memory > c.memory * 1024) status = STATUS.STATUS_MEMORY_LIMIT_EXCEEDED;
-            else if ((result.code && result.code !== 13 /* Broken Pipe */) || (result.code === 13 && !resManager.code)) {
+            else if ((result.code && result.code !== 13) /* Broken Pipe */ || (result.code === 13 && !resManager.code)) {
                 status = STATUS.STATUS_RUNTIME_ERROR;
                 if (ctx.config.detail === 'full') {
                     if (result.code < 32 && result.signalled) message = signals[result.code];
@@ -78,12 +80,13 @@ function judgeCase(c: NormalizedCase) {
     };
 }
 
-export const judge = async (ctx: Context) => await runFlow(ctx, {
-    compile: async () => {
-        [ctx.executeUser, ctx.executeManager] = await Promise.all([
-            ctx.compile(ctx.lang, ctx.code),
-            ctx.compileLocalFile('manager', ctx.config.manager),
-        ]);
-    },
-    judgeCase,
-});
+export const judge = async (ctx: Context) =>
+    await runFlow(ctx, {
+        compile: async () => {
+            [ctx.executeUser, ctx.executeManager] = await Promise.all([
+                ctx.compile(ctx.lang, ctx.code),
+                ctx.compileLocalFile('manager', ctx.config.manager),
+            ]);
+        },
+        judgeCase,
+    });

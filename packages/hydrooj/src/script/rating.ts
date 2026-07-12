@@ -1,5 +1,5 @@
 /* eslint-disable no-cond-assign */
-/* eslint-disable no-await-in-loop */
+
 import { NumericDictionary, unionWith } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import Schema from 'schemastery';
@@ -33,19 +33,16 @@ export const RpTypes: Record<string, RpDef> = {
             const problems = await problem.getMulti('', { domainId: { $in: domainIds }, nAccept: { $gt: 0 }, hidden: false }).toArray();
             if (problems.length) await report({ message: `Found ${problems.length} problems in ${domainIds[0]}` });
             for (const pdoc of problems) {
-                const cursor = problem.getMultiStatus(
-                    pdoc.domainId,
-                    {
-                        docId: pdoc.docId,
-                        rid: { $ne: null },
-                        uid: { $ne: pdoc.owner },
-                        score: { $gt: 0 },
-                    },
-                );
+                const cursor = problem.getMultiStatus(pdoc.domainId, {
+                    docId: pdoc.docId,
+                    rid: { $ne: null },
+                    uid: { $ne: pdoc.owner },
+                    score: { $gt: 0 },
+                });
                 const difficulty = +pdoc.difficulty || difficultyAlgorithm(pdoc.nSubmit, pdoc.nAccept) || 5;
                 const p = difficulty / 100;
                 let psdoc;
-                while (psdoc = await cursor.next()) {
+                while ((psdoc = await cursor.next())) {
                     udict[psdoc.uid] += min(psdoc.score, 100) * p;
                 }
             }
@@ -56,8 +53,10 @@ export const RpTypes: Record<string, RpDef> = {
     },
     contest: {
         async run(domainIds, udict, report) {
-            const contests: Tdoc[] = await contest.getMulti('', { domainId: { $in: domainIds }, rated: true })
-                .limit(10).toArray() as any;
+            const contests: Tdoc[] = (await contest
+                .getMulti('', { domainId: { $in: domainIds }, rated: true })
+                .limit(10)
+                .toArray()) as any;
             if (contests.length) await report({ message: `Found ${contests.length} contests in ${domainIds[0]}` });
             for (const tdoc of contests.reverse()) {
                 const start = Date.now();
@@ -65,7 +64,7 @@ export const RpTypes: Record<string, RpDef> = {
                     docId: tdoc.docId,
                     journal: { $ne: null },
                 };
-                if (!await contest.countStatus(tdoc.domainId, query)) continue;
+                if (!(await contest.countStatus(tdoc.domainId, query))) continue;
                 const cursor = contest.getMultiStatus(tdoc.domainId, query).sort(contest.RULES[tdoc.rule].statusSort);
                 const rankedTsdocs = await contest.RULES[tdoc.rule].ranked(tdoc, cursor);
                 const users = rankedTsdocs.map((i) => ({ uid: i[1].uid, rank: i[0], old: udict[i[1].uid] }));
@@ -89,9 +88,7 @@ export const RpTypes: Record<string, RpDef> = {
     delta: {
         async run(domainIds, udict) {
             const dudocs = unionWith(
-                await domain.getMultiUserInDomain(
-                    '', { domainId: { $in: domainIds }, rpdelta: { $exists: true } },
-                ).toArray(),
+                await domain.getMultiUserInDomain('', { domainId: { $in: domainIds }, rpdelta: { $exists: true } }).toArray(),
                 (a, b) => a.uid === b.uid,
             );
             for (const dudoc of dudocs) udict[dudoc.uid] = dudoc.rpdelta;
@@ -109,9 +106,7 @@ export async function calcLevel(domainId: string, report: Report) {
     let count = 0;
     const coll = db.collection('domain.user');
     const filter = { rp: { $gt: 0 }, uid: { $nin: [0, 1], $gt: -1000 } };
-    const ducur = domain.getMultiUserInDomain(domainId, filter)
-        .project<{ _id: ObjectId, rp: number }>({ rp: 1 })
-        .sort({ rp: -1 });
+    const ducur = domain.getMultiUserInDomain(domainId, filter).project<{ _id: ObjectId; rp: number }>({ rp: 1 }).sort({ rp: -1 });
     let bulk = coll.initializeUnorderedBulkOp();
     for await (const dudoc of ducur) {
         count++;
@@ -155,7 +150,9 @@ async function runInDomain(domainId: string, report: Report) {
     await domain.setMultiUserInDomain(domainId, {}, { rp: 0 });
     const bulk = db.collection('domain.user').initializeUnorderedBulkOp();
     for (const uid in udict) {
-        bulk.find({ domainId, uid: +uid }).upsert().update({ $set: { rp: Math.max(0, udict[uid]) } });
+        bulk.find({ domainId, uid: +uid })
+            .upsert()
+            .update({ $set: { rp: Math.max(0, udict[uid]) } });
     }
     if (bulk.batches.length) await bulk.execute();
     await calcLevel(domainId, report);
@@ -183,7 +180,4 @@ export async function run({ domainId }, report: Report) {
     return true;
 }
 
-export const apply = (ctx) => ctx.addScript(
-    'rp', 'Calculate rp of a domain, or all domains',
-    Schema.object({ domainId: Schema.string() }), run,
-);
+export const apply = (ctx) => ctx.addScript('rp', 'Calculate rp of a domain, or all domains', Schema.object({ domainId: Schema.string() }), run);

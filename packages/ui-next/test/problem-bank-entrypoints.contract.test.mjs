@@ -94,7 +94,7 @@ test('creation hub and all eight routes consume the shared kind mapping', () => 
 });
 
 test('legacy composite authoring runtime files are deleted without an alias', () => {
-    const legacy = 'paper' + '-center';
+    const legacy = ['paper', 'center'].join('-');
     assert.equal(existsSync(resolve(ROOT, `packages/hydrooj/src/handler/${legacy}.ts`)), false);
     assert.equal(existsSync(resolve(ROOT, `packages/ui-next/src/pages/${legacy}.tsx`)), false);
     assert.equal(existsSync(resolve(ROOT, `packages/ui-next/src/pages/${legacy}-edit.tsx`)), false);
@@ -117,7 +117,9 @@ test('manual grading derives the authoritative domain before every domain-sensit
         'record.getMulti(domainId',
         'user.getListForRender(domainId',
         'gradeLatestManualRecord({',
-    ]) assert.ok(grading.includes(call), `manual grading must use authoritative domain at ${call}`);
+    ]) {
+        assert.ok(grading.includes(call), `manual grading must use authoritative domain at ${call}`);
+    }
     assert.match(grading, /this\.tdoc\.owner !== this\.user\._id/);
     assert.match(grading, /this\.user\.hasPriv\(PRIV\.PRIV_EDIT_SYSTEM\)/);
     assert.match(grading, /domainId:\s*String\(this\.domain\?\._id\)/);

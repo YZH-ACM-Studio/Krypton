@@ -5,7 +5,11 @@ import browserUpdate from 'browser-update';
 
 browserUpdate({
   required: {
-    e: -10, f: -10, o: -3, s: -1, c: -10,
+    e: -10,
+    f: -10,
+    o: -3,
+    s: -1,
+    c: -10,
   },
   insecure: true,
   api: 2022.03,
@@ -29,7 +33,7 @@ if (typeof window['WeakRef'] === 'undefined') {
       return wm.get(this);
     };
     return WeakRef;
-  }(new WeakMap()));
+  })(new WeakMap());
 }
 if (!window.matchMedia('all').addListener && !window.matchMedia('all').addEventListener) {
   const localMatchMedia = window.matchMedia;

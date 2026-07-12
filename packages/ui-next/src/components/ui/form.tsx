@@ -17,11 +17,14 @@
  *    </FormField>
  *  </FormSection>
  */
-import { type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
 export function FormSection({
-  title, description, children, className,
+  title,
+  description,
+  children,
+  className,
 }: {
   title?: ReactNode;
   description?: ReactNode;
@@ -36,15 +39,15 @@ export function FormSection({
           {description && <p className="text-xs text-muted-foreground">{description}</p>}
         </header>
       )}
-      <div className="space-y-4">
-        {children}
-      </div>
+      <div className="space-y-4">{children}</div>
     </section>
   );
 }
 
 export function FormRow({
-  columns = 1, children, className,
+  columns = 1,
+  children,
+  className,
 }: {
   /** Number of columns at md+ breakpoint. */
   columns?: 1 | 2 | 3 | 4;
@@ -57,15 +60,17 @@ export function FormRow({
     3: 'grid-cols-1 md:grid-cols-3',
     4: 'grid-cols-1 md:grid-cols-2 lg:grid-cols-4',
   }[columns];
-  return (
-    <div className={cn('grid gap-4', cols, className)}>
-      {children}
-    </div>
-  );
+  return <div className={cn('grid gap-4', cols, className)}>{children}</div>;
 }
 
 export function FormField({
-  label, htmlFor, required, hint, error, children, className,
+  label,
+  htmlFor,
+  required,
+  hint,
+  error,
+  children,
+  className,
 }: {
   label?: ReactNode;
   htmlFor?: string;
@@ -78,10 +83,7 @@ export function FormField({
   return (
     <div className={cn('space-y-1.5', className)}>
       {label && (
-        <label
-          htmlFor={htmlFor}
-          className="flex items-center gap-1 text-sm font-medium text-foreground"
-        >
+        <label htmlFor={htmlFor} className="flex items-center gap-1 text-sm font-medium text-foreground">
           <span>{label}</span>
           {required && <span className="text-destructive">*</span>}
         </label>
@@ -94,12 +96,6 @@ export function FormField({
 }
 
 /** Padded card body — replaces `<CardContent className="p-0">`'s `p-0` antipattern. */
-export function CardBody({
-  children, className, dense,
-}: { children: ReactNode; className?: string; dense?: boolean }) {
-  return (
-    <div className={cn(dense ? 'p-4' : 'p-5 sm:p-6', className)}>
-      {children}
-    </div>
-  );
+export function CardBody({ children, className, dense }: { children: ReactNode; className?: string; dense?: boolean }) {
+  return <div className={cn(dense ? 'p-4' : 'p-5 sm:p-6', className)}>{children}</div>;
 }

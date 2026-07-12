@@ -4,8 +4,7 @@ import { gradeObjectiveAnswer } from '../objective';
 
 describe('single-problem objective grading', () => {
     it('grades single and case-sensitive blank answers exactly', () => {
-        expect(gradeObjectiveAnswer(['B', 100, { kind: 'single' }], 'B'))
-            .to.deep.equal({ outcome: 'correct', score: 100 });
+        expect(gradeObjectiveAnswer(['B', 100, { kind: 'single' }], 'B')).to.deep.equal({ outcome: 'correct', score: 100 });
         expect(gradeObjectiveAnswer(['B', 100, { kind: 'single' }], 'A').score).to.equal(0);
         const blank = ['Answer\nLine', 100, { kind: 'blank' }] as any;
         expect(gradeObjectiveAnswer(blank, '  Answer\r\nLine\n')).to.deep.equal({ outcome: 'correct', score: 100 });
@@ -18,8 +17,7 @@ describe('single-problem objective grading', () => {
             ['A', 100, { kind: 'true_false' }],
             ['Answer', 100, { kind: 'blank' }],
         ] as any[]) {
-            expect(gradeObjectiveAnswer(entry, [entry[0], 'ignored']))
-                .to.deep.equal({ outcome: 'wrong', score: 0 });
+            expect(gradeObjectiveAnswer(entry, [entry[0], 'ignored'])).to.deep.equal({ outcome: 'wrong', score: 0 });
         }
     });
 
@@ -29,14 +27,14 @@ describe('single-problem objective grading', () => {
         expect(gradeObjectiveAnswer(entry, ['A', 'C'])).to.deep.equal({ outcome: 'correct', score: 100 });
         expect(gradeObjectiveAnswer(entry, ['A', 'B'])).to.deep.equal({ outcome: 'wrong', score: 0 });
         expect(gradeObjectiveAnswer(entry, [])).to.deep.equal({ outcome: 'wrong', score: 0 });
-        expect(gradeObjectiveAnswer([['A', 'C'], 100, { kind: 'multi', partialCreditPercent: 0 }], ['A']).score)
-            .to.equal(0);
-        expect(gradeObjectiveAnswer([['A', 'C'], 100, { kind: 'multi', partialCreditPercent: 100 }], ['A']))
-            .to.deep.equal({ outcome: 'partial', score: 100 });
+        expect(gradeObjectiveAnswer([['A', 'C'], 100, { kind: 'multi', partialCreditPercent: 0 }], ['A']).score).to.equal(0);
+        expect(gradeObjectiveAnswer([['A', 'C'], 100, { kind: 'multi', partialCreditPercent: 100 }], ['A'])).to.deep.equal({
+            outcome: 'partial',
+            score: 100,
+        });
     });
 
     it('preserves the legacy half-credit rule when no percentage is stored', () => {
-        expect(gradeObjectiveAnswer([['A', 'C'], 80, { kind: 'multi' }], ['A']))
-            .to.deep.equal({ outcome: 'partial', score: 40 });
+        expect(gradeObjectiveAnswer([['A', 'C'], 80, { kind: 'multi' }], ['A'])).to.deep.equal({ outcome: 'partial', score: 40 });
     });
 });

@@ -1,9 +1,5 @@
-import {
-  ArrowLeft, CheckCircle2, CircleDot, ListChecks, Plus, Save, TextCursorInput, Trash2,
-} from 'lucide-react';
-import {
-  useEffect, useMemo, useRef, useState,
-} from 'react';
+import { ArrowLeft, CheckCircle2, CircleDot, ListChecks, Plus, Save, TextCursorInput, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BASIC_OBJECTIVE_KIND, type BasicObjectiveKind } from '@hydrooj/common';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { Button } from '@/components/ui/button';
@@ -14,7 +10,7 @@ import { cn } from '@/lib/cn';
 
 type RowConfig = Record<string, any>;
 
-const KIND_META: Record<BasicObjectiveKind, { label: string, icon: typeof CircleDot }> = {
+const KIND_META: Record<BasicObjectiveKind, { label: string; icon: typeof CircleDot }> = {
   [BASIC_OBJECTIVE_KIND.single]: { label: '单选题', icon: CircleDot },
   [BASIC_OBJECTIVE_KIND.multi]: { label: '多选题', icon: ListChecks },
   [BASIC_OBJECTIVE_KIND.trueFalse]: { label: '判断题', icon: CheckCircle2 },
@@ -41,7 +37,10 @@ function validateOptions(options: string[]): string {
 }
 
 function ObjectiveEditorShell({
-  kind, config, validationError, children,
+  kind,
+  config,
+  validationError,
+  children,
 }: {
   kind: BasicObjectiveKind;
   config: RowConfig;
@@ -106,16 +105,22 @@ function ObjectiveEditorShell({
     <main className="mx-auto w-full max-w-5xl space-y-5 pb-10">
       <header className="flex flex-wrap items-center gap-3 border-b border-border/70 pb-4">
         <Button asChild variant="ghost" size="icon" className="size-11">
-          <a href={isCreate ? '/problem/create' : `/p/${pid}`} aria-label="返回"><ArrowLeft className="size-4" /></a>
+          <a href={isCreate ? '/problem/create' : `/p/${pid}`} aria-label="返回">
+            <ArrowLeft className="size-4" />
+          </a>
         </Button>
         <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Icon className="size-3.5" />单题编辑器</p>
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Icon className="size-3.5" />
+            单题编辑器
+          </p>
           <h1 className="mt-0.5 truncate text-2xl font-semibold tracking-tight">
             {isCreate ? `新建${meta.label}` : `编辑 ${pdoc.title || meta.label}`}
           </h1>
         </div>
         <Button type="submit" form="basic-objective-form" className="min-h-11 gap-1.5" disabled={saving}>
-          <Save className="size-4" />{saving ? '保存中…' : '保存'}
+          <Save className="size-4" />
+          {saving ? '保存中…' : '保存'}
         </Button>
       </header>
 
@@ -130,7 +135,11 @@ function ObjectiveEditorShell({
           该题已有提交或所属容器已开始，题面和答案结构已锁定；仍可修改标题、标签和可见性。结构调整请克隆为新题。
         </p>
       ) : null}
-      {error ? <p role="alert" className="border-y border-destructive/40 bg-destructive/5 px-3 py-3 text-sm text-destructive">{error}</p> : null}
+      {error ? (
+        <p role="alert" className="border-y border-destructive/40 bg-destructive/5 px-3 py-3 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
 
       <form
         id="basic-objective-form"
@@ -141,7 +150,9 @@ function ObjectiveEditorShell({
         }}
         className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]"
       >
-        {locked ? <input type="hidden" name="metadataOnly" value="true" /> : (
+        {locked ? (
+          <input type="hidden" name="metadataOnly" value="true" />
+        ) : (
           <>
             <input type="hidden" name="editorProblemKind" value={kind} />
             <input type="hidden" name="structuredConfig" value={JSON.stringify(config)} />
@@ -152,7 +163,9 @@ function ObjectiveEditorShell({
         <fieldset disabled={locked} className={cn('min-w-0 space-y-6', locked && 'opacity-60')}>
           <section className="space-y-4" aria-labelledby="objective-statement-title">
             <div>
-              <h2 id="objective-statement-title" className="text-sm font-semibold">题面</h2>
+              <h2 id="objective-statement-title" className="text-sm font-semibold">
+                题面
+              </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">题面只保存在 content，不在选项配置中重复。</p>
             </div>
             <MarkdownEditor name="content" value={pdoc.content || ''} minHeight={300} />
@@ -160,7 +173,9 @@ function ObjectiveEditorShell({
 
           <section className="space-y-4 border-t border-border/70 pt-5" aria-labelledby="objective-answer-title">
             <div>
-              <h2 id="objective-answer-title" className="text-sm font-semibold">答案设置</h2>
+              <h2 id="objective-answer-title" className="text-sm font-semibold">
+                答案设置
+              </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">学生端不会收到标准答案或部分分配置。</p>
             </div>
             {children}
@@ -205,7 +220,11 @@ function ObjectiveEditorShell({
 }
 
 function ChoiceRows({
-  options, setOptions, selected, toggle, single,
+  options,
+  setOptions,
+  selected,
+  toggle,
+  single,
 }: {
   options: string[];
   setOptions: (next: string[], removedIndex?: number) => void;
@@ -240,9 +259,16 @@ function ChoiceRows({
             size="icon"
             className="size-11 text-destructive"
             disabled={options.length <= 2}
-            onClick={() => setOptions(options.filter((_, i) => i !== index), index)}
+            onClick={() =>
+              setOptions(
+                options.filter((_, i) => i !== index),
+                index,
+              )
+            }
             aria-label={`删除选项 ${String.fromCharCode(65 + index)}`}
-          ><Trash2 className="size-4" /></Button>
+          >
+            <Trash2 className="size-4" />
+          </Button>
         </div>
       ))}
       <Button
@@ -251,7 +277,10 @@ function ChoiceRows({
         className="min-h-11 gap-1.5"
         disabled={options.length >= 26}
         onClick={() => setOptions([...options, ''])}
-      ><Plus className="size-4" />添加选项</Button>
+      >
+        <Plus className="size-4" />
+        添加选项
+      </Button>
     </div>
   );
 }
@@ -287,20 +316,27 @@ export function MultiProblemEditorPage() {
   const [options, setOptions] = useState<string[]>(main.options || ['', '']);
   const [answerIndexes, setAnswerIndexes] = useState<Set<number>>(new Set(main.answerIndexes || [0]));
   const [partialCreditPercent, setPartialCreditPercent] = useState<number>(Number(main.partialCreditPercent) || 0);
-  const config = useMemo(() => ({
-    main: { options, answerIndexes: [...answerIndexes].sort((a, b) => a - b), partialCreditPercent },
-  }), [answerIndexes, options, partialCreditPercent]);
-  const validationError = validateOptions(options)
-    || (!answerIndexes.size ? '至少选择一个正确项。' : '')
-    || (!Number.isInteger(partialCreditPercent) || partialCreditPercent < 0 || partialCreditPercent > 100
-      ? '部分分比例必须是 0–100 整数。' : '');
+  const config = useMemo(
+    () => ({
+      main: { options, answerIndexes: [...answerIndexes].sort((a, b) => a - b), partialCreditPercent },
+    }),
+    [answerIndexes, options, partialCreditPercent],
+  );
+  const validationError =
+    validateOptions(options) ||
+    (!answerIndexes.size ? '至少选择一个正确项。' : '') ||
+    (!Number.isInteger(partialCreditPercent) || partialCreditPercent < 0 || partialCreditPercent > 100 ? '部分分比例必须是 0–100 整数。' : '');
   const updateOptions = (next: string[], removedIndex?: number) => {
     setOptions(next);
-    setAnswerIndexes(new Set([...answerIndexes].flatMap((index) => {
-      if (removedIndex === undefined) return index < next.length ? [index] : [];
-      if (index === removedIndex) return [];
-      return [index > removedIndex ? index - 1 : index];
-    })));
+    setAnswerIndexes(
+      new Set(
+        [...answerIndexes].flatMap((index) => {
+          if (removedIndex === undefined) return index < next.length ? [index] : [];
+          if (index === removedIndex) return [];
+          return [index > removedIndex ? index - 1 : index];
+        }),
+      ),
+    );
   };
   return (
     <ObjectiveEditorShell kind={BASIC_OBJECTIVE_KIND.multi} config={config} validationError={validationError}>
@@ -308,11 +344,14 @@ export function MultiProblemEditorPage() {
         options={options}
         setOptions={updateOptions}
         selected={answerIndexes}
-        toggle={(index) => setAnswerIndexes((current) => {
-          const next = new Set(current);
-          if (next.has(index)) next.delete(index); else next.add(index);
-          return next;
-        })}
+        toggle={(index) =>
+          setAnswerIndexes((current) => {
+            const next = new Set(current);
+            if (next.has(index)) next.delete(index);
+            else next.add(index);
+            return next;
+          })
+        }
         single={false}
       />
       <label className="block max-w-xs space-y-1.5 border-t border-border/70 pt-4">
@@ -338,7 +377,10 @@ export function TrueFalseProblemEditorPage() {
   return (
     <ObjectiveEditorShell kind={BASIC_OBJECTIVE_KIND.trueFalse} config={{ main: { answer } }} validationError="">
       <div className="grid gap-2 sm:grid-cols-2">
-        {[{ value: true, label: '正确' }, { value: false, label: '错误' }].map((option) => (
+        {[
+          { value: true, label: '正确' },
+          { value: false, label: '错误' },
+        ].map((option) => (
           <label
             key={String(option.value)}
             className={cn(

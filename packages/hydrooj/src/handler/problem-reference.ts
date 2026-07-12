@@ -18,10 +18,7 @@ export function normalizeProblemDocIds(values: unknown): number[] {
 export async function getVisibleReferencedProblems(domainId: string, pids: number[], user: any) {
     const visible: Record<number, any> = {};
     for (const pid of pids) {
-        // eslint-disable-next-line no-await-in-loop
-        const pdoc = await problem.getViewableAuthorized(
-            domainId, pid, user, problem.PROJECTION_PUBLIC,
-        );
+        const pdoc = await problem.getViewableAuthorized(domainId, pid, user, problem.PROJECTION_PUBLIC);
         if (!pdoc?.docId) continue;
         visible[pdoc.docId] = pdoc;
     }
@@ -29,4 +26,4 @@ export async function getVisibleReferencedProblems(domainId: string, pids: numbe
 }
 
 /** This helper lives in handler/ and is therefore discovered by Hydro's loader. */
-export function apply() { }
+export function apply() {}

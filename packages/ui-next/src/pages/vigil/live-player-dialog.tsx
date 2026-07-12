@@ -65,8 +65,14 @@ interface LivePlayerDialogProps {
 }
 
 export function LivePlayerDialog({
-  open, onOpenChange, contestId, student, recordEnabled,
-  onCaptureScreenshot, onLockScreen, onSendMessage,
+  open,
+  onOpenChange,
+  contestId,
+  student,
+  recordEnabled,
+  onCaptureScreenshot,
+  onLockScreen,
+  onSendMessage,
 }: LivePlayerDialogProps) {
   const [overLimit, setOverLimit] = useState(false);
 
@@ -90,29 +96,24 @@ export function LivePlayerDialog({
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">
               直播 · {student.name}
-              {student.studentId && (
-                <span className="ml-2 font-mono text-xs text-muted-foreground">{student.studentId}</span>
-              )}
+              {student.studentId && <span className="ml-2 font-mono text-xs text-muted-foreground">{student.studentId}</span>}
             </p>
             <p className="truncate font-mono text-[10px] text-muted-foreground">{student.machineId}</p>
           </div>
           <div className="flex items-center gap-1">
             <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={onCaptureScreenshot}>
-              <Camera className="size-3.5" />截屏
+              <Camera className="size-3.5" />
+              截屏
             </Button>
             <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={onLockScreen}>
-              <Lock className="size-3.5" />锁屏
+              <Lock className="size-3.5" />
+              锁屏
             </Button>
             <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-xs" onClick={onSendMessage}>
-              <MessageSquare className="size-3.5" />消息
+              <MessageSquare className="size-3.5" />
+              消息
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 w-7 p-0"
-              onClick={() => onOpenChange(false)}
-              title="关闭"
-            >
+            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => onOpenChange(false)} title="关闭">
               <X className="size-4" />
             </Button>
           </div>
@@ -125,7 +126,9 @@ export function LivePlayerDialog({
             <p className="max-w-md text-center text-xs text-muted-foreground">
               为保证机房网络稳定，同时打开的直播窗口数有限制。请先关闭其他直播窗口，再尝试打开新的直播。
             </p>
-            <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>关闭</Button>
+            <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
+              关闭
+            </Button>
           </div>
         ) : (
           <LiveVideoCanvas
@@ -143,7 +146,10 @@ export function LivePlayerDialog({
 /* ─── Internal video canvas ────────────────────────────────────────────── */
 
 function LiveVideoCanvas({
-  contestId, machineId, recordEnabled, cameraEnabled,
+  contestId,
+  machineId,
+  recordEnabled,
+  cameraEnabled,
 }: {
   contestId: string;
   machineId: string;
@@ -187,10 +193,7 @@ function LiveVideoCanvas({
   };
 
   return (
-    <div
-      ref={containerRef}
-      className="relative flex-1 overflow-hidden bg-black"
-    >
+    <div ref={containerRef} className="relative flex-1 overflow-hidden bg-black">
       <LiveVideo
         flvSrc={buildFlvStreamUrl(contestId, machineId, 'screen', recordEnabled)}
         hlsSrc={buildHlsStreamUrl(contestId, machineId, 'screen', recordEnabled)}
@@ -235,9 +238,7 @@ function LiveVideoCanvas({
  * MSE-FLV or when the FLV stream errors. Screen track is muted (silent); the
  * camera track is left unmuted so the newly-added microphone audio plays.
  */
-function LiveVideo({ flvSrc, hlsSrc, kind, className }: {
-  flvSrc: string; hlsSrc: string; kind: 'screen' | 'camera'; className?: string;
-}) {
+function LiveVideo({ flvSrc, hlsSrc, kind, className }: { flvSrc: string; hlsSrc: string; kind: 'screen' | 'camera'; className?: string }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Latch to HLS once FLV proves unusable so we don't ping-pong between them.
@@ -258,22 +259,50 @@ function LiveVideo({ flvSrc, hlsSrc, kind, className }: {
       const fallback = () => {
         if (flvFailed) return;
         flvFailed = true;
-        try { player.destroy(); } catch { /* ignore */ }
+        try {
+          player.destroy();
+        } catch {
+          /* ignore */
+        }
         setUseHls(true); // re-run effect on the HLS branch
       };
       player.on(mpegts.Events.ERROR, fallback);
       try {
         player.attachMediaElement(video);
         player.load();
-        video.play().catch(() => { /* autoplay block; user can click */ });
-      } catch { fallback(); }
+        video.play().catch(() => {
+          /* autoplay block; user can click */
+        });
+      } catch {
+        fallback();
+      }
       return () => {
-        try { player.pause(); } catch { /* ignore */ }
-        try { player.unload(); } catch { /* ignore */ }
-        try { player.detachMediaElement(); } catch { /* ignore */ }
-        try { player.destroy(); } catch { /* ignore */ }
+        try {
+          player.pause();
+        } catch {
+          /* ignore */
+        }
+        try {
+          player.unload();
+        } catch {
+          /* ignore */
+        }
+        try {
+          player.detachMediaElement();
+        } catch {
+          /* ignore */
+        }
+        try {
+          player.destroy();
+        } catch {
+          /* ignore */
+        }
         if (video) {
-          try { video.pause(); } catch { /* ignore */ }
+          try {
+            video.pause();
+          } catch {
+            /* ignore */
+          }
           video.removeAttribute('src');
           video.load();
         }
@@ -292,7 +321,9 @@ function LiveVideo({ flvSrc, hlsSrc, kind, className }: {
         manifestLoadingMaxRetry: 3,
       });
       hls.attachMedia(video);
-      hls.on(Hls.Events.MEDIA_ATTACHED, () => { hls!.loadSource(hlsSrc); });
+      hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+        hls!.loadSource(hlsSrc);
+      });
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
         switch (data.type) {
@@ -310,18 +341,32 @@ function LiveVideo({ flvSrc, hlsSrc, kind, className }: {
             break;
         }
       });
-      video.play().catch(() => { /* autoplay block */ });
+      video.play().catch(() => {
+        /* autoplay block */
+      });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = hlsSrc; // iOS Safari native HLS
-      video.play().catch(() => { /* autoplay block; user can tap */ });
+      video.play().catch(() => {
+        /* autoplay block; user can tap */
+      });
     } else {
       setError('当前浏览器不支持直播播放');
     }
 
     return () => {
-      if (hls) { try { hls.destroy(); } catch { /* ignore */ } }
+      if (hls) {
+        try {
+          hls.destroy();
+        } catch {
+          /* ignore */
+        }
+      }
       if (video) {
-        try { video.pause(); } catch { /* ignore */ }
+        try {
+          video.pause();
+        } catch {
+          /* ignore */
+        }
         video.removeAttribute('src');
         video.load();
       }
@@ -330,14 +375,7 @@ function LiveVideo({ flvSrc, hlsSrc, kind, className }: {
 
   return (
     <div className={cn('relative', className)}>
-      <video
-        ref={videoRef}
-        autoPlay
-        muted={kind === 'screen'}
-        playsInline
-        className="h-full w-full"
-        controls={false}
-      />
+      <video ref={videoRef} autoPlay muted={kind === 'screen'} playsInline className="h-full w-full" controls={false} />
       {error && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 text-center text-xs text-white">
           <AlertTriangle className="size-6 text-amber-400" />

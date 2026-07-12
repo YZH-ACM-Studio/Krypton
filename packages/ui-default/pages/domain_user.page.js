@@ -3,9 +3,7 @@ import _ from 'lodash';
 import { confirm, InfoDialog, prompt } from 'vj/components/dialog';
 import Notification from 'vj/components/notification';
 import { NamedPage } from 'vj/misc/Page';
-import {
-  delay, i18n, request, tpl,
-} from 'vj/utils';
+import { delay, i18n, request, tpl } from 'vj/utils';
 
 const page = new NamedPage('domain_user', () => {
   $('.not-joined').data('tooltip', i18n('Click to view detailed instructions.'));
@@ -37,12 +35,14 @@ const page = new NamedPage('domain_user', () => {
         label: 'Role',
         options: UiContext.roles.filter((i) => !['default', 'guest'].includes(i)),
       },
-      ...((UiContext.canForceJoin && UiContext.domain._id !== 'system') ? {
-        join: {
-          type: 'checkbox',
-          label: i18n('Mark user as joined using admin privilege'),
-        },
-      } : {}),
+      ...(UiContext.canForceJoin && UiContext.domain._id !== 'system'
+        ? {
+            join: {
+              type: 'checkbox',
+              label: i18n('Mark user as joined using admin privilege'),
+            },
+          }
+        : {}),
     });
     if (!res?.user?.length || !res?.role) return;
     try {
@@ -59,10 +59,7 @@ const page = new NamedPage('domain_user', () => {
   }
 
   function ensureAndGetSelectedUsers() {
-    const users = _.map(
-      $('.domain-users tbody [type="checkbox"]:checked'),
-      (ch) => $(ch).attr('data-uid') || $(ch).closest('tr').attr('data-uid'),
-    );
+    const users = _.map($('.domain-users tbody [type="checkbox"]:checked'), (ch) => $(ch).attr('data-uid') || $(ch).closest('tr').attr('data-uid'));
     if (users.length === 0) {
       Notification.error(i18n('Please select at least one user to perform this operation.'));
       return null;
@@ -73,8 +70,12 @@ const page = new NamedPage('domain_user', () => {
   async function handleClickRemoveSelected() {
     const selectedUsers = ensureAndGetSelectedUsers();
     if (selectedUsers === null) return;
-    if (!(await confirm(`${i18n('Confirm removing the selected users?')}
-${i18n('Their account will not be deleted and they will be with the guest role until they re-join the domain.')}`))) return;
+    if (
+      !(await confirm(`${i18n('Confirm removing the selected users?')}
+${i18n('Their account will not be deleted and they will be with the guest role until they re-join the domain.')}`))
+    ) {
+      return;
+    }
     try {
       await request.post('', {
         operation: 'kick',

@@ -71,10 +71,7 @@ class RatingCalculator {
         for (const user of this.users) user.delta += inc;
         // Calculate second inc
         this.users = this.users.sort((a, b) => b.old - a.old);
-        const s = Math.min(
-            this.users.length,
-            Math.floor(4 * Math.round(Math.sqrt(this.users.length))),
-        );
+        const s = Math.min(this.users.length, Math.floor(4 * Math.round(Math.sqrt(this.users.length))));
         let sumS = 0;
         for (let i = 0; i < s; i++) {
             sumS += this.users[i].delta;

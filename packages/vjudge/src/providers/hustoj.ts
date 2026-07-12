@@ -1,6 +1,4 @@
-import {
-    _, Logger, sleep, STATUS,
-} from 'hydrooj';
+import { _, Logger, sleep, STATUS } from 'hydrooj';
 import { BasicFetcher } from '../fetch';
 import { IBasicProvider, RemoteAccount } from '../interface';
 import { VERDICT } from '../verdict';
@@ -17,7 +15,6 @@ import { VERDICT } from '../verdict';
 //       but the server might limit the number of accounts per IP address.
 //       Those fixes won't be implemented officially. Use at your own risk.
 
-/* eslint-disable no-await-in-loop */
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.163 Safari/537.36';
 const logger = new Logger('vjudge/hustoj');
 
@@ -103,7 +100,10 @@ export class HUSTOJ extends BasicFetcher implements IBasicProvider {
         pid: '',
     };
 
-    constructor(public account: RemoteAccount, private save: (data: any) => Promise<void>) {
+    constructor(
+        public account: RemoteAccount,
+        private save: (data: any) => Promise<void>,
+    ) {
         const config = _.defaultsDeep({ ...defaultConfig }, account);
         super(account, '', 'form', logger, {
             post: {
@@ -119,7 +119,7 @@ export class HUSTOJ extends BasicFetcher implements IBasicProvider {
         if (this.config.server) this.endpoint = this.config.server;
     }
 
-    updateConfig() { }
+    updateConfig() {}
 
     getProblem() {
         return null;
@@ -153,7 +153,7 @@ export class HUSTOJ extends BasicFetcher implements IBasicProvider {
         if (!this.account.handle || !this.account.password) return false;
         if (await this.loggedIn) return true;
         await this.login(this.account.handle, this.account.password);
-        if (!await this.loggedIn) {
+        if (!(await this.loggedIn)) {
             // assume rate limit triggered or incorrect captcha
             await this.login(this.account.handle, this.account.password);
         }
@@ -187,8 +187,11 @@ export class HUSTOJ extends BasicFetcher implements IBasicProvider {
 
     async waitForSubmission(rid, next, end) {
         let url = this.config.monit.endpoint.replace('{uid}', this.state.username).replace('{pid}', this.state.pid);
-        // eslint-disable-next-line max-len
-        const RE = new RegExp(`<tr.*?class="evenrow".*?><td>${rid}</td>.*?</td><td>.*?</td><td><font color=".*?">(.*?)</font></td><td>(.*?)<font color="red">kb</font></td><td>(.*?)<font color="red">ms`, 'gim');
+
+        const RE = new RegExp(
+            `<tr.*?class="evenrow".*?><td>${rid}</td>.*?</td><td>.*?</td><td><font color=".*?">(.*?)</font></td><td>(.*?)<font color="red">kb</font></td><td>(.*?)<font color="red">ms`,
+            'gim',
+        );
         const res = await this.get(url);
         let [, status, time, memory] = RE.exec(res.text);
         while (isProcessing(status)) {
@@ -200,8 +203,13 @@ export class HUSTOJ extends BasicFetcher implements IBasicProvider {
         if (VERDICT[status] === STATUS.STATUS_COMPILE_ERROR) {
             url = this.config.ceInfo.endpoint.replace('{rid}', rid);
             const resp = await this.get(url);
-            const compilerText = decodeURIComponent(this.config.ceInfo.matcher.exec(resp.text)[1]
-                ?.replace(/\n/g, '')?.replace(/<br\/>/g, '\n')?.replace(/\n\n/g, '\n'));
+            const compilerText = decodeURIComponent(
+                this.config.ceInfo.matcher
+                    .exec(resp.text)[1]
+                    ?.replace(/\n/g, '')
+                    ?.replace(/<br\/>/g, '\n')
+                    ?.replace(/\n\n/g, '\n'),
+            );
             end({
                 status: STATUS.STATUS_COMPILE_ERROR,
                 score: 0,

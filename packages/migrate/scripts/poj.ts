@@ -1,12 +1,26 @@
-/* eslint-disable no-await-in-loop */
 /* eslint-disable style/no-tabs */
 
 import path from 'path';
 import zlib from 'zlib';
 import mariadb from 'mariadb';
 import {
-    buildContent, ContestModel, DomainModel, fs, moment, noop, NotFoundError, ObjectId, postJudge, ProblemModel,
-    RecordDoc, RecordModel, SolutionModel, STATUS, SystemModel, Time, UserModel,
+    buildContent,
+    ContestModel,
+    DomainModel,
+    fs,
+    moment,
+    noop,
+    NotFoundError,
+    ObjectId,
+    postJudge,
+    ProblemModel,
+    RecordDoc,
+    RecordModel,
+    SolutionModel,
+    STATUS,
+    SystemModel,
+    Time,
+    UserModel,
 } from 'hydrooj';
 
 const statusMap = {
@@ -31,11 +45,10 @@ const nameMap: Record<string, string> = {
     'test.out': 'test0.out',
 };
 
-export async function run({
-    host = 'localhost', port = 3306, name,
-    username, password, domainId, contestType = 'oi',
-    dataDir, imageDir, rerun = true, randomMail = false,
-}, report: (data: any) => void) {
+export async function run(
+    { host = 'localhost', port = 3306, name, username, password, domainId, contestType = 'oi', dataDir, imageDir, rerun = true, randomMail = false },
+    report: (data: any) => void,
+) {
     const src = await mariadb.createConnection({
         host,
         port,
@@ -45,9 +58,12 @@ export async function run({
         // GBK
         charset: 'GBK',
     });
-    const query = (q: string) => new Promise<any[]>((res, rej) => {
-        src.query(q).then((r) => res(r)).catch((e) => rej(e));
-    });
+    const query = (q: string) =>
+        new Promise<any[]>((res, rej) => {
+            src.query(q)
+                .then((r) => res(r))
+                .catch((e) => rej(e));
+        });
     const target = await DomainModel.get(domainId);
     if (!target) throw new NotFoundError(domainId);
     report({ message: 'Connected to database' });
@@ -79,8 +95,12 @@ export async function run({
             uidMap[udoc.user_id] = current._id;
         } else {
             const uid = await UserModel.create(
-                udoc.email || `${udoc.user_id}@poj.local`, udoc.user_id, '',
-                null, udoc.ip, udoc.defunct === 'Y' ? 0 : SystemModel.get('default.priv'),
+                udoc.email || `${udoc.user_id}@poj.local`,
+                udoc.user_id,
+                '',
+                null,
+                udoc.ip,
+                udoc.defunct === 'Y' ? 0 : SystemModel.get('default.priv'),
             );
             uidMap[udoc.user_id] = uid;
             await UserModel.setById(uid, {
@@ -143,14 +163,17 @@ export async function run({
             }
             if (!pidMap[pdoc.problem_id]) {
                 const files = {};
-                let content = buildContent({
-                    description: pdoc.description,
-                    input: pdoc.input,
-                    output: pdoc.output,
-                    samples: [[pdoc.sample_input.trim(), pdoc.sample_output.trim()]],
-                    hint: pdoc.hint,
-                    source: pdoc.source,
-                }, 'html');
+                let content = buildContent(
+                    {
+                        description: pdoc.description,
+                        input: pdoc.input,
+                        output: pdoc.output,
+                        samples: [[pdoc.sample_input.trim(), pdoc.sample_output.trim()]],
+                        hint: pdoc.hint,
+                        source: pdoc.source,
+                    },
+                    'html',
+                );
                 // eslint-disable-next-line regexp/no-super-linear-backtracking
                 const uploadFiles = content.matchAll(/(?:src|href)="\/images\/([^"]+\/([^"]+))"/g);
                 for (const file of uploadFiles) {
@@ -162,9 +185,17 @@ export async function run({
                     }
                 }
                 const pid = await ProblemModel.add(
-                    domainId, `P${pdoc.problem_id}`,
-                    pdoc.title, content,
-                    1, pdoc.source?.trim().length ? pdoc.source.split(' ').map((i) => i.trim()).filter((i) => i) : [],
+                    domainId,
+                    `P${pdoc.problem_id}`,
+                    pdoc.title,
+                    content,
+                    1,
+                    pdoc.source?.trim().length
+                        ? pdoc.source
+                              .split(' ')
+                              .map((i) => i.trim())
+                              .filter((i) => i)
+                        : [],
                     { hidden: pdoc.defunct === 'Y', problemKind: 'programming' },
                 );
                 pidMap[pdoc.problem_id] = pid;
@@ -202,8 +233,15 @@ memory: ${pdoc.memory_limit}k`,
         const pids = pdocs.map((i) => pidMap[i.problem_id]).filter((i) => i);
         const endAt = moment(tdoc.end_time).isSameOrBefore(tdoc.start_time) ? moment(tdoc.end_time).add(1, 'minute').toDate() : tdoc.end_time;
         const tid = await ContestModel.add(
-            domainId, tdoc.title, tdoc.description || 'Description',
-            adminUids[0], contestType, tdoc.start_time, endAt, pids, true,
+            domainId,
+            tdoc.title,
+            tdoc.description || 'Description',
+            adminUids[0],
+            contestType,
+            tdoc.start_time,
+            endAt,
+            pids,
+            true,
             tdoc.private ? { _code: password } : {},
         );
         tidMap[tdoc.contest_id] = tid.toHexString();

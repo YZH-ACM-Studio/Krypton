@@ -5,9 +5,7 @@
  * 再 POST operation=addImage 挂到该卡片的代表奖项上。
  */
 import { useState } from 'react';
-import {
-  ArrowLeft, Award as AwardIcon, Camera, ImageOff, Trophy, Users,
-} from 'lucide-react';
+import { ArrowLeft, Award as AwardIcon, Camera, ImageOff, Trophy, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -43,12 +41,7 @@ interface YearBucket {
   icpc: GalleryCard[];
 }
 
-function TeamCard({ card, canUpload, uid, onLightbox }: {
-  card: GalleryCard;
-  canUpload: boolean;
-  uid: number;
-  onLightbox: (url: string) => void;
-}) {
+function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; canUpload: boolean; uid: number; onLightbox: (url: string) => void }) {
   const [imageUrls, setImageUrls] = useState<string[]>(card.imageUrls);
   const [uploading, setUploading] = useState(false);
   const cover = imageUrls[card.coverIndex] || imageUrls[0] || null;
@@ -88,11 +81,7 @@ function TeamCard({ card, canUpload, uid, onLightbox }: {
     <Card className="overflow-hidden">
       {/* 封面区 */}
       {cover ? (
-        <button
-          type="button"
-          onClick={() => onLightbox(cover)}
-          className="block h-44 w-full overflow-hidden bg-muted"
-        >
+        <button type="button" onClick={() => onLightbox(cover)} className="block h-44 w-full overflow-hidden bg-muted">
           <img src={cover} alt={card.title} className="size-full object-cover transition-transform hover:scale-105" />
         </button>
       ) : (
@@ -104,12 +93,17 @@ function TeamCard({ card, canUpload, uid, onLightbox }: {
       <CardContent className="space-y-2.5 p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold" title={card.title}>{card.title}</p>
+            <p className="truncate text-sm font-semibold" title={card.title}>
+              {card.title}
+            </p>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <Badge variant="secondary" className="text-[10px]">{card.typeName}</Badge>
+              <Badge variant="secondary" className="text-[10px]">
+                {card.typeName}
+              </Badge>
               {card.team ? (
                 <Badge variant="outline" className="text-[10px]">
-                  <Users className="mr-0.5 size-2.5" />{card.team}
+                  <Users className="mr-0.5 size-2.5" />
+                  {card.team}
                 </Badge>
               ) : null}
             </div>
@@ -133,16 +127,25 @@ function TeamCard({ card, canUpload, uid, onLightbox }: {
 
         {/* 更多照片 + 上传 */}
         <div className="flex items-center gap-1.5">
-          {imageUrls.filter((u) => u !== cover).slice(0, 4).map((u) => (
-            <button key={u} type="button" onClick={() => onLightbox(u)} className="size-10 overflow-hidden rounded border bg-muted hover:opacity-80">
-              <img src={u} alt="" className="size-full object-cover" />
-            </button>
-          ))}
+          {imageUrls
+            .filter((u) => u !== cover)
+            .slice(0, 4)
+            .map((u) => (
+              <button
+                key={u}
+                type="button"
+                onClick={() => onLightbox(u)}
+                className="size-10 overflow-hidden rounded border bg-muted hover:opacity-80"
+              >
+                <img src={u} alt="" className="size-full object-cover" />
+              </button>
+            ))}
           {canUpload ? (
-            <label className={cn(
-              'flex size-10 cursor-pointer items-center justify-center rounded border border-dashed text-muted-foreground transition-colors hover:border-primary hover:text-primary',
-              uploading && 'pointer-events-none opacity-50',
-            )}
+            <label
+              className={cn(
+                'flex size-10 cursor-pointer items-center justify-center rounded border border-dashed text-muted-foreground transition-colors hover:border-primary hover:text-primary',
+                uploading && 'pointer-events-none opacity-50',
+              )}
             >
               <Camera className="size-4" />
               <input
@@ -174,7 +177,9 @@ export function RankBoardGalleryPage() {
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <Button asChild variant="ghost" size="icon">
-          <a href="/rankboard"><ArrowLeft className="size-4" /></a>
+          <a href="/rankboard">
+            <ArrowLeft className="size-4" />
+          </a>
         </Button>
         <div>
           <h1 className="text-xl font-semibold">荣誉照片墙</h1>
@@ -187,50 +192,59 @@ export function RankBoardGalleryPage() {
 
       {years.length === 0 ? (
         <Card>
-          <CardContent className="py-16 text-center text-sm text-muted-foreground">
-            还没有可展示的获奖记录。
-          </CardContent>
+          <CardContent className="py-16 text-center text-sm text-muted-foreground">还没有可展示的获奖记录。</CardContent>
         </Card>
-      ) : years.map((bucket) => (
-        <section key={bucket.year ?? 'unknown'} className="space-y-4">
-          <h2 className="flex items-center gap-2 border-b pb-2 text-lg font-semibold">
-            {bucket.year ?? '年份未知'}
-            <span className="text-xs font-normal text-muted-foreground">
-              {bucket.ladder.length + bucket.icpc.length} 项
-            </span>
-          </h2>
-          {bucket.ladder.length > 0 ? (
-            <div>
-              <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-                <Trophy className="size-3.5 text-amber-500" />天梯赛（团队）
-              </h3>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {bucket.ladder.map((card, i) => (
-                  <TeamCard key={`${card.typeKey}-${card.team || i}`} card={card} canUpload={data.canUpload} uid={bs.user.id} onLightbox={setLightbox} />
-                ))}
+      ) : (
+        years.map((bucket) => (
+          <section key={bucket.year ?? 'unknown'} className="space-y-4">
+            <h2 className="flex items-center gap-2 border-b pb-2 text-lg font-semibold">
+              {bucket.year ?? '年份未知'}
+              <span className="text-xs font-normal text-muted-foreground">{bucket.ladder.length + bucket.icpc.length} 项</span>
+            </h2>
+            {bucket.ladder.length > 0 ? (
+              <div>
+                <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                  <Trophy className="size-3.5 text-amber-500" />
+                  天梯赛（团队）
+                </h3>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {bucket.ladder.map((card, i) => (
+                    <TeamCard
+                      key={`${card.typeKey}-${card.team || i}`}
+                      card={card}
+                      canUpload={data.canUpload}
+                      uid={bs.user.id}
+                      onLightbox={setLightbox}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          ) : null}
-          {bucket.icpc.length > 0 ? (
-            <div>
-              <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-                <AwardIcon className="size-3.5 text-primary" />ICPC / CCPC（队伍）
-              </h3>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {bucket.icpc.map((card, i) => (
-                  <TeamCard key={`${card.contest || ''}-${card.typeKey}-${card.team || i}`} card={card} canUpload={data.canUpload} uid={bs.user.id} onLightbox={setLightbox} />
-                ))}
+            ) : null}
+            {bucket.icpc.length > 0 ? (
+              <div>
+                <h3 className="mb-2 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                  <AwardIcon className="size-3.5 text-primary" />
+                  ICPC / CCPC（队伍）
+                </h3>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {bucket.icpc.map((card, i) => (
+                    <TeamCard
+                      key={`${card.contest || ''}-${card.typeKey}-${card.team || i}`}
+                      card={card}
+                      canUpload={data.canUpload}
+                      uid={bs.user.id}
+                      onLightbox={setLightbox}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          ) : null}
-        </section>
-      ))}
+            ) : null}
+          </section>
+        ))
+      )}
 
       {lightbox && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6"
-          onClick={() => setLightbox(null)}
-        >
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
           <img src={lightbox} alt="" className="max-h-[90vh] max-w-[90vw] object-contain" />
         </div>
       )}

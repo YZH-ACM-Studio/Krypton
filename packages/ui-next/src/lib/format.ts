@@ -50,12 +50,14 @@ export function formatRelativeTime(value: unknown, locale: string) {
 }
 
 export function makeInitials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || '')
-    .join('') || 'K';
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || '')
+      .join('') || 'K'
+  );
 }
 
 export function replaceRouteTokens(template: string, replacements: Record<string, string | number>) {
@@ -77,24 +79,26 @@ export function replaceRouteTokens(template: string, replacements: Record<string
  * only remove them when they appear as line-leading markdown markers.
  */
 export function formatPlainTextSummary(value: unknown) {
-  return String(value || '')
-    // 1. Drop fenced code blocks entirely
-    .replace(/```[\s\S]*?```/g, ' ')
-    // 2. Unwrap inline code
-    .replace(/`([^`]+)`/g, '$1')
-    // 3. Drop image references
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-    // 4. Unwrap links to just the label
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    // 5. Drop raw HTML tags but keep their text
-    .replace(/<[^>]+>/g, ' ')
-    // 6. Remove leading list / heading / quote markers at the *start of a line*
-    .replace(/(^|\n)\s*(?:[#>|*\-+]\s+|\d+\.\s+)/g, '$1')
-    // 7. Drop pure emphasis markers but leave their content
-    .replace(/(\*\*|__)(.*?)\1/g, '$2')
-    .replace(/(\*|_)(.*?)\1/g, '$2')
-    .replace(/~~(.*?)~~/g, '$1')
-    // 8. Collapse runs of whitespace
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    String(value || '')
+      // 1. Drop fenced code blocks entirely
+      .replace(/```[\s\S]*?```/g, ' ')
+      // 2. Unwrap inline code
+      .replace(/`([^`]+)`/g, '$1')
+      // 3. Drop image references
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+      // 4. Unwrap links to just the label
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      // 5. Drop raw HTML tags but keep their text
+      .replace(/<[^>]+>/g, ' ')
+      // 6. Remove leading list / heading / quote markers at the *start of a line*
+      .replace(/(^|\n)\s*(?:[#>|*\-+]\s+|\d+\.\s+)/g, '$1')
+      // 7. Drop pure emphasis markers but leave their content
+      .replace(/(\*\*|__)(.*?)\1/g, '$2')
+      .replace(/(\*|_)(.*?)\1/g, '$2')
+      .replace(/~~(.*?)~~/g, '$1')
+      // 8. Collapse runs of whitespace
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }

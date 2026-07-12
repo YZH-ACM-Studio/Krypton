@@ -80,29 +80,12 @@ export function AdminPage({
       {!hideSidebar ? <AdminSidebar currentTemplate={bs.page.templateName} /> : null}
 
       <ScrollArea className="min-w-0 min-h-0 flex-1" viewportClassName="pr-1">
-        <motion.div
-          className={cn('space-y-5', contentClassName)}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.15 }}
-        >
+        <motion.div className={cn('space-y-5', contentClassName)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
           {(title || actions || description) && (
             <header className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div className="space-y-1">
-                {title ? (
-                  typeof title === 'string' ? (
-                    <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
-                  ) : (
-                    title
-                  )
-                ) : null}
-                {description ? (
-                  typeof description === 'string' ? (
-                    <p className="text-sm text-muted-foreground">{description}</p>
-                  ) : (
-                    description
-                  )
-                ) : null}
+                {title ? typeof title === 'string' ? <h1 className="text-xl font-semibold tracking-tight">{title}</h1> : title : null}
+                {description ? typeof description === 'string' ? <p className="text-sm text-muted-foreground">{description}</p> : description : null}
               </div>
               {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
             </header>

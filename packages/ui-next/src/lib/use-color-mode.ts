@@ -15,28 +15,28 @@ import { useEffect, useState } from 'react';
 export type ColorMode = 'light' | 'dark';
 
 function readMode(): ColorMode {
-    if (typeof document === 'undefined') return 'light';
-    return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+  if (typeof document === 'undefined') return 'light';
+  return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
 }
 
 export function useColorMode(): ColorMode {
-    const [mode, setMode] = useState<ColorMode>(() => readMode());
+  const [mode, setMode] = useState<ColorMode>(() => readMode());
 
-    useEffect(() => {
-        if (typeof document === 'undefined') return;
-        const html = document.documentElement;
-        const update = () => setMode(readMode());
-        const observer = new MutationObserver((records) => {
-            for (const r of records) {
-                if (r.type === 'attributes' && r.attributeName === 'class') {
-                    update();
-                    return;
-                }
-            }
-        });
-        observer.observe(html, { attributes: true, attributeFilter: ['class'] });
-        return () => observer.disconnect();
-    }, []);
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const html = document.documentElement;
+    const update = () => setMode(readMode());
+    const observer = new MutationObserver((records) => {
+      for (const r of records) {
+        if (r.type === 'attributes' && r.attributeName === 'class') {
+          update();
+          return;
+        }
+      }
+    });
+    observer.observe(html, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
 
-    return mode;
+  return mode;
 }

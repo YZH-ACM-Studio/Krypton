@@ -35,8 +35,7 @@ export function ProblemSubmitPage() {
   const tid = tdoc?.docId ? String(tdoc.docId) : null;
   const contestQS = tid ? `?tid=${tid}` : '';
   const submitUrl = `${problemUrl}/submit${contestQS}`;
-  const isStructuredCompile = config.type === 'fill_function'
-    && ['program_fill', 'function'].includes(String(pdoc.problemKind));
+  const isStructuredCompile = config.type === 'fill_function' && ['program_fill', 'function'].includes(String(pdoc.problemKind));
   const regions = Array.isArray(config.template?.regions) ? config.template.regions : [];
   const singleLineRegion = pdoc.problemKind === 'program_fill';
 
@@ -55,24 +54,28 @@ export function ProblemSubmitPage() {
     try {
       const saved = localStorage.getItem(langKey);
       if (saved && (availableLangs.length === 0 || availableLangs.includes(saved))) return saved;
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
     return availableLangs[0] || 'cc.cc17';
   });
   const [code, setCode] = useState<string>(() => {
     try {
       const saved = localStorage.getItem(cacheKey);
       if (saved) return saved;
-    } catch { /* */ }
-    return isStructuredCompile
-      ? JSON.stringify(Object.fromEntries(regions.map((region: R) => [region.id, ''])))
-      : '';
+    } catch {
+      /* */
+    }
+    return isStructuredCompile ? JSON.stringify(Object.fromEntries(regions.map((region: R) => [region.id, '']))) : '';
   });
   const regionValues = useMemo(() => {
     if (!isStructuredCompile) return {};
     try {
       const parsed = JSON.parse(code);
       return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-    } catch { return {}; }
+    } catch {
+      return {};
+    }
   }, [code, isStructuredCompile]);
   const updateRegion = (id: string, value: string) => {
     setCode(JSON.stringify({ ...regionValues, [id]: value }));
@@ -83,12 +86,20 @@ export function ProblemSubmitPage() {
   useEffect(() => {
     clearTimeout(cacheTimer.current);
     cacheTimer.current = setTimeout(() => {
-      try { localStorage.setItem(cacheKey, code); } catch { /* */ }
+      try {
+        localStorage.setItem(cacheKey, code);
+      } catch {
+        /* */
+      }
     }, 400);
     return () => clearTimeout(cacheTimer.current);
   }, [code, cacheKey]);
   useEffect(() => {
-    try { localStorage.setItem(langKey, lang); } catch { /* */ }
+    try {
+      localStorage.setItem(langKey, lang);
+    } catch {
+      /* */
+    }
   }, [lang, langKey]);
 
   const [submitting, setSubmitting] = useState(false);
@@ -97,7 +108,8 @@ export function ProblemSubmitPage() {
   const handleSubmit = useCallback(async () => {
     if (submitting) return;
     if (!code.trim() || (isStructuredCompile && regions.some((region: R) => !(regionValues[region.id] || '').trim()))) {
-      setSubmitError('作答内容不能为空'); return;
+      setSubmitError('作答内容不能为空');
+      return;
     }
     setSubmitting(true);
     setSubmitError(null);
@@ -144,12 +156,7 @@ export function ProblemSubmitPage() {
   }, [code, lang, tid, submitUrl, submitting, bs.urls.recordDetail, isStructuredCompile, regionValues, regions]);
 
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
-    >
+    <motion.div className="space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
       {/* Breadcrumb */}
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         {tdoc && contestLetter ? (
@@ -159,20 +166,21 @@ export function ProblemSubmitPage() {
             </a>
             <ChevronRight className="size-3" />
             <a
-              href={replaceRouteTokens(
-                tdoc.rule === 'homework' ? bs.urls.homeworkDetail : bs.urls.contestDetail,
-                { TID: tid! },
-              )}
+              href={replaceRouteTokens(tdoc.rule === 'homework' ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid! })}
               className="hover:text-primary truncate max-w-[200px]"
             >
               {tdoc.title || '比赛'}
             </a>
           </>
         ) : (
-          <a href={bs.urls.problems} className="hover:text-primary">题库</a>
+          <a href={bs.urls.problems} className="hover:text-primary">
+            题库
+          </a>
         )}
         <ChevronRight className="size-3" />
-        <a href={`${problemUrl}${contestQS}`} className="hover:text-primary truncate max-w-[260px]">{title}</a>
+        <a href={`${problemUrl}${contestQS}`} className="hover:text-primary truncate max-w-[260px]">
+          {title}
+        </a>
         <ChevronRight className="size-3" />
         <span className="text-foreground">提交代码</span>
       </div>
@@ -196,33 +204,36 @@ export function ProblemSubmitPage() {
         {/* Language picker + meta */}
         <div className="flex flex-wrap items-center gap-2">
           <label className="text-xs text-muted-foreground">语言</label>
-          {isStructuredCompile ? <Badge variant="outline">{lang}</Badge> : (
+          {isStructuredCompile ? (
+            <Badge variant="outline">{lang}</Badge>
+          ) : (
             <SimpleSelect
               value={lang}
               onValueChange={setLang}
               size="sm"
               className="w-auto min-w-[8rem]"
               options={
-                availableLangs.length === 0
-                  ? [{ value: lang, label: lang }]
-                  : availableLangs.map((id) => ({ value: id, label: langRange[id] || id }))
+                availableLangs.length === 0 ? [{ value: lang, label: lang }] : availableLangs.map((id) => ({ value: id, label: langRange[id] || id }))
               }
             />
           )}
-          {config.time ? <Badge variant="outline" className="text-[10px]">{config.time}</Badge> : null}
-          {config.memory ? <Badge variant="outline" className="text-[10px]">{config.memory}</Badge> : null}
+          {config.time ? (
+            <Badge variant="outline" className="text-[10px]">
+              {config.time}
+            </Badge>
+          ) : null}
+          {config.memory ? (
+            <Badge variant="outline" className="text-[10px]">
+              {config.memory}
+            </Badge>
+          ) : null}
           <span className="ml-auto text-[11px] text-muted-foreground">已自动缓存草稿</span>
         </div>
 
         {/* Editor in simple mode */}
         {isStructuredCompile ? (
           <div className="border-y border-border/70 py-5">
-            <StructuredRegionInputs
-              regions={regions}
-              values={regionValues}
-              onChange={updateRegion}
-              singleLine={singleLineRegion}
-            />
+            <StructuredRegionInputs regions={regions} values={regionValues} onChange={updateRegion} singleLine={singleLineRegion} />
           </div>
         ) : (
           <div className="rounded-md border overflow-hidden" style={{ height: 'calc(100vh - 220px)', minHeight: 480 }}>

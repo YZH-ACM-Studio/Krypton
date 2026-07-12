@@ -3,7 +3,7 @@ import http from 'http';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { PassThrough } from 'stream';
-import type { } from '@cordisjs/plugin-timer';
+import type {} from '@cordisjs/plugin-timer';
 import { Context as CordisContext, Service } from 'cordis';
 import type { Files } from 'formidable';
 import fs from 'fs-extra';
@@ -13,16 +13,11 @@ import Compress from 'koa-compress';
 import Schema from 'schemastery';
 import { Shorty } from 'shorty.js';
 import { WebSocket, WebSocketServer } from 'ws';
-import {
-    Counter, errorMessage, isClass, Logger, parseMemoryMB,
-} from '@hydrooj/utils/lib/utils';
+import { Counter, errorMessage, isClass, Logger, parseMemoryMB } from '@hydrooj/utils/lib/utils';
 import base from './base';
 import * as decorators from './decorators';
-import {
-    CsrfTokenError, HydroError, InvalidOperationError,
-    MethodNotAllowedError, NotFoundError, UserFacingError,
-} from './error';
-import type { KnownHandlers } from './interface';
+import { CsrfTokenError, HydroError, InvalidOperationError, MethodNotAllowedError, NotFoundError, UserFacingError } from './error';
+import type { KnownHandlers, ServerEvents } from './interface';
 import { Router } from './router';
 import serializer from './serializer';
 
@@ -45,7 +40,7 @@ export function encodeRFC5987ValueChars(str: string) {
 }
 
 async function forkContextWithScope(ctx: CordisContext) {
-    const scope = ctx.plugin(() => { });
+    const scope = ctx.plugin(() => {});
     await scope;
     const dispose = () => scope.dispose();
     return {
@@ -101,7 +96,7 @@ interface HydroContext {
 export type KoaContext = Koa.Context & {
     HydroContext: HydroContext;
     handler: any;
-    request: Koa.Request & { body: any, files: Files };
+    request: Koa.Request & { body: any; files: Files };
     session: Record<string, any>;
     holdFiles: (string | File)[];
 };
@@ -142,7 +137,7 @@ export interface UserModel {
     _id: number;
 }
 
-export interface HandlerCommon { }
+export interface HandlerCommon {}
 export class HandlerCommon {
     static [kHandler]: string | boolean = 'HandlerCommon';
     session: Record<string, any>;
@@ -152,7 +147,10 @@ export class HandlerCommon {
     UiContext: Record<string, any>;
     user: UserModel;
 
-    constructor(public context: KoaContext, public ctx: CordisContext) {
+    constructor(
+        public context: KoaContext,
+        public ctx: CordisContext,
+    ) {
         this.renderHTML = this.renderHTML.bind(this);
         this.url = this.url.bind(this);
         this.session = context.session;
@@ -200,8 +198,9 @@ export class HandlerCommon {
     }
 
     renderHTML(templateName: string, args: Record<string, any>) {
-        const renderers = Object.values((this.ctx as any).server.renderers as Record<string, Renderer>)
-            .filter((r) => r.accept.includes(templateName) || r.asFallback);
+        const renderers = Object.values((this.ctx as any).server.renderers as Record<string, Renderer>).filter(
+            (r) => r.accept.includes(templateName) || r.asFallback,
+        );
         const topPrio = renderers.sort((a, b) => b.priority - a.priority)[0];
         const engine = topPrio?.render || (() => JSON.stringify(args, serializer(false, this)));
         return engine(templateName, args, {
@@ -302,11 +301,14 @@ export class ConnectionHandler extends HandlerCommon {
 }
 
 export class NotFoundHandler extends Handler {
-    prepare() { throw new NotFoundError(this.request.path); }
-    all() { }
+    prepare() {
+        throw new NotFoundError(this.request.path);
+    }
+
+    all() {}
 }
 
-function executeMiddlewareStack(context: any, middlewares: { name: string, func: Function }[]) {
+function executeMiddlewareStack(context: any, middlewares: { name: string; func: Function }[]) {
     let index = -1;
     context.__timers ||= {};
     function dispatch(i) {
@@ -349,7 +351,7 @@ export class WebService extends Service<never> {
     private wsLayers = [];
     private captureAllRoutes = Object.create(null);
     private customDefaultContext: CordisContext;
-    private activeHandlers: Map<Handler, { start: number, name: string }> = new Map();
+    private activeHandlers: Map<Handler, { start: number; name: string }> = new Map();
 
     renderers: Record<string, Renderer> = Object.create(null);
     server = koa;
@@ -358,7 +360,10 @@ export class WebService extends Service<never> {
     Handler = Handler;
     ConnectionHandler = ConnectionHandler;
 
-    constructor(ctx: CordisContext, public config: ReturnType<typeof WebService.Config>) {
+    constructor(
+        ctx: CordisContext,
+        public config: ReturnType<typeof WebService.Config>,
+    ) {
         super(ctx, 'server');
         ctx.mixin('server', ['Route', 'Connection', 'withHandlerClass']);
         this.server.keys = this.config.keys;
@@ -411,18 +416,20 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
             const uploadDir = join(tmpdir(), 'hydro', 'upload', process.env.NODE_APP_INSTANCE || '0');
             fs.ensureDirSync(uploadDir);
             logger.debug('Using upload dir: %s', uploadDir);
-            this.server.use(Body({
-                multipart: true,
-                jsonLimit: '8mb',
-                formLimit: '8mb',
-                formidable: {
-                    uploadDir,
-                    allowEmptyFiles: true,
-                    minFileSize: 0,
-                    maxFileSize: parseMemoryMB(this.config.upload) * 1024 * 1024,
-                    keepExtensions: true,
-                },
-            }));
+            this.server.use(
+                Body({
+                    multipart: true,
+                    jsonLimit: '8mb',
+                    formLimit: '8mb',
+                    formidable: {
+                        uploadDir,
+                        allowEmptyFiles: true,
+                        minFileSize: 0,
+                        maxFileSize: parseMemoryMB(this.config.upload) * 1024 * 1024,
+                        keepExtensions: true,
+                    },
+                }),
+            );
             this.server.use(async (c, next) => {
                 c.holdFiles = [];
                 try {
@@ -445,33 +452,34 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
                 fs.emptyDirSync(uploadDir);
             });
         } else {
-            this.server.use(Body({
-                multipart: true,
-                jsonLimit: '8mb',
-                formLimit: '8mb',
-            }));
+            this.server.use(
+                Body({
+                    multipart: true,
+                    jsonLimit: '8mb',
+                    formLimit: '8mb',
+                }),
+            );
         }
-        this.router.use((c, next) => executeMiddlewareStack(c, [
-            ...this.handlerLayers,
-            { name: 'logic', func: next },
-        ]).catch(console.error));
-        this.server.use((c) => executeMiddlewareStack(c, [
-            ...this.serverLayers,
-            { name: 'routes', func: router.routes() },
-            { name: 'methods', func: router.allowedMethods() },
-            ...this.handlerLayers,
-            {
-                name: '404',
-                func: (t) => this.handleHttp(t, NotFoundHandler, () => true, this.customDefaultContext || this.ctx),
-            },
-        ]));
+        this.router.use((c, next) => executeMiddlewareStack(c, [...this.handlerLayers, { name: 'logic', func: next }]).catch(console.error));
+        this.server.use((c) =>
+            executeMiddlewareStack(c, [
+                ...this.serverLayers,
+                { name: 'routes', func: router.routes() },
+                { name: 'methods', func: router.allowedMethods() },
+                ...this.handlerLayers,
+                {
+                    name: '404',
+                    func: (t) => this.handleHttp(t, NotFoundHandler, () => true, this.customDefaultContext || this.ctx),
+                },
+            ]),
+        );
         this.addLayer('base', base(logger, this.config.xff, this.config.xhost));
         wsServer.on('connection', async (socket, request) => {
             socket.on('error', (err) => {
                 logger.warn('Websocket Error: %s', err.message);
                 try {
                     socket.close(1003, 'Websocket Error');
-                } catch (e) { }
+                } catch (e) {}
             });
             socket.pause();
             const KoaContext: any = koa.createContext(request, {} as any);
@@ -511,14 +519,16 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
         const h = new HandlerClass(ctx, sub.ctx);
         ctx.handler = h;
         const method = ctx.method.toLowerCase();
-        const name = ((Object.hasOwn(HandlerClass, kHandler) && typeof HandlerClass[kHandler] === 'string')
-            ? HandlerClass[kHandler] : HandlerClass.name).replace(/Handler$/, '');
+        const name = (
+            Object.hasOwn(HandlerClass, kHandler) && typeof HandlerClass[kHandler] === 'string' ? HandlerClass[kHandler] : HandlerClass.name
+        ).replace(/Handler$/, '');
         this.activeHandlers.set(h, { start: Date.now(), name });
         try {
-            const operation = (method === 'post' && ctx.request.body?.operation)
-                // eslint-disable-next-line regexp/no-unused-capturing-group
-                ? `_${ctx.request.body.operation}`.replace(/_([a-z])/g, (s) => s[1].toUpperCase())
-                : '';
+            const operation =
+                method === 'post' && ctx.request.body?.operation
+                    ? // eslint-disable-next-line regexp/no-unused-capturing-group
+                      `_${ctx.request.body.operation}`.replace(/_([a-z])/g, (s) => s[1].toUpperCase())
+                    : '';
 
             // FIXME: should pass type check
             await (this.ctx.parallel as any)('handler/create', h, 'http');
@@ -540,18 +550,33 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
             }
 
             const steps = [
-                'log/__init', 'init', 'handler/init',
-                `handler/before-prepare/${name}#${method}`, `handler/before-prepare/${name}`, 'handler/before-prepare',
-                'log/__prepare', '__prepare', '_prepare', 'prepare', 'log/__prepareDone',
-                `handler/before/${name}#${method}`, `handler/before/${name}`, 'handler/before',
-                'log/__method', 'all', method, 'log/__methodDone',
-                ...operation ? [
-                    `handler/before-operation/${name}`, 'handler/before-operation',
-                    `post${operation}`, 'log/__operationDone',
-                ] : [], 'after',
-                `handler/after/${name}#${method}`, `handler/after/${name}`, 'handler/after',
+                'log/__init',
+                'init',
+                'handler/init',
+                `handler/before-prepare/${name}#${method}`,
+                `handler/before-prepare/${name}`,
+                'handler/before-prepare',
+                'log/__prepare',
+                '__prepare',
+                '_prepare',
+                'prepare',
+                'log/__prepareDone',
+                `handler/before/${name}#${method}`,
+                `handler/before/${name}`,
+                'handler/before',
+                'log/__method',
+                'all',
+                method,
+                'log/__methodDone',
+                ...(operation ? [`handler/before-operation/${name}`, 'handler/before-operation', `post${operation}`, 'log/__operationDone'] : []),
+                'after',
+                `handler/after/${name}#${method}`,
+                `handler/after/${name}`,
+                'handler/after',
                 'cleanup',
-                `handler/finish/${name}#${method}`, `handler/finish/${name}`, 'handler/finish',
+                `handler/finish/${name}#${method}`,
+                `handler/finish/${name}`,
+                'handler/finish',
                 'log/__finish',
             ];
 
@@ -561,9 +586,9 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
                 let control;
                 if (step.startsWith('log/')) h.args[step.slice(4)] = Date.now();
                 // @ts-ignore
-                else if (step.startsWith('handler/')) control = await this.ctx.serial(step, h); // eslint-disable-line no-await-in-loop
-                // eslint-disable-next-line no-await-in-loop
-                else if (typeof h[step] === 'function') control = await h[step](args);
+                else if (step.startsWith('handler/')) {
+                    control = await this.ctx.serial(step as keyof ServerEvents, h);
+                } else if (typeof h[step] === 'function') control = await h[step](args);
                 if (control) {
                     const index = steps.findIndex((i) => control === i);
                     if (index === -1) throw new Error(`Invalid control: ${control} (after step ${step})`);
@@ -705,8 +730,9 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
 
     private register(type: 'route' | 'conn', routeName: string, path: string, HandlerClass: any, ...permPrivChecker) {
         if (!HandlerClass?.[kHandler] || !isClass(HandlerClass)) throw new Error('Invalid registration.');
-        const name = ((Object.hasOwn(HandlerClass, kHandler) && typeof HandlerClass[kHandler] === 'string')
-            ? HandlerClass[kHandler] : HandlerClass.name).replace(/Handler$/, '');
+        const name = (
+            Object.hasOwn(HandlerClass, kHandler) && typeof HandlerClass[kHandler] === 'string' ? HandlerClass[kHandler] : HandlerClass.name
+        ).replace(/Handler$/, '');
         if (this.registrationCount[name] && this.registry[name] !== HandlerClass) {
             logger.warn('Route with name %s already exists.', name);
         }
@@ -716,7 +742,7 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
         const Checker = (args) => {
             let perm: bigint;
             let priv: number;
-            let checker = () => { };
+            let checker = () => {};
             for (const item of args) {
                 if (typeof item === 'object') {
                     if (typeof item.call !== 'undefined') {
@@ -741,9 +767,7 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
 
         // We hope to use parent context for handler (the context that calls register)
         // So that handler can use services injected before calling register
-        const savedContext = Object.hasOwn(this.ctx, Symbol.for('cordis.shadow'))
-            ? Object.getPrototypeOf(this.ctx)
-            : this.ctx;
+        const savedContext = Object.hasOwn(this.ctx, Symbol.for('cordis.shadow')) ? Object.getPrototypeOf(this.ctx) : this.ctx;
         const checker = Checker(permPrivChecker);
         if (type === 'route') {
             router.all(routeName, path, (ctx) => this.handleHttp(ctx as any, HandlerClass, checker, savedContext));
@@ -784,7 +808,8 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
     }
 
     public withHandlerClass<T extends string>(
-        name: T, callback: (HandlerClass: T extends `${string}ConnectionHandler` ? typeof ConnectionHandler : typeof Handler) => any,
+        name: T,
+        callback: (HandlerClass: T extends `${string}ConnectionHandler` ? typeof ConnectionHandler : typeof Handler) => any,
     ) {
         name = name.replace(/Handler$/, '') as any;
         if (this.registry[name]) callback(this.registry[name]);
@@ -792,7 +817,6 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
         this.ctx.on(`handler/register/${name}`, callback as any);
     }
 
-    // eslint-disable-next-line ts/naming-convention
     public Route(name: string, path: string, RouteHandler: typeof Handler, ...permPrivChecker) {
         // if (name === 'contest_scoreboard') {
         //     console.log('+++', this.ctx);
@@ -801,7 +825,6 @@ ${c.response.status} ${endTime - startTime}ms ${c.response.length}`);
         return this.register('route', name, path, RouteHandler, ...permPrivChecker);
     }
 
-    // eslint-disable-next-line ts/naming-convention
     public Connection(name: string, path: string, RouteHandler: typeof ConnectionHandler, ...permPrivChecker) {
         return this.register('conn', name, path, RouteHandler, ...permPrivChecker);
     }

@@ -13,5 +13,5 @@ export function isActiveCanonicalDoc(doc: { active?: unknown } | null | undefine
 
 export function normalizeActiveCanonicalDoc<T extends { active?: unknown }>(doc: T): T & { active: true } {
     if (!isActiveCanonicalDoc(doc)) throw new Error('inactive canonical permit cannot be normalized');
-    return doc.active === true ? doc as T & { active: true } : { ...doc, active: true };
+    return doc.active === true ? (doc as T & { active: true }) : { ...doc, active: true };
 }

@@ -62,8 +62,10 @@ const SEVERITY_ZH: Record<string, string> = {
   critical: '严重',
 };
 
-/** Translate an event category token. Falls back to a humanised version of
- *  the original token if unknown (replace `_` and `.` with spaces). */
+/**
+ * Translate an event category token. Falls back to a humanised version of
+ *  the original token if unknown (replace `_` and `.` with spaces).
+ */
 export function translateEventType(token: string | null | undefined): string {
   if (!token) return '未知事件';
   const hit = EVENT_TYPE_ZH[token];

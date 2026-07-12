@@ -9,15 +9,9 @@ import {
     type ProblemAclMutationLock,
     sameAclMutationIntent,
 } from './coordinator';
-import {
-    aclMutationFencesColl,
-    permitsColl,
-    permitSourcesColl,
-} from './db';
+import { aclMutationFencesColl, permitsColl, permitSourcesColl } from './db';
 import { canonicalActiveFilter, normalizeActiveCanonicalDoc } from './legacy-canonical';
-import type {
-    AclServiceRepository, ProblemMaintainerMirror, ProblemWriteClaim,
-} from './service';
+import type { AclServiceRepository, ProblemMaintainerMirror, ProblemWriteClaim } from './service';
 
 const TYPE_PROBLEM = 10;
 const documentColl = db.collection<any>('document');
@@ -43,9 +37,7 @@ function sourceFromDoc(doc: any): PermitSource {
 
 function canonicalFromDoc(doc: any): CanonicalPermit {
     const normalized = normalizeActiveCanonicalDoc(doc);
-    const viaContest = normalized.viaContest
-        ? (normalized.viaContest.toHexString?.() || String(normalized.viaContest))
-        : null;
+    const viaContest = normalized.viaContest ? normalized.viaContest.toHexString?.() || String(normalized.viaContest) : null;
     return {
         domainId: normalized.domainId,
         pid: normalized.pid,
@@ -107,22 +99,24 @@ function problemWriteClaimFromDoc(domainId: string, pid: number, claim: any): Pr
 
 function transactionCapable(): boolean {
     const topology = (db as any).client?.topology?.description?.type;
-    return topology === 'ReplicaSetWithPrimary'
-        || topology === 'ReplicaSetNoPrimary'
-        || topology === 'Sharded';
+    return topology === 'ReplicaSetWithPrimary' || topology === 'ReplicaSetNoPrimary' || topology === 'Sharded';
 }
 
 export class MongoAclRepository implements AclServiceRepository {
-    constructor(private readonly session?: any) { }
+    constructor(private readonly session?: any) {}
 
     private options() {
         return this.session ? { session: this.session } : {};
     }
 
     async getCanonical(pair: AclPair): Promise<CanonicalPermit | null> {
-        const doc = await permitsColl.findOne({
-            ...canonicalPairFilter(pair), active: canonicalActiveFilter(),
-        }, this.options());
+        const doc = await permitsColl.findOne(
+            {
+                ...canonicalPairFilter(pair),
+                active: canonicalActiveFilter(),
+            },
+            this.options(),
+        );
         return doc ? canonicalFromDoc(doc) : null;
     }
 
@@ -148,9 +142,9 @@ export class MongoAclRepository implements AclServiceRepository {
     async beginProblemAclMutation(lock: ProblemAclMutationLock): Promise<ProblemAclMutationLock> {
         const writeClaimFilter = lock.writeClaimRequestId
             ? {
-                'aclWriteClaim.requestId': lock.writeClaimRequestId,
-                'aclWriteClaim.state': 'active',
-            }
+                  'aclWriteClaim.requestId': lock.writeClaimRequestId,
+                  'aclWriteClaim.state': 'active',
+              }
             : { aclWriteClaim: { $exists: false } };
         const doc: any = await documentColl.findOneAndUpdate(
             {
@@ -160,7 +154,7 @@ export class MongoAclRepository implements AclServiceRepository {
                 'aclMutationLocks.uid': { $ne: lock.uid },
                 ...writeClaimFilter,
             },
-            ({
+            {
                 $inc: { aclMutationRevision: 1 },
                 $push: {
                     aclMutationLocks: {
@@ -174,7 +168,7 @@ export class MongoAclRepository implements AclServiceRepository {
                         writeClaimRequestId: lock.writeClaimRequestId || null,
                     },
                 },
-            } as any),
+            } as any,
             { ...this.options(), returnDocument: 'after' },
         );
         if (doc) {
@@ -191,11 +185,7 @@ export class MongoAclRepository implements AclServiceRepository {
             throw new AclMutationConflictError(lock, lock.requestId, existing.requestId);
         }
         if (!sameAclMutationIntent(existing.intent, lock.intent)) {
-            throw new AclMutationError(
-                `requestId ${lock.requestId} was reused with a different ProblemDoc ACL lock intent`,
-                lock,
-                lock.requestId,
-            );
+            throw new AclMutationError(`requestId ${lock.requestId} was reused with a different ProblemDoc ACL lock intent`, lock, lock.requestId);
         }
         return existing;
     }
@@ -217,22 +207,17 @@ export class MongoAclRepository implements AclServiceRepository {
     }
 
     async createFence(fence: AclMutationFence): Promise<void> {
-        await aclMutationFencesColl.insertOne({
-            _id: new ObjectId(),
-            ...fence,
-        }, this.options());
-    }
-
-    async updateFence(
-        pair: AclPair,
-        requestId: string,
-        patch: Partial<AclMutationFence>,
-    ): Promise<void> {
-        const result = await aclMutationFencesColl.updateOne(
-            { ...canonicalPairFilter(pair), requestId },
-            { $set: patch },
+        await aclMutationFencesColl.insertOne(
+            {
+                _id: new ObjectId(),
+                ...fence,
+            },
             this.options(),
         );
+    }
+
+    async updateFence(pair: AclPair, requestId: string, patch: Partial<AclMutationFence>): Promise<void> {
+        const result = await aclMutationFencesColl.updateOne({ ...canonicalPairFilter(pair), requestId }, { $set: patch }, this.options());
         if (result.matchedCount !== 1) {
             throw new Error(`ACL fence ownership lost for ${pair.domainId}/${pair.pid}/${pair.uid}`);
         }
@@ -294,9 +279,7 @@ export class MongoAclRepository implements AclServiceRepository {
     }
 
     async writeMirror(pair: AclPair, maintain: boolean): Promise<void> {
-        const update = maintain
-            ? { $addToSet: { maintainer: pair.uid } }
-            : { $pull: { maintainer: pair.uid } };
+        const update = maintain ? { $addToSet: { maintainer: pair.uid } } : { $pull: { maintainer: pair.uid } };
         const result = await documentColl.updateOne(
             { domainId: pair.domainId, docType: TYPE_PROBLEM, docId: pair.pid },
             update as any,
@@ -316,18 +299,13 @@ export class MongoAclRepository implements AclServiceRepository {
     }
 
     async deleteFence(pair: AclPair, requestId: string): Promise<void> {
-        const result = await aclMutationFencesColl.deleteOne(
-            { ...canonicalPairFilter(pair), requestId },
-            this.options(),
-        );
+        const result = await aclMutationFencesColl.deleteOne({ ...canonicalPairFilter(pair), requestId }, this.options());
         if (result.deletedCount !== 1) {
             throw new Error(`ACL fence ownership lost before clear for ${pair.domainId}/${pair.pid}/${pair.uid}`);
         }
     }
 
-    async withMutationTransaction<T>(
-        work: (transactional: AclServiceRepository) => Promise<T>,
-    ): Promise<T> {
+    async withMutationTransaction<T>(work: (transactional: AclServiceRepository) => Promise<T>): Promise<T> {
         if (this.session || !transactionCapable()) return work(this);
         const session = (db as any).client.startSession();
         try {
@@ -345,19 +323,14 @@ export class MongoAclRepository implements AclServiceRepository {
         return (await permitSourcesColl.find({ domainId, pid }, this.options()).toArray()).map(sourceFromDoc);
     }
 
-    async listSourcesForContest(
-        domainId: string, sourceId: string, uid?: number,
-    ): Promise<PermitSource[]> {
+    async listSourcesForContest(domainId: string, sourceId: string, uid?: number): Promise<PermitSource[]> {
         const filter: any = { domainId, sourceType: 'contest', sourceId };
         if (uid !== undefined) filter.uid = uid;
         return (await permitSourcesColl.find(filter, this.options()).toArray()).map(sourceFromDoc);
     }
 
     async listCanonicalForUser(domainId: string, uid: number): Promise<CanonicalPermit[]> {
-        const docs = await permitsColl.find(
-            { domainId, uid, active: canonicalActiveFilter() },
-            this.options(),
-        ).toArray();
+        const docs = await permitsColl.find({ domainId, uid, active: canonicalActiveFilter() }, this.options()).toArray();
         return docs.map(canonicalFromDoc);
     }
 
@@ -366,17 +339,16 @@ export class MongoAclRepository implements AclServiceRepository {
         return docs.map(fenceFromDoc);
     }
 
-    async listProblemAclMutationLocksForUser(
-        domainId: string,
-        uid: number,
-    ): Promise<ProblemAclMutationLock[]> {
-        const docs = await documentColl.find(
-            { domainId, docType: TYPE_PROBLEM, 'aclMutationLocks.uid': uid },
-            { ...this.options(), projection: { docId: 1, aclMutationLocks: 1 } },
-        ).toArray();
-        return docs.flatMap((doc: any) => (doc.aclMutationLocks || [])
-            .filter((lock: any) => lock.uid === uid)
-            .map((lock: any) => problemLockFromDoc(domainId, doc.docId, lock)));
+    async listProblemAclMutationLocksForUser(domainId: string, uid: number): Promise<ProblemAclMutationLock[]> {
+        const docs = await documentColl
+            .find(
+                { domainId, docType: TYPE_PROBLEM, 'aclMutationLocks.uid': uid },
+                { ...this.options(), projection: { docId: 1, aclMutationLocks: 1 } },
+            )
+            .toArray();
+        return docs.flatMap((doc: any) =>
+            (doc.aclMutationLocks || []).filter((lock: any) => lock.uid === uid).map((lock: any) => problemLockFromDoc(domainId, doc.docId, lock)),
+        );
     }
 
     async listFencesForDomain(domainId: string): Promise<AclMutationFence[]> {
@@ -384,38 +356,35 @@ export class MongoAclRepository implements AclServiceRepository {
     }
 
     async listProblemAclMutationLocksForDomain(domainId: string): Promise<ProblemAclMutationLock[]> {
-        const docs = await documentColl.find(
-            { domainId, docType: TYPE_PROBLEM, 'aclMutationLocks.0': { $exists: true } },
-            { ...this.options(), projection: { docId: 1, aclMutationLocks: 1 } },
-        ).toArray();
-        return docs.flatMap((doc: any) => (doc.aclMutationLocks || [])
-            .map((lock: any) => problemLockFromDoc(domainId, doc.docId, lock)));
+        const docs = await documentColl
+            .find(
+                { domainId, docType: TYPE_PROBLEM, 'aclMutationLocks.0': { $exists: true } },
+                { ...this.options(), projection: { docId: 1, aclMutationLocks: 1 } },
+            )
+            .toArray();
+        return docs.flatMap((doc: any) => (doc.aclMutationLocks || []).map((lock: any) => problemLockFromDoc(domainId, doc.docId, lock)));
     }
 
-    async listProblemAclMutationLocksForProblem(
-        domainId: string, pid: number,
-    ): Promise<ProblemAclMutationLock[]> {
+    async listProblemAclMutationLocksForProblem(domainId: string, pid: number): Promise<ProblemAclMutationLock[]> {
         const doc = await documentColl.findOne(
             { domainId, docType: TYPE_PROBLEM, docId: pid },
             { ...this.options(), projection: { docId: 1, aclMutationLocks: 1 } },
         );
-        return (doc?.aclMutationLocks || [])
-            .map((lock: any) => problemLockFromDoc(domainId, pid, lock));
+        return (doc?.aclMutationLocks || []).map((lock: any) => problemLockFromDoc(domainId, pid, lock));
     }
 
     async listProblemWriteClaimsForDomain(domainId: string): Promise<ProblemWriteClaim[]> {
-        const docs = await documentColl.find(
-            { domainId, docType: TYPE_PROBLEM, aclWriteClaim: { $exists: true } },
-            { ...this.options(), projection: { docId: 1, aclWriteClaim: 1 } },
-        ).toArray();
+        const docs = await documentColl
+            .find(
+                { domainId, docType: TYPE_PROBLEM, aclWriteClaim: { $exists: true } },
+                { ...this.options(), projection: { docId: 1, aclWriteClaim: 1 } },
+            )
+            .toArray();
         return docs.map((doc: any) => problemWriteClaimFromDoc(domainId, doc.docId, doc.aclWriteClaim));
     }
 
     async problemExists(domainId: string, pid: number): Promise<boolean> {
-        return !!await documentColl.findOne(
-            { domainId, docType: TYPE_PROBLEM, docId: pid },
-            { ...this.options(), projection: { _id: 1 } },
-        );
+        return !!(await documentColl.findOne({ domainId, docType: TYPE_PROBLEM, docId: pid }, { ...this.options(), projection: { _id: 1 } }));
     }
 
     async getProblemWriteClaim(domainId: string, pid: number): Promise<ProblemWriteClaim | null> {
@@ -423,14 +392,10 @@ export class MongoAclRepository implements AclServiceRepository {
             { domainId, docType: TYPE_PROBLEM, docId: pid },
             { ...this.options(), projection: { aclWriteClaim: 1 } },
         );
-        return doc?.aclWriteClaim
-            ? problemWriteClaimFromDoc(domainId, pid, doc.aclWriteClaim)
-            : null;
+        return doc?.aclWriteClaim ? problemWriteClaimFromDoc(domainId, pid, doc.aclWriteClaim) : null;
     }
 
-    async reactivateErroredProblemWriteClaim(
-        domainId: string, pid: number, requestId: string,
-    ): Promise<boolean> {
+    async reactivateErroredProblemWriteClaim(domainId: string, pid: number, requestId: string): Promise<boolean> {
         const result = await documentColl.updateOne(
             {
                 domainId,
@@ -451,9 +416,7 @@ export class MongoAclRepository implements AclServiceRepository {
         return result.matchedCount === 1;
     }
 
-    async markProblemWriteClaimRepairError(
-        domainId: string, pid: number, requestId: string, error: unknown,
-    ): Promise<boolean> {
+    async markProblemWriteClaimRepairError(domainId: string, pid: number, requestId: string, error: unknown): Promise<boolean> {
         const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
         const result = await documentColl.updateOne(
             {
@@ -475,9 +438,7 @@ export class MongoAclRepository implements AclServiceRepository {
         return result.matchedCount === 1;
     }
 
-    async clearActiveProblemWriteClaim(
-        domainId: string, pid: number, requestId: string,
-    ): Promise<boolean> {
+    async clearActiveProblemWriteClaim(domainId: string, pid: number, requestId: string): Promise<boolean> {
         const result = await documentColl.updateOne(
             {
                 domainId,
@@ -494,15 +455,10 @@ export class MongoAclRepository implements AclServiceRepository {
     }
 
     async listCanonicalForDomain(domainId: string): Promise<CanonicalPermit[]> {
-        return (await permitsColl.find(
-            { domainId, active: canonicalActiveFilter() },
-            this.options(),
-        ).toArray()).map(canonicalFromDoc);
+        return (await permitsColl.find({ domainId, active: canonicalActiveFilter() }, this.options()).toArray()).map(canonicalFromDoc);
     }
 
-    async listCanonicalForContest(
-        domainId: string, sourceId: string, uid?: number,
-    ): Promise<CanonicalPermit[]> {
+    async listCanonicalForContest(domainId: string, sourceId: string, uid?: number): Promise<CanonicalPermit[]> {
         const filter: any = {
             domainId,
             viaContest: new ObjectId(sourceId),
@@ -517,10 +473,9 @@ export class MongoAclRepository implements AclServiceRepository {
     }
 
     async listProblemMirrorsForDomain(domainId: string): Promise<ProblemMaintainerMirror[]> {
-        const docs = await documentColl.find(
-            { domainId, docType: TYPE_PROBLEM },
-            { ...this.options(), projection: { docId: 1, maintainer: 1 } },
-        ).toArray();
+        const docs = await documentColl
+            .find({ domainId, docType: TYPE_PROBLEM }, { ...this.options(), projection: { docId: 1, maintainer: 1 } })
+            .toArray();
         return docs.map((doc: any) => ({
             domainId,
             pid: doc.docId,
@@ -529,10 +484,7 @@ export class MongoAclRepository implements AclServiceRepository {
     }
 
     async listCanonicalForProblem(domainId: string, pid: number): Promise<CanonicalPermit[]> {
-        return (await permitsColl.find(
-            { domainId, pid, active: canonicalActiveFilter() },
-            this.options(),
-        ).toArray()).map(canonicalFromDoc);
+        return (await permitsColl.find({ domainId, pid, active: canonicalActiveFilter() }, this.options()).toArray()).map(canonicalFromDoc);
     }
 
     async listFencesForProblem(domainId: string, pid: number): Promise<AclMutationFence[]> {
@@ -540,10 +492,7 @@ export class MongoAclRepository implements AclServiceRepository {
     }
 
     async getProblemMirror(domainId: string, pid: number): Promise<number[]> {
-        const doc = await documentColl.findOne(
-            { domainId, docType: TYPE_PROBLEM, docId: pid },
-            { ...this.options(), projection: { maintainer: 1 } },
-        );
+        const doc = await documentColl.findOne({ domainId, docType: TYPE_PROBLEM, docId: pid }, { ...this.options(), projection: { maintainer: 1 } });
         return Array.isArray(doc?.maintainer) ? doc.maintainer : [];
     }
 }

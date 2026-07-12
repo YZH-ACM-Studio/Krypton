@@ -25,9 +25,21 @@ interface PermitRow {
   note: string;
 }
 
-interface UserMini { _id: number; uname: string }
-interface ProblemMini { docId: number; pid?: string; title: string; hidden?: boolean; lockHidden?: boolean }
-interface ContestMini { _id: string; title: string }
+interface UserMini {
+  _id: number;
+  uname: string;
+}
+interface ProblemMini {
+  docId: number;
+  pid?: string;
+  title: string;
+  hidden?: boolean;
+  lockHidden?: boolean;
+}
+interface ContestMini {
+  _id: string;
+  title: string;
+}
 
 export function MyVerifyInboxPage() {
   const bs = useBootstrap();
@@ -40,7 +52,7 @@ export function MyVerifyInboxPage() {
   const direct = (data.permits || []).filter((p) => !p.viaContest);
   // Group contest permits by tid
   const byContest = new Map<string, PermitRow[]>();
-  for (const p of (data.permits || [])) {
+  for (const p of data.permits || []) {
     if (!p.viaContest) continue;
     if (!byContest.has(p.viaContest)) byContest.set(p.viaContest, []);
     byContest.get(p.viaContest)!.push(p);
@@ -55,29 +67,20 @@ export function MyVerifyInboxPage() {
   }
 
   return (
-    <motion.div
-      className="space-y-5"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25 }}
-    >
+    <motion.div className="space-y-5" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold">
             <Mail className="size-6 text-primary" />
             我的验题任务
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            被邀请验题的所有题目都会出现在这里。直接邀请和通过比赛邀请分开列出。
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">被邀请验题的所有题目都会出现在这里。直接邀请和通过比赛邀请分开列出。</p>
         </div>
       </div>
 
       {direct.length === 0 && byContest.size === 0 ? (
         <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            还没有任何验题邀请
-          </CardContent>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">还没有任何验题邀请</CardContent>
         </Card>
       ) : null}
 
@@ -89,11 +92,7 @@ export function MyVerifyInboxPage() {
           <CardContent className="p-0">
             <ul className="divide-y">
               {direct.map((p) => (
-                <PermitRowItem
-                  key={p._id} permit={p}
-                  pdict={data.pdict} udict={data.udict}
-                  onRevoke={() => revoke(p.pid, p._id)}
-                />
+                <PermitRowItem key={p._id} permit={p} pdict={data.pdict} udict={data.udict} onRevoke={() => revoke(p.pid, p._id)} />
               ))}
             </ul>
           </CardContent>
@@ -117,11 +116,7 @@ export function MyVerifyInboxPage() {
             <CardContent className="p-0">
               <ul className="divide-y">
                 {rows.map((p) => (
-                  <PermitRowItem
-                    key={p._id} permit={p}
-                    pdict={data.pdict} udict={data.udict}
-                    onRevoke={() => revoke(p.pid, p._id)}
-                  />
+                  <PermitRowItem key={p._id} permit={p} pdict={data.pdict} udict={data.udict} onRevoke={() => revoke(p.pid, p._id)} />
                 ))}
               </ul>
             </CardContent>
@@ -133,7 +128,10 @@ export function MyVerifyInboxPage() {
 }
 
 function PermitRowItem({
-  permit, pdict, udict, onRevoke,
+  permit,
+  pdict,
+  udict,
+  onRevoke,
 }: {
   permit: PermitRow;
   pdict: Record<string, ProblemMini>;
@@ -146,21 +144,24 @@ function PermitRowItem({
     <li className="flex items-center justify-between px-5 py-3">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <ChevronRight className="size-3 shrink-0 text-muted-foreground" />
-        <a
-          href={`/p/${p.pid || p.docId}`}
-          className="truncate text-sm font-medium hover:text-primary hover:underline"
-        >
+        <a href={`/p/${p.pid || p.docId}`} className="truncate text-sm font-medium hover:text-primary hover:underline">
           <span className="font-mono text-[11px] text-muted-foreground">{p.pid || p.docId}</span>
           <span className="ml-1.5">{p.title || '题目'}</span>
         </a>
         {p.hidden ? (
-          <Badge variant="outline" className="gap-0.5 border-amber-500/40 bg-amber-50 px-1 py-0 text-[10px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+          <Badge
+            variant="outline"
+            className="gap-0.5 border-amber-500/40 bg-amber-50 px-1 py-0 text-[10px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+          >
             <EyeOff className="size-2.5" />
             隐藏
           </Badge>
         ) : null}
         {p.lockHidden ? (
-          <Badge variant="outline" className="gap-0.5 border-rose-500/40 bg-rose-50 px-1 py-0 text-[10px] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+          <Badge
+            variant="outline"
+            className="gap-0.5 border-rose-500/40 bg-rose-50 px-1 py-0 text-[10px] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+          >
             <Lock className="size-2.5" />
             锁定
           </Badge>
@@ -170,10 +171,10 @@ function PermitRowItem({
         </Badge>
       </div>
       <div className="flex items-center gap-3 shrink-0">
-        <span className="text-xs text-muted-foreground">
-          {granter ? `${granter.uname} 邀请` : `uid:${permit.grantedBy}`}
-        </span>
-        <Button type="button" size="sm" variant="ghost" onClick={onRevoke}>退出</Button>
+        <span className="text-xs text-muted-foreground">{granter ? `${granter.uname} 邀请` : `uid:${permit.grantedBy}`}</span>
+        <Button type="button" size="sm" variant="ghost" onClick={onRevoke}>
+          退出
+        </Button>
       </div>
     </li>
   );

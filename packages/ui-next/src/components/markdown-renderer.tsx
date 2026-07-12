@@ -10,14 +10,7 @@
  *  - View mode (read-only) and Edit mode (side-by-side live preview)
  */
 
-import {
-  startTransition,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -41,11 +34,43 @@ const sanitizeSchema = {
   ...defaultSchema,
   tagNames: [
     ...(defaultSchema.tagNames || []),
-    'span', 'div', 'math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup',
-    'msub', 'mfrac', 'munderover', 'mtable', 'mtr', 'mtd', 'annotation',
-    'svg', 'path', 'line', 'rect', 'circle',
-    'center', 'font', 'u', 'mark', 'details', 'summary', 'kbd', 'var',
-    'sub', 'sup', 'ins', 'del', 'abbr', 'ruby', 'rt', 'rp',
+    'span',
+    'div',
+    'math',
+    'semantics',
+    'mrow',
+    'mi',
+    'mo',
+    'mn',
+    'msup',
+    'msub',
+    'mfrac',
+    'munderover',
+    'mtable',
+    'mtr',
+    'mtd',
+    'annotation',
+    'svg',
+    'path',
+    'line',
+    'rect',
+    'circle',
+    'center',
+    'font',
+    'u',
+    'mark',
+    'details',
+    'summary',
+    'kbd',
+    'var',
+    'sub',
+    'sup',
+    'ins',
+    'del',
+    'abbr',
+    'ruby',
+    'rt',
+    'rp',
   ],
   attributes: {
     ...defaultSchema.attributes,
@@ -64,12 +89,7 @@ const sanitizeSchema = {
   },
 };
 
-const rehypePlugins = [
-  rehypeRaw,
-  [rehypeSanitize, sanitizeSchema],
-  rehypeKatex,
-  rehypeHighlight,
-];
+const rehypePlugins = [rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex, rehypeHighlight];
 
 /* ------------------------------------------------------------------ */
 /*  Content can be a plain string or a Record<lang, string>            */
@@ -128,15 +148,7 @@ function pickInitialLang(langs: Record<string, string>, preferred?: string): str
 /*  Mini tab bar for switching languages                               */
 /* ------------------------------------------------------------------ */
 
-function LangTabs({
-  langs,
-  active,
-  onChange,
-}: {
-  langs: string[];
-  active: string;
-  onChange: (lang: string) => void;
-}) {
+function LangTabs({ langs, active, onChange }: { langs: string[]; active: string; onChange: (lang: string) => void }) {
   if (langs.length <= 1) return null;
   return (
     <div className="mb-3 flex gap-0.5 rounded-md bg-muted p-0.5">
@@ -147,9 +159,7 @@ function LangTabs({
           onClick={() => onChange(lang)}
           className={cn(
             'rounded-sm px-3 py-1 text-xs font-medium transition-colors',
-            active === lang
-              ? 'bg-background text-foreground shadow-sm'
-              : 'text-muted-foreground hover:text-foreground',
+            active === lang ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
           )}
         >
           {resolveLangLabel(lang)}
@@ -188,10 +198,7 @@ function MarkdownContent({ source, resolveFileUrl }: { source: string; resolveFi
   const renderedSource = useMemo(() => normalizePreviewSource(source, resolveFileUrl), [source, resolveFileUrl]);
   return (
     <div className={PROSE_CLASS}>
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins as any}
-      >
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins as any}>
         {renderedSource}
       </ReactMarkdown>
     </div>
@@ -208,11 +215,13 @@ function PreviewWithSamples({ source, resolveFileUrl }: { source: string; resolv
   if (chunks.length === 0) return <MarkdownContent source={source} resolveFileUrl={resolveFileUrl} />;
   return (
     <>
-      {chunks.map((chunk, i) => (
-        chunk.kind === 'md'
-          ? <MarkdownContent key={i} source={chunk.md || ''} resolveFileUrl={resolveFileUrl} />
-          : <SampleBlocks key={i} samples={chunk.samples || []} suppressHeader />
-      ))}
+      {chunks.map((chunk, i) =>
+        chunk.kind === 'md' ? (
+          <MarkdownContent key={i} source={chunk.md || ''} resolveFileUrl={resolveFileUrl} />
+        ) : (
+          <SampleBlocks key={i} samples={chunk.samples || []} suppressHeader />
+        ),
+      )}
     </>
   );
 }
@@ -229,32 +238,24 @@ export interface MarkdownViewProps {
   preferredLang?: string;
 }
 
-export function MarkdownView({
-  content,
-  className,
-  preferredLang,
-}: MarkdownViewProps) {
+export function MarkdownView({ content, className, preferredLang }: MarkdownViewProps) {
   const langs = useMemo(() => parseContent(content), [content]);
   const keys = Object.keys(langs);
-  const [activeLang, setActiveLang] = useState(() =>
-    pickInitialLang(langs, preferredLang),
-  );
+  const [activeLang, setActiveLang] = useState(() => pickInitialLang(langs, preferredLang));
   const md = langs[activeLang] || langs[keys[0]] || '';
   const chunks = useMemo(() => splitMarkdownBySamples(md), [md]);
 
   return (
     <div className={className}>
-      <LangTabs
-        langs={keys.length > 1 ? keys : []}
-        active={activeLang}
-        onChange={setActiveLang}
-      />
+      <LangTabs langs={keys.length > 1 ? keys : []} active={activeLang} onChange={setActiveLang} />
       {chunks.length > 0 ? (
-        chunks.map((chunk, i) => (
-          chunk.kind === 'md'
-            ? <MarkdownContent key={i} source={chunk.md || ''} />
-            : <SampleBlocks key={i} samples={chunk.samples || []} suppressHeader />
-        ))
+        chunks.map((chunk, i) =>
+          chunk.kind === 'md' ? (
+            <MarkdownContent key={i} source={chunk.md || ''} />
+          ) : (
+            <SampleBlocks key={i} samples={chunk.samples || []} suppressHeader />
+          ),
+        )
       ) : (
         <MarkdownContent source={md} />
       )}
@@ -314,9 +315,7 @@ export function MarkdownEditor({
   const [drafts, setDrafts] = useState(() => initialLangs);
   const keys = Object.keys(drafts);
   const isMultiLang = keys.length > 1 || (keys.length === 1 && keys[0] !== 'default');
-  const [activeLang, setActiveLang] = useState(() =>
-    pickInitialLang(initialLangs, preferredLang),
-  );
+  const [activeLang, setActiveLang] = useState(() => pickInitialLang(initialLangs, preferredLang));
   const [source, setSource] = useState(() => initialLangs[activeLang] || '');
   const [preview, setPreview] = useState('');
   const sourceRef = useRef(source);
@@ -324,19 +323,22 @@ export function MarkdownEditor({
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
-  const commitSource = useCallback((nextSource: string) => {
-    sourceRef.current = nextSource;
-    setSource(nextSource);
-    if (isMultiLang) {
-      setDrafts((current) => {
-        const next = { ...current, [activeLang]: nextSource };
-        onChange?.(JSON.stringify(next));
-        return next;
-      });
-    } else {
-      onChange?.(nextSource);
-    }
-  }, [activeLang, isMultiLang, onChange]);
+  const commitSource = useCallback(
+    (nextSource: string) => {
+      sourceRef.current = nextSource;
+      setSource(nextSource);
+      if (isMultiLang) {
+        setDrafts((current) => {
+          const next = { ...current, [activeLang]: nextSource };
+          onChange?.(JSON.stringify(next));
+          return next;
+        });
+      } else {
+        onChange?.(nextSource);
+      }
+    },
+    [activeLang, isMultiLang, onChange],
+  );
 
   // Debounced preview update
   useEffect(() => {
@@ -372,7 +374,7 @@ export function MarkdownEditor({
         const start = ta.selectionStart;
         const end = ta.selectionEnd;
         const val = ta.value;
-        const newVal = val.substring(0, start) + '  ' + val.substring(end);
+        const newVal = `${val.substring(0, start)}  ${val.substring(end)}`;
         commitSource(newVal);
         requestAnimationFrame(() => {
           ta.selectionStart = ta.selectionEnd = start + 2;
@@ -382,62 +384,66 @@ export function MarkdownEditor({
     [commitSource],
   );
 
-  const replaceInsertedText = useCallback((needle: string, replacement: string) => {
-    const current = sourceRef.current;
-    const index = current.indexOf(needle);
-    if (index < 0) return;
-    commitSource(current.slice(0, index) + replacement + current.slice(index + needle.length));
-  }, [commitSource]);
+  const replaceInsertedText = useCallback(
+    (needle: string, replacement: string) => {
+      const current = sourceRef.current;
+      const index = current.indexOf(needle);
+      if (index < 0) return;
+      commitSource(current.slice(0, index) + replacement + current.slice(index + needle.length));
+    },
+    [commitSource],
+  );
 
-  const handlePaste = useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    if (!pasteUpload?.endpoint) return;
-    const items = Array.from(e.clipboardData?.items || []);
-    const item = items.find((i) => /^image\/(png|jpe?g|gif|webp)$/i.test(i.type));
-    if (!item) return;
-    const file = item.getAsFile();
-    if (!file) return;
+  const handlePaste = useCallback(
+    async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (!pasteUpload?.endpoint) return;
+      const items = Array.from(e.clipboardData?.items || []);
+      const item = items.find((i) => /^image\/(?:png|jpe?g|gif|webp)$/i.test(i.type));
+      if (!item) return;
+      const file = item.getAsFile();
+      if (!file) return;
 
-    e.preventDefault();
-    const ext = imageExtension(file.type);
-    const token = makeUploadToken();
-    const filename = `${token}.${ext}`;
-    const placeholder = `![image](uploading-${token})`;
-    const ta = e.currentTarget;
-    const start = ta.selectionStart ?? sourceRef.current.length;
-    const end = ta.selectionEnd ?? start;
-    const current = sourceRef.current;
-    commitSource(current.slice(0, start) + placeholder + current.slice(end));
-    requestAnimationFrame(() => {
-      ta.focus();
-      ta.selectionStart = ta.selectionEnd = start + placeholder.length;
-    });
-
-    const form = new FormData();
-    for (const [key, val] of Object.entries(pasteUpload.meta || {})) form.append(key, val);
-    if (!form.has('operation')) form.append('operation', 'upload_file');
-    if (!form.has('filename')) form.append('filename', filename);
-    form.append('file', file, filename);
-
-    try {
-      const res = await fetch(pasteUpload.endpoint, {
-        method: 'POST',
-        body: form,
-        credentials: 'same-origin',
+      e.preventDefault();
+      const ext = imageExtension(file.type);
+      const token = makeUploadToken();
+      const filename = `${token}.${ext}`;
+      const placeholder = `![image](uploading-${token})`;
+      const ta = e.currentTarget;
+      const start = ta.selectionStart ?? sourceRef.current.length;
+      const end = ta.selectionEnd ?? start;
+      const current = sourceRef.current;
+      commitSource(current.slice(0, start) + placeholder + current.slice(end));
+      requestAnimationFrame(() => {
+        ta.focus();
+        ta.selectionStart = ta.selectionEnd = start + placeholder.length;
       });
-      if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
-      const url = pasteUpload.makeUrl ? pasteUpload.makeUrl(filename) : filename;
-      replaceInsertedText(placeholder, `![image](${url})`);
-    } catch (err) {
-      const message = err instanceof Error && err.message ? err.message : '上传失败';
-      replaceInsertedText(placeholder, `图片上传失败：${message}`);
-    }
-  }, [commitSource, pasteUpload, replaceInsertedText]);
+
+      const form = new FormData();
+      for (const [key, val] of Object.entries(pasteUpload.meta || {})) form.append(key, val);
+      if (!form.has('operation')) form.append('operation', 'upload_file');
+      if (!form.has('filename')) form.append('filename', filename);
+      form.append('file', file, filename);
+
+      try {
+        const res = await fetch(pasteUpload.endpoint, {
+          method: 'POST',
+          body: form,
+          credentials: 'same-origin',
+        });
+        if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
+        const url = pasteUpload.makeUrl ? pasteUpload.makeUrl(filename) : filename;
+        replaceInsertedText(placeholder, `![image](${url})`);
+      } catch (err) {
+        const message = err instanceof Error && err.message ? err.message : '上传失败';
+        replaceInsertedText(placeholder, `图片上传失败：${message}`);
+      }
+    },
+    [commitSource, pasteUpload, replaceInsertedText],
+  );
 
   return (
     <div className={cn('space-y-2', className)}>
-      {isMultiLang && name ? (
-        <input type="hidden" name={name} value={JSON.stringify(drafts)} readOnly />
-      ) : null}
+      {isMultiLang && name ? <input type="hidden" name={name} value={JSON.stringify(drafts)} readOnly /> : null}
       {/* Header bar */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <LangTabs
@@ -488,12 +494,7 @@ export function MarkdownEditor({
         </div>
 
         {/* Preview pane */}
-        <ScrollArea
-          viewportRef={previewRef}
-          orientation="both"
-          className="h-full min-h-0 bg-card"
-          viewportClassName="p-4"
-        >
+        <ScrollArea viewportRef={previewRef} orientation="both" className="h-full min-h-0 bg-card" viewportClassName="p-4">
           {preview ? (
             <PreviewWithSamples source={preview} resolveFileUrl={previewFileUrl} />
           ) : (

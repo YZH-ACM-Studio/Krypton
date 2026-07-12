@@ -30,12 +30,7 @@ export function HomeworkPage() {
   const locale = bs.locale;
 
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold">作业</h1>
@@ -85,7 +80,8 @@ export function HomeworkPage() {
                       </TableCell>
                       <TableCell className="text-center">
                         <span className="flex items-center justify-center gap-1 text-sm text-muted-foreground">
-                          <Users className="size-3" />{h.attend || 0}
+                          <Users className="size-3" />
+                          {h.attend || 0}
                         </span>
                       </TableCell>
                       <TableCell className="text-center">
@@ -115,16 +111,13 @@ export function HomeworkDetailPage() {
   const locale = bs.locale;
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <a href={bs.urls.homework} className="hover:text-primary">作业</a>
+            <a href={bs.urls.homework} className="hover:text-primary">
+              作业
+            </a>
             <ChevronRight className="size-3" />
           </div>
           <h1 className="mt-1 text-2xl font-bold">{tdoc.title || '作业'}</h1>
@@ -156,7 +149,9 @@ export function HomeworkDetailPage() {
 
       {tdoc.content ? (
         <Card>
-          <CardHeader><CardTitle>作业说明</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>作业说明</CardTitle>
+          </CardHeader>
           <CardContent>
             <MarkdownView content={tdoc.content} className="prose prose-sm dark:prose-invert max-w-none" />
           </CardContent>
@@ -164,7 +159,9 @@ export function HomeworkDetailPage() {
       ) : null}
 
       <Card>
-        <CardHeader><CardTitle>题目列表</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>题目列表</CardTitle>
+        </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
@@ -177,7 +174,9 @@ export function HomeworkDetailPage() {
             <TableBody>
               {pids.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">暂无题目</TableCell>
+                  <TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">
+                    暂无题目
+                  </TableCell>
                 </TableRow>
               ) : (
                 pids.map((pid, i) => {

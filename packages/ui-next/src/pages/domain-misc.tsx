@@ -3,16 +3,7 @@
  */
 
 import { motion } from 'motion/react';
-import {
-  ArrowLeft,
-  Globe,
-  Key,
-  Monitor,
-  Save,
-  Shield,
-  Trash2,
-  UserPlus,
-} from 'lucide-react';
+import { ArrowLeft, Globe, Key, Monitor, Save, Shield, Trash2, UserPlus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,15 +19,8 @@ type R = Record<string, any>;
 /* ---------- Domain Create ---------- */
 
 export function DomainCreatePage() {
-  const bs = useBootstrap();
-
   return (
-    <motion.div
-      className="space-y-6 pt-4"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6 pt-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
           <ArrowLeft className="size-4" />
@@ -51,28 +35,37 @@ export function DomainCreatePage() {
         <CardContent className="p-6">
           <form method="post" className="space-y-4">
             <div className="space-y-1.5">
-              <label htmlFor="id" className="text-sm font-medium">域 ID</label>
+              <label htmlFor="id" className="text-sm font-medium">
+                域 ID
+              </label>
               <Input id="id" name="id" required placeholder="my-domain" pattern="[a-zA-Z][a-zA-Z0-9_-]*" />
               <p className="text-xs text-muted-foreground">只能包含字母、数字、下划线和连字符，以字母开头</p>
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="name" className="text-sm font-medium">域名称</label>
+              <label htmlFor="name" className="text-sm font-medium">
+                域名称
+              </label>
               <Input id="name" name="name" required placeholder="我的域" />
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="bulletin" className="text-sm font-medium">公告 (Markdown)</label>
+              <label htmlFor="bulletin" className="text-sm font-medium">
+                公告 (Markdown)
+              </label>
               <MarkdownEditor name="bulletin" value="" minHeight={220} />
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="avatar" className="text-sm font-medium">头像 URL (可选)</label>
+              <label htmlFor="avatar" className="text-sm font-medium">
+                头像 URL (可选)
+              </label>
               <Input id="avatar" name="avatar" placeholder="https://..." />
             </div>
 
             <Button type="submit" className="w-full">
-              <Globe className="mr-1 size-4" />创建域
+              <Globe className="mr-1 size-4" />
+              创建域
             </Button>
           </form>
         </CardContent>
@@ -94,12 +87,7 @@ export function DomainJoinPage() {
   const needCode = joinSettings.method === 2; // JOIN_METHOD_CODE
 
   return (
-    <motion.div
-      className="space-y-6 pt-4"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6 pt-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
           <ArrowLeft className="size-4" />
@@ -131,13 +119,16 @@ export function DomainJoinPage() {
 
             {needCode && (
               <div className="space-y-1.5">
-                <label htmlFor="code" className="text-sm font-medium">邀请码</label>
+                <label htmlFor="code" className="text-sm font-medium">
+                  邀请码
+                </label>
                 <Input id="code" name="code" defaultValue={code} required placeholder="输入邀请码" />
               </div>
             )}
 
             <Button type="submit" className="w-full">
-              <UserPlus className="mr-1 size-4" />加入
+              <UserPlus className="mr-1 size-4" />
+              加入
             </Button>
           </form>
         </CardContent>
@@ -165,12 +156,12 @@ export function DomainJoinApplicationsPage() {
   return (
     <AdminPage
       bypassPrivGate
-      title={(
+      title={
         <div className="flex items-center gap-2">
           <Shield className="size-5 text-primary" />
           <h1 className="text-xl font-semibold">入域申请</h1>
         </div>
-      )}
+      }
       description="管理加入域的方式与默认角色"
     >
       {joinSettings && (
@@ -203,7 +194,9 @@ export function DomainJoinApplicationsPage() {
         <CardContent>
           <form method="post" className="grid gap-4 sm:max-w-xl">
             <div className="space-y-1.5">
-              <label htmlFor="method" className="text-sm font-medium">加入方式</label>
+              <label htmlFor="method" className="text-sm font-medium">
+                加入方式
+              </label>
               <SimpleSelect
                 id="method"
                 name="method"
@@ -217,7 +210,9 @@ export function DomainJoinApplicationsPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="role" className="text-sm font-medium">默认角色</label>
+              <label htmlFor="role" className="text-sm font-medium">
+                默认角色
+              </label>
               <SimpleSelect
                 id="role"
                 name="role"
@@ -230,7 +225,9 @@ export function DomainJoinApplicationsPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="expire" className="text-sm font-medium">有效期</label>
+              <label htmlFor="expire" className="text-sm font-medium">
+                有效期
+              </label>
               <SimpleSelect
                 id="expire"
                 name="expire"
@@ -243,17 +240,24 @@ export function DomainJoinApplicationsPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="invitationCode" className="text-sm font-medium">邀请码</label>
+              <label htmlFor="invitationCode" className="text-sm font-medium">
+                邀请码
+              </label>
               <Input id="invitationCode" name="invitationCode" defaultValue={joinSettings?.code || ''} placeholder="设置邀请码" />
             </div>
 
             <div className="space-y-1.5">
-              <label htmlFor="group" className="text-sm font-medium">加入用户组 (可选)</label>
+              <label htmlFor="group" className="text-sm font-medium">
+                加入用户组 (可选)
+              </label>
               <Input id="group" name="group" placeholder="组名" />
             </div>
 
             <div className="flex justify-end">
-              <Button type="submit"><Save className="mr-1 size-4" />保存</Button>
+              <Button type="submit">
+                <Save className="mr-1 size-4" />
+                保存
+              </Button>
             </div>
           </form>
         </CardContent>
@@ -270,12 +274,7 @@ export function ContestModePage() {
   const bindings: { _id: number; loginip: string }[] = data.bindings || [];
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
@@ -286,17 +285,21 @@ export function ContestModePage() {
             <h1 className="text-xl font-semibold">比赛模式</h1>
           </div>
         </div>
-        <form method="post" onSubmit={(e) => { if (!confirm('确定要解绑所有用户吗？')) e.preventDefault(); }}>
+        <form
+          method="post"
+          onSubmit={(e) => {
+            if (!confirm('确定要解绑所有用户吗？')) e.preventDefault();
+          }}
+        >
           <input type="hidden" name="operation" value="reset" />
           <Button type="submit" variant="destructive" size="sm">
-            <Trash2 className="mr-1 size-3" />全部解绑
+            <Trash2 className="mr-1 size-3" />
+            全部解绑
           </Button>
         </form>
       </div>
 
-      <p className="text-sm text-muted-foreground">
-        比赛模式下，用户将绑定 IP 地址，只能在绑定的设备上登录。共 {bindings.length} 个绑定。
-      </p>
+      <p className="text-sm text-muted-foreground">比赛模式下，用户将绑定 IP 地址，只能在绑定的设备上登录。共 {bindings.length} 个绑定。</p>
 
       <Card>
         <CardContent className="p-0">
@@ -326,7 +329,9 @@ export function ContestModePage() {
               ))}
               {bindings.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">暂无 IP 绑定</TableCell>
+                  <TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">
+                    暂无 IP 绑定
+                  </TableCell>
                 </TableRow>
               )}
             </TableBody>

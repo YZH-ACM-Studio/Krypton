@@ -1,5 +1,3 @@
-/* eslint-disable consistent-return */
-/* eslint-disable simple-import-sort/imports */
 import './init';
 import './interface';
 import fs from 'fs';
@@ -12,9 +10,7 @@ import './ui';
 import { I18nService } from './lib/i18n';
 
 import { Logger } from './logger';
-import {
-    Context, Service, FiberState, Fiber, ApiMixin,
-} from './context';
+import { Context, Service, FiberState, Fiber, ApiMixin } from './context';
 // eslint-disable-next-line import/no-duplicates
 import { sleep, unwrapExports } from './utils';
 import { PRIV } from './model/builtin';
@@ -135,20 +131,14 @@ export class Loader extends Service {
         // must do a full reload once config changed
         const config = await this.resolveConfig(plugin, configScope, false);
         let fork = this.state[key];
-        const displayPath = key.includes('node_modules')
-            ? key.split('node_modules').pop()
-            : path.relative(process.cwd(), key);
-        logger.info(
-            `%s plugin %c${configScope ? ' with scope %c' : ''}`,
-            fork ? 'update' : 'apply', displayPath, configScope,
-        );
+        const displayPath = key.includes('node_modules') ? key.split('node_modules').pop() : path.relative(process.cwd(), key);
+        logger.info(`%s plugin %c${configScope ? ' with scope %c' : ''}`, fork ? 'update' : 'apply', displayPath, configScope);
         if (fork) {
             fork.update(config, true);
         } else {
             fork = this.ctx.plugin(plugin, config);
             if (!fork) return;
-            const inner = Object.getPrototypeOf(fork) !== Fiber.prototype
-                ? Object.getPrototypeOf(fork) : fork;
+            const inner = Object.getPrototypeOf(fork) !== Fiber.prototype ? Object.getPrototypeOf(fork) : fork;
             this.state[key] = inner;
         }
         if (!Object.isFrozen(config)) {
@@ -251,7 +241,7 @@ export async function load() {
                 await sleep(5000);
             }
         }
-    } catch (e) { }
+    } catch (e) {}
     await require('./entry/worker').apply(app);
     global.gc?.();
 }

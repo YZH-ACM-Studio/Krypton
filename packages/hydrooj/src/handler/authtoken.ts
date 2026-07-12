@@ -7,12 +7,15 @@
  * docs/PLAN-2026-06-11-krypton-toolkit-authtoken.md.
  */
 import type { ObjectId } from 'mongodb';
+import { Context, Handler, OplogModel, param, PERM, PRIV, Types, UserModel } from 'hydrooj';
 import {
-    Context, Handler, OplogModel, param, PERM, PRIV, Types, UserModel,
-} from 'hydrooj';
-import {
-    ensureAuthTokenIndexes, issueAuthToken, listAuthTokens, renewAuthToken,
-    resolveAuthToken, revokeAuthToken, updateAuthToken,
+    ensureAuthTokenIndexes,
+    issueAuthToken,
+    listAuthTokens,
+    renewAuthToken,
+    resolveAuthToken,
+    revokeAuthToken,
+    updateAuthToken,
 } from '../lib/auth-token';
 
 function expiryFromDays(expireDays: number): Date | null {
@@ -40,19 +43,14 @@ class AuthTokenAdminHandler extends Handler {
     @param('label', Types.String, true)
     @param('expireDays', Types.UnsignedInt, true)
     @param('years', Types.CommaSeperatedArray, true)
-    async postIssue(
-        _args: any, channels: string[], uid: number, label: string,
-        expireDays: number, years: string[],
-    ) {
+    async postIssue(_args: any, channels: string[], uid: number, label: string, expireDays: number, years: string[]) {
         // Build scopeFilters from structured params, NOT a JSON-string field:
         // Types.Any is identity, so a urlencoded JSON string would arrive as a
         // string, fail issueAuthToken's object guard, and silently issue an
         // UNSCOPED token. `years` is the only filter any handler enforces today.
         const scopeFilters: Record<string, any> = {};
         if (years && years.length) {
-            const ys = years
-                .map((y) => parseInt(String(y).trim(), 10))
-                .filter((y) => Number.isSafeInteger(y));
+            const ys = years.map((y) => Number.parseInt(String(y).trim(), 10)).filter((y) => Number.isSafeInteger(y));
             if (ys.length) scopeFilters.years = ys;
         }
         const { token, doc } = await issueAuthToken({
@@ -65,7 +63,11 @@ class AuthTokenAdminHandler extends Handler {
             expiresAt: expiryFromDays(expireDays),
         });
         await OplogModel.log(this as any, 'authtoken.issue', {
-            display: doc.display, uid: doc.uid, channels: doc.channels, label: doc.label, expiresAt: doc.expiresAt,
+            display: doc.display,
+            uid: doc.uid,
+            channels: doc.channels,
+            label: doc.label,
+            expiresAt: doc.expiresAt,
         });
         // Plaintext returned ONCE — never recoverable after this response.
         const safe: any = { ...doc };
@@ -77,16 +79,12 @@ class AuthTokenAdminHandler extends Handler {
     @param('channels', Types.CommaSeperatedArray, true)
     @param('label', Types.String, true)
     @param('years', Types.CommaSeperatedArray, true)
-    async postUpdate(
-        _args: any, id: ObjectId, channels: string[], label: string, years: string[],
-    ) {
+    async postUpdate(_args: any, id: ObjectId, channels: string[], label: string, years: string[]) {
         // Edit replaces the data-scope wholesale (an empty `years` field clears it),
         // mirroring postIssue's structured parsing. Expiry is changed via renew.
         const scopeFilters: Record<string, any> = {};
         if (years && years.length) {
-            const ys = years
-                .map((y) => parseInt(String(y).trim(), 10))
-                .filter((y) => Number.isSafeInteger(y));
+            const ys = years.map((y) => Number.parseInt(String(y).trim(), 10)).filter((y) => Number.isSafeInteger(y));
             if (ys.length) scopeFilters.years = ys;
         }
         const patch: { channels?: string[]; scopeFilters?: Record<string, any>; label?: string } = {
@@ -96,7 +94,9 @@ class AuthTokenAdminHandler extends Handler {
         if (channels && channels.length) patch.channels = channels;
         const ok = await updateAuthToken(id, patch);
         await OplogModel.log(this as any, 'authtoken.update', {
-            id: id.toHexString(), channels: patch.channels, years: scopeFilters.years,
+            id: id.toHexString(),
+            channels: patch.channels,
+            years: scopeFilters.years,
         });
         this.response.body = { ok };
     }

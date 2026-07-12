@@ -4,15 +4,9 @@ import { fs, yaml } from '@hydrooj/utils';
 import { FormatError } from '../error';
 import { Context } from './interface';
 
-export async function judge({
-    next, end, config, code,
-}: Context) {
+export async function judge({ next, end, config, code }: Context) {
     next({ status: STATUS.STATUS_JUDGING, progress: 0 });
-    const answer = ('src' in code)
-        ? await fs.readFile(code.src, 'utf-8')
-        : ('content' in code)
-            ? code.content.toString().replace(/\r\n/g, '\n')
-            : '';
+    const answer = 'src' in code ? await fs.readFile(code.src, 'utf-8') : 'content' in code ? code.content.toString().replace(/\r\n/g, '\n') : '';
     let answers: { [x: string]: string | string[] } = {};
     try {
         answers = yaml.load(answer) as any;

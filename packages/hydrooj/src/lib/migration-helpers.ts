@@ -82,14 +82,7 @@ export function batchProgress(label: string, expectedTotal: number, logEvery = 5
                 const elapsed = (Date.now() - startedAt) / 1000;
                 const rate = count / elapsed;
                 const remaining = expectedTotal > count ? Math.ceil((expectedTotal - count) / rate) : 0;
-                logger.info(
-                    '%s: %d/%d (%.1f/s, ~%ds remaining)',
-                    label,
-                    count,
-                    expectedTotal || count,
-                    rate,
-                    remaining,
-                );
+                logger.info('%s: %d/%d (%.1f/s, ~%ds remaining)', label, count, expectedTotal || count, rate, remaining);
             }
         },
         done() {

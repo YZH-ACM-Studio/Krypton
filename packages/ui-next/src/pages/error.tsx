@@ -26,12 +26,8 @@ export function ErrorPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
   const error = data.error;
-  const rawMessage = typeof error === 'string'
-    ? error
-    : error?.message || error?.msg || '发生了一个错误';
-  const params = typeof error === 'object' && error !== null
-    ? (error.params as unknown[] | undefined)
-    : undefined;
+  const rawMessage = typeof error === 'string' ? error : error?.message || error?.msg || '发生了一个错误';
+  const params = typeof error === 'object' && error !== null ? (error.params as unknown[] | undefined) : undefined;
   const message = substituteErrorParams(String(rawMessage), params);
   const code = data.code || data.status || '';
 
@@ -47,9 +43,7 @@ export function ErrorPage() {
           <div className="rounded-full bg-yellow-500/10 p-4">
             <AlertTriangle className="size-8 text-yellow-500" />
           </div>
-          {code ? (
-            <p className="text-4xl font-bold text-muted-foreground">{code}</p>
-          ) : null}
+          {code ? <p className="text-4xl font-bold text-muted-foreground">{code}</p> : null}
           <p className="text-lg font-medium">{message}</p>
           <div className="flex gap-3 pt-4">
             <Button variant="outline" onClick={() => window.history.back()}>
@@ -87,13 +81,9 @@ export function BsodPage() {
             <Bug className="size-8 text-destructive" />
           </div>
           <p className="text-lg font-semibold">服务器内部错误</p>
-          <p className="text-sm text-muted-foreground">
-            服务器遇到了未预期的错误，请稍后重试或联系管理员。
-          </p>
+          <p className="text-sm text-muted-foreground">服务器遇到了未预期的错误，请稍后重试或联系管理员。</p>
           {error ? (
-            <pre className="mt-4 max-h-64 w-full overflow-auto rounded-md bg-muted p-4 text-left text-xs text-muted-foreground">
-              {error}
-            </pre>
+            <pre className="mt-4 max-h-64 w-full overflow-auto rounded-md bg-muted p-4 text-left text-xs text-muted-foreground">{error}</pre>
           ) : null}
           <div className="flex gap-3 pt-4">
             <Button variant="outline" onClick={() => window.history.back()}>

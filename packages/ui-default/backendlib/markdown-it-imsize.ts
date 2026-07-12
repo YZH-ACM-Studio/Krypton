@@ -8,7 +8,7 @@ function parseNextNumber(str, pos, max) {
     value: '',
   };
   let code = str.charCodeAt(pos);
-  while (pos < max && ((code >= 0x30 /* 0 */ && code <= 0x39 /* 9 */) || code === 0x25 /* % */)) {
+  while (pos < max && ((code >= 0x30 /* 0 */ && code <= 0x39) /* 9 */ || code === 0x25) /* % */) {
     code = str.charCodeAt(++pos);
   }
   result.ok = true;
@@ -26,7 +26,7 @@ function parseImageSize(str, pos, max) {
   };
   if (pos >= max) return result;
   let code = str.charCodeAt(pos);
-  if (code !== 0x3D /* = */) return result;
+  if (code !== 0x3d /* = */) return result;
   pos++;
   code = str.charCodeAt(pos);
   if (code !== 0x78 /* x */ && (code < 0x30 || code > 0x39) /* [0-9] */) {
@@ -37,7 +37,9 @@ function parseImageSize(str, pos, max) {
   pos = resultW.pos;
   // next charactor must be 'x'
   code = str.charCodeAt(pos);
-  if (code !== 0x78 /* x */) { return result; }
+  if (code !== 0x78 /* x */) {
+    return result;
+  }
   pos++;
   // parse height
   const resultH = parseNextNumber(str, pos, max);
@@ -67,8 +69,8 @@ export default function plugin(md) {
     const oldPos = state.pos;
     const max = state.posMax;
 
-    if (state.src.charCodeAt(state.pos) !== 0x21/* ! */) return false;
-    if (state.src.charCodeAt(state.pos + 1) !== 0x5B/* [ */) return false;
+    if (state.src.charCodeAt(state.pos) !== 0x21 /* ! */) return false;
+    if (state.src.charCodeAt(state.pos + 1) !== 0x5b /* [ */) return false;
 
     const labelStart = state.pos + 2;
     const labelEnd = md.helpers.parseLinkLabel(state, state.pos + 1, false);
@@ -77,7 +79,7 @@ export default function plugin(md) {
     if (labelEnd < 0) return false;
 
     pos = labelEnd + 1;
-    if (pos < max && state.src.charCodeAt(pos) === 0x28/* ( */) {
+    if (pos < max && state.src.charCodeAt(pos) === 0x28 /* ( */) {
       //
       // Inline link
       //
@@ -87,7 +89,9 @@ export default function plugin(md) {
       pos++;
       for (; pos < max; pos++) {
         code = state.src.charCodeAt(pos);
-        if (code !== 0x20 && code !== 0x0A) { break; }
+        if (code !== 0x20 && code !== 0x0a) {
+          break;
+        }
       }
       if (pos >= max) return false;
 
@@ -109,7 +113,9 @@ export default function plugin(md) {
       start = pos;
       for (; pos < max; pos++) {
         code = state.src.charCodeAt(pos);
-        if (code !== 0x20 && code !== 0x0A) { break; }
+        if (code !== 0x20 && code !== 0x0a) {
+          break;
+        }
       }
 
       // [link](  <href>  "title"  )
@@ -123,7 +129,9 @@ export default function plugin(md) {
         //                         ^^ skipping these spaces
         for (; pos < max; pos++) {
           code = state.src.charCodeAt(pos);
-          if (code !== 0x20 && code !== 0x0A) { break; }
+          if (code !== 0x20 && code !== 0x0a) {
+            break;
+          }
         }
       } else {
         title = '';
@@ -147,13 +155,15 @@ export default function plugin(md) {
             //                              ^^ skipping these spaces
             for (; pos < max; pos++) {
               code = state.src.charCodeAt(pos);
-              if (code !== 0x20 && code !== 0x0A) { break; }
+              if (code !== 0x20 && code !== 0x0a) {
+                break;
+              }
             }
           }
         }
       }
 
-      if (pos >= max || state.src.charCodeAt(pos) !== 0x29/* ) */) {
+      if (pos >= max || state.src.charCodeAt(pos) !== 0x29 /* ) */) {
         state.pos = oldPos;
         return false;
       }
@@ -168,10 +178,12 @@ export default function plugin(md) {
       //      ^^ optional whitespace (can include newlines)
       for (; pos < max; pos++) {
         code = state.src.charCodeAt(pos);
-        if (code !== 0x20 && code !== 0x0A) { break; }
+        if (code !== 0x20 && code !== 0x0a) {
+          break;
+        }
       }
 
-      if (pos < max && state.src.charCodeAt(pos) === 0x5B/* [ */) {
+      if (pos < max && state.src.charCodeAt(pos) === 0x5b /* [ */) {
         start = pos + 1;
         pos = md.helpers.parseLinkLabel(state, pos);
         if (pos >= 0) {
@@ -204,16 +216,13 @@ export default function plugin(md) {
       state.pos = labelStart;
       state.posMax = labelEnd;
 
-      const newState = new state.md.inline.State(
-        state.src.slice(labelStart, labelEnd),
-        state.md,
-        state.env,
-        tokens = [],
-      );
+      const newState = new state.md.inline.State(state.src.slice(labelStart, labelEnd), state.md, state.env, (tokens = []));
       newState.md.inline.tokenize(newState);
       token = state.push('image', 'img', 0);
-      token.attrs = attrs = [['src', href],
-        ['alt', '']];
+      token.attrs = attrs = [
+        ['src', href],
+        ['alt', ''],
+      ];
       token.children = tokens;
       if (title) {
         attrs.push(['title', title]);

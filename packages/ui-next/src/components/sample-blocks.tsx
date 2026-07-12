@@ -53,11 +53,7 @@ async function copyText(text: string): Promise<boolean> {
   return fallbackCopyText(text);
 }
 
-export function SampleBlocks({
-  samples,
-  className,
-  suppressHeader,
-}: { samples: SampleCase[]; className?: string; suppressHeader?: boolean }) {
+export function SampleBlocks({ samples, className, suppressHeader }: { samples: SampleCase[]; className?: string; suppressHeader?: boolean }) {
   if (!samples.length) return null;
   return (
     <div className={`space-y-3 my-4 ${className || ''}`}>

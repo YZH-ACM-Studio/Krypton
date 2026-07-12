@@ -9,14 +9,8 @@ import { ensureIndexes, seedCategoriesIfEmpty } from './src/db';
 import { applyHandlers } from './src/handler';
 import { migrationScripts } from './src/migration';
 
+export { countUnreadForUser, listAnnouncements, listCategories, listForHomepage, listUnreadForUser } from './src/model';
 export * from './src/types';
-export {
-    listAnnouncements,
-    listForHomepage,
-    listCategories,
-    listUnreadForUser,
-    countUnreadForUser,
-} from './src/model';
 
 export function apply(ctx: Context) {
     applyHandlers(ctx);

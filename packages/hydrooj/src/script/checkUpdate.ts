@@ -1,4 +1,3 @@
-/* eslint-disable no-await-in-loop */
 import Schema from 'schemastery';
 import * as semver from 'semver';
 import superagent from 'superagent';

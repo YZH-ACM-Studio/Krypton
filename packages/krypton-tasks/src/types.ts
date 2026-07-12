@@ -168,12 +168,7 @@ export interface TaskPointResult {
  * Under admissionMode='auto', the flow skips qualified+admitted entirely:
  *   pending → completed (directly when graph satisfies)
  */
-export type AssignmentStatus =
-    | 'pending'
-    | 'qualified'
-    | 'admitted'
-    | 'completed'
-    | 'cancelled';
+export type AssignmentStatus = 'pending' | 'qualified' | 'admitted' | 'completed' | 'cancelled';
 
 export interface TaskAssignmentDoc {
     _id: ObjectId;
@@ -214,13 +209,7 @@ export interface TaskAssignmentDoc {
  * Audit event kinds. `override` was the only kind in v1; v2 generalizes the
  * collection to cover the new admin actions (admit/confirm/condition change).
  */
-export type AuditEventType =
-    | 'override'
-    | 'admit'
-    | 'unadmit'
-    | 'confirm'
-    | 'unconfirm'
-    | 'condition_change';
+export type AuditEventType = 'override' | 'admit' | 'unadmit' | 'confirm' | 'unconfirm' | 'condition_change';
 
 export interface AuditLogDoc {
     _id: ObjectId;
@@ -268,8 +257,10 @@ export type GpltLevel = 'school' | 'national';
 export interface PatScoreDoc {
     _id: ObjectId;
     domainId: string;
-    /** Student identity = userbind.students._id. Keyed by the student (not the
-     *  OJ account) so unbound students are covered; tasks resolve userId→this. */
+    /**
+     * Student identity = userbind.students._id. Keyed by the student (not the
+     *  OJ account) so unbound students are covered; tasks resolve userId→this.
+     */
     studentDocId: ObjectId;
     level: PatLevel;
     year: number;
@@ -284,8 +275,10 @@ export interface PatScoreDoc {
 export interface GpltScoreDoc {
     _id: ObjectId;
     domainId: string;
-    /** Student identity = userbind.students._id. Single source of truth for the
-     *  天梯赛 numeric score; the rankboard reads it for display. */
+    /**
+     * Student identity = userbind.students._id. Single source of truth for the
+     *  天梯赛 numeric score; the rankboard reads it for display.
+     */
     studentDocId: ObjectId;
     level: GpltLevel;
     year: number;

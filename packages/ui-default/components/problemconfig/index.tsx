@@ -21,7 +21,10 @@ export default function ProblemConfig(props: Props) {
   const [editor, setEditor] = React.useState<any>(null);
   const store = useStore<RootState>();
   const valid = useSelector((state: RootState) => state.config.__valid);
-  const errors = useSelector((state: RootState) => state.config.__errors, (a, b) => JSON.stringify(a) === JSON.stringify(b));
+  const errors = useSelector(
+    (state: RootState) => state.config.__errors,
+    (a, b) => JSON.stringify(a) === JSON.stringify(b),
+  );
 
   const handleSave = React.useCallback(async () => {
     if (valid) props.onSave();
@@ -29,7 +32,7 @@ export default function ProblemConfig(props: Props) {
   }, [valid, props.onSave]);
 
   React.useEffect(() => {
-    if (!container) return () => { };
+    if (!container) return () => {};
     container.style.height ||= '600px';
     const callback = () => {
       setTimeout(() => {
@@ -46,46 +49,54 @@ export default function ProblemConfig(props: Props) {
     };
   }, [container, tabs, store]);
 
-  return <ContextMenuProvider>
-    <div ref={setContainer}>
-      <Allotment
-        defaultSizes={[2, 3]}
-        className="problem-config-allotment">
-        <Allotment.Pane>
-          <div style={{ height: '100%', overflow: 'auto' }}>
-            <ProblemConfigEditor ref={setEditor} />
-          </div>
-        </Allotment.Pane>
-        <Allotment.Pane>
-          <Tabs
-            ref={setTabs}
-            value={valid ? selected : 'errors'}
-            keepMounted={false}
-            style={{ paddingLeft: 20 }}
-            onChange={(t) => (t !== 'errors' && t && setSelected(t.toString()))}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Tabs.List>
-                <Tabs.Tab value="basic" disabled={!valid}>{i18n('Basic')}</Tabs.Tab>
-                <Tabs.Tab value="subtasks" disabled={!valid}>{i18n('Subtasks')}</Tabs.Tab>
-                <Tabs.Tab value="errors" disabled={valid}>{errors.length ? `Errors(${errors.length})` : 'No Errors'}</Tabs.Tab>
-              </Tabs.List>
-              <Button onClick={handleSave}>
-                {i18n('Save')}
-              </Button>
+  return (
+    <ContextMenuProvider>
+      <div ref={setContainer}>
+        <Allotment defaultSizes={[2, 3]} className="problem-config-allotment">
+          <Allotment.Pane>
+            <div style={{ height: '100%', overflow: 'auto' }}>
+              <ProblemConfigEditor ref={setEditor} />
             </div>
-            <Tabs.Panel value="basic">
-              <ProblemConfigForm />
-            </Tabs.Panel>
-            <Tabs.Panel value="subtasks">
-              <ProblemConfigTree />
-            </Tabs.Panel>
-            <Tabs.Panel value="errors">
-              <div>{errors.map((i) => (<pre key={i}>{i}</pre>))}</div>
-            </Tabs.Panel>
-          </Tabs>
-        </Allotment.Pane>
-      </Allotment>
-    </div>
-  </ContextMenuProvider>;
+          </Allotment.Pane>
+          <Allotment.Pane>
+            <Tabs
+              ref={setTabs}
+              value={valid ? selected : 'errors'}
+              keepMounted={false}
+              style={{ paddingLeft: 20 }}
+              onChange={(t) => t !== 'errors' && t && setSelected(t.toString())}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Tabs.List>
+                  <Tabs.Tab value="basic" disabled={!valid}>
+                    {i18n('Basic')}
+                  </Tabs.Tab>
+                  <Tabs.Tab value="subtasks" disabled={!valid}>
+                    {i18n('Subtasks')}
+                  </Tabs.Tab>
+                  <Tabs.Tab value="errors" disabled={valid}>
+                    {errors.length ? `Errors(${errors.length})` : 'No Errors'}
+                  </Tabs.Tab>
+                </Tabs.List>
+                <Button onClick={handleSave}>{i18n('Save')}</Button>
+              </div>
+              <Tabs.Panel value="basic">
+                <ProblemConfigForm />
+              </Tabs.Panel>
+              <Tabs.Panel value="subtasks">
+                <ProblemConfigTree />
+              </Tabs.Panel>
+              <Tabs.Panel value="errors">
+                <div>
+                  {errors.map((i) => (
+                    <pre key={i}>{i}</pre>
+                  ))}
+                </div>
+              </Tabs.Panel>
+            </Tabs>
+          </Allotment.Pane>
+        </Allotment>
+      </div>
+    </ContextMenuProvider>
+  );
 }

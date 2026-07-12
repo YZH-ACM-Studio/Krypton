@@ -76,9 +76,7 @@ export interface UpsertDraftPayload {
  * force-unlock is detectable). Caller is responsible for comparing the
  * stored fingerprint against the current one on load and reacting.
  */
-export async function upsertDraft(
-    domainId: string, tid: ObjectId, pid: number, uid: number, payload: UpsertDraftPayload,
-): Promise<PaperDraft> {
+export async function upsertDraft(domainId: string, tid: ObjectId, pid: number, uid: number, payload: UpsertDraftPayload): Promise<PaperDraft> {
     await ensureIndexes();
     const now = new Date();
     const setOnInsert: Partial<PaperDraft> = {
@@ -96,24 +94,16 @@ export async function upsertDraft(
     if (payload.code !== undefined) $set.code = payload.code;
     if (payload.lang !== undefined) $set.lang = payload.lang;
 
-    await coll.updateOne(
-        { domainId, tid, pid, uid },
-        { $set, $setOnInsert: setOnInsert as any },
-        { upsert: true },
-    );
+    await coll.updateOne({ domainId, tid, pid, uid }, { $set, $setOnInsert: setOnInsert as any }, { upsert: true });
     return (await coll.findOne({ domainId, tid, pid, uid }))!;
 }
 
-export async function getDraft(
-    domainId: string, tid: ObjectId, pid: number, uid: number,
-): Promise<PaperDraft | null> {
+export async function getDraft(domainId: string, tid: ObjectId, pid: number, uid: number): Promise<PaperDraft | null> {
     await ensureIndexes();
     return await coll.findOne({ domainId, tid, pid, uid });
 }
 
-export async function getDraftsForUser(
-    domainId: string, tid: ObjectId, uid: number,
-): Promise<PaperDraft[]> {
+export async function getDraftsForUser(domainId: string, tid: ObjectId, uid: number): Promise<PaperDraft[]> {
     await ensureIndexes();
     return await coll.find({ domainId, tid, uid }).toArray();
 }
@@ -126,33 +116,21 @@ export async function getDraftsForUser(
  * The lock is at the (tid, uid, pid) granularity. The paper UI typically
  * iterates over all (tid, uid) drafts and locks the same kind on each.
  */
-export async function lockKind(
-    domainId: string, tid: ObjectId, pid: number, uid: number, kind: QuestionKind,
-): Promise<QuestionKind[]> {
+export async function lockKind(domainId: string, tid: ObjectId, pid: number, uid: number, kind: QuestionKind): Promise<QuestionKind[]> {
     await ensureIndexes();
-    await coll.updateOne(
-        { domainId, tid, pid, uid },
-        { $addToSet: { lockedKinds: kind as any } as any, $set: { updatedAt: new Date() } },
-    );
+    await coll.updateOne({ domainId, tid, pid, uid }, { $addToSet: { lockedKinds: kind as any } as any, $set: { updatedAt: new Date() } });
     const doc = await coll.findOne({ domainId, tid, pid, uid });
     return doc?.lockedKinds || [];
 }
 
 /** Lock a kind across every draft for `(tid, uid)`. */
-export async function lockKindForUser(
-    domainId: string, tid: ObjectId, uid: number, kind: QuestionKind,
-): Promise<void> {
+export async function lockKindForUser(domainId: string, tid: ObjectId, uid: number, kind: QuestionKind): Promise<void> {
     await ensureIndexes();
-    await coll.updateMany(
-        { domainId, tid, uid },
-        { $addToSet: { lockedKinds: kind as any } as any, $set: { updatedAt: new Date() } },
-    );
+    await coll.updateMany({ domainId, tid, uid }, { $addToSet: { lockedKinds: kind as any } as any, $set: { updatedAt: new Date() } });
 }
 
 /** Drop all drafts for `(tid, uid)`. Used after final submit succeeds. */
-export async function clearDrafts(
-    domainId: string, tid: ObjectId, uid: number,
-): Promise<number> {
+export async function clearDrafts(domainId: string, tid: ObjectId, uid: number): Promise<number> {
     await ensureIndexes();
     const res = await coll.deleteMany({ domainId, tid, uid });
     logger.info('cleared %d drafts for tid=%s uid=%d', res.deletedCount, tid, uid);
@@ -160,16 +138,17 @@ export async function clearDrafts(
 }
 
 /** List drafts across the contest — used by time-expiry auto-finalize. */
-export async function getDraftsForContest(
-    domainId: string, tid: ObjectId,
-): Promise<PaperDraft[]> {
+export async function getDraftsForContest(domainId: string, tid: ObjectId): Promise<PaperDraft[]> {
     await ensureIndexes();
     return await coll.find({ domainId, tid }).toArray();
 }
 
 /** Save per-question judge results to the draft (merged with existing). */
 export async function setJudgeResults(
-    domainId: string, tid: ObjectId, pid: number, uid: number,
+    domainId: string,
+    tid: ObjectId,
+    pid: number,
+    uid: number,
     results: Record<string, 'correct' | 'wrong' | 'partial'>,
 ): Promise<void> {
     await ensureIndexes();

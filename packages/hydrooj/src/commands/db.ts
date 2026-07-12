@@ -56,27 +56,33 @@ export function register(cli: CAC) {
         .option('-p <password>', 'Restic password', { default: '' })
         .action(async () => {
             const url = getUrl();
-            exec('mongodump', [
-                url, `--out=${dir}/dump`,
-                '--excludeCollection=opcount', '--excludeCollection=event',
-                ...(argv.options.withLogs ? [] : ['--excludeCollection=oplog']),
-            ], { stdio: 'inherit' });
+            exec(
+                'mongodump',
+                [
+                    url,
+                    `--out=${dir}/dump`,
+                    '--excludeCollection=opcount',
+                    '--excludeCollection=event',
+                    ...(argv.options.withLogs ? [] : ['--excludeCollection=oplog']),
+                ],
+                { stdio: 'inherit' },
+            );
             const timestamp = new Date().toISOString().replace(':', '-').split(':')[0];
             const target = `${process.cwd()}/backup-${timestamp}${argv.options.dbOnly ? '-db-only' : ''}.zip`;
             const filesToAdd = [];
             const filesToRemove = [];
             const addFile = argv.options.r
                 ? (cwd: string, item: string, keepSource = true) => {
-                    filesToAdd.push(item);
-                    if (cwd === '/data') return;
-                    if (keepSource) fs.copySync(path.join(cwd, item), path.join('/data', item), { overwrite: true });
-                    else fs.moveSync(path.join(cwd, item), path.join('/data', item), { overwrite: true });
-                    filesToRemove.push(path.join('/data', item));
-                }
+                      filesToAdd.push(item);
+                      if (cwd === '/data') return;
+                      if (keepSource) fs.copySync(path.join(cwd, item), path.join('/data', item), { overwrite: true });
+                      else fs.moveSync(path.join(cwd, item), path.join('/data', item), { overwrite: true });
+                      filesToRemove.push(path.join('/data', item));
+                  }
                 : (cwd: string, item: string, keepSource = true) => {
-                    exec('zip', ['-gr', target, item], { cwd, stdio: 'inherit' });
-                    if (!keepSource) fs.removeSync(path.join(cwd, item));
-                };
+                      exec('zip', ['-gr', target, item], { cwd, stdio: 'inherit' });
+                      if (!keepSource) fs.removeSync(path.join(cwd, item));
+                  };
             addFile(dir, 'dump', false);
             if (!argv.options.dbOnly) addFile('/data', 'file');
             if (argv.options.withAddons) {
@@ -144,11 +150,27 @@ export function register(cli: CAC) {
             if (fs.existsSync(`${dataDir}/file`)) {
                 if (argv.options.r) {
                     await withPasswordFile(argv.options.p, async (file) => {
-                        exec('restic', [
-                            'restore', '-r', argv.options.r, '-p', file, 'latest',
-                            '-t', '/data', '-i', '/file', '--delete',
-                            '--overwrite', 'if-changed', '--path', '/data/file',
-                        ], { stdio: 'inherit' });
+                        exec(
+                            'restic',
+                            [
+                                'restore',
+                                '-r',
+                                argv.options.r,
+                                '-p',
+                                file,
+                                'latest',
+                                '-t',
+                                '/data',
+                                '-i',
+                                '/file',
+                                '--delete',
+                                '--overwrite',
+                                'if-changed',
+                                '--path',
+                                '/data/file',
+                            ],
+                            { stdio: 'inherit' },
+                        );
                     });
                 } else {
                     await fs.remove('/data/file/hydro');

@@ -63,7 +63,7 @@ const NAME_TO_KEY: Record<string, string> = {
     '天梯赛-个人全国二等奖': 'ladder_individual_2',
     '天梯赛-个人全国三等奖': 'ladder_individual_3',
     // New type introduced by v2
-    'PAT甲级满分': 'pat_a_perfect',
+    PAT甲级满分: 'pat_a_perfect',
 };
 
 const KNOWN_KEYS = new Set(Object.values(NAME_TO_KEY));
@@ -97,12 +97,14 @@ async function legacyCollExists(name: string): Promise<boolean> {
 }
 
 function parseStudentInfo(info: string): { studentId: string; realName: string } {
-    const parts = String(info || '').trim().split(/\s+/);
+    const parts = String(info || '')
+        .trim()
+        .split(/\s+/);
     if (parts.length < 2) return { studentId: parts[0] || '', realName: '' };
     return { studentId: parts[0], realName: parts.slice(1).join(' ') };
 }
 
-async function migrateV1(_ctx: Context): Promise<void> {
+async function migrateV1(_ctx: Context): Promise<boolean> {
     return await oncePerSetting(MIGRATION_FLAG, async () => {
         await seedAwardTypesIfEmpty();
         const studentsColl = db.collection<any>('userbind.students');
@@ -125,7 +127,8 @@ async function migrateV1(_ctx: Context): Promise<void> {
                         continue;
                     }
                     const student = await studentsColl.findOne({
-                        studentId: parsed.studentId, realName: parsed.realName,
+                        studentId: parsed.studentId,
+                        realName: parsed.realName,
                     });
                     if (!student) {
                         unmatched.push({ legacyId: String(old._id), studentInfo: old.studentInfo, reason: 'no_match' });
@@ -213,7 +216,7 @@ async function migrateV1(_ctx: Context): Promise<void> {
  * then matches individual awards by (contest, date, team) and copies the
  * legacy `imageUrl` into the new `imageUrls` array.
  */
-async function migrateV2(_ctx: Context): Promise<void> {
+async function migrateV2(_ctx: Context): Promise<boolean> {
     return await oncePerSetting(MIGRATION_FLAG_V2, async () => {
         const studentsColl = db.collection<any>('userbind.students');
 
@@ -234,10 +237,12 @@ async function migrateV2(_ctx: Context): Promise<void> {
         );
 
         // 2. Salvage images from old-schema docs to new-schema docs.
-        const oldDocs = await peopleColl.find({
-            studentDocId: { $exists: false } as any,
-            studentInfo: { $exists: true } as any,
-        } as any).toArray() as any[];
+        const oldDocs = (await peopleColl
+            .find({
+                studentDocId: { $exists: false } as any,
+                studentInfo: { $exists: true } as any,
+            } as any)
+            .toArray()) as any[];
         logger.info('found %d legacy docs to salvage', oldDocs.length);
 
         let imagesRestored = 0;
@@ -245,10 +250,11 @@ async function migrateV2(_ctx: Context): Promise<void> {
             const parsed = parseStudentInfo(old.studentInfo);
             if (!parsed.studentId || !parsed.realName) continue;
             const student = await studentsColl.findOne({
-                studentId: parsed.studentId, realName: parsed.realName,
+                studentId: parsed.studentId,
+                realName: parsed.realName,
             });
             if (!student) continue;
-            const newDoc = await peopleColl.findOne({ studentDocId: student._id }) as any;
+            const newDoc = (await peopleColl.findOne({ studentDocId: student._id })) as any;
             if (!newDoc) continue;
 
             const newAwards = (newDoc.awards || []) as any[];
@@ -256,9 +262,9 @@ async function migrateV2(_ctx: Context): Promise<void> {
             for (const oldAward of (old.awards || []) as any[]) {
                 const oldImg = oldAward.imageUrl || (Array.isArray(oldAward.imageUrls) ? oldAward.imageUrls[0] : null);
                 if (!oldImg) continue;
-                const match = newAwards.find((a: any) => a.contest === oldAward.contest
-                    && a.date === oldAward.date
-                    && (a.team || null) === (oldAward.team || null));
+                const match = newAwards.find(
+                    (a: any) => a.contest === oldAward.contest && a.date === oldAward.date && (a.team || null) === (oldAward.team || null),
+                );
                 if (!match) continue;
                 if (!Array.isArray(match.imageUrls) || match.imageUrls.length === 0) {
                     match.imageUrls = [oldImg];
@@ -268,10 +274,7 @@ async function migrateV2(_ctx: Context): Promise<void> {
                 }
             }
             if (dirty) {
-                await peopleColl.updateOne(
-                    { _id: newDoc._id },
-                    { $set: { awards: newAwards, updatedAt: new Date() } },
-                );
+                await peopleColl.updateOne({ _id: newDoc._id }, { $set: { awards: newAwards, updatedAt: new Date() } });
             }
         }
         logger.info('restored %d award images', imagesRestored);
@@ -297,10 +300,7 @@ async function migrateV2(_ctx: Context): Promise<void> {
                 }
             }
             if (dirty) {
-                await peopleColl.updateOne(
-                    { _id: doc._id },
-                    { $set: { awards, updatedAt: new Date() } },
-                );
+                await peopleColl.updateOne({ _id: doc._id }, { $set: { awards, updatedAt: new Date() } });
                 updated++;
             }
         }
@@ -308,10 +308,7 @@ async function migrateV2(_ctx: Context): Promise<void> {
         if (unmatched.size) {
             const list = [...unmatched].join('\n');
             logger.warn('unmatched award type names: %s', list);
-            await global.Hydro.model.system.set(
-                'rankboard.migration_v2_unmatched_types',
-                list,
-            );
+            await global.Hydro.model.system.set('rankboard.migration_v2_unmatched_types', list);
         }
 
         // 4. Delete leftover old-schema docs.
@@ -334,12 +331,12 @@ async function migrateV2(_ctx: Context): Promise<void> {
  * v3 reuses `NAME_TO_KEY` (already correct in v2) to push every legacy
  * weight onto the matching `award_types.key`.
  */
-async function migrateV3(_ctx: Context): Promise<void> {
+async function migrateV3(_ctx: Context): Promise<boolean> {
     const V3_FLAG = 'rankboard.migration_v3_done';
     return await oncePerSetting(V3_FLAG, async () => {
         // Source of truth for legacy weights — try the production rankboard.config
         // first; admins may have edited it. Falls back to no-op if absent.
-        if (!await legacyCollExists('rankboard.config')) {
+        if (!(await legacyCollExists('rankboard.config'))) {
             logger.info('v3: legacy rankboard.config not present, skipping');
             return;
         }

@@ -6,13 +6,7 @@
  * (e.g., `vjudge.account`).
  */
 import { db } from 'hydrooj';
-import type {
-    BindingRequest,
-    BindToken,
-    School,
-    StudentRecord,
-    UserGroup,
-} from './types';
+import type { BindingRequest, BindToken, School, StudentRecord, UserGroup } from './types';
 
 export const schoolsColl = db.collection<School>('userbind.schools');
 export const userGroupsColl = db.collection<UserGroup>('userbind.user_groups');
@@ -29,30 +23,38 @@ export async function ensureIndexes(): Promise<void> {
     await Promise.all([
         schoolsColl.createIndex({ domainId: 1, name: 1 }, { unique: true }),
 
-        userGroupsColl.createIndex(
-            { domainId: 1, schoolId: 1, name: 1 },
-            { unique: true },
-        ),
+        userGroupsColl.createIndex({ domainId: 1, schoolId: 1, name: 1 }, { unique: true }),
         userGroupsColl.createIndex({ domainId: 1, schoolId: 1 }),
 
-        studentsColl.createIndex(
-            { domainId: 1, schoolId: 1, studentId: 1 },
-            { unique: true },
-        ),
+        studentsColl.createIndex({ domainId: 1, schoolId: 1, studentId: 1 }, { unique: true }),
         studentsColl.createIndex({ domainId: 1, boundUserId: 1 }),
         studentsColl.createIndex({ domainId: 1, groupIds: 1 }),
         studentsColl.createIndex({ domainId: 1, studentId: 1, realName: 1 }),
         studentsColl.createIndex({
-            domainId: 1, schoolId: 1, enrollmentYear: 1, boundUserId: 1, createdAt: -1,
+            domainId: 1,
+            schoolId: 1,
+            enrollmentYear: 1,
+            boundUserId: 1,
+            createdAt: -1,
         }),
         studentsColl.createIndex({
-            domainId: 1, schoolId: 1, enrollmentYear: 1, boundUserId: 1, boundAt: -1,
+            domainId: 1,
+            schoolId: 1,
+            enrollmentYear: 1,
+            boundUserId: 1,
+            boundAt: -1,
         }),
         studentsColl.createIndex({
-            domainId: 1, enrollmentYear: 1, boundUserId: 1, createdAt: -1,
+            domainId: 1,
+            enrollmentYear: 1,
+            boundUserId: 1,
+            createdAt: -1,
         }),
         studentsColl.createIndex({
-            domainId: 1, enrollmentYear: 1, boundUserId: 1, boundAt: -1,
+            domainId: 1,
+            enrollmentYear: 1,
+            boundUserId: 1,
+            boundAt: -1,
         }),
 
         bindTokensColl.createIndex({ domainId: 1, studentRecordId: 1 }),

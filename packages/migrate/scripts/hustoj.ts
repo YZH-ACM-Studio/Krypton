@@ -1,11 +1,29 @@
 /* eslint-disable style/no-tabs */
-/* eslint-disable no-await-in-loop */
+
 import path from 'path';
 import mariadb from 'mariadb';
 import TurndownService from 'turndown';
 import {
-    _, buildContent, ContestModel, DomainModel, fs, MessageModel, moment, noop, NotFoundError, ObjectId, postJudge, ProblemModel,
-    RecordDoc, RecordModel, SolutionModel, STATUS, StorageModel, SystemModel, Time, UserModel,
+    _,
+    buildContent,
+    ContestModel,
+    DomainModel,
+    fs,
+    MessageModel,
+    moment,
+    noop,
+    NotFoundError,
+    ObjectId,
+    postJudge,
+    ProblemModel,
+    RecordDoc,
+    RecordModel,
+    SolutionModel,
+    STATUS,
+    StorageModel,
+    SystemModel,
+    Time,
+    UserModel,
 } from 'hydrooj';
 
 const turndown = new TurndownService({
@@ -67,8 +85,10 @@ function fixFileName(fileName: string) {
 }
 
 async function iterate(
-    count: bigint | number, step: bigint | number, cb: (pageId: bigint) => Promise<void>,
-    reportOpts?: { every: number | bigint, namespace: string, report: (data: any) => void },
+    count: bigint | number,
+    step: bigint | number,
+    cb: (pageId: bigint) => Promise<void>,
+    reportOpts?: { every: number | bigint; namespace: string; report: (data: any) => void },
 ) {
     const _count = BigInt(count);
     const _step = BigInt(step);
@@ -78,7 +98,7 @@ async function iterate(
     for (let pageId = 0n; pageId < pageCount; pageId++) {
         await cb(pageId);
         if (reportOpts && pageId % _showProgress === 0n) {
-            const progress = pageId * _step * 100n / _count;
+            const progress = (pageId * _step * 100n) / _count;
             report({
                 message: `${namespace} finished ${Number(pageId * _step)} / ${Number(count)} (${Number(progress)}%)`,
             });
@@ -86,12 +106,23 @@ async function iterate(
     }
 }
 
-export async function run({
-    host = 'localhost', port = 3306, name = 'jol',
-    username, password, domainId, contestType = 'oi',
-    dataDir, uploadDir = '/home/judge/src/web/upload/', rerun = true, randomMail = false,
-    withContest = true,
-}, report: (data: any) => void) {
+export async function run(
+    {
+        host = 'localhost',
+        port = 3306,
+        name = 'jol',
+        username,
+        password,
+        domainId,
+        contestType = 'oi',
+        dataDir,
+        uploadDir = '/home/judge/src/web/upload/',
+        rerun = true,
+        randomMail = false,
+        withContest = true,
+    },
+    report: (data: any) => void,
+) {
     let remoteUsed = false;
     const src = await mariadb.createConnection({
         host,
@@ -100,9 +131,12 @@ export async function run({
         password,
         database: name,
     });
-    const query = (q: string) => new Promise<any[]>((res, rej) => {
-        src.query(q).then((r) => res(r)).catch((e) => rej(e));
-    });
+    const query = (q: string) =>
+        new Promise<any[]>((res, rej) => {
+            src.query(q)
+                .then((r) => res(r))
+                .catch((e) => rej(e));
+        });
     report({ message: JSON.stringify(await query("show VARIABLES like 'char%';")) });
     const target = await DomainModel.get(domainId);
     if (!target) throw new NotFoundError(domainId);
@@ -137,8 +171,12 @@ export async function run({
             uidMap[udoc.user_id] = current._id;
         } else {
             const uid = await UserModel.create(
-                udoc.email || `${udoc.user_id}@hustoj.local`, udoc.user_id, '',
-                null, udoc.ip, udoc.defunct === 'Y' ? 0 : SystemModel.get('default.priv'),
+                udoc.email || `${udoc.user_id}@hustoj.local`,
+                udoc.user_id,
+                '',
+                null,
+                udoc.ip,
+                udoc.defunct === 'Y' ? 0 : SystemModel.get('default.priv'),
             );
             uidMap[udoc.user_id] = uid;
             await UserModel.setById(uid, {
@@ -194,69 +232,91 @@ export async function run({
     const pidMap: Record<string, number> = {};
     const [{ 'count(*)': pcount }] = await query('SELECT count(*) FROM `problem`');
     const step = 50n;
-    await iterate(pcount, 50n, async (pageId: bigint) => {
-        const pdocs = await query(`SELECT * FROM \`problem\` LIMIT ${Number(pageId * step)}, ${Number(step)}`);
-        for (const pdoc of pdocs) {
-            if (rerun) {
-                const opdoc = await ProblemModel.get(domainId, `P${pdoc.problem_id}`);
-                if (opdoc) pidMap[pdoc.problem_id] = opdoc.docId;
-            }
-            if (!pidMap[pdoc.problem_id]) {
-                const files = {};
-                const markdown = [pdoc.description?.[0], pdoc.input?.[0], pdoc.output?.[0], pdoc.hint?.[0]].some((i) => i?.includes('[md]'));
-                let content = buildContent({
-                    description: pdoc.description,
-                    input: pdoc.input,
-                    output: pdoc.output,
-                    samples: [[pdoc.sample_input.trim(), pdoc.sample_output.trim()]],
-                    hint: pdoc.hint,
-                    source: pdoc.source,
-                }, 'html').replace(/<math xm<x>lns=/g, '<math xmlns=').replace(/\[\/?md\]/g, '');
-                const uploadFiles = content.matchAll(/(?:src|href)="\/upload\/([^"/]+)(?:\/([^"/]+))?\/([^"/]+\.[^"/.]+)"/g);
-                for (const file of uploadFiles) {
-                    try {
-                        const filename = fixFileName(file[3]);
-                        const fileWithPath = [file[1], ...(file[2] ? [file[2]] : []), file[3]].join('/');
-                        files[filename] = await fs.readFile(path.join(uploadDir, fileWithPath));
-                        content = content.replace(`/upload/${fileWithPath}`, `file://${filename}`);
-                    } catch (e) {
-                        report({ message: `failed to read file: ${path.join(uploadDir, file[1])}` });
-                    }
+    await iterate(
+        pcount,
+        50n,
+        async (pageId: bigint) => {
+            const pdocs = await query(`SELECT * FROM \`problem\` LIMIT ${Number(pageId * step)}, ${Number(step)}`);
+            for (const pdoc of pdocs) {
+                if (rerun) {
+                    const opdoc = await ProblemModel.get(domainId, `P${pdoc.problem_id}`);
+                    if (opdoc) pidMap[pdoc.problem_id] = opdoc.docId;
                 }
-                const pid = await ProblemModel.add(
-                    domainId, `P${pdoc.problem_id}`,
-                    pdoc.title, content,
-                    1, pdoc.source?.trim().length ? pdoc.source.split(' ').map((i) => i.trim()).filter((i) => i) : [],
-                    { hidden: pdoc.defunct === 'Y', problemKind: 'programming' },
-                );
-                if (!markdown) await ProblemModel.edit(domainId, pid, { html: true });
-                pidMap[pdoc.problem_id] = pid;
-                await Promise.all(Object.keys(files).map((filename) => ProblemModel.addAdditionalFile(domainId, pid, filename, files[filename])));
-                if (Object.keys(files).length) report({ message: `move ${Object.keys(files).length} file for problem ${pid}` });
-            }
-            const cdoc = await query(`SELECT * FROM \`privilege\` WHERE \`rightstr\` = 'p${pdoc.problem_id}'`);
-            const maintainer = [];
-            for (let i = 1; i < cdoc.length; i++) maintainer.push(uidMap[cdoc[i].user_id]);
-            await ProblemModel.edit(domainId, pidMap[pdoc.problem_id], {
-                nAccept: 0,
-                nSubmit: pdoc.submit,
-                config: `time: ${pdoc.time_limit}s
+                if (!pidMap[pdoc.problem_id]) {
+                    const files = {};
+                    const markdown = [pdoc.description?.[0], pdoc.input?.[0], pdoc.output?.[0], pdoc.hint?.[0]].some((i) => i?.includes('[md]'));
+                    let content = buildContent(
+                        {
+                            description: pdoc.description,
+                            input: pdoc.input,
+                            output: pdoc.output,
+                            samples: [[pdoc.sample_input.trim(), pdoc.sample_output.trim()]],
+                            hint: pdoc.hint,
+                            source: pdoc.source,
+                        },
+                        'html',
+                    )
+                        .replace(/<math xm<x>lns=/g, '<math xmlns=')
+                        .replace(/\[\/?md\]/g, '');
+                    const uploadFiles = content.matchAll(/(?:src|href)="\/upload\/([^"/]+)(?:\/([^"/]+))?\/([^"/]+\.[^"/.]+)"/g);
+                    for (const file of uploadFiles) {
+                        try {
+                            const filename = fixFileName(file[3]);
+                            const fileWithPath = [file[1], ...(file[2] ? [file[2]] : []), file[3]].join('/');
+                            files[filename] = await fs.readFile(path.join(uploadDir, fileWithPath));
+                            content = content.replace(`/upload/${fileWithPath}`, `file://${filename}`);
+                        } catch (e) {
+                            report({ message: `failed to read file: ${path.join(uploadDir, file[1])}` });
+                        }
+                    }
+                    const pid = await ProblemModel.add(
+                        domainId,
+                        `P${pdoc.problem_id}`,
+                        pdoc.title,
+                        content,
+                        1,
+                        pdoc.source?.trim().length
+                            ? pdoc.source
+                                  .split(' ')
+                                  .map((i) => i.trim())
+                                  .filter((i) => i)
+                            : [],
+                        { hidden: pdoc.defunct === 'Y', problemKind: 'programming' },
+                    );
+                    if (!markdown) await ProblemModel.edit(domainId, pid, { html: true });
+                    pidMap[pdoc.problem_id] = pid;
+                    await Promise.all(Object.keys(files).map((filename) => ProblemModel.addAdditionalFile(domainId, pid, filename, files[filename])));
+                    if (Object.keys(files).length) report({ message: `move ${Object.keys(files).length} file for problem ${pid}` });
+                }
+                const cdoc = await query(`SELECT * FROM \`privilege\` WHERE \`rightstr\` = 'p${pdoc.problem_id}'`);
+                const maintainer = [];
+                for (let i = 1; i < cdoc.length; i++) maintainer.push(uidMap[cdoc[i].user_id]);
+                await ProblemModel.edit(domainId, pidMap[pdoc.problem_id], {
+                    nAccept: 0,
+                    nSubmit: pdoc.submit,
+                    config: `time: ${pdoc.time_limit}s
 memory: ${pdoc.memory_limit}m
-${pdoc.remote_oj === 'bas' ? `type: remote_judge
+${
+    pdoc.remote_oj === 'bas'
+        ? `type: remote_judge
 subType: ybtbas
 target: ybtbas/${+pdoc.id - 3000}
-` : ''}`,
-                owner: uidMap[cdoc[0]?.user_id] || 1,
-                maintainer,
-                html: true,
-            });
-            if (pdoc.remote_oj === 'bas') remoteUsed = true;
-            if (pdoc.solution) {
-                const md = turndown.turndown(pdoc.solution);
-                await SolutionModel.add(domainId, pidMap[pdoc.problem_id], 1, md);
+`
+        : ''
+}`,
+                    owner: uidMap[cdoc[0]?.user_id] || 1,
+                    maintainer,
+                    html: true,
+                });
+                if (pdoc.remote_oj === 'bas') remoteUsed = true;
+                if (pdoc.solution) {
+                    const md = turndown.turndown(pdoc.solution);
+                    await SolutionModel.add(domainId, pidMap[pdoc.problem_id], 1, md);
+                }
             }
-        }
-    }, { every: 10n, namespace: 'problem', report });
+        },
+        { every: 10n, namespace: 'problem', report },
+    );
 
     if (remoteUsed) {
         MessageModel.sendNotification(`您导入的数据中使用了一本通编程启蒙远端测试题目。
@@ -303,8 +363,15 @@ hydrooj install https://hydro.ac/hydroac-client.zip
                 isAssignMode = true;
             }
             const tid = await ContestModel.add(
-                domainId, tdoc.title, description || 'Description',
-                adminUids[0], contestType, tdoc.start_time, endAt, pids, true,
+                domainId,
+                tdoc.title,
+                description || 'Description',
+                adminUids[0],
+                contestType,
+                tdoc.start_time,
+                endAt,
+                pids,
+                true,
                 { _code: tdoc.password },
             );
             tidMap[tdoc.contest_id] = tid.toHexString();
@@ -354,45 +421,50 @@ hydrooj install https://hydro.ac/hydroac-client.zip
     */
     // 测试运行 problem_id=0 导致非比赛的提交无法确定属于哪个题目,因此跳过测试运行
     const [{ 'count(*)': rcount }] = await query('SELECT count(*) FROM `solution` WHERE `problem_id` > 0');
-    await iterate(rcount, 50n, async (pageId: bigint) => {
-        const rdocs = await query(`SELECT * FROM \`solution\` WHERE \`problem_id\` > 0 LIMIT ${pageId * BigInt(step)}, ${step}`);
-        for (const rdoc of rdocs) {
-            const data: RecordDoc = {
-                status: statusMap[rdoc.result] || 0,
-                _id: Time.getObjectID(rdoc.in_date, false),
-                uid: uidMap[rdoc.user_id] || 0,
-                code: "HustOJ didn't provide user code",
-                lang: langMap[rdoc.language] || '',
-                pid: pidMap[rdoc.problem_id] || 0,
-                domainId,
-                score: rdoc.pass_rate ? Math.ceil(rdoc.pass_rate * 100) : rdoc.result === 4 ? 100 : 0,
-                time: rdoc.time || 0,
-                memory: rdoc.memory || 0,
-                judgeTexts: [],
-                compilerTexts: [],
-                testCases: [],
-                judgeAt: new Date(),
-                rejudged: false,
-                judger: 1,
-            };
-            const ceInfo = await query(`SELECT \`error\` FROM \`compileinfo\` WHERE \`solution_id\` = ${rdoc.solution_id}`);
-            if (ceInfo[0]?.error) data.judgeTexts.push(ceInfo[0].error);
-            const rtInfo = await query(`SELECT \`error\` FROM \`runtimeinfo\` WHERE \`solution_id\` = ${rdoc.solution_id}`);
-            if (rtInfo[0]?.error) data.judgeTexts.push(rtInfo[0].error);
-            const source = await query(`SELECT \`source\` FROM \`source_code\` WHERE \`solution_id\` = ${rdoc.solution_id}`);
-            if (source[0]?.source) data.code = source[0].source;
-            if (rdoc.contest_id && withContest) {
-                if (!tidMap[rdoc.contest_id]) {
-                    report({ message: `warning: contest_id ${rdoc.contest_id} for submission ${rdoc.solution_id} not found` });
-                } else {
-                    data.contest = new ObjectId(tidMap[rdoc.contest_id]);
-                    await ContestModel.attend(domainId, data.contest, uidMap[rdoc.user_id]).catch(noop);
+    await iterate(
+        rcount,
+        50n,
+        async (pageId: bigint) => {
+            const rdocs = await query(`SELECT * FROM \`solution\` WHERE \`problem_id\` > 0 LIMIT ${pageId * BigInt(step)}, ${step}`);
+            for (const rdoc of rdocs) {
+                const data: RecordDoc = {
+                    status: statusMap[rdoc.result] || 0,
+                    _id: Time.getObjectID(rdoc.in_date, false),
+                    uid: uidMap[rdoc.user_id] || 0,
+                    code: "HustOJ didn't provide user code",
+                    lang: langMap[rdoc.language] || '',
+                    pid: pidMap[rdoc.problem_id] || 0,
+                    domainId,
+                    score: rdoc.pass_rate ? Math.ceil(rdoc.pass_rate * 100) : rdoc.result === 4 ? 100 : 0,
+                    time: rdoc.time || 0,
+                    memory: rdoc.memory || 0,
+                    judgeTexts: [],
+                    compilerTexts: [],
+                    testCases: [],
+                    judgeAt: new Date(),
+                    rejudged: false,
+                    judger: 1,
+                };
+                const ceInfo = await query(`SELECT \`error\` FROM \`compileinfo\` WHERE \`solution_id\` = ${rdoc.solution_id}`);
+                if (ceInfo[0]?.error) data.judgeTexts.push(ceInfo[0].error);
+                const rtInfo = await query(`SELECT \`error\` FROM \`runtimeinfo\` WHERE \`solution_id\` = ${rdoc.solution_id}`);
+                if (rtInfo[0]?.error) data.judgeTexts.push(rtInfo[0].error);
+                const source = await query(`SELECT \`source\` FROM \`source_code\` WHERE \`solution_id\` = ${rdoc.solution_id}`);
+                if (source[0]?.source) data.code = source[0].source;
+                if (rdoc.contest_id && withContest) {
+                    if (!tidMap[rdoc.contest_id]) {
+                        report({ message: `warning: contest_id ${rdoc.contest_id} for submission ${rdoc.solution_id} not found` });
+                    } else {
+                        data.contest = new ObjectId(tidMap[rdoc.contest_id]);
+                        await ContestModel.attend(domainId, data.contest, uidMap[rdoc.user_id]).catch(noop);
+                    }
                 }
+                await RecordModel.coll.insertOne(data);
+                await postJudge(data).catch((err) => report({ message: err.message }));
             }
-            await RecordModel.coll.insertOne(data);
-            await postJudge(data).catch((err) => report({ message: err.message }));
-        }
-    }, { every: 10n, namespace: 'record', report });
+        },
+        { every: 10n, namespace: 'record', report },
+    );
     report({ message: 'record finished' });
 
     src.end();

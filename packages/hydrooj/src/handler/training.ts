@@ -2,9 +2,7 @@ import assert from 'assert';
 import { escapeRegExp, pick } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import { sortFiles } from '@hydrooj/utils/lib/utils';
-import {
-    FileLimitExceededError, FileUploadError, NotFoundError, ValidationError,
-} from '../error';
+import { FileLimitExceededError, FileUploadError, NotFoundError, ValidationError } from '../error';
 import { Tdoc, TrainingDoc } from '../interface';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as document from '../model/document';
@@ -15,9 +13,7 @@ import storage from '../model/storage';
 import system from '../model/system';
 import * as training from '../model/training';
 import user from '../model/user';
-import {
-    Handler, param, post, Types,
-} from '../service/server';
+import { Handler, param, post, Types } from '../service/server';
 import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-reference';
 
 async function _parseDagJson(domainId: string, _dag: string): Promise<Tdoc['dag']> {
@@ -70,21 +66,19 @@ class TrainingMainHandler extends Handler {
         const query: Filter<TrainingDoc> = { kind: { $ne: 'course' } };
         if (q) query.title = { $regex: new RegExp(escapeRegExp(q), 'i') };
         await this.ctx.parallel('training/list', query, this);
-        const [tdocs, tpcount] = await this.paginate(
-            training.getMulti(domainId, query),
-            page,
-            'training',
-        );
+        const [tdocs, tpcount] = await this.paginate(training.getMulti(domainId, query), page, 'training');
         const tids: Set<ObjectId> = new Set();
         for (const tdoc of tdocs) tids.add(tdoc.docId);
         const tsdict = {};
         let tdict = {};
         if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) {
             const enrolledTids: Set<ObjectId> = new Set();
-            const tsdocs = await training.getMultiStatus(domainId, {
-                uid: this.user._id,
-                $or: [{ docId: { $in: Array.from(tids) } }, { enroll: 1 }],
-            }).toArray();
+            const tsdocs = await training
+                .getMultiStatus(domainId, {
+                    uid: this.user._id,
+                    $or: [{ docId: { $in: Array.from(tids) } }, { enroll: 1 }],
+                })
+                .toArray();
             for (const tsdoc of tsdocs) {
                 tsdict[tsdoc.docId] = tsdoc;
                 enrolledTids.add(tsdoc.docId);
@@ -105,7 +99,12 @@ class TrainingMainHandler extends Handler {
         for (const tdoc of tdocs) tdict[tdoc.docId.toHexString()] = tdoc;
         this.response.template = 'training_main.html';
         this.response.body = {
-            tdocs, page, tpcount, tsdict, tdict, q,
+            tdocs,
+            page,
+            tpcount,
+            tsdict,
+            tdict,
+            q,
         };
     }
 }
@@ -123,8 +122,13 @@ class TrainingDetailHandler extends Handler {
         let shouldCompare = false;
         const pids = training.getPids(tdoc.dag);
         if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE) && this.ctx.setting.get('training.enrolled-users')) {
-            enrollUsers = (await training.getMultiStatus(domainId, { docId: tid, uid: { $gt: 1 }, enroll: 1 })
-                .project({ uid: 1 }).limit(500).toArray()).map((x) => +x.uid);
+            enrollUsers = (
+                await training
+                    .getMultiStatus(domainId, { docId: tid, uid: { $gt: 1 }, enroll: 1 })
+                    .project({ uid: 1 })
+                    .limit(500)
+                    .toArray()
+            ).map((x) => +x.uid);
             shouldCompare = uid !== this.user._id;
         } else uid = this.user._id;
         const [udoc, udict, pdict] = await Promise.all([
@@ -170,10 +174,20 @@ class TrainingDetailHandler extends Handler {
             donePids: Array.from(donePids),
             done: doneNids.size === tdoc.dag.length,
         });
-        const groups = this.user.hasPerm(PERM.PERM_EDIT_DOMAIN)
-            ? await user.listGroup(domainId) : [];
+        const groups = this.user.hasPerm(PERM.PERM_EDIT_DOMAIN) ? await user.listGroup(domainId) : [];
         this.response.body = {
-            tdoc, tsdoc, pids, pdict, psdict, ndict, nsdict, udoc, udict, selfPsdict, groups, missing,
+            tdoc,
+            tsdoc,
+            pids,
+            pdict,
+            psdict,
+            ndict,
+            nsdict,
+            udoc,
+            udict,
+            selfPsdict,
+            groups,
+            missing,
         };
         this.response.body.tdoc.description = this.response.body.tdoc.description
             .replace(/\(file:\/\//g, `(./${tdoc.docId}/file/`)
@@ -185,8 +199,11 @@ class TrainingDetailHandler extends Handler {
         // 学号 PII，与审批页/record 学号列同档。学生响应不含 members 字段。
         // 纯读聚合（PLAN Rev.8）：4 条批量查询 + 内存归并，零写库零 N+1。
         if (this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS)) {
-            const enrollDocs = await training.getMultiStatus(domainId, { docId: tid, uid: { $gt: 1 }, enroll: 1 })
-                .project({ uid: 1 }).limit(1000).toArray();
+            const enrollDocs = await training
+                .getMultiStatus(domainId, { docId: tid, uid: { $gt: 1 }, enroll: 1 })
+                .project({ uid: 1 })
+                .limit(1000)
+                .toArray();
             const memberUids = enrollDocs.map((x) => +x.uid);
             const ub = (global as any).Hydro?.model?.userbind;
             const [memberUdict, students, ubGroups, acDocs] = await Promise.all([
@@ -194,10 +211,15 @@ class TrainingDetailHandler extends Handler {
                 user.getListForRender(domainId, memberUids, false),
                 ub?.findStudentsByUserIds ? ub.findStudentsByUserIds(domainId, memberUids) : {},
                 ub?.listUserGroups ? ub.listUserGroups(domainId) : [],
-                (memberUids.length && exist.length)
-                    ? document.getMultiStatus(domainId, document.TYPE_PROBLEM, {
-                        uid: { $in: memberUids }, docId: { $in: exist }, status: STATUS.STATUS_ACCEPTED,
-                    }).project({ uid: 1, docId: 1 }).toArray()
+                memberUids.length && exist.length
+                    ? document
+                          .getMultiStatus(domainId, document.TYPE_PROBLEM, {
+                              uid: { $in: memberUids },
+                              docId: { $in: exist },
+                              status: STATUS.STATUS_ACCEPTED,
+                          })
+                          .project({ uid: 1, docId: 1 })
+                          .toArray()
                     : [],
             ]);
             // limit 1000 截断不许静默（对抗审查发现）——前端据此提示。
@@ -275,14 +297,10 @@ class TrainingEditHandler extends Handler {
     @param('dag', Types.Content)
     @param('pin', Types.UnsignedInt)
     @param('description', Types.Content)
-    async post(
-        _domainId: string, tid: ObjectId,
-        title: string, content: string,
-        _dag: string, pin = 0, description: string,
-    ) {
+    async post(_domainId: string, tid: ObjectId, title: string, content: string, _dag: string, pin = 0, description: string) {
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
-        if ((!!this.tdoc?.pin) !== (!!pin)) this.checkPerm(PERM.PERM_PIN_TRAINING);
+        if (!!this.tdoc?.pin !== !!pin) this.checkPerm(PERM.PERM_PIN_TRAINING);
         const dag = await _parseDagJson(authoritativeDomainId, _dag);
         const pids = training.getPids(dag);
         assert(pids.length, new ValidationError('dag', null, 'Please specify at least one problem'));
@@ -292,7 +310,11 @@ class TrainingEditHandler extends Handler {
             tid = await training.add(authoritativeDomainId, title, content, this.user._id, dag, description, pin);
         } else {
             await training.edit(authoritativeDomainId, tid, {
-                title, content, dag, description, pin,
+                title,
+                content,
+                dag,
+                description,
+                pin,
             });
         }
         this.response.body = { tid };
@@ -349,7 +371,10 @@ export class TrainingFilesHandler extends Handler {
     @post('files', Types.ArrayOf(Types.Filename))
     async postDeleteFiles(domainId: string, tid: ObjectId, files: string[]) {
         await Promise.all([
-            storage.del(files.map((t) => `training/${domainId}/${tid}/${t}`), this.user._id),
+            storage.del(
+                files.map((t) => `training/${domainId}/${tid}/${t}`),
+                this.user._id,
+            ),
             training.edit(domainId, tid, { files: this.tdoc.files.filter((i) => !files.includes(i.name)) }),
         ]);
         this.back();
@@ -371,9 +396,7 @@ export class TrainingFileDownloadHandler extends Handler {
             target,
             size: file?.size || 0,
         });
-        this.response.redirect = await storage.signDownloadLink(
-            target, noDisposition ? undefined : filename, false, 'user',
-        );
+        this.response.redirect = await storage.signDownloadLink(target, noDisposition ? undefined : filename, false, 'user');
     }
 }
 

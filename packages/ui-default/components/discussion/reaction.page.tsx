@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 import 'jquery.easing';
 
 import { MantineProvider, Popover } from '@mantine/core';
@@ -56,10 +55,12 @@ function Reaction({ payload, ele }) {
               <div
                 key={emoji}
                 className={`medium-${12 / elesPerRow} small-${12 / elesPerRow} columns popover-reaction-item`}
-                onClick={() => handleEmojiClick(payload, emoji, ele).then(() => {
-                  updateOpen(false);
-                  updateTrigger(false);
-                })}
+                onClick={() =>
+                  handleEmojiClick(payload, emoji, ele).then(() => {
+                    updateOpen(false);
+                    updateTrigger(false);
+                  })
+                }
               >
                 {emoji}
               </div>
@@ -79,9 +80,11 @@ function Reaction({ payload, ele }) {
 const reactionPage = new AutoloadPage('reactionPage', () => {
   const canUseReaction = $('[data-op="react"]').length > 0;
   $('[data-op="react"]').each((i, e) => {
-    ReactDOM.createRoot(e).render(<MantineProvider>
-      <Reaction payload={$(e).data('form')} ele={$(`.reactions[data-${$(e).data('form').nodeType}='${$(e).data('form').id}']`)} />
-    </MantineProvider>);
+    ReactDOM.createRoot(e).render(
+      <MantineProvider>
+        <Reaction payload={$(e).data('form')} ele={$(`.reactions[data-${$(e).data('form').nodeType}='${$(e).data('form').id}']`)} />
+      </MantineProvider>,
+    );
   });
   $(document).on('click', '.reaction', async (e) => {
     if (!canUseReaction) {

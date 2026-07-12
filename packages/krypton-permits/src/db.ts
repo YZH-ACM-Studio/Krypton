@@ -13,10 +13,13 @@
  * fences are durable deny markers and intentionally have no TTL index.
  */
 import { db } from 'hydrooj';
+import type { Collection, ObjectId } from 'mongodb';
+import type { AclMutationFence, PermitSource } from './coordinator';
+import type { PermitDoc } from './types';
 
-export const permitsColl = db.collection('problem.permits');
-export const permitSourcesColl = db.collection('problem.permitSources');
-export const aclMutationFencesColl = db.collection('problem.aclMutationFences');
+export const permitsColl: Collection<PermitDoc> = db.collection('problem.permits');
+export const permitSourcesColl: Collection<PermitSource & { _id: ObjectId }> = db.collection('problem.permitSources');
+export const aclMutationFencesColl: Collection<AclMutationFence & { _id: ObjectId }> = db.collection('problem.aclMutationFences');
 
 interface RequiredIndex {
     name: string;
@@ -93,20 +96,18 @@ function sameKey(actual: Record<string, unknown>, expected: Record<string, unkno
 }
 
 function isLegacyCanonicalPairAlias(found: any, expected: RequiredIndex): boolean {
-    return expected.name === 'problem_permits_pair_uq'
-        && sameKey(found.key, expected.key)
-        && found.unique === true
-        && found.partialFilterExpression === undefined
-        && found.expireAfterSeconds === undefined;
+    return (
+        expected.name === 'problem_permits_pair_uq' &&
+        sameKey(found.key, expected.key) &&
+        found.unique === true &&
+        found.partialFilterExpression === undefined &&
+        found.expireAfterSeconds === undefined
+    );
 }
 
 function isHarmlessLegacyViaContestPartial(found: any): boolean {
-    const hasExpectedPartialFilter = JSON.stringify(found.partialFilterExpression)
-        === JSON.stringify({ viaContest: { $type: 'objectId' } });
-    return sameKey(found.key, { domainId: 1, viaContest: 1 })
-        && hasExpectedPartialFilter
-        && !found.unique
-        && found.expireAfterSeconds === undefined;
+    const hasExpectedPartialFilter = JSON.stringify(found.partialFilterExpression) === JSON.stringify({ viaContest: { $type: 'objectId' } });
+    return sameKey(found.key, { domainId: 1, viaContest: 1 }) && hasExpectedPartialFilter && !found.unique && found.expireAfterSeconds === undefined;
 }
 
 function assertRequiredIndexShape(found: any, expected: RequiredIndex): void {
@@ -137,11 +138,7 @@ async function listExistingIndexes(collection: any, allowMissingNamespace: boole
     }
 }
 
-async function createAndVerifyIndexes(
-    collection: any,
-    required: RequiredIndex[],
-    compatibility: IndexCompatibility = {},
-): Promise<void> {
+async function createAndVerifyIndexes(collection: any, required: RequiredIndex[], compatibility: IndexCompatibility = {}): Promise<void> {
     // MongoDB reports code 26 when listIndexes targets a collection that has
     // never been created. This is expected only for the two new P2.11
     // collections; createIndex creates the namespace, after which the normal
@@ -160,14 +157,11 @@ async function createAndVerifyIndexes(
             continue;
         }
         const equivalent = required.find((expected) => sameKey(found.key, expected.key));
-        if (equivalent
-            && compatibility.allowLegacyCanonicalPair
-            && isLegacyCanonicalPairAlias(found, equivalent)) {
+        if (equivalent && compatibility.allowLegacyCanonicalPair && isLegacyCanonicalPairAlias(found, equivalent)) {
             satisfied.add(equivalent.name);
             continue;
         }
-        if (compatibility.allowLegacyViaContestPartial
-            && isHarmlessLegacyViaContestPartial(found)) {
+        if (compatibility.allowLegacyViaContestPartial && isHarmlessLegacyViaContestPartial(found)) {
             continue;
         }
         if (found.partialFilterExpression !== undefined) {
@@ -177,16 +171,21 @@ async function createAndVerifyIndexes(
             throw new Error(`legacy index ${found.name} duplicates required key ${equivalent.name}; repair explicitly`);
         }
     }
-    await Promise.all(required.filter((index) => !satisfied.has(index.name)).map((index) => collection.createIndex(index.key, {
-        name: index.name,
-        ...(index.unique ? { unique: true } : {}),
-    })));
+    await Promise.all(
+        required
+            .filter((index) => !satisfied.has(index.name))
+            .map((index) =>
+                collection.createIndex(index.key, {
+                    name: index.name,
+                    ...(index.unique ? { unique: true } : {}),
+                }),
+            ),
+    );
     const actual = await collection.listIndexes().toArray();
     for (const expected of required) {
-        const found = actual.find((index: any) => index.name === expected.name)
-            || (compatibility.allowLegacyCanonicalPair
-                ? actual.find((index: any) => isLegacyCanonicalPairAlias(index, expected))
-                : undefined);
+        const found =
+            actual.find((index: any) => index.name === expected.name) ||
+            (compatibility.allowLegacyCanonicalPair ? actual.find((index: any) => isLegacyCanonicalPairAlias(index, expected)) : undefined);
         if (!found) throw new Error(`required index ${expected.name} is missing after createIndex`);
         assertRequiredIndexShape(found, expected);
     }

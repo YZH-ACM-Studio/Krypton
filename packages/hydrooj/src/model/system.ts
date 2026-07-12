@@ -20,23 +20,27 @@ class SystemModelService extends Service {
         return this.cache[key];
     }
 
+    getMany<A extends keyof SystemKeys, B extends keyof SystemKeys>(keys: [A, B]): [SystemKeys[A], SystemKeys[B]];
+    getMany<A extends keyof SystemKeys, B extends keyof SystemKeys, C extends keyof SystemKeys>(
+        keys: [A, B, C],
+    ): [SystemKeys[A], SystemKeys[B], SystemKeys[C]];
+    getMany<A extends keyof SystemKeys, B extends keyof SystemKeys, C extends keyof SystemKeys, D extends keyof SystemKeys>(
+        keys: [A, B, C, D],
+    ): [SystemKeys[A], SystemKeys[B], SystemKeys[C], SystemKeys[D]];
     getMany<
-        A extends keyof SystemKeys, B extends keyof SystemKeys,
-    >(keys: [A, B]): [SystemKeys[A], SystemKeys[B]];
-    getMany<
-        A extends keyof SystemKeys, B extends keyof SystemKeys, C extends keyof SystemKeys,
-    >(keys: [A, B, C]): [SystemKeys[A], SystemKeys[B], SystemKeys[C]];
-    getMany<
-        A extends keyof SystemKeys, B extends keyof SystemKeys, C extends keyof SystemKeys,
+        A extends keyof SystemKeys,
+        B extends keyof SystemKeys,
+        C extends keyof SystemKeys,
         D extends keyof SystemKeys,
-    >(keys: [A, B, C, D]): [SystemKeys[A], SystemKeys[B], SystemKeys[C], SystemKeys[D]];
-    getMany<
-        A extends keyof SystemKeys, B extends keyof SystemKeys, C extends keyof SystemKeys,
-        D extends keyof SystemKeys, E extends keyof SystemKeys,
+        E extends keyof SystemKeys,
     >(keys: [A, B, C, D, E]): [SystemKeys[A], SystemKeys[B], SystemKeys[C], SystemKeys[D], SystemKeys[E]];
     getMany<
-        A extends keyof SystemKeys, B extends keyof SystemKeys, C extends keyof SystemKeys,
-        D extends keyof SystemKeys, E extends keyof SystemKeys, F extends keyof SystemKeys,
+        A extends keyof SystemKeys,
+        B extends keyof SystemKeys,
+        C extends keyof SystemKeys,
+        D extends keyof SystemKeys,
+        E extends keyof SystemKeys,
+        F extends keyof SystemKeys,
     >(keys: [A, B, C, D, E, F]): [SystemKeys[A], SystemKeys[B], SystemKeys[C], SystemKeys[D], SystemKeys[E], SystemKeys[F]];
     getMany(keys: (keyof SystemKeys)[]): any[];
     getMany(keys: string[]): any[] {
@@ -47,11 +51,7 @@ class SystemModelService extends Service {
     async set<K>(_id: string, value: K, broadcast?: boolean): Promise<K>;
     async set(_id: string, value: any, broadcast = true) {
         if (broadcast) this.ctx.broadcast('system/setting', { [_id]: value });
-        const res = await this.coll.findOneAndUpdate(
-            { _id },
-            { $set: { value } },
-            { upsert: true, returnDocument: 'after' },
-        );
+        const res = await this.coll.findOneAndUpdate({ _id }, { $set: { value } }, { upsert: true, returnDocument: 'after' });
         this.cache[_id] = res.value;
         return res.value;
     }

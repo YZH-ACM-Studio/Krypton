@@ -5,9 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import yaml from 'js-yaml';
-import type {
-    AnswerEntry, FillFunctionTemplate, FillRegion, QuestionKind,
-} from '@hydrooj/common';
+import type { AnswerEntry, FillFunctionTemplate, FillRegion, QuestionKind } from '@hydrooj/common';
 
 /**
  * pdoc.config 在库里是 YAML 字符串（与 testdata config.yaml 镜像）。
@@ -20,7 +18,7 @@ export function parseProblemConfigObject(pdoc: { config?: unknown } | null | und
     if (typeof pdoc.config === 'string' && pdoc.config.trim()) {
         try {
             const cfg = yaml.load(pdoc.config);
-            return (cfg && typeof cfg === 'object') ? cfg : null;
+            return cfg && typeof cfg === 'object' ? cfg : null;
         } catch {
             return null;
         }
@@ -32,14 +30,8 @@ export function isProblemConfigFilename(name: string): boolean {
     return /^config\.ya?ml$/i.test(name);
 }
 
-export function validateTextProgramFillSubmission(
-    problemKind: unknown,
-    config: any,
-    submitted: unknown,
-): boolean {
-    if (problemKind !== 'program_fill'
-        || config?.type !== 'objective'
-        || config?.subType !== 'program_fill_text') return false;
+export function validateTextProgramFillSubmission(problemKind: unknown, config: any, submitted: unknown): boolean {
+    if (problemKind !== 'program_fill' || config?.type !== 'objective' || config?.subType !== 'program_fill_text') return false;
     if (!submitted || typeof submitted !== 'object' || Array.isArray(submitted)) {
         throw new Error('program_fill: text submission must be an object');
     }
@@ -146,7 +138,7 @@ function compareQuestionKeys(a: string, b: string): number {
  * `clientProblemConfig`，绝不直接下发 answers。
  */
 export function clientQuestions(
-    config: { answers?: Record<string, AnswerEntry>, options?: Record<string, string[]> } | null | undefined,
+    config: { answers?: Record<string, AnswerEntry>; options?: Record<string, string[]> } | null | undefined,
 ): ClientQuestion[] {
     if (!config?.answers || typeof config.answers !== 'object') return [];
     const out: ClientQuestion[] = [];
@@ -160,8 +152,9 @@ export function clientQuestions(
         } catch {
             continue;
         }
-        const choices = (Array.isArray(meta.choices) && meta.choices.length ? meta.choices : undefined)
-            ?? (Array.isArray(config.options?.[key]) && config.options[key].length ? config.options[key] : undefined);
+        const choices =
+            (Array.isArray(meta.choices) && meta.choices.length ? meta.choices : undefined) ??
+            (Array.isArray(config.options?.[key]) && config.options[key].length ? config.options[key] : undefined);
         const q: ClientQuestion = { key, kind, score: Number(entry[1]) || 0 };
         if (typeof meta.prompt === 'string' && meta.prompt) q.prompt = meta.prompt;
         if (meta.presentation === 'truefalse') q.presentation = 'truefalse';
@@ -192,9 +185,9 @@ export function clientProblemConfig(config: any): any {
             lang: config.template.lang,
             regions: Array.isArray(config.template.regions)
                 ? config.template.regions.map((region) => ({
-                    id: region.id,
-                    ...(region.prompt ? { prompt: region.prompt } : {}),
-                }))
+                      id: region.id,
+                      ...(region.prompt ? { prompt: region.prompt } : {}),
+                  }))
                 : [],
         };
     }
@@ -219,9 +212,7 @@ export function templateSourceHash(source: string): string {
  *
  * Throws on invalid input: unknown region id, missing region, out-of-bounds.
  */
-export function spliceFillFunction(
-    template: FillFunctionTemplate, regionContents: Record<string, string>,
-): string {
+export function spliceFillFunction(template: FillFunctionTemplate, regionContents: Record<string, string>): string {
     const expected = new Set(template.regions.map((region) => region.id));
     const unknown = Object.keys(regionContents).find((id) => !expected.has(id));
     if (unknown) throw new Error(`fill_function: unknown region "${unknown}"`);
@@ -236,8 +227,8 @@ export function spliceFillFunction(
         if (content === undefined) {
             throw new Error(`fill_function: missing region "${region.id}"`);
         }
-        validateRegionBounds(lines, region); // eslint-disable-line ts/no-use-before-define
-        spliceOne(lines, region, content); // eslint-disable-line ts/no-use-before-define
+        validateRegionBounds(lines, region);
+        spliceOne(lines, region, content);
     }
     return lines.join('\n');
 }
@@ -271,11 +262,7 @@ function spliceOne(lines: string[], region: FillRegion, content: string): void {
     if (contentLines.length === 1) {
         lines.splice(start.line, end.line - start.line + 1, before + contentLines[0] + after);
     } else {
-        const newLines = [
-            before + contentLines[0],
-            ...contentLines.slice(1, -1),
-            contentLines[contentLines.length - 1] + after,
-        ];
+        const newLines = [before + contentLines[0], ...contentLines.slice(1, -1), contentLines[contentLines.length - 1] + after];
         lines.splice(start.line, end.line - start.line + 1, ...newLines);
     }
 }
@@ -300,8 +287,7 @@ export function validateRegions(template: Pick<FillFunctionTemplate, 'source' | 
     for (let i = 1; i < sorted.length; i++) {
         const prev = sorted[i - 1];
         const cur = sorted[i];
-        if (prev.end.line > cur.start.line
-            || (prev.end.line === cur.start.line && prev.end.col > cur.start.col)) {
+        if (prev.end.line > cur.start.line || (prev.end.line === cur.start.line && prev.end.col > cur.start.col)) {
             throw new Error(`fill_function: regions "${prev.id}" and "${cur.id}" overlap`);
         }
     }
@@ -315,10 +301,7 @@ export interface RegionMarkerMetadata {
 const REGION_START = /^\s*\/\/\s*@krypton-region\s+([A-Za-z][A-Za-z0-9_-]{0,31})\s*$/;
 const REGION_END = /^\s*\/\/\s*@krypton-endregion\s+([A-Za-z][A-Za-z0-9_-]{0,31})\s*$/;
 
-export function parseRegionMarkers(
-    markerSource: string,
-    metadata: RegionMarkerMetadata[],
-): FillFunctionTemplate {
+export function parseRegionMarkers(markerSource: string, metadata: RegionMarkerMetadata[]): FillFunctionTemplate {
     if (typeof markerSource !== 'string' || !markerSource.trim()) {
         throw new Error('fill_function: template source is required');
     }
@@ -338,7 +321,7 @@ export function parseRegionMarkers(
     }
     const output: string[] = [];
     const parsed = new Map<string, FillRegion>();
-    let active: { id: string, startLine: number } | null = null;
+    let active: { id: string; startLine: number } | null = null;
     for (const line of markerSource.replace(/\r\n/g, '\n').split('\n')) {
         const start = line.match(REGION_START);
         const end = line.match(REGION_END);
@@ -389,7 +372,7 @@ export function validateCompiledStructuredConfig(kind: string, config: any): voi
     if (config?.type !== 'fill_function' || config?.subType !== expectedSubType) {
         throw new Error(`${kind}: invalid compile configuration`);
     }
-    validateFillFunctionJudgeConfig(config); // eslint-disable-line ts/no-use-before-define
+    validateFillFunctionJudgeConfig(config);
     const template = config.template as FillFunctionTemplate;
     if (!Array.isArray(config.langs) || config.langs.length !== 1 || config.langs[0] !== template.lang) {
         throw new Error(`${kind}: language mismatch`);
@@ -416,22 +399,17 @@ export function validateFillFunctionJudgeConfig(config: any): void {
     }
 }
 
-export function validateFillFunctionTestdataFiles(
-    config: any,
-    files: Array<{ name: string }>,
-): void {
+export function validateFillFunctionTestdataFiles(config: any, files: Array<{ name: string }>): void {
     validateFillFunctionJudgeConfig(config);
     const available = new Set((files || []).map((item) => item.name));
-    const missing = (config.cases || [])
-        .flatMap((item) => [item.input, item.output])
-        .find((name) => !available.has(name));
+    const missing = (config.cases || []).flatMap((item) => [item.input, item.output]).find((name) => !available.has(name));
     if (missing) throw new Error(`fill_function: missing testdata file ${missing}`);
 }
 
 /** Parse and validate a student region payload before inserting a Record. */
 export function parseStructuredRegionSubmission(
     kind: 'program_fill' | 'function' | 'fill_function',
-    template: { lang: string, regions: Array<{ id: string }> } | null | undefined,
+    template: { lang: string; regions: Array<{ id: string }> } | null | undefined,
     rawCode: string,
 ): Record<string, string> {
     if (!template?.lang || !Array.isArray(template.regions) || !template.regions.length) {

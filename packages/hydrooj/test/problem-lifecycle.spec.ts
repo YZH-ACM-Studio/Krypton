@@ -8,7 +8,7 @@ class TestValidationError extends Error {
 }
 
 const counts = new Map<string, number>();
-const collectionQueries: Array<{ name: string, query: any }> = [];
+const collectionQueries: Array<{ name: string; query: any }> = [];
 const documentQueries: any[] = [];
 let failingCollection = '';
 
@@ -35,7 +35,9 @@ const documentStub = {
             documentQueries.push(structuredClone(query));
             return counts.get(`document:${query.docType}:${query.parentType || ''}`) || 0;
         },
-        async findOne() { return null; },
+        async findOne() {
+            return null;
+        },
     },
     collStatus: {
         async countDocuments(query: any) {
@@ -57,13 +59,21 @@ const previous = new Map<string, NodeModule | undefined>([
 ]);
 
 require.cache[dbPath] = {
-    id: dbPath, filename: dbPath, loaded: true, exports: { __esModule: true, default: dbStub },
+    id: dbPath,
+    filename: dbPath,
+    loaded: true,
+    exports: { __esModule: true, default: dbStub },
 } as NodeModule;
 require.cache[documentPath] = {
-    id: documentPath, filename: documentPath, loaded: true, exports: documentStub,
+    id: documentPath,
+    filename: documentPath,
+    loaded: true,
+    exports: documentStub,
 } as NodeModule;
 require.cache[errorPath] = {
-    id: errorPath, filename: errorPath, loaded: true,
+    id: errorPath,
+    filename: errorPath,
+    loaded: true,
     exports: { ValidationError: TestValidationError },
 } as NodeModule;
 delete require.cache[lifecyclePath];
@@ -80,9 +90,13 @@ beforeEach(() => {
 describe('P2.12 minimal problem lifecycle', () => {
     it('records every created problem field that varies by create input', () => {
         expect(lifecycle.problemCreateChangedFields('programming', {})).not.to.include('config');
-        expect(lifecycle.problemCreateChangedFields('multi', {
-            pid: 'M1', difficulty: 3, reference: { domainId: 'system', pid: 1 },
-        })).to.include.members(['pid', 'difficulty', 'reference', 'config']);
+        expect(
+            lifecycle.problemCreateChangedFields('multi', {
+                pid: 'M1',
+                difficulty: 3,
+                reference: { domainId: 'system', pid: 1 },
+            }),
+        ).to.include.members(['pid', 'difficulty', 'reference', 'config']);
         expect(lifecycle.problemCreateChangedFields('blank', {})).to.include('config');
     });
 
@@ -93,37 +107,39 @@ describe('P2.12 minimal problem lifecycle', () => {
     });
 
     it('keeps content as the only statement and fixes the structured score at 100', () => {
-        expect(lifecycle.normalizeStructuredProblemConfig('single', {
-            main: { options: ['Alpha', 'Beta'], answerIndex: 1 }, score: 1,
-        })).to.deep.equal({
-            type: 'objective', score: 100,
+        expect(
+            lifecycle.normalizeStructuredProblemConfig('single', {
+                main: { options: ['Alpha', 'Beta'], answerIndex: 1 },
+                score: 1,
+            }),
+        ).to.deep.equal({
+            type: 'objective',
+            score: 100,
             main: { options: ['Alpha', 'Beta'], answerIndex: 1 },
             answers: { main: ['B', 100, { kind: 'single', choices: ['Alpha', 'Beta'] }] },
             options: { main: ['Alpha', 'Beta'] },
         });
-        for (const config of [
-            {},
-            { main: {}, meta: { prompt: 'duplicate' } },
-            { main: {}, testdataSourcePid: 8 },
-        ]) {
-            expect(() => lifecycle.normalizeStructuredProblemConfig('single', config))
-                .to.throw(TestValidationError);
+        for (const config of [{}, { main: {}, meta: { prompt: 'duplicate' } }, { main: {}, testdataSourcePid: 8 }]) {
+            expect(() => lifecycle.normalizeStructuredProblemConfig('single', config)).to.throw(TestValidationError);
         }
     });
 
     it('normalizes all basic single-problem objective kinds and validates on the server', () => {
-        expect(lifecycle.normalizeStructuredProblemConfig('true_false', { main: { answer: false } }))
-            .to.have.nested.property('answers.main[0]', 'B');
-        expect(lifecycle.normalizeStructuredProblemConfig('blank', { main: { answer: 'CaseSensitive' } }))
-            .to.have.nested.property('answers.main[0]', 'CaseSensitive');
+        expect(lifecycle.normalizeStructuredProblemConfig('true_false', { main: { answer: false } })).to.have.nested.property('answers.main[0]', 'B');
+        expect(lifecycle.normalizeStructuredProblemConfig('blank', { main: { answer: 'CaseSensitive' } })).to.have.nested.property(
+            'answers.main[0]',
+            'CaseSensitive',
+        );
         const multi = lifecycle.normalizeStructuredProblemConfig('multi', {
             main: { options: ['A1', 'B1', 'C1'], answerIndexes: [2, 0], partialCreditPercent: 35 },
         });
         expect(multi).to.have.nested.property('answers.main[2].partialCreditPercent', 35);
         expect(multi).to.have.nested.property('answers.main[0]').that.deep.equals(['A', 'C']);
-        expect(lifecycle.normalizeStructuredProblemConfig('multi', {
-            main: { options: ['A1', 'B1'], answerIndexes: [0] },
-        })).to.have.nested.property('main.partialCreditPercent', 0);
+        expect(
+            lifecycle.normalizeStructuredProblemConfig('multi', {
+                main: { options: ['A1', 'B1'], answerIndexes: [0] },
+            }),
+        ).to.have.nested.property('main.partialCreditPercent', 0);
 
         for (const [kind, config] of [
             ['single', { main: { options: ['same', 'same'], answerIndex: 0 } }],
@@ -138,63 +154,75 @@ describe('P2.12 minimal problem lifecycle', () => {
     });
 
     it('normalizes a single subjective problem without an automatic answer', () => {
-        expect(lifecycle.normalizeStructuredProblemConfig('subjective', {
-            main: { gradingInstructions: 'Award for reasoning.' },
-        })).to.deep.equal({
+        expect(
+            lifecycle.normalizeStructuredProblemConfig('subjective', {
+                main: { gradingInstructions: 'Award for reasoning.' },
+            }),
+        ).to.deep.equal({
             type: 'objective',
             score: 100,
             main: { gradingInstructions: 'Award for reasoning.' },
             answers: { main: ['', 100, { kind: 'subjective' }] },
         });
-        expect(() => lifecycle.normalizeStructuredProblemConfig('subjective', {
-            main: { gradingInstructions: 42 },
-        })).to.throw(TestValidationError);
+        expect(() =>
+            lifecycle.normalizeStructuredProblemConfig('subjective', {
+                main: { gradingInstructions: 42 },
+            }),
+        ).to.throw(TestValidationError);
     });
 
     it('normalizes text and compile program-fill modes without sharing schemas', () => {
-        expect(lifecycle.normalizeStructuredProblemConfig('program_fill', {
-            main: { mode: 'text', answer: ' i++ ' },
-        })).to.deep.equal({
-            type: 'objective', subType: 'program_fill_text', score: 100,
+        expect(
+            lifecycle.normalizeStructuredProblemConfig('program_fill', {
+                main: { mode: 'text', answer: ' i++ ' },
+            }),
+        ).to.deep.equal({
+            type: 'objective',
+            subType: 'program_fill_text',
+            score: 100,
             main: { mode: 'text', answer: ' i++ ' },
             answers: { main: [' i++ ', 100, { kind: 'fill_program' }] },
         });
-        expect(() => lifecycle.normalizeStructuredProblemConfig('program_fill', {
-            main: { mode: 'text', answer: 'i++\nj++' },
-        })).to.throw(TestValidationError);
+        expect(() =>
+            lifecycle.normalizeStructuredProblemConfig('program_fill', {
+                main: { mode: 'text', answer: 'i++\nj++' },
+            }),
+        ).to.throw(TestValidationError);
 
         const compiled = lifecycle.normalizeStructuredProblemConfig('program_fill', {
             main: {
-                mode: 'compile', lang: 'cc.cc17',
-                markerSource: [
-                    'int main() {',
-                    '// @krypton-region main',
-                    'i++;',
-                    '// @krypton-endregion main',
-                    '}',
-                ].join('\n'),
+                mode: 'compile',
+                lang: 'cc.cc17',
+                markerSource: ['int main() {', '// @krypton-region main', 'i++;', '// @krypton-endregion main', '}'].join('\n'),
                 regions: [{ id: 'main', prompt: '填写一行' }],
                 cases: [{ input: '1.in', output: '1.out' }],
             },
         });
         expect(compiled).to.include({
-            type: 'fill_function', subType: 'program_fill_compile', score: 100,
+            type: 'fill_function',
+            subType: 'program_fill_compile',
+            score: 100,
         });
         expect(compiled).to.have.nested.property('template.lang', 'cc.cc17');
         expect(compiled).to.have.nested.property('template.regions[0].id', 'main');
         expect(lifecycle.structuredProblemUsesTestdata('program_fill', compiled)).to.equal(true);
-        expect(lifecycle.structuredProblemUsesTestdata('program_fill', {
-            main: { mode: 'text' },
-        })).to.equal(false);
-        expect(lifecycle.structuredProblemUsesTestdata('program_fill', {
-            subType: 'program_fill_compile',
-        })).to.equal(true);
+        expect(
+            lifecycle.structuredProblemUsesTestdata('program_fill', {
+                main: { mode: 'text' },
+            }),
+        ).to.equal(false);
+        expect(
+            lifecycle.structuredProblemUsesTestdata('program_fill', {
+                subType: 'program_fill_compile',
+            }),
+        ).to.equal(true);
     });
 
     it('normalizes function problems with multiple multi-line regions', () => {
         const compiled = lifecycle.normalizeStructuredProblemConfig('function', {
             main: {
-                mode: 'function', lang: 'cc.cc17',
+                mode: 'function',
+                lang: 'cc.cc17',
                 markerSource: [
                     '// @krypton-region first',
                     'int first() {',
@@ -220,12 +248,9 @@ describe('P2.12 minimal problem lifecycle', () => {
     it('creates an immutable different-language clone config with the same private source hash', () => {
         const source = lifecycle.normalizeStructuredProblemConfig('function', {
             main: {
-                mode: 'function', lang: 'cc.cc17',
-                markerSource: [
-                    '// @krypton-region solve',
-                    'int solve() { return 1; }',
-                    '// @krypton-endregion solve',
-                ].join('\n'),
+                mode: 'function',
+                lang: 'cc.cc17',
+                markerSource: ['// @krypton-region solve', 'int solve() { return 1; }', '// @krypton-endregion solve'].join('\n'),
                 regions: [{ id: 'solve' }],
                 cases: [{ input: '1.in', output: '1.out' }],
             },
@@ -236,8 +261,7 @@ describe('P2.12 minimal problem lifecycle', () => {
         expect(clone).to.have.nested.property('langs[0]', 'py.py3');
         expect(clone).to.have.nested.property('template.source', (source as any).template.source);
         expect(clone).to.have.nested.property('template.sourceHash', (source as any).template.sourceHash);
-        expect(() => lifecycle.cloneStructuredProblemForLanguage('function', source, 'cc.cc17'))
-            .to.throw(TestValidationError);
+        expect(() => lifecycle.cloneStructuredProblemForLanguage('function', source, 'cc.cc17')).to.throw(TestValidationError);
     });
 
     it('runs the fixed reference scan and reports every reference class', async () => {
@@ -271,8 +295,13 @@ describe('P2.12 minimal problem lifecycle', () => {
         });
         expect(lifecycle.problemReferenceCount(report)).to.equal(97);
         expect(collectionQueries.map((item) => item.name)).to.include.members([
-            'record', 'record.stat', 'mindmap.nodes', 'tasks.tasks',
-            'vigil.paper_draft', 'problem.permits', 'problem.permitSources',
+            'record',
+            'record.stat',
+            'mindmap.nodes',
+            'tasks.tasks',
+            'vigil.paper_draft',
+            'problem.permits',
+            'problem.permitSources',
         ]);
         const reverseReferenceQuery = documentQueries.find((query) => query['reference.domainId']);
         expect(reverseReferenceQuery).to.deep.equal({

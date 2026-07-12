@@ -1,8 +1,6 @@
 import { PassThrough } from 'stream';
 import type { Next } from 'koa';
-import {
-    HydroRequest, HydroResponse, KoaContext, serializer,
-} from '@hydrooj/framework';
+import { HydroRequest, HydroResponse, KoaContext, serializer } from '@hydrooj/framework';
 import { errorMessage } from '@hydrooj/utils/lib/utils';
 import { SystemError, UserFacingError } from './error';
 
@@ -16,8 +14,8 @@ export default (logger, xff, xhost) => async (ctx: KoaContext, next: Next) => {
     // Base Layer
     const request: HydroRequest = {
         method: ctx.request.method.toLowerCase(),
-        host: ctx.request.headers[xhost?.toLowerCase() || ''] as string || ctx.request.host,
-        ip: (ctx.request.headers[xff?.toLowerCase() || ''] as string || ctx.request.ip).split(',')[0].trim(),
+        host: (ctx.request.headers[xhost?.toLowerCase() || ''] as string) || ctx.request.host,
+        ip: ((ctx.request.headers[xff?.toLowerCase() || ''] as string) || ctx.request.ip).split(',')[0].trim(),
         ...pick(ctx, ['cookies', 'query', 'path', 'originalPath', 'querystring']),
         ...pick(ctx.request, ['headers', 'body', 'hostname']),
         files: ctx.request.files as any,
@@ -48,7 +46,10 @@ export default (logger, xff, xhost) => async (ctx: KoaContext, next: Next) => {
         disposition: null,
     };
     const args = {
-        ...ctx.params, ...ctx.query, ...ctx.request.body, __start: Date.now(),
+        ...ctx.params,
+        ...ctx.query,
+        ...ctx.request.body,
+        __start: Date.now(),
     };
     ctx.HydroContext = { request, response, args } as any;
     try {
@@ -69,18 +70,20 @@ export default (logger, xff, xhost) => async (ctx: KoaContext, next: Next) => {
             if (response.pjax && args.pjax) {
                 const pjax = typeof response.pjax === 'string' ? [[response.pjax, {}]] : response.pjax;
                 response.body = {
-                    fragments: (await Promise.all(
-                        pjax.map(async ([template, extra]) => handler.renderHTML(template, { ...response.body, ...extra })),
-                    )).map((i) => ({ html: i })),
+                    fragments: (
+                        await Promise.all(pjax.map(async ([template, extra]) => handler.renderHTML(template, { ...response.body, ...extra })))
+                    ).map((i) => ({ html: i })),
                 };
                 response.type = 'application/json';
-            } else if (
-                request.json || response.redirect
-                || request.query.noTemplate || !response.template) {
+            } else if (request.json || response.redirect || request.query.noTemplate || !response.template) {
                 // Send raw data
                 try {
                     if (typeof response.body === 'object' && request.headers['x-hydro-inject']) {
-                        const inject = request.headers['x-hydro-inject'].toString().toLowerCase().split(',').map((i) => i.trim());
+                        const inject = request.headers['x-hydro-inject']
+                            .toString()
+                            .toLowerCase()
+                            .split(',')
+                            .map((i) => i.trim());
                         if (inject.includes('uicontext')) response.body.UiContext = UiContext;
                         if (inject.includes('usercontext')) response.body.UserContext = user;
                     }
@@ -105,10 +108,10 @@ export default (logger, xff, xhost) => async (ctx: KoaContext, next: Next) => {
         if (request.json) response.body = { error };
         else {
             try {
-                response.body = await ctx.handler.renderHTML(
-                    error instanceof UserFacingError ? 'error.html' : 'bsod.html',
-                    { UserFacingError, error },
-                );
+                response.body = await ctx.handler.renderHTML(error instanceof UserFacingError ? 'error.html' : 'bsod.html', {
+                    UserFacingError,
+                    error,
+                });
                 response.type = 'text/html';
             } catch (e) {
                 logger.error(e);
@@ -126,10 +129,7 @@ export default (logger, xff, xhost) => async (ctx: KoaContext, next: Next) => {
             } else if (response.body) {
                 ctx.body = response.body instanceof Blob ? Buffer.from(await response.body.arrayBuffer()) : response.body;
                 ctx.response.status = response.status || 200;
-                ctx.response.type = response.type
-                    || (request.json
-                        ? 'application/json'
-                        : ctx.response.type);
+                ctx.response.type = response.type || (request.json ? 'application/json' : ctx.response.type);
             }
         }
     }

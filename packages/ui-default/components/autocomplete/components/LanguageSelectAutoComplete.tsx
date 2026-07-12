@@ -2,8 +2,13 @@ import { CustomSelectAutoComplete } from '@hydrooj/components';
 import PropTypes from 'prop-types';
 import React from 'react';
 
-const prefixes = new Set(Object.keys(window.LANGS).filter((i) => i.includes('.')).map((i) => i.split('.')[0]));
-const data = Object.keys(window.LANGS).filter((i) => !prefixes.has(i))
+const prefixes = new Set(
+  Object.keys(window.LANGS)
+    .filter((i) => i.includes('.'))
+    .map((i) => i.split('.')[0]),
+);
+const data = Object.keys(window.LANGS)
+  .filter((i) => !prefixes.has(i))
   .map((i) => ({ name: `${i.includes('.') ? `${window.LANGS[i.split('.')[0]].display || ''}/` : ''}${window.LANGS[i].display}`, _id: i }));
 const withAuto = [...data, { name: 'Auto', _id: 'auto' }];
 

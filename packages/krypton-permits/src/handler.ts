@@ -1,4 +1,3 @@
-/* eslint-disable no-await-in-loop */
 /**
  * Route handlers for krypton-permits.
  *
@@ -18,9 +17,20 @@
 import { Logger } from '@hydrooj/utils';
 import type { Context } from 'hydrooj';
 import {
-    ContestModel, Handler, NotFoundError, ObjectId, param, PERM, PermissionError, PRIV,
-    PrivilegeError, ProblemModel, Types,
-    UserModel, ValidationError } from 'hydrooj';
+    ContestModel,
+    Handler,
+    NotFoundError,
+    ObjectId,
+    param,
+    PERM,
+    PermissionError,
+    PRIV,
+    PrivilegeError,
+    ProblemModel,
+    Types,
+    UserModel,
+    ValidationError,
+} from 'hydrooj';
 import MessageModel from 'hydrooj/src/model/message';
 import { canMaintainProblem } from 'hydrooj/src/model/problem-access';
 import { permitsColl } from './db';
@@ -60,16 +70,10 @@ class ProblemPermitGrantHandler extends Handler {
             throw new PermissionError('无权查看此题目的权限列表');
         }
         const permits = await permitsModel.listForProblem(domainId, pdoc.docId);
-        const uids = Array.from(new Set([
-            ...permits.map((p) => p.uid),
-            ...permits.map((p) => p.grantedBy),
-        ]));
+        const uids = Array.from(new Set([...permits.map((p) => p.uid), ...permits.map((p) => p.grantedBy)]));
         const udict = await UserModel.getList(domainId, uids);
-        const confirmedPdoc = await ProblemModel.getViewableAuthorized(
-            domainId, pdoc.docId, this.user,
-        );
-        if (!confirmedPdoc || confirmedPdoc.docId !== pdoc.docId
-            || !canManageProblemPermits(this.user, confirmedPdoc)) {
+        const confirmedPdoc = await ProblemModel.getViewableAuthorized(domainId, pdoc.docId, this.user);
+        if (!confirmedPdoc || confirmedPdoc.docId !== pdoc.docId || !canManageProblemPermits(this.user, confirmedPdoc)) {
             throw new PermissionError('无权查看此题目的权限列表');
         }
         this.response.body = { permits, udict };
@@ -83,17 +87,20 @@ class ProblemPermitGrantHandler extends Handler {
     @param('requestId', Types.String, true)
     async post(
         args: { domainId?: unknown },
-        pid: number, uid: number | undefined, uids: string[] | undefined, role: string, note: string,
+        pid: number,
+        uid: number | undefined,
+        uids: string[] | undefined,
+        role: string,
+        note: string,
         requestId: string | undefined,
     ) {
         const domainId = authoritativeDomainId(this, args);
         if (!VALID_ROLES.includes(role as PermitRole)) {
             throw new ValidationError('role', null, 'role 必须是 verifier 或 maintainer');
         }
-        const targetUids = Array.from(new Set([
-            ...(uid ? [uid] : []),
-            ...(uids || []).map((i) => +i),
-        ].filter((i) => Number.isSafeInteger(i) && i > 0)));
+        const targetUids = Array.from(
+            new Set([...(uid ? [uid] : []), ...(uids || []).map((i) => +i)].filter((i) => Number.isSafeInteger(i) && i > 0)),
+        );
         if (!targetUids.length) {
             throw new ValidationError('uid', null, '请选择至少一个目标用户');
         }
@@ -117,7 +124,10 @@ class ProblemPermitGrantHandler extends Handler {
             domainId,
             pdoc.docId,
             role,
-            targetUids.slice().sort((a, b) => a - b).join(','),
+            targetUids
+                .slice()
+                .sort((a, b) => a - b)
+                .join(','),
         );
         await ProblemModel.withAuthorizedWriteClaim(
             domainId,
@@ -125,28 +135,36 @@ class ProblemPermitGrantHandler extends Handler {
             this.user,
             'permit-grant',
             async (claim) => {
-                await Promise.all(targetUids.map((targetUid) => permitsModel.grant(
-                    domainId, pdoc.docId, targetUid, role as PermitRole, this.user._id, {
-                        note,
-                        requestId: `${mutationId}:${targetUid}`,
-                        writeClaimRequestId: claim.requestId,
-                    },
-                )));
+                await Promise.all(
+                    targetUids.map((targetUid) =>
+                        permitsModel.grant(domainId, pdoc.docId, targetUid, role as PermitRole, this.user._id, {
+                            note,
+                            requestId: `${mutationId}:${targetUid}`,
+                            writeClaimRequestId: claim.requestId,
+                        }),
+                    ),
+                );
             },
             { requestId: mutationId },
         );
-        await Promise.all(targetUids.map(async (targetUid) => {
-            const pairRequestId = `${mutationId}:${targetUid}`;
-            const msg = `[krypton] 你被 ${this.user.uname} 邀请成为题目 ${pdoc.title} 的 ${roleZh}：${link}${note ? `\n附言：${note}` : ''}`;
-            try {
-                await MessageModel.send(this.user._id, targetUid, msg, MessageModel.FLAG_UNREAD);
-            } catch (error) {
-                logger.error(
-                    'notification failed requestId=%s domain=%s pid=%d uid=%d error=%s',
-                    pairRequestId, domainId, pdoc.docId, targetUid, error,
-                );
-            }
-        }));
+        await Promise.all(
+            targetUids.map(async (targetUid) => {
+                const pairRequestId = `${mutationId}:${targetUid}`;
+                const msg = `[krypton] 你被 ${this.user.uname} 邀请成为题目 ${pdoc.title} 的 ${roleZh}：${link}${note ? `\n附言：${note}` : ''}`;
+                try {
+                    await MessageModel.send(this.user._id, targetUid, msg, MessageModel.FLAG_UNREAD);
+                } catch (error) {
+                    logger.error(
+                        'notification failed requestId=%s domain=%s pid=%d uid=%d error=%s',
+                        pairRequestId,
+                        domainId,
+                        pdoc.docId,
+                        targetUid,
+                        error,
+                    );
+                }
+            }),
+        );
         this.response.body = { success: true, count: targetUids.length, requestId: mutationId };
     }
 }
@@ -155,10 +173,7 @@ class ProblemPermitRevokeHandler extends Handler {
     @param('pid', Types.UnsignedInt)
     @param('permitId', Types.ObjectId)
     @param('requestId', Types.String, true)
-    async post(
-        args: { domainId?: unknown },
-        pid: number, permitId: ObjectId, requestId: string | undefined,
-    ) {
+    async post(args: { domainId?: unknown }, pid: number, permitId: ObjectId, requestId: string | undefined) {
         const domainId = authoritativeDomainId(this, args);
         const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
         if (!pdoc) throw new NotFoundError('题目不存在');
@@ -173,19 +188,18 @@ class ProblemPermitRevokeHandler extends Handler {
         if (!isSelf && !canManageProblemPermits(this.user, pdoc)) {
             throw new PermissionError('无权撤销该权限');
         }
-        const mutationId = deriveAclRequestId(
-            requestId, 'problem-permit-revoke', domainId, pdoc.docId, row.uid,
-        );
+        const mutationId = deriveAclRequestId(requestId, 'problem-permit-revoke', domainId, pdoc.docId, row.uid);
         await ProblemModel.withAuthorizedWriteClaim(
             domainId,
             pdoc.docId,
             this.user,
             'permit-revoke',
-            (claim) => permitsModel.revoke(domainId, permitId, {
-                requestId: mutationId,
-                actor: this.user._id,
-                writeClaimRequestId: claim.requestId,
-            }),
+            (claim) =>
+                permitsModel.revoke(domainId, permitId, {
+                    requestId: mutationId,
+                    actor: this.user._id,
+                    writeClaimRequestId: claim.requestId,
+                }),
             { requestId: mutationId, selfRevokeUid: isSelf ? row.uid : undefined },
         );
         this.response.body = { success: true, requestId: mutationId };
@@ -198,10 +212,7 @@ class ContestVerifierAddHandler extends Handler {
     @param('role', Types.String, true)
     @param('note', Types.String, true)
     @param('requestId', Types.String, true)
-    async post(
-        args: { domainId?: unknown },
-        tid: ObjectId, uid: number, role: string, note: string, requestId: string | undefined,
-    ) {
+    async post(args: { domainId?: unknown }, tid: ObjectId, uid: number, role: string, note: string, requestId: string | undefined) {
         const domainId = authoritativeDomainId(this, args);
         const r = (role || 'verifier') as PermitRole;
         if (!VALID_ROLES.includes(r)) {
@@ -233,33 +244,28 @@ class ContestVerifierAddHandler extends Handler {
         // committed but its hook failed, a retry skips the edit branch above;
         // this call resumes the hook's stable requestId instead of colliding
         // with an abandoned fence.
-        await permitsModel.syncContestCurrentPids(
-            domainId,
-            tid,
-            tdoc.pids || [],
-            [...new Set([...verifiers, uid])],
-            this.user._id,
-            { requestId: `contest-edit:${domainId}:${tid.toHexString()}` },
-        );
+        await permitsModel.syncContestCurrentPids(domainId, tid, tdoc.pids || [], [...new Set([...verifiers, uid])], this.user._id, {
+            requestId: `contest-edit:${domainId}:${tid.toHexString()}`,
+        });
         // Bulk-grant on every contest problem.
-        const mutationId = deriveAclRequestId(
-            requestId, 'contest-permit-grant', domainId, tid.toHexString(), uid, r,
-        );
-        await permitsModel.grantBulkViaContest(
-            domainId, tdoc.pids || [], uid, r, this.user._id, tid,
-            { requestId: mutationId, note },
-        );
+        const mutationId = deriveAclRequestId(requestId, 'contest-permit-grant', domainId, tid.toHexString(), uid, r);
+        await permitsModel.grantBulkViaContest(domainId, tdoc.pids || [], uid, r, this.user._id, tid, { requestId: mutationId, note });
         const link = `/contest/${tid.toHexString()}`;
         const roleZh = r === 'maintainer' ? '比赛维护者' : '验比赛人';
         const problemCount = (tdoc.pids || []).length;
-        const msg = `[krypton] 你被 ${this.user.uname} 邀请成为比赛 ${tdoc.title} 的 ${roleZh}`
-            + `（共 ${problemCount} 题）：${link}${note ? `\n附言：${note}` : ''}`;
+        const msg =
+            `[krypton] 你被 ${this.user.uname} 邀请成为比赛 ${tdoc.title} 的 ${roleZh}` +
+            `（共 ${problemCount} 题）：${link}${note ? `\n附言：${note}` : ''}`;
         try {
             await MessageModel.send(this.user._id, uid, msg, MessageModel.FLAG_UNREAD);
         } catch (error) {
             logger.error(
                 'notification failed requestId=%s domain=%s contest=%s uid=%d error=%s',
-                mutationId, domainId, tid.toHexString(), uid, error,
+                mutationId,
+                domainId,
+                tid.toHexString(),
+                uid,
+                error,
             );
         }
         this.response.body = { success: true, requestId: mutationId };
@@ -270,10 +276,7 @@ class ContestVerifierRemoveHandler extends Handler {
     @param('tid', Types.ObjectId)
     @param('uid', Types.PositiveInt)
     @param('requestId', Types.String, true)
-    async post(
-        args: { domainId?: unknown },
-        tid: ObjectId, uid: number, requestId: string | undefined,
-    ) {
+    async post(args: { domainId?: unknown }, tid: ObjectId, uid: number, requestId: string | undefined) {
         const domainId = authoritativeDomainId(this, args);
         const tdoc = await ContestModel.get(domainId, tid);
         if (!tdoc) throw new NotFoundError('比赛不存在');
@@ -282,9 +285,7 @@ class ContestVerifierRemoveHandler extends Handler {
             throw new PermissionError('无权移除该验题人');
         }
         const verifiers = (tdoc.verifiers || []).filter((u) => u !== uid);
-        const mutationId = deriveAclRequestId(
-            requestId, 'contest-permit-revoke', domainId, tid.toHexString(), uid,
-        );
+        const mutationId = deriveAclRequestId(requestId, 'contest-permit-revoke', domainId, tid.toHexString(), uid);
         await permitsModel.revokeContestUser(domainId, tid, uid, {
             requestId: mutationId,
             actor: this.user._id,
@@ -305,9 +306,7 @@ class MyVerifyInboxHandler extends Handler {
         // concurrent revoke cannot leave an old permitted title in the page.
         const fixedPdict: Record<string, any> = {};
         for (const pid of pids) {
-            const pdoc = await ProblemModel.getViewableAuthorized(
-                domainId, pid, this.user, ProblemModel.PROJECTION_LIST,
-            );
+            const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user, ProblemModel.PROJECTION_LIST);
             if (pdoc) fixedPdict[pid] = pdoc;
         }
         const granterUids = Array.from(new Set(rows.map((r) => r.grantedBy)));

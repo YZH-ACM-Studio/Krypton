@@ -23,6 +23,7 @@ const compilerOptionsBase = {
     jsx: 'react-jsx',
     sourceMap: false,
     composite: true,
+    skipLibCheck: true,
     strict: false,
     strictBindCallApply: true,
     resolveJsonModule: true,
@@ -36,18 +37,20 @@ const config = {
     references: [
         { path: 'tsconfig.ui.json' },
         { path: 'tsconfig.ui-next.json' },
+        { path: 'tsconfig.ui-workers.json' },
+        { path: 'tsconfig.check.json' },
         { path: 'plugins/tsconfig.json' },
     ],
     files: [],
 };
-const exclude = ['**/public', '**/frontend', '**/node_modules', '**/bin', '**/dist', '**/__mocks__'];
+const exclude = ['**/public', '**/frontend', '**/node_modules', '**/dist', '**/__mocks__'];
 const configSrc = (name) => ({
     compilerOptions: {
         ...compilerOptionsBase,
         outDir: path.join(baseOutDir, name),
-        rootDir: 'src',
+        rootDir: '.',
     },
-    include: ['src'],
+    include: ['src', 'test', 'bin/**/*.ts', '*.ts', '*.tsx', 'package.json'],
     exclude,
 });
 const configFlat = (name) => ({
@@ -56,9 +59,7 @@ const configFlat = (name) => ({
         outDir: path.join(baseOutDir, name),
         rootDir: '.',
         paths: {
-            'vj/*': [
-                '../../packages/ui-default/*',
-            ],
+            'vj/*': ['../../packages/ui-default/*'],
         },
     },
     include: ['**/*.ts', '**/*.tsx'],
@@ -80,7 +81,9 @@ for (const name of ['plugins', 'modules']) {
 const modules = [
     'packages/hydrooj',
     ...['packages', 'framework'].flatMap((i) => fs.readdirSync(path.resolve(process.cwd(), i)).map((j) => `${i}/${j}`)),
-].filter((i) => !['/.', 'ui-default', 'ui-next'].some((t) => i.includes(t))).filter((i) => fs.statSync(path.resolve(process.cwd(), i)).isDirectory());
+]
+    .filter((i) => !['/.', 'ui-default', 'ui-next'].some((t) => i.includes(t)))
+    .filter((i) => fs.statSync(path.resolve(process.cwd(), i)).isDirectory());
 
 const UIConfig = {
     exclude: [
@@ -94,10 +97,12 @@ const UIConfig = {
         'packages/ui-default/components/message/worker.ts',
         '**/node_modules',
     ],
-    include: ['ts', 'tsx', 'vue', 'json']
-        .flatMap((ext) => ['plugins']
-            .flatMap((name) => [`${name}/**/public/**/*.${ext}`, `${name}/**/frontend/**/*.${ext}`])
-            .concat(`packages/ui-default/**/*.${ext}`)),
+    include: ['ts', 'tsx', 'vue', 'json'].flatMap((ext) => [
+        `plugins/**/public/**/*.${ext}`,
+        `plugins/**/frontend/**/*.${ext}`,
+        `packages/*/frontend/**/*.${ext}`,
+        `packages/ui-default/**/*.${ext}`,
+    ]),
     compilerOptions: {
         ...compilerOptionsBase,
         module: 'ESNext',
@@ -113,6 +118,7 @@ const UIConfig = {
         /* Bundler mode */
         moduleResolution: 'bundler',
         moduleDetection: 'force',
+        allowImportingTsExtensions: true,
         noEmit: true,
 
         /* Linting */
@@ -120,18 +126,19 @@ const UIConfig = {
         noUncheckedSideEffectImports: true,
 
         paths: {
-            'vj/*': [
-                './packages/ui-default/*',
-            ],
+            'vj/*': ['./packages/ui-default/*'],
         },
     },
 };
 
 const UINextConfig = {
-    exclude: [
-        '**/node_modules',
-    ],
-    include: ['ts', 'tsx', 'vue', 'json'].map((ext) => `packages/ui-next/src/**/*.${ext}`),
+    exclude: ['**/node_modules', 'packages/ui-next/public'],
+    include: ['ts', 'tsx', 'vue', 'json'].flatMap((ext) => [
+        `packages/ui-next/src/**/*.${ext}`,
+        `packages/ui-next/test/**/*.${ext}`,
+        `packages/ui-next/vite.config.${ext}`,
+        `packages/ui-next/rankboard-capabilities.${ext}`,
+    ]),
     compilerOptions: {
         ...compilerOptionsBase,
         module: 'ESNext',
@@ -150,6 +157,7 @@ const UINextConfig = {
         /* Bundler mode */
         moduleResolution: 'bundler',
         moduleDetection: 'force',
+        allowImportingTsExtensions: true,
         noEmit: true,
 
         /* Linting */
@@ -157,12 +165,63 @@ const UINextConfig = {
         noUncheckedSideEffectImports: true,
 
         paths: {
-            '@/*': [
-                './packages/ui-next/src/*',
-            ],
-            'vj/*': [
-                './packages/ui-default/*',
-            ],
+            '@/*': ['./packages/ui-next/src/*'],
+            'vj/*': ['./packages/ui-default/*'],
+        },
+    },
+};
+
+const CheckConfig = {
+    exclude: [
+        '**/node_modules',
+        '**/dist',
+        '**/public',
+        '**/frontend',
+        'packages/ui-next/src',
+        'packages/ui-next/test',
+        'packages/ui-next/public',
+        'packages/ui-next/vite.config.ts',
+        'packages/ui-default/service-worker.ts',
+        'packages/hydrojudge/vendor',
+    ],
+    include: [
+        'build/**/*.ts',
+        'install/**/*.ts',
+        'test/**/*.ts',
+        'framework/**/*.ts',
+        'framework/**/package.json',
+        'packages/*/src/**/*.ts',
+        'packages/*/test/**/*.ts',
+        'packages/*/test/**/*.tsx',
+        'packages/*/package.json',
+        'packages/ui-default/index.ts',
+        'packages/ui-default/backendlib/**/*.ts',
+        'packages/ui-next/index.ts',
+        'packages/ui-next/rankboard-capabilities.ts',
+    ],
+    compilerOptions: {
+        ...compilerOptionsBase,
+        baseUrl: '.',
+        rootDir: '.',
+        outDir: path.join(baseOutDir, 'check'),
+        noEmit: true,
+        lib: ['esnext', 'DOM', 'DOM.Iterable'],
+        paths: {
+            'vj/*': ['./packages/ui-default/*'],
+        },
+    },
+};
+
+const UIWorkersConfig = {
+    exclude: ['**/node_modules'],
+    include: ['packages/ui-default/service-worker.ts', 'packages/ui-default/components/message/worker.ts'],
+    compilerOptions: {
+        ...compilerOptionsBase,
+        baseUrl: '.',
+        outDir: path.join(baseOutDir, 'ui-workers'),
+        noEmit: true,
+        paths: {
+            'vj/*': ['./packages/ui-default/*'],
         },
     },
 };
@@ -176,17 +235,11 @@ const tryUpdate = (location, content) => {
 const nm = path.resolve(__dirname, '../node_modules');
 fs.ensureDirSync(path.join(nm, '@hydrooj'));
 try {
-    fs.symlinkSync(
-        path.join(process.cwd(), 'packages/ui-default'),
-        path.join(nm, '@hydrooj/ui-default'),
-        'dir',
-    );
-} catch (e) { }
+    fs.symlinkSync(path.join(process.cwd(), 'packages/ui-default'), path.join(nm, '@hydrooj/ui-default'), 'dir');
+} catch (e) {}
 
 const pluginsConfig = {
-    include: [
-        '**/*.ts',
-    ],
+    include: ['**/*.ts'],
     exclude,
     compilerOptions: {
         ...compilerOptionsBase,
@@ -195,9 +248,7 @@ const pluginsConfig = {
         outDir: path.join(baseOutDir, 'plugins'),
         skipLibCheck: true,
         paths: {
-            'vj/*': [
-                '../packages/ui-default/*',
-            ],
+            'vj/*': ['../packages/ui-default/*'],
         },
     },
 };
@@ -207,11 +258,10 @@ for (const pkg of modules) {
     const basedir = path.resolve(process.cwd(), pkg);
     const files = fs.readdirSync(basedir);
     try {
-        // eslint-disable-next-line import/no-dynamic-require
         const name = require(path.join(basedir, 'package.json')).name;
         fs.symlinkSync(basedir, path.join(nm, name), 'dir');
-    } catch (e) { }
-    if (!files.includes('src') && !files.filter((i) => i.endsWith('.ts')).length && pkg !== 'packages/utils') continue;
+    } catch (e) {}
+    if (!files.includes('src') && !files.includes('lib') && !files.filter((i) => i.endsWith('.ts')).length) continue;
     config.references.push({ path: pkg });
     const origConfig = (files.includes('src') ? configSrc : configFlat)(pkg);
     const expectedConfig = JSON.stringify(pkg.startsWith('modules/') ? withoutTypes(origConfig) : origConfig);
@@ -229,4 +279,6 @@ for (const pkg of modules) {
 }
 tryUpdate(path.resolve(process.cwd(), 'tsconfig.ui.json'), UIConfig);
 tryUpdate(path.resolve(process.cwd(), 'tsconfig.ui-next.json'), UINextConfig);
+tryUpdate(path.resolve(process.cwd(), 'tsconfig.ui-workers.json'), UIWorkersConfig);
+tryUpdate(path.resolve(process.cwd(), 'tsconfig.check.json'), CheckConfig);
 tryUpdate(path.resolve(process.cwd(), 'tsconfig.json'), config);

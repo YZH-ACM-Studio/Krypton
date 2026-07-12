@@ -14,10 +14,16 @@ PYTHONPATH=/lib/python3.13/site-packages
 `;
 
 export const JudgeSettings = Schema.object({
-    cache_dir: Schema.string().default(path.resolve(os.homedir(), '.cache', 'hydro', 'judge')).description('Testdata cache directory'),
+    cache_dir: Schema.string()
+        .default(path.resolve(os.homedir(), '.cache', 'hydro', 'judge'))
+        .description('Testdata cache directory'),
     tmp_dir: Schema.string().default(path.resolve(os.tmpdir(), 'hydro', 'judge')),
-    stdio_size: Schema.string().pattern(/^\d+[kmg]b?$/g).default('32m'),
-    memoryMax: Schema.string().pattern(/^\d+[kmg]b?$/g).default('512m'),
+    stdio_size: Schema.string()
+        .pattern(/^\d+[kmg]b?$/g)
+        .default('32m'),
+    memoryMax: Schema.string()
+        .pattern(/^\d+[kmg]b?$/g)
+        .default('512m'),
     strict_memory: Schema.boolean().default(false).description('Use address space memory limit'),
     sandbox_host: Schema.string().role('url').default('http://localhost:5050'),
     testcases_max: Schema.number().default(100).min(1).step(1),
@@ -40,13 +46,12 @@ export const JudgeSettings = Schema.object({
         Schema.const('full'),
         Schema.const('case'),
         Schema.const('none'),
-        Schema.transform(Schema.union([
-            Schema.boolean().deprecated(),
-            Schema.const('full'),
-            Schema.const('none'),
-            Schema.const('case'),
-        ]), (v) => (typeof v === 'boolean' ? (v ? 'full' : 'case') : v)),
-    ]).description('Show diff detail').default('full'),
+        Schema.transform(Schema.union([Schema.boolean().deprecated(), Schema.const('full'), Schema.const('none'), Schema.const('case')]), (v) =>
+            typeof v === 'boolean' ? (v ? 'full' : 'case') : v,
+        ),
+    ])
+        .description('Show diff detail')
+        .default('full'),
     performance: Schema.boolean().description('Performance mode').default(false),
 });
 
@@ -56,33 +61,36 @@ const newPath = path.resolve(os.homedir(), '.hydro', 'judge.yaml');
 let config = global.Hydro
     ? JudgeSettings({})
     : (() => {
-        const base: any = {};
-        if (process.env.TEMP_DIR || argv.options.tmp) {
-            base.tmp_dir = path.resolve(process.env.TEMP_DIR || argv.options.tmp);
-        }
-        if (process.env.CACHE_DIR || argv.options.cache) {
-            base.cache_dir = path.resolve(process.env.CACHE_DIR || argv.options.cache);
-        }
-        if (process.env.EXECUTION_HOST || argv.options.sandbox) {
-            base.sandbox_host = path.resolve(process.env.EXECUTION_HOST || argv.options.sandbox);
-        }
-        const configFilePath = (process.env.CONFIG_FILE || argv.options.config)
-            ? path.resolve(process.env.CONFIG_FILE || argv.options.config)
-            : fs.existsSync(newPath) ? newPath : oldPath;
-        const configFile = fs.readFileSync(configFilePath, 'utf-8');
-        Object.assign(base, yaml.load(configFile) as any);
-        if (process.env.OVERRIDE_CONFIG) {
-            if (fs.existsSync(process.env.OVERRIDE_CONFIG)) {
-                const overrideConfigFile = fs.readFileSync(process.env.OVERRIDE_CONFIG, 'utf-8');
-                Object.assign(base, yaml.load(overrideConfigFile) as any);
-            } else console.warn('Override config file not found');
-        }
-        const cfg = JudgeSettings(base);
-        return JudgeSettings(cfg);
-    })();
+          const base: any = {};
+          if (process.env.TEMP_DIR || argv.options.tmp) {
+              base.tmp_dir = path.resolve(process.env.TEMP_DIR || argv.options.tmp);
+          }
+          if (process.env.CACHE_DIR || argv.options.cache) {
+              base.cache_dir = path.resolve(process.env.CACHE_DIR || argv.options.cache);
+          }
+          if (process.env.EXECUTION_HOST || argv.options.sandbox) {
+              base.sandbox_host = path.resolve(process.env.EXECUTION_HOST || argv.options.sandbox);
+          }
+          const configFilePath =
+              process.env.CONFIG_FILE || argv.options.config
+                  ? path.resolve(process.env.CONFIG_FILE || argv.options.config)
+                  : fs.existsSync(newPath)
+                    ? newPath
+                    : oldPath;
+          const configFile = fs.readFileSync(configFilePath, 'utf-8');
+          Object.assign(base, yaml.load(configFile) as any);
+          if (process.env.OVERRIDE_CONFIG) {
+              if (fs.existsSync(process.env.OVERRIDE_CONFIG)) {
+                  const overrideConfigFile = fs.readFileSync(process.env.OVERRIDE_CONFIG, 'utf-8');
+                  Object.assign(base, yaml.load(overrideConfigFile) as any);
+              } else console.warn('Override config file not found');
+          }
+          const cfg = JudgeSettings(base);
+          return JudgeSettings(cfg);
+      })();
 
 export function overrideConfig(update: ReturnType<typeof JudgeSettings>) {
     config = JudgeSettings(update);
 }
 
-export const getConfig: <K extends keyof typeof config>(key: K) => typeof config[K] = (key) => config[key];
+export const getConfig: <K extends keyof typeof config>(key: K) => (typeof config)[K] = (key) => config[key];

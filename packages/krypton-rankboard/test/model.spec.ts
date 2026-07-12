@@ -22,10 +22,11 @@ const students = [
 const studentsColl = {
     async findOne(filter: any) {
         studentQueries.push(filter);
-        return students.find((student) => (
-            String(student._id) === String(filter._id)
-            && (filter.domainId === undefined || student.domainId === filter.domainId)
-        )) || null;
+        return (
+            students.find(
+                (student) => String(student._id) === String(filter._id) && (filter.domainId === undefined || student.domainId === filter.domainId),
+            ) || null
+        );
     },
 };
 
@@ -44,9 +45,15 @@ const dbStub = {
     awardTypesColl: {},
     importBatchesColl: {},
     peopleColl,
-    async seedAwardTypesIfEmpty() { return undefined; },
-    async getConfig() { return { baseScore: 100, decayFactor: 0.5 }; },
-    async setConfig() { return undefined; },
+    async seedAwardTypesIfEmpty() {
+        return undefined;
+    },
+    async getConfig() {
+        return { baseScore: 100, decayFactor: 0.5 };
+    },
+    async setConfig() {
+        return undefined;
+    },
 };
 
 const hydroojStub = {
@@ -76,7 +83,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     return originalLoad.call(this, request, parent, isMain);
 };
 
-let createPerson: (input: { studentDocId: any, createdBy: number }) => Promise<any>;
+let createPerson: (input: { studentDocId: any; createdBy: number }) => Promise<any>;
 try {
     ({ createPerson } = require(modelPath));
 } finally {

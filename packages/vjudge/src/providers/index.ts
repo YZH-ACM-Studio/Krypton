@@ -1,10 +1,7 @@
 import codeforces from './codeforces';
 import csgoj from './csgoj';
 import hduoj from './hduoj';
-import {
-    HUSTOJ as hustoj,
-    XJOI as xjoi,
-} from './hustoj';
+import { HUSTOJ as hustoj, XJOI as xjoi } from './hustoj';
 import poj from './poj';
 import spoj from './spoj';
 import uoj from './uoj';

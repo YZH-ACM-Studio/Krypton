@@ -35,14 +35,14 @@ import { cn } from '@/lib/cn';
 import { formatDateTime, replaceRouteTokens, toDate } from '@/lib/format';
 
 type R = Record<string, any>;
-type ScoreboardCell = {
+interface ScoreboardCell {
   type?: string;
   value?: string | number;
   raw?: any;
   score?: number;
   hover?: string;
   style?: string;
-};
+}
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  Shared helpers                                                   */
@@ -60,23 +60,34 @@ function contestState(c: R) {
 
 function ruleLabel(rule?: string): string {
   switch ((rule || '').toLowerCase()) {
-    case 'acm': return 'XCPC';
-    case 'oi': return 'OI';
-    case 'ioi': return 'IOI';
-    case 'strictioi': return 'IOI 严格';
-    case 'ledo': return 'Ledo';
-    case 'homework': return '作业';
-    case 'exam': return '考试';
-    default: return rule || '—';
+    case 'acm':
+      return 'XCPC';
+    case 'oi':
+      return 'OI';
+    case 'ioi':
+      return 'IOI';
+    case 'strictioi':
+      return 'IOI 严格';
+    case 'ledo':
+      return 'Ledo';
+    case 'homework':
+      return '作业';
+    case 'exam':
+      return '考试';
+    default:
+      return rule || '—';
   }
 }
 
 function ruleBadgeVariant(rule?: string): 'default' | 'secondary' | 'outline' {
   switch ((rule || '').toLowerCase()) {
-    case 'acm': return 'default';
+    case 'acm':
+      return 'default';
     case 'ioi':
-    case 'strictioi': return 'secondary';
-    default: return 'outline';
+    case 'strictioi':
+      return 'secondary';
+    default:
+      return 'outline';
   }
 }
 
@@ -120,7 +131,9 @@ function countdownProgress(phase: ReturnType<typeof contestState>['phase'], begi
 function CountdownUnit({ value, label, wide = false }: { value: string | number; label: string; wide?: boolean }) {
   return (
     <span className="inline-flex items-end gap-1">
-      <span className={`inline-flex h-11 items-center justify-center rounded-md border bg-background/80 px-2 font-mono text-2xl font-semibold tabular-nums ${wide ? 'min-w-16' : 'min-w-12'}`}>
+      <span
+        className={`inline-flex h-11 items-center justify-center rounded-md border bg-background/80 px-2 font-mono text-2xl font-semibold tabular-nums ${wide ? 'min-w-16' : 'min-w-12'}`}
+      >
         {value}
       </span>
       <span className="pb-1 text-[11px] text-muted-foreground">{label}</span>
@@ -156,13 +169,17 @@ function CountdownStrip({
       <div className="grid gap-4 p-4 lg:grid-cols-[1fr_auto_220px] lg:items-center">
         <div className="flex items-center gap-3">
           <span className="flex size-10 items-center justify-center rounded-lg border bg-background/70">
-            {isRunning ? <Radio className="size-4 text-emerald-600" /> : isUpcoming ? <Clock className="size-4 text-amber-600" /> : <CheckCircle2 className="size-4 text-muted-foreground" />}
+            {isRunning ? (
+              <Radio className="size-4 text-emerald-600" />
+            ) : isUpcoming ? (
+              <Clock className="size-4 text-amber-600" />
+            ) : (
+              <CheckCircle2 className="size-4 text-muted-foreground" />
+            )}
           </span>
           <div>
             <p className="text-sm font-medium">{label}</p>
-            <p className="text-xs text-muted-foreground">
-              {isRunning ? '比赛正在进行' : isUpcoming ? '准备阶段' : '可查看赛后信息'}
-            </p>
+            <p className="text-xs text-muted-foreground">{isRunning ? '比赛正在进行' : isUpcoming ? '准备阶段' : '可查看赛后信息'}</p>
           </div>
         </div>
 
@@ -211,10 +228,18 @@ export function ContestsPage() {
   const currentQuery = data.q || '';
 
   const [view, setView] = useState<'list' | 'cards'>(() => {
-    try { return (localStorage.getItem(VIEW_KEY) as any) || 'list'; } catch { return 'list'; }
+    try {
+      return (localStorage.getItem(VIEW_KEY) as any) || 'list';
+    } catch {
+      return 'list';
+    }
   });
   useEffect(() => {
-    try { localStorage.setItem(VIEW_KEY, view); } catch { /* ignore */ }
+    try {
+      localStorage.setItem(VIEW_KEY, view);
+    } catch {
+      /* ignore */
+    }
   }, [view]);
 
   // Status filter (client-side, since server doesn't filter by status)
@@ -251,12 +276,7 @@ export function ContestsPage() {
   })();
 
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       {/* Header + create */}
       <div className="flex items-center justify-between">
         <div>
@@ -270,10 +290,32 @@ export function ContestsPage() {
 
       {/* Stats strip */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCell label="进行中" value={buckets.running.length} icon={<Flag className="size-4 text-green-600" />} active={statusFilter === 'running'} onClick={() => setStatusFilter(statusFilter === 'running' ? 'all' : 'running')} />
-        <StatCell label="即将开始" value={buckets.upcoming.length} icon={<Clock className="size-4 text-amber-600" />} active={statusFilter === 'upcoming'} onClick={() => setStatusFilter(statusFilter === 'upcoming' ? 'all' : 'upcoming')} />
-        <StatCell label="已结束" value={buckets.ended.length} icon={<CheckCircle2 className="size-4 text-muted-foreground" />} active={statusFilter === 'ended'} onClick={() => setStatusFilter(statusFilter === 'ended' ? 'all' : 'ended')} />
-        <StatCell label="我参加" value={Object.values(tsdict).filter((s: any) => s?.attend).length} icon={<Trophy className="size-4 text-primary" />} />
+        <StatCell
+          label="进行中"
+          value={buckets.running.length}
+          icon={<Flag className="size-4 text-green-600" />}
+          active={statusFilter === 'running'}
+          onClick={() => setStatusFilter(statusFilter === 'running' ? 'all' : 'running')}
+        />
+        <StatCell
+          label="即将开始"
+          value={buckets.upcoming.length}
+          icon={<Clock className="size-4 text-amber-600" />}
+          active={statusFilter === 'upcoming'}
+          onClick={() => setStatusFilter(statusFilter === 'upcoming' ? 'all' : 'upcoming')}
+        />
+        <StatCell
+          label="已结束"
+          value={buckets.ended.length}
+          icon={<CheckCircle2 className="size-4 text-muted-foreground" />}
+          active={statusFilter === 'ended'}
+          onClick={() => setStatusFilter(statusFilter === 'ended' ? 'all' : 'ended')}
+        />
+        <StatCell
+          label="我参加"
+          value={Object.values(tsdict).filter((s: any) => s?.attend).length}
+          icon={<Trophy className="size-4 text-primary" />}
+        />
       </div>
 
       {/* Search + group + rule filter form */}
@@ -297,10 +339,7 @@ export function ContestsPage() {
               <SimpleSelect
                 name="group"
                 defaultValue={currentGroup}
-                options={[
-                  { value: '', label: '全部' },
-                  ...groups.map((group) => ({ value: group, label: group })),
-                ]}
+                options={[{ value: '', label: '全部' }, ...groups.map((group) => ({ value: group, label: group }))]}
               />
             </div>
             <div className="space-y-1.5">
@@ -308,19 +347,28 @@ export function ContestsPage() {
               <SimpleSelect
                 name="rule"
                 defaultValue={currentRule}
-                options={[
-                  { value: '', label: '全部' },
-                  ...Object.entries(rules).map(([key, label]) => ({ value: key, label: label as string })),
-                ]}
+                options={[{ value: '', label: '全部' }, ...Object.entries(rules).map(([key, label]) => ({ value: key, label: label as string }))]}
               />
             </div>
             <div className="flex items-center gap-2">
-              <Button type="submit" size="sm">筛选</Button>
+              <Button type="submit" size="sm">
+                筛选
+              </Button>
               <div className="ml-auto flex items-center gap-1 rounded-md border bg-muted/30 p-0.5">
-                <button type="button" onClick={() => setView('list')} className={`p-1.5 rounded ${view === 'list' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`} title="列表视图">
+                <button
+                  type="button"
+                  onClick={() => setView('list')}
+                  className={`p-1.5 rounded ${view === 'list' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  title="列表视图"
+                >
                   <List className="size-3.5" />
                 </button>
-                <button type="button" onClick={() => setView('cards')} className={`p-1.5 rounded ${view === 'cards' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`} title="卡片视图">
+                <button
+                  type="button"
+                  onClick={() => setView('cards')}
+                  className={`p-1.5 rounded ${view === 'cards' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                  title="卡片视图"
+                >
                   <LayoutGrid className="size-3.5" />
                 </button>
               </div>
@@ -347,15 +395,15 @@ export function ContestsPage() {
       {/* Main list */}
       {filteredDocs.length === 0 ? (
         <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            没有符合条件的比赛
-          </CardContent>
+          <CardContent className="py-12 text-center text-sm text-muted-foreground">没有符合条件的比赛</CardContent>
         </Card>
       ) : view === 'list' ? (
         <ContestTable docs={filteredDocs} bs={bs} tsdict={tsdict} locale={locale} />
       ) : (
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {filteredDocs.map((c) => <ContestCard key={String(c.docId)} c={c} bs={bs} tsdict={tsdict} />)}
+          {filteredDocs.map((c) => (
+            <ContestCard key={String(c.docId)} c={c} bs={bs} tsdict={tsdict} />
+          ))}
         </div>
       )}
 
@@ -364,7 +412,19 @@ export function ContestsPage() {
   );
 }
 
-function StatCell({ label, value, icon, active, onClick }: { label: string; value: number; icon: React.ReactNode; active?: boolean; onClick?: () => void }) {
+function StatCell({
+  label,
+  value,
+  icon,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  icon: React.ReactNode;
+  active?: boolean;
+  onClick?: () => void;
+}) {
   const clickable = !!onClick;
   return (
     <button
@@ -393,7 +453,9 @@ function RunningContestCard({ c, bs, tsdict }: { c: R; bs: ReturnType<typeof use
         <CardContent className="p-4 space-y-2">
           <div className="flex items-start justify-between gap-2">
             <h3 className="font-medium line-clamp-2 leading-tight">{c.title || '未命名'}</h3>
-            <Badge variant={ruleBadgeVariant(c.rule)} className="shrink-0">{ruleLabel(c.rule)}</Badge>
+            <Badge variant={ruleBadgeVariant(c.rule)} className="shrink-0">
+              {ruleLabel(c.rule)}
+            </Badge>
           </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Clock className="size-3" />
@@ -401,12 +463,18 @@ function RunningContestCard({ c, bs, tsdict }: { c: R; bs: ReturnType<typeof use
           </div>
           <div className="flex items-center justify-between text-xs">
             <span className="flex items-center gap-1 text-muted-foreground">
-              <Users className="size-3" />{c.attend || 0}
+              <Users className="size-3" />
+              {c.attend || 0}
             </span>
-            {tsdoc.attend
-              ? <Badge variant="default" className="text-[10px]">已参加</Badge>
-              : <Badge variant="outline" className="text-[10px]">未参加</Badge>
-            }
+            {tsdoc.attend ? (
+              <Badge variant="default" className="text-[10px]">
+                已参加
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-[10px]">
+                未参加
+              </Badge>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -424,17 +492,24 @@ function ContestCard({ c, bs, tsdict }: { c: R; bs: ReturnType<typeof useBootstr
         <CardContent className="p-4 space-y-2">
           <div className="flex items-start justify-between gap-2">
             <h3 className="font-medium line-clamp-2 leading-tight">{c.title || '未命名'}</h3>
-            <Badge variant={ruleBadgeVariant(c.rule)} className="shrink-0">{ruleLabel(c.rule)}</Badge>
+            <Badge variant={ruleBadgeVariant(c.rule)} className="shrink-0">
+              {ruleLabel(c.rule)}
+            </Badge>
           </div>
-          <div className="text-xs text-muted-foreground">
-            {formatDateTime(c.beginAt, bs.locale)}
-          </div>
+          <div className="text-xs text-muted-foreground">{formatDateTime(c.beginAt, bs.locale)}</div>
           <div className="flex items-center justify-between">
-            <Badge variant={st.variant} className="text-[10px]">{st.label}</Badge>
+            <Badge variant={st.variant} className="text-[10px]">
+              {st.label}
+            </Badge>
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <Users className="size-3" />{c.attend || 0}
+              <Users className="size-3" />
+              {c.attend || 0}
             </span>
-            {tsdoc.attend ? <Badge variant="secondary" className="text-[10px]">已参加</Badge> : null}
+            {tsdoc.attend ? (
+              <Badge variant="secondary" className="text-[10px]">
+                已参加
+              </Badge>
+            ) : null}
           </div>
         </CardContent>
       </Card>
@@ -470,27 +545,33 @@ function ContestTable({ docs, bs, tsdict, locale }: { docs: R[]; bs: ReturnType<
                     >
                       {c.title || '未命名比赛'}
                     </a>
-                    {c.rated ? <Badge variant="secondary" className="ml-2 text-[10px]">Rated</Badge> : null}
+                    {c.rated ? (
+                      <Badge variant="secondary" className="ml-2 text-[10px]">
+                        Rated
+                      </Badge>
+                    ) : null}
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {formatDateTime(c.beginAt, locale)}
-                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{formatDateTime(c.beginAt, locale)}</TableCell>
                   <TableCell className="text-center">
                     <Badge variant={ruleBadgeVariant(c.rule)}>{ruleLabel(c.rule)}</Badge>
                   </TableCell>
                   <TableCell className="text-center text-sm text-muted-foreground">
                     <span className="flex items-center justify-center gap-1">
-                      <Users className="size-3" />{c.attend || 0}
+                      <Users className="size-3" />
+                      {c.attend || 0}
                     </span>
                   </TableCell>
                   <TableCell className="text-center">
                     <Badge variant={st.variant}>{st.label}</Badge>
                   </TableCell>
                   <TableCell className="text-center">
-                    {ts.attend
-                      ? <Badge variant="default" className="text-[10px]">已参加</Badge>
-                      : <span className="text-[10px] text-muted-foreground">—</span>
-                    }
+                    {ts.attend ? (
+                      <Badge variant="default" className="text-[10px]">
+                        已参加
+                      </Badge>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                 </TableRow>
               );
@@ -527,9 +608,7 @@ export function ContestDetailPage() {
   const endAt = toDate(tdoc.endAt)?.getTime() || 0;
   const countdownTarget = st.phase === 'upcoming' ? beginAt : st.phase === 'running' ? endAt : null;
   const cd = useCountdown(countdownTarget);
-  const cdForStrip = cd || (st.phase === 'ended'
-    ? { expired: true, days: 0, hours: 0, minutes: 0, seconds: 0, total: 0 }
-    : null);
+  const cdForStrip = cd || (st.phase === 'ended' ? { expired: true, days: 0, hours: 0, minutes: 0, seconds: 0, total: 0 } : null);
   const entryUrl = isClientRequired ? `/exam-mode/${encodeURIComponent(String(tdoc.docId))}` : `${detailUrl}/problems`;
   const canOpenProblems = canManageContest || st.phase === 'ended' || (attended && st.phase !== 'upcoming');
   const discussionUrl = replaceRouteTokens(bs.urls.discussionNode, { TYPE: 'contest', NAME: String(tdoc.docId) });
@@ -537,12 +616,7 @@ export function ContestDetailPage() {
   const allRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(String(tdoc.docId))}`;
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <a href={isHomework ? bs.urls.homework : bs.urls.contests} className="hover:text-primary">
@@ -624,9 +698,7 @@ export function ContestDetailPage() {
         </div>
       </section>
 
-      {cdForStrip ? (
-        <CountdownStrip phase={st.phase} beginAt={beginAt} endAt={endAt} cd={cdForStrip} />
-      ) : null}
+      {cdForStrip ? <CountdownStrip phase={st.phase} beginAt={beginAt} endAt={endAt} cd={cdForStrip} /> : null}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
         <div className="space-y-4">
@@ -649,7 +721,12 @@ export function ContestDetailPage() {
               <CardTitle className="text-base">比赛入口</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
-              <DetailAction href={entryUrl} icon={<List className="size-4" />} title={canOpenProblems ? '进入题目' : '题目未开放'} muted={!canOpenProblems}>
+              <DetailAction
+                href={entryUrl}
+                icon={<List className="size-4" />}
+                title={canOpenProblems ? '进入题目' : '题目未开放'}
+                muted={!canOpenProblems}
+              >
                 {isClientRequired ? '客户端工作台' : '比赛题目入口'}
               </DetailAction>
               <DetailAction href={`${detailUrl}/scoreboard`} icon={<Trophy className="size-4" />} title="排行榜">
@@ -679,19 +756,15 @@ export function ContestDetailPage() {
 
         <div className="space-y-3">
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">我的成绩</CardTitle></CardHeader>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">我的成绩</CardTitle>
+            </CardHeader>
             <CardContent className="space-y-2 text-sm">
               {attended ? (
                 <>
-                  {typeof tsdoc.rank === 'number' && tsdoc.rank > 0 ? (
-                    <Row label="当前排名" value={`# ${tsdoc.rank}`} />
-                  ) : null}
-                  {typeof tsdoc.score === 'number' ? (
-                    <Row label={isACM ? '通过题数' : '总得分'} value={String(tsdoc.score)} />
-                  ) : null}
-                  {tsdoc.endAt ? (
-                    <Row label="结束时间" value={formatDateTime(tsdoc.endAt, locale)} />
-                  ) : null}
+                  {typeof tsdoc.rank === 'number' && tsdoc.rank > 0 ? <Row label="当前排名" value={`# ${tsdoc.rank}`} /> : null}
+                  {typeof tsdoc.score === 'number' ? <Row label={isACM ? '通过题数' : '总得分'} value={String(tsdoc.score)} /> : null}
+                  {tsdoc.endAt ? <Row label="结束时间" value={formatDateTime(tsdoc.endAt, locale)} /> : null}
                   <a href={`${detailUrl}/scoreboard`} className="block pt-2 text-xs text-primary hover:underline">
                     查看完整排行 →
                   </a>
@@ -703,7 +776,9 @@ export function ContestDetailPage() {
           </Card>
 
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">比赛时间</CardTitle></CardHeader>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">比赛时间</CardTitle>
+            </CardHeader>
             <CardContent className="space-y-2 text-sm">
               <Row label="开始" value={formatDateTime(tdoc.beginAt, locale)} />
               <Row label="结束" value={formatDateTime(tdoc.endAt, locale)} />
@@ -713,43 +788,73 @@ export function ContestDetailPage() {
           </Card>
 
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">操作</CardTitle></CardHeader>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">操作</CardTitle>
+            </CardHeader>
             <CardContent className="space-y-1.5">
               {canManageContest ? (
                 <>
-                  <SidebarLink href={`${detailUrl}/edit`} icon={<Pencil className="size-3.5" />}>编辑比赛</SidebarLink>
-                  <SidebarLink href={`${detailUrl}/management`} icon={<Settings className="size-3.5" />}>管理比赛</SidebarLink>
+                  <SidebarLink href={`${detailUrl}/edit`} icon={<Pencil className="size-3.5" />}>
+                    编辑比赛
+                  </SidebarLink>
+                  <SidebarLink href={`${detailUrl}/management`} icon={<Settings className="size-3.5" />}>
+                    管理比赛
+                  </SidebarLink>
                   <div className="my-1 h-px bg-border" />
                 </>
               ) : null}
-              <SidebarLink href={`${detailUrl}/scoreboard`} icon={<Trophy className="size-3.5" />}>排行榜</SidebarLink>
+              <SidebarLink href={`${detailUrl}/scoreboard`} icon={<Trophy className="size-3.5" />}>
+                排行榜
+              </SidebarLink>
               {!isExam ? (
-                <SidebarLink href={`${detailUrl}/clarification`} icon={<MessageSquare className="size-3.5" />}>澄清答疑</SidebarLink>
+                <SidebarLink href={`${detailUrl}/clarification`} icon={<MessageSquare className="size-3.5" />}>
+                  澄清答疑
+                </SidebarLink>
               ) : null}
-              <SidebarLink href={discussionUrl} icon={<MessageSquare className="size-3.5" />}>讨论</SidebarLink>
+              <SidebarLink href={discussionUrl} icon={<MessageSquare className="size-3.5" />}>
+                讨论
+              </SidebarLink>
               {tdoc.allowViewCode ? (
-                <SidebarLink href={`${detailUrl}/code`} icon={<Code className="size-3.5" />}>代码浏览</SidebarLink>
+                <SidebarLink href={`${detailUrl}/code`} icon={<Code className="size-3.5" />}>
+                  代码浏览
+                </SidebarLink>
               ) : null}
               {attended && canViewRecord ? (
-                <SidebarLink href={myRecordUrl} icon={<Code className="size-3.5" />}>我的提交</SidebarLink>
+                <SidebarLink href={myRecordUrl} icon={<Code className="size-3.5" />}>
+                  我的提交
+                </SidebarLink>
               ) : null}
               {canManageContest ? (
-                <SidebarLink href={allRecordUrl} icon={<Flag className="size-3.5" />}>全部提交</SidebarLink>
+                <SidebarLink href={allRecordUrl} icon={<Flag className="size-3.5" />}>
+                  全部提交
+                </SidebarLink>
               ) : null}
               {isACM ? (
-                <SidebarLink href={`${detailUrl}/balloon`} icon={<Flag className="size-3.5" />}>气球</SidebarLink>
+                <SidebarLink href={`${detailUrl}/balloon`} icon={<Flag className="size-3.5" />}>
+                  气球
+                </SidebarLink>
               ) : null}
-              <SidebarLink href={`${detailUrl}/print`} icon={<FileText className="size-3.5" />}>打印题面</SidebarLink>
-              <SidebarLink href={`${detailUrl}/user`} icon={<Users className="size-3.5" />}>参赛选手</SidebarLink>
+              <SidebarLink href={`${detailUrl}/print`} icon={<FileText className="size-3.5" />}>
+                打印题面
+              </SidebarLink>
+              <SidebarLink href={`${detailUrl}/user`} icon={<Users className="size-3.5" />}>
+                参赛选手
+              </SidebarLink>
             </CardContent>
           </Card>
 
           {Array.isArray(data.files) && data.files.length > 0 ? (
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">附件</CardTitle></CardHeader>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">附件</CardTitle>
+              </CardHeader>
               <CardContent className="space-y-1.5">
                 {data.files.map((f: R) => (
-                  <a key={f.name} href={`${detailUrl}/file/contest/${f.name}`} className="flex items-center gap-1.5 text-xs text-primary hover:underline">
+                  <a
+                    key={f.name}
+                    href={`${detailUrl}/file/contest/${f.name}`}
+                    className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                  >
                     <Download className="size-3" />
                     <span className="truncate">{f.name}</span>
                   </a>
@@ -778,9 +883,7 @@ function DetailAction({
 }) {
   const content = (
     <>
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-background">
-        {icon}
-      </span>
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-background">{icon}</span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-medium">{title}</span>
         <span className="block truncate text-xs text-muted-foreground">{children}</span>
@@ -792,7 +895,11 @@ function DetailAction({
     muted ? 'cursor-not-allowed bg-muted/30 opacity-70' : 'hover:border-primary/40 hover:bg-accent/30'
   }`;
   if (muted) return <div className={className}>{content}</div>;
-  return <a href={href} className={className}>{content}</a>;
+  return (
+    <a href={href} className={className}>
+      {content}
+    </a>
+  );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -806,10 +913,7 @@ function Row({ label, value }: { label: string; value: string }) {
 
 function SidebarLink({ href, icon, children }: { href: string; icon: React.ReactNode; children: React.ReactNode }) {
   return (
-    <a
-      href={href}
-      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-accent hover:text-accent-foreground"
-    >
+    <a href={href} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-accent hover:text-accent-foreground">
       {icon}
       <span>{children}</span>
     </a>
@@ -843,9 +947,11 @@ export function ContestScoreboardPage() {
   const isHomework = tdoc.rule === 'homework';
   const examUrls: R = data.examMode?.urls || {};
   const inExamMode = !!data.examMode?.enabled;
-  const detailUrl = examUrls.overview || replaceRouteTokens(isHomework ? bs.urls.homeworkDetail : bs.urls.contestDetail, {
-    TID: String(tdoc.docId),
-  });
+  const detailUrl =
+    examUrls.overview ||
+    replaceRouteTokens(isHomework ? bs.urls.homeworkDetail : bs.urls.contestDetail, {
+      TID: String(tdoc.docId),
+    });
   const scoreboardUrl = examUrls.ranking || `${detailUrl}/scoreboard`;
   const availableViews = Array.isArray(data.availableViews) ? data.availableViews : [];
   const extraViews = availableViews.filter(([id]: [string]) => !['html', 'csv', 'default', 'ghost'].includes(id));
@@ -859,23 +965,23 @@ export function ContestScoreboardPage() {
   const showStudentCols = Object.keys(studentDict).length > 0 && userColIndex >= 0;
   const displayHeader: ScoreboardCell[] = showStudentCols
     ? [
-      ...header.slice(0, userColIndex + 1),
-      { type: 'studentId', value: '学号' },
-      { type: 'realName', value: '姓名' },
-      ...header.slice(userColIndex + 1),
-    ]
+        ...header.slice(0, userColIndex + 1),
+        { type: 'studentId', value: '学号' },
+        { type: 'realName', value: '姓名' },
+        ...header.slice(userColIndex + 1),
+      ]
     : header;
   const displayBody: ScoreboardCell[][] = showStudentCols
     ? body.map((row) => {
-      const uid = row[userColIndex]?.raw;
-      const info = studentDict[String(uid)] || null;
-      return [
-        ...row.slice(0, userColIndex + 1),
-        { type: 'studentId', value: info?.studentId, raw: uid },
-        { type: 'realName', value: info?.realName, raw: uid },
-        ...row.slice(userColIndex + 1),
-      ];
-    })
+        const uid = row[userColIndex]?.raw;
+        const info = studentDict[String(uid)] || null;
+        return [
+          ...row.slice(0, userColIndex + 1),
+          { type: 'studentId', value: info?.studentId, raw: uid },
+          { type: 'realName', value: info?.realName, raw: uid },
+          ...row.slice(userColIndex + 1),
+        ];
+      })
     : body;
 
   function cellText(cell: ScoreboardCell) {
@@ -898,9 +1004,17 @@ export function ContestScoreboardPage() {
       const index = match.index ?? 0;
       pushText(source.slice(last, index));
       if (match[0].includes('icon-check')) {
-        nodes.push(<span key={`ok-${key++}`} className="font-semibold">✓</span>);
+        nodes.push(
+          <span key={`ok-${key++}`} className="font-semibold">
+            ✓
+          </span>,
+        );
       } else {
-        nodes.push(<span key={`pending-${key++}`} className="font-semibold text-orange-500">{match[1]}</span>);
+        nodes.push(
+          <span key={`pending-${key++}`} className="font-semibold text-orange-500">
+            {match[1]}
+          </span>,
+        );
       }
       last = index + match[0].length;
     }
@@ -912,7 +1026,11 @@ export function ContestScoreboardPage() {
     if (typeof cell.style === 'string' && /background-color/i.test(cell.style)) {
       return 'bg-[#d9f0c7] dark:bg-emerald-950/50';
     }
-    if (cell.type === 'records' && Array.isArray(cell.raw) && cell.raw.some((record: ScoreboardCell) => /background-color/i.test(String(record.style || '')))) {
+    if (
+      cell.type === 'records' &&
+      Array.isArray(cell.raw) &&
+      cell.raw.some((record: ScoreboardCell) => /background-color/i.test(String(record.style || '')))
+    ) {
       return 'bg-[#d9f0c7] dark:bg-emerald-950/50';
     }
     return '';
@@ -938,7 +1056,11 @@ export function ContestScoreboardPage() {
     if (inExamMode) return content;
     return (
       <a
-        href={examUrls.record ? String(examUrls.record).replace('__RID__', String(cell.raw)) : replaceRouteTokens(bs.urls.recordDetail, { RID: String(cell.raw) })}
+        href={
+          examUrls.record
+            ? String(examUrls.record).replace('__RID__', String(cell.raw))
+            : replaceRouteTokens(bs.urls.recordDetail, { RID: String(cell.raw) })
+        }
         className="hover:underline"
       >
         {content}
@@ -951,9 +1073,11 @@ export function ContestScoreboardPage() {
       const problem = pdict[String(cell.raw)] || {};
       return (
         <a
-          href={examUrls.problem
-            ? String(examUrls.problem).replace('__PID__', String(cell.raw))
-            : `${replaceRouteTokens(bs.urls.problemDetail, { PID: String(cell.raw) })}?tid=${tdoc.docId}`}
+          href={
+            examUrls.problem
+              ? String(examUrls.problem).replace('__PID__', String(cell.raw))
+              : `${replaceRouteTokens(bs.urls.problemDetail, { PID: String(cell.raw) })}?tid=${tdoc.docId}`
+          }
           className="block text-center hover:text-primary hover:underline"
           title={problem.title || cell.hover || undefined}
         >
@@ -969,24 +1093,19 @@ export function ContestScoreboardPage() {
 
   function renderBodyCell(cell: ScoreboardCell) {
     if (cell.type === 'rank') {
-      return (
-        <span className="font-mono text-sm text-muted-foreground">
-          {cell.value === '0' || cell.value === 0 ? '*' : cellText(cell)}
-        </span>
-      );
+      return <span className="font-mono text-sm text-muted-foreground">{cell.value === '0' || cell.value === 0 ? '*' : cellText(cell)}</span>;
     }
     if (cell.type === 'user') {
       const user = udict[String(cell.raw)] || null;
       const name = user?.uname || cellText(cell);
       if (inExamMode) return <span className="font-medium">{name}</span>;
       return cell.raw ? (
-        <a
-          href={replaceRouteTokens(bs.urls.userDetail, { UID: String(cell.raw) })}
-          className="font-medium hover:text-primary hover:underline"
-        >
+        <a href={replaceRouteTokens(bs.urls.userDetail, { UID: String(cell.raw) })} className="font-medium hover:text-primary hover:underline">
           {name}
         </a>
-      ) : <span className="font-medium">{name}</span>;
+      ) : (
+        <span className="font-medium">{name}</span>
+      );
     }
     if (cell.type === 'studentId') {
       return <span className="font-mono text-xs text-muted-foreground">{cellText(cell)}</span>;
@@ -1009,21 +1128,23 @@ export function ContestScoreboardPage() {
     }
     if (cell.type === 'total_score' || cell.type === 'solved' || cell.type === 'time') {
       return (
-        <span className={`whitespace-pre-line font-medium tabular-nums ${cell.type === 'total_score' ? scoreClass(cell) : ''}`} title={cell.hover || undefined}>
+        <span
+          className={`whitespace-pre-line font-medium tabular-nums ${cell.type === 'total_score' ? scoreClass(cell) : ''}`}
+          title={cell.hover || undefined}
+        >
           {renderScoreboardText(cell)}
         </span>
       );
     }
-    return <span className="whitespace-pre-line" title={cell.hover || undefined}>{renderScoreboardText(cell)}</span>;
+    return (
+      <span className="whitespace-pre-line" title={cell.hover || undefined}>
+        {renderScoreboardText(cell)}
+      </span>
+    );
   }
 
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -1039,31 +1160,29 @@ export function ContestScoreboardPage() {
           <h1 className="mt-1 text-xl font-semibold">排行榜</h1>
         </div>
         {!inExamMode ? (
-        <div className="flex flex-wrap gap-2">
-          {['html', 'csv', 'ghost'].map((view) => (
-            <Button key={view} asChild variant="outline" size="sm">
-              <a href={`${scoreboardUrl}/${view}`} target="_blank" rel="noreferrer">
-                <Download className="size-4" />
-                {view.toUpperCase()}
-              </a>
-            </Button>
-          ))}
-          {extraViews.map(([id, name]: [string, string]) => (
-            <Button key={id} asChild variant="outline" size="sm">
-              <a href={`${scoreboardUrl}/${id}`} target="_blank" rel="noreferrer">
-                {name || id}
-              </a>
-            </Button>
-          ))}
-        </div>
+          <div className="flex flex-wrap gap-2">
+            {['html', 'csv', 'ghost'].map((view) => (
+              <Button key={view} asChild variant="outline" size="sm">
+                <a href={`${scoreboardUrl}/${view}`} target="_blank" rel="noreferrer">
+                  <Download className="size-4" />
+                  {view.toUpperCase()}
+                </a>
+              </Button>
+            ))}
+            {extraViews.map(([id, name]: [string, string]) => (
+              <Button key={id} asChild variant="outline" size="sm">
+                <a href={`${scoreboardUrl}/${id}`} target="_blank" rel="noreferrer">
+                  {name || id}
+                </a>
+              </Button>
+            ))}
+          </div>
         ) : null}
       </div>
 
       {tdoc.lockAt && !tdoc.unlocked ? (
         <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20">
-          <CardContent className="p-4 text-sm text-amber-800 dark:text-amber-200">
-            排行榜已封榜，封榜后的提交可能会暂时显示为待定。
-          </CardContent>
+          <CardContent className="p-4 text-sm text-amber-800 dark:text-amber-200">排行榜已封榜，封榜后的提交可能会暂时显示为待定。</CardContent>
         </Card>
       ) : null}
 

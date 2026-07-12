@@ -85,7 +85,9 @@ async function migrateV1(_ctx: Context): Promise<void> {
 
         logger.info(
             'v1 backfill: %d exam contests upgraded (scope inferred from schools=%d, groups=%d)',
-            upgraded, scopeFromSchools, scopeFromGroups,
+            upgraded,
+            scopeFromSchools,
+            scopeFromGroups,
         );
     });
 }

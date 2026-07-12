@@ -20,10 +20,7 @@ export default new NamedPage('record_detail', async () => {
   });
 
   if (!UiContext.socketUrl) return;
-  const [{ default: WebSocket }, { DiffDOM }] = await Promise.all([
-    import('../components/socket'),
-    import('diff-dom'),
-  ]);
+  const [{ default: WebSocket }, { DiffDOM }] = await Promise.all([import('../components/socket'), import('diff-dom')]);
 
   const sock = new WebSocket(UiContext.ws_prefix + UiContext.socketUrl, false, true);
   const dd = new DiffDOM();

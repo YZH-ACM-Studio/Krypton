@@ -33,9 +33,7 @@ export const COMMON_LANG_OPTIONS: LangOption[] = [
   { value: 'bash', label: 'Bash' },
 ];
 
-export const LANG_LABEL_MAP = Object.fromEntries(
-  COMMON_LANG_OPTIONS.map((o) => [o.value, o.label]),
-) as Record<string, string>;
+export const LANG_LABEL_MAP = Object.fromEntries(COMMON_LANG_OPTIONS.map((o) => [o.value, o.label])) as Record<string, string>;
 
 /** Resolve a list of lang ids to LangOption — unknown ids fall back to id-as-label. */
 export function resolveLangs(ids: string[]): LangOption[] {
@@ -44,7 +42,7 @@ export function resolveLangs(ids: string[]): LangOption[] {
 
 export interface ProblemOption {
   docId: number;
-  pid?: string;
+  pid?: string | number;
   title: string;
   tag?: string[];
   difficulty?: number;
@@ -56,9 +54,9 @@ export interface ProblemOption {
  * Search problems via the existing Hydro /p endpoint with JSON Accept.
  * `quick=true` keeps the projection small. Limit is server-clamped.
  */
-export async function searchProblems(query: string, limit = 20): Promise<ProblemOption[]> {
+export async function searchProblems(query: string | number, limit = 20): Promise<ProblemOption[]> {
   const url = new URL('/p', window.location.origin);
-  if (query) url.searchParams.set('q', query);
+  if (query) url.searchParams.set('q', String(query));
   url.searchParams.set('quick', 'true');
   url.searchParams.set('limit', String(limit));
   try {
@@ -75,7 +73,9 @@ export async function searchProblems(query: string, limit = 20): Promise<Problem
       nSubmit: p.nSubmit,
       nAccept: p.nAccept,
     }));
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -83,15 +83,16 @@ export async function searchProblems(query: string, limit = 20): Promise<Problem
  * MultiSelect value from a stored CSV without losing titles). Falls
  * through to a placeholder if a pid isn't found.
  */
-export async function fetchProblemsByIds(ids: string[]): Promise<ProblemOption[]> {
+export async function fetchProblemsByIds(ids: Array<string | number>): Promise<ProblemOption[]> {
   if (!ids.length) return [];
   // Hydro's /p endpoint doesn't accept "ids=..." cleanly; the cheapest
   // workaround is one search per id (each cheap, parallel).
-  const results = await Promise.all(ids.map(async (id) => {
-    const list = await searchProblems(id, 5);
-    return list.find((p) => String(p.pid) === id || String(p.docId) === id)
-      || { docId: Number(id) || 0, pid: id, title: '' };
-  }));
+  const results = await Promise.all(
+    ids.map(async (id) => {
+      const list = await searchProblems(id, 5);
+      return list.find((p) => String(p.pid) === id || String(p.docId) === id) || { docId: Number(id) || 0, pid: id, title: '' };
+    }),
+  );
   return results;
 }
 

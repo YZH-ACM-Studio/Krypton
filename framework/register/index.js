@@ -1,9 +1,12 @@
 /* eslint-disable node/no-deprecated-api */
 const zlib = require('zlib');
-const sourceMapArg = process.env.LOADER_SOURCEMAP_ONLY
-    || process.argv.find((i) => i.startsWith('--sourcemap-only='))
-    || '';
-const sourceMapOnly = sourceMapArg ? sourceMapArg.split('=')[1].split(',').filter((i) => i) : false;
+const sourceMapArg = process.env.LOADER_SOURCEMAP_ONLY || process.argv.find((i) => i.startsWith('--sourcemap-only=')) || '';
+const sourceMapOnly = sourceMapArg
+    ? sourceMapArg
+          .split('=')[1]
+          .split(',')
+          .filter((i) => i)
+    : false;
 const map = new Proxy(Object.create(null), {
     get(target, key) {
         if (!target[key]) return null;
@@ -83,9 +86,7 @@ function transform(filename, tsx = true) {
     return result.code;
 }
 const _script = new vm.Script('"Hydro"', { produceCachedData: true });
-const bytecode = (_script.createCachedData && _script.createCachedData.call)
-    ? _script.createCachedData()
-    : _script.cachedData;
+const bytecode = _script.createCachedData && _script.createCachedData.call ? _script.createCachedData() : _script.cachedData;
 require.extensions['.js'] = function loader(module, filename) {
     if (major < 14) {
         return module._compile(transform(filename), filename);
@@ -100,7 +101,8 @@ require.extensions['.js'] = function loader(module, filename) {
             content = content.split('//# sourceMappingURL')[0];
         }
         return module._compile(content, filename);
-    } catch (e) { // ESM
+    } catch (e) {
+        // ESM
         return module._compile(transform(filename), filename);
     }
 };
@@ -117,7 +119,7 @@ require.extensions['.jsc'] = function loader(module, filename) {
         bytecode.subarray(16, 20).copy(buf, 16);
     }
 
-    const length = buf.subarray(8, 12).reduce((sum, number, power) => sum += number * (256 ** power), 0);
+    const length = buf.subarray(8, 12).reduce((sum, number, power) => (sum += number * 256 ** power), 0);
     let dummyCode = '';
     if (length > 1) dummyCode = `"${'\u200B'.repeat(length - 2)}"`;
     const script = new vm.Script(dummyCode, {

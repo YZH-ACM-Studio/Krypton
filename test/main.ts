@@ -1,9 +1,7 @@
 import assert from 'assert';
 import { writeFileSync } from 'fs';
 import autocannon from 'autocannon';
-import {
-    after, before, describe, it,
-} from 'node:test';
+import { after, before, describe, it } from 'node:test';
 import * as supertest from 'supertest';
 
 const Root = {
@@ -14,20 +12,23 @@ const Root = {
 
 describe('App', () => {
     let agent;
-    before(async () => {
-        const init = Date.now();
-        await new Promise((resolve) => {
-            process.send = ((send) => (data) => {
-                console.log('send', data);
-                if (data === 'ready') {
-                    agent = supertest.agent(require('hydrooj').httpServer);
-                    resolve(null);
-                }
-                return send?.(data) || false;
-            })(process.send);
-        });
-        console.log('Application inited in %d ms', Date.now() - init);
-    }, { timeout: 30000 });
+    before(
+        async () => {
+            const init = Date.now();
+            await new Promise((resolve) => {
+                process.send = ((send) => (data) => {
+                    console.log('send', data);
+                    if (data === 'ready') {
+                        agent = supertest.agent(require('hydrooj').httpServer);
+                        resolve(null);
+                    }
+                    return send?.(data) || false;
+                })(process.send);
+            });
+            console.log('Application inited in %d ms', Date.now() - init);
+        },
+        { timeout: 30000 },
+    );
 
     const routes = ['/', '/contest', '/homework', '/user/1', '/training', '/course'];
     for (const route of routes) {
@@ -42,17 +43,17 @@ describe('App', () => {
     });
 
     it('Create User', async () => {
-        const redirect = await agent.post('/register')
+        const redirect = await agent
+            .post('/register')
             .send({ mail: 'test@example.com' })
             .expect(302)
             .then((res) => res.headers.location);
-        await agent.post(redirect)
-            .send({ uname: Root.username, password: Root.password, verifyPassword: Root.password })
-            .expect(302);
+        await agent.post(redirect).send({ uname: Root.username, password: Root.password, verifyPassword: Root.password }).expect(302);
     });
 
     it('Login', async () => {
-        const cookie = await agent.post('/login')
+        const cookie = await agent
+            .post('/login')
             .send({ uname: Root.username, password: Root.password })
             .expect(302)
             .then((res) => res.headers['set-cookie']);

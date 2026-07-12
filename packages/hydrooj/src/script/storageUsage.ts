@@ -4,13 +4,15 @@ import storage from '../model/storage';
 
 export async function run(_, report) {
     let totalProblemSize = 0;
-    const m = await storage.coll.aggregate([
-        { $match: { path: { $regex: /^problem\//i } } },
-        { $addFields: { domainId: { $arrayElemAt: [{ $split: ['$path', '/'] }, 1] } } },
-        { $group: { _id: '$domainId', size: { $sum: '$size' }, count: { $sum: 1 } } },
-        { $match: { size: { $gt: 10 * 1024 * 1024 } } },
-        { $sort: { size: -1 } },
-    ]).toArray();
+    const m = await storage.coll
+        .aggregate([
+            { $match: { path: { $regex: /^problem\//i } } },
+            { $addFields: { domainId: { $arrayElemAt: [{ $split: ['$path', '/'] }, 1] } } },
+            { $group: { _id: '$domainId', size: { $sum: '$size' }, count: { $sum: 1 } } },
+            { $match: { size: { $gt: 10 * 1024 * 1024 } } },
+            { $sort: { size: -1 } },
+        ])
+        .toArray();
     const cases = m.map((val, i) => {
         totalProblemSize += val.size;
         return {

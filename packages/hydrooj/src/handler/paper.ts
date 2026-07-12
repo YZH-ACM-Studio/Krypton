@@ -15,18 +15,34 @@ import { effectiveProblemKind, gradeObjectiveAnswer } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
 import {
     clientProblemConfig,
-    Context, Handler, NotFoundError, OplogModel, PaperDraftModel, param,
-    parseProblemConfigObject, parseStructuredRegionSubmission, PERM,
-    PermissionError, PRIV, problemFingerprint, ProblemModel, questionKindMap,
+    Context,
+    Handler,
+    NotFoundError,
+    OplogModel,
+    PaperDraftModel,
+    param,
+    parseProblemConfigObject,
+    parseStructuredRegionSubmission,
+    PERM,
+    PermissionError,
+    PRIV,
+    problemFingerprint,
+    ProblemModel,
+    questionKindMap,
     route,
-    Types, UserModel, validateCompiledStructuredConfig, validateFillFunctionJudgeConfig,
-    validateTextProgramFillSubmission, ValidationError } from 'hydrooj';
+    Types,
+    UserModel,
+    validateCompiledStructuredConfig,
+    validateFillFunctionJudgeConfig,
+    validateTextProgramFillSubmission,
+    ValidationError,
+} from 'hydrooj';
 import { ContestClientFinishedError } from '../error';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
 import * as document from '../model/document';
 import { markManualPending } from '../model/manual-grade';
-import * as record from '../model/record';
+import record from '../model/record';
 import { closeSessionOnVigil } from '../service/vigil-bridge';
 import { ContestPrintHandler, ContestProblemListHandler, ContestScoreboardHandler } from './contest';
 import { DiscussionDetailHandler } from './discussion';
@@ -59,7 +75,11 @@ function absolutizeProblemFileUrls(handler: Handler, content: string, pdoc: any,
     // 1) raw file:// — JSON-load path + getProblemDict's untouched raw pdoc.
     let out = content.replace(/file:\/\/([^ \n)\\"]+)/g, (str: string, fileinfo: string) => {
         let filename = fileinfo.split('?')[0];
-        try { filename = decodeURIComponent(filename); } catch { /* keep encoded */ }
+        try {
+            filename = decodeURIComponent(filename);
+        } catch {
+            /* keep encoded */
+        }
         if (!pdoc.additional_file?.find((i: any) => i.name === filename)) return str;
         return withTid(`${absBase}${fileinfo}`);
     });
@@ -84,12 +104,10 @@ function validatePaperRegionSubmission(
     pdoc: any,
     config: any,
     rawCode: string | undefined,
-    context: { domainId: string, tid: ObjectId, uid: number, stage: string },
+    context: { domainId: string; tid: ObjectId; uid: number; stage: string },
 ) {
     const effectiveKind = effectiveProblemKind(pdoc);
-    const kind = effectiveKind === 'program_fill' || effectiveKind === 'function'
-        ? effectiveKind
-        : 'fill_function';
+    const kind = effectiveKind === 'program_fill' || effectiveKind === 'function' ? effectiveKind : 'fill_function';
     try {
         validateFillFunctionJudgeConfig(config);
         validateCompiledStructuredConfig(effectiveKind, config);
@@ -98,8 +116,14 @@ function validatePaperRegionSubmission(
     } catch (error: any) {
         logger.error(
             'Paper structured submission rejected stage=%s domain=%s tid=%s pid=%d kind=%s revision=%s uid=%d error=%o',
-            context.stage, context.domainId, context.tid, pdoc.docId, kind,
-            pdoc.structureRevision, context.uid, error,
+            context.stage,
+            context.domainId,
+            context.tid,
+            pdoc.docId,
+            kind,
+            pdoc.structureRevision,
+            context.uid,
+            error,
         );
         throw new ValidationError('code', null, error.message);
     }
@@ -110,31 +134,38 @@ function validatePaperTextProgramFillSubmission(
     pdoc: any,
     config: any,
     answers: unknown,
-    context: { domainId: string, tid: ObjectId, uid: number, stage: string },
+    context: { domainId: string; tid: ObjectId; uid: number; stage: string },
 ) {
     try {
         validateTextProgramFillSubmission(effectiveProblemKind(pdoc), config, answers);
     } catch (error: any) {
         logger.error(
             'Paper text program-fill rejected stage=%s domain=%s tid=%s pid=%d kind=%s revision=%s uid=%d error=%o',
-            context.stage, context.domainId, context.tid, pdoc.docId,
-            effectiveProblemKind(pdoc), pdoc.structureRevision, context.uid, error,
+            context.stage,
+            context.domainId,
+            context.tid,
+            pdoc.docId,
+            effectiveProblemKind(pdoc),
+            pdoc.structureRevision,
+            context.uid,
+            error,
         );
         throw new ValidationError('answers', null, error.message);
     }
 }
 
 function preflightPaperTextProgramFillDrafts(
-    drafts: Array<{ pid: number, answers?: unknown }>,
+    drafts: Array<{ pid: number; answers?: unknown }>,
     pdict: Record<number, any>,
-    context: { domainId: string, tid: ObjectId, uid: number },
+    context: { domainId: string; tid: ObjectId; uid: number },
 ) {
     for (const draft of drafts) {
         const pdoc = pdict[draft.pid];
         if (!pdoc) continue;
         const config = parsedProblemConfig(pdoc);
         validatePaperTextProgramFillSubmission(pdoc, config, draft.answers, {
-            ...context, stage: 'finalize-preflight',
+            ...context,
+            stage: 'finalize-preflight',
         });
     }
 }
@@ -155,17 +186,16 @@ class PaperBaseHandler extends Handler {
         // ── Krypton: client-required gate ────────────────────────────
         // Paper mode's _prepare is its own (it doesn't extend
         // ContestDetailBaseHandler), so we apply the same gate here.
-        const isAdminBypass = this.user.own(this.tdoc)
-            || this.user.hasPerm(PERM.PERM_EDIT_CONTEST)
-            || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        const isAdminBypass = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         const hasAttendPerm = this.user.hasPerm(PERM.PERM_ATTEND_CONTEST);
         const vg = (global as any).Hydro?.model?.vigilguard;
         const sid = vg?.clientSessionKeyFromSession
             ? vg.clientSessionKeyFromSession((this as any).session)
-            : ((this as any).session?.sessionId || (this as any).session?._id || '');
-        const hasClientSession = !isAdminBypass && sid && vg?.isValidClientSessionForContest
-            ? await vg.isValidClientSessionForContest(sid, authoritativeDomainId, tid, this.user._id)
-            : false;
+            : (this as any).session?.sessionId || (this as any).session?._id || '';
+        const hasClientSession =
+            !isAdminBypass && sid && vg?.isValidClientSessionForContest
+                ? await vg.isValidClientSessionForContest(sid, authoritativeDomainId, tid, this.user._id)
+                : false;
 
         if (!isAdminBypass && !hasAttendPerm && !hasClientSession) {
             throw new PermissionError(PERM.PERM_ATTEND_CONTEST);
@@ -173,9 +203,7 @@ class PaperBaseHandler extends Handler {
 
         if (!isAdminBypass) {
             if (vg?.effectiveContestAccess) {
-                const result = await vg.effectiveContestAccess(
-                    authoritativeDomainId, this.tdoc, this.user._id, sid,
-                );
+                const result = await vg.effectiveContestAccess(authoritativeDomainId, this.tdoc, this.user._id, sid);
                 if (!result.ok) {
                     // Paper UI surfaces the friendly /client-required-notice
                     // redirect through ContestClientRequiredError handling
@@ -215,20 +243,22 @@ class PaperBaseHandler extends Handler {
     async getProblemDict(): Promise<Record<number, any>> {
         const authoritativeDomainId = String(this.domain?._id);
         const pdict: Record<number, any> = {};
-        await Promise.all((this.tdoc.pids as number[]).map(async (pid) => {
-            const pdoc = await ProblemModel.get(authoritativeDomainId, pid, undefined, true);
-            if (!pdoc) return;
-            // Raw pdoc → file:// image attachments are never rewritten; make them
-            // absolute so they load under the deep /exam-mode/:tid/... routes.
-            if (typeof pdoc.content === 'string') {
-                pdoc.content = absolutizeProblemFileUrls(this, pdoc.content, pdoc, this.tdoc.docId);
-            }
-            // 考试上下文不得下发原赛通过率（难度提示）——public 投影会带上它。
-            delete pdoc.origStat;
-            // 统一解析为完整 config 对象（服务端内部用；含标准答案）。
-            pdoc.config = parsedProblemConfig(pdoc);
-            pdict[pid] = pdoc;
-        }));
+        await Promise.all(
+            (this.tdoc.pids as number[]).map(async (pid) => {
+                const pdoc = await ProblemModel.get(authoritativeDomainId, pid, undefined, true);
+                if (!pdoc) return;
+                // Raw pdoc → file:// image attachments are never rewritten; make them
+                // absolute so they load under the deep /exam-mode/:tid/... routes.
+                if (typeof pdoc.content === 'string') {
+                    pdoc.content = absolutizeProblemFileUrls(this, pdoc.content, pdoc, this.tdoc.docId);
+                }
+                // 考试上下文不得下发原赛通过率（难度提示）——public 投影会带上它。
+                delete pdoc.origStat;
+                // 统一解析为完整 config 对象（服务端内部用；含标准答案）。
+                pdoc.config = parsedProblemConfig(pdoc);
+                pdict[pid] = pdoc;
+            }),
+        );
         return pdict;
     }
 
@@ -291,7 +321,7 @@ function examModeContext(tdoc: any, section: ExamModeSection, contentTemplate: s
  * Resolve the student record for the current viewer, injected so the exam
  *  top bar can render `学号 + 姓名` next to the avatar.
  */
-async function resolveExamModeStudent(handler: any, domainId: string): Promise<{ studentId: string, realName: string } | null> {
+async function resolveExamModeStudent(handler: any, domainId: string): Promise<{ studentId: string; realName: string } | null> {
     const uid = handler?.user?._id;
     if (!uid) return null;
     const userbind = (global as any).Hydro?.model?.userbind;
@@ -308,13 +338,7 @@ async function resolveExamModeStudent(handler: any, domainId: string): Promise<{
     }
 }
 
-async function decorateExamMode(
-    handler: Handler,
-    tdoc: any,
-    section: ExamModeSection,
-    contentTemplate: string,
-    previewMode = false,
-) {
+async function decorateExamMode(handler: Handler, tdoc: any, section: ExamModeSection, contentTemplate: string, previewMode = false) {
     handler.response.template = 'exam_contest.html';
     handler.response.body ||= {};
     handler.response.body.tdoc ||= tdoc;
@@ -329,10 +353,8 @@ async function ensureExamModeAccess(handler: Handler, domainId: string, tid: Obj
     const vg = (global as any).Hydro?.model?.vigilguard;
     const sessionKey = vg?.clientSessionKeyFromSession
         ? vg.clientSessionKeyFromSession((handler as any).session)
-        : ((handler as any).session?.sessionId || (handler as any).session?._id || '');
-    const isAdminBypass = handler.user.own(tdoc)
-        || handler.user.hasPerm(PERM.PERM_EDIT_CONTEST)
-        || handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        : (handler as any).session?.sessionId || (handler as any).session?._id || '';
+    const isAdminBypass = handler.user.own(tdoc) || handler.user.hasPerm(PERM.PERM_EDIT_CONTEST) || handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
     let previewMode = false;
     if (isAdminBypass && vg?.currentClientSession) {
         const sess = await vg.currentClientSession(sessionKey);
@@ -364,15 +386,17 @@ async function ensureExamModeAccess(handler: Handler, domainId: string, tid: Obj
 // ─── Cell + grading helpers ──────────────────────────────────────────────
 
 /** Compute correctness for a single objective question. */
-function gradeObjective(
-    answerSpec: any, studentAnswer: any,
-): 'correct' | 'wrong' | 'partial' {
+function gradeObjective(answerSpec: any, studentAnswer: any): 'correct' | 'wrong' | 'partial' {
     return gradeObjectiveAnswer(answerSpec, studentAnswer).outcome;
 }
 
 async function gradeObjectiveDraft(
-    domainId: string, tid: ObjectId, uid: number, pid: number,
-    pdoc: any, kindFilter?: string,
+    domainId: string,
+    tid: ObjectId,
+    uid: number,
+    pid: number,
+    pdoc: any,
+    kindFilter?: string,
 ): Promise<Record<string, 'correct' | 'wrong' | 'partial'>> {
     const draft = await PaperDraftModel.getDraft(domainId, tid, pid, uid);
     if (!draft) return {};
@@ -415,11 +439,12 @@ class PaperLayoutHandler extends PaperBaseHandler {
                 const kinds = questionKindMap(config?.answers);
                 for (const [key, kind] of Object.entries(kinds)) {
                     const score = Array.isArray(config.answers?.[key]) ? config.answers[key][1] : 0;
-                    const meta = Array.isArray(config.answers?.[key]) && config.answers[key].length >= 3
-                        ? config.answers[key][2]
-                        : undefined;
+                    const meta = Array.isArray(config.answers?.[key]) && config.answers[key].length >= 3 ? config.answers[key][2] : undefined;
                     cells.push({
-                        pid, questionKey: key, kind, score,
+                        pid,
+                        questionKey: key,
+                        kind,
+                        score,
                         prompt: meta?.prompt,
                     });
                 }
@@ -428,9 +453,7 @@ class PaperLayoutHandler extends PaperBaseHandler {
                 cells.push({
                     pid,
                     questionKey: null,
-                    kind: kind === 'program_fill'
-                        ? 'program_fill_compile'
-                        : kind === 'function' ? 'function' : 'fill_function',
+                    kind: kind === 'program_fill' ? 'program_fill_compile' : kind === 'function' ? 'function' : 'fill_function',
                     score: pdoc.score || 100,
                 });
             } else {
@@ -465,20 +488,20 @@ class PaperLayoutHandler extends PaperBaseHandler {
         // Scoreboard (best-effort).
         const allowRealtime = !!this.tdoc.realtimeScoreboard;
         const showScoreboard = !this.isInWindow() || allowRealtime;
-        let scoreboard: Array<{ rank: number, uid: number, uname: string, realName?: string, studentId?: string, score: number }> = [];
+        let scoreboard: Array<{ rank: number; uid: number; uname: string; realName?: string; studentId?: string; score: number }> = [];
         if (showScoreboard) {
             try {
-                const tsdocs = await (contest as any).getMultiStatus(domainId, { docId: this.tid })
-                    .sort({ score: -1 }).limit(100).toArray();
+                const tsdocs = await (contest as any).getMultiStatus(domainId, { docId: this.tid }).sort({ score: -1 }).limit(100).toArray();
                 const uids = tsdocs.map((t: any) => t.uid);
-                const udict = uids.length > 0
-                    ? await UserModel.getListForRender(domainId, uids, false).catch(() => ({}))
-                    : {};
+                const udict = uids.length > 0 ? await UserModel.getListForRender(domainId, uids, false).catch(() => ({})) : {};
                 scoreboard = tsdocs.map((t: any, i: number) => {
                     const u = (udict as any)[t.uid] || {};
                     return {
-                        rank: i + 1, uid: t.uid, uname: u.uname || `UID ${t.uid}`,
-                        realName: u.realName, studentId: u.studentId,
+                        rank: i + 1,
+                        uid: t.uid,
+                        uname: u.uname || `UID ${t.uid}`,
+                        realName: u.realName,
+                        studentId: u.studentId,
                         score: t.score || 0,
                     };
                 });
@@ -520,10 +543,15 @@ class PaperDraftListHandler extends PaperBaseHandler {
 
         // Look up most recent record per (tid, uid, pid) for programming-style cells.
         try {
-            const rdocs = await (record as any).getUserInProblemMulti(domainId, this.user._id, {
-                tid: this.tid, hidden: false,
-            }).sort({ _id: -1 }).limit(200).toArray();
-            for (const r of (rdocs || [])) {
+            const rdocs = await (record as any)
+                .getUserInProblemMulti(domainId, this.user._id, {
+                    tid: this.tid,
+                    hidden: false,
+                })
+                .sort({ _id: -1 })
+                .limit(200)
+                .toArray();
+            for (const r of rdocs || []) {
                 if (!recordStatus[String(r.pid)]) {
                     recordStatus[String(r.pid)] = String(r.status || '');
                 }
@@ -541,10 +569,7 @@ class PaperDraftUpsertHandler extends PaperBaseHandler {
     @param('answers', Types.Content, true)
     @param('code', Types.Content, true)
     @param('lang', Types.Name, true)
-    async post(
-        { domainId }: { domainId: string },
-        pid: number, answersJson?: string, code?: string, lang?: string,
-    ) {
+    async post({ domainId }: { domainId: string }, pid: number, answersJson?: string, code?: string, lang?: string) {
         if (!this.isInWindow()) throw new ValidationError('contest', null, 'Contest not in active window');
         if (!(this.tdoc.pids as number[]).includes(pid)) {
             throw new ValidationError('pid', null, 'Problem is not part of this contest');
@@ -569,11 +594,17 @@ class PaperDraftUpsertHandler extends PaperBaseHandler {
 
         const config = parsedProblemConfig(pdoc);
         validatePaperTextProgramFillSubmission(pdoc, config, parsedAnswers, {
-            domainId, tid: this.tid, uid: this.user._id, stage: 'draft-save',
+            domainId,
+            tid: this.tid,
+            uid: this.user._id,
+            stage: 'draft-save',
         });
         if (config?.type === 'fill_function') {
             const validated = validatePaperRegionSubmission(pdoc, config, code, {
-                domainId, tid: this.tid, uid: this.user._id, stage: 'draft-save',
+                domainId,
+                tid: this.tid,
+                uid: this.user._id,
+                stage: 'draft-save',
             });
             code = validated.code;
             lang = validated.lang;
@@ -599,21 +630,21 @@ class PaperLockKindHandler extends PaperBaseHandler {
         }
         if (!this.isInWindow()) throw new ValidationError('contest', null, 'Contest not in active window');
         if (!this.tdoc.allowSubmitByKind) {
-            throw new ValidationError(
-                'allowSubmitByKind', null,
-                'This contest does not allow per-kind submission. Use finalize to submit.',
-            );
+            throw new ValidationError('allowSubmitByKind', null, 'This contest does not allow per-kind submission. Use finalize to submit.');
         }
         const pdict = await this.getProblemDict();
         if (kind === 'fill_program') {
             for (const pid of this.tdoc.pids as number[]) {
                 const pdoc = pdict[pid];
                 if (!pdoc) continue;
-                // eslint-disable-next-line no-await-in-loop
+
                 const draft = await PaperDraftModel.getDraft(domainId, this.tid, pid, this.user._id);
                 if (!draft) continue;
                 validatePaperTextProgramFillSubmission(pdoc, pdoc.config, draft.answers, {
-                    domainId, tid: this.tid, uid: this.user._id, stage: 'lock-kind',
+                    domainId,
+                    tid: this.tid,
+                    uid: this.user._id,
+                    stage: 'lock-kind',
                 });
             }
         }
@@ -652,18 +683,19 @@ class PaperSubmitCodeHandler extends PaperBaseHandler {
         if (!draft || !draft.code) {
             throw new ValidationError('draft', null, 'No code saved yet — call save first');
         }
-        const validated = type === 'fill_function'
-            ? validatePaperRegionSubmission(pdoc, config, draft.code, {
-                domainId, tid: this.tid, uid: this.user._id, stage: 'immediate-submit',
-            })
-            : null;
-        const lang = validated?.lang || draft.lang || (config?.langs?.[0]) || 'cpp';
+        const validated =
+            type === 'fill_function'
+                ? validatePaperRegionSubmission(pdoc, config, draft.code, {
+                      domainId,
+                      tid: this.tid,
+                      uid: this.user._id,
+                      stage: 'immediate-submit',
+                  })
+                : null;
+        const lang = validated?.lang || draft.lang || config?.langs?.[0] || 'cpp';
         const finalCode = validated?.code || draft.code;
 
-        const rid = await record.add(
-            domainId, pid, this.user._id, lang, finalCode, true,
-            { contest: this.tid, type: 'judge' },
-        );
+        const rid = await record.add(domainId, pid, this.user._id, lang, finalCode, true, { contest: this.tid, type: 'judge' });
         this.response.body = { rid };
         await OplogModel.log(this, 'paper.submit_code', { tid: this.tid, pid, rid });
     }
@@ -675,18 +707,20 @@ export async function finalizePaperForUser(
     domainId: string,
     tid: ObjectId,
     uid: number,
-    options: { tdoc?: any, meta?: any } = {},
+    options: { tdoc?: any; meta?: any } = {},
 ): Promise<ObjectId[]> {
-    const tdoc = options.tdoc || await contest.get(domainId, tid);
+    const tdoc = options.tdoc || (await contest.get(domainId, tid));
     if (!tdoc) throw new NotFoundError('Contest');
     if (tdoc.rule !== 'exam') return [];
 
     const drafts = await PaperDraftModel.getDraftsForUser(domainId, tid, uid);
     const pdict: Record<number, any> = {};
-    await Promise.all((tdoc.pids as number[] || []).map(async (pid) => {
-        const pdoc = await ProblemModel.get(tdoc.domainId, pid, undefined, true);
-        if (pdoc) pdict[pid] = pdoc;
-    }));
+    await Promise.all(
+        ((tdoc.pids as number[]) || []).map(async (pid) => {
+            const pdoc = await ProblemModel.get(tdoc.domainId, pid, undefined, true);
+            if (pdoc) pdict[pid] = pdoc;
+        }),
+    );
     preflightPaperTextProgramFillDrafts(drafts, pdict, { domainId, tid, uid });
 
     const rids: ObjectId[] = [];
@@ -706,11 +740,12 @@ export async function finalizePaperForUser(
             if (isSubjective && rawSubjectiveAnswer !== undefined && typeof rawSubjectiveAnswer !== 'string') {
                 throw new ValidationError('answer', null, '主观题答案必须是文本');
             }
-            const code = isSubjective ? (rawSubjectiveAnswer || '') : yaml.dump(draft.answers || {});
-            const rid = await record.add(
-                domainId, draft.pid, uid, '_', code, true,
-                { contest: tid, type: isSubjective ? 'manual' : 'judge', ...recordMeta } as any,
-            );
+            const code = isSubjective ? (rawSubjectiveAnswer as string | undefined) || '' : yaml.dump(draft.answers || {});
+            const rid = await record.add(domainId, draft.pid, uid, '_', code, true, {
+                contest: tid,
+                type: isSubjective ? 'manual' : 'judge',
+                ...recordMeta,
+            } as any);
             if (isSubjective) {
                 manualRids.add(String(rid));
                 await markManualPending({ domainId, tid, pid: draft.pid, uid, rid });
@@ -719,27 +754,25 @@ export async function finalizePaperForUser(
         } else if (type === 'fill_function') {
             const codeBody = draft.code || JSON.stringify(draft.answers || {});
             const validated = validatePaperRegionSubmission(pdoc, config, codeBody, {
-                domainId, tid, uid, stage: 'finalize',
+                domainId,
+                tid,
+                uid,
+                stage: 'finalize',
             });
-            const rid = await record.add(
-                domainId, draft.pid, uid, validated.lang, validated.code, true,
-                { contest: tid, type: 'judge', ...recordMeta } as any,
-            );
+            const rid = await record.add(domainId, draft.pid, uid, validated.lang, validated.code, true, {
+                contest: tid,
+                type: 'judge',
+                ...recordMeta,
+            } as any);
             rids.push(rid);
         } else if (type === 'default') {
             if (!draft.code) continue;
             const lang = draft.lang || config?.langs?.[0] || 'cpp';
-            const rid = await record.add(
-                domainId, draft.pid, uid, lang, draft.code, true,
-                { contest: tid, type: 'judge', ...recordMeta } as any,
-            );
+            const rid = await record.add(domainId, draft.pid, uid, lang, draft.code, true, { contest: tid, type: 'judge', ...recordMeta } as any);
             rids.push(rid);
         } else if (type === 'submit_answer') {
             const codeBody = draft.code || '';
-            const rid = await record.add(
-                domainId, draft.pid, uid, '_', codeBody, true,
-                { contest: tid, type: 'judge', ...recordMeta } as any,
-            );
+            const rid = await record.add(domainId, draft.pid, uid, '_', codeBody, true, { contest: tid, type: 'judge', ...recordMeta } as any);
             rids.push(rid);
         }
     }
@@ -770,7 +803,7 @@ class PaperFinalizeHandler extends PaperBaseHandler {
         if (!vg?.currentClientSession) return false;
         const sid = vg.clientSessionKeyFromSession
             ? vg.clientSessionKeyFromSession((this as any).session)
-            : ((this as any).session?.sessionId || (this as any).session?._id || '');
+            : (this as any).session?.sessionId || (this as any).session?._id || '';
         const sess = await vg.currentClientSession(sid);
         if (!sess) return false;
         if (sess.domainId !== domainId || sess.uid !== this.user._id || !sess.contestId?.equals?.(this.tid)) {
@@ -780,12 +813,16 @@ class PaperFinalizeHandler extends PaperBaseHandler {
             await closeSessionOnVigil(this.tid.toString(), sess.vigilSessionId, 'submitted');
             await vg.deleteClientSessionByVigilSessionId?.(sess.vigilSessionId);
             await OplogModel.log(this, 'vigil.session_close_requested', {
-                tid: this.tid, sessionId: sess.vigilSessionId, closeReason: 'submitted',
+                tid: this.tid,
+                sessionId: sess.vigilSessionId,
+                closeReason: 'submitted',
             });
             return true;
         } catch (e: any) {
             await OplogModel.log(this, 'vigil.session_close_failed', {
-                tid: this.tid, sessionId: sess.vigilSessionId, error: e?.message || String(e),
+                tid: this.tid,
+                sessionId: sess.vigilSessionId,
+                error: e?.message || String(e),
             });
             return false;
         }
@@ -810,13 +847,14 @@ class ExamModeHomeHandler extends Handler {
      */
     async get(_args: { domainId?: string }) {
         const authoritativeDomainId = String(this.domain?._id);
-        const isAdmin = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)
-            || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+        const isAdmin = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
 
         let contests: any[] = [];
         if (isAdmin) {
-            const cursor = contest.getMulti(authoritativeDomainId, { vigilEnabled: true } as any)
-                .sort({ beginAt: -1 }).limit(50);
+            const cursor = contest
+                .getMulti(authoritativeDomainId, { vigilEnabled: true } as any)
+                .sort({ beginAt: -1 })
+                .limit(50);
             const tdocs = await cursor.toArray();
             const now = Date.now();
             contests = tdocs.map((t: any) => ({
@@ -877,26 +915,26 @@ class ExamModeEntryHandler extends Handler {
         // Before the start time, the client workspace may be open for check-in,
         // but students must not receive problem ids/titles in the bootstrap JSON.
         const hideProblemsBeforeStart = contest.isNotStarted(tdoc) && !isAdminBypass;
-        const workspaceTdoc = hideProblemsBeforeStart
-            ? { ...tdoc, pids: [], allowPrint: false }
-            : tdoc;
+        const workspaceTdoc = hideProblemsBeforeStart ? { ...tdoc, pids: [], allowPrint: false } : tdoc;
 
         // Resolve problem dict so the workspace can render the problem list inline.
         const pdict: Record<number, any> = {};
         if (!hideProblemsBeforeStart) {
-            await Promise.all((tdoc.pids as number[] || []).map(async (pid) => {
-                const pdoc = await ProblemModel.get(authoritativeDomainId, pid, undefined, true);
-                if (!pdoc) return;
-                // Absolutize file:// image attachments for the deep exam-mode route.
-                if (typeof pdoc.content === 'string') {
-                    pdoc.content = absolutizeProblemFileUrls(this, pdoc.content, pdoc, tdoc.docId);
-                }
-                // 考试上下文不得下发原赛通过率（难度提示）。
-                delete pdoc.origStat;
-                // 净化 config：原始 YAML 串含标准答案，不下发。
-                pdoc.config = clientProblemConfig(parsedProblemConfig(pdoc));
-                pdict[pid] = pdoc;
-            }));
+            await Promise.all(
+                ((tdoc.pids as number[]) || []).map(async (pid) => {
+                    const pdoc = await ProblemModel.get(authoritativeDomainId, pid, undefined, true);
+                    if (!pdoc) return;
+                    // Absolutize file:// image attachments for the deep exam-mode route.
+                    if (typeof pdoc.content === 'string') {
+                        pdoc.content = absolutizeProblemFileUrls(this, pdoc.content, pdoc, tdoc.docId);
+                    }
+                    // 考试上下文不得下发原赛通过率（难度提示）。
+                    delete pdoc.origStat;
+                    // 净化 config：原始 YAML 串含标准答案，不下发。
+                    pdoc.config = clientProblemConfig(parsedProblemConfig(pdoc));
+                    pdict[pid] = pdoc;
+                }),
+            );
         }
 
         this.response.body = {
@@ -1114,8 +1152,16 @@ class ExamModeDiscussionCreateHandler extends Handler {
         if (highlight) this.checkPerm(PERM.PERM_HIGHLIGHT_DISCUSSION);
         if (pin) this.checkPerm(PERM.PERM_PIN_DISCUSSION);
         const did = await discussion.add(
-            authoritativeDomainId, document.TYPE_CONTEST, tid, this.user._id,
-            title, content, this.request.ip, highlight, pin, this.vnode?.hidden ?? false,
+            authoritativeDomainId,
+            document.TYPE_CONTEST,
+            tid,
+            this.user._id,
+            title,
+            content,
+            this.request.ip,
+            highlight,
+            pin,
+            this.vnode?.hidden ?? false,
         );
         this.response.body = { did };
         this.response.redirect = `/exam-mode/${tid.toHexString()}/discussion/${did.toHexString()}`;

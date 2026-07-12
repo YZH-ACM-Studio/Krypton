@@ -65,9 +65,7 @@ class WebsocketEventsConnectionManagerHandler extends ConnectionHandler {
     async subscribe(payload: any) {
         const accept = [];
         const reject = [];
-        const session = payload.credential
-            ? await TokenModel.get(payload.credential, TokenModel.TYPE_SESSION)
-            : null;
+        const session = payload.credential ? await TokenModel.get(payload.credential, TokenModel.TYPE_SESSION) : null;
         const op = payload.operation || '';
         if (op === 'resume' && !this.privileged) {
             this.send({ operation: 'resume_failed' });
@@ -76,12 +74,11 @@ class WebsocketEventsConnectionManagerHandler extends ConnectionHandler {
         const user = op === 'resume' ? null : await UserModel.getById('system', session?.uid || 0);
         for (const channel of payload.channels || []) {
             try {
-                const result = op === 'resume'
-                    ? { ok: true, channel }
-                    // eslint-disable-next-line no-await-in-loop
-                    : await this.ctx.bail('subscription/subscribe', channel, user, this.privileged ? payload.metadata || {} : {});
+                const result =
+                    op === 'resume'
+                        ? { ok: true, channel }
+                        : await this.ctx.bail('subscription/subscribe', channel, user, this.privileged ? payload.metadata || {} : {});
                 if (result?.ok) {
-                    // eslint-disable-next-line no-await-in-loop
                     await this.accept(result.channel);
                     accept.push(result.channel);
                 } else reject.push(channel);

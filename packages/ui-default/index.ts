@@ -1,8 +1,20 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  ContestModel, Context, Handler, ObjectId, param, PERM, PRIV, ProblemModel, Schema,
-  SettingModel, SystemModel, Types, UserModel, yaml,
+  ContestModel,
+  Context,
+  Handler,
+  ObjectId,
+  param,
+  PERM,
+  PRIV,
+  ProblemModel,
+  Schema,
+  SettingModel,
+  SystemModel,
+  Types,
+  UserModel,
+  yaml,
 } from 'hydrooj';
 import convert from 'schemastery-jsonschema';
 import markdown from './backendlib/markdown';
@@ -24,7 +36,7 @@ class WikiAboutHandler extends Handler {
     // TODO template engine
     raw = raw.replace(/\{\{ name \}\}/g, this.domain.ui?.name || SystemModel.get('server.name')).trim();
     const lines = raw.split('\n');
-    const sections: { id: string, title: string, content: string }[] = [];
+    const sections: { id: string; title: string; content: string }[] = [];
     for (const line of lines) {
       if (line.startsWith('# ')) {
         const id = line.split(' ')[1];
@@ -55,7 +67,7 @@ class LegacyModeHandler extends Handler {
 
   @param('legacy', Types.Boolean)
   @param('nohint', Types.Boolean)
-  async get({ }, legacy = false, nohint = false) {
+  async get({}, legacy = false, nohint = false) {
     this.session.legacy = legacy;
     this.session.nohint = nohint;
     this.back();
@@ -66,9 +78,7 @@ class MarkdownHandler extends Handler {
   noCheckPermView = true;
 
   async post({ text, inline = false }) {
-    this.response.body = inline
-      ? markdown.renderInline(text)
-      : markdown.render(text);
+    this.response.body = inline ? markdown.renderInline(text) : markdown.render(text);
     this.response.type = 'text/html';
     this.response.status = 200;
   }
@@ -93,7 +103,7 @@ class RichMediaHandler extends Handler {
   async renderProblem(domainId, payload) {
     const cur = payload.domainId ? await UserModel.getById(payload.domainId, this.user._id) : this.user;
     let pdoc = cur.hasPerm(PERM.PERM_VIEW | PERM.PERM_VIEW_PROBLEM)
-      ? await ProblemModel.get(payload.domainId || domainId, payload.id) || ProblemModel.default
+      ? (await ProblemModel.get(payload.domainId || domainId, payload.id)) || ProblemModel.default
       : ProblemModel.default;
     if (pdoc.hidden && !cur.own(pdoc) && !cur.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN)) pdoc = ProblemModel.default;
     return await this.renderHTML('partials/problem.html', { pdoc });
@@ -131,28 +141,27 @@ class RichMediaHandler extends Handler {
   }
 }
 
-/* eslint-disable style/quote-props */
 const fontRange = {
   'Open Sans': 'Open Sans',
-  'Seravek': 'Seravek',
+  Seravek: 'Seravek',
   'Segoe UI': 'Segoe UI',
-  'Verdana': 'Verdana',
+  Verdana: 'Verdana',
   'PingFang SC': 'PingFang SC',
   'Hiragino Sans GB': 'Hiragino Sans GB',
   'Microsoft Yahei': 'Microsoft Yahei',
   'WenQuanYi Micro Hei': 'WenQuanYi Micro Hei',
-  'sans': 'sans',
+  sans: 'sans',
   'XiaoLai SC': '小赖 SC',
 };
 const codeFontRange = {
-  'monaco': 'Monaco',
+  monaco: 'Monaco',
   'Source Code Pro': 'Source Code Pro',
-  'Consolas': 'Consolas',
+  Consolas: 'Consolas',
   'Lucida Console': 'Lucida Console',
   'Fira Code': 'Fira Code',
   'Roboto Mono': 'Roboto Mono',
-  'Inconsolata': 'Inconsolata',
-  'Hack': 'Hack',
+  Inconsolata: 'Inconsolata',
+  Hack: 'Hack',
   'Jetbrains Mono': 'Jetbrains Mono',
   'DM Mono': 'DM Mono',
   'Ubuntu Mono': 'Ubuntu Mono',
@@ -168,7 +177,9 @@ export const Config = Schema.object({
     preload: Schema.string().default(''),
     assets: Schema.array(Schema.string()).default([]),
     domains: Schema.array(Schema.string()).default([]),
-  }).description('Service worker optimization settings').experimental(),
+  })
+    .description('Service worker optimization settings')
+    .experimental(),
 });
 
 export function apply(ctx: Context, config: ReturnType<typeof Config>) {
@@ -184,15 +195,17 @@ export function apply(ctx: Context, config: ReturnType<typeof Config>) {
       SettingModel.Setting('setting_highlight', 'showInvisibleChar', false, 'boolean', 'Show Invisible Characters'),
       SettingModel.Setting('setting_highlight', 'formatCode', true, 'boolean', 'Auto Format Code'),
     );
-    c.setting.SystemSetting(Schema.object({
-      'ui-default': Schema.object({
-        footer_extra_html: Schema.string().role('textarea').default(''),
-        nav_logo_dark: Schema.string().default('/components/navigation/nav-logo-small_dark.png'),
-        domainNavigation: Schema.boolean().default(true).description('Show Domain Navigation'),
-        about: Schema.string().role('markdown').default(defaultAbout),
-        enableScratchpad: Schema.boolean().default(true).description('Enable Scratchpad Mode'),
+    c.setting.SystemSetting(
+      Schema.object({
+        'ui-default': Schema.object({
+          footer_extra_html: Schema.string().role('textarea').default(''),
+          nav_logo_dark: Schema.string().default('/components/navigation/nav-logo-small_dark.png'),
+          domainNavigation: Schema.boolean().default(true).description('Show Domain Navigation'),
+          about: Schema.string().role('markdown').default(defaultAbout),
+          enableScratchpad: Schema.boolean().default(true).description('Enable Scratchpad Mode'),
+        }),
       }),
-    }));
+    );
     ctx.Route('config_schema', '/manage/config/schema.json', SystemConfigSchemaHandler, PRIV.PRIV_EDIT_SYSTEM);
   });
   if (process.env.HYDRO_CLI) return;
@@ -211,12 +224,7 @@ export function apply(ctx: Context, config: ReturnType<typeof Config>) {
   ctx.on('handler/after', async (that) => {
     that.UiContext.SWConfig = {
       preload: config.serviceWorker.preload,
-      hosts: [
-        `http://${that.request.host}`,
-        `https://${that.request.host}`,
-        SystemModel.get('server.url'),
-        SystemModel.get('server.cdn'),
-      ],
+      hosts: [`http://${that.request.host}`, `https://${that.request.host}`, SystemModel.get('server.url'), SystemModel.get('server.cdn')],
       assets: config.serviceWorker.assets,
       domains: config.serviceWorker.domains,
     };

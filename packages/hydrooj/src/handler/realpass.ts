@@ -16,9 +16,7 @@
  *   - 非数字串只按 pid 查。
  */
 import { escapeRegExp } from 'lodash';
-import {
-    Context, db, Handler, OplogModel, param, PRIV, Types, ValidationError,
-} from 'hydrooj';
+import { Context, db, Handler, OplogModel, param, PRIV, Types, ValidationError } from 'hydrooj';
 import problem from '../model/problem';
 
 const PROJ_RESOLVE = ['docId', 'pid', 'title'] as any[];
@@ -47,25 +45,36 @@ async function resolveTarget(domainId: string, raw: string): Promise<ResolveResu
         const b = byPid[0];
         if (a && b && a.docId !== b.docId) {
             return {
-                status: 'conflict', byDocId: a.docId, byPid: b.docId,
+                status: 'conflict',
+                byDocId: a.docId,
+                byPid: b.docId,
             };
         }
         const hit = a || b;
         if (!hit) return { status: 'unmatched' };
         return {
-            status: 'ok', docId: hit.docId, pid: hit.pid, title: hit.title,
+            status: 'ok',
+            docId: hit.docId,
+            pid: hit.pid,
+            title: hit.title,
         };
     }
     const hits = await problem.getMulti(domainId, { pid: s }, PROJ_RESOLVE).limit(1).toArray();
     if (!hits[0]) return { status: 'unmatched' };
     return {
-        status: 'ok', docId: hits[0].docId, pid: hits[0].pid, title: hits[0].title,
+        status: 'ok',
+        docId: hits[0].docId,
+        pid: hits[0].pid,
+        title: hits[0].title,
     };
 }
 
 function buildOrigStat(accepted: number, submitted: number, uid: number) {
     return {
-        accepted, submitted, updatedBy: uid, updatedAt: new Date(),
+        accepted,
+        submitted,
+        updatedBy: uid,
+        updatedAt: new Date(),
     };
 }
 
@@ -89,17 +98,17 @@ class RealPassManageHandler extends Handler {
             const re = new RegExp(escapeRegExp(q), 'i');
             query.$or = [{ pid: re }, { title: re }];
         }
-        const [pdocs, ppcount, pcount] = await this.paginate(
-            problem.getMulti(domainId, query, PROJ_LIST).sort({ docId: 1 }),
-            page,
-            'problem',
-        );
+        const [pdocs, ppcount, pcount] = await this.paginate(problem.getMulti(domainId, query, PROJ_LIST).sort({ docId: 1 }), page, 'problem');
         // 迁移脚本留下的 unmatched/conflict 报告（只读展示，帮助管理员收尾）。
-        const migration = await db.collection('system' as any)
-            .findOne({ _id: 'realpass.migration_unmatched' as any });
+        const migration = await db.collection('system' as any).findOne({ _id: 'realpass.migration_unmatched' as any });
         this.response.template = 'manage_realpass.html';
         this.response.body = {
-            pdocs, page, ppcount, pcount, q, migration: migration?.value || null,
+            pdocs,
+            page,
+            ppcount,
+            pcount,
+            q,
+            migration: migration?.value || null,
         };
     }
 
@@ -113,17 +122,18 @@ class RealPassManageHandler extends Handler {
             throw new ValidationError('target', null, `docId 与 pid 双命中不同题（docId→#${r.byDocId} / pid→#${r.byPid}），请改用明确的 pid`);
         }
         if (r.status !== 'ok') throw new ValidationError('target', null, `未找到题目：${target}`);
-        await problem.editAuthorized(
-            domainId,
-            r.docId!,
-            { origStat: buildOrigStat(accepted, submitted, this.user._id) } as any,
-            this.user,
-        );
+        await problem.editAuthorized(domainId, r.docId!, { origStat: buildOrigStat(accepted, submitted, this.user._id) } as any, this.user);
         await OplogModel.log(this as any, 'realpass.set', {
-            docId: r.docId, pid: r.pid, accepted, submitted,
+            docId: r.docId,
+            pid: r.pid,
+            accepted,
+            submitted,
         });
         this.response.body = {
-            ok: true, docId: r.docId, pid: r.pid, title: r.title,
+            ok: true,
+            docId: r.docId,
+            pid: r.pid,
+            title: r.title,
         };
     }
 
@@ -140,7 +150,10 @@ class RealPassManageHandler extends Handler {
     @param('payload', Types.String)
     @param('commit', Types.Boolean)
     async postBatch(domainId: string, payload: string, commit = false) {
-        const lines = payload.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        const lines = payload
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .filter(Boolean);
         if (!lines.length) throw new ValidationError('payload', null, '内容为空');
         if (lines.length > 2000) throw new ValidationError('payload', null, '单次最多 2000 行');
         const rows: BatchRow[] = [];
@@ -163,34 +176,54 @@ class RealPassManageHandler extends Handler {
                 rows.push({ line, status: 'invalid', reason: '通过数不能大于提交数' });
                 continue;
             }
-            const r = await resolveTarget(domainId, id); // eslint-disable-line no-await-in-loop
+            const r = await resolveTarget(domainId, id);
             if (r.status === 'conflict') {
                 rows.push({
-                    line, status: 'conflict', reason: `docId→#${r.byDocId} / pid→#${r.byPid} 双命中不同题`, accepted, submitted,
+                    line,
+                    status: 'conflict',
+                    reason: `docId→#${r.byDocId} / pid→#${r.byPid} 双命中不同题`,
+                    accepted,
+                    submitted,
                 });
                 continue;
             }
             if (r.status !== 'ok') {
                 rows.push({
-                    line, status: 'unmatched', reason: `未找到题目：${id}`, accepted, submitted,
+                    line,
+                    status: 'unmatched',
+                    reason: `未找到题目：${id}`,
+                    accepted,
+                    submitted,
                 });
                 continue;
             }
             if (seen.has(r.docId!)) {
                 rows.push({
-                    line, status: 'duplicate', reason: `与前面的行指向同一题 #${r.docId}，本行跳过`, docId: r.docId, pid: r.pid, title: r.title, accepted, submitted,
+                    line,
+                    status: 'duplicate',
+                    reason: `与前面的行指向同一题 #${r.docId}，本行跳过`,
+                    docId: r.docId,
+                    pid: r.pid,
+                    title: r.title,
+                    accepted,
+                    submitted,
                 });
                 continue;
             }
             seen.add(r.docId!);
             rows.push({
-                line, status: 'ok', docId: r.docId, pid: r.pid, title: r.title, accepted, submitted,
+                line,
+                status: 'ok',
+                docId: r.docId,
+                pid: r.pid,
+                title: r.title,
+                accepted,
+                submitted,
             });
         }
         const okRows = rows.filter((r) => r.status === 'ok');
         if (commit) {
             for (const r of okRows) {
-                // eslint-disable-next-line no-await-in-loop
                 await problem.editAuthorized(
                     domainId,
                     r.docId!,

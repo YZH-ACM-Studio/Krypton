@@ -1,13 +1,22 @@
 import {
-    ContestModel, Context, DomainModel, fs, nanoid, ProblemDoc, ProblemModel,
-    RecordModel, SettingModel, StorageModel, SystemModel,
+    ContestModel,
+    Context,
+    DomainModel,
+    fs,
+    nanoid,
+    ProblemDoc,
+    ProblemModel,
+    RecordModel,
+    SettingModel,
+    StorageModel,
+    SystemModel,
 } from 'hydrooj';
 import { ContestDetailBaseHandler } from 'hydrooj/src/handler/contest';
 
 class AutoSubmitHandler extends ContestDetailBaseHandler {
     pdoc: ProblemDoc;
 
-    async submit({ domainId, dryrun }: { domainId: string, dryrun: boolean }) {
+    async submit({ domainId, dryrun }: { domainId: string; dryrun: boolean }) {
         if (!this.tdoc || !ContestModel.isOngoing(this.tdoc, this.tsdoc)) return { error: 'Contest not live' };
         if (!this.tdoc.allowPrint) return { error: 'Not a on-site contest' };
         const file = this.request.files?.file;
@@ -66,10 +75,12 @@ Language ${SettingModel.langs[lang].display} (${lang})
         await this.limitRate('add_record', 60, SystemModel.get('limit.submission_user'), '{{user}}');
         await this.limitRate('add_record', 60, SystemModel.get('limit.submission'));
 
-        const rid = await RecordModel.add(
-            domainId, this.pdoc.docId, this.user._id, lang, code, true,
-            { contest: this.tdoc.docId, files, type: 'judge', notify: true },
-        );
+        const rid = await RecordModel.add(domainId, this.pdoc.docId, this.user._id, lang, code, true, {
+            contest: this.tdoc.docId,
+            files,
+            type: 'judge',
+            notify: true,
+        });
         await Promise.all([
             ProblemModel.inc(domainId, this.pdoc.docId, 'nSubmit', 1),
             DomainModel.incUserInDomain(domainId, this.user._id, 'nSubmit'),

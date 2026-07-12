@@ -53,7 +53,9 @@ export function AnnouncementPopover({ signedIn }: { signedIn: boolean }) {
         setLoaded(true);
       })
       .catch(() => {});
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [signedIn]);
 
   // Close on outside click.
@@ -72,7 +74,10 @@ export function AnnouncementPopover({ signedIn }: { signedIn: boolean }) {
         variant="ghost"
         size="icon"
         className="relative size-8"
-        onClick={(e) => { e.stopPropagation(); setOpen((p) => !p); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((p) => !p);
+        }}
         title="公告"
       >
         <Megaphone className="size-4" />
@@ -83,13 +88,14 @@ export function AnnouncementPopover({ signedIn }: { signedIn: boolean }) {
         )}
       </Button>
       {open && (
-        <div
-          className="absolute right-0 top-full z-50 mt-1.5 w-[360px] rounded-lg border bg-popover shadow-lg"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-[360px] rounded-lg border bg-popover shadow-lg" onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center justify-between border-b px-4 py-2.5">
             <span className="text-sm font-medium">公告</span>
-            {count > 0 && <Badge variant="secondary" className="text-[10px]">{count} 条未读</Badge>}
+            {count > 0 && (
+              <Badge variant="secondary" className="text-[10px]">
+                {count} 条未读
+              </Badge>
+            )}
           </div>
           <ScrollArea className="max-h-[400px]">
             {!loaded ? (
@@ -100,15 +106,14 @@ export function AnnouncementPopover({ signedIn }: { signedIn: boolean }) {
               <ul className="divide-y">
                 {docs.map((doc) => (
                   <li key={doc._id}>
-                    <a
-                      href={`/announce/${doc._id}`}
-                      className="flex items-start gap-2 px-4 py-3 transition-colors hover:bg-accent/40"
-                    >
+                    <a href={`/announce/${doc._id}`} className="flex items-start gap-2 px-4 py-3 transition-colors hover:bg-accent/40">
                       {doc.pin && <Pin className="mt-0.5 size-3 shrink-0 text-amber-600" />}
-                      <span className={cn(
-                        'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium',
-                        COLOR_CLASSES[doc.categoryColor] || COLOR_CLASSES.gray,
-                      )}>
+                      <span
+                        className={cn(
+                          'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium',
+                          COLOR_CLASSES[doc.categoryColor] || COLOR_CLASSES.gray,
+                        )}
+                      >
                         {doc.categoryName}
                       </span>
                       <div className="min-w-0 flex-1">

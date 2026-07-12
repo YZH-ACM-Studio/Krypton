@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { expect } from 'chai';
 import { beforeEach, describe, it } from 'node:test';
+import type { Award } from '../src/types';
 
 const framework = require('../../../framework/framework');
 const Module = require('module');
@@ -15,7 +16,7 @@ const outerPersonId = new ObjectId();
 const missingPersonId = new ObjectId();
 const batchId = new ObjectId();
 
-const award = {
+const award: Award = {
     type: 'ladder_team_gold',
     contest: '2026 年天梯赛',
     date: '2026-04',
@@ -72,19 +73,19 @@ function personMatches(person: any, filter: any) {
 const studentsColl = {
     async findOne(filter: any) {
         studentFindOneQueries.push(filter);
-        return students.find((student) => (
-            String(student._id) === String(filter._id)
-            && (filter.domainId === undefined || student.domainId === filter.domainId)
-        )) || null;
+        return (
+            students.find(
+                (student) => String(student._id) === String(filter._id) && (filter.domainId === undefined || student.domainId === filter.domainId),
+            ) || null
+        );
     },
     find(filter: any) {
         studentFindQueries.push(filter);
         return {
             async toArray() {
-                return students.filter((student) => (
-                    idIn(student._id, filter._id?.$in || [])
-                    && (filter.domainId === undefined || student.domainId === filter.domainId)
-                ));
+                return students.filter(
+                    (student) => idIn(student._id, filter._id?.$in || []) && (filter.domainId === undefined || student.domainId === filter.domainId),
+                );
             },
         };
     },
@@ -94,8 +95,12 @@ const peopleColl = {
     find(filter: any) {
         const docs = people.filter((person) => personMatches(person, filter));
         return {
-            sort() { return this; },
-            async toArray() { return docs; },
+            sort() {
+                return this;
+            },
+            async toArray() {
+                return docs;
+            },
         };
     },
     async findOne(filter: any) {
@@ -113,24 +118,30 @@ const peopleColl = {
         peopleUpdateMany.push({ filter, update });
         return { modifiedCount: people.filter((person) => personMatches(person, filter)).length };
     },
-    async insertOne() { throw new Error('unexpected insert'); },
+    async insertOne() {
+        throw new Error('unexpected insert');
+    },
 };
 
 const awardTypesColl = {
     find() {
         return {
-            sort() { return this; },
+            sort() {
+                return this;
+            },
             async toArray() {
-                return [{
-                    _id: new ObjectId(),
-                    key: 'ladder_team_gold',
-                    name: '天梯赛团队金奖',
-                    weight: 1,
-                    useRankDecay: false,
-                    hidden: false,
-                    order: 1,
-                    builtin: true,
-                }];
+                return [
+                    {
+                        _id: new ObjectId(),
+                        key: 'ladder_team_gold',
+                        name: '天梯赛团队金奖',
+                        weight: 1,
+                        useRankDecay: false,
+                        hidden: false,
+                        order: 1,
+                        builtin: true,
+                    },
+                ];
             },
         };
     },
@@ -138,9 +149,7 @@ const awardTypesColl = {
 
 const importBatchesColl = {
     async findOne(filter: any) {
-        return String(filter._id) === String(batchId)
-            ? { _id: batchId, rolledBack: false, rolledBackAt: null }
-            : null;
+        return String(filter._id) === String(batchId) ? { _id: batchId, rolledBack: false, rolledBackAt: null } : null;
     },
     async updateOne(filter: any, update: any) {
         batchUpdates.push({ filter, update });
@@ -150,7 +159,11 @@ const importBatchesColl = {
 
 const emptyCollection = {
     find() {
-        return { async toArray() { return []; } };
+        return {
+            async toArray() {
+                return [];
+            },
+        };
     },
 };
 
@@ -158,15 +171,25 @@ const dbStub = {
     awardTypesColl,
     importBatchesColl,
     peopleColl,
-    async seedAwardTypesIfEmpty() { return undefined; },
-    async getConfig() { return { baseScore: 100, decayFactor: 0.5 }; },
-    async setConfig() { return undefined; },
+    async seedAwardTypesIfEmpty() {
+        return undefined;
+    },
+    async getConfig() {
+        return { baseScore: 100, decayFactor: 0.5 };
+    },
+    async setConfig() {
+        return undefined;
+    },
 };
 
 const hydroojStub = {
     ...framework,
     ObjectId,
-    UserModel: { async getList() { return {}; } },
+    UserModel: {
+        async getList() {
+            return {};
+        },
+    },
     db: {
         collection(name: string) {
             if (name === 'userbind.students') return studentsColl;
@@ -236,9 +259,7 @@ describe('historical rankboard person scope', () => {
             ...year.icpc.flatMap((card: any) => card.members.map((member: any) => member.personId)),
         ]);
         expect(memberIds).to.deep.equal([String(systemPersonId)]);
-        expect(studentFindQueries).to.satisfy((queries: any[]) => (
-            queries.length >= 2 && queries.every((query) => query.domainId === 'system')
-        ));
+        expect(studentFindQueries).to.satisfy((queries: any[]) => queries.length >= 2 && queries.every((query) => query.domainId === 'system'));
     });
 
     for (const [label, invoke] of [

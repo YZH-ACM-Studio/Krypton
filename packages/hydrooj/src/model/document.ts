@@ -1,12 +1,16 @@
 import assert from 'assert';
-import {
-    Filter, FindCursor, ObjectId, OnlyFieldsOfType, PushOperator, UpdateFilter,
-} from 'mongodb';
+import { Filter, FindCursor, ObjectId, OnlyFieldsOfType, PushOperator, UpdateFilter } from 'mongodb';
 import { Context } from '../context';
 import {
-    Content, ContestClarificationDoc, ContestPrintDoc, DiscussionDoc,
-    DiscussionReplyDoc, ProblemDoc, ProblemStatusDoc,
-    Tdoc, TrainingDoc,
+    Content,
+    ContestClarificationDoc,
+    ContestPrintDoc,
+    DiscussionDoc,
+    DiscussionReplyDoc,
+    ProblemDoc,
+    ProblemStatusDoc,
+    Tdoc,
+    TrainingDoc,
 } from '../interface';
 import bus from '../service/bus';
 import db from '../service/db';
@@ -50,21 +54,33 @@ export interface DocStatusType {
 }
 
 export async function add<T extends keyof DocType, K extends DocType[T]['docId']>(
-    domainId: string, content: Content, owner: number,
-    docType: T, docId: K,
-    parentType?: DocType[T]['parentType'], parentId?: DocType[T]['parentId'],
+    domainId: string,
+    content: Content,
+    owner: number,
+    docType: T,
+    docId: K,
+    parentType?: DocType[T]['parentType'],
+    parentId?: DocType[T]['parentId'],
     args?: Partial<DocType[T]>,
 ): Promise<K>;
 export async function add<T extends keyof DocType>(
-    domainId: string, content: Content, owner: number,
-    docType: T, docId: null,
-    parentType?: DocType[T]['parentType'], parentId?: DocType[T]['parentId'],
+    domainId: string,
+    content: Content,
+    owner: number,
+    docType: T,
+    docId: null,
+    parentType?: DocType[T]['parentType'],
+    parentId?: DocType[T]['parentId'],
     args?: Partial<DocType[T]>,
 ): Promise<ObjectId>;
 export async function add(
-    domainId: string, content: Content, owner: number,
-    docType: number, docId: DocID = null,
-    parentType: number | null = null, parentId: DocID = null,
+    domainId: string,
+    content: Content,
+    owner: number,
+    docType: number,
+    docId: DocID = null,
+    parentType: number | null = null,
+    parentId: DocID = null,
     args: any = {},
 ) {
     const _id = new ObjectId();
@@ -108,36 +124,26 @@ export async function set<K extends keyof DocType>(
     if ($set && Object.keys($set).length) update.$set = $set;
     if ($unset && Object.keys($unset).length) update.$unset = $unset;
     if ($push && Object.keys($push).length) update.$push = $push;
-    return await coll.findOneAndUpdate(
-        { domainId, docType, docId },
-        update,
-        { returnDocument: 'after', upsert: true },
-    );
+    return await coll.findOneAndUpdate({ domainId, docType, docId }, update, { returnDocument: 'after', upsert: true });
 }
 
-export function deleteOne<K extends keyof DocType>(
-    domainId: string, docType: K, docId: DocType[K]['docId'],
-) {
-    return Promise.all([
-        coll.deleteOne({ domainId, docType, docId }),
-        collStatus.deleteMany({ domainId, docType, docId }),
-    ]);
+export function deleteOne<K extends keyof DocType>(domainId: string, docType: K, docId: DocType[K]['docId']) {
+    return Promise.all([coll.deleteOne({ domainId, docType, docId }), collStatus.deleteMany({ domainId, docType, docId })]);
 }
 
-export function deleteMulti<K extends keyof DocType>(
-    domainId: string, docType: K, query?: Filter<DocType[K]>,
-) {
+export function deleteMulti<K extends keyof DocType>(domainId: string, docType: K, query?: Filter<DocType[K]>) {
     return coll.deleteMany({ ...query, domainId, docType });
 }
 
-export function deleteMultiStatus<K extends keyof DocStatusType>(
-    domainId: string, docType: K, query?: Filter<DocStatusType[K]>,
-) {
+export function deleteMultiStatus<K extends keyof DocStatusType>(domainId: string, docType: K, query?: Filter<DocStatusType[K]>) {
     return collStatus.deleteMany({ ...query, domainId, docType });
 }
 
 export function getMulti<K extends keyof DocType>(
-    domainId: string, docType: K, query?: Filter<DocType[K]>, projection?: Projection<DocType[K]>,
+    domainId: string,
+    docType: K,
+    query?: Filter<DocType[K]>,
+    projection?: Projection<DocType[K]>,
 ): FindCursor<DocType[K]> {
     let cursor = coll.find({ docType, domainId, ...query });
     if (projection) cursor = cursor.project(buildProjection(projection));
@@ -145,55 +151,53 @@ export function getMulti<K extends keyof DocType>(
 }
 
 export async function inc<K extends keyof DocType>(
-    domainId: string, docType: K, docId: DocType[K]['docId'],
-    key: NumberKeys<DocType[K]>, value: number,
+    domainId: string,
+    docType: K,
+    docId: DocType[K]['docId'],
+    key: NumberKeys<DocType[K]>,
+    value: number,
 ) {
-    return await coll.findOneAndUpdate(
-        { domainId, docType, docId },
-        { $inc: { [key]: value } },
-        { returnDocument: 'after' },
-    );
+    return await coll.findOneAndUpdate({ domainId, docType, docId }, { $inc: { [key]: value } }, { returnDocument: 'after' });
 }
 
 export async function incAndSet<K extends keyof DocType>(
-    domainId: string, docType: K, docId: DocType[K]['docId'],
-    key: NumberKeys<DocType[K]>, value: number, args: Partial<DocType[K]>,
+    domainId: string,
+    docType: K,
+    docId: DocType[K]['docId'],
+    key: NumberKeys<DocType[K]>,
+    value: number,
+    args: Partial<DocType[K]>,
 ) {
-    return await coll.findOneAndUpdate(
-        { domainId, docType, docId },
-        { $inc: { [key]: value }, $set: args },
-        { returnDocument: 'after' },
-    );
+    return await coll.findOneAndUpdate({ domainId, docType, docId }, { $inc: { [key]: value }, $set: args }, { returnDocument: 'after' });
 }
 
-export function count<K extends keyof DocType>(
-    domainId: string, docType: K, query?: Filter<DocType[K]>,
-) {
+export function count<K extends keyof DocType>(domainId: string, docType: K, query?: Filter<DocType[K]>) {
     return coll.countDocuments({ ...query, docType, domainId });
 }
 
-export function countStatus<K extends keyof DocStatusType>(
-    domainId: string, docType: K, query?: Filter<DocStatusType[K]>,
-) {
+export function countStatus<K extends keyof DocStatusType>(domainId: string, docType: K, query?: Filter<DocStatusType[K]>) {
     return collStatus.countDocuments({ ...query, docType, domainId });
 }
 
 export async function push<K extends keyof DocType>(
-    domainId: string, docType: K, docId: DocType[K]['docId'],
-    key: ArrayKeys<DocType[K]>, value: DocType[K][0],
+    domainId: string,
+    docType: K,
+    docId: DocType[K]['docId'],
+    key: ArrayKeys<DocType[K]>,
+    value: DocType[K][0],
 ): Promise<[DocType[K], ObjectId]>;
 export async function push<K extends keyof DocType, T extends keyof DocType[K]>(
-    domainId: string, docType: K, docId: DocType[K]['docId'],
-    key: keyof DocType[K], content: string, owner: number, args?: DocType[K][T][0],
+    domainId: string,
+    docType: K,
+    docId: DocType[K]['docId'],
+    key: keyof DocType[K],
+    content: string,
+    owner: number,
+    args?: DocType[K][T][0],
 ): Promise<[DocType[K], ObjectId]>;
-export async function push(
-    domainId: string, docType: number, docId: DocID, key: string,
-    arg0: any, arg1?: any, arg2?: any,
-) {
+export async function push(domainId: string, docType: number, docId: DocID, key: string, arg0: any, arg1?: any, arg2?: any) {
     const _id = arg2?._id || arg0?._id || new ObjectId();
-    const v = arg1
-        ? { _id, ...arg2, content: arg0, owner: arg1 }
-        : { _id, ...arg0 };
+    const v = arg1 ? { _id, ...arg2, content: arg0, owner: arg1 } : { _id, ...arg0 };
     const doc = await coll.findOneAndUpdate(
         { domainId, docType, docId },
         // @ts-ignore
@@ -204,8 +208,11 @@ export async function push(
 }
 
 export async function pull<K extends keyof DocType, T extends ArrayKeys<DocType[K]>>(
-    domainId: string, docType: K, docId: DocType[K]['docId'],
-    setKey: T, contents: Filter<DocType[K][T][0]>,
+    domainId: string,
+    docType: K,
+    docId: DocType[K]['docId'],
+    setKey: T,
+    contents: Filter<DocType[K][T][0]>,
 ): Promise<DocType[K]> {
     return await coll.findOneAndUpdate(
         { domainId, docType, docId },
@@ -216,8 +223,11 @@ export async function pull<K extends keyof DocType, T extends ArrayKeys<DocType[
 }
 
 export async function deleteSub<T extends keyof DocType, K extends ArrayKeys<DocType[T]>>(
-    domainId: string, docType: T, docId: DocType[T]['docId'],
-    key: K, subId: MaybeArray<DocType[T][K][0]['_id']>,
+    domainId: string,
+    docType: T,
+    docId: DocType[T]['docId'],
+    key: K,
+    subId: MaybeArray<DocType[T][K][0]['_id']>,
 ): Promise<DocType[T]> {
     subId = Array.isArray(subId) ? subId : [subId];
     return await coll.findOneAndUpdate(
@@ -229,8 +239,11 @@ export async function deleteSub<T extends keyof DocType, K extends ArrayKeys<Doc
 }
 
 export async function getSub<T extends keyof DocType, K extends ArrayKeys<DocType[T]>>(
-    domainId: string, docType: T, docId: DocType[T]['docId'],
-    key: K, subId: DocType[T][K][0]['_id'],
+    domainId: string,
+    docType: T,
+    docId: DocType[T]['docId'],
+    key: K,
+    subId: DocType[T][K][0]['_id'],
 ): Promise<[DocType[T], DocType[T][K][0]]> {
     const doc = await coll.findOne({
         domainId,
@@ -246,8 +259,12 @@ export async function getSub<T extends keyof DocType, K extends ArrayKeys<DocTyp
 }
 
 export async function setSub<T extends keyof DocType, K extends NormalArrayKeys<DocType[T]>>(
-    domainId: string, docType: T, docId: DocType[T]['docId'],
-    key: K, subId: DocType[T][K][0]['_id'], args: Partial<DocType[T][K][0]>,
+    domainId: string,
+    docType: T,
+    docId: DocType[T]['docId'],
+    key: K,
+    subId: DocType[T][K][0]['_id'],
+    args: Partial<DocType[T][K][0]>,
 ): Promise<DocType[T]> {
     const $set: Record<string, any> = {};
     for (const k in args) $set[`${key}.$.${k}`] = args[k];
@@ -264,8 +281,11 @@ export async function setSub<T extends keyof DocType, K extends NormalArrayKeys<
 }
 
 export async function addToSet<T extends keyof DocType, K extends ArrayKeys<DocType[T], string>>(
-    domainId: string, docType: T, docId: DocType[T]['docId'],
-    setKey: K, content: string,
+    domainId: string,
+    docType: T,
+    docId: DocType[T]['docId'],
+    setKey: K,
+    content: string,
 ) {
     return await coll.findOneAndUpdate(
         { domainId, docType, docId },
@@ -276,26 +296,33 @@ export async function addToSet<T extends keyof DocType, K extends ArrayKeys<DocT
 }
 
 export async function getStatus<K extends keyof DocStatusType>(
-    domainId: string, docType: K, docId: DocStatusType[K]['docId'], uid: number,
+    domainId: string,
+    docType: K,
+    docId: DocStatusType[K]['docId'],
+    uid: number,
 ): Promise<DocStatusType[K]> {
     return await collStatus.findOne({ domainId, docType, docId, uid });
 }
 
 export function getMultiStatus<K extends keyof DocStatusType>(
-    domainId: string, docType: K, args: Filter<DocStatusType[K]>,
+    domainId: string,
+    docType: K,
+    args: Filter<DocStatusType[K]>,
 ): FindCursor<DocStatusType[K]> {
     return collStatus.find({ ...args, docType, domainId });
 }
 
-export function getMultiStatusWithoutDomain<K extends keyof DocStatusType>(
-    docType: K, args: Filter<DocStatusType[K]>,
-): FindCursor<DocStatusType[K]> {
+export function getMultiStatusWithoutDomain<K extends keyof DocStatusType>(docType: K, args: Filter<DocStatusType[K]>): FindCursor<DocStatusType[K]> {
     return collStatus.find({ ...args, docType });
 }
 
 export async function setStatus<K extends keyof DocStatusType>(
-    domainId: string, docType: K, docId: DocStatusType[K]['docId'], uid: number,
-    args: UpdateFilter<DocStatusType[K]>['$set'], returnDocument: 'before' | 'after' = 'after',
+    domainId: string,
+    docType: K,
+    docId: DocStatusType[K]['docId'],
+    uid: number,
+    args: UpdateFilter<DocStatusType[K]>['$set'],
+    returnDocument: 'before' | 'after' = 'after',
 ): Promise<DocStatusType[K]> {
     return await collStatus.findOneAndUpdate(
         { domainId, docType, docId, uid },
@@ -310,60 +337,72 @@ export async function setStatus<K extends keyof DocStatusType>(
 }
 
 export async function setMultiStatus<K extends keyof DocStatusType>(
-    domainId: string, docType: K, query: Filter<DocStatusType[K]>, args: Partial<DocStatusType[K]>,
+    domainId: string,
+    docType: K,
+    query: Filter<DocStatusType[K]>,
+    args: Partial<DocStatusType[K]>,
 ) {
-    return await collStatus.updateMany(
-        { domainId, docType, ...query },
-        { $set: args },
-    );
+    return await collStatus.updateMany({ domainId, docType, ...query }, { $set: args });
 }
 
 export async function setStatusIfCondition<T extends keyof DocStatusType>(
-    domainId: string, docType: T, docId: DocStatusType[T]['docId'], uid: number,
-    filter: Filter<DocStatusType[T]>, args: Partial<DocStatusType[T]> = {},
+    domainId: string,
+    docType: T,
+    docId: DocStatusType[T]['docId'],
+    uid: number,
+    filter: Filter<DocStatusType[T]>,
+    args: Partial<DocStatusType[T]> = {},
     returnDocument: 'before' | 'after' = 'after',
 ): Promise<DocStatusType[T]> {
     try {
-        return await collStatus.findOneAndUpdate(
-            { domainId, docType, docId, uid, ...filter },
-            { $set: args },
-            { upsert: true, returnDocument },
-        );
+        return await collStatus.findOneAndUpdate({ domainId, docType, docId, uid, ...filter }, { $set: args }, { upsert: true, returnDocument });
     } catch (e) {
         return false;
     }
 }
 
 export async function setIfNotStatus<T extends keyof DocStatusType, K extends keyof DocStatusType[T]>(
-    domainId: string, docType: T, docId: DocStatusType[T]['docId'], uid: number,
-    key: K, value: DocStatusType[T][K], ifNot: DocStatusType[T][K], args: Partial<DocStatusType[T]>,
+    domainId: string,
+    docType: T,
+    docId: DocStatusType[T]['docId'],
+    uid: number,
+    key: K,
+    value: DocStatusType[T][K],
+    ifNot: DocStatusType[T][K],
+    args: Partial<DocStatusType[T]>,
     returnDocument: 'before' | 'after' = 'after',
 ): Promise<DocStatusType[T]> {
-    return await setStatusIfCondition(
-        domainId, docType, docId, uid, { [key]: { $ne: ifNot } } as any,
-        { [key]: value, ...args }, returnDocument,
-    );
+    return await setStatusIfCondition(domainId, docType, docId, uid, { [key]: { $ne: ifNot } } as any, { [key]: value, ...args }, returnDocument);
 }
 
 export async function cappedIncStatus<T extends keyof DocStatusType>(
-    domainId: string, docType: T, docId: DocStatusType[T]['docId'], uid: number,
-    key: NumberKeys<DocStatusType[T]>, value: number, minValue = -1, maxValue = 1,
+    domainId: string,
+    docType: T,
+    docId: DocStatusType[T]['docId'],
+    uid: number,
+    key: NumberKeys<DocStatusType[T]>,
+    value: number,
+    minValue = -1,
+    maxValue = 1,
     setPayload: Partial<DocStatusType[T]> = {},
 ): Promise<DocStatusType[T]> {
     assert(value !== 0);
     const $not = value > 0 ? { $gte: maxValue } : { $lte: minValue };
     const operation = { $inc: { [key]: value } } as UpdateFilter<DocStatusType[T]>;
     if (Object.keys(setPayload).length) operation.$set = setPayload;
-    return await collStatus.findOneAndUpdate(
-        { domainId, docType, docId, uid, [key]: { $not } },
-        operation,
-        { upsert: true, returnDocument: 'after' },
-    );
+    return await collStatus.findOneAndUpdate({ domainId, docType, docId, uid, [key]: { $not } }, operation, {
+        upsert: true,
+        returnDocument: 'after',
+    });
 }
 
 export async function incStatus<T extends keyof DocStatusType>(
-    domainId: string, docType: T, docId: DocStatusType[T]['docId'], uid: number,
-    key: NumberKeys<DocStatusType[T]>, value: number,
+    domainId: string,
+    docType: T,
+    docId: DocStatusType[T]['docId'],
+    uid: number,
+    key: NumberKeys<DocStatusType[T]>,
+    value: number,
 ): Promise<DocStatusType[T]> {
     return await collStatus.findOneAndUpdate(
         { domainId, docType, docId, uid },
@@ -373,8 +412,13 @@ export async function incStatus<T extends keyof DocStatusType>(
 }
 
 export async function revPushStatus<T extends keyof DocStatusType>(
-    domainId: string, docType: T, docId: DocStatusType[T]['docId'], uid: number,
-    key: NormalArrayKeys<DocStatusType[T]>, value: any, id = '_id',
+    domainId: string,
+    docType: T,
+    docId: DocStatusType[T]['docId'],
+    uid: number,
+    key: NormalArrayKeys<DocStatusType[T]>,
+    value: any,
+    id = '_id',
 ): Promise<DocStatusType[T]> {
     let res = await collStatus.findOneAndUpdate(
         { domainId, docType, docId, uid, [`${key}.${id}`]: value[id] },
@@ -391,18 +435,21 @@ export async function revPushStatus<T extends keyof DocStatusType>(
 }
 
 export async function revInitStatus<T extends keyof DocStatusType>(
-    domainId: string, docType: T, docId: DocStatusType[T]['docId'], uid: number,
+    domainId: string,
+    docType: T,
+    docId: DocStatusType[T]['docId'],
+    uid: number,
 ): Promise<DocStatusType[T]> {
-    return await collStatus.findOneAndUpdate(
-        { domainId, docType, docId, uid },
-        { $inc: { rev: 1 } },
-        { upsert: true, returnDocument: 'after' },
-    );
+    return await collStatus.findOneAndUpdate({ domainId, docType, docId, uid }, { $inc: { rev: 1 } }, { upsert: true, returnDocument: 'after' });
 }
 
 export async function revSetStatus<T extends keyof DocStatusType>(
-    domainId: string, docType: T, docId: DocStatusType[T]['docId'], uid: number,
-    rev: number, args: Partial<DocStatusType[T]>,
+    domainId: string,
+    docType: T,
+    docId: DocStatusType[T]['docId'],
+    uid: number,
+    rev: number,
+    args: Partial<DocStatusType[T]>,
 ): Promise<any> {
     const filter = { domainId, docType, docId, uid, rev };
     const update = { $set: args, $inc: { rev: 1 } };
@@ -410,10 +457,7 @@ export async function revSetStatus<T extends keyof DocStatusType>(
 }
 
 export async function apply(ctx: Context) {
-    ctx.on('domain/delete', (domainId) => Promise.all([
-        coll.deleteMany({ domainId }),
-        collStatus.deleteMany({ domainId }),
-    ]));
+    ctx.on('domain/delete', (domainId) => Promise.all([coll.deleteMany({ domainId }), collStatus.deleteMany({ domainId })]));
     await ctx.db.clearIndexes(coll, ['tag', 'hidden']);
     const onlyFor = (docType: number) => ({ partialFilterExpression: { docType } });
     await ctx.db.ensureIndexes(

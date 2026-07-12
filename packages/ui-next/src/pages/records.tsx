@@ -17,7 +17,7 @@ type R = Record<string, any>;
 type SubtaskView = R & { id: string };
 
 function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | undefined) {
-  return uid != null ? udict[String(uid)] ?? null : null;
+  return uid != null ? (udict[String(uid)] ?? null) : null;
 }
 
 const STATUS_MAP: Record<number, { label: string; color: string }> = {
@@ -75,7 +75,7 @@ function toRecordDate(value: unknown) {
   const date = toDate(value);
   if (date) return date;
   if (typeof value === 'string' && /^[0-9a-f]{24}$/i.test(value)) {
-    return new Date(parseInt(value.slice(0, 8), 16) * 1000);
+    return new Date(Number.parseInt(value.slice(0, 8), 16) * 1000);
   }
   return null;
 }
@@ -121,7 +121,7 @@ function normalizeSubtasks(value: unknown): SubtaskView[] {
   if (!value) return [];
   if (Array.isArray(value)) {
     return value.map((item, index) => ({
-      ...(typeof item === 'object' && item ? item as R : {}),
+      ...(typeof item === 'object' && item ? (item as R) : {}),
       id: String((typeof item === 'object' && item ? (item as R).id : undefined) ?? index + 1),
     }));
   }
@@ -226,12 +226,7 @@ export function RecordsPage() {
   });
 
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div>
         <h1 className="text-xl font-semibold">评测记录</h1>
         <p className="text-sm text-muted-foreground">所有提交记录</p>
@@ -296,15 +291,15 @@ export function RecordsPage() {
             </div>
             <div className="lg:col-span-6 flex flex-wrap gap-4 text-xs text-muted-foreground">
               <label className="inline-flex items-center gap-2">
-                <Checkbox size="sm" name="all" value="1" defaultChecked={!!data.all}  />
+                <Checkbox size="sm" name="all" value="1" defaultChecked={!!data.all} />
                 包含比赛记录
               </label>
               <label className="inline-flex items-center gap-2">
-                <Checkbox size="sm" name="allDomain" value="1" defaultChecked={!!data.allDomain}  />
+                <Checkbox size="sm" name="allDomain" value="1" defaultChecked={!!data.allDomain} />
                 全站域记录
               </label>
               <label className="inline-flex items-center gap-2">
-                <Checkbox size="sm" name="stat" value="1" defaultChecked={!!statistics}  />
+                <Checkbox size="sm" name="stat" value="1" defaultChecked={!!statistics} />
                 显示统计
               </label>
             </div>
@@ -320,9 +315,7 @@ export function RecordsPage() {
                 <TableHead className="w-28">状态</TableHead>
                 <TableHead>题目</TableHead>
                 <TableHead className="w-28">用户</TableHead>
-                {hasStudentColumn ? (
-                  <TableHead className="w-32">学号 / 姓名</TableHead>
-                ) : null}
+                {hasStudentColumn ? <TableHead className="w-32">学号 / 姓名</TableHead> : null}
                 <TableHead className="w-20 text-center">语言</TableHead>
                 <TableHead className="w-24 text-right">得分</TableHead>
                 <TableHead className="w-24 text-right">时间</TableHead>
@@ -344,10 +337,7 @@ export function RecordsPage() {
                   return (
                     <TableRow key={String(r._id)}>
                       <TableCell>
-                        <a
-                          href={replaceRouteTokens(bs.urls.recordDetail, { RID: String(r._id) })}
-                          className="hover:underline"
-                        >
+                        <a href={replaceRouteTokens(bs.urls.recordDetail, { RID: String(r._id) })} className="hover:underline">
                           {statusDisplay(r.status)}
                         </a>
                       </TableCell>
@@ -359,9 +349,7 @@ export function RecordsPage() {
                           {pdoc.title ? `${r.pid}. ${pdoc.title}` : r.pid}
                         </a>
                       </TableCell>
-                      <TableCell className="text-sm">
-                        {user?.uname || `#${r.uid}`}
-                      </TableCell>
+                      <TableCell className="text-sm">{user?.uname || `#${r.uid}`}</TableCell>
                       {hasStudentColumn ? (
                         <TableCell className="text-xs">
                           {studentDict[String(r.uid)] ? (
@@ -375,24 +363,20 @@ export function RecordsPage() {
                         </TableCell>
                       ) : null}
                       <TableCell className="text-center">
-                        <Badge variant="outline" className="text-[10px]">{langDisplay(langs, r.lang)}</Badge>
+                        <Badge variant="outline" className="text-[10px]">
+                          {langDisplay(langs, r.lang)}
+                        </Badge>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {r.score != null ? (
-                          <span className={r.score === 100 ? 'font-medium text-green-600 dark:text-green-400' : ''}>
-                            {r.score}
-                          </span>
-                        ) : '—'}
+                          <span className={r.score === 100 ? 'font-medium text-green-600 dark:text-green-400' : ''}>{r.score}</span>
+                        ) : (
+                          '—'
+                        )}
                       </TableCell>
-                      <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
-                        {r.time != null ? `${r.time}ms` : '—'}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-xs text-muted-foreground">
-                        {formatMemory(r.memory)}
-                      </TableCell>
-                      <TableCell className="text-right text-xs text-muted-foreground">
-                        {formatRecordTime(r._id || r.judgeAt, locale)}
-                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{r.time != null ? `${r.time}ms` : '—'}</TableCell>
+                      <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{formatMemory(r.memory)}</TableCell>
+                      <TableCell className="text-right text-xs text-muted-foreground">{formatRecordTime(r._id || r.judgeAt, locale)}</TableCell>
                     </TableRow>
                   );
                 })
@@ -408,7 +392,9 @@ export function RecordsPage() {
             <a href={prevUrl}>上一页</a>
           </Button>
         ) : (
-          <Button variant="outline" size="sm" disabled>上一页</Button>
+          <Button variant="outline" size="sm" disabled>
+            上一页
+          </Button>
         )}
         <span className="text-xs text-muted-foreground">第 {page} 页</span>
         {rdocs.length ? (
@@ -416,7 +402,9 @@ export function RecordsPage() {
             <a href={nextUrl}>下一页</a>
           </Button>
         ) : (
-          <Button variant="outline" size="sm" disabled>下一页</Button>
+          <Button variant="outline" size="sm" disabled>
+            下一页
+          </Button>
         )}
       </div>
 
@@ -427,9 +415,13 @@ export function RecordsPage() {
               <Search className="size-4 text-primary" />
               评测统计
               {data.statisticsScope === 'contest' ? (
-                <Badge variant="secondary" className="text-[10px]">本场比赛</Badge>
+                <Badge variant="secondary" className="text-[10px]">
+                  本场比赛
+                </Badge>
               ) : data.statisticsScope === 'all' ? (
-                <Badge variant="secondary" className="text-[10px]">全站</Badge>
+                <Badge variant="secondary" className="text-[10px]">
+                  全站
+                </Badge>
               ) : null}
             </div>
             <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-7">
@@ -516,23 +508,18 @@ export function RecordDetailPage() {
   });
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <a href={recordListUrl} className="hover:text-primary">记录</a>
+            <a href={recordListUrl} className="hover:text-primary">
+              记录
+            </a>
             <ChevronRight className="size-3" />
           </div>
-          <h1 className="mt-1 text-xl font-semibold">
-            提交记录 #{String(rdoc._id).slice(-8)}
-          </h1>
+          <h1 className="mt-1 text-xl font-semibold">提交记录 #{String(rdoc._id).slice(-8)}</h1>
         </div>
-        {(code || rdoc.files?.code || rdoc.files?.hack) ? (
+        {code || rdoc.files?.code || rdoc.files?.hack ? (
           <Button asChild variant="outline" size="sm" className="w-fit">
             <a href={downloadUrl}>
               <Download className="size-4" />
@@ -613,7 +600,11 @@ export function RecordDetailPage() {
                   </div>
                   <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                     <span>得分 {subtask.score ?? '—'}</span>
-                    {subtask.type ? <Badge variant="outline" className="text-[10px]">{subtask.type}</Badge> : null}
+                    {subtask.type ? (
+                      <Badge variant="outline" className="text-[10px]">
+                        {subtask.type}
+                      </Badge>
+                    ) : null}
                   </div>
                 </div>
               ))}
@@ -642,15 +633,11 @@ export function RecordDetailPage() {
                   const caseId = c.id ?? i + 1;
                   return (
                     <TableRow key={`${subtaskId ?? 'case'}-${caseId}-${i}`}>
-                      <TableCell className="text-muted-foreground">
-                        {subtaskId != null ? `${subtaskId}-${caseId}` : caseId}
-                      </TableCell>
+                      <TableCell className="text-muted-foreground">{subtaskId != null ? `${subtaskId}-${caseId}` : caseId}</TableCell>
                       <TableCell>
                         <div>{statusDisplay(c.status)}</div>
                         {message ? (
-                          <p className="mt-1 max-w-xl whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
-                            {message}
-                          </p>
+                          <p className="mt-1 max-w-xl whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">{message}</p>
                         ) : null}
                         {(() => {
                           // Key by the case's IDENTITY (subtaskId-caseId), which
@@ -662,11 +649,11 @@ export function RecordDetailPage() {
                           if (!h?.hint && !h?.videoUrl) return null;
                           return (
                             <div className="mt-1.5 max-w-xl rounded border border-amber-200 bg-amber-50/60 px-2 py-1 text-xs dark:border-amber-900/50 dark:bg-amber-950/20">
-                              {h.hint ? (
-                                <p className="whitespace-pre-wrap break-words text-amber-800 dark:text-amber-200">💡 {h.hint}</p>
-                              ) : null}
+                              {h.hint ? <p className="whitespace-pre-wrap break-words text-amber-800 dark:text-amber-200">💡 {h.hint}</p> : null}
                               {h.videoUrl && /^https?:\/\//i.test(h.videoUrl) ? (
-                                <a href={h.videoUrl} target="_blank" rel="noreferrer" className="mt-0.5 inline-block text-primary hover:underline">▶ 讲解视频</a>
+                                <a href={h.videoUrl} target="_blank" rel="noreferrer" className="mt-0.5 inline-block text-primary hover:underline">
+                                  ▶ 讲解视频
+                                </a>
                               ) : null}
                             </div>
                           );
@@ -697,7 +684,9 @@ export function RecordDetailPage() {
                 langs={[]}
                 defaultLang={rdoc.lang || 'cc.cc17'}
                 value={String(code)}
-                onValueChange={() => { /* read-only */ }}
+                onValueChange={() => {
+                  /* read-only */
+                }}
                 minHeight={320}
                 className="h-full rounded-none border-0"
               />

@@ -2,9 +2,7 @@ import yaml from 'js-yaml';
 import Schema from 'schemastery';
 import { Context, Service } from './context';
 import { Logger } from './logger';
-import {
-    AccountSetting, DomainSetting, DomainUserSetting, PreferenceSetting, SystemSetting,
-} from './model/setting';
+import { AccountSetting, DomainSetting, DomainUserSetting, PreferenceSetting, SystemSetting } from './model/setting';
 
 const logger = new Logger('settings');
 
@@ -55,9 +53,13 @@ export class SettingService extends Service {
     }
 
     async loadConfig() {
-        const config = await this.ctx.db.collection('system').findOne({ _id: 'config' }, {
-            readPreference: 'primary', readConcern: 'majority',
-        });
+        const config = await this.ctx.db.collection('system').findOne(
+            { _id: 'config' },
+            {
+                readPreference: 'primary',
+                readConcern: 'majority',
+            },
+        );
         try {
             this.configSource = config?.value || '{}';
             this.systemConfig = yaml.load(this.configSource);
@@ -102,8 +104,8 @@ export class SettingService extends Service {
 
     async _actualMigrate(schema: Schema<any>) {
         const processNode = async (path: string[], node: Schema<any, any>) => {
-            for (const item of node.list || []) await processNode(path, item); // eslint-disable-line no-await-in-loop
-            for (const key in node.dict || {}) await processNode([...path, ...key], node.dict[key]); // eslint-disable-line no-await-in-loop
+            for (const item of node.list || []) await processNode(path, item);
+            for (const key in node.dict || {}) await processNode([...path, ...key], node.dict[key]);
             if (['string', 'number', 'boolean'].includes(node.type)) {
                 const value = this.initialValues[path.join('.')];
                 const migrated = this.initialValues[`${path.join('.')}__migrated`];
@@ -113,7 +115,7 @@ export class SettingService extends Service {
                     if (node.type === 'string') parsed = value;
                     if (node.type === 'number') parsed = +value;
                     if (node.type === 'boolean') parsed = !!value && !['off', '0', 'false'].includes(value);
-                } catch (e) { }
+                } catch (e) {}
                 if (parsed === undefined) return;
                 await this.ctx.db.collection('system').updateOne({ _id: `${path.join('.')}__migrated` }, { $set: { value: true } }, { upsert: true });
                 this.ctx.logger.info('Migrating %s: %o', path.join('.'), parsed);
@@ -140,8 +142,7 @@ export class SettingService extends Service {
     }
 
     get(key: string) {
-        return (this.ctx ? this.ctx.domain?.config?.[key.replace(/\./g, '$')] : null)
-            ?? (this._get(key) ?? global.Hydro?.model?.system?.get?.(key));
+        return (this.ctx ? this.ctx.domain?.config?.[key.replace(/\./g, '$')] : null) ?? this._get(key) ?? global.Hydro?.model?.system?.get?.(key);
     }
 
     async setConfig(key: string, value: any) {
@@ -177,7 +178,7 @@ export class SettingService extends Service {
             if (path.some((p) => SettingService.blacklist.includes(p.toString()))) throw new Error(`Invalid path: ${path.join('.')}`);
             let currentValue = curValue;
             for (const p of path) currentValue = currentValue[p];
-            if ((typeof currentValue !== 'object') || !currentValue || Array.isArray(currentValue)) return currentValue;
+            if (typeof currentValue !== 'object' || !currentValue || Array.isArray(currentValue)) return currentValue;
             if (path.some((p) => typeof p === 'symbol')) return currentValue;
             return new Proxy(currentValue, {
                 get(self, key: string) {

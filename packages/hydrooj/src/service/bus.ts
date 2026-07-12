@@ -1,13 +1,21 @@
-import {
-    BSON, Db, Filter, ObjectId, OnlyFieldsOfType,
-} from 'mongodb';
+import { BSON, Db, Filter, ObjectId, OnlyFieldsOfType } from 'mongodb';
 import type { ConnectionHandler, Handler } from '@hydrooj/framework';
 import pm2 from '@hydrooj/utils/lib/locate-pm2';
 import { Context } from '../context';
 import type {
-    BaseUserDict, ContestBalloonDoc, DiscussionDoc, DomainDoc, FileInfo,
-    MessageDoc, ProblemDict, ProblemDoc, RecordDoc,
-    ScoreboardRow, Tdoc, TrainingDoc, User,
+    BaseUserDict,
+    ContestBalloonDoc,
+    DiscussionDoc,
+    DomainDoc,
+    FileInfo,
+    MessageDoc,
+    ProblemDict,
+    ProblemDoc,
+    RecordDoc,
+    ScoreboardRow,
+    Tdoc,
+    TrainingDoc,
+    User,
 } from '../interface';
 import type { DocType } from '../model/document';
 
@@ -24,9 +32,7 @@ export interface EventMap {
 
     'subscription/init': (h: ConnectionHandler, privileged: boolean) => VoidReturn;
     'subscription/subscribe': (channel: string, user: User, metadata: Record<string, string>) => VoidReturn;
-    'subscription/enable': (
-        channel: string, h: ConnectionHandler, privileged: boolean, onDispose: (disposable: () => void) => void,
-    ) => VoidReturn;
+    'subscription/enable': (channel: string, h: ConnectionHandler, privileged: boolean, onDispose: (disposable: () => void) => void) => VoidReturn;
 
     'app/watch/change': (path: string) => VoidReturn;
     'app/watch/unlink': (path: string) => VoidReturn;
@@ -60,8 +66,11 @@ export interface EventMap {
 
     'document/add': (doc: any) => VoidReturn;
     'document/set': <T extends keyof DocType>(
-        domainId: string, docType: T, docId: DocType[T],
-        $set: any, $unset: OnlyFieldsOfType<DocType[T], any, true | '' | 1>,
+        domainId: string,
+        docType: T,
+        docId: DocType[T],
+        $set: any,
+        $unset: OnlyFieldsOfType<DocType[T], any, true | '' | 1>,
     ) => VoidReturn;
 
     'discussion/before-add': (payload: Partial<DiscussionDoc>) => VoidReturn;

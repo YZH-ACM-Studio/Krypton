@@ -17,23 +17,17 @@
  * to give callers full info without crowding the layout.
  */
 import { type HTMLAttributes, useEffect, useState } from 'react';
-import {
-  type DateInput,
-  formatDateTime,
-  formatDateTimeWithRelative,
-  formatRelative,
-  parseDate,
-} from '@hydrooj/common';
+import { type DateInput, formatDateTime, formatDateTimeWithRelative, formatRelative, parseDate } from '@hydrooj/common';
 import { cn } from '@/lib/cn';
 
 export type DateTimeMode =
-  | 'datetime'      // 2026-05-21 18:30 (default)
-  | 'datetime-sec'  // 2026-05-21 18:30:45
-  | 'date'          // 2026-05-21
-  | 'date-cn'       // 2026年5月21日
-  | 'datetime-cn'   // 2026年5月21日 18:30
-  | 'relative'      // 3 天后
-  | 'both';         // 2026-05-21 18:30 · 3 天后
+  | 'datetime' // 2026-05-21 18:30 (default)
+  | 'datetime-sec' // 2026-05-21 18:30:45
+  | 'date' // 2026-05-21
+  | 'date-cn' // 2026年5月21日
+  | 'datetime-cn' // 2026年5月21日 18:30
+  | 'relative' // 3 天后
+  | 'both'; // 2026-05-21 18:30 · 3 天后
 
 export interface DateTimeProps extends Omit<HTMLAttributes<HTMLTimeElement>, 'children'> {
   value: DateInput;
@@ -44,14 +38,7 @@ export interface DateTimeProps extends Omit<HTMLAttributes<HTMLTimeElement>, 'ch
   refreshInterval?: number;
 }
 
-export function DateTime({
-  value,
-  mode = 'datetime',
-  fallback = '—',
-  refreshInterval = 60_000,
-  className,
-  ...rest
-}: DateTimeProps) {
+export function DateTime({ value, mode = 'datetime', fallback = '—', refreshInterval = 60_000, className, ...rest }: DateTimeProps) {
   const [tick, setTick] = useState(0);
   const wantsLive = mode === 'relative' || mode === 'both';
   useEffect(() => {
@@ -63,7 +50,11 @@ export function DateTime({
 
   const parsed = parseDate(value);
   if (!parsed) {
-    return <time className={cn('text-muted-foreground', className)} {...rest}>{fallback}</time>;
+    return (
+      <time className={cn('text-muted-foreground', className)} {...rest}>
+        {fallback}
+      </time>
+    );
   }
 
   const iso = parsed.toISOString();
@@ -106,7 +97,12 @@ export function DateDisplay(props: Omit<DateTimeProps, 'mode'>) {
 
 /** Range like "2026-05-21 18:30 → 20:30" (collapses identical date part). */
 export function DateTimeRange({
-  from, to, separator = ' → ', fallback = '—', className, mode = 'datetime',
+  from,
+  to,
+  separator = ' → ',
+  fallback = '—',
+  className,
+  mode = 'datetime',
 }: {
   from: DateInput;
   to: DateInput;
@@ -131,14 +127,18 @@ export function DateTimeRange({
       const bTimeOnly = bStr.slice(aDate.length).trim();
       return (
         <time className={className} title={`${aStr} → ${bStr}`}>
-          {aStr}{separator}{bTimeOnly}
+          {aStr}
+          {separator}
+          {bTimeOnly}
         </time>
       );
     }
   }
   return (
     <time className={className} title={`${aStr} → ${bStr}`}>
-      {aStr}{separator}{bStr}
+      {aStr}
+      {separator}
+      {bStr}
     </time>
   );
 }

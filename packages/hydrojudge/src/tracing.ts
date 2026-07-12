@@ -20,7 +20,6 @@ export function initTracing(endpoint: string, samplePercentage = 1.0) {
     sdk.start();
     const originalExport = traceExporter.export;
     if (originalExport && process.env.HYDROJUDGE_DEBUG_TRACING) {
-        // eslint-disable-next-line consistent-return
         traceExporter.export = function wrappedExport(spans: any, resultCallback: any) {
             const spanCount = spans?.length || 0;
             logger.info('[Tracing] Exporting %d span(s) to Tempo...', spanCount);

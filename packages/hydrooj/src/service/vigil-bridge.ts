@@ -120,9 +120,7 @@ export async function deleteExamFromVigil(ojContestId: string): Promise<void> {
     }
 }
 
-export async function closeSessionOnVigil(
-    ojContestId: string, sessionId: string, closeReason: string,
-): Promise<void> {
+export async function closeSessionOnVigil(ojContestId: string, sessionId: string, closeReason: string): Promise<void> {
     try {
         await fetchWithRetry(`${baseUrl()}/api/integrations/oj/exam/${ojContestId}/close-session`, {
             method: 'POST',
@@ -157,9 +155,7 @@ export interface VigilAccessVerification {
     scopeOverride?: boolean;
 }
 
-export async function verifyAccessTokenWithVigil(
-    sessionId: string, accessToken: string,
-): Promise<VigilAccessVerification> {
+export async function verifyAccessTokenWithVigil(sessionId: string, accessToken: string): Promise<VigilAccessVerification> {
     try {
         const res = await fetchWithRetry(`${baseUrl()}/api/integrations/oj/verify-access-token`, {
             method: 'POST',

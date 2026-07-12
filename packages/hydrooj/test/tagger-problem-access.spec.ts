@@ -43,26 +43,23 @@ let tokenUser: any;
 let tokenDocDomainId = 'system';
 
 function cursor(docs: any[]) {
-    return { async toArray() { return docs; } };
+    return {
+        async toArray() {
+            return docs;
+        },
+    };
 }
 
 function buildScope(user: any) {
     const liveLock = { 'aclMutationLocks.uid': { $ne: user._id } };
     if (user.admin) {
-        return user._aclFencedPids.size
-            ? { $and: [{ docId: { $nin: [...user._aclFencedPids].sort((a, b) => a - b) } }, liveLock] }
-            : liveLock;
+        return user._aclFencedPids.size ? { $and: [{ docId: { $nin: [...user._aclFencedPids].sort((a, b) => a - b) } }, liveLock] } : liveLock;
     }
-    const maintained = [...user._maintainedPids]
-        .filter((pid: number) => !user._aclFencedPids.has(pid))
-        .sort((a: number, b: number) => a - b);
+    const maintained = [...user._maintainedPids].filter((pid: number) => !user._aclFencedPids.has(pid)).sort((a: number, b: number) => a - b);
     const authorScope = maintained.length
         ? {
-            $or: [
-                { owner: user._id },
-                { $and: [{ docId: { $in: maintained } }, { maintainer: user._id }] },
-            ],
-        }
+              $or: [{ owner: user._id }, { $and: [{ docId: { $in: maintained } }, { maintainer: user._id }] }],
+          }
         : { owner: user._id };
     return user._aclFencedPids.size
         ? { $and: [authorScope, { docId: { $nin: [...user._aclFencedPids].sort((a, b) => a - b) } }, liveLock] }
@@ -71,15 +68,16 @@ function buildScope(user: any) {
 
 const problemStub = {
     buildProblemBankScope: buildScope,
-    canBrowseProblemBank: (user: any) => user._problemAclLoaded === true
-        && user.hasPerm(PERM.PERM_CREATE_PROBLEM),
+    canBrowseProblemBank: (user: any) => user._problemAclLoaded === true && user.hasPerm(PERM.PERM_CREATE_PROBLEM),
     canMaintainProblem(user: any, pdoc: any) {
         calls.maintain.push({ user, pdoc });
         calls.events.push(`maintain:${pdoc.docId}`);
-        return user._problemAclLoaded === true
-            && user._problemAclDomainId === pdoc.domainId
-            && !user._aclFencedPids.has(pdoc.docId)
-            && (user.admin || pdoc.owner === user._id || user._maintainedPids.has(pdoc.docId));
+        return (
+            user._problemAclLoaded === true &&
+            user._problemAclDomainId === pdoc.domainId &&
+            !user._aclFencedPids.has(pdoc.docId) &&
+            (user.admin || pdoc.owner === user._id || user._maintainedPids.has(pdoc.docId))
+        );
     },
     async edit(domainId: string, docId: number, _patch: unknown) {
         calls.events.push(`raw-edit:${docId}`);
@@ -89,7 +87,7 @@ const problemStub = {
         calls.edits.push({ domainId, docId, patch });
         calls.events.push(`editAuthorized:${docId}`);
         if (editError) throw editError;
-        return { domainId, docId, ...patch as any, actor };
+        return { domainId, docId, ...(patch as any), actor };
     },
     async refreshProblemAcl(user: any, domainId: string) {
         calls.refresh.push({ user, domainId });
@@ -126,15 +124,19 @@ function noopDecorator() {
     return (_target: unknown, _key: string, descriptor: PropertyDescriptor) => descriptor;
 }
 
-class HandlerStub { }
+class HandlerStub {}
 class TestLogger {
-    error(...args: unknown[]) { calls.errors.push(args); }
+    error(...args: unknown[]) {
+        calls.errors.push(args);
+    }
 }
 
 const hydroojStub = {
     Handler: HandlerStub,
     OplogModel: {
-        async log(...args: unknown[]) { calls.oplogs.push(args); },
+        async log(...args: unknown[]) {
+            calls.oplogs.push(args);
+        },
     },
     param: noopDecorator,
     PERM,
@@ -157,7 +159,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../model/document') return documentStub;
     if (request === '../model/problem') return problemStub;
     if (request === '../model/system') {
-        return { get: (key: string) => key === 'serviceToken.tagger.domain' ? 'system' : {} };
+        return { get: (key: string) => (key === 'serviceToken.tagger.domain' ? 'system' : {}) };
     }
     return originalLoad.call(this, request, parent, isMain);
 };
@@ -172,17 +174,14 @@ try {
 
 const routes: Record<string, any> = {};
 void taggerModule.apply({
-    Route(name: string, _path: string, HandlerClass: any) { routes[name] = HandlerClass; },
+    Route(name: string, _path: string, HandlerClass: any) {
+        routes[name] = HandlerClass;
+    },
 } as any);
 
 function makeUser(
     uid: number,
-    perms: bigint[] = [
-        PERM.PERM_CREATE_PROBLEM,
-        PERM.PERM_EDIT_PROBLEM,
-        PERM.PERM_VIEW_PROBLEM,
-        PERM.PERM_VIEW_PROBLEM_HIDDEN,
-    ],
+    perms: bigint[] = [PERM.PERM_CREATE_PROBLEM, PERM.PERM_EDIT_PROBLEM, PERM.PERM_VIEW_PROBLEM, PERM.PERM_VIEW_PROBLEM_HIDDEN],
     overrides: Record<string, unknown> = {},
 ) {
     const allowed = new Set(perms);
@@ -215,11 +214,13 @@ function makeHandler(routeName: string) {
     return handler as any;
 }
 
-function installAclLoader(load: (domainId: string, uid: number) => Promise<any> = async () => ({
-    permitPids: new Set([7, 9]),
-    maintainedPids: new Set([7]),
-    fencedPids: new Set([9]),
-})) {
+function installAclLoader(
+    load: (domainId: string, uid: number) => Promise<any> = async () => ({
+        permitPids: new Set([7, 9]),
+        maintainedPids: new Set([7]),
+        fencedPids: new Set([9]),
+    }),
+) {
     (global as any).Hydro.model.permits = {
         async loadAclForUser(domainId: string, uid: number) {
             calls.loads.push({ domainId, uid });
@@ -306,7 +307,9 @@ describe('P2.11 tagger token-user ACL preload', () => {
     });
 
     it('logs ERROR, keeps a deny snapshot, and returns 403 when ACL loading fails', async () => {
-        installAclLoader(async () => { throw new Error('acl database unavailable'); });
+        installAclLoader(async () => {
+            throw new Error('acl database unavailable');
+        });
         const handler = makeHandler('tagger_problems');
 
         const error = await captureFailure(() => handler.prepare());
@@ -323,19 +326,13 @@ describe('P2.11 tagger token-user ACL preload', () => {
 
 describe('P2.11 tagger enumeration gates and scopes', () => {
     it('returns 403 before problems, vocab, audit, or retag can query when CREATE is absent', async () => {
-        tokenUser = makeUser(42, [
-            PERM.PERM_EDIT_PROBLEM,
-            PERM.PERM_VIEW_PROBLEM,
-            PERM.PERM_VIEW_PROBLEM_HIDDEN,
-        ]);
+        tokenUser = makeUser(42, [PERM.PERM_EDIT_PROBLEM, PERM.PERM_VIEW_PROBLEM, PERM.PERM_VIEW_PROBLEM_HIDDEN]);
         for (const routeName of ['tagger_problems', 'tagger_vocab', 'tagger_audit', 'tagger_retag']) {
             const handler = makeHandler(routeName);
-            // eslint-disable-next-line no-await-in-loop
+
             await handler.prepare();
-            // eslint-disable-next-line no-await-in-loop
-            const error = await captureFailure(() => routeName === 'tagger_retag'
-                ? handler.post({}, ['old'], 'new', false)
-                : handler.get());
+
+            const error = await captureFailure(() => (routeName === 'tagger_retag' ? handler.post({}, ['old'], 'new', false) : handler.get()));
             expect(error).to.be.instanceOf(TestPermissionError);
             expect(error.params).to.deep.equal([PERM.PERM_CREATE_PROBLEM]);
         }
@@ -348,10 +345,7 @@ describe('P2.11 tagger enumeration gates and scopes', () => {
         const scope = {
             $and: [
                 {
-                    $or: [
-                        { owner: 42 },
-                        { $and: [{ docId: { $in: [7] } }, { maintainer: 42 }] },
-                    ],
+                    $or: [{ owner: 42 }, { $and: [{ docId: { $in: [7] } }, { maintainer: 42 }] }],
                 },
                 { docId: { $nin: [9] } },
                 { 'aclMutationLocks.uid': { $ne: 42 } },
@@ -388,7 +382,9 @@ describe('P2.11 tagger enumeration gates and scopes', () => {
     it('lets an administrator retain an all-domain scope', async () => {
         tokenUser = makeUser(1, undefined, { admin: true });
         installAclLoader(async () => ({
-            permitPids: new Set(), maintainedPids: new Set(), fencedPids: new Set(),
+            permitPids: new Set(),
+            maintainedPids: new Set(),
+            fencedPids: new Set(),
         }));
         const handler = makeHandler('tagger_audit');
         await handler.prepare();
@@ -417,10 +413,7 @@ describe('P2.11 tagger enumeration gates and scopes', () => {
         expect(calls.getMulti[0].query).to.deep.equal({
             $and: [
                 {
-                    $and: [
-                        { owner: 42 },
-                        { 'aclMutationLocks.uid': { $ne: 42 } },
-                    ],
+                    $and: [{ owner: 42 }, { 'aclMutationLocks.uid': { $ne: 42 } }],
                 },
                 { hidden: { $ne: true } },
             ],
@@ -431,7 +424,13 @@ describe('P2.11 tagger enumeration gates and scopes', () => {
 describe('P2.11 tagger mutation gates', () => {
     it('makes missing and unauthorized apply items indistinguishable and performs zero writes', async () => {
         getDocs.set(8, {
-            domainId: 'system', docId: 8, owner: 99, pid: 'P8', title: 'old', tag: [], maintainer: [42],
+            domainId: 'system',
+            docId: 8,
+            owner: 99,
+            pid: 'P8',
+            title: 'old',
+            tag: [],
+            maintainer: [42],
         });
         const handler = makeHandler('tagger_apply');
         await handler.prepare();
@@ -450,16 +449,25 @@ describe('P2.11 tagger mutation gates', () => {
 
     it('uses the atomic authorized edit entrypoint for an allowed apply item', async () => {
         getDocs.set(7, {
-            domainId: 'system', docId: 7, owner: 42, pid: 'P7', title: 'old', tag: [],
+            domainId: 'system',
+            docId: 7,
+            owner: 42,
+            pid: 'P7',
+            title: 'old',
+            tag: [],
         });
         const handler = makeHandler('tagger_apply');
         await handler.prepare();
 
         await handler.post({}, [{ docId: 7, title: 'new' }]);
 
-        expect(calls.edits).to.deep.equal([{
-            domainId: 'system', docId: 7, patch: { title: 'new' },
-        }]);
+        expect(calls.edits).to.deep.equal([
+            {
+                domainId: 'system',
+                docId: 7,
+                patch: { title: 'new' },
+            },
+        ]);
         expect(calls.events).to.deep.equal(['maintain:7', 'editAuthorized:7']);
     });
 
@@ -469,7 +477,9 @@ describe('P2.11 tagger mutation gates', () => {
             { domainId: 'system', docId: 10, owner: 42, pid: 'P10', tag: ['old'] },
         ];
         installAclLoader(async () => ({
-            permitPids: new Set([7]), maintainedPids: new Set([7]), fencedPids: new Set(),
+            permitPids: new Set([7]),
+            maintainedPids: new Set([7]),
+            fencedPids: new Set(),
         }));
         const handler = makeHandler('tagger_retag');
         await handler.prepare();

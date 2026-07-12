@@ -43,12 +43,22 @@ export interface RegionEditorProps {
 
 function langExtension(lang: string): Extension {
   switch (lang) {
-    case 'cpp': case 'c': case 'cc': return cpp();
-    case 'python': case 'py': return python();
-    case 'java': return java();
-    case 'go': return go();
-    case 'rust': case 'rs': return rust();
-    default: return [];
+    case 'cpp':
+    case 'c':
+    case 'cc':
+      return cpp();
+    case 'python':
+    case 'py':
+      return python();
+    case 'java':
+      return java();
+    case 'go':
+      return go();
+    case 'rust':
+    case 'rs':
+      return rust();
+    default:
+      return [];
   }
 }
 
@@ -74,11 +84,7 @@ function buildLiveSource(
     if (contentLines.length === 1) {
       lines.splice(start.line, end.line - start.line + 1, before + contentLines[0] + after);
     } else {
-      const newLines = [
-        before + contentLines[0],
-        ...contentLines.slice(1, -1),
-        contentLines[contentLines.length - 1] + after,
-      ];
+      const newLines = [before + contentLines[0], ...contentLines.slice(1, -1), contentLines[contentLines.length - 1] + after];
       lines.splice(start.line, end.line - start.line + 1, ...newLines);
     }
   }
@@ -108,17 +114,15 @@ function buildLiveSource(
     const content = regionContents[region.id] ?? '';
     const contentLines = content.split('\n');
     const endLineInLive = newStartLine + contentLines.length - 1;
-    const endColInLive = contentLines.length === 1
-      ? region.start.col + contentLines[0].length
-      : contentLines[contentLines.length - 1].length;
+    const endColInLive = contentLines.length === 1 ? region.start.col + contentLines[0].length : contentLines[contentLines.length - 1].length;
 
     const from = lineOffsets[newStartLine] + region.start.col;
     const to = lineOffsets[endLineInLive] + endColInLive;
     liveRanges.push({ from, to, id: region.id });
 
-    const oldLines = (region.end.line - region.start.line + 1);
+    const oldLines = region.end.line - region.start.line + 1;
     const newLines = contentLines.length;
-    lineDelta += (newLines - oldLines);
+    lineDelta += newLines - oldLines;
   }
   return { source, liveRanges };
 }
@@ -153,8 +157,14 @@ function buildReadOnlyDecorations(editableRanges: Array<{ from: number; to: numb
 }
 
 export function RegionEditor({
-  lang, templateSource, regions, regionContents, onChange,
-  readOnly = false, height = 480, dark = false,
+  lang,
+  templateSource,
+  regions,
+  regionContents,
+  onChange,
+  readOnly = false,
+  height = 480,
+  dark = false,
 }: RegionEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -163,7 +173,6 @@ export function RegionEditor({
 
   // Build initial source on first mount only.
   const initial = useMemo(() => buildLiveSource(templateSource, regions, regionContents), []);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -201,11 +210,6 @@ export function RegionEditor({
           // Recompute live ranges by walking the document and re-extracting each region.
           const doc = upd.state.doc;
           const liveRanges: Array<{ from: number; to: number; id: string }> = [];
-          let runningDelta = 0;
-          const sortedAsc = [...regions].sort((a, b) => {
-            if (a.start.line !== b.start.line) return a.start.line - b.start.line;
-            return a.start.col - b.start.col;
-          });
           // For each region we approximate via tracking original anchors; this is
           // sufficient because edits are constrained to inside ranges, so the
           // text outside doesn't shift unexpectedly.
@@ -214,7 +218,6 @@ export function RegionEditor({
           let delta = 0;
           for (let i = 0; i < prev.length; i++) {
             const orig = prev[i];
-            const region = sortedAsc.find((r) => r.id === orig.id)!;
             const adjustedFrom = orig.from + delta;
             // Recompute "to" by reading what's currently between (from, ?) up to the next
             // anchor — but simpler is to keep `orig.from` fixed and let `to` move via the
@@ -226,7 +229,7 @@ export function RegionEditor({
             liveRanges.push({ from: adjustedFrom, to: mappedTo, id: orig.id });
             // Compute new delta accumulator for next region: the size change inside this
             // region affects all subsequent ones.
-            delta += (mappedTo - adjustedFrom) - (orig.to - orig.from);
+            delta += mappedTo - adjustedFrom - (orig.to - orig.from);
             // Notify parent of this region's new content.
             const newContent = doc.sliceString(adjustedFrom, mappedTo);
             if (newContent !== (regionContents[orig.id] ?? '')) {
@@ -241,7 +244,10 @@ export function RegionEditor({
         }),
         decoCompartment.of(
           EditorView.decorations.compute(['doc'], (s) =>
-            buildReadOnlyDecorations(liveRangesRef.current.map(({ from, to }) => ({ from, to })), s.doc.length)
+            buildReadOnlyDecorations(
+              liveRangesRef.current.map(({ from, to }) => ({ from, to })),
+              s.doc.length,
+            ),
           ),
         ),
         themeCompartment.of(dark ? oneDark : []),
@@ -269,7 +275,6 @@ export function RegionEditor({
       viewRef.current = null;
     };
     // We only re-init on lang/template/region shape changes — content changes flow through onChange.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lang, templateSource, JSON.stringify(regions)]);
 
   // React to dark mode toggle without recreating editor.

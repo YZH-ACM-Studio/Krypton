@@ -31,12 +31,7 @@ export function ClientRequiredNoticePage() {
 
   return (
     <div className="mx-auto flex min-h-[60vh] max-w-2xl items-center justify-center p-6">
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="w-full"
-      >
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="w-full">
         <Card className="border-rose-500/30">
           <CardHeader className="flex flex-row items-center gap-3 space-y-0">
             <ShieldAlert className="size-6 text-rose-500" />
@@ -44,8 +39,7 @@ export function ClientRequiredNoticePage() {
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
             <p className="text-muted-foreground">
-              你目前处于一场客户端强制比赛的管控时段，普通浏览器访问已被暂时关闭。
-              请通过指定的 Qt 客户端进入比赛。
+              你目前处于一场客户端强制比赛的管控时段，普通浏览器访问已被暂时关闭。 请通过指定的 Qt 客户端进入比赛。
             </p>
 
             {title && (
@@ -54,7 +48,8 @@ export function ClientRequiredNoticePage() {
                 <div className="mt-1 font-medium">{title}</div>
                 {blockEnd && (
                   <div className="mt-1 text-xs text-muted-foreground">
-                    预计解除时间：<DateTime value={blockEnd} />
+                    预计解除时间：
+                    <DateTime value={blockEnd} />
                   </div>
                 )}
               </div>

@@ -13,6 +13,7 @@
     },
     "dependencies": {
         "@hydrooj/register": "workspace:^",
+        "@zip.js/zip.js": "^2.8.26",
         "bson": "^7.0.0",
         "cac": "^7.0.0",
         "fs-extra": "^11.3.4",
@@ -20,9 +21,11 @@
         "moment": "^2.30.0",
         "reggol": "^2.1.0",
         "search-query-parser": "^1.6.0",
+        "superagent": "^10.3.0",
         "systeminformation": "^5.31.5"
     },
     "devDependencies": {
-        "@types/fs-extra": "^11.0.4"
+        "@types/fs-extra": "^11.0.4",
+        "@types/superagent": "^8.1.9"
     }
 }

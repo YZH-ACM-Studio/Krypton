@@ -54,10 +54,7 @@ export function Sheet({ open, onOpenChange, children }: SheetProps) {
   return createPortal(
     <SheetContext.Provider value={{ onOpenChange }}>
       <div className="fixed inset-0 z-200">
-        <div
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-          onClick={() => onOpenChange(false)}
-        />
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => onOpenChange(false)} />
         <div className="relative h-full w-full" onClick={(e) => e.stopPropagation()}>
           {children}
         </div>
@@ -71,9 +68,7 @@ interface SheetContentProps extends React.HTMLAttributes<HTMLDivElement> {
   side?: SheetSide;
 }
 
-export function SheetContent({
-  side = 'right', className, children, ...props
-}: SheetContentProps) {
+export function SheetContent({ side = 'right', className, children, ...props }: SheetContentProps) {
   const ctx = useSheetContext();
   const sideClasses: Record<SheetSide, string> = {
     right: 'right-0 top-0 h-full border-l',
@@ -105,14 +100,10 @@ export function SheetContent({
   );
 }
 
-export function SheetHeader({
-  className, ...props
-}: React.HTMLAttributes<HTMLDivElement>) {
+export function SheetHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return <div className={cn('shrink-0 border-b px-6 py-4', className)} {...props} />;
 }
 
-export function SheetTitle({
-  className, ...props
-}: React.HTMLAttributes<HTMLHeadingElement>) {
+export function SheetTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
   return <h2 className={cn('text-base font-semibold pr-8', className)} {...props} />;
 }

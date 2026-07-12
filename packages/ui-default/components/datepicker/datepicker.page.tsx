@@ -14,39 +14,46 @@ function initTimePicker(input: HTMLInputElement) {
   const $wrapper = $('<div>').css({ position: 'relative', display: 'inline-block', width: '100%' });
   $input.wrap($wrapper);
 
-  const $dropdown = $('<div>').css({
-    position: 'absolute',
-    top: $input.outerHeight(),
-    left: 0,
-    right: 0,
-    maxHeight: 0,
-    overflowY: 'auto',
-    background: 'var(--bg-color, #fff)',
-    border: '1px solid #ccc',
-    borderTop: 'none',
-    borderRadius: '0 0 4px 4px',
-    zIndex: 1000,
-    opacity: 0,
-    boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-    transition: 'max-height .2s ease, opacity .2s ease',
-    pointerEvents: 'none',
-  }).addClass('time-picker-dropdown');
+  const $dropdown = $('<div>')
+    .css({
+      position: 'absolute',
+      top: $input.outerHeight(),
+      left: 0,
+      right: 0,
+      maxHeight: 0,
+      overflowY: 'auto',
+      background: 'var(--bg-color, #fff)',
+      border: '1px solid #ccc',
+      borderTop: 'none',
+      borderRadius: '0 0 4px 4px',
+      zIndex: 1000,
+      opacity: 0,
+      boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+      transition: 'max-height .2s ease, opacity .2s ease',
+      pointerEvents: 'none',
+    })
+    .addClass('time-picker-dropdown');
 
   for (let h = 0; h < 24; h++) {
     for (let m = 0; m < 60; m += interval) {
       const time = `${padTwo(h)}:${padTwo(m)}`;
-      const $item = $('<div>').text(time).css({
-        padding: '6px 12px',
-        cursor: 'pointer',
-      }).on('mousedown', (e) => {
-        e.preventDefault();
-        $input.val(time).trigger('change');
-        closeDropdown(); // eslint-disable-line ts/no-use-before-define
-      }).on('mouseenter', function () {
-        $(this).css('background', 'var(--highlight-color, #e8f0fe)');
-      }).on('mouseleave', function () {
-        $(this).css('background', '');
-      });
+      const $item = $('<div>')
+        .text(time)
+        .css({
+          padding: '6px 12px',
+          cursor: 'pointer',
+        })
+        .on('mousedown', (e) => {
+          e.preventDefault();
+          $input.val(time).trigger('change');
+          closeDropdown();
+        })
+        .on('mouseenter', function () {
+          $(this).css('background', 'var(--highlight-color, #e8f0fe)');
+        })
+        .on('mouseleave', function () {
+          $(this).css('background', '');
+        });
       $dropdown.append($item);
     }
   }

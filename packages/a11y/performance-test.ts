@@ -1,7 +1,4 @@
-/* eslint-disable no-await-in-loop */
-import {
-    ProblemModel, RecordModel, sleep, STATUS, yaml,
-} from 'hydrooj';
+import { ProblemModel, RecordModel, sleep, STATUS, yaml } from 'hydrooj';
 
 // These tests are from https://loj.ac/d/425
 const head = '#include<cstdio>\nusing namespace std;\n';
@@ -160,39 +157,51 @@ int main(){
 };
 
 export async function startPerformanceTest(args: { enable5: boolean }, report) {
-    const templateDocId = (await ProblemModel.get('system', 'PTEST'))?.docId
-        || await ProblemModel.add('system', 'PTEST', 'Performance Test', 'test only', 1, [], {
+    const templateDocId =
+        (await ProblemModel.get('system', 'PTEST'))?.docId ||
+        (await ProblemModel.add('system', 'PTEST', 'Performance Test', 'test only', 1, [], {
             hidden: true,
             problemKind: 'programming',
-        });
+        }));
     const docId = await ProblemModel.copy('system', templateDocId, 'system', undefined, true);
     await ProblemModel.addTestdata('system', docId, '1.in', Buffer.from('1'));
     await ProblemModel.addTestdata('system', docId, '1.out', Buffer.from(''));
-    await ProblemModel.addTestdata('system', docId, 'config.yaml', Buffer.from(yaml.dump({
-        time: '3s',
-        memory: args.enable5 ? '2g' : '512m',
-        cases: Array.from({ length: 20 }).fill({
-            input: '1.in',
-            output: '1.out',
-        }),
-    })));
+    await ProblemModel.addTestdata(
+        'system',
+        docId,
+        'config.yaml',
+        Buffer.from(
+            yaml.dump({
+                time: '3s',
+                memory: args.enable5 ? '2g' : '512m',
+                cases: Array.from({ length: 20 }).fill({
+                    input: '1.in',
+                    output: '1.out',
+                }),
+            }),
+        ),
+    );
     report({ message: 'Running tests...' });
     const results = {};
-    await Promise.all(Object.keys(TESTS).map(async (key) => {
-        if (key === ' 5 ' && !args.enable5) return;
-        const id = await RecordModel.add('system', docId, 1, 'cc.cc14o2', `// TEST ${key}\n${head}${TESTS[key]}\nreturn 0;}`, true);
-        while ([
-            STATUS.STATUS_WAITING, STATUS.STATUS_JUDGING, STATUS.STATUS_FETCHED, STATUS.STATUS_COMPILING,
-        ].includes((await RecordModel.get('system', id))?.status)) {
-            await sleep(500);
-        }
-        const result = await RecordModel.get('system', id);
-        if (result.status !== STATUS.STATUS_ACCEPTED && result.status !== STATUS.STATUS_WRONG_ANSWER) {
-            report({ message: `Test ${key} failed (${id}) ${result.status}` });
-        } else {
-            results[key] = result.testCases.map((i) => i.time);
-        }
-    }));
+    await Promise.all(
+        Object.keys(TESTS).map(async (key) => {
+            if (key === ' 5 ' && !args.enable5) return;
+            const id = await RecordModel.add('system', docId, 1, 'cc.cc14o2', `// TEST ${key}\n${head}${TESTS[key]}\nreturn 0;}`, true);
+            while (
+                [STATUS.STATUS_WAITING, STATUS.STATUS_JUDGING, STATUS.STATUS_FETCHED, STATUS.STATUS_COMPILING].includes(
+                    (await RecordModel.get('system', id))?.status,
+                )
+            ) {
+                await sleep(500);
+            }
+            const result = await RecordModel.get('system', id);
+            if (result.status !== STATUS.STATUS_ACCEPTED && result.status !== STATUS.STATUS_WRONG_ANSWER) {
+                report({ message: `Test ${key} failed (${id}) ${result.status}` });
+            } else {
+                results[key] = result.testCases.map((i) => i.time);
+            }
+        }),
+    );
     const formatL = (t: number, width = 4) => Math.floor(t).toString().padEnd(width);
     const formatR = (t: number, width = 4) => Math.floor(t).toString().padStart(width);
     for (const key of Object.keys(TESTS)) {

@@ -4,25 +4,26 @@ import QRCode from 'qrcode';
 import { ActionDialog } from 'vj/components/dialog';
 import Notification from 'vj/components/notification';
 import { NamedPage } from 'vj/misc/Page';
-import {
-  delay, i18n, request, secureRandomString, tpl,
-} from 'vj/utils';
+import { delay, i18n, request, secureRandomString, tpl } from 'vj/utils';
 
 async function changeMail() {
   const changeMailDialog = new ActionDialog({
     $body: tpl(
       <div className="typo" id="change-mail-dialog">
-        <label>{i18n('Current Password')}
+        <label>
+          {i18n('Current Password')}
           <div className="textbox-container">
             <input className="textbox" type="password" name="password" data-autofocus required></input>
           </div>
         </label>
-        <label>{i18n('Current Email')}
+        <label>
+          {i18n('Current Email')}
           <div className="textbox-container">
             <input className="textbox" type="text" name="currentEmail" value={UserContext.mail} disabled></input>
           </div>
         </label>
-        <label>{i18n('New Email')}
+        <label>
+          {i18n('New Email')}
           <div className="textbox-container">
             <input className="textbox" type="text" name="mail" required></input>
           </div>
@@ -158,7 +159,7 @@ async function enableAuthn(type: string) {
 }
 
 export default new NamedPage('home_security', () => {
-  const MenuLink = ({ children, action, icon }: { children: React.ReactNode, action?: string, icon?: string }) => (
+  const MenuLink = ({ children, action, icon }: { children: React.ReactNode; action?: string; icon?: string }) => (
     <li className={`menu__item ${action ? '' : 'disabled'}`}>
       <a className={`menu__link ${action ? '' : 'disabled'}`} data-action={action}>
         {icon && <span className={`icon icon-${icon}`} />}
@@ -168,7 +169,7 @@ export default new NamedPage('home_security', () => {
   );
 
   $(document).on('click', '[name="auth_enable"]', async () => {
-    const platformAvailable = browserSupportsWebAuthn() && await platformAuthenticatorIsAvailable();
+    const platformAvailable = browserSupportsWebAuthn() && (await platformAuthenticatorIsAvailable());
     const $body = tpl(
       <div>
         <h3>{i18n('Choose Authenticator Type')}</h3>
@@ -177,26 +178,24 @@ export default new NamedPage('home_security', () => {
             {i18n('Two Factor Authentication')}
           </MenuLink>
           <li className="menu__seperator"></li>
-          {(!window.isSecureContext || !browserSupportsWebAuthn()) ? (
+          {!window.isSecureContext || !browserSupportsWebAuthn() ? (
             <MenuLink icon="fingerprint">
-              {window.isSecureContext
-                ? i18n("Your browser doesn't support WebAuthn.")
-                : i18n('Webauthn is not available in insecure context.')}
+              {window.isSecureContext ? i18n("Your browser doesn't support WebAuthn.") : i18n('Webauthn is not available in insecure context.')}
             </MenuLink>
-          ) : (<>
-            {platformAvailable ? (
-              <MenuLink action="platform" icon="fingerprint">
-                {i18n('Your Device')}
+          ) : (
+            <>
+              {platformAvailable ? (
+                <MenuLink action="platform" icon="fingerprint">
+                  {i18n('Your Device')}
+                </MenuLink>
+              ) : (
+                <MenuLink icon="fingerprint">{i18n("Your browser doesn't support platform authenticator.")}</MenuLink>
+              )}
+              <MenuLink action="cross-platform" icon="usb">
+                {i18n('Multi Platform Authenticator')}
               </MenuLink>
-            ) : (
-              <MenuLink icon="fingerprint">
-                {i18n("Your browser doesn't support platform authenticator.")}
-              </MenuLink>
-            )}
-            <MenuLink action="cross-platform" icon="usb">
-              {i18n('Multi Platform Authenticator')}
-            </MenuLink>
-          </>)}
+            </>
+          )}
         </ol>
       </div>,
     );

@@ -7,9 +7,7 @@ import Notification from 'vj/components/notification';
 import { previewFile } from 'vj/components/preview/preview.page';
 import download from 'vj/components/zipDownloader';
 import { NamedPage } from 'vj/misc/Page';
-import {
-  i18n, pjax, request, tpl,
-} from 'vj/utils';
+import { i18n, pjax, request, tpl } from 'vj/utils';
 
 function ensureAndGetSelectedFiles(type = '') {
   const allChecked = $(`.files tbody [data-checkbox-group="${type}"]:checked`);

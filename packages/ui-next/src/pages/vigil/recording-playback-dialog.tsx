@@ -15,10 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Film, Pause, Play, X } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import {
-  buildRecordingUrl, listContestRecordings,
-  type VigilRecording, type VigilStudentCard, VigilOfflineError,
-} from '@/lib/vigil-api';
+import { buildRecordingUrl, listContestRecordings, type VigilRecording, type VigilStudentCard, VigilOfflineError } from '@/lib/vigil-api';
 
 interface RecordingPlaybackDialogProps {
   open: boolean;
@@ -29,9 +26,7 @@ interface RecordingPlaybackDialogProps {
 
 type StreamType = 'screen' | 'camera';
 
-export function RecordingPlaybackDialog({
-  open, onOpenChange, contestId, student,
-}: RecordingPlaybackDialogProps) {
+export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student }: RecordingPlaybackDialogProps) {
   const [streamType, setStreamType] = useState<StreamType>('screen');
   const [items, setItems] = useState<VigilRecording[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -57,14 +52,20 @@ export function RecordingPlaybackDialog({
         }
         setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [open, contestId]);
 
   // Filter to this machine + selected stream type, sorted by startTs asc so
   // the dropdown reads naturally as "earliest → latest".
-  const candidates = useMemo(() => (items || [])
-    .filter((r) => r.machineId === student.machineId && r.streamType === streamType)
-    .sort((a, b) => new Date(a.startTs).getTime() - new Date(b.startTs).getTime()), [items, student.machineId, streamType]);
+  const candidates = useMemo(
+    () =>
+      (items || [])
+        .filter((r) => r.machineId === student.machineId && r.streamType === streamType)
+        .sort((a, b) => new Date(a.startTs).getTime() - new Date(b.startTs).getTime()),
+    [items, student.machineId, streamType],
+  );
 
   const totalBytes = useMemo(() => candidates.reduce((s, c) => s + (c.size || 0), 0), [candidates]);
 
@@ -75,18 +76,10 @@ export function RecordingPlaybackDialog({
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">
               录屏回放 · {student.name}
-              {student.studentId && (
-                <span className="ml-2 font-mono text-xs text-muted-foreground">{student.studentId}</span>
-              )}
+              {student.studentId && <span className="ml-2 font-mono text-xs text-muted-foreground">{student.studentId}</span>}
             </p>
           </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 w-7 p-0"
-            onClick={() => onOpenChange(false)}
-            title="关闭"
-          >
+          <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => onOpenChange(false)} title="关闭">
             <X className="size-4" />
           </Button>
         </div>
@@ -122,9 +115,7 @@ export function RecordingPlaybackDialog({
 
         <div className="relative flex-1 bg-black">
           {loading ? (
-            <div className="flex h-full items-center justify-center text-xs text-white/60">
-              加载录屏列表…
-            </div>
+            <div className="flex h-full items-center justify-center text-xs text-white/60">加载录屏列表…</div>
           ) : err ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-white/70">
               <AlertCircle className="size-6 text-amber-400" />
@@ -152,7 +143,11 @@ function probeDuration(url: string): Promise<number> {
     v.muted = true;
     const done = (val: number) => {
       v.removeAttribute('src');
-      try { v.load(); } catch { /* ignore */ }
+      try {
+        v.load();
+      } catch {
+        /* ignore */
+      }
       resolve(Number.isFinite(val) && val > 0 ? val : 0);
     };
     v.onloadedmetadata = () => done(v.duration);
@@ -184,15 +179,14 @@ function UnifiedTimelinePlayer({ chunks }: { chunks: VigilRecording[] }) {
     (async () => {
       for (const c of chunks) {
         if (cancelled) return;
-        const seconds = c.durationMs > 0
-          ? c.durationMs / 1000
-          // eslint-disable-next-line no-await-in-loop
-          : await probeDuration(buildRecordingUrl(c.filename));
+        const seconds = c.durationMs > 0 ? c.durationMs / 1000 : await probeDuration(buildRecordingUrl(c.filename));
         if (cancelled) return;
         setDurations((d) => (d[c.recordingId] != null ? d : { ...d, [c.recordingId]: seconds }));
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [chunks]);
 
   const layout = useMemo(() => {
@@ -207,27 +201,44 @@ function UnifiedTimelinePlayer({ chunks }: { chunks: VigilRecording[] }) {
   }, [chunks, durations]);
 
   // Reset to the start when the chunk set (stream type) changes.
-  useEffect(() => { setActiveIdx(0); setGlobalTime(0); setPlaying(false); }, [chunks]);
+  useEffect(() => {
+    setActiveIdx(0);
+    setGlobalTime(0);
+    setPlaying(false);
+  }, [chunks]);
 
-  const seekToGlobal = useCallback((t: number) => {
-    const total = layout.total || 0;
-    const clamped = Math.max(0, Math.min(t, total));
-    let idx = layout.segs.findIndex((s) => clamped < s.start + s.dur);
-    if (idx < 0) idx = Math.max(0, layout.segs.length - 1);
-    const offset = clamped - (layout.segs[idx]?.start ?? 0);
-    setGlobalTime(clamped);
-    if (idx !== activeIdx) {
-      pendingSeekRef.current = offset;
-      setActiveIdx(idx);
-    } else if (videoRef.current) {
-      try { videoRef.current.currentTime = offset; } catch { /* not ready */ }
-    }
-  }, [layout, activeIdx]);
+  const seekToGlobal = useCallback(
+    (t: number) => {
+      const total = layout.total || 0;
+      const clamped = Math.max(0, Math.min(t, total));
+      let idx = layout.segs.findIndex((s) => clamped < s.start + s.dur);
+      if (idx < 0) idx = Math.max(0, layout.segs.length - 1);
+      const offset = clamped - (layout.segs[idx]?.start ?? 0);
+      setGlobalTime(clamped);
+      if (idx !== activeIdx) {
+        pendingSeekRef.current = offset;
+        setActiveIdx(idx);
+      } else if (videoRef.current) {
+        try {
+          videoRef.current.currentTime = offset;
+        } catch {
+          /* not ready */
+        }
+      }
+    },
+    [layout, activeIdx],
+  );
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
-    if (v.paused) { v.play().catch(() => {}); setPlaying(true); } else { v.pause(); setPlaying(false); }
+    if (v.paused) {
+      v.play().catch(() => {});
+      setPlaying(true);
+    } else {
+      v.pause();
+      setPlaying(false);
+    }
   }, []);
 
   const activeChunk = chunks[activeIdx];
@@ -247,7 +258,11 @@ function UnifiedTimelinePlayer({ chunks }: { chunks: VigilRecording[] }) {
             const v = videoRef.current;
             if (!v) return;
             if (pendingSeekRef.current != null) {
-              try { v.currentTime = pendingSeekRef.current; } catch { /* ignore */ }
+              try {
+                v.currentTime = pendingSeekRef.current;
+              } catch {
+                /* ignore */
+              }
               pendingSeekRef.current = null;
             }
             if (playing) v.play().catch(() => {});

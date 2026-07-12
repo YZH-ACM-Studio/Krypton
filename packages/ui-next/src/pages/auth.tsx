@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { CheckCircle, Clock, Mail as MailIcon, Swords } from 'lucide-react';
+import { Clock, Mail as MailIcon, Swords } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,18 +25,28 @@ export function LoginPage() {
         <CardContent className="p-6">
           <form method="post" className="space-y-4">
             <div className="space-y-2">
-              <label htmlFor="uname" className="text-sm font-medium">用户名或邮箱</label>
+              <label htmlFor="uname" className="text-sm font-medium">
+                用户名或邮箱
+              </label>
               <Input id="uname" name="uname" autoComplete="username" autoFocus required />
             </div>
             <div className="space-y-2">
-              <label htmlFor="password" className="text-sm font-medium">密码</label>
+              <label htmlFor="password" className="text-sm font-medium">
+                密码
+              </label>
               <Input id="password" name="password" type="password" autoComplete="current-password" required />
             </div>
-            <Button type="submit" className="w-full">登录</Button>
+            <Button type="submit" className="w-full">
+              登录
+            </Button>
           </form>
           <div className="mt-4 flex items-center justify-between text-sm">
-            <a href={bs.urls.register} className="text-primary hover:underline">注册账号</a>
-            <a href="/lostpass" className="text-muted-foreground hover:text-primary">忘记密码?</a>
+            <a href={bs.urls.register} className="text-primary hover:underline">
+              注册账号
+            </a>
+            <a href="/lostpass" className="text-muted-foreground hover:text-primary">
+              忘记密码?
+            </a>
           </div>
         </CardContent>
       </Card>
@@ -83,18 +93,26 @@ export function RegisterPage() {
           <CardContent className="p-6">
             <form method="post" className="space-y-4">
               <div className="space-y-2">
-                <label htmlFor="uname" className="text-sm font-medium">用户名</label>
+                <label htmlFor="uname" className="text-sm font-medium">
+                  用户名
+                </label>
                 <Input id="uname" name="uname" autoComplete="username" autoFocus required placeholder="设置你的用户名" />
               </div>
               <div className="space-y-2">
-                <label htmlFor="password" className="text-sm font-medium">密码</label>
+                <label htmlFor="password" className="text-sm font-medium">
+                  密码
+                </label>
                 <Input id="password" name="password" type="password" autoComplete="new-password" required />
               </div>
               <div className="space-y-2">
-                <label htmlFor="verifyPassword" className="text-sm font-medium">确认密码</label>
+                <label htmlFor="verifyPassword" className="text-sm font-medium">
+                  确认密码
+                </label>
                 <Input id="verifyPassword" name="verifyPassword" type="password" autoComplete="new-password" required />
               </div>
-              <Button type="submit" className="w-full">注册</Button>
+              <Button type="submit" className="w-full">
+                注册
+              </Button>
             </form>
           </CardContent>
         </Card>
@@ -120,14 +138,20 @@ export function RegisterPage() {
         <CardContent className="p-6">
           <form method="post" className="space-y-4">
             <div className="space-y-2">
-              <label htmlFor="mail" className="text-sm font-medium">邮箱</label>
+              <label htmlFor="mail" className="text-sm font-medium">
+                邮箱
+              </label>
               <Input id="mail" name="mail" type="email" autoComplete="email" autoFocus required />
             </div>
-            <Button type="submit" className="w-full">发送验证邮件</Button>
+            <Button type="submit" className="w-full">
+              发送验证邮件
+            </Button>
           </form>
           <div className="mt-4 text-center text-sm">
             <span className="text-muted-foreground">已有账号？</span>{' '}
-            <a href={bs.urls.login} className="text-primary hover:underline">去登录</a>
+            <a href={bs.urls.login} className="text-primary hover:underline">
+              去登录
+            </a>
           </div>
         </CardContent>
       </Card>
@@ -155,7 +179,9 @@ export function LogoutPage() {
               <a href={bs.urls.home}>取消</a>
             </Button>
             <form method="post" className="flex-1">
-              <Button type="submit" variant="destructive" className="w-full">退出</Button>
+              <Button type="submit" variant="destructive" className="w-full">
+                退出
+              </Button>
             </form>
           </div>
         </CardContent>
@@ -183,13 +209,19 @@ export function LostPasswordPage() {
         <CardContent className="p-6">
           <form method="post" className="space-y-4">
             <div className="space-y-2">
-              <label htmlFor="mail" className="text-sm font-medium">邮箱</label>
+              <label htmlFor="mail" className="text-sm font-medium">
+                邮箱
+              </label>
               <Input id="mail" name="mail" type="email" autoFocus required />
             </div>
-            <Button type="submit" className="w-full">发送重置邮件</Button>
+            <Button type="submit" className="w-full">
+              发送重置邮件
+            </Button>
           </form>
           <div className="mt-4 text-center text-sm">
-            <a href={bs.urls.login} className="text-primary hover:underline">返回登录</a>
+            <a href={bs.urls.login} className="text-primary hover:underline">
+              返回登录
+            </a>
           </div>
         </CardContent>
       </Card>
@@ -281,14 +313,20 @@ export function LostPasswordWithCodePage() {
         <CardContent className="p-6">
           <form method="post" className="space-y-4">
             <div className="space-y-2">
-              <label htmlFor="password" className="text-sm font-medium">新密码</label>
+              <label htmlFor="password" className="text-sm font-medium">
+                新密码
+              </label>
               <Input id="password" name="password" type="password" autoComplete="new-password" autoFocus required />
             </div>
             <div className="space-y-2">
-              <label htmlFor="verifyPassword" className="text-sm font-medium">确认密码</label>
+              <label htmlFor="verifyPassword" className="text-sm font-medium">
+                确认密码
+              </label>
               <Input id="verifyPassword" name="verifyPassword" type="password" autoComplete="new-password" required />
             </div>
-            <Button type="submit" className="w-full">重置密码</Button>
+            <Button type="submit" className="w-full">
+              重置密码
+            </Button>
           </form>
         </CardContent>
       </Card>
@@ -310,9 +348,7 @@ export function UserDeletePendingPage() {
         <CardContent className="p-8 text-center">
           <Clock className="mx-auto size-10 text-amber-500" />
           <h1 className="mt-4 text-xl font-semibold">账号删除已提交</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            你的账号将在 7 天后被永久删除。在此期间，你可以取消删除操作。
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground">你的账号将在 7 天后被永久删除。在此期间，你可以取消删除操作。</p>
         </CardContent>
       </Card>
     </motion.div>
@@ -333,9 +369,7 @@ export function ChangeMailSentPage() {
         <CardContent className="p-8 text-center">
           <MailIcon className="mx-auto size-10 text-green-500" />
           <h1 className="mt-4 text-xl font-semibold">验证邮件已发送</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            请查看新邮箱的收件箱，点击链接完成邮箱更换。
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground">请查看新邮箱的收件箱，点击链接完成邮箱更换。</p>
         </CardContent>
       </Card>
     </motion.div>

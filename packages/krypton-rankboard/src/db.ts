@@ -21,10 +21,7 @@ export async function ensureIndexes(): Promise<void> {
         // 关死（第二个同内容 insert 直接 E11000）；已回滚批次不占位。
         // partial index 只支持等值，故用布尔 `rolledBack:false` 而非
         // `rolledBackAt $exists`（后者内部转 $not，partial index 不允许）。
-        importBatchesColl.createIndex(
-            { contentHash: 1 },
-            { unique: true, partialFilterExpression: { rolledBack: false } },
-        ),
+        importBatchesColl.createIndex({ contentHash: 1 }, { unique: true, partialFilterExpression: { rolledBack: false } }),
         importBatchesColl.createIndex({ createdAt: -1 }),
     ]);
 }
@@ -61,9 +58,7 @@ export const PRESET_AWARD_TYPES: Array<Omit<AwardType, '_id'>> = [
 export async function seedAwardTypesIfEmpty(): Promise<void> {
     const count = await awardTypesColl.estimatedDocumentCount();
     if (count > 0) return;
-    await awardTypesColl.insertMany(
-        PRESET_AWARD_TYPES.map((p) => ({ ...p } as AwardType)),
-    );
+    await awardTypesColl.insertMany(PRESET_AWARD_TYPES.map((p) => ({ ...p }) as AwardType));
 }
 
 export async function getConfig(): Promise<{ baseScore: number; decayFactor: number }> {

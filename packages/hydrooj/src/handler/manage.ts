@@ -3,9 +3,7 @@ import { inspect } from 'util';
 import * as yaml from 'js-yaml';
 import { omit } from 'lodash';
 import Schema from 'schemastery';
-import {
-    CannotEditSuperAdminError, NotLaunchedByPM2Error, UserNotFoundError, ValidationError,
-} from '../error';
+import { CannotEditSuperAdminError, NotLaunchedByPM2Error, UserNotFoundError, ValidationError } from '../error';
 import { Logger } from '../logger';
 import { PRIV, STATUS } from '../model/builtin';
 import domain from '../model/domain';
@@ -13,9 +11,7 @@ import record from '../model/record';
 import * as setting from '../model/setting';
 import system from '../model/system';
 import user from '../model/user';
-import {
-    ConnectionHandler, Handler, param, requireSudo, Types,
-} from '../service/server';
+import { ConnectionHandler, Handler, param, requireSudo, Types } from '../service/server';
 import { JudgeResultCallbackContext } from './judge';
 
 const logger = new Logger('manage');
@@ -24,7 +20,7 @@ function set(key: string, value: any) {
     if (setting.SYSTEM_SETTINGS_BY_KEY[key]) {
         const s = setting.SYSTEM_SETTINGS_BY_KEY[key];
         if (s.flag & setting.FLAG_DISABLED) return undefined;
-        if ((s.flag & setting.FLAG_SECRET) && !value) return undefined;
+        if (s.flag & setting.FLAG_SECRET && !value) return undefined;
         if (s.type === 'boolean') {
             if (value === 'on') return true;
             return false;
@@ -69,7 +65,9 @@ class SystemCheckConnHandler extends ConnectionHandler {
         const log = (payload: any) => this.send({ type: 'log', payload });
         const warn = (payload: any) => this.send({ type: 'warn', payload });
         const error = (payload: any) => this.send({ type: 'error', payload });
-        await this.ctx.check.run(this, log, warn, error, (id) => { this.id = id; });
+        await this.ctx.check.run(this, log, warn, error, (id) => {
+            this.id = id;
+        });
     }
 
     async cleanup() {
@@ -108,14 +106,17 @@ class SystemScriptHandler extends SystemHandler {
         c.next({ message: `Running script: ${id} `, status: STATUS.STATUS_JUDGING });
         const start = Date.now();
         // Maybe async?
-        global.Hydro.script[id].run(args, (data) => c.next(data))
-            .then((ret: any) => c.end({
-                status: STATUS.STATUS_ACCEPTED,
-                message: inspect(ret, false, 10, true),
-                judger: 1,
-                time: Date.now() - start,
-                memory: 0,
-            }))
+        global.Hydro.script[id]
+            .run(args, (data) => c.next(data))
+            .then((ret: any) =>
+                c.end({
+                    status: STATUS.STATUS_ACCEPTED,
+                    message: inspect(ret, false, 10, true),
+                    judger: 1,
+                    time: Date.now() - start,
+                    memory: 0,
+                }),
+            )
             .catch((err: Error) => {
                 logger.error(err);
                 c.end({
@@ -205,7 +206,7 @@ class SystemConfigHandler extends SystemHandler {
 
     @requireSudo
     @param('value', Types.String)
-    async post({ }, value: string) {
+    async post({}, value: string) {
         const oldConfig = yaml.load(this.ctx.setting.configSource);
         let config;
         const processNode = (node: any, old: any, schema: Schema<any, any>, parent?: any, accessKey?: string) => {
@@ -231,7 +232,6 @@ class SystemConfigHandler extends SystemHandler {
     }
 }
 
-/* eslint-disable no-await-in-loop */
 class SystemUserImportHandler extends SystemHandler {
     async get() {
         this.response.body.users = [];
@@ -242,7 +242,7 @@ class SystemUserImportHandler extends SystemHandler {
     @param('draft', Types.Boolean)
     async post(domainId: string, _users: string, draft: boolean) {
         const users = _users.split('\n');
-        const udocs: { email: string, username: string, password: string, displayName?: string, [key: string]: any }[] = [];
+        const udocs: { email: string; username: string; password: string; displayName?: string; [key: string]: any }[] = [];
         const messages = [];
         const mapping = Object.create(null);
         const groups: Record<string, string[]> = Object.create(null);
@@ -259,9 +259,9 @@ class SystemUserImportHandler extends SystemHandler {
                 if (!Types.Email[1](email)) messages.push(`Line ${+i + 1}: Invalid email.`);
                 else if (!Types.Username[1](username)) messages.push(`Line ${+i + 1}: Invalid username`);
                 else if (!Types.Password[1](password)) messages.push(`Line ${+i + 1}: Invalid password`);
-                else if (udocs.find((t) => t.email === email) || await user.getByEmail('system', email)) {
+                else if (udocs.find((t) => t.email === email) || (await user.getByEmail('system', email))) {
                     messages.push(`Line ${+i + 1}: Email ${email} already exists.`);
-                } else if (udocs.find((t) => t.username === username) || await user.getByUname('system', username)) {
+                } else if (udocs.find((t) => t.username === username) || (await user.getByUname('system', username))) {
                     messages.push(`Line ${+i + 1}: Username ${username} already exists.`);
                 } else {
                     const payload: any = {};
@@ -272,9 +272,12 @@ class SystemUserImportHandler extends SystemHandler {
                             groups[data.group].push(email);
                         }
                         Object.assign(payload, data);
-                    } catch (e) { }
+                    } catch (e) {}
                     Object.assign(payload, {
-                        email, username, password, displayName,
+                        email,
+                        username,
+                        password,
+                        displayName,
                     });
                     await this.ctx.serial('user/import/parse', payload);
                     udocs.push(payload);
@@ -306,7 +309,6 @@ class SystemUserImportHandler extends SystemHandler {
         this.response.body.messages = messages;
     }
 }
-/* eslint-enable no-await-in-loop */
 
 const Priv = omit(PRIV, ['PRIV_DEFAULT', 'PRIV_NEVER', 'PRIV_NONE', 'PRIV_ALL']);
 const allPriv = Math.sum(Object.values(Priv));
@@ -314,12 +316,21 @@ const allPriv = Math.sum(Object.values(Priv));
 class SystemUserPrivHandler extends SystemHandler {
     @requireSudo
     @param('extraIgnore', Types.NumericArray, true)
-    async get({ }, extraIgnore: number[] = []) {
+    async get({}, extraIgnore: number[] = []) {
         const defaultPriv = system.get('default.priv');
-        const udocs = await user.getMulti({
-            _id: { $gte: -1000, $ne: 1 }, priv: { $nin: [0, defaultPriv, ...extraIgnore] },
-        }).limit(1000).sort({ _id: 1 }).toArray();
-        const banudocs = await user.getMulti({ _id: { $gte: -1000, $ne: 1 }, priv: 0 }).limit(1000).sort({ _id: 1 }).toArray();
+        const udocs = await user
+            .getMulti({
+                _id: { $gte: -1000, $ne: 1 },
+                priv: { $nin: [0, defaultPriv, ...extraIgnore] },
+            })
+            .limit(1000)
+            .sort({ _id: 1 })
+            .toArray();
+        const banudocs = await user
+            .getMulti({ _id: { $gte: -1000, $ne: 1 }, priv: 0 })
+            .limit(1000)
+            .sort({ _id: 1 })
+            .toArray();
         this.response.body = {
             udocs: [...udocs, ...banudocs],
             defaultPriv,

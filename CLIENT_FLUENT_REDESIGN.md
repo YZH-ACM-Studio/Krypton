@@ -17,21 +17,21 @@
 
 13 项已确认决策（grill session 2026-05-27）：
 
-| # | 主题 | 决策 |
-|---|---|---|
-| 1 | 实现路线 | QSS + Win32 DWM hacks（Mica） |
-| 2 | 改造范围 | LoginWindow + ExamShell dialogs + ExamWebview chrome + blockedHtml |
-| 3 | 颜色模式 | Light only（blockedHtml 例外保留深色） |
-| 4 | 主色 | `#0078D4` Win11 默认 accent + 派生色阶 |
-| 5 | 字体栈 | Segoe UI Variable → Segoe UI → Microsoft YaHei UI → system-ui |
-| 6 | 窗口边框 | Hybrid — LoginWindow frameless 自画，ExamWebview native chrome + Mica |
-| 7 | Mica fallback | 只 Win11 22H2+ Mica，其他自动 solid 白 |
-| 8 | 组件分发 | setProperty + QSS 属性选择器 |
-| 9 | 动画 | QSS 状态选择器 + Dialog 淡入 + InfoBar 滑入 + ProgressRing 自定义 |
-| 10 | 图标 | Microsoft Fluent UI System Icons + SVG + QRC |
-| 11 | 代码组织 | 新建 `ui/` 顶层目录（fluent/ + widgets/ + resources/） |
-| 12 | 上线节奏 | 三阶段（基础设施 → 主屏 → dialogs/InfoBar） |
-| 13 | MainWindow | 全局 QSS 自动覆盖（"Let it happen"） |
+| #   | 主题          | 决策                                                                  |
+| --- | ------------- | --------------------------------------------------------------------- |
+| 1   | 实现路线      | QSS + Win32 DWM hacks（Mica）                                         |
+| 2   | 改造范围      | LoginWindow + ExamShell dialogs + ExamWebview chrome + blockedHtml    |
+| 3   | 颜色模式      | Light only（blockedHtml 例外保留深色）                                |
+| 4   | 主色          | `#0078D4` Win11 默认 accent + 派生色阶                                |
+| 5   | 字体栈        | Segoe UI Variable → Segoe UI → Microsoft YaHei UI → system-ui         |
+| 6   | 窗口边框      | Hybrid — LoginWindow frameless 自画，ExamWebview native chrome + Mica |
+| 7   | Mica fallback | 只 Win11 22H2+ Mica，其他自动 solid 白                                |
+| 8   | 组件分发      | setProperty + QSS 属性选择器                                          |
+| 9   | 动画          | QSS 状态选择器 + Dialog 淡入 + InfoBar 滑入 + ProgressRing 自定义     |
+| 10  | 图标          | Microsoft Fluent UI System Icons + SVG + QRC                          |
+| 11  | 代码组织      | 新建 `ui/` 顶层目录（fluent/ + widgets/ + resources/）                |
+| 12  | 上线节奏      | 三阶段（基础设施 → 主屏 → dialogs/InfoBar）                           |
+| 13  | MainWindow    | 全局 QSS 自动覆盖（"Let it happen"）                                  |
 
 ## 3. 调色板
 
@@ -84,21 +84,24 @@ error-accent     #F87171  (淡红警告)
 
 ```css
 font-family:
-  "Segoe UI Variable", "Segoe UI",          /* Win11 → Win10 fallback */
-  "Microsoft YaHei UI", "Microsoft YaHei",  /* 中文 */
-  system-ui, sans-serif;
+    'Segoe UI Variable',
+    'Segoe UI',
+    /* Win11 → Win10 fallback */ 'Microsoft YaHei UI',
+    'Microsoft YaHei',
+    /* 中文 */ system-ui,
+    sans-serif;
 ```
 
 零字体打包；全部依赖 Windows 内置字体；macOS / Linux 走 system-ui fallback（开发用机）。
 
 ### 4.2 Type Ramp（WinUI3 标准 4 档）
 
-| 名称 | 字号 | 字重 | 使用场景 |
-|---|---|---|---|
-| **Body** | 14px | Regular (400) | 默认正文 |
-| **Body Strong** | 14px | SemiBold (600) | 字段标签 |
-| **Subtitle** | 20px | SemiBold (600) | 对话框标题 |
-| **Title** | 28px | SemiBold (600) | 大标题（LoginWindow welcome） |
+| 名称            | 字号 | 字重           | 使用场景                      |
+| --------------- | ---- | -------------- | ----------------------------- |
+| **Body**        | 14px | Regular (400)  | 默认正文                      |
+| **Body Strong** | 14px | SemiBold (600) | 字段标签                      |
+| **Subtitle**    | 20px | SemiBold (600) | 对话框标题                    |
+| **Title**       | 28px | SemiBold (600) | 大标题（LoginWindow welcome） |
 
 Variable 字体的光学尺寸特性靠 `QFont::setStyleStrategy(QFont::PreferAntialias)` + `setWeight(QFont::Weight)` 触发。
 
@@ -106,21 +109,21 @@ Variable 字体的光学尺寸特性靠 `QFont::setStyleStrategy(QFont::PreferAn
 
 ### 5.1 按钮（QPushButton + variant）
 
-| Variant | 用途 | 视觉 |
-|---|---|---|
-| `primary` | 主操作（提交 / 确认） | accent 填充 + 白字 |
-| `standard` | 次操作（取消） | 白底 + 灰边 + 黑字（默认） |
-| `subtle` | 弱操作（链接式） | 透明底 + 灰字 + hover 浅灰底 |
-| `destructive` | 危险操作（删除 / 强制结束） | `#C42B1C` 填充 + 白字 |
-| `hyperlink` | 链接 | 透明底 + accent 文字 + hover 下划线 |
+| Variant       | 用途                        | 视觉                                |
+| ------------- | --------------------------- | ----------------------------------- |
+| `primary`     | 主操作（提交 / 确认）       | accent 填充 + 白字                  |
+| `standard`    | 次操作（取消）              | 白底 + 灰边 + 黑字（默认）          |
+| `subtle`      | 弱操作（链接式）            | 透明底 + 灰字 + hover 浅灰底        |
+| `destructive` | 危险操作（删除 / 强制结束） | `#C42B1C` 填充 + 白字               |
+| `hyperlink`   | 链接                        | 透明底 + accent 文字 + hover 下划线 |
 
 应用方式：`Fluent::setVariant(button, "primary")`。
 
 ### 5.2 输入框（QLineEdit + variant）
 
-| Variant | 用途 |
-|---|---|
-| `default` | 标准单行输入 |
+| Variant    | 用途               |
+| ---------- | ------------------ |
+| `default`  | 标准单行输入       |
 | `readonly` | 只读（URL bar 等） |
 
 视觉：1px `#E5E5E5` 边框，hover/focus 时变 accent `#0078D4` 2px 描边，圆角 4px。
@@ -288,6 +291,7 @@ ecosystems/KryptonVigilSystem/Client/
 ```
 
 `CMakeLists.txt` 改动：
+
 - `find_package(Qt6 6.5 REQUIRED COMPONENTS ... Svg)`
 - `qt_add_executable(KryptonVigilClient ... ui/fluent/*.cpp ui/widgets/*.cpp ${FLUENT_BACKDROP_PLATFORM_SOURCE} ${FLUENT_FRAMELESS_PLATFORM_SOURCE})`
 - `qt_add_resources(KryptonVigilClient "fluent_resources" PREFIX "/fluent" FILES ...)`
@@ -298,6 +302,7 @@ ecosystems/KryptonVigilSystem/Client/
 ### Phase 1 — 基础设施 + 全局 QSS（零 UI 代码改动）
 
 **交付：**
+
 - `ui/fluent/*` 调色板 / helper / Mica 接入
 - `ui/widgets/*` ProgressRing / InfoBar / FramelessDialog（基础类，未使用）
 - `ui/fluent/resources/fluent.qss` 主样式表
@@ -307,6 +312,7 @@ ecosystems/KryptonVigilSystem/Client/
 - `app/main.cpp` 启动时 `QApplication::setStyleSheet(loadFluentQss())`
 
 **影响：**
+
 - 所有现有 widget（包括 MainWindow）立即套上 Fluent 基础皮（QSS 全局生效）
 - 0 行为变更，只视觉升级
 - 行为风险接近 0，可独立合并独立观察
@@ -314,19 +320,21 @@ ecosystems/KryptonVigilSystem/Client/
 ### Phase 2 — LoginWindow + ExamWebview 主屏重写
 
 **交付：**
+
 - `app/login_window.cpp` 改造：
-  - 继承 `Fluent::FramelessDialog`
-  - 移除 inline `setStyleSheet`（已被全局 QSS 接管）
-  - 提交按钮 `Fluent::setVariant(submit, "primary")`
-  - QProgressBar 替换为 `Fluent::ProgressRing`
+    - 继承 `Fluent::FramelessDialog`
+    - 移除 inline `setStyleSheet`（已被全局 QSS 接管）
+    - 提交按钮 `Fluent::setVariant(submit, "primary")`
+    - QProgressBar 替换为 `Fluent::ProgressRing`
 - `app/exam_webview.cpp` 改造：
-  - 移除 toolbar / infoBar 的 inline `setStyleSheet`
-  - 调按钮 variant
-  - 用 `Fluent::tintedIcon` 替代 emoji 字符（`←` `↻` `→` → SVG）
-  - 启动时调 `Fluent::Backdrop::applyMica(this)` 启用 Mica
+    - 移除 toolbar / infoBar 的 inline `setStyleSheet`
+    - 调按钮 variant
+    - 用 `Fluent::tintedIcon` 替代 emoji 字符（`←` `↻` `→` → SVG）
+    - 启动时调 `Fluent::Backdrop::applyMica(this)` 启用 Mica
 - `app/main.cpp` 启动时给 LoginWindow / ExamWebview 调 Mica
 
 **影响：**
+
 - 主要触点完整 Fluent 化
 - ExamShell 临时对话框暂时维持默认风格，可能有"主屏 Fluent + 弹窗默认"的视觉断层
 - 工程量 ~500 行
@@ -334,15 +342,17 @@ ecosystems/KryptonVigilSystem/Client/
 ### Phase 3 — dialogs + InfoBar + 错误页
 
 **交付：**
+
 - `ui/widgets/content_dialog.{h,cpp}` 实现 Fluent ContentDialog
 - `app/exam_shell.cpp` 替换：
-  - `confirmStudentFinish` 自定义 QDialog → `Fluent::ContentDialog`
-  - `needs_selection` `QInputDialog::getItem` → 自定义 `Fluent::ListSelectionDialog`
-  - 提示类 QMessageBox（"正在结束"）→ `Fluent::InfoBar`
-  - 关键决策 QMessageBox（"考试结束"、"网络锁失败"）→ `Fluent::ContentDialog`
+    - `confirmStudentFinish` 自定义 QDialog → `Fluent::ContentDialog`
+    - `needs_selection` `QInputDialog::getItem` → 自定义 `Fluent::ListSelectionDialog`
+    - 提示类 QMessageBox（"正在结束"）→ `Fluent::InfoBar`
+    - 关键决策 QMessageBox（"考试结束"、"网络锁失败"）→ `Fluent::ContentDialog`
 - `blockedHtml` HTML 字符串：保留深色，加 Fluent 字体 + 内联 SVG 图标
 
 **影响：**
+
 - 客户端全栈 Fluent 化完成
 - 工程量 ~500 行
 
@@ -351,9 +361,15 @@ ecosystems/KryptonVigilSystem/Client/
 ### 12.1 默认（按 widget 类型）
 
 ```css
-QPushButton { /* 默认 = standard 风格 */ }
-QLineEdit   { /* 默认 = default 风格 */ }
-QLabel      { /* 默认正文 */ }
+QPushButton {
+    /* 默认 = standard 风格 */
+}
+QLineEdit {
+    /* 默认 = default 风格 */
+}
+QLabel {
+    /* 默认正文 */
+}
 ```
 
 ### 12.2 Variant 选择器（与默认共存）
@@ -372,8 +388,12 @@ QPushButton[variant="destructive"] { background: #C42B1C; color: white; }
 ### 12.3 objectName 选择器（用于特定 widget）
 
 ```css
-QFrame#examToolbar { /* Fluent toolbar 风格 */ }
-QFrame#examInfoBar { /* Fluent info bar 风格 */ }
+QFrame#examToolbar {
+    /* Fluent toolbar 风格 */
+}
+QFrame#examInfoBar {
+    /* Fluent info bar 风格 */
+}
 ```
 
 ### 12.4 Property change 后必须重新 polish
@@ -397,13 +417,13 @@ void setVariant(QWidget* w, const char* variant) {
 
 ## 14. 风险与回滚
 
-| 风险 | 缓解 |
-|---|---|
-| MainWindow 在 Phase 1 后布局错位 | 单独给问题 widget 加 legacy-compact variant 反向覆盖 |
-| Mica API 在某 Win 版本崩溃 | `DwmSetWindowAttribute` 调用包 try-catch，失败 NoOp |
-| Frameless dialog 拖动 hit-test 错位 | LoginWindow 是 QDialog 定宽，hit-test 区域固定，问题面小 |
-| 字体 fallback 在中文 Win10 下变形 | YaHei UI 是 Win 内置，必能 fallback；最差降到 system-ui |
-| QSS hot-reload 不支持 | 开发模式下用环境变量 `KRYPTON_FLUENT_QSS_PATH` 指定文件系统路径，编辑保存重启即可看到 |
+| 风险                                | 缓解                                                                                  |
+| ----------------------------------- | ------------------------------------------------------------------------------------- |
+| MainWindow 在 Phase 1 后布局错位    | 单独给问题 widget 加 legacy-compact variant 反向覆盖                                  |
+| Mica API 在某 Win 版本崩溃          | `DwmSetWindowAttribute` 调用包 try-catch，失败 NoOp                                   |
+| Frameless dialog 拖动 hit-test 错位 | LoginWindow 是 QDialog 定宽，hit-test 区域固定，问题面小                              |
+| 字体 fallback 在中文 Win10 下变形   | YaHei UI 是 Win 内置，必能 fallback；最差降到 system-ui                               |
+| QSS hot-reload 不支持               | 开发模式下用环境变量 `KRYPTON_FLUENT_QSS_PATH` 指定文件系统路径，编辑保存重启即可看到 |
 
 回滚：每个 Phase 一个独立 PR，回滚单 Phase 即可。Phase 1 不动 UI 代码，回滚=删 ui/ 目录 + main.cpp 那行 setStyleSheet。
 

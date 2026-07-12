@@ -29,25 +29,29 @@ window.UiContext = JSON.parse(window.UiContext);
 window.UserContext = JSON.parse(window.UserContext);
 try {
   __webpack_public_path__ = UiContext.cdn_prefix;
-} catch (e) { }
+} catch (e) {}
 if ('serviceWorker' in navigator) {
-  const sendConfig = () => fetch('/service-worker-config', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(UiContext.SWConfig),
-  });
-  navigator.serviceWorker.register('/service-worker.js').then((registration) => {
-    console.log('SW registered: ', registration);
-    const sw = registration.active || registration.waiting || registration.installing;
-    if (sw.state === 'activated') sendConfig();
-    else {
-      sw.addEventListener('statechange', (e) => {
-        if (e.target.state === 'activated') sendConfig();
-      });
-    }
-  }).catch((registrationError) => {
-    console.log('SW registration failed: ', registrationError);
-  });
+  const sendConfig = () =>
+    fetch('/service-worker-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(UiContext.SWConfig),
+    });
+  navigator.serviceWorker
+    .register('/service-worker.js')
+    .then((registration) => {
+      console.log('SW registered: ', registration);
+      const sw = registration.active || registration.waiting || registration.installing;
+      if (sw.state === 'activated') sendConfig();
+      else {
+        sw.addEventListener('statechange', (e) => {
+          if (e.target.state === 'activated') sendConfig();
+        });
+      }
+    })
+    .catch((registrationError) => {
+      console.log('SW registration failed: ', registrationError);
+    });
 }
 
 const PageLoader = '<div class="page-loader nojs--hide" style="display:none;"><div class="loader"></div></div>';
@@ -63,10 +67,14 @@ if (process.env.NODE_ENV === 'production' && UiContext.sentry_dsn) {
   document.body.appendChild(script);
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
-  Object.assign(window.UiContext, JSON.parse(window.UiContextNew));
-  Object.assign(window.UserContext, JSON.parse(window.UserContextNew));
-  window.HydroExports = await import('./api');
-  await window._hydroLoad();
-  await window.HydroExports.initPageLoader();
-}, false);
+document.addEventListener(
+  'DOMContentLoaded',
+  async () => {
+    Object.assign(window.UiContext, JSON.parse(window.UiContextNew));
+    Object.assign(window.UserContext, JSON.parse(window.UserContextNew));
+    window.HydroExports = await import('./api');
+    await window._hydroLoad();
+    await window.HydroExports.initPageLoader();
+  },
+  false,
+);

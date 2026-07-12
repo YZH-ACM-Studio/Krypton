@@ -13,14 +13,21 @@ import '@xyflow/react/dist/style.css';
 
 import {
   addEdge,
-  applyNodeChanges, Background, BackgroundVariant, Controls, type Edge, Handle, type Node as RFNode, type NodeChange, type OnConnect,
-  Position, ReactFlow,
-  ReactFlowProvider } from '@xyflow/react';
+  applyNodeChanges,
+  Background,
+  BackgroundVariant,
+  Controls,
+  type Edge,
+  Handle,
+  type Node as RFNode,
+  type NodeChange,
+  type OnConnect,
+  Position,
+  ReactFlow,
+  ReactFlowProvider,
+} from '@xyflow/react';
 import ELK from 'elkjs/lib/elk.bundled.js';
-import {
-  ChevronDown, ChevronRight, Edit3, Network, Plus, RefreshCw, Save, Search,
-  Sparkles, Trash2, X,
-} from 'lucide-react';
+import { ChevronDown, ChevronRight, Edit3, Network, Plus, RefreshCw, Save, Search, Sparkles, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -40,7 +47,7 @@ interface MindmapNode {
   topic: string;
   description?: string;
   color?: string;
-  position?: { x: number, y: number };
+  position?: { x: number; y: number };
   tags: string[];
   problemIds: string[];
   order: number;
@@ -119,16 +126,17 @@ function MindmapNodeComponent({ data }: { data: NodeData }) {
         {data.hasChildren && toggle ? (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); toggle(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggle();
+            }}
             onPointerDown={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             className="ml-1.5 inline-flex size-4 shrink-0 items-center justify-center rounded hover:bg-accent"
             title={data.collapsed ? '展开子节点' : '收起子节点'}
             aria-label={data.collapsed ? '展开' : '收起'}
           >
-            {data.collapsed
-              ? <ChevronRight className="size-3" />
-              : <ChevronDown className="size-3" />}
+            {data.collapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
           </button>
         ) : null}
       </div>
@@ -140,7 +148,10 @@ function MindmapNodeComponent({ data }: { data: NodeData }) {
 
 const NODE_TYPES = { mindmap: MindmapNodeComponent };
 
-interface LayoutResult { nodes: RFNode<NodeData>[], edges: Edge[] }
+interface LayoutResult {
+  nodes: RFNode<NodeData>[];
+  edges: Edge[];
+}
 
 /**
  * Compute a subset of `raw` nodes to actually render — anything whose
@@ -148,10 +159,7 @@ interface LayoutResult { nodes: RFNode<NodeData>[], edges: Edge[] }
  * visible subset and the per-node `children` adjacency (used for the
  * `hasChildren` flag on the visible nodes' UI badges).
  */
-function visibleSubset(
-  raw: MindmapNode[],
-  collapsed: ReadonlySet<string>,
-): { visible: MindmapNode[], children: Record<string, string[]> } {
+function visibleSubset(raw: MindmapNode[], collapsed: ReadonlySet<string>): { visible: MindmapNode[]; children: Record<string, string[]> } {
   const children: Record<string, string[]> = {};
   for (const n of raw) {
     if (n.parentId) {
@@ -193,12 +201,7 @@ const SHARED_LAYOUT_OPTS = {
   'elk.edgeRouting': 'ORTHOGONAL',
 };
 
-async function layoutHalf(
-  rootId: string,
-  ids: Set<string>,
-  visible: MindmapNode[],
-  direction: 'LEFT' | 'RIGHT',
-) {
+async function layoutHalf(rootId: string, ids: Set<string>, visible: MindmapNode[], direction: 'LEFT' | 'RIGHT') {
   // Sort nodes by their `order` field so ELK's layered crossing
   // minimization gets stable input, keeping siblings in the same relative
   // position across expand/collapse cycles.
@@ -230,7 +233,9 @@ async function layoutHalf(
 }
 
 async function computeLayout(
-  raw: MindmapNode[], rootId: string | null, _direction: 'RIGHT' | 'DOWN',
+  raw: MindmapNode[],
+  rootId: string | null,
+  _direction: 'RIGHT' | 'DOWN',
   collapsed: ReadonlySet<string> = new Set(),
 ): Promise<LayoutResult> {
   if (!raw.length || !rootId) return { nodes: [], edges: [] };
@@ -263,7 +268,7 @@ async function computeLayout(
 
   // Anchor root at (0,0). For each subtree, find the laid-out root position
   // and translate all of that subtree's nodes by (-rootX, -rootY).
-  const positions = new Map<string, { x: number, y: number }>();
+  const positions = new Map<string, { x: number; y: number }>();
   positions.set(rootId, { x: 0, y: 0 });
   function ingest(layouted: any, ids: Set<string>) {
     if (!layouted?.children) return;
@@ -377,9 +382,7 @@ function MindmapInner() {
     const rootId = initialData.config.rootNodeId;
     if (!rootId) return new Set();
     const hasChildren = new Set(initialData.nodes.map((n) => n.parentId).filter(Boolean));
-    return new Set(initialData.nodes
-      .filter((n) => n._id !== rootId && hasChildren.has(n._id))
-      .map((n) => n._id));
+    return new Set(initialData.nodes.filter((n) => n._id !== rootId && hasChildren.has(n._id)).map((n) => n._id));
   });
 
   const toggleCollapse = useCallback((id: string) => {
@@ -394,12 +397,7 @@ function MindmapInner() {
   // Layout — re-runs whenever the tree shape OR the collapsed set changes.
   useEffect(() => {
     let cancelled = false;
-    computeLayout(
-      rawNodes,
-      initialData.config.rootNodeId,
-      initialData.config.layoutDirection,
-      collapsedNodes,
-    ).then(({ nodes, edges }) => {
+    computeLayout(rawNodes, initialData.config.rootNodeId, initialData.config.layoutDirection, collapsedNodes).then(({ nodes, edges }) => {
       if (cancelled) return;
       // Inject the per-node toggle callback so the in-node ▾/▸ button
       // can call back into this component.
@@ -410,21 +408,27 @@ function MindmapInner() {
       setRfNodes(withCallbacks);
       setRfEdges(edges);
     });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      cancelled = true;
+    };
   }, [rawNodes.length, initialData.config.layoutDirection, collapsedNodes]);
 
   // Selection sync.
   useEffect(() => {
-    setRfNodes((nodes) => nodes.map((n) => ({
-      ...n,
-      data: { ...n.data, selected: n.id === selectedId },
-    })));
+    setRfNodes((nodes) =>
+      nodes.map((n) => ({
+        ...n,
+        data: { ...n.data, selected: n.id === selectedId },
+      })),
+    );
   }, [selectedId]);
 
   // Fetch problems for selected node.
   useEffect(() => {
-    if (!selectedId) { setProblems([]); return; }
+    if (!selectedId) {
+      setProblems([]);
+      return;
+    }
     setProblemsLoading(true);
     fetch(`/api/mindmap/problems?nodeId=${selectedId}`, { headers: { Accept: 'application/json' } })
       .then((r) => r.json())
@@ -525,12 +529,12 @@ function MindmapInner() {
               <>
                 <p className="text-xs text-muted-foreground">节点</p>
                 <h2 className="truncate text-base font-semibold">{selectedNode.topic}</h2>
-                {selectedNode.description && (
-                  <p className="mt-1 text-xs text-muted-foreground">{selectedNode.description}</p>
-                )}
+                {selectedNode.description && <p className="mt-1 text-xs text-muted-foreground">{selectedNode.description}</p>}
                 <div className="mt-2 flex flex-wrap gap-1">
                   {selectedNode.tags.map((t) => (
-                    <Badge key={t} variant="outline" className="text-[10px]">{t}</Badge>
+                    <Badge key={t} variant="outline" className="text-[10px]">
+                      {t}
+                    </Badge>
                   ))}
                 </div>
               </>
@@ -569,21 +573,13 @@ function MindmapInner() {
                 {problemsLoading ? (
                   <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>
                 ) : filteredProblems.length === 0 ? (
-                  <p className="py-8 text-center text-xs text-muted-foreground">
-                    {problems.length === 0 ? '此节点暂无关联题目' : '无匹配题目'}
-                  </p>
+                  <p className="py-8 text-center text-xs text-muted-foreground">{problems.length === 0 ? '此节点暂无关联题目' : '无匹配题目'}</p>
                 ) : (
                   <ul className="divide-y">
                     {filteredProblems.map((p) => (
                       <li key={p.pid}>
-                        <a
-                          href={`/p/${p.pid}`}
-                          className="flex items-center gap-2 px-3 py-2 transition-colors hover:bg-accent/40"
-                        >
-                          <span className={cn(
-                            'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold',
-                            difficultyChip(p.difficulty),
-                          )}>
+                        <a href={`/p/${p.pid}`} className="flex items-center gap-2 px-3 py-2 transition-colors hover:bg-accent/40">
+                          <span className={cn('shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold', difficultyChip(p.difficulty))}>
                             {p.difficulty}
                           </span>
                           <div className="min-w-0 flex-1">
@@ -624,7 +620,11 @@ function MindmapInner() {
 }
 
 function NodeEditorDrawer({
-  node, onClose, onSaved, onDeleted, onChildCreated,
+  node,
+  onClose,
+  onSaved,
+  onDeleted,
+  onChildCreated,
 }: {
   node: MindmapNode;
   onClose: () => void;
@@ -662,9 +662,17 @@ function NodeEditorDrawer({
     setSaving(false);
     onSaved({
       ...node,
-      topic, description, color,
-      tags: tagsCsv.split(',').map((s) => s.trim()).filter(Boolean),
-      problemIds: problemIdsCsv.split(',').map((s) => s.trim()).filter(Boolean),
+      topic,
+      description,
+      color,
+      tags: tagsCsv
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+      problemIds: problemIdsCsv
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
     });
   };
 
@@ -713,11 +721,7 @@ function NodeEditorDrawer({
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium">配色</label>
-          <SimpleSelect
-            value={color}
-            onValueChange={setColor}
-            options={Object.keys(COLOR_BG).map((c) => ({ value: c, label: c }))}
-          />
+          <SimpleSelect value={color} onValueChange={setColor} options={Object.keys(COLOR_BG).map((c) => ({ value: c, label: c }))} />
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium">Tags（逗号分隔，匹配 Hydro 题目 tag）</label>

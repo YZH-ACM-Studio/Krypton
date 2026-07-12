@@ -23,24 +23,19 @@ export function SudoPage() {
             <Lock className="size-5 text-primary" />
           </div>
           <CardTitle className="text-lg">身份验证</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            此操作需要重新验证您的身份，请输入密码以继续。
-          </p>
+          <p className="text-sm text-muted-foreground">此操作需要重新验证您的身份，请输入密码以继续。</p>
         </CardHeader>
         <CardContent>
           <form method="post" className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium" htmlFor="sudo-password">密码</label>
-              <Input
-                id="sudo-password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                autoFocus
-                placeholder="请输入您的密码"
-              />
+              <label className="text-sm font-medium" htmlFor="sudo-password">
+                密码
+              </label>
+              <Input id="sudo-password" name="password" type="password" autoComplete="current-password" autoFocus placeholder="请输入您的密码" />
             </div>
-            <Button type="submit" className="w-full">验证</Button>
+            <Button type="submit" className="w-full">
+              验证
+            </Button>
           </form>
         </CardContent>
       </Card>
@@ -54,11 +49,7 @@ export function SudoPage() {
  */
 export function SudoRedirectPage() {
   return (
-    <motion.div
-      className="flex min-h-[60vh] items-center justify-center"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-    >
+    <motion.div className="flex min-h-[60vh] items-center justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <p className="text-sm text-muted-foreground">正在跳转…</p>
     </motion.div>
   );

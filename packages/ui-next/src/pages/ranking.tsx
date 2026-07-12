@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { Medal } from 'lucide-react';
+import { Medal, ExternalLink } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -10,7 +10,6 @@ import { Pagination } from '@/components/ui/pagination';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { MarkdownView } from '@/components/markdown-renderer';
-import { ExternalLink } from 'lucide-react';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatPlainTextSummary, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { cn } from '@/lib/cn';
@@ -68,16 +67,17 @@ function RankingRow({
         )}
       </TableCell>
       <TableCell>
-        <a
-          href={replaceRouteTokens(bs.urls.userDetail, { UID: String(user._id) })}
-          className="flex min-w-0 items-center gap-2 hover:text-primary"
-        >
+        <a href={replaceRouteTokens(bs.urls.userDetail, { UID: String(user._id) })} className="flex min-w-0 items-center gap-2 hover:text-primary">
           <Avatar className="size-7">
             {user.avatarUrl ? <AvatarImage src={String(user.avatarUrl)} alt={String(user.uname || '')} /> : null}
             <AvatarFallback className="text-[10px]">{makeInitials(user.uname || '?')}</AvatarFallback>
           </Avatar>
           <span className="truncate font-medium">{user.uname || `#${user._id}`}</span>
-          {current ? <Badge variant="secondary" className="text-[10px]">我</Badge> : null}
+          {current ? (
+            <Badge variant="secondary" className="text-[10px]">
+              我
+            </Badge>
+          ) : null}
         </a>
       </TableCell>
       {studentInfo !== undefined ? (
@@ -92,17 +92,13 @@ function RankingRow({
           )}
         </TableCell>
       ) : null}
-      <TableCell className="text-right tabular-nums font-medium">
-        {Math.round(Number(user.rp || 0))}
-      </TableCell>
+      <TableCell className="text-right tabular-nums font-medium">{Math.round(Number(user.rp || 0))}</TableCell>
       {rpKeys.map((key) => (
         <TableCell key={key} className="hidden text-right tabular-nums text-sm text-muted-foreground md:table-cell">
           {getRpDetail(user, key)}
         </TableCell>
       ))}
-      <TableCell className="text-right tabular-nums">
-        {user.nAccept ?? 0}
-      </TableCell>
+      <TableCell className="text-right tabular-nums">{user.nAccept ?? 0}</TableCell>
       <TableCell className="max-w-64 text-sm">
         {bioPreview ? (
           <button
@@ -128,9 +124,7 @@ export function RankingPage() {
   const upcount = Number(data.upcount || data.rpcount) || 1;
   const users: Array<GenericUserDoc & R> = data.udocs || [];
   const ranked: number[] = data.ranked || [];
-  const fallbackUsers = ranked
-    .map((uid) => bs.udict[String(uid)] as GenericUserDoc & R)
-    .filter(Boolean);
+  const fallbackUsers = ranked.map((uid) => bs.udict[String(uid)] as GenericUserDoc & R).filter(Boolean);
   const rows = users.length ? users : fallbackUsers;
   const rpDefinitions: R = data.rpDefinitions || {};
   const rpKeys = Object.entries(rpDefinitions)
@@ -142,12 +136,7 @@ export function RankingPage() {
   const [bioUser, setBioUser] = useState<(GenericUserDoc & R) | null>(null);
 
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <div>
         <h1 className="text-xl font-semibold">排名</h1>
         <p className="text-sm text-muted-foreground">用户 RP 排行榜，分项列会跟随当前评分脚本配置。</p>
@@ -158,12 +147,10 @@ export function RankingPage() {
           <div>
             <Table>
               <TableHeader>
-<TableRow>
+                <TableRow>
                   <TableHead className="w-16 text-center">#</TableHead>
                   <TableHead>用户</TableHead>
-                  {hasStudentColumn ? (
-                    <TableHead className="w-32">学号 / 姓名</TableHead>
-                  ) : null}
+                  {hasStudentColumn ? <TableHead className="w-32">学号 / 姓名</TableHead> : null}
                   <TableHead className="w-20 text-right">RP</TableHead>
                   {rpKeys.map((key) => (
                     <TableHead key={key} className="hidden w-24 text-right md:table-cell">
@@ -213,10 +200,7 @@ export function RankingPage() {
 
       {/* Bio detail dialog */}
       <Dialog open={!!bioUser} onOpenChange={(o) => !o && setBioUser(null)}>
-        <DialogContent
-          className="flex h-[80vh] w-[80vw] max-w-4xl flex-col"
-          onClose={() => setBioUser(null)}
-        >
+        <DialogContent className="flex h-[80vh] w-[80vw] max-w-4xl flex-col" onClose={() => setBioUser(null)}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Avatar className="size-7">
@@ -236,9 +220,7 @@ export function RankingPage() {
           </ScrollArea>
           <div className="flex shrink-0 justify-end border-t px-6 py-3">
             <Button asChild variant="default" size="sm">
-              <a
-                href={replaceRouteTokens(bs.urls.userDetail, { UID: String(bioUser?._id || '') })}
-              >
+              <a href={replaceRouteTokens(bs.urls.userDetail, { UID: String(bioUser?._id || '') })}>
                 查看完整资料
                 <ExternalLink className="size-3.5" />
               </a>

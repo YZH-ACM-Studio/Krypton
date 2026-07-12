@@ -1,4 +1,3 @@
-/* eslint-disable no-await-in-loop */
 /*                        ..
                         .' @`._
          ~       ...._.'  ,__.-;

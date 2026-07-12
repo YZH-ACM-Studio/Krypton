@@ -57,8 +57,11 @@ export function serviceInstance<T extends new (...args: any[]) => any>(ImplClass
                 ImplClass.prototype[Service.init] = new Proxy(originalInit, {
                     apply(...applyArgs) {
                         const result = Reflect.apply(...applyArgs);
-                        if (result instanceof Promise) result.then(() => { state = 'initialized'; });
-                        else state = 'initialized';
+                        if (result instanceof Promise) {
+                            result.then(() => {
+                                state = 'initialized';
+                            });
+                        } else state = 'initialized';
                         return result;
                     },
                 });
@@ -67,7 +70,7 @@ export function serviceInstance<T extends new (...args: any[]) => any>(ImplClass
             if (!Reflect.has(ImplClass, Service.init)) state = 'initialized';
             return instance;
         },
-    }) as (T extends (new (...args: any[]) => infer R) ? (R & { Service: (new (...args: any[]) => R) }) : never);
+    }) as T extends new (...args: any[]) => infer R ? R & { Service: new (...args: any[]) => R } : never;
     return proxyObj;
 }
 

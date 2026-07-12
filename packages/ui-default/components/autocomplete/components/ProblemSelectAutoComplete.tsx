@@ -18,7 +18,10 @@ const ProblemSelectAutoComplete = forwardRef<AutoCompleteHandle<ProblemDoc>, Aut
     renderItem={(pdoc) => (
       <div className="media">
         <div className="media__body medium">
-          <div className="problem-select__name">{pdoc.pid ? `${pdoc.pid} ` : ''}{pdoc.title}</div>
+          <div className="problem-select__name">
+            {pdoc.pid ? `${pdoc.pid} ` : ''}
+            {pdoc.title}
+          </div>
           <div className="problem-select__id">ID = {pdoc.docId}</div>
         </div>
       </div>

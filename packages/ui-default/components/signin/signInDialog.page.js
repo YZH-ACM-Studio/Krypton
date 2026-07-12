@@ -22,11 +22,10 @@ const signinDialogPage = new AutoloadPage('signinDialogPage', null, () => {
     if (!support) return;
     const authnInfo = await request.get('/user/webauthn', { login: true });
     if (!authnInfo.authOptions) return;
-    const result = await startAuthentication({ optionsJSON: authnInfo.authOptions, useBrowserAutofill: true })
-      .catch((e) => {
-        Notification.error(i18n('Failed to get credential: {0}', e));
-        return null;
-      });
+    const result = await startAuthentication({ optionsJSON: authnInfo.authOptions, useBrowserAutofill: true }).catch((e) => {
+      Notification.error(i18n('Failed to get credential: {0}', e));
+      return null;
+    });
     if (!result) return;
     try {
       const authn = await request.post('/user/webauthn', {

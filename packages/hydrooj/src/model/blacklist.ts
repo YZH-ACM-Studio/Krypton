@@ -13,11 +13,7 @@ class BlackListModel {
         else if (typeof expire === 'number') expireAt = moment().add(expire, 'months').toDate();
         else if (expire instanceof Date) expireAt = expire;
         else expireAt = new Date(Date.now() + 365 * Time.day);
-        return await coll.findOneAndUpdate(
-            { _id: id },
-            { $set: { expireAt } },
-            { upsert: true, returnDocument: 'after' },
-        );
+        return await coll.findOneAndUpdate({ _id: id }, { $set: { expireAt } }, { upsert: true, returnDocument: 'after' });
     }
 
     @ArgMethod
@@ -33,10 +29,7 @@ class BlackListModel {
 
 export async function apply(ctx: Context) {
     coll = ctx.db.collection('blacklist');
-    await ctx.db.ensureIndexes(
-        coll,
-        { key: { expireAt: -1 }, name: 'expire', expireAfterSeconds: 0 },
-    );
+    await ctx.db.ensureIndexes(coll, { key: { expireAt: -1 }, name: 'expire', expireAfterSeconds: 0 });
 }
 export default BlackListModel;
 global.Hydro.model.blacklist = BlackListModel;

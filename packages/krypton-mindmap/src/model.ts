@@ -1,6 +1,6 @@
 import { ObjectId, db } from 'hydrooj';
 import type { Filter } from 'mongodb';
-import { configColl, getConfig, nodesColl, setConfig } from './db';
+import { getConfig, nodesColl, setConfig } from './db';
 import type { MindmapNode } from './types';
 
 const documentColl = db.collection<any>('document');
@@ -26,8 +26,7 @@ export async function createNode(input: {
 }): Promise<MindmapNode> {
     const pid = typeof input.parentId === 'string' ? new ObjectId(input.parentId) : input.parentId;
     // append-at-end ordering: max-order + 1 among siblings.
-    const last = await nodesColl.find({ parentId: pid })
-        .sort({ order: -1 }).limit(1).toArray();
+    const last = await nodesColl.find({ parentId: pid }).sort({ order: -1 }).limit(1).toArray();
     const order = (last[0]?.order || 0) + 10;
     const doc: MindmapNode = {
         _id: new ObjectId(),
@@ -45,19 +44,12 @@ export async function createNode(input: {
     return doc;
 }
 
-export async function updateNode(
-    id: ObjectId | string,
-    patch: Partial<Omit<MindmapNode, '_id' | 'createdAt' | 'parentId'>>,
-): Promise<void> {
+export async function updateNode(id: ObjectId | string, patch: Partial<Omit<MindmapNode, '_id' | 'createdAt' | 'parentId'>>): Promise<void> {
     const _id = typeof id === 'string' ? new ObjectId(id) : id;
     await nodesColl.updateOne({ _id }, { $set: { ...patch, updatedAt: new Date() } });
 }
 
-export async function moveNode(
-    id: ObjectId | string,
-    newParentId: ObjectId | string,
-    newOrder?: number,
-): Promise<void> {
+export async function moveNode(id: ObjectId | string, newParentId: ObjectId | string, newOrder?: number): Promise<void> {
     const _id = typeof id === 'string' ? new ObjectId(id) : id;
     const pid = typeof newParentId === 'string' ? new ObjectId(newParentId) : newParentId;
     const order = newOrder ?? ((await nodesColl.find({ parentId: pid }).sort({ order: -1 }).limit(1).toArray())[0]?.order || 0) + 10;
@@ -122,9 +114,7 @@ function difficultyOf(p: { nSubmit?: number; nAccept?: number }): number {
     return 6;
 }
 
-export async function listProblemsForNode(
-    domainId: string, nodeId: ObjectId | string, scope: Filter<any>,
-): Promise<PanelProblem[]> {
+export async function listProblemsForNode(domainId: string, nodeId: ObjectId | string, scope: Filter<any>): Promise<PanelProblem[]> {
     const node = await getNode(nodeId);
     if (!node) return [];
     const orClauses: any[] = [];
@@ -147,10 +137,7 @@ export async function listProblemsForNode(
             },
         ],
     };
-    const docs = await documentColl.find(filter)
-        .project({ pid: 1, docId: 1, title: 1, nSubmit: 1, nAccept: 1 })
-        .limit(500)
-        .toArray();
+    const docs = await documentColl.find(filter).project({ pid: 1, docId: 1, title: 1, nSubmit: 1, nAccept: 1 }).limit(500).toArray();
     return docs.map((d: any) => ({
         pid: d.pid || String(d.docId),
         title: d.title || '(无标题)',

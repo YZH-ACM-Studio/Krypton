@@ -37,7 +37,7 @@ monaco.languages.registerCodeLensProvider('markdown', {
     if (!users.length) {
       return {
         lenses: [],
-        dispose: () => { },
+        dispose: () => {},
       };
     }
     const data = await api('users', { ids: users.map((i) => +i.matches[1]) }, ['_id', 'uname']);
@@ -51,7 +51,7 @@ monaco.languages.registerCodeLensProvider('markdown', {
           title: `@${data.find((doc) => doc._id.toString() === i.matches[1])?.uname || i.matches[1]}`,
         },
       })),
-      dispose: () => { },
+      dispose: () => {},
     };
   },
   resolveCodeLens(model, codeLens) {

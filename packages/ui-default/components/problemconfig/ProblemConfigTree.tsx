@@ -21,9 +21,9 @@ interface TestcasesDndItem {
 export function SubtaskNode(props: { subtaskId: number }) {
   const { subtaskId } = props;
   const subtaskIds = useSelector((s: RootState) => Object.values(s.config?.subtasks || []).map((i) => i.id), isEqual);
-  const cases = useSelector((state: RootState) => (subtaskId === -1
-    ? state.config.__cases
-    : state.config.subtasks.find((i) => i.id === subtaskId).cases || []));
+  const cases = useSelector((state: RootState) =>
+    subtaskId === -1 ? state.config.__cases : state.config.subtasks.find((i) => i.id === subtaskId).cases || [],
+  );
   const time = useSelector((s: RootState) => s.config?.time);
   const memory = useSelector((s: RootState) => s.config?.memory);
   const dispatch = useDispatch();
@@ -77,19 +77,17 @@ export function SubtaskNode(props: { subtaskId: number }) {
         </div>
       )}
       <div ref={drop as any}>
-        {subtaskId !== -1 && expand && (
-          <SubtaskSettings subtaskId={subtaskId} subtaskIds={subtaskIds} time={time} memory={memory} />
-        )}
-        {expand
-          ? <SelectionManager subtaskId={subtaskId} subtaskIds={subtaskIds} />
-          : <div style={{ paddingLeft: 22 }}>
+        {subtaskId !== -1 && expand && <SubtaskSettings subtaskId={subtaskId} subtaskIds={subtaskIds} time={time} memory={memory} />}
+        {expand ? (
+          <SelectionManager subtaskId={subtaskId} subtaskIds={subtaskIds} />
+        ) : (
+          <div style={{ paddingLeft: 22 }}>
             <Text>{cases.length} testcases.</Text>
-          </div>}
+          </div>
+        )}
         {!cases.length && (
           <div style={{ paddingLeft: 22 }}>
-            <Text c="dimmed">{subtaskId === -1
-              ? i18n('No testcase here')
-              : i18n('Drag and drop testcases here:')}</Text>
+            <Text c="dimmed">{subtaskId === -1 ? i18n('No testcase here') : i18n('Drag and drop testcases here:')}</Text>
           </div>
         )}
       </div>
@@ -103,7 +101,10 @@ export function SubtaskConfigTree() {
   const store = useStore<RootState>();
   const autoConfigure = React.useCallback(() => {
     const state = store.getState();
-    const subtasks = readSubtasksFromFiles(state.testdata.map((t) => t.name), state.config);
+    const subtasks = readSubtasksFromFiles(
+      state.testdata.map((t) => t.name),
+      state.config,
+    );
     const cases = subtasks.reduce((a, b) => a.concat(b.cases), []);
     dispatch({
       type: 'CONFIG_AUTOCASES_UPDATE',
@@ -114,12 +115,15 @@ export function SubtaskConfigTree() {
       cases,
     });
   }, [dispatch, store]);
-  const rootNodes = React.useMemo<any[]>(() => [
-    { id: 'auto', label: i18n('Auto configure'), type: 'action' as const },
-    { id: 'global', label: i18n('Global settings'), type: 'global' as const },
-    ...ids.map((id) => ({ id: `sub-${id}`, label: i18n('Subtask {0}', id), type: 'subtask' as const, subtaskId: id })),
-    { id: 'add', label: i18n('Add new subtask'), type: 'add' as const },
-  ], [ids]);
+  const rootNodes = React.useMemo<any[]>(
+    () => [
+      { id: 'auto', label: i18n('Auto configure'), type: 'action' as const },
+      { id: 'global', label: i18n('Global settings'), type: 'global' as const },
+      ...ids.map((id) => ({ id: `sub-${id}`, label: i18n('Subtask {0}', id), type: 'subtask' as const, subtaskId: id })),
+      { id: 'add', label: i18n('Add new subtask'), type: 'add' as const },
+    ],
+    [ids],
+  );
 
   return (
     <Tree
@@ -128,15 +132,23 @@ export function SubtaskConfigTree() {
       renderNode={({ node }) => {
         const n: any = node;
         if (n.type === 'action') {
-          return <div style={{ padding: '6px 0' }} onClick={autoConfigure}>
-            <Text><i className="icon icon-settings" /> {i18n('Auto configure')}</Text>
-          </div>;
+          return (
+            <div style={{ padding: '6px 0' }} onClick={autoConfigure}>
+              <Text>
+                <i className="icon icon-settings" /> {i18n('Auto configure')}
+              </Text>
+            </div>
+          );
         }
         if (n.type === 'global') return <GlobalSettings />;
         if (n.type === 'add') {
-          return <div style={{ padding: '6px 0' }} onClick={() => dispatch({ type: 'problemconfig/addSubtask' })}>
-            <Text><i className="icon icon-add" /> {i18n('Add new subtask')}</Text>
-          </div>;
+          return (
+            <div style={{ padding: '6px 0' }} onClick={() => dispatch({ type: 'problemconfig/addSubtask' })}>
+              <Text>
+                <i className="icon icon-add" /> {i18n('Add new subtask')}
+              </Text>
+            </div>
+          );
         }
         return <SubtaskNode subtaskId={n.subtaskId} />;
       }}

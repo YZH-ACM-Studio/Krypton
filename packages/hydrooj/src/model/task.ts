@@ -38,7 +38,12 @@ export class Consumer {
     running?: any;
     notify: (res?: any) => void;
 
-    constructor(public filter: any, public func: (t: Task) => Promise<void>, public destroyOnError = true, private concurrency = 1) {
+    constructor(
+        public filter: any,
+        public func: (t: Task) => Promise<void>,
+        public destroyOnError = true,
+        private concurrency = 1,
+    ) {
         this.consuming = true;
         this.consume();
         bus.on('app/exit', this.destroy);
@@ -48,17 +53,17 @@ export class Consumer {
         while (this.consuming) {
             try {
                 if (this.processing.size >= this.concurrency) {
-                    // eslint-disable-next-line no-await-in-loop
                     await new Promise((resolve) => {
                         this.notify = resolve;
                     });
                     continue;
                 }
-                const res = await getFirst(this.filter); // eslint-disable-line no-await-in-loop
+                const res = await getFirst(this.filter);
                 if (!res) {
-                    // eslint-disable-next-line no-await-in-loop
                     await Promise.race([
-                        new Promise((resolve) => { this.notify = resolve; }),
+                        new Promise((resolve) => {
+                            this.notify = resolve;
+                        }),
                         sleep(1000 / (this.concurrency - this.processing.size)),
                     ]);
                     continue;
@@ -169,19 +174,15 @@ export async function apply(ctx: Context) {
         while (true) {
             let res;
             try {
-                // eslint-disable-next-line no-await-in-loop
-                res = await collEvent.findOneAndUpdate(
-                    { expire: { $gt: new Date() }, ack: { $nin: [id] } },
-                    { $push: { ack: id } },
-                );
+                res = await collEvent.findOneAndUpdate({ expire: { $gt: new Date() }, ack: { $nin: [id] } }, { $push: { ack: id } });
             } catch (e) {
                 logger.error(e);
-                // eslint-disable-next-line no-await-in-loop
+
                 await sleep(50); // This allows exiting when shutting down
                 continue;
             }
             if (argv.options.showEvent) logger.info('Event: %o', res);
-            // eslint-disable-next-line no-await-in-loop
+
             await (res ? handleEvent(res) : sleep(500));
         }
     });

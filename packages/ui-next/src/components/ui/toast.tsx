@@ -15,9 +15,7 @@
  *
  * Used by hooks/use-proctor-commands to surface InfoBar-style command receipts.
  */
-import {
-  useCallback, useEffect, useState, type ReactNode,
-} from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { CheckCircle2, Info, Loader2, X, XCircle } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -127,9 +125,7 @@ export function ToastProvider() {
   );
 }
 
-function ToastCard({
-  t, onDismiss,
-}: { t: InternalToast; onDismiss: (id: string) => void }) {
+function ToastCard({ t, onDismiss }: { t: InternalToast; onDismiss: (id: string) => void }) {
   const dismiss = useCallback(() => onDismiss(t.id), [onDismiss, t.id]);
 
   useEffect(() => {
@@ -171,18 +167,10 @@ function ToastCard({
         ring,
       )}
     >
-      <Icon
-        className={cn(
-          'size-4 shrink-0 translate-y-0.5',
-          iconColor,
-          t.kind === 'loading' && 'animate-spin',
-        )}
-      />
+      <Icon className={cn('size-4 shrink-0 translate-y-0.5', iconColor, t.kind === 'loading' && 'animate-spin')} />
       <div className="flex-1 space-y-1">
         <p className="text-sm font-medium text-foreground">{t.title}</p>
-        {t.description && (
-          <p className="text-xs text-muted-foreground">{t.description}</p>
-        )}
+        {t.description && <p className="text-xs text-muted-foreground">{t.description}</p>}
       </div>
       <button
         type="button"

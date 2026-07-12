@@ -63,12 +63,12 @@ export function UserDetailPage() {
     { label: '邮箱', value: udoc.mail, icon: Mail },
     { label: 'QQ', value: udoc.qq, icon: MessageSquare },
     { label: '微信', value: udoc.wechat, icon: MessageSquare },
-    ...(isBound ? [
-      { label: '学号', value: binding.studentId, icon: Hash },
-    ] : [
-      { label: '学号', value: udoc.studentId, icon: Hash },
-      { label: '学校', value: udoc.school, icon: UserIcon },
-    ]),
+    ...(isBound
+      ? [{ label: '学号', value: binding.studentId, icon: Hash }]
+      : [
+          { label: '学号', value: udoc.studentId, icon: Hash },
+          { label: '学校', value: udoc.school, icon: UserIcon },
+        ]),
   ].filter((it) => it.value);
 
   // Top tag histogram — normalise widths from the largest count
@@ -77,12 +77,7 @@ export function UserDetailPage() {
   const avatarUrl = udoc.avatarUrl || (udoc.avatar && /^https?:|^\//.test(udoc.avatar) ? udoc.avatar : null);
 
   return (
-    <motion.div
-      className="space-y-5"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-5" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       {/* Hero card */}
       <Card>
         <CardContent className="flex flex-col items-center gap-5 p-6 sm:flex-row sm:items-start">
@@ -103,16 +98,28 @@ export function UserDetailPage() {
                   <p className="text-sm text-muted-foreground">{udoc.displayName}</p>
                 ) : null}
                 <div className="mt-2 flex flex-wrap justify-center gap-1.5 sm:justify-start">
-                  {udoc.role ? <Badge variant="outline" className="text-[10px]">{udoc.role}</Badge> : null}
+                  {udoc.role ? (
+                    <Badge variant="outline" className="text-[10px]">
+                      {udoc.role}
+                    </Badge>
+                  ) : null}
                   {binding ? (
                     isBound ? (
                       <Badge className="border-transparent bg-green-600/15 text-[10px] text-green-700 dark:text-green-400">已绑定</Badge>
                     ) : (
-                      <Badge variant="outline" className="text-[10px] text-muted-foreground">未绑定</Badge>
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                        未绑定
+                      </Badge>
                     )
                   ) : null}
-                  {!isBound && udoc.school ? <Badge variant="secondary" className="text-[10px]">{udoc.school}</Badge> : null}
-                  <Badge variant="outline" className="text-[10px] font-mono">UID {udoc._id ?? '?'}</Badge>
+                  {!isBound && udoc.school ? (
+                    <Badge variant="secondary" className="text-[10px]">
+                      {udoc.school}
+                    </Badge>
+                  ) : null}
+                  <Badge variant="outline" className="text-[10px] font-mono">
+                    UID {udoc._id ?? '?'}
+                  </Badge>
                 </div>
               </div>
               <div className="flex flex-wrap justify-center gap-2 sm:justify-end shrink-0">
@@ -179,7 +186,9 @@ export function UserDetailPage() {
                   const pct = maxTagCount > 0 ? Math.round((count / maxTagCount) * 100) : 0;
                   return (
                     <div key={tag} className="flex items-center gap-3 text-xs">
-                      <span className="w-24 truncate" title={tag}>{tag}</span>
+                      <span className="w-24 truncate" title={tag}>
+                        {tag}
+                      </span>
                       <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
                         <div className="h-full bg-primary/80 transition-all" style={{ width: `${pct}%` }} />
                       </div>
@@ -193,7 +202,6 @@ export function UserDetailPage() {
 
           {/* Submission heatmap (GitHub-style) */}
           <ActivityHeatmap daily={data.daily || {}} />
-
 
           {/* Attended contests */}
           {tdocs.length ? (
@@ -216,7 +224,9 @@ export function UserDetailPage() {
                       className="flex items-center gap-2 px-4 py-2 text-sm transition-colors hover:bg-accent"
                     >
                       <span className="truncate">{t.title || '未命名'}</span>
-                      <Badge variant="outline" className="ml-auto text-[10px] shrink-0">{t.rule || '—'}</Badge>
+                      <Badge variant="outline" className="ml-auto text-[10px] shrink-0">
+                        {t.rule || '—'}
+                      </Badge>
                     </a>
                   ))}
                 </div>
@@ -270,12 +280,16 @@ export function UserDetailPage() {
                     return (
                       <a
                         key={String(ps._id)}
-                        href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(ps.parentId) }) + `/solution/${ps._id}`}
+                        href={`${replaceRouteTokens(bs.urls.problemDetail, { PID: String(ps.parentId) })}/solution/${ps._id}`}
                         className="flex items-center gap-2 px-3 py-2 text-xs transition-colors hover:bg-accent"
                       >
                         <span className="font-mono text-[10px] text-muted-foreground">{ps.parentId}</span>
                         <span className="truncate">{p?.title || ps.title || '题解'}</span>
-                        {ps.vote ? <Badge variant="outline" className="ml-auto text-[10px]">{ps.vote}↑</Badge> : null}
+                        {ps.vote ? (
+                          <Badge variant="outline" className="ml-auto text-[10px]">
+                            {ps.vote}↑
+                          </Badge>
+                        ) : null}
                       </a>
                     );
                   })}
@@ -356,7 +370,7 @@ function ActivityHeatmap({ daily }: { daily: Record<string, number> }) {
       return 1;
     }
     const q1 = sorted[Math.floor(sorted.length * 0.25)];
-    const q2 = sorted[Math.floor(sorted.length * 0.50)];
+    const q2 = sorted[Math.floor(sorted.length * 0.5)];
     const q3 = sorted[Math.floor(sorted.length * 0.75)];
     if (n >= q3) return 4;
     if (n >= q2) return 3;
@@ -365,7 +379,7 @@ function ActivityHeatmap({ daily }: { daily: Record<string, number> }) {
   }
 
   // Group by column (53 columns of 7 days each).
-  const columns: Array<Array<typeof cells[number]>> = [];
+  const columns: Array<Array<(typeof cells)[number]>> = [];
   for (let c = 0; c < 53; c++) columns.push(cells.slice(c * 7, c * 7 + 7));
 
   // Month labels — show the month name above the first column where it
@@ -421,7 +435,9 @@ function ActivityHeatmap({ daily }: { daily: Record<string, number> }) {
               {/* Day-of-week axis */}
               <div className="mr-1 flex flex-col gap-[3px] justify-around pt-px text-right">
                 {['', '一', '', '三', '', '五', ''].map((d, i) => (
-                  <div key={i} className="h-[11px] w-6 leading-[11px]">{d}</div>
+                  <div key={i} className="h-[11px] w-6 leading-[11px]">
+                    {d}
+                  </div>
                 ))}
               </div>
               {/* Cells */}
@@ -432,9 +448,7 @@ function ActivityHeatmap({ daily }: { daily: Record<string, number> }) {
                       <div
                         key={ri}
                         className={`size-[11px] rounded-[2px] ${cell.isFuture ? 'opacity-0' : bucketClass[bucket(cell.count)]}`}
-                        title={cell.isFuture
-                          ? ''
-                          : `${cell.date} · ${cell.count} 次提交`}
+                        title={cell.isFuture ? '' : `${cell.date} · ${cell.count} 次提交`}
                       />
                     ))}
                   </div>
@@ -499,12 +513,7 @@ export function SettingsPage() {
   const current: R = data.current || {};
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <h1 className="text-xl font-semibold">{data.page_name === 'home_account' ? '账号' : '设置'}</h1>
 
       <form method="post" className="space-y-6">
@@ -531,13 +540,7 @@ function SettingControl({ setting, value }: { setting: R; value: any }) {
   const type = setting.type || 'text';
   if (setting.range && typeof setting.range === 'object') {
     const entries = Object.entries(setting.range);
-    return (
-      <SimpleSelect
-        name={name}
-        defaultValue={value || ''}
-        options={entries.map(([k, v]) => ({ value: k, label: String(v) }))}
-      />
-    );
+    return <SimpleSelect name={name} defaultValue={value || ''} options={entries.map(([k, v]) => ({ value: k, label: String(v) }))} />;
   }
   if (type === 'boolean') {
     return (
@@ -559,16 +562,13 @@ export function SecurityPage() {
   const sessions: R[] = data.sessions || [];
 
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <h1 className="text-xl font-semibold">账号安全</h1>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">修改密码</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base">修改密码</CardTitle>
+        </CardHeader>
         <CardContent>
           <form method="post" action="/home/security/password" className="space-y-3">
             <Input name="currentPassword" placeholder="当前密码" type="password" />
@@ -582,7 +582,9 @@ export function SecurityPage() {
       <Separator />
 
       <Card>
-        <CardHeader><CardTitle className="text-base">会话</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle className="text-base">会话</CardTitle>
+        </CardHeader>
         <CardContent>
           {sessions.length === 0 ? (
             <p className="text-sm text-muted-foreground">暂无会话</p>
@@ -597,7 +599,9 @@ export function SecurityPage() {
                   {s._id ? (
                     <form method="post" action="/home/security/session" className="ml-auto">
                       <input type="hidden" name="sid" value={String(s._id)} />
-                      <Button type="submit" variant="outline" size="sm">登出</Button>
+                      <Button type="submit" variant="outline" size="sm">
+                        登出
+                      </Button>
                     </form>
                   ) : null}
                 </div>
@@ -616,12 +620,7 @@ export function MessagesPage() {
   const mdocs: R[] = data.mdocs || [];
 
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
+    <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       <h1 className="text-xl font-semibold">消息</h1>
       <Card>
         <CardContent className="p-0">

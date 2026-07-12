@@ -37,10 +37,7 @@ test('management workspace active resolution fails fast for unknown keys and tem
     assert.match(workspace, /Unknown module workspace active key: \$\{activeKey\}/);
     assert.doesNotMatch(workspace, /\)\?\.key;/);
     assert.match(workspace, /const matchedItem = items\.find/);
-    assert.match(
-        workspace,
-        /if \(!matchedItem\) \{[\s\S]*?No module workspace navigation item matches template: \$\{templateName\}/,
-    );
+    assert.match(workspace, /if \(!matchedItem\) \{[\s\S]*?No module workspace navigation item matches template: \$\{templateName\}/);
 });
 
 test('management workspace navigation is accessible, compact, and reduced-motion aware', () => {
@@ -101,12 +98,7 @@ test('domain dashboard drops the forbidden shortcut while student self-service s
     assert.doesNotMatch(domainAdmin, /学生 \/ 班级 \/ 学校（用户绑定）/);
     assert.doesNotMatch(domainAdmin, /href: '\/admin\/userbind'/);
 
-    for (const component of [
-        'UserBindPage',
-        'UserBindApplicationsPage',
-        'UserBindLandingPage',
-        'UserBindClaimPage',
-    ]) {
+    for (const component of ['UserBindPage', 'UserBindApplicationsPage', 'UserBindLandingPage', 'UserBindClaimPage']) {
         assert.match(userbind, new RegExp(`export function ${component}\\(`));
     }
     for (const route of [
@@ -126,11 +118,17 @@ test('rankboard admin pages reuse the management workspace without legacy admin 
     assert.equal((rankboardAdmin.match(/<ModuleWorkspace\b/g) || []).length, 3);
 
     for (const value of [
-        '人员', '/admin/rankboard?section=people',
-        '批量导入', '/admin/rankboard?section=import',
-        '奖项类型', '/admin/rankboard/awards',
-        '计分设置', '/admin/rankboard?section=settings',
-    ]) assert.ok(rankboardAdmin.includes(value), `missing rankboard workspace contract: ${value}`);
+        '人员',
+        '/admin/rankboard?section=people',
+        '批量导入',
+        '/admin/rankboard?section=import',
+        '奖项类型',
+        '/admin/rankboard/awards',
+        '计分设置',
+        '/admin/rankboard?section=settings',
+    ]) {
+        assert.ok(rankboardAdmin.includes(value), `missing rankboard workspace contract: ${value}`);
+    }
     assert.match(rankboardAdmin, /activeKey=\{data\.section\}/);
     assert.match(rankboardAdmin, /activeKey="people"/);
     assert.match(rankboardAdmin, /activeKey="awards"/);
@@ -156,9 +154,9 @@ test('main sidebar uses server rankboard capability and preserves the public ran
     assert.equal((sidebar.match(/label: '荣誉管理'/g) || []).length, 1);
     assert.match(sidebar, /bs\.user\.canImportRankboard \|\| bs\.user\.canManageRankboard/);
     assert.match(sidebar, /label: '荣誉管理'[\s\S]*?href: '\/admin\/rankboard\?section=people'/);
-    for (const template of [
-        'admin_rankboard.html', 'admin_rankboard_person.html', 'admin_rankboard_awards.html',
-    ]) assert.ok(sidebar.includes(template), `sidebar rankboard entry missing ${template}`);
+    for (const template of ['admin_rankboard.html', 'admin_rankboard_person.html', 'admin_rankboard_awards.html']) {
+        assert.ok(sidebar.includes(template), `sidebar rankboard entry missing ${template}`);
+    }
 });
 
 test('bootstrap publishes explicit server-computed rankboard capabilities', () => {

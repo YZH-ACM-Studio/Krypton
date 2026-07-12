@@ -9,13 +9,11 @@
  *   - `FileUploader`: drag-drop pool for multiple files (testdata,
  *     attachments). Renders our own progress bars.
  */
-/* eslint-disable ts/no-use-before-define -- primary flows precede their local helper components */
+
 import Uppy from '@uppy/core';
 import XHRUpload from '@uppy/xhr-upload';
 import { Crop, Loader2, Upload, X } from 'lucide-react';
-import {
-  useCallback, useEffect, useRef, useState,
-} from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -87,7 +85,12 @@ export function AvatarUpload({
   };
 
   // Release object URLs when no longer needed
-  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+  useEffect(
+    () => () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    },
+    [previewUrl],
+  );
 
   const closeCrop = () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -169,23 +172,13 @@ export function AvatarUpload({
               使用第三方头像
             </Button>
           </div>
-          <p className="text-[11px] text-muted-foreground">
-            ≤ 8MB · JPG/PNG/WebP/GIF
-          </p>
+          <p className="text-[11px] text-muted-foreground">≤ 8MB · JPG/PNG/WebP/GIF</p>
         </div>
       </div>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif"
-        className="hidden"
-        onChange={handleFile}
-      />
+      <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={handleFile} />
 
-      {errorMsg ? (
-        <p className="text-xs text-destructive">{errorMsg}</p>
-      ) : null}
+      {errorMsg ? <p className="text-xs text-destructive">{errorMsg}</p> : null}
 
       {/* Third-party providers (gravatar / qq / github / url) */}
       {showProviderTab ? (
@@ -209,13 +202,7 @@ export function AvatarUpload({
                 裁剪头像
               </DialogTitle>
             </DialogHeader>
-            <CropPanel
-              srcUrl={previewUrl}
-              outputSize={outputSize}
-              busy={busy}
-              onCancel={closeCrop}
-              onConfirm={handleCroppedBlob}
-            />
+            <CropPanel srcUrl={previewUrl} outputSize={outputSize} busy={busy} onCancel={closeCrop} onConfirm={handleCroppedBlob} />
             {errorMsg ? <p className="text-xs text-destructive">{errorMsg}</p> : null}
           </DialogContent>
         </Dialog>
@@ -225,7 +212,13 @@ export function AvatarUpload({
 }
 
 /** Crop interface: image + draggable square overlay; export as PNG. */
-function CropPanel({ srcUrl, outputSize, busy, onCancel, onConfirm }: {
+function CropPanel({
+  srcUrl,
+  outputSize,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
   srcUrl: string;
   outputSize: number;
   busy: boolean;
@@ -290,7 +283,9 @@ function CropPanel({ srcUrl, outputSize, busy, onCancel, onConfirm }: {
       setCrop({ x: nx, y: ny, size: ns });
     }
   };
-  const onPointerUp = () => { dragRef.current.mode = null; };
+  const onPointerUp = () => {
+    dragRef.current.mode = null;
+  };
 
   const exportCrop = useCallback(() => {
     if (!imgRef.current) return;
@@ -301,14 +296,14 @@ function CropPanel({ srcUrl, outputSize, busy, onCancel, onConfirm }: {
     if (!ctx) return;
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, outputSize, outputSize);
-    ctx.drawImage(
-      imgRef.current,
-      crop.x, crop.y, crop.size, crop.size,
-      0, 0, outputSize, outputSize,
+    ctx.drawImage(imgRef.current, crop.x, crop.y, crop.size, crop.size, 0, 0, outputSize, outputSize);
+    canvas.toBlob(
+      (blob) => {
+        if (blob) onConfirm(blob);
+      },
+      'image/png',
+      0.92,
     );
-    canvas.toBlob((blob) => {
-      if (blob) onConfirm(blob);
-    }, 'image/png', 0.92);
   }, [crop, outputSize, onConfirm]);
 
   return (
@@ -352,9 +347,18 @@ function CropPanel({ srcUrl, outputSize, busy, onCancel, onConfirm }: {
                 {/* Resize handle (top-left) */}
                 <div
                   className="absolute -left-1.5 -top-1.5 size-3 cursor-nw-resize rounded-sm bg-white shadow"
-                  onPointerDown={(e) => { e.stopPropagation(); onPointerDown(e, 'resize'); }}
-                  onPointerMove={(e) => { e.stopPropagation(); onPointerMove(e); }}
-                  onPointerUp={(e) => { e.stopPropagation(); onPointerUp(); }}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onPointerDown(e, 'resize');
+                  }}
+                  onPointerMove={(e) => {
+                    e.stopPropagation();
+                    onPointerMove(e);
+                  }}
+                  onPointerUp={(e) => {
+                    e.stopPropagation();
+                    onPointerUp();
+                  }}
                 />
               </div>
             </>
@@ -363,12 +367,18 @@ function CropPanel({ srcUrl, outputSize, busy, onCancel, onConfirm }: {
       </div>
 
       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-        <span>原图 {imgSize.w}×{imgSize.h}</span>
-        <span>裁剪 {Math.round(crop.size)}×{Math.round(crop.size)} → {outputSize}×{outputSize}</span>
+        <span>
+          原图 {imgSize.w}×{imgSize.h}
+        </span>
+        <span>
+          裁剪 {Math.round(crop.size)}×{Math.round(crop.size)} → {outputSize}×{outputSize}
+        </span>
       </div>
 
       <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={onCancel}>取消</Button>
+        <Button variant="outline" onClick={onCancel}>
+          取消
+        </Button>
         <Button onClick={exportCrop} disabled={busy || !loaded}>
           {busy ? <Loader2 className="size-3.5 mr-1 animate-spin" /> : <Upload className="size-3.5 mr-1" />}
           {busy ? '上传中…' : '确认并上传'}
@@ -378,11 +388,7 @@ function CropPanel({ srcUrl, outputSize, busy, onCancel, onConfirm }: {
   );
 }
 
-function ProviderPicker({ endpoint, onClose, onSubmitted }: {
-  endpoint: string;
-  onClose: () => void;
-  onSubmitted: (spec: string) => void;
-}) {
+function ProviderPicker({ endpoint, onClose, onSubmitted }: { endpoint: string; onClose: () => void; onSubmitted: (spec: string) => void }) {
   const [provider, setProvider] = useState<'gravatar' | 'qq' | 'github' | 'url'>('gravatar');
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
@@ -405,7 +411,11 @@ function ProviderPicker({ endpoint, onClose, onSubmitted }: {
       } else {
         setErr(`保存失败 (${res.status})`);
       }
-    } catch (e: any) { setErr(e?.message || '保存失败'); } finally { setBusy(false); }
+    } catch (e: any) {
+      setErr(e?.message || '保存失败');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -426,15 +436,26 @@ function ProviderPicker({ endpoint, onClose, onSubmitted }: {
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder={({
-          gravatar: '邮箱地址', qq: 'QQ 号', github: 'GitHub 用户名', url: 'https://...',
-        } as const)[provider]}
+        placeholder={
+          (
+            {
+              gravatar: '邮箱地址',
+              qq: 'QQ 号',
+              github: 'GitHub 用户名',
+              url: 'https://...',
+            } as const
+          )[provider]
+        }
         className="w-full rounded border bg-background px-2 py-1.5 text-sm"
       />
       {err ? <p className="text-xs text-destructive">{err}</p> : null}
       <div className="flex justify-end gap-2">
-        <Button variant="outline" size="sm" onClick={onClose}>取消</Button>
-        <Button size="sm" onClick={handleSubmit} disabled={busy}>{busy ? '保存中…' : '保存'}</Button>
+        <Button variant="outline" size="sm" onClick={onClose}>
+          取消
+        </Button>
+        <Button size="sm" onClick={handleSubmit} disabled={busy}>
+          {busy ? '保存中…' : '保存'}
+        </Button>
       </div>
     </div>
   );
@@ -530,17 +551,28 @@ export function FileUploader({
       },
     });
     uppy.on('file-added', (file) => {
-      setItems((prev) => [...prev, {
-        id: file.id, name: file.name || 'file', size: file.size || 0, progress: 0, status: 'queued',
-      }]);
+      setItems((prev) => [
+        ...prev,
+        {
+          id: file.id,
+          name: file.name || 'file',
+          size: file.size || 0,
+          progress: 0,
+          status: 'queued',
+        },
+      ]);
     });
     uppy.on('upload-progress', (file, progress) => {
-      setItems((prev) => prev.map((it) => it.id === file?.id
-        ? { ...it, status: 'uploading', progress: Math.round((progress.bytesUploaded / Math.max(1, progress.bytesTotal || 1)) * 100) }
-        : it));
+      setItems((prev) =>
+        prev.map((it) =>
+          it.id === file?.id
+            ? { ...it, status: 'uploading', progress: Math.round((progress.bytesUploaded / Math.max(1, progress.bytesTotal || 1)) * 100) }
+            : it,
+        ),
+      );
     });
     uppy.on('upload-success', (file) => {
-      setItems((prev) => prev.map((it) => it.id === file?.id ? { ...it, status: 'done', progress: 100 } : it));
+      setItems((prev) => prev.map((it) => (it.id === file?.id ? { ...it, status: 'done', progress: 100 } : it)));
       if (file?.name) onUploaded?.(file.name);
     });
     uppy.on('upload-error', (file, error) => {
@@ -549,7 +581,7 @@ export function FileUploader({
         setIngestError(message);
         return;
       }
-      setItems((prev) => prev.map((it) => it.id === file.id ? { ...it, status: 'failed', error: message } : it));
+      setItems((prev) => prev.map((it) => (it.id === file.id ? { ...it, status: 'failed', error: message } : it)));
     });
     uppy.on('complete', (result) => {
       if (!result.failed?.length) {
@@ -563,39 +595,42 @@ export function FileUploader({
     uppyRef.current = uppy;
   }
 
-  const ingest = useCallback((files: FileList | File[]) => {
-    const uppy = uppyRef.current;
-    if (!uppy) return;
-    setIngestError('');
-    for (const f of Array.from(files)) {
-      try {
-        const id = uppy.addFile({
-          name: f.name,
-          type: f.type,
-          data: f,
-          meta: {
+  const ingest = useCallback(
+    (files: FileList | File[]) => {
+      const uppy = uppyRef.current;
+      if (!uppy) return;
+      setIngestError('');
+      for (const f of Array.from(files)) {
+        try {
+          const id = uppy.addFile({
+            name: f.name,
+            type: f.type,
+            data: f,
+            meta: {
+              operation: 'upload_file',
+              filename: f.name,
+            },
+          });
+          // Uppy reserves meta.type for the file MIME and rewrites it during
+          // addFile(). Hydro also needs a POST field named "type", so apply
+          // caller metadata after addFile() and before upload starts.
+          uppy.setFileMeta(id, {
             operation: 'upload_file',
             filename: f.name,
-          },
-        });
-        // Uppy reserves meta.type for the file MIME and rewrites it during
-        // addFile(). Hydro also needs a POST field named "type", so apply
-        // caller metadata after addFile() and before upload starts.
-        uppy.setFileMeta(id, {
-          operation: 'upload_file',
-          filename: f.name,
-          ...(meta || {}),
-        });
-      } catch (error) {
-        console.error('File rejected before upload', { filename: f.name, error });
-        setIngestError(error instanceof Error ? error.message : `${f.name} 无法加入上传队列`);
+            ...(meta || {}),
+          });
+        } catch (error) {
+          console.error('File rejected before upload', { filename: f.name, error });
+          setIngestError(error instanceof Error ? error.message : `${f.name} 无法加入上传队列`);
+        }
       }
-    }
-    void uppy.upload().catch((error) => {
-      console.error('File upload batch failed', error);
-      setIngestError(error instanceof Error ? error.message : '上传批次失败');
-    });
-  }, [meta]);
+      void uppy.upload().catch((error) => {
+        console.error('File upload batch failed', error);
+        setIngestError(error instanceof Error ? error.message : '上传批次失败');
+      });
+    },
+    [meta],
+  );
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -607,7 +642,10 @@ export function FileUploader({
     <div className={cn('space-y-2', className)}>
       <button
         type="button"
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         onClick={() => fileInputRef.current?.click()}
@@ -623,10 +661,9 @@ export function FileUploader({
         <span className="text-[10px]">
           {maxFileSize === null && maxFiles === null
             ? '文件大小与数量以服务器限制为准'
-            : [
-              maxFileSize === null ? null : `最大 ${Math.round(maxFileSize / (1024 * 1024))}MB`,
-              maxFiles === null ? null : `最多 ${maxFiles} 个`,
-            ].filter(Boolean).join(' · ')}
+            : [maxFileSize === null ? null : `最大 ${Math.round(maxFileSize / (1024 * 1024))}MB`, maxFiles === null ? null : `最多 ${maxFiles} 个`]
+                .filter(Boolean)
+                .join(' · ')}
         </span>
       </button>
       <input
@@ -641,16 +678,24 @@ export function FileUploader({
         }}
       />
 
-      {ingestError ? <p role="alert" className="text-xs text-destructive">{ingestError}</p> : null}
+      {ingestError ? (
+        <p role="alert" className="text-xs text-destructive">
+          {ingestError}
+        </p>
+      ) : null}
 
       {items.length ? (
         <ul aria-label="上传进度" className="space-y-1">
           {items.map((it) => (
             <li key={it.id} className="flex items-center gap-2 rounded border bg-card px-2 py-1.5 text-xs">
               <span className="truncate flex-1 font-mono">{it.name}</span>
-              <Badge variant="outline" className="text-[9px]">{Math.round(it.size / 1024)} KB</Badge>
+              <Badge variant="outline" className="text-[9px]">
+                {Math.round(it.size / 1024)} KB
+              </Badge>
               {it.status === 'done' ? (
-                <Badge variant="default" className="text-[9px]">已上传</Badge>
+                <Badge variant="default" className="text-[9px]">
+                  已上传
+                </Badge>
               ) : it.status === 'failed' ? (
                 <span role="alert" className="max-w-56 text-right text-destructive">
                   {it.error || '上传失败'}
@@ -664,10 +709,7 @@ export function FileUploader({
                   aria-valuenow={it.progress}
                   className="h-1.5 w-20 overflow-hidden rounded-full bg-muted"
                 >
-                  <div
-                    className="h-full bg-primary transition-all"
-                    style={{ width: `${it.progress}%` }}
-                  />
+                  <div className="h-full bg-primary transition-all" style={{ width: `${it.progress}%` }} />
                 </div>
               )}
               <button

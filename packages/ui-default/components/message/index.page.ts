@@ -1,9 +1,7 @@
 import { nanoid } from 'nanoid';
 import { InfoDialog } from 'vj/components/dialog';
 import VjNotification from 'vj/components/notification/index';
-import {
-  FLAG_ALERT, FLAG_I18N, FLAG_INFO, FLAG_RICHTEXT,
-} from 'vj/constant/message';
+import { FLAG_ALERT, FLAG_I18N, FLAG_INFO, FLAG_RICHTEXT } from 'vj/constant/message';
 import { AutoloadPage } from 'vj/misc/Page';
 import { i18n, tpl } from 'vj/utils';
 import Sock from '../socket';
@@ -49,16 +47,17 @@ const onmessage = (msg) => {
   if (document.hidden) return false;
   // Is message
   new VjNotification({
-    ...(msg.udoc._id === 1)
+    ...(msg.udoc._id === 1
       ? {
-        type: 'info',
-        message: msg.mdoc.flag & FLAG_RICHTEXT ? i18n('You received a system message, click here to view.') : msg.mdoc.content,
-        ...(msg.mdoc.avatar ? { avatar: msg.mdoc.avatar } : {}),
-      } : {
-        title: msg.udoc.uname,
-        avatar: msg.udoc.avatarUrl,
-        message: msg.mdoc.content,
-      },
+          type: 'info',
+          message: msg.mdoc.flag & FLAG_RICHTEXT ? i18n('You received a system message, click here to view.') : msg.mdoc.content,
+          ...(msg.mdoc.avatar ? { avatar: msg.mdoc.avatar } : {}),
+        }
+      : {
+          title: msg.udoc.uname,
+          avatar: msg.udoc.avatarUrl,
+          message: msg.mdoc.content,
+        }),
     duration: 15000,
     action: () => window.open(msg.mdoc.url ? msg.mdoc.url : `/home/messages?uid=${msg.udoc._id}`, '_blank'),
   }).show();
@@ -136,12 +135,14 @@ const messagePage = new AutoloadPage('messagePage', (pagename) => {
     const masterChannel = new BroadcastChannel('hydro-messages');
     const sock = new Sock(endpoint);
     sock.onopen = () => {
-      sock.send(JSON.stringify({
-        operation: 'subscribe',
-        request_id: Math.random().toString(16).substring(2),
-        credential: document.cookie.split('sid=')[1].split(';')[0],
-        channels: ['message'],
-      }));
+      sock.send(
+        JSON.stringify({
+          operation: 'subscribe',
+          request_id: Math.random().toString(16).substring(2),
+          credential: document.cookie.split('sid=')[1].split(';')[0],
+          channels: ['message'],
+        }),
+      );
     };
     sock.onmessage = async (message) => {
       const payload = JSON.parse(message.data);

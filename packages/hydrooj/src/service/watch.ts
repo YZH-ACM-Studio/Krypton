@@ -10,9 +10,11 @@ export const apply = (ctx: Context) => {
     const roots = [root];
     if (process.env.WATCH_ROOT) roots.push(process.env.WATCH_ROOT);
     const watcher = watch(roots, {
-        ignored: (file) => file.endsWith('.log') || [
-            'node_modules', '.git', 'logs', '.cache', '.yarn', 'tsconfig.tsbuildinfo',
-        ].some((rule) => file.startsWith(`${rule}/`) || file.endsWith(`/${rule}`) || file.includes(`/${rule}/`)),
+        ignored: (file) =>
+            file.endsWith('.log') ||
+            ['node_modules', '.git', 'logs', '.cache', '.yarn', 'tsconfig.tsbuildinfo'].some(
+                (rule) => file.startsWith(`${rule}/`) || file.endsWith(`/${rule}`) || file.includes(`/${rule}/`),
+            ),
     });
     logger.info(`Start watching changes in ${root}`);
     // files independent from any plugins will trigger a full reload

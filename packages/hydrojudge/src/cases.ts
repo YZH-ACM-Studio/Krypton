@@ -1,11 +1,7 @@
 import path from 'path';
-import {
-    convertIniConfig, LangConfig, normalizeSubtasks, ProblemConfigFile, readSubtasksFromFiles,
-} from '@hydrooj/common';
+import { convertIniConfig, LangConfig, normalizeSubtasks, ProblemConfigFile, readSubtasksFromFiles } from '@hydrooj/common';
 import { readYamlCases } from '@hydrooj/common/cases';
-import {
-    changeErrorType, fs, yaml,
-} from '@hydrooj/utils';
+import { changeErrorType, fs, yaml } from '@hydrooj/utils';
 import { getConfig } from './config';
 import { FormatError, SystemError } from './error';
 import { NextFunction, ParsedConfig } from './interface';
@@ -31,12 +27,14 @@ function isValidConfig(config) {
 
 async function collectFiles(folder: string) {
     const files = await fs.readdir(folder);
-    await Promise.all(['input', 'output'].map(async (t) => {
-        if (await fs.pathExists(path.resolve(folder, t))) {
-            const f = await fs.readdir(path.resolve(folder, t));
-            files.push(...f.map((i) => `${t}/${i}`));
-        }
-    }));
+    await Promise.all(
+        ['input', 'output'].map(async (t) => {
+            if (await fs.pathExists(path.resolve(folder, t))) {
+                const f = await fs.readdir(path.resolve(folder, t));
+                files.push(...f.map((i) => `${t}/${i}`));
+            }
+        }),
+    );
     return files;
 }
 
@@ -75,8 +73,9 @@ export default async function readCases(folder: string, cfg: ProblemConfigFile =
     const timeRate = +(config.time_limit_rate?.[args.lang] || args.langConfig?.time_limit_rate || 1) || 1;
     const memoryRate = +(config.memory_limit_rate?.[args.lang] || args.langConfig?.memory_limit_rate || 1) || 1;
     const checkFile = ensureFile(folder);
-    const result = await readYamlCases(config, checkFile)
-        .catch((e) => { throw changeErrorType(e, FormatError); });
+    const result = await readYamlCases(config, checkFile).catch((e) => {
+        throw changeErrorType(e, FormatError);
+    });
     result.count = Object.keys(result.answers || {}).length || Math.sum((result.subtasks || []).map((s) => s.cases.length));
     if (!result.count) {
         try {

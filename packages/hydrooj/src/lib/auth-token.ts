@@ -45,9 +45,7 @@ const HEADER = 'x-service-token';
 /** 403 + JSON (ForbiddenError is a UserFacingError, so it renders cleanly for the desktop client). */
 // CreateError is a factory (aliased `Err` in error.ts), NOT a constructor — must be called without `new`.
 // eslint-disable-next-line unicorn/throw-new-error
-export const AuthTokenRejectedError = CreateError(
-    'AuthTokenRejectedError', ForbiddenError, '访问令牌无效、已撤销或已过期。',
-);
+export const AuthTokenRejectedError = CreateError('AuthTokenRejectedError', ForbiddenError, '访问令牌无效、已撤销或已过期。');
 
 const coll = db.collection('authtoken.tokens');
 
@@ -97,18 +95,16 @@ function sanitizeScopeFilters(input: any): ScopeFilters {
         out.years = Array.isArray(out.years) ? out.years.filter((y: any) => Number.isInteger(y)) : [];
     }
     if ('schools' in out) {
-        out.schools = Array.isArray(out.schools)
-            ? out.schools.filter((s: any) => typeof s === 'string' && s) : [];
+        out.schools = Array.isArray(out.schools) ? out.schools.filter((s: any) => typeof s === 'string' && s) : [];
     }
     if ('scoreLevels' in out) {
-        out.scoreLevels = Array.isArray(out.scoreLevels)
-            ? out.scoreLevels.filter((s: any) => typeof s === 'string' && s) : [];
+        out.scoreLevels = Array.isArray(out.scoreLevels) ? out.scoreLevels.filter((s: any) => typeof s === 'string' && s) : [];
     }
     return out;
 }
 
 /** Mint a token. Returns the plaintext ONCE (never stored) plus the stored doc. */
-export async function issueAuthToken(opts: IssueOpts): Promise<{ token: string, doc: AuthTokenDoc }> {
+export async function issueAuthToken(opts: IssueOpts): Promise<{ token: string; doc: AuthTokenDoc }> {
     await ensureAuthTokenIndexes();
     const token = `kat_${randomBytes(24).toString('base64url')}`;
     const channels = [...new Set((opts.channels || []).map((c) => String(c).trim()).filter(Boolean))];
@@ -149,7 +145,9 @@ export async function verifyAuthToken(presented: string): Promise<AuthTokenDoc |
 
 /** Fire-and-forget `lastUsedAt` bump (zombie-token detection in the admin list). */
 function touchLastUsed(id: ObjectId): void {
-    coll.updateOne({ _id: id }, { $set: { lastUsedAt: new Date() } }).catch(() => { /* best-effort */ });
+    coll.updateOne({ _id: id }, { $set: { lastUsedAt: new Date() } }).catch(() => {
+        /* best-effort */
+    });
 }
 
 export interface ResolvedAuthToken {
@@ -262,9 +260,13 @@ export async function updateAuthToken(
 }
 
 /** Admin listing — never returns `hash`. */
-export async function listAuthTokens(filter: { uid?: number, domainId?: string } = {}): Promise<AuthTokenDoc[]> {
+export async function listAuthTokens(filter: { uid?: number; domainId?: string } = {}): Promise<AuthTokenDoc[]> {
     const q: Record<string, any> = {};
     if (filter.uid != null) q.uid = filter.uid;
     if (filter.domainId) q.domainId = filter.domainId;
-    return coll.find(q, { projection: { hash: 0 } }).sort({ createdAt: -1 }).limit(500).toArray();
+    return coll
+        .find(q, { projection: { hash: 0 } })
+        .sort({ createdAt: -1 })
+        .limit(500)
+        .toArray();
 }

@@ -12,9 +12,7 @@ const locales = {
   en: 'en-US',
 };
 
-function MonacoContainer({
-  config, setValue, setError, monaco, schema, editorCallback, size, dark,
-}) {
+function MonacoContainer({ config, setValue, setError, monaco, schema, editorCallback, size, dark }) {
   const [editor, setEditor] = React.useState<any>(null);
   const [model, setModel] = React.useState<any>(null);
   const [initialized, setInitialized] = React.useState(false);
@@ -25,7 +23,7 @@ function MonacoContainer({
     const interval = setInterval(() => {
       monaco.editor.remeasureFonts();
     }, 1000);
-    return () => clearInterval(interval); // eslint-disable-line consistent-return
+    return () => clearInterval(interval);
   }, [monaco]);
 
   React.useEffect(() => {
@@ -60,38 +58,41 @@ function MonacoContainer({
         setError(err.message);
       }
     });
-    return () => disposable.dispose(); // eslint-disable-line
+    return () => disposable.dispose();
   }, [editor, model, setValue, setError, schema]);
-  const initializeEditor = React.useCallback((element) => {
-    if (!element || initialized) return;
-    setInitialized(true);
-    // eslint-disable-next-line
-    const model = monaco.editor.createModel(config, 'yaml', monaco.Uri.parse('hydro://system/setting.yaml'));
-    setModel(model);
-    const e = monaco.editor.create(element, {
-      theme: dark ? 'vs-dark' : 'vs-light',
-      lineNumbers: 'off',
-      glyphMargin: true,
-      lightbulb: { enabled: monaco.editor.ShowLightbulbIconMode.On },
-      model,
-      minimap: { enabled: false },
-      hideCursorInOverviewRuler: true,
-      overviewRulerLanes: 0,
-      overviewRulerBorder: false,
-      fontFamily: codeFontFamily,
-      fontLigatures: '',
-      unicodeHighlight: {
-        ambiguousCharacters: true,
-      },
-    });
-    editorCallback(e, model, element);
-    setEditor(e);
-  }, [config, monaco, editorCallback, codeFontFamily, initialized]);
+  const initializeEditor = React.useCallback(
+    (element) => {
+      if (!element || initialized) return;
+      setInitialized(true);
+      // eslint-disable-next-line
+      const model = monaco.editor.createModel(config, 'yaml', monaco.Uri.parse('hydro://system/setting.yaml'));
+      setModel(model);
+      const e = monaco.editor.create(element, {
+        theme: dark ? 'vs-dark' : 'vs-light',
+        lineNumbers: 'off',
+        glyphMargin: true,
+        lightbulb: { enabled: monaco.editor.ShowLightbulbIconMode.On },
+        model,
+        minimap: { enabled: false },
+        hideCursorInOverviewRuler: true,
+        overviewRulerLanes: 0,
+        overviewRulerBorder: false,
+        fontFamily: codeFontFamily,
+        fontLigatures: '',
+        unicodeHighlight: {
+          ambiguousCharacters: true,
+        },
+      });
+      editorCallback(e, model, element);
+      setEditor(e);
+    },
+    [config, monaco, editorCallback, codeFontFamily, initialized],
+  );
   React.useEffect(() => {
     if (!editor) return;
     const current = editor.getValue({ lineEnding: '\n', preserveBOM: false });
     const diff = diffLines(current, config);
-    const ops: { range: any, text: string }[] = [];
+    const ops: { range: any; text: string }[] = [];
     let cursor = 1;
     for (const line of diff) {
       if (line.added) {
@@ -112,9 +113,7 @@ function MonacoContainer({
   return <div ref={initializeEditor} style={{ width: '100%', height: '80vh' }} />;
 }
 
-export default function ConfigEditor({
-  schema, config, monaco, Markdown, onSave, registerAction, sidebar, dynamic,
-}) {
+export default function ConfigEditor({ schema, config, monaco, Markdown, onSave, registerAction, sidebar, dynamic }) {
   const getValue = () => {
     try {
       return yaml.load(config);
@@ -128,22 +127,32 @@ export default function ConfigEditor({
   const initial = React.useMemo(getValue, []);
   const { i18n } = React.useContext(ComponentsContext);
 
-  const Form = React.useMemo(() => createSchemasteryReact({
-    locale: locales[i18n('__id')] || 'en-US',
-    Markdown,
-  }), []);
+  const Form = React.useMemo(
+    () =>
+      createSchemasteryReact({
+        locale: locales[i18n('__id')] || 'en-US',
+        Markdown,
+      }),
+    [],
+  );
 
-  const updateFromForm = React.useCallback((v) => {
-    const newDump = yaml.dump(v);
-    if (newDump === stringConfig) return;
-    setStringConfig(newDump);
-    setValue(v);
-  }, [stringConfig]);
-  const updateFromMonaco = React.useCallback((v) => {
-    if (v === stringConfig) return;
-    setStringConfig(v);
-    setValue(yaml.load(v));
-  }, [stringConfig]);
+  const updateFromForm = React.useCallback(
+    (v) => {
+      const newDump = yaml.dump(v);
+      if (newDump === stringConfig) return;
+      setStringConfig(newDump);
+      setValue(v);
+    },
+    [stringConfig],
+  );
+  const updateFromMonaco = React.useCallback(
+    (v) => {
+      if (v === stringConfig) return;
+      setStringConfig(v);
+      setValue(yaml.load(v));
+    },
+    [stringConfig],
+  );
 
   // FIXME: Otherwise first form change will be ignored
   React.useEffect(() => {
@@ -158,30 +167,42 @@ export default function ConfigEditor({
 
   const [size, setSize] = React.useState([50, 50]);
 
-  return (<div className="fullscreen-content" style={{ zIndex: 10 }}>
-    <Allotment onChange={setSize}>
-      <Allotment.Pane>
-        <MonacoContainer
-          editorCallback={registerAction}
-          schema={schema}
-          monaco={monaco}
-          config={stringConfig}
-          setValue={updateFromMonaco}
-          setError={setInfo}
-          size={size[0]}
-          dark={document.documentElement.className.includes('theme--dark')}
-        />
-        <pre className="help-text">{info}</pre>
-        <button onClick={() => onSave(stringConfig)} className="rounded primary button">{i18n('Save All Changes')}</button>
-      </Allotment.Pane>
-      <Allotment.Pane>
-        <div style={{
-          overflowY: 'scroll', top: 0, bottom: 0, left: 0, right: 0, position: 'absolute', marginLeft: 10,
-        }}>
-          <Form schema={schema} initial={initial} value={value} onChange={updateFromForm} dynamic={dynamic} />
-        </div>
-      </Allotment.Pane>
-      {sidebar && <Allotment.Pane maxSize={220}>{sidebar}</Allotment.Pane>}
-    </Allotment>
-  </div>);
+  return (
+    <div className="fullscreen-content" style={{ zIndex: 10 }}>
+      <Allotment onChange={setSize}>
+        <Allotment.Pane>
+          <MonacoContainer
+            editorCallback={registerAction}
+            schema={schema}
+            monaco={monaco}
+            config={stringConfig}
+            setValue={updateFromMonaco}
+            setError={setInfo}
+            size={size[0]}
+            dark={document.documentElement.className.includes('theme--dark')}
+          />
+          <pre className="help-text">{info}</pre>
+          <button onClick={() => onSave(stringConfig)} className="rounded primary button">
+            {i18n('Save All Changes')}
+          </button>
+        </Allotment.Pane>
+        <Allotment.Pane>
+          <div
+            style={{
+              overflowY: 'scroll',
+              top: 0,
+              bottom: 0,
+              left: 0,
+              right: 0,
+              position: 'absolute',
+              marginLeft: 10,
+            }}
+          >
+            <Form schema={schema} initial={initial} value={value} onChange={updateFromForm} dynamic={dynamic} />
+          </div>
+        </Allotment.Pane>
+        {sidebar && <Allotment.Pane maxSize={220}>{sidebar}</Allotment.Pane>}
+      </Allotment>
+    </div>
+  );
 }

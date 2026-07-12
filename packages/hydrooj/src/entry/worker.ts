@@ -8,9 +8,7 @@ import SystemModel from '../model/system';
 import { load } from '../options';
 import { MongoService } from '../service/db';
 import { SettingService } from '../settings';
-import {
-    addon, builtinModel, locale, model, service,
-} from './common';
+import { addon, builtinModel, locale, model, service } from './common';
 
 const argv = cac().parse();
 const logger = new Logger('worker');
@@ -60,8 +58,8 @@ export async function apply(ctx: Context) {
             resolve(c);
         });
     });
-    const loadDir = async (dir: string) => Promise.all((await fs.readdir(dir)).filter((i) => i.endsWith('.ts'))
-        .map((h) => ctx.loader.reloadPlugin(path.resolve(dir, h), '')));
+    const loadDir = async (dir: string) =>
+        Promise.all((await fs.readdir(dir)).filter((i) => i.endsWith('.ts')).map((h) => ctx.loader.reloadPlugin(path.resolve(dir, h), '')));
     await loadDir(path.resolve(__dirname, '..', 'handler'));
     await ctx.plugin(require('../service/migration').default);
     await addon(pending, fail, ctx);
@@ -73,7 +71,7 @@ export async function apply(ctx: Context) {
         // Use ordered copy to allow resource override
         for (const f of Object.values(global.addons)) {
             const dir = path.join(f, 'public');
-            // eslint-disable-next-line no-await-in-loop
+
             if (await fs.pathExists(dir)) await fs.copy(dir, staticDir);
         }
         await new Promise((resolve, reject) => {

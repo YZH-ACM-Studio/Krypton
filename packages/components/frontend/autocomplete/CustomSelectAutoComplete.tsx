@@ -18,16 +18,18 @@ const CustomSelectAutoComplete = React.forwardRef<any, any>((props, ref) => {
     freeSolo: false,
     freeSoloConverter: (input) => input,
   });
-  return <AutoComplete<DefaultProps>
-    ref={ref as any}
-    fetchItems={(keys) => def.data.filter((i) => (i._id ? keys.includes(i._id) : keys.includes(i)))}
-    queryItems={(query) => def.data.filter((i) => (i.name || i).toString().toLowerCase().includes(query.toLowerCase()))}
-    itemText={(item) => `${item.name || item}`}
-    itemKey={(item) => `${item._id?.toString() || item.name || item}`}
-    renderItem={(item) => `${item.name || item}`}
-    allowEmptyQuery
-    {...def}
-  />;
+  return (
+    <AutoComplete<DefaultProps>
+      ref={ref as any}
+      fetchItems={(keys) => def.data.filter((i) => (i._id ? keys.includes(i._id) : keys.includes(i)))}
+      queryItems={(query) => def.data.filter((i) => (i.name || i).toString().toLowerCase().includes(query.toLowerCase()))}
+      itemText={(item) => `${item.name || item}`}
+      itemKey={(item) => `${item._id?.toString() || item.name || item}`}
+      renderItem={(item) => `${item.name || item}`}
+      allowEmptyQuery
+      {...def}
+    />
+  );
 });
 
 CustomSelectAutoComplete.propTypes = {

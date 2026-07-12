@@ -58,12 +58,14 @@ const ProblemModel = {
     },
 };
 
-const sensitiveProblems = [{
-    pid: 'SECRET_PID',
-    title: 'SECRET_TITLE',
-    tag: ['SECRET_TAG'],
-    nSubmit: 987654,
-}];
+const sensitiveProblems = [
+    {
+        pid: 'SECRET_PID',
+        title: 'SECRET_TITLE',
+        tag: ['SECRET_TAG'],
+        nSubmit: 987654,
+    },
+];
 
 const modelStub = {
     clearAllPositions: async () => undefined,
@@ -139,11 +141,7 @@ function makeUser() {
     };
 }
 
-async function dispatchProblemsApi(
-    user = makeUser(),
-    argsDomainId = 'system',
-    authoritativeDomainId = 'system',
-) {
+async function dispatchProblemsApi(user = makeUser(), argsDomainId = 'system', authoritativeDomainId = 'system') {
     const HandlerClass = routes.get('mindmap_api_problems');
     expect(HandlerClass, 'missing mindmap_api_problems route').to.be.a('function');
     const nodeId = new ObjectId();
@@ -201,27 +199,26 @@ async function dispatchProblemsApi(
                     };
                 }
             },
-            async serial() { return undefined; },
+            async serial() {
+                return undefined;
+            },
         },
     };
     const savedContext = {
         plugin() {
             return {
                 ctx: { server: { renderers: {} } },
-                async dispose() { return undefined; },
+                async dispose() {
+                    return undefined;
+                },
             };
         },
     };
-    await (framework.WebService.prototype as any).handleHttp.call(
-        service, koaContext, HandlerClass, () => {}, savedContext,
-    );
+    await (framework.WebService.prototype as any).handleHttp.call(service, koaContext, HandlerClass, () => {}, savedContext);
     return { nodeId, response };
 }
 
-async function dispatchMindmapPage(
-    user = makeUser(),
-    authoritativeDomainId = 'system',
-) {
+async function dispatchMindmapPage(user = makeUser(), authoritativeDomainId = 'system') {
     const HandlerClass = routes.get('mindmap_main');
     expect(HandlerClass, 'missing mindmap_main route').to.be.a('function');
     const request = {
@@ -278,20 +275,22 @@ async function dispatchMindmapPage(
                     };
                 }
             },
-            async serial() { return undefined; },
+            async serial() {
+                return undefined;
+            },
         },
     };
     const savedContext = {
         plugin() {
             return {
                 ctx: { server: { renderers: {} } },
-                async dispose() { return undefined; },
+                async dispose() {
+                    return undefined;
+                },
             };
         },
     };
-    await (framework.WebService.prototype as any).handleHttp.call(
-        service, koaContext, HandlerClass, () => {}, savedContext,
-    );
+    await (framework.WebService.prototype as any).handleHttp.call(service, koaContext, HandlerClass, () => {}, savedContext);
     return { response };
 }
 
@@ -310,16 +309,18 @@ beforeEach(() => {
     browseFailure = null;
     scopeFailure = null;
     canonicalScope = {};
-    bootstrapNodes = [{
-        _id: new ObjectId(),
-        parentId: null,
-        topic: '公开根节点',
-        description: '公开说明',
-        color: 'sky',
-        tags: ['SECRET_TAG'],
-        problemIds: ['SECRET_PID'],
-        order: 0,
-    }];
+    bootstrapNodes = [
+        {
+            _id: new ObjectId(),
+            parentId: null,
+            topic: '公开根节点',
+            description: '公开说明',
+            color: 'sky',
+            tags: ['SECRET_TAG'],
+            problemIds: ['SECRET_PID'],
+            order: 0,
+        },
+    ];
 });
 
 describe('mindmap page bootstrap metadata boundary', () => {

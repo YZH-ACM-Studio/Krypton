@@ -1,23 +1,17 @@
 import { useState, useEffect } from 'react';
-import {
-  KeyRound, Plus, Copy, Check, Trash2, RefreshCw, Pencil,
-} from 'lucide-react';
+import { KeyRound, Plus, Copy, Check, Trash2, RefreshCw, Pencil } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { PRIV } from '@/lib/perms';
 import { registerAdminNavSection } from '@/lib/admin-nav-registry';
 import { AdminPage } from '@/components/admin/admin-page';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
-} from '@/components/ui/table';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { FormField } from '@/components/ui/form';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DateTime } from '@/components/ui/datetime';
 
 // ── sidebar nav (registered at module load — read by AdminSidebar) ──────────
@@ -81,7 +75,7 @@ async function postOp(fields: Record<string, string>): Promise<any> {
     credentials: 'include',
     body: new URLSearchParams(fields),
   });
-  const json = await resp.json().catch(() => ({} as any));
+  const json = await resp.json().catch(() => ({}) as any);
   if (!resp.ok) {
     throw new Error(json?.error?.message || json?.error || `请求失败 (${resp.status})`);
   }
@@ -106,11 +100,7 @@ function scopeSummary(t: AuthTokenRow): string {
 }
 
 // ── Issue dialog ────────────────────────────────────────────────────────────
-function IssueDialog({ open, onClose, onIssued }: {
-  open: boolean;
-  onClose: () => void;
-  onIssued: (token: string) => void;
-}) {
+function IssueDialog({ open, onClose, onIssued }: { open: boolean; onClose: () => void; onIssued: (token: string) => void }) {
   const [channels, setChannels] = useState<Record<string, boolean>>({});
   const [uid, setUid] = useState('');
   const [label, setLabel] = useState('');
@@ -120,7 +110,7 @@ function IssueDialog({ open, onClose, onIssued }: {
   const [error, setError] = useState<string | null>(null);
 
   const selected = Object.keys(channels).filter((k) => channels[k]);
-  const uidNum = parseInt(uid.trim(), 10);
+  const uidNum = Number.parseInt(uid.trim(), 10);
   const uidValid = uid.trim() !== '' && Number.isSafeInteger(uidNum) && uidNum > 0;
   const canSubmit = selected.length > 0 && uidValid && !busy;
 
@@ -133,7 +123,10 @@ function IssueDialog({ open, onClose, onIssued }: {
     setError(null);
     setBusy(false);
   };
-  const close = () => { reset(); onClose(); };
+  const close = () => {
+    reset();
+    onClose();
+  };
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -147,7 +140,10 @@ function IssueDialog({ open, onClose, onIssued }: {
       };
       if (label.trim()) fields.label = label.trim();
       if (expireDays.trim()) fields.expireDays = expireDays.trim();
-      const ys = years.split(/[\s,，、]+/).map((s) => s.trim()).filter(Boolean);
+      const ys = years
+        .split(/[\s,，、]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
       if (ys.length) fields.years = ys.join(',');
       const json = await postOp(fields);
       if (!json?.token) throw new Error('服务器未返回令牌');
@@ -161,7 +157,12 @@ function IssueDialog({ open, onClose, onIssued }: {
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) close(); }}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) close();
+      }}
+    >
       <DialogContent className="w-full sm:w-[560px]" onClose={close}>
         <DialogHeader>
           <DialogTitle>签发访问令牌</DialogTitle>
@@ -174,11 +175,7 @@ function IssueDialog({ open, onClose, onIssued }: {
             <div className="space-y-2">
               {CHANNELS.map((c) => (
                 <label key={c.key} htmlFor={`kat-ch-${c.key}`} className="flex cursor-pointer items-start gap-2">
-                  <Checkbox
-                    id={`kat-ch-${c.key}`}
-                    checked={!!channels[c.key]}
-                    onCheckedChange={(v) => setChannels((p) => ({ ...p, [c.key]: v }))}
-                  />
+                  <Checkbox id={`kat-ch-${c.key}`} checked={!!channels[c.key]} onCheckedChange={(v) => setChannels((p) => ({ ...p, [c.key]: v }))} />
                   <span className="leading-tight">
                     <span className="font-mono text-sm">{c.label}</span>
                     <span className="block text-xs text-muted-foreground">{c.hint}</span>
@@ -194,35 +191,15 @@ function IssueDialog({ open, onClose, onIssued }: {
             htmlFor="kat-uid"
             hint="令牌以该用户身份鉴权(实际权限 = 用户权限 ∩ 频道 ∩ 数据范围)。crawler / tagger / scores 必须绑定用户。"
           >
-            <Input
-              id="kat-uid"
-              inputMode="numeric"
-              placeholder="如 2(root)"
-              value={uid}
-              onChange={(e) => setUid(e.target.value)}
-            />
+            <Input id="kat-uid" inputMode="numeric" placeholder="如 2(root)" value={uid} onChange={(e) => setUid(e.target.value)} />
           </FormField>
 
           <FormField label="备注" htmlFor="kat-label">
-            <Input
-              id="kat-label"
-              placeholder="如 张三的爬题工具"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-            />
+            <Input id="kat-label" placeholder="如 张三的爬题工具" value={label} onChange={(e) => setLabel(e.target.value)} />
           </FormField>
 
-          <FormField
-            label="可录年份"
-            htmlFor="kat-years"
-            hint="仅约束 scores 频道可录入的年级;留空 = 不限年份。"
-          >
-            <Input
-              id="kat-years"
-              placeholder="留空 = 不限;多个用逗号,如 2024,2025"
-              value={years}
-              onChange={(e) => setYears(e.target.value)}
-            />
+          <FormField label="可录年份" htmlFor="kat-years" hint="仅约束 scores 频道可录入的年级;留空 = 不限年份。">
+            <Input id="kat-years" placeholder="留空 = 不限;多个用逗号,如 2024,2025" value={years} onChange={(e) => setYears(e.target.value)} />
           </FormField>
 
           <FormField label="有效天数" htmlFor="kat-exp">
@@ -238,7 +215,9 @@ function IssueDialog({ open, onClose, onIssued }: {
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
         <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
-          <Button variant="ghost" onClick={close}>取消</Button>
+          <Button variant="ghost" onClick={close}>
+            取消
+          </Button>
           <Button onClick={submit} disabled={!canSubmit}>
             <KeyRound /> {busy ? '签发中…' : '签发'}
           </Button>
@@ -261,19 +240,20 @@ function RevealDialog({ token, onClose }: { token: string | null; onClose: () =>
     }
   };
   return (
-    <Dialog open={!!token} onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog
+      open={!!token}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
       <DialogContent className="w-full sm:w-[560px]" onClose={onClose}>
         <DialogHeader>
           <DialogTitle>令牌已签发</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 px-5 py-4">
-          <p className="text-sm font-medium text-destructive">
-            此令牌只显示这一次,关闭后无法再次查看,请立即复制保存。
-          </p>
+          <p className="text-sm font-medium text-destructive">此令牌只显示这一次,关闭后无法再次查看,请立即复制保存。</p>
           <div className="flex items-center gap-2">
-            <code className="flex-1 select-all break-all rounded-md border bg-muted px-3 py-2 font-mono text-sm">
-              {token}
-            </code>
+            <code className="flex-1 select-all break-all rounded-md border bg-muted px-3 py-2 font-mono text-sm">{token}</code>
             <Button variant="outline" size="icon" onClick={copy} aria-label="复制">
               {copied ? <Check /> : <Copy />}
             </Button>
@@ -295,7 +275,12 @@ function RenewDialog({ target, onClose }: { target: AuthTokenRow | null; onClose
   const [expireDays, setExpireDays] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const close = () => { setExpireDays(''); setError(null); setBusy(false); onClose(); };
+  const close = () => {
+    setExpireDays('');
+    setError(null);
+    setBusy(false);
+    onClose();
+  };
   const submit = async () => {
     if (!target) return;
     setBusy(true);
@@ -311,7 +296,12 @@ function RenewDialog({ target, onClose }: { target: AuthTokenRow | null; onClose
     }
   };
   return (
-    <Dialog open={!!target} onOpenChange={(v) => { if (!v) close(); }}>
+    <Dialog
+      open={!!target}
+      onOpenChange={(v) => {
+        if (!v) close();
+      }}
+    >
       <DialogContent className="w-full sm:w-[460px]" onClose={close}>
         <DialogHeader>
           <DialogTitle>续期 / 改有效期</DialogTitle>
@@ -319,7 +309,9 @@ function RenewDialog({ target, onClose }: { target: AuthTokenRow | null; onClose
         <div className="space-y-3 px-5 py-4">
           <p className="font-mono text-sm text-muted-foreground">{target?.display}</p>
           <div className="space-y-1.5">
-            <label className="text-sm font-medium" htmlFor="kat-renew">从现在起有效天数</label>
+            <label className="text-sm font-medium" htmlFor="kat-renew">
+              从现在起有效天数
+            </label>
             <Input
               id="kat-renew"
               inputMode="numeric"
@@ -332,8 +324,12 @@ function RenewDialog({ target, onClose }: { target: AuthTokenRow | null; onClose
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
         <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
-          <Button variant="ghost" onClick={close}>取消</Button>
-          <Button onClick={submit} disabled={busy}>{busy ? '提交中…' : '确认'}</Button>
+          <Button variant="ghost" onClick={close}>
+            取消
+          </Button>
+          <Button onClick={submit} disabled={busy}>
+            {busy ? '提交中…' : '确认'}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -344,7 +340,11 @@ function RenewDialog({ target, onClose }: { target: AuthTokenRow | null; onClose
 function RevokeDialog({ target, onClose }: { target: AuthTokenRow | null; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const close = () => { setError(null); setBusy(false); onClose(); };
+  const close = () => {
+    setError(null);
+    setBusy(false);
+    onClose();
+  };
   const submit = async () => {
     if (!target) return;
     setBusy(true);
@@ -358,7 +358,12 @@ function RevokeDialog({ target, onClose }: { target: AuthTokenRow | null; onClos
     }
   };
   return (
-    <Dialog open={!!target} onOpenChange={(v) => { if (!v) close(); }}>
+    <Dialog
+      open={!!target}
+      onOpenChange={(v) => {
+        if (!v) close();
+      }}
+    >
       <DialogContent className="w-full sm:w-[460px]" onClose={close}>
         <DialogHeader>
           <DialogTitle>撤销令牌</DialogTitle>
@@ -372,7 +377,9 @@ function RevokeDialog({ target, onClose }: { target: AuthTokenRow | null; onClos
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
         <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
-          <Button variant="ghost" onClick={close}>取消</Button>
+          <Button variant="ghost" onClick={close}>
+            取消
+          </Button>
           <Button variant="destructive" onClick={submit} disabled={busy}>
             <Trash2 /> {busy ? '撤销中…' : '撤销'}
           </Button>
@@ -394,7 +401,9 @@ function EditDialog({ target, onClose }: { target: AuthTokenRow | null; onClose:
   useEffect(() => {
     if (!target) return;
     const ch: Record<string, boolean> = {};
-    target.channels.forEach((c) => { ch[c] = true; });
+    target.channels.forEach((c) => {
+      ch[c] = true;
+    });
     setChannels(ch);
     setLabel(target.label || '');
     const ys = target.scopeFilters?.years;
@@ -405,13 +414,20 @@ function EditDialog({ target, onClose }: { target: AuthTokenRow | null; onClose:
 
   const selected = Object.keys(channels).filter((k) => channels[k]);
   const canSubmit = selected.length > 0 && !busy;
-  const close = () => { setError(null); setBusy(false); onClose(); };
+  const close = () => {
+    setError(null);
+    setBusy(false);
+    onClose();
+  };
   const submit = async () => {
     if (!target || !canSubmit) return;
     setBusy(true);
     setError(null);
     try {
-      const ys = years.split(/[\s,，、]+/).map((s) => s.trim()).filter(Boolean);
+      const ys = years
+        .split(/[\s,，、]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
       await postOp({
         operation: 'update',
         id: target._id,
@@ -427,7 +443,12 @@ function EditDialog({ target, onClose }: { target: AuthTokenRow | null; onClose:
   };
 
   return (
-    <Dialog open={!!target} onOpenChange={(v) => { if (!v) close(); }}>
+    <Dialog
+      open={!!target}
+      onOpenChange={(v) => {
+        if (!v) close();
+      }}
+    >
       <DialogContent className="w-full sm:w-[560px]" onClose={close}>
         <DialogHeader>
           <DialogTitle>编辑令牌权限范围</DialogTitle>
@@ -441,11 +462,7 @@ function EditDialog({ target, onClose }: { target: AuthTokenRow | null; onClose:
             <div className="space-y-2">
               {CHANNELS.map((c) => (
                 <label key={c.key} htmlFor={`kat-ed-${c.key}`} className="flex cursor-pointer items-start gap-2">
-                  <Checkbox
-                    id={`kat-ed-${c.key}`}
-                    checked={!!channels[c.key]}
-                    onCheckedChange={(v) => setChannels((p) => ({ ...p, [c.key]: v }))}
-                  />
+                  <Checkbox id={`kat-ed-${c.key}`} checked={!!channels[c.key]} onCheckedChange={(v) => setChannels((p) => ({ ...p, [c.key]: v }))} />
                   <span className="leading-tight">
                     <span className="font-mono text-sm">{c.label}</span>
                     <span className="block text-xs text-muted-foreground">{c.hint}</span>
@@ -456,34 +473,20 @@ function EditDialog({ target, onClose }: { target: AuthTokenRow | null; onClose:
           </div>
 
           <FormField label="备注" htmlFor="kat-ed-label">
-            <Input
-              id="kat-ed-label"
-              placeholder="如 张三的运维令牌"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-            />
+            <Input id="kat-ed-label" placeholder="如 张三的运维令牌" value={label} onChange={(e) => setLabel(e.target.value)} />
           </FormField>
 
-          <FormField
-            label="可录年份"
-            htmlFor="kat-ed-years"
-            hint="仅约束 scores 频道;留空 = 不限。保存会整体替换数据范围。"
-          >
-            <Input
-              id="kat-ed-years"
-              placeholder="留空 = 不限;多个用逗号,如 2024,2025"
-              value={years}
-              onChange={(e) => setYears(e.target.value)}
-            />
+          <FormField label="可录年份" htmlFor="kat-ed-years" hint="仅约束 scores 频道;留空 = 不限。保存会整体替换数据范围。">
+            <Input id="kat-ed-years" placeholder="留空 = 不限;多个用逗号,如 2024,2025" value={years} onChange={(e) => setYears(e.target.value)} />
           </FormField>
 
-          <p className="text-xs text-muted-foreground">
-            绑定用户与密钥明文不变;仅调整频道与数据范围,保存后立即生效。
-          </p>
+          <p className="text-xs text-muted-foreground">绑定用户与密钥明文不变;仅调整频道与数据范围,保存后立即生效。</p>
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
         <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
-          <Button variant="ghost" onClick={close}>取消</Button>
+          <Button variant="ghost" onClick={close}>
+            取消
+          </Button>
           <Button onClick={submit} disabled={!canSubmit}>
             <Pencil /> {busy ? '保存中…' : '保存'}
           </Button>
@@ -510,7 +513,11 @@ export function AdminAuthTokenPage() {
       title="访问令牌"
       description="签发、撤销、续期 Krypton 访问令牌(KAT)。令牌绑定到 Hydro 用户、复用其权限,并按频道与数据范围收敛。明文仅在签发时显示一次。"
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
-      actions={<Button onClick={() => setIssueOpen(true)}><Plus /> 签发令牌</Button>}
+      actions={
+        <Button onClick={() => setIssueOpen(true)}>
+          <Plus /> 签发令牌
+        </Button>
+      }
     >
       <Card>
         <CardContent className="p-0">
@@ -544,43 +551,39 @@ export function AdminAuthTokenPage() {
                         {t.label && <div className="text-xs text-muted-foreground">{t.label}</div>}
                       </TableCell>
                       <TableCell>
-                        {t.uid != null
-                          ? <span>{unames[t.uid] || `UID ${t.uid}`} <span className="text-xs text-muted-foreground">#{t.uid}</span></span>
-                          : <span className="text-muted-foreground">服务令牌</span>}
+                        {t.uid != null ? (
+                          <span>
+                            {unames[t.uid] || `UID ${t.uid}`} <span className="text-xs text-muted-foreground">#{t.uid}</span>
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">服务令牌</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
                           {t.channels.map((c) => (
-                            <Badge key={c} variant="secondary" className="font-mono">{c}</Badge>
+                            <Badge key={c} variant="secondary" className="font-mono">
+                              {c}
+                            </Badge>
                           ))}
                         </div>
                       </TableCell>
                       <TableCell className="text-sm">{scopeSummary(t)}</TableCell>
-                      <TableCell><Badge variant={st.variant}>{st.label}</Badge></TableCell>
+                      <TableCell>
+                        <Badge variant={st.variant}>{st.label}</Badge>
+                      </TableCell>
                       <TableCell className="text-sm">
                         <DateTime value={t.lastUsedAt} mode="relative" fallback="从未" />
                       </TableCell>
                       <TableCell className="text-sm">
-                        {t.expiresAt
-                          ? <DateTime value={t.expiresAt} mode="datetime" />
-                          : <span className="text-muted-foreground">永不过期</span>}
+                        {t.expiresAt ? <DateTime value={t.expiresAt} mode="datetime" /> : <span className="text-muted-foreground">永不过期</span>}
                       </TableCell>
                       <TableCell>
                         <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={t.revoked}
-                            onClick={() => setEditTarget(t)}
-                          >
+                          <Button variant="ghost" size="sm" disabled={t.revoked} onClick={() => setEditTarget(t)}>
                             <Pencil /> 编辑
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={t.revoked}
-                            onClick={() => setRenewTarget(t)}
-                          >
+                          <Button variant="ghost" size="sm" disabled={t.revoked} onClick={() => setRenewTarget(t)}>
                             <RefreshCw /> 续期
                           </Button>
                           <Button
@@ -606,11 +609,17 @@ export function AdminAuthTokenPage() {
       <IssueDialog
         open={issueOpen}
         onClose={() => setIssueOpen(false)}
-        onIssued={(tok) => { setIssueOpen(false); setRevealToken(tok); }}
+        onIssued={(tok) => {
+          setIssueOpen(false);
+          setRevealToken(tok);
+        }}
       />
       <RevealDialog
         token={revealToken}
-        onClose={() => { setRevealToken(null); window.location.reload(); }}
+        onClose={() => {
+          setRevealToken(null);
+          window.location.reload();
+        }}
       />
       <EditDialog target={editTarget} onClose={() => setEditTarget(null)} />
       <RenewDialog target={renewTarget} onClose={() => setRenewTarget(null)} />

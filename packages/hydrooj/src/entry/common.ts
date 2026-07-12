@@ -1,4 +1,3 @@
-/* eslint-disable no-await-in-loop */
 import '../lib/index';
 
 import path from 'path';
@@ -20,27 +19,25 @@ function locateFile(basePath: string, filenames: string[]) {
 }
 
 type LoadTask = 'model' | 'addon' | 'service';
-const getLoader = (type: LoadTask, filename: string) => async function loader(pending: Record<string, string>, fail: string[], ctx: Context) {
-    for (const [name, i] of Object.entries(pending)) {
-        const p = locateFile(i, [`${filename}.ts`, `${filename}.js`]);
-        if (p && !fail.includes(i)) {
-            const loadType = type.replace(/^(.)/, (t) => t.toUpperCase());
-            try {
-                const m = unwrapExports(require(p));
-                if (m.apply) ctx.loader.reloadPlugin(p, name);
-                else logger.info(`${loadType} init: %s`, i);
-            } catch (e) {
-                fail.push(i);
-                app.injectUI(
-                    'Notification', `${loadType} load fail: {0}`,
-                    { args: [i], type: 'warn' }, PRIV.PRIV_VIEW_SYSTEM_NOTIFICATION,
-                );
-                logger.info(`${loadType} load fail: %s`, i);
-                logger.error(e);
+const getLoader = (type: LoadTask, filename: string) =>
+    async function loader(pending: Record<string, string>, fail: string[], ctx: Context) {
+        for (const [name, i] of Object.entries(pending)) {
+            const p = locateFile(i, [`${filename}.ts`, `${filename}.js`]);
+            if (p && !fail.includes(i)) {
+                const loadType = type.replace(/^(.)/, (t) => t.toUpperCase());
+                try {
+                    const m = unwrapExports(require(p));
+                    if (m.apply) ctx.loader.reloadPlugin(p, name);
+                    else logger.info(`${loadType} init: %s`, i);
+                } catch (e) {
+                    fail.push(i);
+                    app.injectUI('Notification', `${loadType} load fail: {0}`, { args: [i], type: 'warn' }, PRIV.PRIV_VIEW_SYSTEM_NOTIFICATION);
+                    logger.info(`${loadType} load fail: %s`, i);
+                    logger.error(e);
+                }
             }
         }
-    }
-};
+    };
 
 export const addon = getLoader('addon', 'index');
 export const model = getLoader('model', 'model');

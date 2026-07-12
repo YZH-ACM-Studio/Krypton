@@ -44,9 +44,7 @@ interface SendMessageDialogProps {
   sendCommand: ReturnType<typeof UseProctorCommandsT>['sendCommand'];
 }
 
-export function SendMessageDialog({
-  open, onOpenChange, student, counters, sendCommand,
-}: SendMessageDialogProps) {
+export function SendMessageDialog({ open, onOpenChange, student, counters, sendCommand }: SendMessageDialogProps) {
   const [severity, setSeverity] = useState<Severity>('info');
   const [audience, setAudience] = useState<Audience>(student ? 'single' : 'all');
   const [title, setTitle] = useState('');
@@ -112,10 +110,7 @@ export function SendMessageDialog({
 
   return (
     <Dialog open={open} onOpenChange={busy ? () => {} : onOpenChange}>
-      <DialogContent
-        className="w-[90vw] max-w-[640px]"
-        onClose={() => !busy && onOpenChange(false)}
-      >
+      <DialogContent className="w-[90vw] max-w-[640px]" onClose={() => !busy && onOpenChange(false)}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <MessageSquare className="size-4 text-primary" />
@@ -125,13 +120,14 @@ export function SendMessageDialog({
 
         <form
           className="space-y-4 p-5"
-          onSubmit={(e) => { e.preventDefault(); submit(); }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
         >
           {/* Severity */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              类型
-            </label>
+            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">类型</label>
             <RadioGroup orientation="horizontal">
               <RadioGroupItem
                 name="severity"
@@ -168,9 +164,7 @@ export function SendMessageDialog({
             </div>
           ) : (
             <div className="space-y-1.5">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                收件人
-              </label>
+              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">收件人</label>
               <RadioGroup orientation="horizontal">
                 <RadioGroupItem
                   name="audience"
@@ -199,53 +193,26 @@ export function SendMessageDialog({
 
           {/* Title */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              标题（可选）
-            </label>
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="例如：监考通知"
-              maxLength={80}
-            />
+            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">标题（可选）</label>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例如：监考通知" maxLength={80} />
           </div>
 
           {/* Body */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              内容 *
-            </label>
-            <Textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder="发送给学生的消息内容…"
-              required
-              rows={4}
-              maxLength={500}
-            />
+            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">内容 *</label>
+            <Textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="发送给学生的消息内容…" required rows={4} maxLength={500} />
             <p className="text-[10px] text-muted-foreground text-right">{body.length}/500</p>
           </div>
 
           {/* Reason (audit) */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              操作原因（可选，写入审计日志）
-            </label>
-            <Input
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="例如：例行提醒考试纪律"
-            />
+            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">操作原因（可选，写入审计日志）</label>
+            <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="例如：例行提醒考试纪律" />
           </div>
 
           {isCriticalGroup && (
             <label className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs">
-              <input
-                type="checkbox"
-                checked={confirmCritical}
-                onChange={(e) => setConfirmCritical(e.target.checked)}
-                className="mt-0.5"
-              />
+              <input type="checkbox" checked={confirmCritical} onChange={(e) => setConfirmCritical(e.target.checked)} className="mt-0.5" />
               <span className="text-destructive">
                 我已知晓：此操作将向多名学生 <strong>全屏遮挡屏幕</strong>，影响他们的答题。
               </span>
@@ -253,18 +220,10 @@ export function SendMessageDialog({
           )}
 
           <div className="flex justify-end gap-2 border-t pt-4">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={busy}
-            >
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
               取消
             </Button>
-            <Button
-              type="submit"
-              disabled={busy || !body.trim() || (isCriticalGroup && !confirmCritical)}
-            >
+            <Button type="submit" disabled={busy || !body.trim() || (isCriticalGroup && !confirmCritical)}>
               {audience === 'single' ? '发送' : `发送给${audienceLabel(audience).replace('仅', '')}`}
             </Button>
           </div>

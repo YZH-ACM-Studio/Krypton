@@ -4,9 +4,7 @@ import responsiveCutoff from 'vj/breakpoints.json';
 import { AutoloadPage } from 'vj/misc/Page';
 import { isAbove, isBelow } from 'vj/utils/mediaQuery';
 
-const navHeight = isBelow(responsiveCutoff.mobile)
-  ? 0
-  : $('.nav').height();
+const navHeight = isBelow(responsiveCutoff.mobile) ? 0 : $('.nav').height();
 
 function getCutoff(str) {
   if (str === 'medium') return responsiveCutoff.mobile;
@@ -41,7 +39,10 @@ const stickyPage = new AutoloadPage('stickyPage', () => {
   });
   updateStickies($stickies);
   if (shouldListenResize) {
-    $(window).on('resize', _.throttle(() => updateStickies($stickies), 300));
+    $(window).on(
+      'resize',
+      _.throttle(() => updateStickies($stickies), 300),
+    );
   }
 });
 

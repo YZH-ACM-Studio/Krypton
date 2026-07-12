@@ -60,5 +60,8 @@ function renderInline(text) {
 }
 
 module.exports = {
-  md, plugin, render, renderInline,
+  md,
+  plugin,
+  render,
+  renderInline,
 };

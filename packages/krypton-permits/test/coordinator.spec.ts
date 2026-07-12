@@ -167,9 +167,16 @@ describe('ACL mutation coordinator', () => {
 
     it('passes only the canonical three-field pair to repository queries', async () => {
         const pairMethods = new Set([
-            'getCanonical', 'getSources', 'getFence', 'getProblemAclMutationLock',
-            'clearProblemAclMutation', 'updateFence', 'writeCanonical', 'writeMirror',
-            'mirrorHas', 'deleteFence',
+            'getCanonical',
+            'getSources',
+            'getFence',
+            'getProblemAclMutationLock',
+            'clearProblemAclMutation',
+            'updateFence',
+            'writeCanonical',
+            'writeMirror',
+            'mirrorHas',
+            'deleteFence',
         ]);
         const strictRepo = new Proxy(repo, {
             get(target, property, receiver) {
@@ -251,9 +258,7 @@ describe('ACL mutation coordinator', () => {
             events.push('lock');
             return baseBeginProblemAclMutation(lock);
         };
-        transactional.withMutationTransaction = async <T>(
-            work: (tx: AclRepository) => Promise<T>,
-        ): Promise<T> => {
+        transactional.withMutationTransaction = async <T>(work: (tx: AclRepository) => Promise<T>): Promise<T> => {
             events.push('transaction:start');
             const result = await work(transactional);
             events.push('transaction:commit');
@@ -286,9 +291,14 @@ describe('ACL mutation coordinator', () => {
         };
 
         await createAclCoordinator(transactional).mutate({
-            domainId: 'system', pid: 101, uid: 9,
-            requestId: 'tx-101', sourceType: 'direct', sourceId: 'direct',
-            role: 'maintainer', grantedBy: 1,
+            domainId: 'system',
+            pid: 101,
+            uid: 9,
+            requestId: 'tx-101',
+            sourceType: 'direct',
+            sourceId: 'direct',
+            role: 'maintainer',
+            grantedBy: 1,
         });
 
         expect(events).to.deep.equal([
@@ -315,9 +325,12 @@ describe('ACL mutation coordinator', () => {
             let error: unknown;
             try {
                 await faultCoordinator.mutate({
-                    ...pair, requestId: `fault-${step}`,
-                    sourceType: 'direct', sourceId: 'direct',
-                    role: 'maintainer', grantedBy: 1,
+                    ...pair,
+                    requestId: `fault-${step}`,
+                    sourceType: 'direct',
+                    sourceId: 'direct',
+                    role: 'maintainer',
+                    grantedBy: 1,
                 });
             } catch (caught) {
                 error = caught;
@@ -336,9 +349,12 @@ describe('ACL mutation coordinator', () => {
                     expect(faultRepo.fences.has(keyOf(pair))).to.equal(false);
                 }
                 await faultCoordinator.mutate({
-                    ...pair, requestId: `fault-${step}`,
-                    sourceType: 'direct', sourceId: 'direct',
-                    role: 'maintainer', grantedBy: 1,
+                    ...pair,
+                    requestId: `fault-${step}`,
+                    sourceType: 'direct',
+                    sourceId: 'direct',
+                    role: 'maintainer',
+                    grantedBy: 1,
                 });
                 expect(faultRepo.fences.has(keyOf(pair))).to.equal(false);
                 expect(faultRepo.problemLocks.has(keyOf(pair))).to.equal(false);
@@ -351,16 +367,26 @@ describe('ACL mutation coordinator', () => {
     it('rejects a different requestId while retaining the original pair fence', async () => {
         const pair = { domainId: 'system', pid: 300, uid: 30 };
         repo.failOnceAt = 'source';
-        await coordinator.mutate({
-            ...pair, requestId: 'original', sourceType: 'direct', sourceId: 'direct',
-            role: 'maintainer', grantedBy: 1,
-        }).catch(() => undefined);
+        await coordinator
+            .mutate({
+                ...pair,
+                requestId: 'original',
+                sourceType: 'direct',
+                sourceId: 'direct',
+                role: 'maintainer',
+                grantedBy: 1,
+            })
+            .catch(() => undefined);
 
         let error: any;
         try {
             await coordinator.mutate({
-                ...pair, requestId: 'intruder', sourceType: 'direct', sourceId: 'direct',
-                role: 'verifier', grantedBy: 2,
+                ...pair,
+                requestId: 'intruder',
+                sourceType: 'direct',
+                sourceId: 'direct',
+                role: 'verifier',
+                grantedBy: 2,
             });
         } catch (caught) {
             error = caught;
@@ -374,32 +400,52 @@ describe('ACL mutation coordinator', () => {
     it('keeps an orphan problem lock when fence insert fails, resumes same request, and conflicts another request', async () => {
         const pair = { domainId: 'system', pid: 301, uid: 31 };
         repo.failOnceAt = 'fence';
-        await coordinator.mutate({
-            ...pair, requestId: 'orphan-owner', sourceType: 'direct', sourceId: 'direct',
-            role: 'maintainer', grantedBy: 1,
-        }).catch(() => undefined);
+        await coordinator
+            .mutate({
+                ...pair,
+                requestId: 'orphan-owner',
+                sourceType: 'direct',
+                sourceId: 'direct',
+                role: 'maintainer',
+                grantedBy: 1,
+            })
+            .catch(() => undefined);
 
         expect(repo.problemLocks.get(keyOf(pair))).to.deep.include({
             ...pair,
             requestId: 'orphan-owner',
             intent: {
-                action: 'set-source', sourceType: 'direct', sourceId: 'direct',
-                role: 'maintainer', grantedBy: 1, note: '',
+                action: 'set-source',
+                sourceType: 'direct',
+                sourceId: 'direct',
+                role: 'maintainer',
+                grantedBy: 1,
+                note: '',
             },
         });
         expect(repo.problemRevisions.get('system:301')).to.equal(1);
         expect(repo.fences.has(keyOf(pair))).to.equal(false);
 
-        const conflict = await coordinator.mutate({
-            ...pair, requestId: 'intruder', sourceType: 'direct', sourceId: 'direct',
-            role: 'verifier', grantedBy: 2,
-        }).catch((error) => error);
+        const conflict = await coordinator
+            .mutate({
+                ...pair,
+                requestId: 'intruder',
+                sourceType: 'direct',
+                sourceId: 'direct',
+                role: 'verifier',
+                grantedBy: 2,
+            })
+            .catch((error) => error);
         expect(conflict?.name).to.equal('AclMutationConflictError');
         expect(repo.problemRevisions.get('system:301')).to.equal(1);
 
         await coordinator.mutate({
-            ...pair, requestId: 'orphan-owner', sourceType: 'direct', sourceId: 'direct',
-            role: 'maintainer', grantedBy: 1,
+            ...pair,
+            requestId: 'orphan-owner',
+            sourceType: 'direct',
+            sourceId: 'direct',
+            role: 'maintainer',
+            grantedBy: 1,
         });
         expect(repo.problemLocks.has(keyOf(pair))).to.equal(false);
         expect(repo.fences.has(keyOf(pair))).to.equal(false);
@@ -410,24 +456,42 @@ describe('ACL mutation coordinator', () => {
         const pair = { domainId: 'system', pid: 302, uid: 32 };
         repo.activeClaims.set('system:302', 'permit-operation');
 
-        const unbound = await coordinator.mutate({
-            ...pair, requestId: 'unbound', sourceType: 'direct', sourceId: 'direct',
-            role: 'maintainer', grantedBy: 42,
-        }).catch((error) => error);
+        const unbound = await coordinator
+            .mutate({
+                ...pair,
+                requestId: 'unbound',
+                sourceType: 'direct',
+                sourceId: 'direct',
+                role: 'maintainer',
+                grantedBy: 42,
+            })
+            .catch((error) => error);
         expect(unbound).to.be.instanceOf(AclMutationError);
         expect(repo.problemLocks.has(keyOf(pair))).to.equal(false);
 
         await coordinator.mutate({
-            ...pair, requestId: 'bound', sourceType: 'direct', sourceId: 'direct',
-            role: 'maintainer', grantedBy: 42, writeClaimRequestId: 'permit-operation',
+            ...pair,
+            requestId: 'bound',
+            sourceType: 'direct',
+            sourceId: 'direct',
+            role: 'maintainer',
+            grantedBy: 42,
+            writeClaimRequestId: 'permit-operation',
         });
         expect(repo.canonical.get(keyOf(pair))?.role).to.equal('maintainer');
 
         const mismatchPair = { ...pair, uid: 33 };
-        const mismatch = await coordinator.mutate({
-            ...mismatchPair, requestId: 'mismatch', sourceType: 'direct', sourceId: 'direct',
-            role: 'maintainer', grantedBy: 42, writeClaimRequestId: 'other-operation',
-        }).catch((error) => error);
+        const mismatch = await coordinator
+            .mutate({
+                ...mismatchPair,
+                requestId: 'mismatch',
+                sourceType: 'direct',
+                sourceId: 'direct',
+                role: 'maintainer',
+                grantedBy: 42,
+                writeClaimRequestId: 'other-operation',
+            })
+            .catch((error) => error);
         expect(mismatch).to.be.instanceOf(AclMutationError);
         expect(repo.problemLocks.has(keyOf(mismatchPair))).to.equal(false);
     });

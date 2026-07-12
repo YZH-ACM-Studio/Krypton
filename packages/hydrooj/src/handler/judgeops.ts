@@ -14,9 +14,7 @@
  *   POST /api/judge/rejudge { rids?|pid?|uid?|status?|stuckOnly?, dryRun? } → { count, dryRun }
  */
 import { ObjectId } from 'mongodb';
-import {
-    Context, Handler, OplogModel, param, Types,
-} from 'hydrooj';
+import { Context, Handler, OplogModel, param, Types } from 'hydrooj';
 import { requireAuthToken } from '../lib/auth-token';
 import { PERM, STATUS } from '../model/builtin';
 import record from '../model/record';
@@ -31,10 +29,7 @@ const CHANNEL = 'judge';
  */
 const QUEUED_WAITING = { status: STATUS.STATUS_WAITING, judgeAt: null };
 const PENDING_QUERY = {
-    $or: [
-        { status: { $in: [STATUS.STATUS_JUDGING, STATUS.STATUS_COMPILING, STATUS.STATUS_FETCHED] } },
-        QUEUED_WAITING,
-    ],
+    $or: [{ status: { $in: [STATUS.STATUS_JUDGING, STATUS.STATUS_COMPILING, STATUS.STATUS_FETCHED] } }, QUEUED_WAITING],
 };
 /** A pending record older than this (minutes) is considered stuck. */
 const STUCK_MIN = 10;
@@ -81,8 +76,7 @@ class JudgeQueueHandler extends JudgeApiHandler {
             record.count(domainId, { status: STATUS.STATUS_JUDGING }),
             record.count(domainId, { status: STATUS.STATUS_COMPILING }),
             record.count(domainId, { status: STATUS.STATUS_FETCHED }),
-            record.getMulti(domainId, PENDING_QUERY)
-                .project({ _id: 1 }).sort({ _id: 1 }).limit(1).toArray(),
+            record.getMulti(domainId, PENDING_QUERY).project({ _id: 1 }).sort({ _id: 1 }).limit(1).toArray(),
             record.stat(domainId),
         ]);
         const totalPending = waiting + judging + compiling + fetched;
@@ -103,10 +97,15 @@ class JudgeStuckHandler extends JudgeApiHandler {
         this.checkPerm(PERM.PERM_REJUDGE_PROBLEM);
         const domainId = judgeDomain();
         const cutoff = cutoffOid(STUCK_MIN);
-        const rdocs = await record.getMulti(domainId, {
-            ...PENDING_QUERY,
-            _id: { $lt: cutoff },
-        }).project({ _id: 1, pid: 1, uid: 1, status: 1, lang: 1 }).sort({ _id: 1 }).limit(STUCK_LIMIT).toArray();
+        const rdocs = await record
+            .getMulti(domainId, {
+                ...PENDING_QUERY,
+                _id: { $lt: cutoff },
+            })
+            .project({ _id: 1, pid: 1, uid: 1, status: 1, lang: 1 })
+            .sort({ _id: 1 })
+            .limit(STUCK_LIMIT)
+            .toArray();
         this.response.body = {
             domainId,
             thresholdMin: STUCK_MIN,
@@ -131,10 +130,7 @@ class JudgeRejudgeHandler extends JudgeApiHandler {
     @param('status', Types.Int, true)
     @param('stuckOnly', Types.Boolean, true)
     @param('dryRun', Types.Boolean, true)
-    async post(
-        _args: any, rids: any, pid: number, uid: number, status: number,
-        stuckOnly: boolean, dryRun: boolean,
-    ) {
+    async post(_args: any, rids: any, pid: number, uid: number, status: number, stuckOnly: boolean, dryRun: boolean) {
         this.checkPerm(PERM.PERM_REJUDGE_PROBLEM);
         const domainId = judgeDomain();
 
@@ -161,9 +157,18 @@ class JudgeRejudgeHandler extends JudgeApiHandler {
             query._id = { $in: oids };
             hasSelector = true;
         }
-        if (Number.isSafeInteger(pid)) { query.pid = pid; hasSelector = true; }
-        if (Number.isSafeInteger(uid)) { query.uid = uid; hasSelector = true; }
-        if (Number.isSafeInteger(status)) { query.status = status; hasSelector = true; }
+        if (Number.isSafeInteger(pid)) {
+            query.pid = pid;
+            hasSelector = true;
+        }
+        if (Number.isSafeInteger(uid)) {
+            query.uid = uid;
+            hasSelector = true;
+        }
+        if (Number.isSafeInteger(status)) {
+            query.status = status;
+            hasSelector = true;
+        }
         if (stuckOnly === true) {
             // 与 stuck 清单同口径：已判完的「待人工评分」记录（WAITING 且
             // judgeAt 非空）绝不进批量重判，否则人工分被冲掉（Rev.12）。
@@ -183,8 +188,7 @@ class JudgeRejudgeHandler extends JudgeApiHandler {
             return;
         }
 
-        const rdocs = await record.getMulti(domainId, query)
-            .project({ _id: 1, contest: 1 }).limit(MAX_REJUDGE).toArray();
+        const rdocs = await record.getMulti(domainId, query).project({ _id: 1, contest: 1 }).limit(MAX_REJUDGE).toArray();
         if (!rdocs.length) {
             this.response.body = { dryRun: false, count: 0, capped: false, matched: 0 };
             return;
@@ -197,11 +201,26 @@ class JudgeRejudgeHandler extends JudgeApiHandler {
         const priority = await record.submissionPriority(this.user._id, -10000 - rdocs.length * 5 - 50);
         await record.reset(domainId, ids, true);
         await Promise.all([
-            record.judge(domainId, rdocs.filter((i) => i.contest).map((i) => i._id), priority, { detail: false }, { rejudge: true }),
-            record.judge(domainId, rdocs.filter((i) => !i.contest).map((i) => i._id), priority, {}, { rejudge: true }),
+            record.judge(
+                domainId,
+                rdocs.filter((i) => i.contest).map((i) => i._id),
+                priority,
+                { detail: false },
+                { rejudge: true },
+            ),
+            record.judge(
+                domainId,
+                rdocs.filter((i) => !i.contest).map((i) => i._id),
+                priority,
+                {},
+                { rejudge: true },
+            ),
         ]);
         await OplogModel.log(this as any, 'judge.rejudge', {
-            worker: this.workerLabel, domainId, count: ids.length, stuckOnly: stuckOnly === true,
+            worker: this.workerLabel,
+            domainId,
+            count: ids.length,
+            stuckOnly: stuckOnly === true,
         });
         this.response.body = {
             dryRun: false,

@@ -1,8 +1,6 @@
 import { hostname } from 'os';
 import { AggregatorRegistry, Metric } from 'prom-client';
-import {
-    Context, Handler, Schema, superagent, SystemModel,
-} from 'hydrooj';
+import { Context, Handler, Schema, superagent, SystemModel } from 'hydrooj';
 import { createRegistry } from './metrics';
 
 declare module 'hydrooj' {
@@ -43,33 +41,40 @@ class MetricsHandler extends Handler {
 }
 
 export function apply(ctx: Context) {
-    ctx.setting.SystemSetting(Schema.object({
-        'prom-client': Schema.object({
-            name: Schema.string().description('basic auth username while requesting metrics').default('admin'),
-            password: Schema.string().role('password').description('basic auth password while requesting metrics').default('admin'),
-            gateway: Schema.string().role('gateway').description('Leave blank to disable push gateway').default(''),
-            collect_rate: Schema.number().role('collect_rate').default(1).description('Collect rate'),
+    ctx.setting.SystemSetting(
+        Schema.object({
+            'prom-client': Schema.object({
+                name: Schema.string().description('basic auth username while requesting metrics').default('admin'),
+                password: Schema.string().role('password').description('basic auth password while requesting metrics').default('admin'),
+                gateway: Schema.string().role('gateway').description('Leave blank to disable push gateway').default(''),
+                collect_rate: Schema.number().role('collect_rate').default(1).description('Collect rate'),
+            }),
         }),
-    }));
+    );
     if (process.env.HYDRO_CLI) return;
     const registry = createRegistry(ctx);
-    ctx.on('metrics', (id, metrics) => { instances[id] = metrics; });
+    ctx.on('metrics', (id, metrics) => {
+        instances[id] = metrics;
+    });
     let pushError = '';
-    ctx.interval(async () => {
-        try {
-            const [gateway, name, pass] = SystemModel.getMany(['prom-client.gateway', 'prom-client.name', 'prom-client.password']);
-            if (gateway) {
-                const prefix = gateway.endsWith('/') ? gateway : `${gateway}/`;
-                const endpoint = `${prefix}metrics/job/hydro-web/instance/${encodeURIComponent(hostname())}:${process.env.NODE_APP_INSTANCE}`;
-                let req = superagent.post(endpoint);
-                if (name) req = req.auth(name, pass, { type: 'basic' });
-                await req.send(await registry.metrics());
-            } else ctx.broadcast('metrics', `${hostname()}/${process.env.NODE_APP_INSTANCE}`, await registry.getMetricsAsJSON());
-            pushError = '';
-        } catch (e) {
-            pushError = e.message;
-        }
-    }, 5000 * (+SystemModel.get('prom-client.collect_rate') || 1));
+    ctx.interval(
+        async () => {
+            try {
+                const [gateway, name, pass] = SystemModel.getMany(['prom-client.gateway', 'prom-client.name', 'prom-client.password']);
+                if (gateway) {
+                    const prefix = gateway.endsWith('/') ? gateway : `${gateway}/`;
+                    const endpoint = `${prefix}metrics/job/hydro-web/instance/${encodeURIComponent(hostname())}:${process.env.NODE_APP_INSTANCE}`;
+                    let req = superagent.post(endpoint);
+                    if (name) req = req.auth(name, pass, { type: 'basic' });
+                    await req.send(await registry.metrics());
+                } else ctx.broadcast('metrics', `${hostname()}/${process.env.NODE_APP_INSTANCE}`, await registry.getMetricsAsJSON());
+                pushError = '';
+            } catch (e) {
+                pushError = e.message;
+            }
+        },
+        5000 * (+SystemModel.get('prom-client.collect_rate') || 1),
+    );
     ctx.inject(['check'], (c) => {
         const gateway = SystemModel.get('prom-client.gateway');
         c.check.addChecker('prom-client', async (_, log, warn, error) => {

@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 import $ from 'jquery';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
@@ -23,16 +22,20 @@ export class Dialog {
     const box: React.CSSProperties = {};
     if (options.width) box.width = box.maxWidth = options.width;
     if (options.height) box.height = box.maxHeight = options.height;
-    this.$dom = $(tpl(
-      <div className={`dialog withBg ${this.options.classes}`} style={{ display: 'none' }}>
-        <div className="dialog__content" style={box}>
-          <div className="dialog__body" style={{ height: 'calc(100% - 45px)' }} />
-          <div className="row"><div className="columns clearfix">
-            <div className="float-right dialog__action" />
-          </div></div>
-        </div>
-      </div>,
-    ));
+    this.$dom = $(
+      tpl(
+        <div className={`dialog withBg ${this.options.classes}`} style={{ display: 'none' }}>
+          <div className="dialog__content" style={box}>
+            <div className="dialog__body" style={{ height: 'calc(100% - 45px)' }} />
+            <div className="row">
+              <div className="columns clearfix">
+                <div className="float-right dialog__action" />
+              </div>
+            </div>
+          </div>
+        </div>,
+      ),
+    );
     this.$dom.on('click', '[data-action]', this.handleActionButton.bind(this));
     this.$dom.on('vjDomDialogShow', this.beforeShow.bind(this));
     this.$dom.on('vjDomDialogHidden', this.afterHide.bind(this));
@@ -127,10 +130,14 @@ export interface Field {
 }
 
 type Result<T extends string, R extends Record<T, Field>> = {
-  [K in keyof R]: R[K]['type'] extends ('text' | 'password' | 'username' | 'domain' | 'textarea') ? string
-    : R[K]['type'] extends 'checkbox' ? boolean
-      : R[K]['type'] extends 'userId' ? number
-        : R[K]['type'] extends 'user' ? any
+  [K in keyof R]: R[K]['type'] extends 'text' | 'password' | 'username' | 'domain' | 'textarea'
+    ? string
+    : R[K]['type'] extends 'checkbox'
+      ? boolean
+      : R[K]['type'] extends 'userId'
+        ? number
+        : R[K]['type'] extends 'user'
+          ? any
           : never;
 };
 
@@ -141,15 +148,16 @@ interface PromptOptions {
 
 export async function prompt<T extends string, R extends Record<T, Field>>(title: string, fields: R, options?: PromptOptions): Promise<Result<T, R>> {
   let valueCache: Result<T, R> = {} as any;
-  const defaultValues = Object.fromEntries(Object.entries(fields)
-    .map(([name, field]: [T, Field]) => {
+  const defaultValues = Object.fromEntries(
+    Object.entries(fields).map(([name, field]: [T, Field]) => {
       let firstOption = '';
       if (field.options) {
         if (Array.isArray(field.options)) firstOption = field.options[0];
         else firstOption = Object.keys(field.options)[0];
       }
       return [name, field.default || firstOption || ''];
-    })) as Result<T, R>;
+    }),
+  ) as Result<T, R>;
 
   const layout: [string, Field][][] = [];
   let pending: [string, Field][] = [];
@@ -171,79 +179,103 @@ export async function prompt<T extends string, R extends Record<T, Field>>(title
       valueCache = values;
     }, [values]);
 
-    return <div>
-      <div className="row"><div className="columns">
-        <h1>{title}</h1>
-      </div></div>
-      {layout.map((i) => <div className="row" key={i[0][0]}>
-        {i.map(([name, field]: [string, Field]) => <div key={name} className={`columns medium-${Math.abs(field.columns || 12)}`}>
-          {field.type === 'textarea' && <label>
-            {field.label}
-            <textarea
-              className="textbox"
-              rows={field.rows || 6}
-              placeholder={field.placeholder}
-              defaultValue={field.default}
-              data-autofocus={field.autofocus}
-              style={{ fontFamily: 'monospace' }}
-              onChange={(e) => setValues({ ...values, [name]: e.target.value })}
-            />
-          </label>}
-          {['text', 'user', 'userId', 'username', 'domain'].includes(field.type) && <label>
-            {field.label}
-            <div className="textbox-container">
-              {['text', 'password'].includes(field.type) && (field.options
-                ? <select
-                  defaultValue={field.default}
-                  className="select"
-                  data-autofocus={field.autofocus}
-                  onChange={(e) => setValues({ ...values, [name]: e.target.value })}
-                >
-                  {Object.entries(field.options).map(([value, label]) => (
-                    <option value={Array.isArray(field.options) ? label : value} key={value}>{label}</option>
-                  ))}
-                </select>
-                : <input
-                  type={field.type}
-                  className="textbox"
-                  data-autofocus={field.autofocus}
-                  defaultValue={field.default}
-                  onChange={(e) => setValues({ ...values, [name]: e.target.value })}
-                />)}
-              {['userId', 'username', 'user'].includes(field.type) && <UserSelectAutoComplete
-                data-autofocus={field.autofocus}
-                multi={field.multi}
-                ref={(el) => { refs.current[name] = el; }}
-                selectedKeys={selected[name]
-                  ? (field.multi
-                    ? String(selected[name]).split(',').filter(Boolean)
-                    : [selected[name].toString()])
-                  : []}
-                onChange={(e) => {
-                  if (e === selected[name]) return;
-                  const items = refs.current[name].getSelectedItems();
-                  const extract = (v) => (field.type === 'username' ? v?.uname : field.type === 'userId' ? v?._id : v);
-                  setValues({ ...values, [name]: field.multi ? items.map(extract) : extract(items[0]) });
-                  setSelected({ ...selected, [name]: e });
-                }}
-              />}
-              {field.type === 'domain' && <DomainSelectAutoComplete
-                data-autofocus={field.autofocus}
-                selectedKeys={values[name] ? [values[name]] : []}
-                onChange={(e) => setValues({ ...values, [name]: e })}
-              />}
-            </div>
-          </label>}
-          {field.type === 'checkbox' && <label className="checkbox">
-            <input
-              type="checkbox"
-              defaultChecked={field.default === 'true'}
-              onChange={(e) => setValues({ ...values, [name]: !!e.target.checked })}
-            />
-            {field.label}
-          </label>}
-        </div>)}</div>)}
-    </div>;
+    return (
+      <div>
+        <div className="row">
+          <div className="columns">
+            <h1>{title}</h1>
+          </div>
+        </div>
+        {layout.map((i) => (
+          <div className="row" key={i[0][0]}>
+            {i.map(([name, field]: [string, Field]) => (
+              <div key={name} className={`columns medium-${Math.abs(field.columns || 12)}`}>
+                {field.type === 'textarea' && (
+                  <label>
+                    {field.label}
+                    <textarea
+                      className="textbox"
+                      rows={field.rows || 6}
+                      placeholder={field.placeholder}
+                      defaultValue={field.default}
+                      data-autofocus={field.autofocus}
+                      style={{ fontFamily: 'monospace' }}
+                      onChange={(e) => setValues({ ...values, [name]: e.target.value })}
+                    />
+                  </label>
+                )}
+                {['text', 'user', 'userId', 'username', 'domain'].includes(field.type) && (
+                  <label>
+                    {field.label}
+                    <div className="textbox-container">
+                      {['text', 'password'].includes(field.type) &&
+                        (field.options ? (
+                          <select
+                            defaultValue={field.default}
+                            className="select"
+                            data-autofocus={field.autofocus}
+                            onChange={(e) => setValues({ ...values, [name]: e.target.value })}
+                          >
+                            {Object.entries(field.options).map(([value, label]) => (
+                              <option value={Array.isArray(field.options) ? label : value} key={value}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type={field.type}
+                            className="textbox"
+                            data-autofocus={field.autofocus}
+                            defaultValue={field.default}
+                            onChange={(e) => setValues({ ...values, [name]: e.target.value })}
+                          />
+                        ))}
+                      {['userId', 'username', 'user'].includes(field.type) && (
+                        <UserSelectAutoComplete
+                          data-autofocus={field.autofocus}
+                          multi={field.multi}
+                          ref={(el) => {
+                            refs.current[name] = el;
+                          }}
+                          selectedKeys={
+                            selected[name] ? (field.multi ? String(selected[name]).split(',').filter(Boolean) : [selected[name].toString()]) : []
+                          }
+                          onChange={(e) => {
+                            if (e === selected[name]) return;
+                            const items = refs.current[name].getSelectedItems();
+                            const extract = (v) => (field.type === 'username' ? v?.uname : field.type === 'userId' ? v?._id : v);
+                            setValues({ ...values, [name]: field.multi ? items.map(extract) : extract(items[0]) });
+                            setSelected({ ...selected, [name]: e });
+                          }}
+                        />
+                      )}
+                      {field.type === 'domain' && (
+                        <DomainSelectAutoComplete
+                          data-autofocus={field.autofocus}
+                          selectedKeys={values[name] ? [values[name]] : []}
+                          onChange={(e) => setValues({ ...values, [name]: e })}
+                        />
+                      )}
+                    </div>
+                  </label>
+                )}
+                {field.type === 'checkbox' && (
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      defaultChecked={field.default === 'true'}
+                      onChange={(e) => setValues({ ...values, [name]: !!e.target.checked })}
+                    />
+                    {field.label}
+                  </label>
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    );
   };
   const div = document.createElement('div');
   const root = ReactDOM.createRoot(div);

@@ -39,13 +39,19 @@ function absoluteThumb(maybeUrl: string | null | undefined): string | null {
 
 export function statusLabel(status: VigilStudentStatus): string {
   switch (status) {
-    case 'locked': return '已锁屏';
-    case 'anomaly': return '异常';
-    case 'offline': return '离线';
-    case 'disconnected': return '未连接';
-    case 'ended': return '已结束';
+    case 'locked':
+      return '已锁屏';
+    case 'anomaly':
+      return '异常';
+    case 'offline':
+      return '离线';
+    case 'disconnected':
+      return '未连接';
+    case 'ended':
+      return '已结束';
     case 'online':
-    default: return '在线';
+    default:
+      return '在线';
   }
 }
 
@@ -87,10 +93,7 @@ const STATUS_STYLES: Record<VigilStudentStatus, { bg: string; dot: string; ring:
 export function StatusPill({ status }: { status: VigilStudentStatus }) {
   const style = STATUS_STYLES[status];
   return (
-    <span className={cn(
-      'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium',
-      style.bg,
-    )}>
+    <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium', style.bg)}>
       <span className={cn('size-1.5 rounded-full', style.dot, status === 'online' && 'animate-pulse')} />
       {statusLabel(status)}
     </span>
@@ -154,7 +157,9 @@ export function StudentCard({ student, onClick, onDoubleClick }: StudentCardProp
               <Activity className="size-3" />
               {formatExamTimeShort(student.examSeconds)}
             </span>
-          ) : <span />}
+          ) : (
+            <span />
+          )}
           {student.eventCount > 0 && (
             <span className="inline-flex items-center gap-0.5 font-medium text-amber-700 dark:text-amber-400">
               <AlertTriangle className="size-3" />

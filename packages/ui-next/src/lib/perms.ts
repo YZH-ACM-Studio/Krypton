@@ -58,10 +58,7 @@ export function canAccessDomainAdmin(userPriv: number): boolean {
  */
 export type AdminAccessLevel = 'systemAdmin' | 'domainAdmin';
 
-export function canSeeAdminAffordance(
-  user: { priv: number; role?: string; signedIn?: boolean },
-  required?: AdminAccessLevel,
-): boolean {
+export function canSeeAdminAffordance(user: { priv: number; role?: string; signedIn?: boolean }, required?: AdminAccessLevel): boolean {
   if (!required) return true;
   if (required === 'systemAdmin') return isSystemAdmin(user.priv);
   if (required === 'domainAdmin') {

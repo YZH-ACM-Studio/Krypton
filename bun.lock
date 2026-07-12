@@ -14,6 +14,7 @@
         "@types/cross-spawn": "^6.0.6",
         "@types/node": "24.10.13",
         "@types/semver": "^7.7.1",
+        "@types/superagent": "^8.1.9",
         "autocannon": "^8.0.0",
         "cac": "^7.0.0",
         "chai": "^6.2.2",
@@ -27,14 +28,17 @@
         "globals": "^17.5.0",
         "globby": "~14.0.2",
         "inspectpack": "^4.7.1",
+        "mongodb": "^7.1.1",
         "mongodb-memory-server": "11.0.1",
         "nyc": "^18.0.0",
         "ora": "^9.3.0",
         "oxlint": "^1.60.0",
         "package-json": "^10.0.1",
         "playwright": "^1.60.0",
+        "prettier": "^3.8.3",
         "semver": "^7.7.4",
         "simple-git": "^3.36.0",
+        "superagent": "^10.3.0",
         "supertest": "^7.2.2",
         "supports-hyperlinks": "^4.4.0",
         "typescript": "5.8.3",
@@ -55,6 +59,10 @@
         "eslint-plugin-react-refresh": "^0.5.2",
         "eslint-plugin-simple-import-sort": "^12.1.1",
         "globals": "^17.5.0",
+        "js-yaml": "^4.1.1",
+      },
+      "devDependencies": {
+        "@types/js-yaml": "^4.0.9",
       },
       "optionalDependencies": {
         "typescript": "^5.9.3",
@@ -67,10 +75,12 @@
       "name": "@hydrooj/framework",
       "version": "0.2.7",
       "dependencies": {
+        "@cordisjs/plugin-timer": "1.1.1",
         "@hydrooj/utils": "workspace:^",
         "@koa/router": "^15.4.0",
         "@mongodb-js/saslprep": "^1.4.8",
         "emoji-regex": "^10.6.0",
+        "formidable": "^3.5.4",
         "fs-extra": "^11.3.4",
         "koa": "^3.2.0",
         "koa-body": "^7.0.1",
@@ -83,6 +93,7 @@
         "ws": "^8.20.0",
       },
       "devDependencies": {
+        "@types/formidable": "^3.5.1",
         "@types/fs-extra": "^11.0.4",
         "@types/koa": "^3.0.2",
         "@types/koa-compress": "^4.0.7",
@@ -109,6 +120,7 @@
       "version": "1.5.4",
       "dependencies": {
         "@hydrooj/register": "workspace:^",
+        "@zip.js/zip.js": "^2.8.26",
         "bson": "^7.0.0",
         "cac": "^7.0.0",
         "fs-extra": "^11.3.4",
@@ -116,10 +128,12 @@
         "moment": "^2.30.0",
         "reggol": "^2.1.0",
         "search-query-parser": "^1.6.0",
+        "superagent": "^10.3.0",
         "systeminformation": "^5.31.5",
       },
       "devDependencies": {
         "@types/fs-extra": "^11.0.4",
+        "@types/superagent": "^8.1.9",
       },
     },
     "packages/a11y": {
@@ -129,6 +143,10 @@
     "packages/blog": {
       "name": "@hydrooj/blog",
       "version": "0.1.0-beta.2",
+      "dependencies": {
+        "hydrooj": "workspace:^",
+        "mongodb": "^7.1.1",
+      },
     },
     "packages/center": {
       "name": "@hydrooj/center",
@@ -213,6 +231,8 @@
         "@opentelemetry/sdk-node": "^0.215.0",
         "@zip.js/zip.js": "^2.8.26",
         "cac": "^7.0.0",
+        "fs-extra": "^11.3.4",
+        "hydrooj": "workspace:^",
         "p-queue": "^9.1.2",
         "schemastery": "^3.18.0",
         "semver": "^7.7.4",
@@ -222,6 +242,7 @@
       },
       "devDependencies": {
         "@types/shell-quote": "^1.7.5",
+        "@types/superagent": "^8.1.9",
         "@types/ws": "^8.18.1",
       },
     },
@@ -253,6 +274,7 @@
         "emojis-list": "2.1.0",
         "fs-extra": "^11.3.4",
         "js-yaml": "^4.1.1",
+        "koa": "^3.2.0",
         "koa-proxies": "^0.12.4",
         "koa-static-cache": "^5.1.4",
         "lodash": "^4.18.1",
@@ -280,6 +302,7 @@
         "@types/babel__code-frame": "^7.27.0",
         "@types/fs-extra": "^11.0.4",
         "@types/js-yaml": "^4.0.9",
+        "@types/koa": "^3.0.2",
         "@types/koa-static-cache": "^5.1.4",
         "@types/lodash": "^4.17.24",
         "@types/mime-types": "^3.0.1",
@@ -304,30 +327,73 @@
     "packages/krypton-announcement": {
       "name": "@hydrooj/krypton-announcement",
       "version": "0.1.0",
+      "dependencies": {
+        "@hydrooj/utils": "workspace:^",
+        "hydrooj": "workspace:^",
+        "mongodb": "^7.1.1",
+      },
     },
     "packages/krypton-mindmap": {
       "name": "@hydrooj/krypton-mindmap",
       "version": "0.1.0",
+      "dependencies": {
+        "@hydrooj/utils": "workspace:^",
+        "hydrooj": "workspace:^",
+        "js-yaml": "^4.1.1",
+        "mongodb": "^7.1.1",
+      },
+      "devDependencies": {
+        "@types/js-yaml": "^4.0.9",
+      },
     },
     "packages/krypton-permits": {
       "name": "@hydrooj/krypton-permits",
       "version": "0.1.0",
+      "dependencies": {
+        "@hydrooj/utils": "workspace:^",
+        "hydrooj": "workspace:^",
+        "mongodb": "^7.1.1",
+      },
     },
     "packages/krypton-rankboard": {
       "name": "@hydrooj/krypton-rankboard",
       "version": "0.1.0",
+      "dependencies": {
+        "@hydrooj/utils": "workspace:^",
+        "hydrooj": "workspace:^",
+        "mongodb": "^7.1.1",
+      },
     },
     "packages/krypton-tasks": {
       "name": "@hydrooj/krypton-tasks",
       "version": "0.1.0",
+      "dependencies": {
+        "@hydrooj/krypton-userbind": "workspace:^",
+        "@hydrooj/utils": "workspace:^",
+        "cordis": "4.0.0-rc.3",
+        "hydrooj": "workspace:^",
+        "mongodb": "^7.1.1",
+      },
     },
     "packages/krypton-userbind": {
       "name": "@hydrooj/krypton-userbind",
       "version": "0.1.0",
+      "dependencies": {
+        "@hydrooj/utils": "workspace:^",
+        "hydrooj": "workspace:^",
+        "mongodb": "^7.1.1",
+      },
     },
     "packages/krypton-vigilguard": {
       "name": "@hydrooj/krypton-vigilguard",
       "version": "0.1.0",
+      "dependencies": {
+        "@hydrooj/utils": "workspace:^",
+        "hydrooj": "workspace:^",
+      },
+      "devDependencies": {
+        "@hydrooj/framework": "workspace:^",
+      },
     },
     "packages/login-with-github": {
       "name": "@hydrooj/login-with-github",
@@ -363,13 +429,17 @@
       "name": "@hydrooj/onsite-toolkit",
       "version": "0.1.0-beta.6",
       "dependencies": {
+        "hydrooj": "workspace:^",
         "lru-cache": "^11.3.5",
+        "moment": "^2.30.1",
       },
     },
     "packages/prom-client": {
       "name": "@hydrooj/prom-client",
       "version": "0.2.0-beta.2",
       "dependencies": {
+        "cordis": "4.0.0-rc.3",
+        "hydrooj": "workspace:^",
         "prom-client": "^15.1.3",
       },
     },
@@ -378,6 +448,8 @@
       "version": "0.0.5-beta.11",
       "dependencies": {
         "@xcpcio/board-app": "^0.84.0",
+        "hydrooj": "workspace:^",
+        "lru-cache": "^11.3.5",
       },
       "devDependencies": {
         "@xcpcio/types": "^0.84.0",
@@ -387,6 +459,8 @@
       "name": "@hydrooj/sonic",
       "version": "1.4.0-beta.0",
       "dependencies": {
+        "cordis": "4.0.0-rc.3",
+        "hydrooj": "workspace:^",
         "sonic-channel": "^1.3.1",
       },
     },
@@ -599,13 +673,20 @@
       "name": "@hydrooj/vjudge",
       "version": "1.10.0-beta.6",
       "dependencies": {
+        "@hydrooj/common": "workspace:^",
         "@hydrooj/utils": "workspace:^",
+        "cordis": "4.0.0-rc.3",
+        "hydrooj": "workspace:^",
+        "js-yaml": "^4.1.1",
         "jsdom": "^29.0.2",
+        "superagent": "^10.3.0",
         "superagent-charset": "^1.2.0",
         "superagent-proxy": "^3.0.0",
       },
       "devDependencies": {
+        "@types/js-yaml": "^4.0.9",
         "@types/jsdom": "^28.0.1",
+        "@types/superagent": "^8.1.9",
         "@types/superagent-proxy": "^3.0.4",
       },
     },

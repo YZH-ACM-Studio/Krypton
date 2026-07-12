@@ -10,8 +10,14 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 
 type R = Record<string, any>;
-interface RegionMeta { id: string, prompt: string }
-interface CaseMeta { input: string, output: string }
+interface RegionMeta {
+  id: string;
+  prompt: string;
+}
+interface CaseMeta {
+  input: string;
+  output: string;
+}
 
 async function responseMessage(response: Response) {
   if (response.status === 409) return '题目结构已锁定或已被其他窗口修改，请重新载入。';
@@ -27,7 +33,7 @@ function move<T>(items: T[], index: number, delta: number) {
   return next;
 }
 
-function CasesEditor({ cases, onChange }: { cases: CaseMeta[], onChange: (cases: CaseMeta[]) => void }) {
+function CasesEditor({ cases, onChange }: { cases: CaseMeta[]; onChange: (cases: CaseMeta[]) => void }) {
   return (
     <section className="space-y-3 border-t border-border/70 pt-5">
       <div className="flex items-center justify-between gap-3">
@@ -35,38 +41,24 @@ function CasesEditor({ cases, onChange }: { cases: CaseMeta[], onChange: (cases:
           <h2 className="text-sm font-semibold">测试数据映射</h2>
           <p className="text-xs text-muted-foreground">填写已上传的输入/输出文件名；发布前服务端会逐一核对。</p>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => onChange([...cases, { input: '', output: '' }])}
-        >
-          <Plus className="size-3.5" />添加测试点
+        <Button type="button" variant="outline" size="sm" onClick={() => onChange([...cases, { input: '', output: '' }])}>
+          <Plus className="size-3.5" />
+          添加测试点
         </Button>
       </div>
       {cases.map((item, index) => (
         <div key={index} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
           <Input
             value={item.input}
-            onChange={(event) => onChange(cases.map((row, i) => (
-              i === index ? { ...row, input: event.target.value } : row
-            )))}
+            onChange={(event) => onChange(cases.map((row, i) => (i === index ? { ...row, input: event.target.value } : row)))}
             placeholder="1.in"
           />
           <Input
             value={item.output}
-            onChange={(event) => onChange(cases.map((row, i) => (
-              i === index ? { ...row, output: event.target.value } : row
-            )))}
+            onChange={(event) => onChange(cases.map((row, i) => (i === index ? { ...row, output: event.target.value } : row)))}
             placeholder="1.out"
           />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => onChange(cases.filter((_, i) => i !== index))}
-            aria-label="删除测试点"
-          >
+          <Button type="button" variant="ghost" size="icon" onClick={() => onChange(cases.filter((_, i) => i !== index))} aria-label="删除测试点">
             <Trash2 className="size-4" />
           </Button>
         </div>
@@ -90,13 +82,11 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const [markerSource, setMarkerSource] = useState(String(initial.markerSource || ''));
   const [regions, setRegions] = useState<RegionMeta[]>(() => {
     if (kind === 'program_fill') return [{ id: 'main', prompt: String(initial.regions?.[0]?.prompt || '') }];
-    return Array.isArray(initial.regions)
-      ? initial.regions.map((item: R) => ({ id: String(item.id || ''), prompt: String(item.prompt || '') }))
-      : [];
+    return Array.isArray(initial.regions) ? initial.regions.map((item: R) => ({ id: String(item.id || ''), prompt: String(item.prompt || '') })) : [];
   });
-  const [cases, setCases] = useState<CaseMeta[]>(() => Array.isArray(initial.cases)
-    ? initial.cases.map((item: R) => ({ input: String(item.input || ''), output: String(item.output || '') }))
-    : []);
+  const [cases, setCases] = useState<CaseMeta[]>(() =>
+    Array.isArray(initial.cases) ? initial.cases.map((item: R) => ({ input: String(item.input || ''), output: String(item.output || '') })) : [],
+  );
   const [saving, setSaving] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [error, setError] = useState('');
@@ -107,16 +97,22 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const [cloneLang, setCloneLang] = useState('');
 
   useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => { if (dirtyRef.current) event.preventDefault(); };
+    const warn = (event: BeforeUnloadEvent) => {
+      if (dirtyRef.current) event.preventDefault();
+    };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, []);
 
-  const structuredConfig = useMemo(() => ({
-    main: kind === 'program_fill' && !compileMode
-      ? { mode: 'text', answer }
-      : { mode: kind === 'program_fill' ? 'compile' : 'function', lang, markerSource, regions, cases },
-  }), [answer, cases, compileMode, kind, lang, markerSource, regions]);
+  const structuredConfig = useMemo(
+    () => ({
+      main:
+        kind === 'program_fill' && !compileMode
+          ? { mode: 'text', answer }
+          : { mode: kind === 'program_fill' ? 'compile' : 'function', lang, markerSource, regions, cases },
+    }),
+    [answer, cases, compileMode, kind, lang, markerSource, regions],
+  );
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -155,8 +151,11 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
         body: new URLSearchParams({
-          operation: 'copy', pids: String(pdoc.docId), target: String(bs.domain.id),
-          hidden: 'true', cloneLang,
+          operation: 'copy',
+          pids: String(pdoc.docId),
+          target: String(bs.domain.id),
+          hidden: 'true',
+          cloneLang,
         }),
       });
       if (!response.ok) throw new Error(await responseMessage(response));
@@ -173,7 +172,9 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
     <main className="mx-auto w-full max-w-6xl space-y-5 pb-10">
       <header className="flex flex-wrap items-center gap-3 border-b border-border/70 pb-4">
         <Button asChild variant="ghost" size="icon" className="size-11">
-          <a href={isCreate ? '/problem/create' : `/p/${pid}`} aria-label="返回"><ArrowLeft className="size-4" /></a>
+          <a href={isCreate ? '/problem/create' : `/p/${pid}`} aria-label="返回">
+            <ArrowLeft className="size-4" />
+          </a>
         </Button>
         <div className="min-w-0 flex-1">
           <p className="text-xs text-muted-foreground">代码评测单题编辑器</p>
@@ -182,27 +183,32 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           </h1>
         </div>
         <Button type="submit" form="structured-code-form" disabled={saving} className="min-h-11 gap-1.5">
-          <Save className="size-4" />{saving ? '保存中…' : '保存'}
+          <Save className="size-4" />
+          {saving ? '保存中…' : '保存'}
         </Button>
       </header>
 
       {locked ? (
-        <p className="border-y border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">
-          结构已锁定；仅可修改标题、标签和可见性。
-        </p>
+        <p className="border-y border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">结构已锁定；仅可修改标题、标签和可见性。</p>
       ) : null}
       {error ? (
-        <p role="alert" className="border-y border-destructive/40 px-3 py-3 text-sm text-destructive">{error}</p>
+        <p role="alert" className="border-y border-destructive/40 px-3 py-3 text-sm text-destructive">
+          {error}
+        </p>
       ) : null}
 
       <form
         id="structured-code-form"
         method="post"
         onSubmit={submit}
-        onChange={() => { dirtyRef.current = true; }}
+        onChange={() => {
+          dirtyRef.current = true;
+        }}
         className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_19rem]"
       >
-        {locked ? <input type="hidden" name="metadataOnly" value="true" /> : (
+        {locked ? (
+          <input type="hidden" name="metadataOnly" value="true" />
+        ) : (
           <>
             <input type="hidden" name="editorProblemKind" value={kind} />
             <input type="hidden" name="structuredConfig" value={JSON.stringify(structuredConfig)} />
@@ -223,7 +229,10 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                 value={mode}
                 onValueChange={(value) => setMode(value as 'text' | 'compile')}
                 disabled={!isCreate}
-                options={[{ value: 'text', label: '文本比对' }, { value: 'compile', label: '拼接编译' }]}
+                options={[
+                  { value: 'text', label: '文本比对' },
+                  { value: 'compile', label: '拼接编译' },
+                ]}
               />
               {!isCreate ? <p className="text-xs text-muted-foreground">评测方式创建后不可切换。</p> : null}
             </section>
@@ -232,20 +241,14 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           {!compileMode ? (
             <section className="space-y-2 border-t border-border/70 pt-5">
               <h2 className="text-sm font-semibold">标准答案（单行）</h2>
-              <Input
-                value={answer}
-                onChange={(event) => setAnswer(event.target.value.replace(/[\r\n]/g, ''))}
-                className="font-mono"
-              />
+              <Input value={answer} onChange={(event) => setAnswer(event.target.value.replace(/[\r\n]/g, ''))} className="font-mono" />
             </section>
           ) : (
             <>
               <section className="space-y-3 border-t border-border/70 pt-5">
                 <div>
                   <h2 className="text-sm font-semibold">语言与完整模板</h2>
-                  <p className="text-xs text-muted-foreground">
-                    语言创建后不可修改。用成对 marker 标记学生填写区域，marker 行不会进入编译源码。
-                  </p>
+                  <p className="text-xs text-muted-foreground">语言创建后不可修改。用成对 marker 标记学生填写区域，marker 行不会进入编译源码。</p>
                 </div>
                 <SimpleSelect
                   value={lang}
@@ -274,12 +277,10 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => setRegions([
-                        ...regions,
-                        { id: `region${regions.length + 1}`, prompt: '' },
-                      ])}
+                      onClick={() => setRegions([...regions, { id: `region${regions.length + 1}`, prompt: '' }])}
                     >
-                      <Plus className="size-3.5" />添加
+                      <Plus className="size-3.5" />
+                      添加
                     </Button>
                   ) : null}
                 </div>
@@ -288,41 +289,31 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                     <Input
                       value={region.id}
                       disabled={kind === 'program_fill'}
-                      onChange={(event) => setRegions(regions.map((item, i) => (
-                        i === index ? { ...item, id: event.target.value } : item
-                      )))}
+                      onChange={(event) => setRegions(regions.map((item, i) => (i === index ? { ...item, id: event.target.value } : item)))}
                       className="font-mono"
                     />
                     <Input
                       value={region.prompt}
-                      onChange={(event) => setRegions(regions.map((item, i) => (
-                        i === index ? { ...item, prompt: event.target.value } : item
-                      )))}
+                      onChange={(event) => setRegions(regions.map((item, i) => (i === index ? { ...item, prompt: event.target.value } : item)))}
                       placeholder="函数签名或填写说明"
                     />
                     {kind === 'function' ? (
                       <div className="flex">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setRegions(move(regions, index, -1))}
-                          aria-label="上移"
-                        ><ArrowUp className="size-4" /></Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setRegions(move(regions, index, 1))}
-                          aria-label="下移"
-                        ><ArrowDown className="size-4" /></Button>
+                        <Button type="button" variant="ghost" size="icon" onClick={() => setRegions(move(regions, index, -1))} aria-label="上移">
+                          <ArrowUp className="size-4" />
+                        </Button>
+                        <Button type="button" variant="ghost" size="icon" onClick={() => setRegions(move(regions, index, 1))} aria-label="下移">
+                          <ArrowDown className="size-4" />
+                        </Button>
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
                           onClick={() => setRegions(regions.filter((_, i) => i !== index))}
                           aria-label="删除"
-                        ><Trash2 className="size-4" /></Button>
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
                       </div>
                     ) : null}
                   </div>
@@ -344,12 +335,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           </label>
           <label className="block space-y-1.5">
             <span className="text-xs font-medium">题目编号</span>
-            <Input
-              name="pid"
-              defaultValue={typeof pdoc.pid === 'string' ? pdoc.pid : ''}
-              placeholder="留空自动分配"
-              disabled={locked}
-            />
+            <Input name="pid" defaultValue={typeof pdoc.pid === 'string' ? pdoc.pid : ''} placeholder="留空自动分配" disabled={locked} />
           </label>
           <label className="block space-y-1.5">
             <span className="text-xs font-medium">标签</span>
@@ -357,16 +343,11 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           </label>
           <label className="block space-y-1.5">
             <span className="text-xs font-medium">难度 1–10</span>
-            <Input
-              name="difficulty"
-              type="number"
-              min={1}
-              max={10}
-              defaultValue={pdoc.difficulty || ''}
-              disabled={locked}
-            />
+            <Input name="difficulty" type="number" min={1} max={10} defaultValue={pdoc.difficulty || ''} disabled={locked} />
           </label>
-          {isCreate ? <p className="border-y py-3 text-xs text-muted-foreground">新题首次保存固定为隐藏。</p> : (
+          {isCreate ? (
+            <p className="border-y py-3 text-xs text-muted-foreground">新题首次保存固定为隐藏。</p>
+          ) : (
             <label className="flex min-h-11 items-center gap-2 border-y py-2 text-sm">
               <Checkbox name="hidden" defaultChecked={!!pdoc.hidden} />
               <span>隐藏题目</span>
@@ -375,28 +356,19 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           {compileMode && !isCreate ? (
             <div className="space-y-2 border-y py-3 text-xs text-muted-foreground">
               <p>测试数据文件：{(data.testdata || []).length} 个</p>
-              <Button asChild variant="outline" size="sm"><a href={`/p/${pid}/files`}>管理测试数据</a></Button>
+              <Button asChild variant="outline" size="sm">
+                <a href={`/p/${pid}/files`}>管理测试数据</a>
+              </Button>
             </div>
           ) : null}
           {compileMode && !isCreate && cloneLangOptions.length ? (
             <div className="space-y-2 border-y py-3">
               <p className="text-xs font-medium">克隆为其他语言</p>
-              <SimpleSelect
-                value={cloneLang}
-                onValueChange={setCloneLang}
-                options={[{ value: '', label: '选择目标语言' }, ...cloneLangOptions]}
-              />
-              <p className="text-xs text-muted-foreground">
-                新题保持隐藏并物理复制测试数据；进入新题后再改写目标语言模板。
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={cloning || !cloneLang}
-                onClick={cloneForLanguage}
-              >
-                <Copy className="size-3.5" />{cloning ? '克隆中…' : '创建语言副本'}
+              <SimpleSelect value={cloneLang} onValueChange={setCloneLang} options={[{ value: '', label: '选择目标语言' }, ...cloneLangOptions]} />
+              <p className="text-xs text-muted-foreground">新题保持隐藏并物理复制测试数据；进入新题后再改写目标语言模板。</p>
+              <Button type="button" variant="outline" size="sm" disabled={cloning || !cloneLang} onClick={cloneForLanguage}>
+                <Copy className="size-3.5" />
+                {cloning ? '克隆中…' : '创建语言副本'}
               </Button>
             </div>
           ) : null}

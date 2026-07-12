@@ -19,10 +19,7 @@
 import { Logger } from '@hydrooj/utils';
 import type { Context } from 'hydrooj';
 import { db, ObjectId, oncePerSetting } from 'hydrooj';
-import {
-    bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl,
-    userGroupsColl,
-} from './db';
+import { bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl, userGroupsColl } from './db';
 import { deriveEnrollmentYear } from './model';
 
 const logger = new Logger('userbind.migration');
@@ -120,7 +117,9 @@ async function migrateSchools(domainId: string): Promise<Map<string, ObjectId>> 
             const realName = (member.realName || '').toString().trim();
             if (!studentId || !realName) continue;
             const existingStudent = await studentsColl.findOne({
-                domainId, schoolId: newId, studentId,
+                domainId,
+                schoolId: newId,
+                studentId,
             });
             if (existingStudent) continue;
             await studentsColl.insertOne({
@@ -143,7 +142,8 @@ async function migrateSchools(domainId: string): Promise<Map<string, ObjectId>> 
 }
 
 async function migrateUserGroups(
-    domainId: string, schoolMap: Map<string, ObjectId>,
+    domainId: string,
+    schoolMap: Map<string, ObjectId>,
 ): Promise<{
     groupMap: Map<string, ObjectId>;
     contestOnlyGroups: Array<{ legacyId: string; name: string; studentIds: string[] }>;
@@ -192,7 +192,7 @@ async function migrateUserGroups(
             const studentId = (member.studentId || '').toString().trim();
             const realName = (member.realName || '').toString().trim();
             if (!studentId || !realName) continue;
-            let student = await studentsColl.findOne({ domainId, schoolId, studentId });
+            const student = await studentsColl.findOne({ domainId, schoolId, studentId });
             if (!student) {
                 const sid = new ObjectId();
                 await studentsColl.insertOne({
@@ -209,10 +209,7 @@ async function migrateUserGroups(
                     createdBy: old.createdBy || 1,
                 });
             } else if (!student.groupIds.some((g) => g.equals(newId))) {
-                await studentsColl.updateOne(
-                    { _id: student._id },
-                    { $addToSet: { groupIds: newId } as any },
-                );
+                await studentsColl.updateOne({ _id: student._id }, { $addToSet: { groupIds: newId } as any });
             }
         }
     }
@@ -220,9 +217,7 @@ async function migrateUserGroups(
     return { groupMap, contestOnlyGroups };
 }
 
-async function migrateBindTokens(
-    domainId: string, schoolMap: Map<string, ObjectId>, groupMap: Map<string, ObjectId>,
-): Promise<number> {
+async function migrateBindTokens(domainId: string, schoolMap: Map<string, ObjectId>, groupMap: Map<string, ObjectId>): Promise<number> {
     let count = 0;
     const legacyColl = db.collection<LegacyBindToken>('bind_tokens' as any);
     const cursor = legacyColl.find({});
@@ -241,15 +236,14 @@ async function migrateBindTokens(
         if (!knownSchool && !knownGroup) continue;
         // Heuristic: pick the first student in the school/group as the bind target.
         // Operator can revoke + re-issue precise tokens after migration.
-        const schoolId = knownSchool || (await (async () => {
-            const g = await userGroupsColl.findOne({ _id: knownGroup });
-            return g?.schoolId;
-        })());
+        const schoolId =
+            knownSchool ||
+            (await (async () => {
+                const g = await userGroupsColl.findOne({ _id: knownGroup });
+                return g?.schoolId;
+            })());
         if (!schoolId) continue;
-        const sampleStudent = await studentsColl.findOne(
-            { domainId, schoolId, boundUserId: null },
-            { sort: { studentId: 1 } },
-        );
+        const sampleStudent = await studentsColl.findOne({ domainId, schoolId, boundUserId: null }, { sort: { studentId: 1 } });
         if (!sampleStudent) continue;
         await bindTokensColl.insertOne({
             _id: old._id,
@@ -269,9 +263,7 @@ async function migrateBindTokens(
     return count;
 }
 
-async function migrateBindingRequests(
-    domainId: string, schoolMap: Map<string, ObjectId>,
-): Promise<number> {
+async function migrateBindingRequests(domainId: string, schoolMap: Map<string, ObjectId>): Promise<number> {
     let count = 0;
     const legacyColl = db.collection<LegacyBindingRequest>('binding_requests' as any);
     const cursor = legacyColl.find({});
@@ -333,7 +325,7 @@ async function migrateV1(_ctx: Context): Promise<boolean> {
             await global.Hydro.model.system.set('userbind.migration_v1_contest_groups_csv', csvLines.join('\n'));
             logger.warn(
                 'Found %d contest-only legacy groups (groupType=1). Operator must map each to a real ' +
-                'contest. CSV saved to global.Hydro.model.system.settings key userbind.migration_v1_contest_groups_csv',
+                    'contest. CSV saved to global.Hydro.model.system.settings key userbind.migration_v1_contest_groups_csv',
                 contestOnlyGroups.length,
             );
         }
@@ -344,20 +336,17 @@ async function migrateV1(_ctx: Context): Promise<boolean> {
  * V2: Backfill `kind: 'student'` on all bind_tokens that predate the kind
  * discriminator, and `sourceTokenId/targetUserGroupId: null` on binding_requests.
  */
-async function migrateV2(_ctx: Context): Promise<void> {
+async function migrateV2(_ctx: Context): Promise<boolean> {
     const V2_FLAG = 'userbind.migration_v2_done';
     return await oncePerSetting(V2_FLAG, async () => {
-        const tokRes = await bindTokensColl.updateMany(
-            { kind: { $exists: false } } as any,
-            { $set: { kind: 'student' } as any },
-        );
-        const reqRes = await bindingRequestsColl.updateMany(
-            { sourceTokenId: { $exists: false } } as any,
-            { $set: { sourceTokenId: null, targetUserGroupId: null } as any },
-        );
+        const tokRes = await bindTokensColl.updateMany({ kind: { $exists: false } } as any, { $set: { kind: 'student' } as any });
+        const reqRes = await bindingRequestsColl.updateMany({ sourceTokenId: { $exists: false } } as any, {
+            $set: { sourceTokenId: null, targetUserGroupId: null } as any,
+        });
         logger.info(
             'v2 backfill: %d tokens tagged kind=student, %d requests got sourceTokenId/targetUserGroupId',
-            tokRes.modifiedCount || 0, reqRes.modifiedCount || 0,
+            tokRes.modifiedCount || 0,
+            reqRes.modifiedCount || 0,
         );
     });
 }
@@ -368,7 +357,7 @@ async function migrateV2(_ctx: Context): Promise<void> {
  * studentId — `240340179` → 2024. If the prefix isn't two digits, store
  * `null` so admins can override individually in the student detail view.
  */
-async function migrateV3(_ctx: Context): Promise<void> {
+async function migrateV3(_ctx: Context): Promise<boolean> {
     const V3_FLAG = 'userbind.migration_v3_done';
     return await oncePerSetting(V3_FLAG, async () => {
         const cursor = studentsColl.find({ enrollmentYear: { $exists: false } as any });
@@ -376,18 +365,12 @@ async function migrateV3(_ctx: Context): Promise<void> {
         let nullCount = 0;
         for await (const s of cursor) {
             const yy = (s.studentId || '').slice(0, 2);
-            const year = /^\d{2}$/.test(yy) ? 2000 + parseInt(yy, 10) : null;
-            await studentsColl.updateOne(
-                { _id: s._id },
-                { $set: { enrollmentYear: year } },
-            );
+            const year = /^\d{2}$/.test(yy) ? 2000 + Number.parseInt(yy, 10) : null;
+            await studentsColl.updateOne({ _id: s._id }, { $set: { enrollmentYear: year } });
             updated++;
             if (year === null) nullCount++;
         }
-        logger.info(
-            'v3 enrollmentYear backfill: %d students updated, %d ended up null (admin should review)',
-            updated, nullCount,
-        );
+        logger.info('v3 enrollmentYear backfill: %d students updated, %d ended up null (admin should review)', updated, nullCount);
     });
 }
 

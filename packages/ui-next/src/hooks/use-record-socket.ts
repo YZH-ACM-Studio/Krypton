@@ -27,19 +27,17 @@ export interface UseRecordSocketOptions {
   disabled?: boolean;
 }
 
-export function useRecordSocket({
-  path = '/record-conn',
-  filters,
-  onRdoc,
-  onError,
-  disabled,
-}: UseRecordSocketOptions) {
+export function useRecordSocket({ path = '/record-conn', filters, onRdoc, onError, disabled }: UseRecordSocketOptions) {
   // Latest callbacks captured in refs so re-renders don't re-open the
   // socket merely because the closure changed.
   const onRdocRef = useRef(onRdoc);
   const onErrorRef = useRef(onError);
-  useEffect(() => { onRdocRef.current = onRdoc; }, [onRdoc]);
-  useEffect(() => { onErrorRef.current = onError; }, [onError]);
+  useEffect(() => {
+    onRdocRef.current = onRdoc;
+  }, [onRdoc]);
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
 
   // Stringify filters into a stable dep so React knows when to reconnect.
   const filterKey = stableFilterKey(filters);
@@ -71,7 +69,11 @@ export function useRecordSocket({
       }
       ws.onmessage = (e) => {
         let payload: any;
-        try { payload = JSON.parse(e.data); } catch { return; }
+        try {
+          payload = JSON.parse(e.data);
+        } catch {
+          return;
+        }
         if (payload && payload.rdoc) {
           onRdocRef.current(payload.rdoc);
         }
@@ -97,11 +99,13 @@ export function useRecordSocket({
       clearTimeout(retryTimer);
       ws?.close();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, filterKey, disabled]);
 }
 
 function stableFilterKey(filters?: Record<string, any>): string {
   if (!filters) return '';
-  return Object.keys(filters).sort().map((k) => `${k}=${String(filters[k] ?? '')}`).join('&');
+  return Object.keys(filters)
+    .sort()
+    .map((k) => `${k}=${String(filters[k] ?? '')}`)
+    .join('&');
 }

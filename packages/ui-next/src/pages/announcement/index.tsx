@@ -8,11 +8,7 @@
  *   admin_announce_categories.html → AdminAnnounceCategoriesPage
  */
 import { useMemo, useState } from 'react';
-import {
-  ArrowUpDown, Calendar,
-  Eye, EyeOff, GripVertical, Megaphone, Pencil, Pin, PinOff,
-  Plus, Save, Tag, Trash2,
-} from 'lucide-react';
+import { ArrowUpDown, Calendar, Eye, EyeOff, GripVertical, Megaphone, Pencil, Pin, PinOff, Plus, Save, Tag, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -40,8 +36,22 @@ registerAdminNavSection({
   order: 22,
   requiredAccess: 'domainAdmin',
   items: [
-    { key: 'list', label: '公告列表', href: '/admin/announce', icon: Megaphone, templateNames: ['admin_announce_list.html'], requiredAccess: 'domainAdmin' },
-    { key: 'categories', label: '分类管理', href: '/admin/announce/categories', icon: Tag, templateNames: ['admin_announce_categories.html'], requiredPriv: PRIV.PRIV_EDIT_SYSTEM },
+    {
+      key: 'list',
+      label: '公告列表',
+      href: '/admin/announce',
+      icon: Megaphone,
+      templateNames: ['admin_announce_list.html'],
+      requiredAccess: 'domainAdmin',
+    },
+    {
+      key: 'categories',
+      label: '分类管理',
+      href: '/admin/announce/categories',
+      icon: Tag,
+      templateNames: ['admin_announce_categories.html'],
+      requiredPriv: PRIV.PRIV_EDIT_SYSTEM,
+    },
   ],
 });
 
@@ -83,18 +93,17 @@ const COLOR_CLASSES: Record<string, string> = {
   sky: 'bg-sky-100 text-sky-900 border-sky-300 dark:bg-sky-950/40 dark:text-sky-200 dark:border-sky-700/50',
 };
 
-function CategoryChip({ category, size = 'sm' }: {
-  category: { name: string; color: string } | undefined;
-  size?: 'sm' | 'md';
-}) {
+function CategoryChip({ category, size = 'sm' }: { category: { name: string; color: string } | undefined; size?: 'sm' | 'md' }) {
   if (!category) return null;
   const colorClass = COLOR_CLASSES[category.color] || COLOR_CLASSES.gray;
   return (
-    <span className={cn(
-      'inline-flex items-center rounded-md border font-medium',
-      size === 'sm' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs',
-      colorClass,
-    )}>
+    <span
+      className={cn(
+        'inline-flex items-center rounded-md border font-medium',
+        size === 'sm' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs',
+        colorClass,
+      )}
+    >
       {category.name}
     </span>
   );
@@ -154,10 +163,7 @@ export function AnnounceListPage() {
           if (currentSort === 'asc') q.push('sort=asc');
           window.location.href = q.length ? `/announce?${q.join('&')}` : '/announce';
         }}
-        items={[
-          { value: 'all', label: '全部' },
-          ...data.categories.map((c) => ({ value: c.key, label: c.name })),
-        ]}
+        items={[{ value: 'all', label: '全部' }, ...data.categories.map((c) => ({ value: c.key, label: c.name }))]}
       />
 
       <Card>
@@ -170,10 +176,7 @@ export function AnnounceListPage() {
                 const cat = catMap.get(doc.category);
                 return (
                   <li key={doc._id}>
-                    <a
-                      href={`/announce/${doc._id}`}
-                      className="flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-accent/40"
-                    >
+                    <a href={`/announce/${doc._id}`} className="flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-accent/40">
                       {doc.pin ? <Pin className="size-3.5 shrink-0 text-amber-600" /> : <span className="size-3.5 shrink-0" />}
                       <CategoryChip category={cat} />
                       <span className="flex-1 truncate text-sm font-medium">{doc.title}</span>
@@ -275,14 +278,14 @@ export function AdminAnnounceListPage() {
 
   return (
     <AdminPage
-      title={(
+      title={
         <div className="flex items-center gap-2">
           <Megaphone className="size-5 text-primary" />
           <h1 className="text-xl font-semibold">公告管理</h1>
         </div>
-      )}
+      }
       bypassPrivGate
-      actions={(
+      actions={
         <div className="flex gap-2">
           <Button variant="outline" onClick={handleSaveOrder} className="gap-1">
             <Save className="size-3.5" />
@@ -295,7 +298,7 @@ export function AdminAnnounceListPage() {
             </a>
           </Button>
         </div>
-      )}
+      }
     >
       <Card>
         <CardContent className="p-0">
@@ -319,8 +322,12 @@ export function AdminAnnounceListPage() {
                   <TableRow
                     key={doc._id}
                     draggable
-                    onDragStart={() => { dragRef[1](doc._id); }}
-                    onDragOver={(e) => { e.preventDefault(); }}
+                    onDragStart={() => {
+                      dragRef[1](doc._id);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                    }}
                     onDrop={(e) => {
                       e.preventDefault();
                       const from = dragRef[0];
@@ -337,15 +344,15 @@ export function AdminAnnounceListPage() {
                     <TableCell className="pl-5">
                       <GripVertical className="size-3.5 cursor-grab text-muted-foreground" />
                     </TableCell>
-                    <TableCell>
-                      {doc.pin ? <Pin className="size-4 text-amber-600" /> : null}
-                    </TableCell>
+                    <TableCell>{doc.pin ? <Pin className="size-4 text-amber-600" /> : null}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="text-[10px]">
                         {doc.scope === 'global' ? '全局' : '当前域'}
                       </Badge>
                     </TableCell>
-                    <TableCell><CategoryChip category={cat} /></TableCell>
+                    <TableCell>
+                      <CategoryChip category={cat} />
+                    </TableCell>
                     <TableCell className="text-sm font-medium">
                       <a href={`/announce/${doc._id}`} className="hover:text-primary">
                         {doc.title}
@@ -366,7 +373,9 @@ export function AdminAnnounceListPage() {
                           定时
                         </Badge>
                       ) : doc.unpublishAt && new Date(doc.unpublishAt) <= new Date() ? (
-                        <Badge variant="outline" className="gap-0.5 text-[10px]">已下线</Badge>
+                        <Badge variant="outline" className="gap-0.5 text-[10px]">
+                          已下线
+                        </Badge>
                       ) : (
                         <Badge variant="secondary" className="gap-0.5 text-[10px]">
                           <Eye className="size-2.5" />
@@ -376,7 +385,9 @@ export function AdminAnnounceListPage() {
                     </TableCell>
                     <TableCell className="pr-5">
                       <TableActions>
-                        <TableAction href={`/admin/announce/${doc._id}/edit`} icon={Pencil}>编辑</TableAction>
+                        <TableAction href={`/admin/announce/${doc._id}/edit`} icon={Pencil}>
+                          编辑
+                        </TableAction>
                         <TableAction
                           formAction={`/admin/announce/${doc._id}/edit`}
                           hidden={{ operation: 'update', aid: doc._id, pin: doc.pin ? 'false' : 'true' }}
@@ -409,7 +420,6 @@ export function AdminAnnounceListPage() {
           </Table>
         </CardContent>
       </Card>
-
     </AdminPage>
   );
 }
@@ -433,29 +443,27 @@ export function AdminAnnounceEditorPage() {
   const [scope, setScope] = useState<'global' | 'domain'>(data.doc?.scope || 'domain');
   const [pin, setPin] = useState(!!data.doc?.pin);
   const [hidden, setHidden] = useState(!!data.doc?.hidden);
-  const [publishAt, setPublishAt] = useState(data.doc?.publishAt
-    ? new Date(data.doc.publishAt).toISOString().slice(0, 16)
-    : new Date().toISOString().slice(0, 16));
-  const [unpublishAt, setUnpublishAt] = useState(data.doc?.unpublishAt
-    ? new Date(data.doc.unpublishAt).toISOString().slice(0, 16)
-    : '');
+  const [publishAt, setPublishAt] = useState(
+    data.doc?.publishAt ? new Date(data.doc.publishAt).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
+  );
+  const [unpublishAt, setUnpublishAt] = useState(data.doc?.unpublishAt ? new Date(data.doc.unpublishAt).toISOString().slice(0, 16) : '');
 
   return (
     <AdminPage
-      title={(
+      title={
         <div className="flex items-center gap-2">
           <Megaphone className="size-5 text-primary" />
           <h1 className="text-xl font-semibold">{isNew ? '新建公告' : '编辑公告'}</h1>
         </div>
-      )}
+      }
       bypassPrivGate
-      actions={(
+      actions={
         <div className="flex gap-2">
           <Button asChild variant="ghost">
             <a href="/admin/announce">返回列表</a>
           </Button>
         </div>
-      )}
+      }
     >
       <Card>
         <CardContent className="p-6">
@@ -487,24 +495,31 @@ export function AdminAnnounceEditorPage() {
                   onValueChange={(v) => setScope(v as 'global' | 'domain')}
                   disabled={!isNew}
                   className="max-w-md"
-                  options={[
-                    { value: 'domain', label: '当前域' },
-                    ...(data.canEditGlobal ? [{ value: 'global', label: '全局（全 OJ）' }] : []),
-                  ]}
+                  options={[{ value: 'domain', label: '当前域' }, ...(data.canEditGlobal ? [{ value: 'global', label: '全局（全 OJ）' }] : [])]}
                 />
               </FormField>
             </FormRow>
 
             <FormRow columns={2}>
               <FormField label="发布时间" htmlFor="ann-pub">
-                <Input id="ann-pub" name="publishAt" type="datetime-local"
-                  value={publishAt} onChange={(e) => setPublishAt(e.target.value)}
-                  className="max-w-md" />
+                <Input
+                  id="ann-pub"
+                  name="publishAt"
+                  type="datetime-local"
+                  value={publishAt}
+                  onChange={(e) => setPublishAt(e.target.value)}
+                  className="max-w-md"
+                />
               </FormField>
               <FormField label="下线时间（可选）" htmlFor="ann-unpub">
-                <Input id="ann-unpub" name="unpublishAt" type="datetime-local"
-                  value={unpublishAt} onChange={(e) => setUnpublishAt(e.target.value)}
-                  className="max-w-md" />
+                <Input
+                  id="ann-unpub"
+                  name="unpublishAt"
+                  type="datetime-local"
+                  value={unpublishAt}
+                  onChange={(e) => setUnpublishAt(e.target.value)}
+                  className="max-w-md"
+                />
               </FormField>
             </FormRow>
 
@@ -564,19 +579,19 @@ export function AdminAnnounceCategoriesPage() {
 
   return (
     <AdminPage
-      title={(
+      title={
         <div className="flex items-center gap-2">
           <Tag className="size-5 text-primary" />
           <h1 className="text-xl font-semibold">公告分类</h1>
         </div>
-      )}
+      }
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
-      actions={(
+      actions={
         <Button onClick={() => setCreating(true)} className="gap-1">
           <Plus className="size-3.5" />
           新增分类
         </Button>
-      )}
+      }
     >
       <Card>
         <CardContent className="p-0">
@@ -603,16 +618,23 @@ export function AdminAnnounceCategoriesPage() {
                   <TableCell className="text-xs text-muted-foreground">{c.color}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{c.order}</TableCell>
                   <TableCell>
-                    {c.builtin && <Badge variant="secondary" className="text-[10px]">内建</Badge>}
+                    {c.builtin && (
+                      <Badge variant="secondary" className="text-[10px]">
+                        内建
+                      </Badge>
+                    )}
                   </TableCell>
                   <TableCell className="pr-5">
                     <TableActions>
-                      <TableAction onClick={() => setEditing(c)} icon={Pencil}>编辑</TableAction>
+                      <TableAction onClick={() => setEditing(c)} icon={Pencil}>
+                        编辑
+                      </TableAction>
                       {!c.builtin && (
                         <TableAction
                           formAction="/admin/announce/categories"
                           hidden={{ operation: 'delete', key: c.key }}
-                          icon={Trash2} variant="destructive"
+                          icon={Trash2}
+                          variant="destructive"
                           confirm="确定删除分类？"
                         >
                           删除
@@ -630,16 +652,17 @@ export function AdminAnnounceCategoriesPage() {
       {(creating || editing) && (
         <CategoryEditorDialog
           category={editing}
-          onClose={() => { setEditing(null); setCreating(false); }}
+          onClose={() => {
+            setEditing(null);
+            setCreating(false);
+          }}
         />
       )}
     </AdminPage>
   );
 }
 
-function CategoryEditorDialog({
-  category, onClose,
-}: { category: Category | null; onClose: () => void }) {
+function CategoryEditorDialog({ category, onClose }: { category: Category | null; onClose: () => void }) {
   const isNew = !category;
   const [key, setKey] = useState(category?.key || '');
   const [name, setName] = useState(category?.name || '');
@@ -650,7 +673,9 @@ function CategoryEditorDialog({
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="w-full sm:w-[480px]" onClose={onClose}>
-        <DialogHeader><DialogTitle>{isNew ? '新增分类' : '编辑分类'}</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>{isNew ? '新增分类' : '编辑分类'}</DialogTitle>
+        </DialogHeader>
         <form method="post" action="/admin/announce/categories" className="flex flex-col">
           <input type="hidden" name="operation" value="upsert" />
           <div className="space-y-4 p-5">
@@ -670,18 +695,17 @@ function CategoryEditorDialog({
                   value={color}
                   onValueChange={setColor}
                   options={['gray', 'amber', 'blue', 'purple', 'green', 'rose', 'sky'].map((c) => ({
-                    value: c, label: c,
+                    value: c,
+                    label: c,
                   }))}
                 />
               </FormField>
               <FormField label="排序" htmlFor="cat-order">
-                <Input id="cat-order" name="order" type="number" value={order}
-                  onChange={(e) => setOrder(Number(e.target.value) || 100)} />
+                <Input id="cat-order" name="order" type="number" value={order} onChange={(e) => setOrder(Number(e.target.value) || 100)} />
               </FormField>
             </FormRow>
             <label className="flex items-center gap-2 text-sm">
-              <Checkbox name="hidden" value="true"
-                checked={hidden} onChange={(e) => setHidden(e.target.checked)}  />
+              <Checkbox name="hidden" value="true" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
               隐藏（仍可用于已有公告，但不出现在新建下拉里）
             </label>
             <div className="rounded-md border bg-muted/30 p-3">
@@ -690,7 +714,9 @@ function CategoryEditorDialog({
             </div>
           </div>
           <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
-            <Button type="button" variant="ghost" onClick={onClose}>取消</Button>
+            <Button type="button" variant="ghost" onClick={onClose}>
+              取消
+            </Button>
             <Button type="submit">保存</Button>
           </div>
         </form>

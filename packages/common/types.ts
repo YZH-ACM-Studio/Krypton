@@ -1,7 +1,9 @@
-export type CompilableSource = string | {
-    file: string;
-    lang: string;
-};
+export type CompilableSource =
+    | string
+    | {
+          file: string;
+          lang: string;
+      };
 
 export enum ProblemType {
     Default = 'default',
@@ -41,20 +43,24 @@ export type QuestionKind = 'single' | 'multi' | 'blank' | 'fill_program' | 'subj
  */
 export type AnswerEntry =
     | [string | string[], number]
-    | [string | string[], number, {
-        kind?: QuestionKind;
-        prompt?: string;
-        /** @deprecated legacy alias of `kind` (early editor versions) */
-        type?: QuestionKind;
-        choices?: string[];
-        /**
-         * UI 呈现变体（Rev.12）：'truefalse' = 判断题（single 的预设，
-         * choices 锁定「正确/错误」）。判题/统计不区分，仅编辑器回读用。
-         */
-        presentation?: string;
-        /** New single-problem multi-select scoring; absent keeps legacy 50%. */
-        partialCreditPercent?: number;
-    }];
+    | [
+          string | string[],
+          number,
+          {
+              kind?: QuestionKind;
+              prompt?: string;
+              /** @deprecated legacy alias of `kind` (early editor versions) */
+              type?: QuestionKind;
+              choices?: string[];
+              /**
+               * UI 呈现变体（Rev.12）：'truefalse' = 判断题（single 的预设，
+               * choices 锁定「正确/错误」）。判题/统计不区分，仅编辑器回读用。
+               */
+              presentation?: string;
+              /** New single-problem multi-select scoring; absent keeps legacy 50%. */
+              partialCreditPercent?: number;
+          },
+      ];
 
 export interface ObjectiveSingleMain {
     options: string[];
@@ -94,8 +100,8 @@ export interface FillFunctionTemplate {
 export interface FillRegion {
     /** Stable identifier chosen by the teacher (e.g. 'r1', 'main_logic'). */
     id: string;
-    start: { line: number, col: number };
-    end: { line: number, col: number };
+    start: { line: number; col: number };
+    end: { line: number; col: number };
     /** Optional prompt shown above the editable area in the student UI. */
     prompt?: string;
 }

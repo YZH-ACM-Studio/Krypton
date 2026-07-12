@@ -1,15 +1,10 @@
-/* eslint-disable no-await-in-loop */
 import { resolve } from 'path';
-import {
-    existsSync, mkdir, readdir, rename, rmdir,
-} from 'fs-extra';
+import { existsSync, mkdir, readdir, rename, rmdir } from 'fs-extra';
 import Schema from 'schemastery';
 import { Context } from '../context';
 
-export const apply = (ctx: Context) => ctx.addScript(
-    'fixStorage', 'Rename all files to lowercase',
-    Schema.object({}),
-    async () => {
+export const apply = (ctx: Context) =>
+    ctx.addScript('fixStorage', 'Rename all files to lowercase', Schema.object({}), async () => {
         const config = await ctx.get('storage').status();
         console.log(config);
         if (config.type !== 'Local') throw new Error('Only local storage is supported');
@@ -49,5 +44,4 @@ export const apply = (ctx: Context) => ctx.addScript(
             if (!hasItem) break;
         }
         return true;
-    },
-);
+    });

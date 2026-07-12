@@ -6,8 +6,23 @@
  * Pages register with the PAGE_MAP at module load (see import in resolver.tsx).
  */
 import {
-  AlertCircle, Building2, ChevronRight, Copy, GraduationCap, Inbox, KeyRound,
-  LinkIcon, ListChecks, Mail, Plus, RefreshCw, Search, ShieldCheck, UserCheck, UserPlus, Users,
+  AlertCircle,
+  Building2,
+  ChevronRight,
+  Copy,
+  GraduationCap,
+  Inbox,
+  KeyRound,
+  LinkIcon,
+  ListChecks,
+  Mail,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  UserCheck,
+  UserPlus,
+  Users,
 } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { ModuleWorkspace, type ModuleWorkspaceNavItem } from '@/components/management/module-workspace';
@@ -94,26 +109,18 @@ interface StudentFilterBootstrapValues {
   to?: string | null;
 }
 
-function normalizeStudentFilterValues(
-  q: string | null | undefined,
-  filters: StudentFilterBootstrapValues | null | undefined,
-): StudentFilterValues {
+function normalizeStudentFilterValues(q: string | null | undefined, filters: StudentFilterBootstrapValues | null | undefined): StudentFilterValues {
   return {
     q: String(q || ''),
     enrollmentYear: filters?.enrollmentYear == null ? '' : String(filters.enrollmentYear),
-    bindingStatus: filters?.bindingStatus === 'bound' || filters?.bindingStatus === 'unbound'
-      ? filters.bindingStatus
-      : 'all',
+    bindingStatus: filters?.bindingStatus === 'bound' || filters?.bindingStatus === 'unbound' ? filters.bindingStatus : 'all',
     timeField: filters?.timeField === 'createdAt' ? 'createdAt' : 'boundAt',
     from: String(filters?.from || ''),
     to: String(filters?.to || ''),
   };
 }
 
-function buildStudentFilterParams(
-  values: StudentFilterValues,
-  scope: { tab?: string, schoolId?: string | null, groupId?: string | null } = {},
-) {
+function buildStudentFilterParams(values: StudentFilterValues, scope: { tab?: string; schoolId?: string | null; groupId?: string | null } = {}) {
   const params = new URLSearchParams();
   if (scope.tab) params.set('tab', scope.tab);
   if (scope.schoolId) params.set('schoolId', scope.schoolId);
@@ -139,13 +146,12 @@ function StudentFilterBar({
   action: string;
   values: StudentFilterValues;
   clearHref: string;
-  schools?: Array<{ _id: string, name: string }>;
+  schools?: Array<{ _id: string; name: string }>;
   schoolId?: string | null;
   groupId?: string | null;
   preserveStudentsTab?: boolean;
 }) {
-  const boundAtWithoutBoundRecords = values.bindingStatus === 'unbound'
-    && values.timeField === 'boundAt';
+  const boundAtWithoutBoundRecords = values.bindingStatus === 'unbound' && values.timeField === 'boundAt';
   return (
     <Card>
       <CardContent className="space-y-3 p-5">
@@ -158,10 +164,7 @@ function StudentFilterBar({
               <SimpleSelect
                 name="schoolId"
                 defaultValue={schoolId || ''}
-                options={[
-                  { value: '', label: '所有学校' },
-                  ...schools.map((school) => ({ value: school._id, label: school.name })),
-                ]}
+                options={[{ value: '', label: '所有学校' }, ...schools.map((school) => ({ value: school._id, label: school.name }))]}
               />
             </label>
           )}
@@ -171,13 +174,7 @@ function StudentFilterBar({
           </label>
           <label className="space-y-1 text-xs font-medium text-muted-foreground">
             入学年
-            <Input
-              name="enrollmentYear"
-              defaultValue={values.enrollmentYear}
-              inputMode="numeric"
-              pattern="(?:19|20)\d{2}"
-              placeholder="如 2024"
-            />
+            <Input name="enrollmentYear" defaultValue={values.enrollmentYear} inputMode="numeric" pattern="(?:19|20)\d{2}" placeholder="如 2024" />
           </label>
           <label className="space-y-1 text-xs font-medium text-muted-foreground">
             绑定状态
@@ -212,7 +209,8 @@ function StudentFilterBar({
           </label>
           <div className="flex items-end gap-2">
             <Button type="submit" className="gap-1">
-              <Search className="size-3.5" />筛选
+              <Search className="size-3.5" />
+              筛选
             </Button>
             <Button asChild type="button" variant="outline">
               <a href={clearHref}>清空</a>
@@ -245,7 +243,10 @@ function StudentListEmptyState({ clearHref }: { clearHref: string }) {
 
 export function AdminUserbindOverviewPage() {
   const data = useBootstrap().page.data as {
-    schoolCount: number; groupCount: number; studentCount: number; pendingRequests: number;
+    schoolCount: number;
+    groupCount: number;
+    studentCount: number;
+    pendingRequests: number;
   };
   const stats = [
     { label: '学校', value: data.schoolCount, href: '/admin/userbind/schools', icon: Building2 },
@@ -254,19 +255,16 @@ export function AdminUserbindOverviewPage() {
     { label: '待审申请', value: data.pendingRequests, href: '/admin/userbind/requests', icon: Inbox },
   ];
   return (
-    <ModuleWorkspace
-      {...USERBIND_WORKSPACE_PROPS}
-      title="管理总览"
-      description="学校、用户组、学生记录和绑定流程的管理面板。"
-      activeKey="schools"
-    >
+    <ModuleWorkspace {...USERBIND_WORKSPACE_PROPS} title="管理总览" description="学校、用户组、学生记录和绑定流程的管理面板。" activeKey="schools">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {stats.map((s) => (
           <a key={s.label} href={s.href}>
             <Card className="transition-colors hover:bg-accent/50">
               <CardContent className="p-5">
                 <div className="flex items-center gap-3">
-                  <div className="rounded-md bg-primary/10 p-2"><s.icon className="size-4 text-primary" /></div>
+                  <div className="rounded-md bg-primary/10 p-2">
+                    <s.icon className="size-4 text-primary" />
+                  </div>
                   <div>
                     <p className="text-sm text-muted-foreground">{s.label}</p>
                     <p className="text-2xl font-semibold">{s.value}</p>
@@ -292,12 +290,12 @@ export function AdminUserbindSchoolsPage() {
     <ModuleWorkspace
       {...USERBIND_WORKSPACE_PROPS}
       title="学校"
-      actions={(
+      actions={
         <Button onClick={() => setCreateOpen(true)} className="gap-1">
           <Plus className="size-3.5" />
           新建学校
         </Button>
-      )}
+      }
     >
       <Card>
         <CardContent className="p-0">
@@ -320,9 +318,13 @@ export function AdminUserbindSchoolsPage() {
                 schools.map((s) => (
                   <TableRow key={s._id}>
                     <TableCell className="pl-5 font-medium">
-                      <a href={`/admin/userbind/schools/${s._id}`} className="hover:text-primary">{s.name}</a>
+                      <a href={`/admin/userbind/schools/${s._id}`} className="hover:text-primary">
+                        {s.name}
+                      </a>
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground"><DateTime value={s.createdAt} /></TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      <DateTime value={s.createdAt} />
+                    </TableCell>
                     <TableCell>
                       <TableActions>
                         <TableAction href={`/admin/userbind/schools/${s._id}`}>查看</TableAction>
@@ -368,10 +370,7 @@ function CreateSchoolDialog({ open, onClose }: { open: boolean; onClose: () => v
             <FormField label="同时导入学生名单（可选）">
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={withRoster}
-                    onChange={(e) => setWithRoster(e.target.checked)}
-                   />
+                  <Checkbox checked={withRoster} onChange={(e) => setWithRoster(e.target.checked)} />
                   创建后立即导入一份学生名单
                 </label>
                 {withRoster && (
@@ -389,8 +388,12 @@ function CreateSchoolDialog({ open, onClose }: { open: boolean; onClose: () => v
             </FormField>
           </ScrollArea>
           <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
-            <Button type="button" variant="ghost" onClick={onClose}>取消</Button>
-            <Button type="submit" disabled={!newName.trim()}>创建学校</Button>
+            <Button type="button" variant="ghost" onClick={onClose}>
+              取消
+            </Button>
+            <Button type="submit" disabled={!newName.trim()}>
+              创建学校
+            </Button>
           </div>
         </form>
       </DialogContent>
@@ -403,7 +406,12 @@ function CreateSchoolDialog({ open, onClose }: { open: boolean; onClose: () => v
  * flex-wrap of badges so a school with 50+ groups doesn't overflow the page.
  */
 function SchoolGroupsList({
-  schoolId, groups, total, page, pageSize, query,
+  schoolId,
+  groups,
+  total,
+  page,
+  pageSize,
+  query,
 }: {
   schoolId: string;
   groups: Array<{ _id: string; name: string; memberCount: number }>;
@@ -420,7 +428,8 @@ function SchoolGroupsList({
           <span>用户组 ({total})</span>
           <Button asChild size="sm" variant="outline" className="gap-1">
             <a href={`/admin/userbind/groups?schoolId=${schoolId}`}>
-              <Users className="size-3.5" />在用户组页新建
+              <Users className="size-3.5" />
+              在用户组页新建
             </a>
           </Button>
         </CardTitle>
@@ -428,14 +437,10 @@ function SchoolGroupsList({
       <CardContent className="space-y-3">
         <form method="get" action={`/admin/userbind/schools/${schoolId}`} className="flex flex-wrap gap-2">
           <input type="hidden" name="tab" value="groups" />
-          <Input
-            name="groupQ"
-            placeholder="搜索用户组名称"
-            defaultValue={query}
-            className="max-w-sm"
-          />
+          <Input name="groupQ" placeholder="搜索用户组名称" defaultValue={query} className="max-w-sm" />
           <Button type="submit" variant="outline" className="gap-1">
-            <Search className="size-3.5" />搜索
+            <Search className="size-3.5" />
+            搜索
           </Button>
         </form>
         {groups.length === 0 && !query ? (
@@ -446,9 +451,7 @@ function SchoolGroupsList({
           <>
             <ScrollArea className="max-h-80 rounded-md border bg-muted/10">
               {groups.length === 0 ? (
-                <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-                  没有匹配「{query}」的用户组
-                </p>
+                <p className="px-4 py-8 text-center text-sm text-muted-foreground">没有匹配「{query}」的用户组</p>
               ) : (
                 <ul className="divide-y divide-border/60">
                   {groups.map((g) => (
@@ -522,19 +525,34 @@ export function AdminUserbindSchoolDetailPage() {
   const studentFilterValues = normalizeStudentFilterValues(data.studentQuery, data.studentFilters);
   const schoolStudentsHref = `/admin/userbind/schools/${data.school._id}`;
   const schoolStudentsClearHref = `${schoolStudentsHref}?tab=students`;
-  const studentPaginationParams = buildStudentFilterParams(
-    studentFilterValues,
-    { tab: 'students' },
-  );
+  const studentPaginationParams = buildStudentFilterParams(studentFilterValues, { tab: 'students' });
   const studentPaginationBaseUrl = `${schoolStudentsHref}?${studentPaginationParams.toString()}`;
   return (
     <ModuleWorkspace {...USERBIND_WORKSPACE_PROPS} title={`学校 - ${data.school.name}`}>
       <MiniTabs
         items={[
-          { value: 'students', label: '学生', count: data.studentTotal || 0, icon: GraduationCap, href: `/admin/userbind/schools/${data.school._id}?tab=students` },
+          {
+            value: 'students',
+            label: '学生',
+            count: data.studentTotal || 0,
+            icon: GraduationCap,
+            href: `/admin/userbind/schools/${data.school._id}?tab=students`,
+          },
           { value: 'import', label: '导入', icon: UserPlus, href: `/admin/userbind/schools/${data.school._id}?tab=import` },
-          { value: 'groups', label: '用户组', count: data.groupTotal || 0, icon: Users, href: `/admin/userbind/schools/${data.school._id}?tab=groups` },
-          { value: 'links', label: '邀请链接', count: (data.schoolTokens || []).length, icon: LinkIcon, href: `/admin/userbind/schools/${data.school._id}?tab=links` },
+          {
+            value: 'groups',
+            label: '用户组',
+            count: data.groupTotal || 0,
+            icon: Users,
+            href: `/admin/userbind/schools/${data.school._id}?tab=groups`,
+          },
+          {
+            value: 'links',
+            label: '邀请链接',
+            count: (data.schoolTokens || []).length,
+            icon: LinkIcon,
+            href: `/admin/userbind/schools/${data.school._id}?tab=links`,
+          },
         ]}
         value={activeTab}
       />
@@ -596,11 +614,7 @@ export function AdminUserbindSchoolDetailPage() {
             </CardContent>
             {studentPageCount > 1 && (
               <div className="flex justify-center border-t px-5 py-3">
-                <Pagination
-                  current={studentPage}
-                  total={studentPageCount}
-                  baseUrl={studentPaginationBaseUrl}
-                />
+                <Pagination current={studentPage} total={studentPageCount} baseUrl={studentPaginationBaseUrl} />
               </div>
             )}
           </Card>
@@ -643,11 +657,16 @@ export function AdminUserbindSchoolDetailPage() {
         <Card>
           <CardHeader className="px-5 pb-3 pt-5">
             <CardTitle className="flex items-center justify-between text-base">
-              <span className="flex items-center gap-2"><LinkIcon className="size-4" />学校邀请链接</span>
+              <span className="flex items-center gap-2">
+                <LinkIcon className="size-4" />
+                学校邀请链接
+              </span>
               <form method="post" className="flex items-end gap-2">
                 <input type="hidden" name="operation" value="generateLink" />
                 <Input name="ttlDays" type="number" placeholder="有效天数（留空=永久）" className="max-w-[160px]" />
-                <Button type="submit" size="sm">生成新链接</Button>
+                <Button type="submit" size="sm">
+                  生成新链接
+                </Button>
               </form>
             </CardTitle>
           </CardHeader>
@@ -662,18 +681,32 @@ export function AdminUserbindSchoolDetailPage() {
                     <div key={t._id} className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-xs">
                       <code className="flex-1 break-all font-mono">{url}</code>
                       <Button
-                        type="button" variant="ghost" size="sm" className="h-7 gap-1"
-                        onClick={() => { navigator.clipboard?.writeText(url).catch(() => {}); }}
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 gap-1"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(url).catch(() => {});
+                        }}
                       >
-                        <Copy className="size-3" />复制
+                        <Copy className="size-3" />
+                        复制
                       </Button>
                       <span className="text-muted-foreground">
-                        {t.expiresAt ? <>过期 <DateTime value={t.expiresAt} mode="date" /></> : '永久'}
+                        {t.expiresAt ? (
+                          <>
+                            过期 <DateTime value={t.expiresAt} mode="date" />
+                          </>
+                        ) : (
+                          '永久'
+                        )}
                       </span>
                       <form method="post" action="/admin/userbind/tokens" className="inline-block">
                         <input type="hidden" name="operation" value="revoke" />
                         <input type="hidden" name="tokenId" value={t._id} />
-                        <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">撤销</Button>
+                        <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">
+                          撤销
+                        </Button>
                       </form>
                     </div>
                   );
@@ -705,7 +738,7 @@ export function AdminUserbindGroupsPage() {
       {...USERBIND_WORKSPACE_PROPS}
       title="班级 / 队伍（用户组）"
       description="学校下的学生分组 — 课程班级 / 校队 / 训练队等。"
-      actions={(
+      actions={
         <div className="flex items-center gap-3">
           {archivedCount > 0 ? (
             <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -723,7 +756,7 @@ export function AdminUserbindGroupsPage() {
             新建用户组
           </Button>
         </div>
-      )}
+      }
     >
       <Card>
         <CardContent className="p-0">
@@ -741,7 +774,9 @@ export function AdminUserbindGroupsPage() {
                   <TableCell className="pl-5 font-medium">
                     {g.name}
                     {g.archivedAt ? (
-                      <Badge variant="outline" className="ml-2 text-[10px] text-muted-foreground">已归档</Badge>
+                      <Badge variant="outline" className="ml-2 text-[10px] text-muted-foreground">
+                        已归档
+                      </Badge>
                     ) : null}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">{schoolNameById.get(g.schoolId) || g.schoolId}</TableCell>
@@ -750,10 +785,7 @@ export function AdminUserbindGroupsPage() {
                       <TableAction href={`/admin/userbind/groups/${g._id}`}>查看</TableAction>
                       {g.archivedAt ? (
                         <>
-                          <TableAction
-                            formAction="/admin/userbind/groups"
-                            hidden={{ operation: 'unarchive', groupId: g._id }}
-                          >
+                          <TableAction formAction="/admin/userbind/groups" hidden={{ operation: 'unarchive', groupId: g._id }}>
                             恢复
                           </TableAction>
                           <TableAction
@@ -794,22 +826,12 @@ export function AdminUserbindGroupsPage() {
         </CardContent>
       </Card>
 
-      <CreateGroupDialog
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        schools={data.schools}
-      />
+      <CreateGroupDialog open={createOpen} onClose={() => setCreateOpen(false)} schools={data.schools} />
     </ModuleWorkspace>
   );
 }
 
-function CreateGroupDialog({
-  open, onClose, schools,
-}: {
-  open: boolean;
-  onClose: () => void;
-  schools: Array<{ _id: string; name: string }>;
-}) {
+function CreateGroupDialog({ open, onClose, schools }: { open: boolean; onClose: () => void; schools: Array<{ _id: string; name: string }> }) {
   const [withRoster, setWithRoster] = useState(false);
   const [roster, setRoster] = useState('');
   return (
@@ -829,10 +851,7 @@ function CreateGroupDialog({
                   required
                   defaultValue=""
                   placeholder="选择学校"
-                  options={[
-                    { value: '', label: '选择学校' },
-                    ...schools.map((s) => ({ value: s._id, label: s.name })),
-                  ]}
+                  options={[{ value: '', label: '选择学校' }, ...schools.map((s) => ({ value: s._id, label: s.name }))]}
                 />
               </FormField>
               <FormField label="用户组名称" required htmlFor="group-name">
@@ -842,10 +861,7 @@ function CreateGroupDialog({
             <FormField label="同时导入成员名单（可选）">
               <div className="space-y-2">
                 <label className="flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={withRoster}
-                    onChange={(e) => setWithRoster(e.target.checked)}
-                   />
+                  <Checkbox checked={withRoster} onChange={(e) => setWithRoster(e.target.checked)} />
                   创建后立即导入一份成员名单
                 </label>
                 {withRoster && (
@@ -856,14 +872,16 @@ function CreateGroupDialog({
                     value={roster}
                     onChange={(e) => setRoster(e.target.value)}
                     className="w-full rounded-md border bg-background p-3 font-mono text-sm"
-                    placeholder={'每行 学号 姓名，已存在的学生会被加入此组；不存在的会先在所属学校建档。'}
+                    placeholder="每行 学号 姓名，已存在的学生会被加入此组；不存在的会先在所属学校建档。"
                   />
                 )}
               </div>
             </FormField>
           </ScrollArea>
           <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
-            <Button type="button" variant="ghost" onClick={onClose}>取消</Button>
+            <Button type="button" variant="ghost" onClick={onClose}>
+              取消
+            </Button>
             <Button type="submit">创建用户组</Button>
           </div>
         </form>
@@ -904,13 +922,19 @@ export function AdminUserbindGroupDetailPage() {
   return (
     <ModuleWorkspace
       {...USERBIND_WORKSPACE_PROPS}
-      title={(
+      title={
         <span className="flex items-center gap-2">
           {`用户组 - ${data.group.name}`}
-          {isArchived ? <Badge variant="outline" className="text-[10px] text-muted-foreground">已归档</Badge> : null}
+          {isArchived ? (
+            <Badge variant="outline" className="text-[10px] text-muted-foreground">
+              已归档
+            </Badge>
+          ) : null}
         </span>
-      )}
-      description={isArchived ? `${data.school?.name || ''}（已归档：不可添加成员/生成邀请，可移除成员；清空后可在列表页永久删除）` : data.school?.name}
+      }
+      description={
+        isArchived ? `${data.school?.name || ''}（已归档：不可添加成员/生成邀请，可移除成员；清空后可在列表页永久删除）` : data.school?.name
+      }
     >
       <div className="flex flex-col gap-4">
         <MiniTabs
@@ -960,14 +984,19 @@ export function AdminUserbindGroupDetailPage() {
             <Card>
               <CardHeader className="px-5 pb-3 pt-5">
                 <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-base">
-                  <span className="flex items-center gap-2"><LinkIcon className="size-4" />用户组邀请链接</span>
+                  <span className="flex items-center gap-2">
+                    <LinkIcon className="size-4" />
+                    用户组邀请链接
+                  </span>
                   {isArchived ? (
                     <span className="text-xs font-normal text-muted-foreground">已归档：不可生成新邀请，既有链接已失效</span>
                   ) : (
                     <form method="post" className="flex flex-wrap items-end gap-2">
                       <input type="hidden" name="operation" value="generateLink" />
                       <Input name="ttlDays" type="number" placeholder="有效天数（留空=永久）" className="w-[180px]" />
-                      <Button type="submit" size="sm">生成新链接</Button>
+                      <Button type="submit" size="sm">
+                        生成新链接
+                      </Button>
                     </form>
                   )}
                 </CardTitle>
@@ -983,18 +1012,32 @@ export function AdminUserbindGroupDetailPage() {
                         <div key={t._id} className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-3 text-xs">
                           <code className="min-w-0 flex-1 break-all font-mono">{url}</code>
                           <Button
-                            type="button" variant="ghost" size="sm" className="h-7 gap-1"
-                            onClick={() => { navigator.clipboard?.writeText(url).catch(() => {}); }}
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 gap-1"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(url).catch(() => {});
+                            }}
                           >
-                            <Copy className="size-3" />复制
+                            <Copy className="size-3" />
+                            复制
                           </Button>
                           <span className="text-muted-foreground">
-                            {t.expiresAt ? <>过期 <DateTime value={t.expiresAt} mode="date" /></> : '永久'}
+                            {t.expiresAt ? (
+                              <>
+                                过期 <DateTime value={t.expiresAt} mode="date" />
+                              </>
+                            ) : (
+                              '永久'
+                            )}
                           </span>
                           <form method="post" action="/admin/userbind/tokens" className="inline-block">
                             <input type="hidden" name="operation" value="revoke" />
                             <input type="hidden" name="tokenId" value={t._id} />
-                            <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">撤销</Button>
+                            <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">
+                              撤销
+                            </Button>
                           </form>
                         </div>
                       );
@@ -1016,7 +1059,8 @@ export function AdminUserbindGroupDetailPage() {
                   <form method="post">
                     <input type="hidden" name="operation" value="retryBind" />
                     <Button type="submit" variant="outline" size="sm" className="gap-1" disabled={(data.unboundMemberCount || 0) === 0}>
-                      <RefreshCw className="size-3.5" />重新尝试绑定未绑定成员
+                      <RefreshCw className="size-3.5" />
+                      重新尝试绑定未绑定成员
                     </Button>
                   </form>
                 </CardTitle>
@@ -1044,7 +1088,8 @@ export function AdminUserbindGroupDetailPage() {
                             {m.boundUserId ? (
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-                                  <UserCheck className="mr-1 size-3" />已绑定
+                                  <UserCheck className="mr-1 size-3" />
+                                  已绑定
                                 </Badge>
                                 <a href={`/user/${m.boundUserId}`} className="font-mono text-xs hover:text-primary">
                                   UID {m.boundUserId}
@@ -1057,7 +1102,9 @@ export function AdminUserbindGroupDetailPage() {
                                 )}
                               </div>
                             ) : (
-                              <Badge variant="outline" className="text-muted-foreground">未绑定</Badge>
+                              <Badge variant="outline" className="text-muted-foreground">
+                                未绑定
+                              </Badge>
                             )}
                           </TableCell>
                         </TableRow>
@@ -1075,11 +1122,7 @@ export function AdminUserbindGroupDetailPage() {
               </CardContent>
               {memberPageCount > 1 && (
                 <div className="flex justify-center border-t px-5 py-3">
-                  <Pagination
-                    current={memberPage}
-                    total={memberPageCount}
-                    baseUrl={`${groupHref}?tab=members`}
-                  />
+                  <Pagination current={memberPage} total={memberPageCount} baseUrl={`${groupHref}?tab=members`} />
                 </div>
               )}
             </Card>
@@ -1115,13 +1158,18 @@ export function AdminUserbindGroupDetailPage() {
 export function AdminUserbindStudentsPage() {
   const data = useBootstrap().page.data as {
     students: Array<{
-      _id: string; studentId: string; realName: string;
-      boundUserId?: number | null; schoolId: string;
+      _id: string;
+      studentId: string;
+      realName: string;
+      boundUserId?: number | null;
+      schoolId: string;
       enrollmentYear?: number | null;
       createdAt?: string | null;
       boundAt?: string | null;
     }>;
-    total: number; page: number; pageSize: number;
+    total: number;
+    page: number;
+    pageSize: number;
     schools: Array<{ _id: string; name: string }>;
     filterSchoolId: string | null;
     filterGroupId: string | null;
@@ -1192,11 +1240,9 @@ export function AdminUserbindStudentsPage() {
                   <TableCell>
                     {!s.boundUserId && (
                       <TableActions>
-                        <TableAction
-                          formAction=""
-                          hidden={{ operation: 'generateStudentToken', studentRecordId: s._id }}
-                          icon={KeyRound}
-                        >单人令牌</TableAction>
+                        <TableAction formAction="" hidden={{ operation: 'generateStudentToken', studentRecordId: s._id }} icon={KeyRound}>
+                          单人令牌
+                        </TableAction>
                       </TableActions>
                     )}
                   </TableCell>
@@ -1242,14 +1288,20 @@ export function AdminUserbindStudentsImportPage() {
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
           <ul className="list-disc space-y-1 pl-5">
-            <li>每行一个学生，格式：<code className="rounded bg-muted px-1.5 py-0.5">学号 姓名</code>（空格 / 逗号 / 分号 / Tab 任意分隔）</li>
-            <li>学号：1–64 位字母/数字/<code className="rounded bg-muted px-1.5 py-0.5">._-</code>，<strong>同一学校内不可重复</strong></li>
+            <li>
+              每行一个学生，格式：<code className="rounded bg-muted px-1.5 py-0.5">学号 姓名</code>（空格 / 逗号 / 分号 / Tab 任意分隔）
+            </li>
+            <li>
+              学号：1–64 位字母/数字/<code className="rounded bg-muted px-1.5 py-0.5">._-</code>，<strong>同一学校内不可重复</strong>
+            </li>
             <li>姓名：最多 32 字符，不可为空</li>
-            <li>以 <code className="rounded bg-muted px-1.5 py-0.5">#</code> 开头的行会被忽略</li>
+            <li>
+              以 <code className="rounded bg-muted px-1.5 py-0.5">#</code> 开头的行会被忽略
+            </li>
             <li>所有不合法行在提交前会高亮显示，不会被静默吞掉</li>
           </ul>
           <pre className="rounded-md border bg-muted/40 p-3 font-mono text-xs">
-{`202301001 张三
+            {`202301001 张三
 202301002 李四
 202301003 王五明
 # 注释行会被忽略`}
@@ -1270,7 +1322,8 @@ export function AdminUserbindStudentsImportPage() {
               size="sm"
               className="gap-1"
             >
-              <Building2 className="size-4" />导入到学校
+              <Building2 className="size-4" />
+              导入到学校
             </Button>
             <Button
               type="button"
@@ -1279,7 +1332,8 @@ export function AdminUserbindStudentsImportPage() {
               size="sm"
               className="gap-1"
             >
-              <Users className="size-4" />导入到用户组
+              <Users className="size-4" />
+              导入到用户组
             </Button>
           </div>
           {target === 'school' && (
@@ -1290,10 +1344,7 @@ export function AdminUserbindStudentsImportPage() {
                 onValueChange={setSchoolId}
                 className="max-w-md"
                 placeholder="选择学校"
-                options={[
-                  { value: '', label: '选择学校' },
-                  ...data.schools.map((s) => ({ value: s._id, label: s.name })),
-                ]}
+                options={[{ value: '', label: '选择学校' }, ...data.schools.map((s) => ({ value: s._id, label: s.name }))]}
               />
             </FormField>
           )}
@@ -1320,9 +1371,7 @@ export function AdminUserbindStudentsImportPage() {
         title="名单导入"
         description="提交前可在下方预览每一行的校验状态。"
         action="/admin/userbind/students/import"
-        hiddenFields={target === 'school'
-          ? { targetKind: 'school', schoolId }
-          : { targetKind: 'user_group', groupId }}
+        hiddenFields={target === 'school' ? { targetKind: 'school', schoolId } : { targetKind: 'user_group', groupId }}
         submitLabel="开始导入"
       />
 
@@ -1342,8 +1391,13 @@ const KIND_LABELS: Record<string, { label: string; color: string }> = {
 export function AdminUserbindTokensPage() {
   const data = useBootstrap().page.data as {
     tokens: Array<{
-      _id: string; kind: string; createdAt: string; expiresAt: string | null;
-      used: boolean; usedBy: number | null; targetLabel: string;
+      _id: string;
+      kind: string;
+      createdAt: string;
+      expiresAt: string | null;
+      used: boolean;
+      usedBy: number | null;
+      targetLabel: string;
     }>;
     kind?: string;
     unusedOnly: boolean;
@@ -1388,37 +1442,41 @@ export function AdminUserbindTokensPage() {
                 return (
                   <TableRow key={t._id}>
                     <TableCell className="pl-5">
-                      <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${kindInfo.color}`}>
-                        {kindInfo.label}
-                      </span>
+                      <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${kindInfo.color}`}>{kindInfo.label}</span>
                     </TableCell>
                     <TableCell className="text-sm">{t.targetLabel}</TableCell>
                     <TableCell className="font-mono text-[10px]">
                       <button
                         type="button"
                         title={url}
-                        onClick={() => { navigator.clipboard?.writeText(url).catch(() => {}); }}
+                        onClick={() => {
+                          navigator.clipboard?.writeText(url).catch(() => {});
+                        }}
                         className="rounded px-1 py-0.5 hover:bg-accent"
                       >
                         <Copy className="inline size-3" /> 复制
                       </button>
                     </TableCell>
                     <TableCell>
-                      {t.kind === 'student'
-                        ? (t.used
-                          ? <Badge variant="secondary">已使用 (UID {t.usedBy})</Badge>
-                          : <Badge variant="outline">未使用</Badge>)
-                        : <Badge variant="outline">共享中</Badge>}
+                      {t.kind === 'student' ? (
+                        t.used ? (
+                          <Badge variant="secondary">已使用 (UID {t.usedBy})</Badge>
+                        ) : (
+                          <Badge variant="outline">未使用</Badge>
+                        )
+                      ) : (
+                        <Badge variant="outline">共享中</Badge>
+                      )}
                     </TableCell>
-                    <TableCell className="text-xs"><DateTime value={t.createdAt} /></TableCell>
-                    <TableCell className="text-xs">{t.expiresAt ? <DateTime value={t.expiresAt} /> : "永久"}</TableCell>
+                    <TableCell className="text-xs">
+                      <DateTime value={t.createdAt} />
+                    </TableCell>
+                    <TableCell className="text-xs">{t.expiresAt ? <DateTime value={t.expiresAt} /> : '永久'}</TableCell>
                     <TableCell>
                       <TableActions>
-                        <TableAction
-                          formAction=""
-                          hidden={{ operation: 'revoke', tokenId: t._id }}
-                          variant="destructive"
-                        >撤销</TableAction>
+                        <TableAction formAction="" hidden={{ operation: 'revoke', tokenId: t._id }} variant="destructive">
+                          撤销
+                        </TableAction>
                       </TableActions>
                     </TableCell>
                   </TableRow>
@@ -1444,13 +1502,21 @@ export function AdminUserbindTokensPage() {
 export function AdminUserbindRequestsPage() {
   const data = useBootstrap().page.data as {
     requests: Array<{
-      _id: string; userId: number; studentIdInput: string; realNameInput: string;
+      _id: string;
+      userId: number;
+      studentIdInput: string;
+      realNameInput: string;
       schoolId: string;
-      status: 'pending' | 'approved' | 'rejected'; createdAt: string;
-      claimTempUserId: number | null; rejectReason: string | null;
-      sourceTokenId: string | null; targetUserGroupId: string | null;
+      status: 'pending' | 'approved' | 'rejected';
+      createdAt: string;
+      claimTempUserId: number | null;
+      rejectReason: string | null;
+      sourceTokenId: string | null;
+      targetUserGroupId: string | null;
     }>;
-    total: number; page: number; status?: string;
+    total: number;
+    page: number;
+    status?: string;
     schoolMap: Record<string, string>;
   };
   return (
@@ -1493,52 +1559,66 @@ export function AdminUserbindRequestsPage() {
                   <TableCell>{r.realNameInput}</TableCell>
                   <TableCell>
                     {r.claimTempUserId ? (
-                      <Badge variant="outline" className="text-[10px]">认领临时账号 UID {r.claimTempUserId}</Badge>
+                      <Badge variant="outline" className="text-[10px]">
+                        认领临时账号 UID {r.claimTempUserId}
+                      </Badge>
                     ) : r.sourceTokenId ? (
-                      <Badge variant="outline" className="text-[10px]">{r.targetUserGroupId ? '用户组链接' : '学校链接'}</Badge>
+                      <Badge variant="outline" className="text-[10px]">
+                        {r.targetUserGroupId ? '用户组链接' : '学校链接'}
+                      </Badge>
                     ) : (
-                      <Badge variant="outline" className="text-[10px]">手动申请</Badge>
+                      <Badge variant="outline" className="text-[10px]">
+                        手动申请
+                      </Badge>
                     )}
                   </TableCell>
                   <TableCell>
                     {r.status === 'pending' && <Badge>待审核</Badge>}
                     {r.status === 'approved' && <Badge variant="secondary">通过</Badge>}
                     {r.status === 'rejected' && (
-                      <Badge variant="destructive" title={r.rejectReason || ''}>拒绝</Badge>
+                      <Badge variant="destructive" title={r.rejectReason || ''}>
+                        拒绝
+                      </Badge>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs"><DateTime value={r.createdAt} /></TableCell>
+                  <TableCell className="text-xs">
+                    <DateTime value={r.createdAt} />
+                  </TableCell>
                   <TableCell>
                     {r.status === 'pending' && (
                       <TableActions>
-                        <TableAction
-                          formAction=""
-                          hidden={{ operation: 'approve', requestId: r._id }}
-                          variant="primary"
-                        >通过</TableAction>
-                        <form method="post" className="inline-block" onSubmit={(e) => {
-                          const reason = window.prompt('驳回理由（必填）：') ?? '';
-                          if (!reason.trim()) {
-                            e.preventDefault();
-                            alert('请填写驳回理由');
-                            return;
-                          }
-                          const reasonInput = e.currentTarget.querySelector('input[name=reason]') as HTMLInputElement | null;
-                          if (reasonInput) reasonInput.value = reason;
-                        }}>
+                        <TableAction formAction="" hidden={{ operation: 'approve', requestId: r._id }} variant="primary">
+                          通过
+                        </TableAction>
+                        <form
+                          method="post"
+                          className="inline-block"
+                          onSubmit={(e) => {
+                            const reason = window.prompt('驳回理由（必填）：') ?? '';
+                            if (!reason.trim()) {
+                              e.preventDefault();
+                              alert('请填写驳回理由');
+                              return;
+                            }
+                            const reasonInput = e.currentTarget.querySelector('input[name=reason]') as HTMLInputElement | null;
+                            if (reasonInput) reasonInput.value = reason;
+                          }}
+                        >
                           <input type="hidden" name="operation" value="reject" />
                           <input type="hidden" name="requestId" value={r._id} />
                           <input type="hidden" name="reason" value="" />
                           <button
                             type="submit"
                             className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-destructive/40 px-2.5 text-xs font-medium text-destructive transition-colors hover:border-destructive hover:bg-destructive/10"
-                          >驳回</button>
+                          >
+                            驳回
+                          </button>
                         </form>
                       </TableActions>
                     )}
                     {r.status === 'rejected' && r.rejectReason && (
                       <span className="text-xs text-muted-foreground" title={r.rejectReason}>
-                        理由: {r.rejectReason.length > 20 ? r.rejectReason.slice(0, 20) + '…' : r.rejectReason}
+                        理由: {r.rejectReason.length > 20 ? `${r.rejectReason.slice(0, 20)}…` : r.rejectReason}
                       </span>
                     )}
                   </TableCell>
@@ -1581,8 +1661,12 @@ export function UserBindPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 px-6 pb-6 text-sm">
-            <p>你的账号已经绑定到学号 <span className="font-mono font-semibold">{data.currentStudentId}</span></p>
-            <p>姓名：<span className="font-semibold">{data.currentRealName}</span></p>
+            <p>
+              你的账号已经绑定到学号 <span className="font-mono font-semibold">{data.currentStudentId}</span>
+            </p>
+            <p>
+              姓名：<span className="font-semibold">{data.currentRealName}</span>
+            </p>
             <p className="text-muted-foreground">绑定后无法修改。如需变更，请联系管理员。</p>
           </CardContent>
         </Card>
@@ -1594,9 +1678,7 @@ export function UserBindPage() {
     <div className="space-y-5">
       <div className="space-y-1">
         <h1 className="text-xl font-semibold">绑定学生身份</h1>
-        <p className="text-sm text-muted-foreground">
-          提交学号和姓名后，由管理员审核通过后完成绑定。
-        </p>
+        <p className="text-sm text-muted-foreground">提交学号和姓名后，由管理员审核通过后完成绑定。</p>
       </div>
       {data.hasPending && (
         <Card className="border-amber-500/40 bg-amber-500/5">
@@ -1605,7 +1687,11 @@ export function UserBindPage() {
             <div className="flex-1 space-y-1 text-sm">
               <p className="font-medium">你已有待审核的申请</p>
               <p className="text-xs text-muted-foreground">
-                请耐心等待管理员审核。你可以前往「<a href="/userbind/applications" className="underline">我的申请</a>」查看进度。
+                请耐心等待管理员审核。你可以前往「
+                <a href="/userbind/applications" className="underline">
+                  我的申请
+                </a>
+                」查看进度。
               </p>
             </div>
           </CardContent>
@@ -1621,10 +1707,7 @@ export function UserBindPage() {
                 required
                 defaultValue=""
                 placeholder="选择学校"
-                options={[
-                  { value: '', label: '选择学校' },
-                  ...data.schools.map((s) => ({ value: s._id, label: s.name })),
-                ]}
+                options={[{ value: '', label: '选择学校' }, ...data.schools.map((s) => ({ value: s._id, label: s.name }))]}
               />
             </FormField>
             <FormRow columns={2}>
@@ -1636,10 +1719,7 @@ export function UserBindPage() {
               </FormField>
             </FormRow>
             <div className="flex items-center justify-between gap-2">
-              <a
-                href="/userbind/applications"
-                className="text-xs text-muted-foreground hover:underline"
-              >
+              <a href="/userbind/applications" className="text-xs text-muted-foreground hover:underline">
                 查看我的申请记录 →
               </a>
               <Button type="submit">提交申请</Button>
@@ -1722,7 +1802,7 @@ export function UserBindApplicationsPage() {
         <div className="space-y-3">
           {data.requests.map((r) => {
             const schoolName = data.schoolMap[r.schoolId] || `学校 ID ${r.schoolId.slice(0, 8)}`;
-            const groupName = r.targetUserGroupId ? (data.groupMap[r.targetUserGroupId] || '') : '';
+            const groupName = r.targetUserGroupId ? data.groupMap[r.targetUserGroupId] || '' : '';
             return (
               <Card key={r._id} className={r.status === 'rejected' ? 'border-rose-500/40' : undefined}>
                 <CardContent className="space-y-3 p-5">
@@ -1745,8 +1825,16 @@ export function UserBindApplicationsPage() {
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                    <span>提交：<DateTime value={r.createdAt} /></span>
-                    {r.reviewedAt && <span>审核：<DateTime value={r.reviewedAt} /></span>}
+                    <span>
+                      提交：
+                      <DateTime value={r.createdAt} />
+                    </span>
+                    {r.reviewedAt && (
+                      <span>
+                        审核：
+                        <DateTime value={r.reviewedAt} />
+                      </span>
+                    )}
                   </div>
                   {r.status === 'rejected' && r.rejectReason && (
                     <div className="rounded-md border border-rose-500/30 bg-rose-500/5 p-3">
@@ -1789,7 +1877,8 @@ export function UserBindLandingPage() {
         <Card className="border-rose-500/40 bg-rose-500/5">
           <CardHeader className="px-6 pb-3 pt-6">
             <CardTitle className="flex items-center gap-2 text-base text-rose-700 dark:text-rose-300">
-              <AlertCircle className="size-5" />邀请链接不可用
+              <AlertCircle className="size-5" />
+              邀请链接不可用
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 px-6 pb-6">
@@ -1801,12 +1890,8 @@ export function UserBindLandingPage() {
     );
   }
 
-  const expiresLabel: ReactNode = data.tokenInfo?.expiresAt
-    ? <DateTime value={data.tokenInfo.expiresAt} />
-    : '永久';
-  const createdLabel: ReactNode = data.tokenInfo?.createdAt
-    ? <DateTime value={data.tokenInfo.createdAt} />
-    : '';
+  const expiresLabel: ReactNode = data.tokenInfo?.expiresAt ? <DateTime value={data.tokenInfo.expiresAt} /> : '永久';
+  const createdLabel: ReactNode = data.tokenInfo?.createdAt ? <DateTime value={data.tokenInfo.createdAt} /> : '';
 
   // Student kind: one-click bind
   if (data.kind === 'student' && data.student) {
@@ -1815,7 +1900,8 @@ export function UserBindLandingPage() {
         <Card>
           <CardHeader className="px-6 pb-3 pt-6">
             <CardTitle className="flex items-center gap-2 text-base">
-              <UserPlus className="size-5 text-primary" />学生身份绑定
+              <UserPlus className="size-5 text-primary" />
+              学生身份绑定
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-5 px-6 pb-6">
@@ -1829,7 +1915,9 @@ export function UserBindLandingPage() {
                     <span className="w-16 text-xs text-muted-foreground">用户组</span>
                     <div className="flex flex-wrap gap-1">
                       {data.groups.map((g) => (
-                        <Badge key={g._id} variant="outline" className="text-[10px]">{g.name}</Badge>
+                        <Badge key={g._id} variant="outline" className="text-[10px]">
+                          {g.name}
+                        </Badge>
                       ))}
                     </div>
                   </div>
@@ -1848,7 +1936,9 @@ export function UserBindLandingPage() {
             </p>
             {data.signedIn ? (
               <form method="post">
-                <Button type="submit" className="w-full">确认绑定</Button>
+                <Button type="submit" className="w-full">
+                  确认绑定
+                </Button>
               </form>
             ) : (
               <Button asChild className="w-full">
@@ -1877,9 +1967,7 @@ export function UserBindLandingPage() {
           <FormSection title="邀请详情">
             <div className="space-y-1.5 rounded-md border bg-muted/30 p-4 text-sm">
               <KeyValueRow k={data.kind === 'school' ? '学校' : '用户组'} v={targetName || '—'} />
-              {data.kind === 'user_group' && (
-                <KeyValueRow k="所属学校" v={data.school?.name || '—'} />
-              )}
+              {data.kind === 'user_group' && <KeyValueRow k="所属学校" v={data.school?.name || '—'} />}
               <KeyValueRow k="邀请人" v={data.inviter ? `${data.inviter.uname} (UID ${data.inviter.uid})` : '系统'} />
               <KeyValueRow k="创建时间" v={createdLabel} />
               <KeyValueRow k="过期时间" v={expiresLabel} />
@@ -1943,12 +2031,16 @@ export function UserBindSuccessPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 px-6 pb-6 text-sm">
-          <p>学校：<span className="font-semibold">{data.school?.name}</span></p>
-          <p>学号：<span className="font-mono">{data.studentRecord.studentId}</span></p>
-          <p>姓名：<span className="font-semibold">{data.studentRecord.realName}</span></p>
-          {data.joinedGroupId && (
-            <p className="text-xs text-muted-foreground">已加入用户组。</p>
-          )}
+          <p>
+            学校：<span className="font-semibold">{data.school?.name}</span>
+          </p>
+          <p>
+            学号：<span className="font-mono">{data.studentRecord.studentId}</span>
+          </p>
+          <p>
+            姓名：<span className="font-semibold">{data.studentRecord.realName}</span>
+          </p>
+          {data.joinedGroupId && <p className="text-xs text-muted-foreground">已加入用户组。</p>}
           <div className="pt-3">
             <Button asChild className="w-full">
               <a href="/">前往首页</a>
@@ -1989,7 +2081,9 @@ export function UserBindClaimPage() {
 
       {data.step === 1 && (
         <Card>
-          <CardHeader className="px-6 pb-3 pt-6"><CardTitle className="text-base">第 1 步：填写学号 + 姓名</CardTitle></CardHeader>
+          <CardHeader className="px-6 pb-3 pt-6">
+            <CardTitle className="text-base">第 1 步：填写学号 + 姓名</CardTitle>
+          </CardHeader>
           <CardContent className="px-6 pb-6">
             <form method="post" className="space-y-4">
               <input type="hidden" name="action" value="lookup" />
@@ -2009,7 +2103,9 @@ export function UserBindClaimPage() {
 
       {data.step === 2 && (
         <Card>
-          <CardHeader className="px-6 pb-3 pt-6"><CardTitle className="text-base">第 2 步：选择要认领的临时账号</CardTitle></CardHeader>
+          <CardHeader className="px-6 pb-3 pt-6">
+            <CardTitle className="text-base">第 2 步：选择要认领的临时账号</CardTitle>
+          </CardHeader>
           <CardContent className="px-6 pb-6">
             {(data.candidates || []).length === 0 ? (
               <div className="space-y-3">
@@ -2020,7 +2116,9 @@ export function UserBindClaimPage() {
                   <input type="hidden" name="action" value="lookup" />
                   <input type="hidden" name="studentId" value="" />
                   <input type="hidden" name="realName" value="" />
-                  <Button type="submit" variant="outline" size="sm">重新搜索</Button>
+                  <Button type="submit" variant="outline" size="sm">
+                    重新搜索
+                  </Button>
                 </form>
               </div>
             ) : (
@@ -2050,7 +2148,7 @@ export function UserBindClaimPage() {
                     name="schoolId"
                     required
                     disabled={data.schoolLocked}
-                    defaultValue={data.schoolLocked ? (data.schools[0]?._id || '') : ''}
+                    defaultValue={data.schoolLocked ? data.schools[0]?._id || '' : ''}
                     placeholder="请选择…"
                     options={[
                       ...(!data.schoolLocked ? [{ value: '', label: '请选择…' }] : []),
@@ -2064,7 +2162,9 @@ export function UserBindClaimPage() {
                     <input type="hidden" name="action" value="lookup" />
                     <input type="hidden" name="studentId" value="" />
                     <input type="hidden" name="realName" value="" />
-                    <Button type="submit" variant="outline">重新搜索</Button>
+                    <Button type="submit" variant="outline">
+                      重新搜索
+                    </Button>
                   </form>
                 </div>
               </form>

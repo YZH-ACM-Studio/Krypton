@@ -46,11 +46,7 @@ class FakeCollection {
                     if (this.namespaceNotFoundStyle === 'codeName') error.codeName = 'NamespaceNotFound';
                     throw error;
                 }
-                return this.indexes.map((index) => (
-                    index.name === this.corruptName
-                        ? { ...index, key: { wrong: 1 } }
-                        : { ...index }
-                ));
+                return this.indexes.map((index) => (index.name === this.corruptName ? { ...index, key: { wrong: 1 } } : { ...index }));
             },
         };
     }
@@ -120,11 +116,7 @@ describe('krypton-permits indexes', () => {
         const { module, collections } = loadDbModule();
         await module.ensureIndexes();
 
-        expect([...collections.keys()]).to.have.members([
-            'problem.permits',
-            'problem.permitSources',
-            'problem.aclMutationFences',
-        ]);
+        expect([...collections.keys()]).to.have.members(['problem.permits', 'problem.permitSources', 'problem.aclMutationFences']);
         const all = [...collections.values()].flatMap((collection) => collection.indexes.slice(1));
         expect(all.every((index) => Boolean(index.name))).to.equal(true);
         expect(all.every((index) => index.partialFilterExpression === undefined)).to.equal(true);
@@ -171,9 +163,9 @@ describe('krypton-permits indexes', () => {
 
         await module.ensureIndexes();
 
-        const pairIndexes = collections.get('problem.permits')!.indexes.filter((index) => (
-            JSON.stringify(index.key) === JSON.stringify({ domainId: 1, pid: 1, uid: 1 })
-        ));
+        const pairIndexes = collections
+            .get('problem.permits')!
+            .indexes.filter((index) => JSON.stringify(index.key) === JSON.stringify({ domainId: 1, pid: 1, uid: 1 }));
         expect(pairIndexes).to.have.lengthOf(1);
         expect(pairIndexes[0]).to.include({
             name: 'domainId_1_pid_1_uid_1',

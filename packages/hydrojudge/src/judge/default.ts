@@ -22,9 +22,7 @@ function judgeCase(c: NormalizedCase) {
             },
             `judgeCase[${c.id}]<${ctx.rid}>`,
         );
-        const {
-            code, signalled, time, memory, fileIds,
-        } = res;
+        const { code, signalled, time, memory, fileIds } = res;
         let { status } = res;
         let message: any = '';
         let score = 0;
@@ -76,12 +74,13 @@ function judgeCase(c: NormalizedCase) {
     };
 }
 
-export const judge = async (ctx: Context) => await runFlow(ctx, {
-    compile: async () => {
-        [ctx.execute, ctx.checker] = await Promise.all([
-            ctx.compile(ctx.lang, ctx.code),
-            ctx.compileLocalFile('checker', ctx.config.checker, ctx.config.checker_type),
-        ]);
-    },
-    judgeCase,
-});
+export const judge = async (ctx: Context) =>
+    await runFlow(ctx, {
+        compile: async () => {
+            [ctx.execute, ctx.checker] = await Promise.all([
+                ctx.compile(ctx.lang, ctx.code),
+                ctx.compileLocalFile('checker', ctx.config.checker, ctx.config.checker_type),
+            ]);
+        },
+        judgeCase,
+    });

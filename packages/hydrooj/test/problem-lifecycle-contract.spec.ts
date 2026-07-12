@@ -87,8 +87,7 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(start).to.be.greaterThan(-1);
         expect(method).to.include('await ProblemModel.editAuthorizedWithSnapshot({');
         expect(method).to.include("type: 'problem.metadata.save'");
-        expect(method.indexOf('await OplogModel.add('))
-            .to.be.greaterThan(method.indexOf('await ProblemModel.editAuthorizedWithSnapshot({'));
+        expect(method.indexOf('await OplogModel.add(')).to.be.greaterThan(method.indexOf('await ProblemModel.editAuthorizedWithSnapshot({'));
         expect(method).to.include('auditedFields.filter((field) => !isEqual(before[field], result[field]))');
     });
 
@@ -124,20 +123,17 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const directStart = source.indexOf('static async renameTestdata(');
         const directEnd = source.indexOf('static async delTestdata(', directStart);
         const directRename = source.slice(directStart, directEnd);
-        expect(directRename.indexOf('normalizeProblemTestdataUpload(newName, source)'))
-            .to.be.lessThan(directRename.indexOf('storage.rename('));
+        expect(directRename.indexOf('normalizeProblemTestdataUpload(newName, source)')).to.be.lessThan(directRename.indexOf('storage.rename('));
 
         const claimStart = source.indexOf('static async renameTestdataWithClaim(');
         const claimEnd = source.indexOf('static async delTestdataWithClaim(', claimStart);
         const claimedRename = source.slice(claimStart, claimEnd);
-        expect(claimedRename.indexOf('normalizeProblemTestdataUpload(newName, source)'))
-            .to.be.lessThan(claimedRename.indexOf('storage.rename('));
+        expect(claimedRename.indexOf('normalizeProblemTestdataUpload(newName, source)')).to.be.lessThan(claimedRename.indexOf('storage.rename('));
 
         const importStart = source.indexOf('static async import(');
         const importEnd = source.indexOf('static async export(', importStart);
         const importer = source.slice(importStart, importEnd);
         expect(importer).to.include("'testdata', 'attachments', 'generators', 'include', 'data', 'output_validators'");
-        expect(importer.indexOf('await validateImportedTestdataConfigs()'))
-            .to.be.lessThan(importer.indexOf('const overrideDoc = overridePid'));
+        expect(importer.indexOf('await validateImportedTestdataConfigs()')).to.be.lessThan(importer.indexOf('const overrideDoc = overridePid'));
     });
 });

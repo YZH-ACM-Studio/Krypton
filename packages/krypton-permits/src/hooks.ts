@@ -27,14 +27,9 @@ export function attachHooks(ctx: Context) {
     // lose pid synchronization.
     ctx.on('contest/edit', async (tdoc) => {
         if (!tdoc?._id || !tdoc.domainId) return;
-        await permitsModel.syncContestCurrentPids(
-            tdoc.domainId,
-            tdoc._id,
-            tdoc.pids || [],
-            tdoc.verifiers || [],
-            tdoc.owner || 0,
-            { requestId: `contest-edit:${tdoc.domainId}:${tdoc._id.toHexString()}` },
-        );
+        await permitsModel.syncContestCurrentPids(tdoc.domainId, tdoc._id, tdoc.pids || [], tdoc.verifiers || [], tdoc.owner || 0, {
+            requestId: `contest-edit:${tdoc.domainId}:${tdoc._id.toHexString()}`,
+        });
     });
 
     ctx.on('contest/del', async (domainId, tid) => {

@@ -1,4 +1,3 @@
-/* eslint-disable no-await-in-loop */
 import {
     type AclMutationFence,
     type AclPair,
@@ -10,11 +9,7 @@ import {
     type ProblemAclMutationLock,
     sameAclMutationIntent,
 } from './coordinator';
-import {
-    ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION,
-    type PermitRole,
-    type ProblemWriteClaimMarker,
-} from './types';
+import { ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION, type PermitRole, type ProblemWriteClaimMarker } from './types';
 
 export interface ProblemMaintainerMirror {
     domainId: string;
@@ -48,9 +43,7 @@ export interface AclServiceRepository extends AclRepository {
     problemExists(domainId: string, pid: number): Promise<boolean>;
     getProblemWriteClaim(domainId: string, pid: number): Promise<ProblemWriteClaim | null>;
     reactivateErroredProblemWriteClaim(domainId: string, pid: number, requestId: string): Promise<boolean>;
-    markProblemWriteClaimRepairError(
-        domainId: string, pid: number, requestId: string, error: unknown,
-    ): Promise<boolean>;
+    markProblemWriteClaimRepairError(domainId: string, pid: number, requestId: string, error: unknown): Promise<boolean>;
     clearActiveProblemWriteClaim(domainId: string, pid: number, requestId: string): Promise<boolean>;
     listCanonicalForDomain(domainId: string): Promise<CanonicalPermit[]>;
     listCanonicalForContest(domainId: string, sourceId: string, uid?: number): Promise<CanonicalPermit[]>;
@@ -67,25 +60,33 @@ export interface AclDriftReport {
     legacyMaintainerWithoutCanonical: AclPair[];
     canonicalMaintainerWithoutLegacy: AclPair[];
     verifierInLegacy: AclPair[];
-    legacyCanonicalWithoutSource: Array<AclPair & {
-        role: PermitRole;
-        sourceType: PermitSource['sourceType'];
-        sourceId: string;
-    }>;
-    sourceCanonicalConflicts: Array<AclPair & {
-        expected: CanonicalPermit | null;
-        actual: CanonicalPermit | null;
-    }>;
+    legacyCanonicalWithoutSource: Array<
+        AclPair & {
+            role: PermitRole;
+            sourceType: PermitSource['sourceType'];
+            sourceId: string;
+        }
+    >;
+    sourceCanonicalConflicts: Array<
+        AclPair & {
+            expected: CanonicalPermit | null;
+            actual: CanonicalPermit | null;
+        }
+    >;
     orphanProblemLocks: ProblemAclMutationLock[];
     /** Every durable deny fence plus its same-pair ProblemDoc lock, if present. */
-    aclMutationFences: Array<AclMutationFence & {
-        problemLock: ProblemAclMutationLock | null;
-    }>;
-    fenceProblemLockMismatches: Array<AclPair & {
-        reasons: FenceProblemLockMismatchReason[];
-        fence: AclMutationFence;
-        problemLock: ProblemAclMutationLock | null;
-    }>;
+    aclMutationFences: Array<
+        AclMutationFence & {
+            problemLock: ProblemAclMutationLock | null;
+        }
+    >;
+    fenceProblemLockMismatches: Array<
+        AclPair & {
+            reasons: FenceProblemLockMismatchReason[];
+            fence: AclMutationFence;
+            problemLock: ProblemAclMutationLock | null;
+        }
+    >;
     problemWriteClaims: ProblemWriteClaim[];
 }
 
@@ -104,52 +105,79 @@ function sortPairs<T extends AclPair>(rows: T[]): T[] {
 
 function canonicalMatches(actual: CanonicalPermit | null, expected: CanonicalPermit | null): boolean {
     if (!actual || !expected) return actual === expected;
-    return actual.active === true
-        && actual.role === expected.role
-        && actual.viaContest === expected.viaContest;
+    return actual.active === true && actual.role === expected.role && actual.viaContest === expected.viaContest;
 }
 
 function errorText(error: unknown): string {
     return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
-export function createAclService(
-    repo: AclServiceRepository,
-    options: { now?: () => Date } = {},
-) {
+export function createAclService(repo: AclServiceRepository, options: { now?: () => Date } = {}) {
     const now = options.now || (() => new Date());
     const coordinator = createAclCoordinator(repo, { now });
 
     async function grantDirect(
-        domainId: string, pid: number, uid: number, role: PermitRole,
-        grantedBy: number, requestId: string, note = '', writeClaimRequestId?: string,
+        domainId: string,
+        pid: number,
+        uid: number,
+        role: PermitRole,
+        grantedBy: number,
+        requestId: string,
+        note = '',
+        writeClaimRequestId?: string,
     ) {
         return coordinator.mutate({
-            domainId, pid, uid, role, grantedBy, requestId: requireRequestId(requestId), note,
-            sourceType: 'direct', sourceId: 'direct',
+            domainId,
+            pid,
+            uid,
+            role,
+            grantedBy,
+            requestId: requireRequestId(requestId),
+            note,
+            sourceType: 'direct',
+            sourceId: 'direct',
             writeClaimRequestId,
         });
     }
 
     async function grantContest(
-        domainId: string, pid: number, uid: number, role: PermitRole,
-        grantedBy: number, contestId: string, requestId: string, note = '', writeClaimRequestId?: string,
+        domainId: string,
+        pid: number,
+        uid: number,
+        role: PermitRole,
+        grantedBy: number,
+        contestId: string,
+        requestId: string,
+        note = '',
+        writeClaimRequestId?: string,
     ) {
         if (!contestId) throw new Error('contest sourceId is required');
         return coordinator.mutate({
-            domainId, pid, uid, role, grantedBy, requestId: requireRequestId(requestId), note,
-            sourceType: 'contest', sourceId: contestId,
+            domainId,
+            pid,
+            uid,
+            role,
+            grantedBy,
+            requestId: requireRequestId(requestId),
+            note,
+            sourceType: 'contest',
+            sourceId: contestId,
             writeClaimRequestId,
         });
     }
 
-    async function removeSources(
-        sources: PermitSource[], requestId: string, actor: number, writeClaimRequestId?: string,
-    ): Promise<number> {
+    async function removeSources(sources: PermitSource[], requestId: string, actor: number, writeClaimRequestId?: string): Promise<number> {
         let removed = 0;
-        const ordered = sources.slice().sort((a, b) => a.domainId.localeCompare(b.domainId)
-            || a.pid - b.pid || a.uid - b.uid
-            || a.sourceType.localeCompare(b.sourceType) || a.sourceId.localeCompare(b.sourceId));
+        const ordered = sources
+            .slice()
+            .sort(
+                (a, b) =>
+                    a.domainId.localeCompare(b.domainId) ||
+                    a.pid - b.pid ||
+                    a.uid - b.uid ||
+                    a.sourceType.localeCompare(b.sourceType) ||
+                    a.sourceId.localeCompare(b.sourceId),
+            );
         for (const source of ordered) {
             await coordinator.mutate({
                 domainId: source.domainId,
@@ -178,9 +206,7 @@ export function createAclService(
         actor = 0,
         writeClaimRequestId?: string,
     ): Promise<boolean> {
-        const source = (await repo.getSources({ domainId, pid, uid })).find((item) => (
-            item.sourceType === sourceType && item.sourceId === sourceId
-        ));
+        const source = (await repo.getSources({ domainId, pid, uid })).find((item) => item.sourceType === sourceType && item.sourceId === sourceId);
         if (!source) return false;
         await removeSources([source], requestId, actor, writeClaimRequestId);
         return true;
@@ -218,31 +244,20 @@ export function createAclService(
         });
     }
 
-    async function resumeMarkersForPair(
-        pair: AclPair,
-        expectedRequestId?: string,
-    ): Promise<CanonicalPermit | null> {
-        const [fence, lock] = await Promise.all([
-            repo.getFence(pair),
-            repo.getProblemAclMutationLock(pair),
-        ]);
+    async function resumeMarkersForPair(pair: AclPair, expectedRequestId?: string): Promise<CanonicalPermit | null> {
+        const [fence, lock] = await Promise.all([repo.getFence(pair), repo.getProblemAclMutationLock(pair)]);
         if (!fence && !lock) return null;
         for (const marker of [fence, lock].filter(Boolean) as Array<AclMutationFence | ProblemAclMutationLock>) {
             if (expectedRequestId && marker.requestId !== expectedRequestId) {
-                throw new Error(
-                    `ACL marker requestId mismatch: expected ${expectedRequestId}, got ${marker.requestId}`,
-                );
+                throw new Error(`ACL marker requestId mismatch: expected ${expectedRequestId}, got ${marker.requestId}`);
             }
         }
         return lock ? resumeProblemLock(lock) : resumeFence(fence!);
     }
 
-    async function repairAclMutation(
-        pair: AclPair,
-        expectedRequestId: string,
-    ): Promise<CanonicalPermit | null> {
+    async function repairAclMutation(pair: AclPair, expectedRequestId: string): Promise<CanonicalPermit | null> {
         const requestId = requireRequestId(expectedRequestId);
-        if (!await repo.problemExists(pair.domainId, pair.pid)) {
+        if (!(await repo.problemExists(pair.domainId, pair.pid))) {
             throw new Error(`problem ${pair.domainId}/${pair.pid} does not exist`);
         }
         const [fence, lock, claim] = await Promise.all([
@@ -256,14 +271,10 @@ export function createAclService(
         }
         for (const marker of markers) {
             if (marker.requestId !== requestId) {
-                throw new Error(
-                    `ACL marker requestId mismatch: expected ${requestId}, got ${marker.requestId}`,
-                );
+                throw new Error(`ACL marker requestId mismatch: expected ${requestId}, got ${marker.requestId}`);
             }
         }
-        const bindings = new Set(markers
-            .map((marker) => marker.writeClaimRequestId || null)
-            .filter((value): value is string => !!value));
+        const bindings = new Set(markers.map((marker) => marker.writeClaimRequestId || null).filter((value): value is string => !!value));
         if (bindings.size > 1) throw new Error('ACL markers are bound to different problem write claims');
         const binding = [...bindings][0];
         if (claim || binding) {
@@ -271,37 +282,25 @@ export function createAclService(
                 throw new Error('ACL marker binding does not match the current problem write claim');
             }
             if (claim.state === 'error') {
-                throw new Error(
-                    `ACL mutation belongs to ERROR problem write claim ${claim.requestId}; `
-                    + 'use problem-write-claim repair',
-                );
+                throw new Error(`ACL mutation belongs to ERROR problem write claim ${claim.requestId}; use problem-write-claim repair`);
             }
             throw new Error(
-                `ACL mutation belongs to ACTIVE problem write claim ${claim.requestId}; `
-                + `after quiescing the process use problem-write-claim repair with ${ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION}`,
+                `ACL mutation belongs to ACTIVE problem write claim ${claim.requestId}; ` +
+                    `after quiescing the process use problem-write-claim repair with ${ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION}`,
             );
         }
 
         const result = await resumeMarkersForPair(pair, requestId);
-        const [fenceLeft, lockLeft] = await Promise.all([
-            repo.getFence(pair),
-            repo.getProblemAclMutationLock(pair),
-        ]);
+        const [fenceLeft, lockLeft] = await Promise.all([repo.getFence(pair), repo.getProblemAclMutationLock(pair)]);
         if (fenceLeft || lockLeft) {
             throw new Error(`ACL mutation repair incomplete for ${pair.domainId}/${pair.pid}/${pair.uid}`);
         }
         return result;
     }
 
-    async function repairOrphanProblemLock(
-        pair: AclPair,
-        expectedRequestId: string,
-    ): Promise<CanonicalPermit | null> {
+    async function repairOrphanProblemLock(pair: AclPair, expectedRequestId: string): Promise<CanonicalPermit | null> {
         const requestId = requireRequestId(expectedRequestId);
-        const [exists, lock] = await Promise.all([
-            repo.problemExists(pair.domainId, pair.pid),
-            repo.getProblemAclMutationLock(pair),
-        ]);
+        const [exists, lock] = await Promise.all([repo.problemExists(pair.domainId, pair.pid), repo.getProblemAclMutationLock(pair)]);
         if (!exists) throw new Error(`problem ${pair.domainId}/${pair.pid} does not exist`);
         if (!lock) {
             throw new Error(`ProblemDoc ACL lock does not exist for ${pair.domainId}/${pair.pid}/${pair.uid}`);
@@ -312,10 +311,7 @@ export function createAclService(
         return repairAclMutation(pair, requestId);
     }
 
-    async function repairFenceWithoutProblemLock(
-        pair: AclPair,
-        expectedRequestId: string,
-    ): Promise<CanonicalPermit | null> {
+    async function repairFenceWithoutProblemLock(pair: AclPair, expectedRequestId: string): Promise<CanonicalPermit | null> {
         const requestId = requireRequestId(expectedRequestId);
         const [exists, fence, lock] = await Promise.all([
             repo.problemExists(pair.domainId, pair.pid),
@@ -335,13 +331,9 @@ export function createAclService(
         return repairAclMutation(pair, requestId);
     }
 
-    async function repairErroredProblemWriteClaim(
-        domainId: string,
-        pid: number,
-        expectedRequestId: string,
-    ): Promise<void> {
+    async function repairErroredProblemWriteClaim(domainId: string, pid: number, expectedRequestId: string): Promise<void> {
         const requestId = requireRequestId(expectedRequestId);
-        if (!await repo.problemExists(domainId, pid)) {
+        if (!(await repo.problemExists(domainId, pid))) {
             throw new Error(`problem ${domainId}/${pid} does not exist`);
         }
         const claim = await repo.getProblemWriteClaim(domainId, pid);
@@ -352,7 +344,7 @@ export function createAclService(
         if (claim.state !== 'error') {
             throw new Error(`problem write claim ${requestId} is active and cannot be operator-cleared`);
         }
-        if (!await repo.reactivateErroredProblemWriteClaim(domainId, pid, requestId)) {
+        if (!(await repo.reactivateErroredProblemWriteClaim(domainId, pid, requestId))) {
             throw new Error(`problem write claim ${requestId} changed before repair activation`);
         }
 
@@ -362,14 +354,9 @@ export function createAclService(
                 repo.listFencesForProblem(domainId, pid),
                 repo.listProblemAclMutationLocksForProblem(domainId, pid),
             ]);
-            for (const marker of [
-                ...fences,
-                ...locks,
-            ]) {
+            for (const marker of [...fences, ...locks]) {
                 if ((marker.writeClaimRequestId || null) !== requestId) {
-                    throw new Error(
-                        `ACL marker ${marker.requestId} is not bound to write claim ${requestId}`,
-                    );
+                    throw new Error(`ACL marker ${marker.requestId} is not bound to write claim ${requestId}`);
                 }
                 markerPairs.set(`${marker.pid}:${marker.uid}`, marker);
             }
@@ -382,7 +369,7 @@ export function createAclService(
             if (fencesLeft.length || locksLeft.length) {
                 throw new Error(`write-claim ACL markers remain for ${domainId}/${pid}`);
             }
-            if (!await repo.clearActiveProblemWriteClaim(domainId, pid, requestId)) {
+            if (!(await repo.clearActiveProblemWriteClaim(domainId, pid, requestId))) {
                 throw new Error(`problem write claim ${requestId} changed before exact clear`);
             }
         } catch (error) {
@@ -391,34 +378,26 @@ export function createAclService(
                 restored = await repo.markProblemWriteClaimRepairError(domainId, pid, requestId, error);
             } catch (markerError) {
                 throw new Error(
-                    `write-claim repair failed and ERROR marker update also failed: ${requestId}; `
-                    + `${errorText(error)}; markerError=${errorText(markerError)}`,
+                    `write-claim repair failed and ERROR marker update also failed: ${requestId}; ` +
+                        `${errorText(error)}; markerError=${errorText(markerError)}`,
                     { cause: error },
                 );
             }
             if (!restored) {
-                throw new Error(
-                    `write-claim repair failed and exact ERROR marker could not be restored: ${requestId}; ${errorText(error)}`,
-                    { cause: error },
-                );
+                throw new Error(`write-claim repair failed and exact ERROR marker could not be restored: ${requestId}; ${errorText(error)}`, {
+                    cause: error,
+                });
             }
             throw error;
         }
     }
 
-    async function recoverActiveProblemWriteClaim(
-        domainId: string,
-        pid: number,
-        expectedRequestId: string,
-        confirmation: string,
-    ): Promise<void> {
+    async function recoverActiveProblemWriteClaim(domainId: string, pid: number, expectedRequestId: string, confirmation: string): Promise<void> {
         if (confirmation !== ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION) {
-            throw new Error(
-                `ACTIVE write-claim recovery requires ${ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION}`,
-            );
+            throw new Error(`ACTIVE write-claim recovery requires ${ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION}`);
         }
         const requestId = requireRequestId(expectedRequestId);
-        if (!await repo.problemExists(domainId, pid)) {
+        if (!(await repo.problemExists(domainId, pid))) {
             throw new Error(`problem ${domainId}/${pid} does not exist`);
         }
         const claim = await repo.getProblemWriteClaim(domainId, pid);
@@ -429,12 +408,8 @@ export function createAclService(
         if (claim.state !== 'active') {
             throw new Error(`problem write claim ${requestId} is ${claim.state}; use ERROR write-claim repair`);
         }
-        const recoveryMarker = new Error(
-            `operator confirmed ${ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION}`,
-        );
-        if (!await repo.markProblemWriteClaimRepairError(
-            domainId, pid, requestId, recoveryMarker,
-        )) {
+        const recoveryMarker = new Error(`operator confirmed ${ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION}`);
+        if (!(await repo.markProblemWriteClaimRepairError(domainId, pid, requestId, recoveryMarker))) {
             throw new Error(`problem write claim ${requestId} changed before exact ACTIVE recovery`);
         }
         await repairErroredProblemWriteClaim(domainId, pid, requestId);
@@ -453,14 +428,12 @@ export function createAclService(
     }
 
     async function prepareProblemWriteClaim(domainId: string, pid: number): Promise<void> {
-        if (!await repo.problemExists(domainId, pid)) {
+        if (!(await repo.problemExists(domainId, pid))) {
             throw new Error(`problem ${domainId}/${pid} does not exist`);
         }
         const claim = await repo.getProblemWriteClaim(domainId, pid);
         if (claim) {
-            throw new Error(
-                `problem ${domainId}/${pid} already has ${claim.state} write claim ${claim.requestId}`,
-            );
+            throw new Error(`problem ${domainId}/${pid} already has ${claim.state} write claim ${claim.requestId}`);
         }
         await resumeFencesForProblem(domainId, pid);
         const [fencesLeft, locksLeft] = await Promise.all([
@@ -472,9 +445,7 @@ export function createAclService(
         }
     }
 
-    async function reconcilePair(
-        pair: AclPair, requestId: string, actor: number, writeClaimRequestId?: string,
-    ) {
+    async function reconcilePair(pair: AclPair, requestId: string, actor: number, writeClaimRequestId?: string) {
         return coordinator.mutate({
             ...pair,
             requestId: requireRequestId(requestId),
@@ -489,7 +460,11 @@ export function createAclService(
     }
 
     async function clearVerifiersForProblem(
-        domainId: string, pid: number, requestId: string, actor = 0, writeClaimRequestId?: string,
+        domainId: string,
+        pid: number,
+        requestId: string,
+        actor = 0,
+        writeClaimRequestId?: string,
     ): Promise<number> {
         await resumeFencesForProblem(domainId, pid);
         const sources = await repo.listSourcesForProblem(domainId, pid);
@@ -499,49 +474,32 @@ export function createAclService(
             actor,
             writeClaimRequestId,
         );
-        const staleCanonical = (await repo.listCanonicalForProblem(domainId, pid))
-            .filter((permit) => permit.active === true && permit.role === 'verifier');
+        const staleCanonical = (await repo.listCanonicalForProblem(domainId, pid)).filter(
+            (permit) => permit.active === true && permit.role === 'verifier',
+        );
         for (const permit of staleCanonical.sort((a, b) => a.uid - b.uid)) {
-            await reconcilePair(
-                { domainId, pid, uid: permit.uid },
-                `${requestId}:canonical-verifier:${permit.uid}`,
-                actor,
-                writeClaimRequestId,
-            );
+            await reconcilePair({ domainId, pid, uid: permit.uid }, `${requestId}:canonical-verifier:${permit.uid}`, actor, writeClaimRequestId);
         }
         const [verifierSources, verifierCanonical] = await Promise.all([
             repo.listSourcesForProblem(domainId, pid),
             repo.listCanonicalForProblem(domainId, pid),
         ]);
-        if (verifierSources.some((source) => source.active === true && source.role === 'verifier')
-            || verifierCanonical.some((permit) => permit.active === true && permit.role === 'verifier')) {
+        if (
+            verifierSources.some((source) => source.active === true && source.role === 'verifier') ||
+            verifierCanonical.some((permit) => permit.active === true && permit.role === 'verifier')
+        ) {
             throw new Error(`publish verifier cleanup incomplete for ${domainId}/${pid}`);
         }
         return removed;
     }
 
-    async function clearForProblem(
-        domainId: string, pid: number, requestId: string, actor = 0, writeClaimRequestId?: string,
-    ): Promise<number> {
+    async function clearForProblem(domainId: string, pid: number, requestId: string, actor = 0, writeClaimRequestId?: string): Promise<number> {
         await resumeFencesForProblem(domainId, pid);
-        const removed = await removeSources(
-            await repo.listSourcesForProblem(domainId, pid), requestId, actor, writeClaimRequestId,
-        );
-        const [canonical, mirroredUids] = await Promise.all([
-            repo.listCanonicalForProblem(domainId, pid),
-            repo.getProblemMirror(domainId, pid),
-        ]);
-        const pairUids = new Set([
-            ...canonical.map((permit) => permit.uid),
-            ...mirroredUids,
-        ]);
+        const removed = await removeSources(await repo.listSourcesForProblem(domainId, pid), requestId, actor, writeClaimRequestId);
+        const [canonical, mirroredUids] = await Promise.all([repo.listCanonicalForProblem(domainId, pid), repo.getProblemMirror(domainId, pid)]);
+        const pairUids = new Set([...canonical.map((permit) => permit.uid), ...mirroredUids]);
         for (const uid of [...pairUids].sort((a, b) => a - b)) {
-            await reconcilePair(
-                { domainId, pid, uid },
-                `${requestId}:reconcile:${uid}`,
-                actor,
-                writeClaimRequestId,
-            );
+            await reconcilePair({ domainId, pid, uid }, `${requestId}:reconcile:${uid}`, actor, writeClaimRequestId);
         }
         const [sourcesLeft, canonicalLeft, fencesLeft, mirrorLeft] = await Promise.all([
             repo.listSourcesForProblem(domainId, pid),
@@ -555,38 +513,22 @@ export function createAclService(
         return removed;
     }
 
-    async function revokeContestUser(
-        domainId: string, contestId: string, uid: number, requestId: string, actor = 0,
-    ): Promise<number> {
-        const removed = await removeSources(
-            await repo.listSourcesForContest(domainId, contestId, uid), requestId, actor,
-        );
+    async function revokeContestUser(domainId: string, contestId: string, uid: number, requestId: string, actor = 0): Promise<number> {
+        const removed = await removeSources(await repo.listSourcesForContest(domainId, contestId, uid), requestId, actor);
         const stale = await repo.listCanonicalForContest(domainId, contestId, uid);
         for (const permit of stale.sort((a, b) => a.pid - b.pid)) {
-            await reconcilePair(
-                { domainId, pid: permit.pid, uid },
-                `${requestId}:canonical:${permit.pid}:${uid}`,
-                actor,
-            );
+            await reconcilePair({ domainId, pid: permit.pid, uid }, `${requestId}:canonical:${permit.pid}:${uid}`, actor);
         }
         const left = (await repo.listCanonicalForContest(domainId, contestId, uid)).length > 0;
         if (left) throw new Error(`contest user revoke incomplete for ${domainId}/${contestId}/${uid}`);
         return removed;
     }
 
-    async function revokeContestAll(
-        domainId: string, contestId: string, requestId: string, actor = 0,
-    ): Promise<number> {
-        const removed = await removeSources(
-            await repo.listSourcesForContest(domainId, contestId), requestId, actor,
-        );
+    async function revokeContestAll(domainId: string, contestId: string, requestId: string, actor = 0): Promise<number> {
+        const removed = await removeSources(await repo.listSourcesForContest(domainId, contestId), requestId, actor);
         const stale = await repo.listCanonicalForContest(domainId, contestId);
         for (const permit of stale.sort((a, b) => a.pid - b.pid || a.uid - b.uid)) {
-            await reconcilePair(
-                { domainId, pid: permit.pid, uid: permit.uid },
-                `${requestId}:canonical:${permit.pid}:${permit.uid}`,
-                actor,
-            );
+            await reconcilePair({ domainId, pid: permit.pid, uid: permit.uid }, `${requestId}:canonical:${permit.pid}:${permit.uid}`, actor);
         }
         const left = (await repo.listCanonicalForContest(domainId, contestId)).length > 0;
         if (left) throw new Error(`contest revoke incomplete for ${domainId}/${contestId}`);
@@ -595,7 +537,7 @@ export function createAclService(
 
     async function revokePairs(
         domainId: string,
-        pairs: Array<{ pid: number, uid: number }>,
+        pairs: Array<{ pid: number; uid: number }>,
         requestId: string,
         actor = 0,
         writeClaimRequestId?: string,
@@ -606,15 +548,9 @@ export function createAclService(
             const aclPair = { domainId, ...pair };
             const fence = await repo.getFence(aclPair);
             if (fence) await resumeFence(fence);
-            const sources = (await repo.getSources({ domainId, ...pair }))
-                .filter((source) => source.domainId === domainId);
+            const sources = (await repo.getSources({ domainId, ...pair })).filter((source) => source.domainId === domainId);
             removed += await removeSources(sources, requestId, actor, writeClaimRequestId);
-            await reconcilePair(
-                aclPair,
-                `${requestId}:pair-reconcile:${pair.pid}:${pair.uid}`,
-                actor,
-                writeClaimRequestId,
-            );
+            await reconcilePair(aclPair, `${requestId}:pair-reconcile:${pair.pid}:${pair.uid}`, actor, writeClaimRequestId);
             const [canonicalLeft, sourcesLeft, fenceLeft, mirrorLeft] = await Promise.all([
                 repo.getCanonical(aclPair),
                 repo.getSources(aclPair),
@@ -633,12 +569,12 @@ export function createAclService(
         contestId: string,
         _oldPids: number[],
         newPids: number[],
-        users: Array<{ uid: number, role: PermitRole }>,
+        users: Array<{ uid: number; role: PermitRole }>,
         grantedBy: number,
         requestId: string,
-    ): Promise<{ added: number, removed: number }> {
+    ): Promise<{ added: number; removed: number }> {
         const existing = await repo.listSourcesForContest(domainId, contestId);
-        const desired = new Map<string, { pid: number, uid: number, role: PermitRole }>();
+        const desired = new Map<string, { pid: number; uid: number; role: PermitRole }>();
         for (const pid of [...new Set(newPids)].sort((a, b) => a - b)) {
             for (const user of users.slice().sort((a, b) => a.uid - b.uid)) {
                 desired.set(`${pid}:${user.uid}`, { pid, uid: user.uid, role: user.role });
@@ -647,14 +583,19 @@ export function createAclService(
         const toRemove = existing.filter((source) => !desired.has(`${source.pid}:${source.uid}`));
         const removed = await removeSources(toRemove, `${requestId}:remove`, grantedBy);
         let added = 0;
-        const existingByPair = new Map(existing
-            .filter((source) => !toRemove.includes(source))
-            .map((source) => [`${source.pid}:${source.uid}`, source]));
+        const existingByPair = new Map(
+            existing.filter((source) => !toRemove.includes(source)).map((source) => [`${source.pid}:${source.uid}`, source]),
+        );
         for (const target of desired.values()) {
             const current = existingByPair.get(`${target.pid}:${target.uid}`);
             if (current?.active === true && current.role === target.role) continue;
             await grantContest(
-                domainId, target.pid, target.uid, target.role, grantedBy, contestId,
+                domainId,
+                target.pid,
+                target.uid,
+                target.role,
+                grantedBy,
+                contestId,
                 `${requestId}:upsert:${target.pid}:${target.uid}`,
             );
             added++;
@@ -668,10 +609,7 @@ export function createAclService(
             repo.listFencesForUser(domainId, uid),
             repo.listProblemAclMutationLocksForUser(domainId, uid),
         ]);
-        const fencedPids = new Set([
-            ...fences.map((fence) => fence.pid),
-            ...problemLocks.map((lock) => lock.pid),
-        ]);
+        const fencedPids = new Set([...fences.map((fence) => fence.pid), ...problemLocks.map((lock) => lock.pid)]);
         const active = canonical.filter((permit) => permit.active === true && !fencedPids.has(permit.pid));
         return {
             permitPids: new Set(active.map((permit) => permit.pid)),
@@ -680,16 +618,8 @@ export function createAclService(
         };
     }
 
-    async function repairLegacyCanonicalWithoutSource(
-        pair: AclPair,
-        requestId: string,
-        actor: number,
-    ): Promise<CanonicalPermit> {
-        const [canonical, sources, fence] = await Promise.all([
-            repo.getCanonical(pair),
-            repo.getSources(pair),
-            repo.getFence(pair),
-        ]);
+    async function repairLegacyCanonicalWithoutSource(pair: AclPair, requestId: string, actor: number): Promise<CanonicalPermit> {
+        const [canonical, sources, fence] = await Promise.all([repo.getCanonical(pair), repo.getSources(pair), repo.getFence(pair)]);
         if (fence) {
             throw new Error(`legacy canonical repair refused while pair is fenced by ${fence.requestId}`);
         }
@@ -699,29 +629,10 @@ export function createAclService(
         if (sources.some((source) => source.active === true)) {
             throw new Error('legacy canonical repair refused because source rows already exist');
         }
-        const grantedBy = Number.isSafeInteger(canonical.grantedBy) && canonical.grantedBy > 0
-            ? canonical.grantedBy
-            : actor;
+        const grantedBy = Number.isSafeInteger(canonical.grantedBy) && canonical.grantedBy > 0 ? canonical.grantedBy : actor;
         const repaired = canonical.viaContest
-            ? await grantContest(
-                pair.domainId,
-                pair.pid,
-                pair.uid,
-                canonical.role,
-                grantedBy,
-                canonical.viaContest,
-                requestId,
-                canonical.note,
-            )
-            : await grantDirect(
-                pair.domainId,
-                pair.pid,
-                pair.uid,
-                canonical.role,
-                grantedBy,
-                requestId,
-                canonical.note,
-            );
+            ? await grantContest(pair.domainId, pair.pid, pair.uid, canonical.role, grantedBy, canonical.viaContest, requestId, canonical.note)
+            : await grantDirect(pair.domainId, pair.pid, pair.uid, canonical.role, grantedBy, requestId, canonical.note);
         if (!repaired) throw new Error('legacy canonical repair produced no active canonical row');
         return repaired;
     }
@@ -735,9 +646,7 @@ export function createAclService(
             repo.listProblemAclMutationLocksForDomain(domainId),
             repo.listProblemWriteClaimsForDomain(domainId),
         ]);
-        const canonicalByPair = new Map(canonical.map((permit) => [
-            `${permit.pid}:${permit.uid}`, permit,
-        ]));
+        const canonicalByPair = new Map(canonical.map((permit) => [`${permit.pid}:${permit.uid}`, permit]));
         const mirrored = new Set<string>();
         const legacyMaintainerWithoutCanonical: AclPair[] = [];
         const verifierInLegacy: AclPair[] = [];
@@ -754,8 +663,7 @@ export function createAclService(
             }
         }
         const canonicalMaintainerWithoutLegacy = canonical
-            .filter((permit) => permit.active === true && permit.role === 'maintainer'
-                && !mirrored.has(`${permit.pid}:${permit.uid}`))
+            .filter((permit) => permit.active === true && permit.role === 'maintainer' && !mirrored.has(`${permit.pid}:${permit.uid}`))
             .map(({ domainId: d, pid, uid }) => ({ domainId: d, pid, uid }));
 
         const sourcesByPair = new Map<string, PermitSource[]>();
@@ -766,14 +674,13 @@ export function createAclService(
         }
         const pairKeys = new Set([...canonicalByPair.keys(), ...sourcesByPair.keys()]);
         const legacyCanonicalWithoutSource = canonical
-            .filter((permit) => !(sourcesByPair.get(`${permit.pid}:${permit.uid}`) || [])
-                .some((source) => source.active === true))
+            .filter((permit) => !(sourcesByPair.get(`${permit.pid}:${permit.uid}`) || []).some((source) => source.active === true))
             .map((permit) => ({
                 domainId: permit.domainId,
                 pid: permit.pid,
                 uid: permit.uid,
                 role: permit.role,
-                sourceType: permit.viaContest ? 'contest' as const : 'direct' as const,
+                sourceType: permit.viaContest ? ('contest' as const) : ('direct' as const),
                 sourceId: permit.viaContest || 'direct',
             }));
         const sourceCanonicalConflicts: AclDriftReport['sourceCanonicalConflicts'] = [];
@@ -786,18 +693,14 @@ export function createAclService(
                 sourceCanonicalConflicts.push({ ...pair, expected, actual });
             }
         }
-        const fencesByPair = new Map(fences.map((fence) => [
-            `${fence.pid}:${fence.uid}`, fence,
-        ]));
+        const fencesByPair = new Map(fences.map((fence) => [`${fence.pid}:${fence.uid}`, fence]));
         const locksByPair = new Map<string, ProblemAclMutationLock[]>();
         for (const lock of problemLocks) {
             const key = `${lock.pid}:${lock.uid}`;
             if (!locksByPair.has(key)) locksByPair.set(key, []);
             locksByPair.get(key)!.push(lock);
         }
-        const orphanProblemLocks = problemLocks.filter(
-            (lock) => !fencesByPair.has(`${lock.pid}:${lock.uid}`),
-        );
+        const orphanProblemLocks = problemLocks.filter((lock) => !fencesByPair.has(`${lock.pid}:${lock.uid}`));
         const lockForFence = (fence: AclMutationFence): ProblemAclMutationLock | null => {
             const locks = locksByPair.get(`${fence.pid}:${fence.uid}`) || [];
             return locks.find((lock) => lock.requestId === fence.requestId) || locks[0] || null;
@@ -843,11 +746,9 @@ export function createAclService(
             orphanProblemLocks: sortPairs(orphanProblemLocks),
             aclMutationFences: sortPairs(aclMutationFences),
             fenceProblemLockMismatches: sortPairs(fenceProblemLockMismatches),
-            problemWriteClaims: problemWriteClaims.sort((a, b) => (
-                a.domainId.localeCompare(b.domainId)
-                || a.pid - b.pid
-                || a.requestId.localeCompare(b.requestId)
-            )),
+            problemWriteClaims: problemWriteClaims.sort(
+                (a, b) => a.domainId.localeCompare(b.domainId) || a.pid - b.pid || a.requestId.localeCompare(b.requestId),
+            ),
         };
     }
 

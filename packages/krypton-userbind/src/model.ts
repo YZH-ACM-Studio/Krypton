@@ -7,18 +7,9 @@
  */
 import type { Filter } from 'mongodb';
 import { db, ObjectId, UserModel, ValidationError } from 'hydrooj';
-import {
-    bindTokensColl,
-    ensureIndexes,
-    schoolsColl,
-    studentsColl,
-    userGroupsColl,
-} from './db';
+import { bindTokensColl, ensureIndexes, schoolsColl, studentsColl, userGroupsColl } from './db';
 import type { ListStudentsFilter } from './student-filter';
-import {
-    escapeRegexLiteral,
-    listStudentsFromCollection,
-} from './student-filter';
+import { escapeRegexLiteral, listStudentsFromCollection } from './student-filter';
 import type {
     BindingRequest,
     BindToken,
@@ -57,7 +48,7 @@ export function deriveEnrollmentYear(studentId: string): number | null {
     if (!studentId || studentId.length < 2) return null;
     const yy = studentId.slice(0, 2);
     if (!/^\d{2}$/.test(yy)) return null;
-    return 2000 + parseInt(yy, 10);
+    return 2000 + Number.parseInt(yy, 10);
 }
 
 // ─── Roster validation helpers ────────────────────────────────────────────
@@ -88,12 +79,14 @@ export function parseRosterText(text: string): ParsedRosterRow[] {
         const trimmed = raw.trim();
         if (!trimmed) continue;
         if (trimmed.startsWith('#')) continue;
-        const parts = trimmed.split(/[\s,;\t]+/).filter(Boolean);
+        const parts = trimmed.split(/[\s,;]+/).filter(Boolean);
         const studentId = (parts[0] || '').trim();
         const realName = parts.slice(1).join(' ').trim();
         const row: ParsedRosterRow = {
-            line: i + 1, raw,
-            studentId, realName,
+            line: i + 1,
+            raw,
+            studentId,
+            realName,
             status: 'ok',
         };
         if (!studentId && !realName) {
@@ -154,12 +147,14 @@ async function autoBindStudentRecords(
     if (candidates.length === 0) return report;
 
     const studentIds = Array.from(new Set(candidates.map((r) => r.studentId)));
-    const users = await UserModel.coll.find(
-        {
-            studentId: { $in: studentIds },
-        } as any,
-        { projection: { _id: 1, studentId: 1, realName: 1 } },
-    ).toArray();
+    const users = await UserModel.coll
+        .find(
+            {
+                studentId: { $in: studentIds },
+            } as any,
+            { projection: { _id: 1, studentId: 1, realName: 1 } },
+        )
+        .toArray();
 
     const usersByKey = new Map<string, Array<{ _id: number; studentId?: string; realName?: string }>>();
     for (const user of users) {
@@ -207,10 +202,9 @@ async function autoBindStudentRecords(
         if (extraGroupIds.length > 0) {
             studentUpdate.$addToSet = { groupIds: { $each: extraGroupIds } };
         }
-        const groupIds = Array.from(new Set([
-            ...record.groupIds.map((g) => g.toString()),
-            ...extraGroupIds.map((g) => g.toString()),
-        ])).map((s) => new ObjectId(s));
+        const groupIds = Array.from(new Set([...record.groupIds.map((g) => g.toString()), ...extraGroupIds.map((g) => g.toString())])).map(
+            (s) => new ObjectId(s),
+        );
         const userAddToSet: Record<string, any> = { parentSchoolId: record.schoolId as any };
         if (groupIds.length > 0) userAddToSet.parentUserGroupId = { $each: groupIds as any[] };
         await Promise.all([
@@ -279,28 +273,18 @@ export async function updateSchool(domainId: string, id: ObjectId, patch: { name
 export async function deleteSchool(domainId: string, id: ObjectId): Promise<void> {
     const studentCount = await studentsColl.countDocuments({ domainId, schoolId: id });
     if (studentCount > 0) {
-        throw new ValidationError(
-            'school',
-            null,
-            `Cannot delete school: ${studentCount} student record(s) still belong to it`,
-        );
+        throw new ValidationError('school', null, `Cannot delete school: ${studentCount} student record(s) still belong to it`);
     }
     const groupCount = await userGroupsColl.countDocuments({ domainId, schoolId: id });
     if (groupCount > 0) {
-        throw new ValidationError(
-            'school',
-            null,
-            `Cannot delete school: ${groupCount} user group(s) still belong to it`,
-        );
+        throw new ValidationError('school', null, `Cannot delete school: ${groupCount} user group(s) still belong to it`);
     }
     await schoolsColl.deleteOne({ domainId, _id: id });
 }
 
 // ─── UserGroups ───────────────────────────────────────────────────────────
 
-export async function createUserGroup(
-    domainId: string, schoolId: ObjectId, name: string, createdBy: number,
-): Promise<UserGroup> {
+export async function createUserGroup(domainId: string, schoolId: ObjectId, name: string, createdBy: number): Promise<UserGroup> {
     name = name.trim();
     if (!name) throw new ValidationError('name');
     const school = await schoolsColl.findOne({ domainId, _id: schoolId });
@@ -332,9 +316,7 @@ export async function getUserGroup(domainId: string, id: ObjectId): Promise<User
     return await userGroupsColl.findOne({ domainId, _id: id });
 }
 
-export async function updateUserGroup(
-    domainId: string, id: ObjectId, patch: { name?: string },
-): Promise<void> {
+export async function updateUserGroup(domainId: string, id: ObjectId, patch: { name?: string }): Promise<void> {
     const setOps: Partial<UserGroup> = {};
     if (typeof patch.name === 'string') {
         const name = patch.name.trim();
@@ -389,10 +371,7 @@ export async function deleteUserGroup(domainId: string, id: ObjectId): Promise<v
         // $or 保证同一任务的图节点 + 可见范围双引用只计一次。
         db.collection('tasks.tasks' as any).countDocuments({
             domainId,
-            $or: [
-                { 'graph.nodes.params.targetId': hex },
-                { 'access.type': 'user_group', 'access.targetId': id },
-            ],
+            $or: [{ 'graph.nodes.params.targetId': hex }, { 'access.type': 'user_group', 'access.targetId': id }],
         }),
         db.collection('document' as any).countDocuments({ domainId, docType: 40, groupIds: id }),
         db.collection('document' as any).countDocuments({ domainId, docType: 30, participantGroupIds: id }),
@@ -423,14 +402,16 @@ export async function importStudents(
     if (!school) throw new ValidationError('schoolId', null, 'School not found');
 
     const report: ImportStudentReport = {
-        inserted: 0, duplicates: [], alreadyBound: 0, autoBound: 0, autoBindSkipped: [],
+        inserted: 0,
+        duplicates: [],
+        alreadyBound: 0,
+        autoBound: 0,
+        autoBindSkipped: [],
     };
     if (rows.length === 0) return report;
 
     // Pre-check existing studentIds within this school.
-    const existingRecords = await studentsColl.find(
-            { domainId, schoolId, studentId: { $in: rows.map((r) => r.studentId) } },
-        ).toArray();
+    const existingRecords = await studentsColl.find({ domainId, schoolId, studentId: { $in: rows.map((r) => r.studentId) } }).toArray();
     const existingByStudentId = new Map(existingRecords.map((d) => [d.studentId, d]));
 
     const docs: StudentRecord[] = [];
@@ -461,9 +442,7 @@ export async function importStudents(
             if (existing.realName === realName) autoBindCandidates.push(existing);
             report.duplicates.push({
                 studentId,
-                reason: existing.realName === realName
-                    ? '该学校已存在同学号'
-                    : `该学校已存在同学号（库内"${existing.realName}"）`,
+                reason: existing.realName === realName ? '该学校已存在同学号' : `该学校已存在同学号（库内"${existing.realName}"）`,
             });
             continue;
         }
@@ -502,29 +481,23 @@ export interface SearchBindableUserResult {
     boundUserId: number;
 }
 
-export async function searchBindableUsers(
-    domainId: string,
-    schoolId: ObjectId,
-    query: string,
-    limit = 50,
-): Promise<SearchBindableUserResult[]> {
+export async function searchBindableUsers(domainId: string, schoolId: ObjectId, query: string, limit = 50): Promise<SearchBindableUserResult[]> {
     const school = await schoolsColl.findOne({ domainId, _id: schoolId });
     if (!school) throw new ValidationError('schoolId', null, 'School not found');
     const q = (query || '').trim();
     if (!q) return [];
     const regex = new RegExp(escapeRegexLiteral(q), 'i');
-    const users = await UserModel.coll.find(
-        {
-            studentId: { $exists: true, $ne: '' },
-            realName: { $exists: true, $ne: '' },
-            $or: [
-                { studentId: { $regex: regex } },
-                { realName: { $regex: regex } },
-                { uname: { $regex: regex } },
-            ],
-        } as any,
-        { projection: { _id: 1, uname: 1, studentId: 1, realName: 1 } },
-    ).limit(limit).toArray();
+    const users = await UserModel.coll
+        .find(
+            {
+                studentId: { $exists: true, $ne: '' },
+                realName: { $exists: true, $ne: '' },
+                $or: [{ studentId: { $regex: regex } }, { realName: { $regex: regex } }, { uname: { $regex: regex } }],
+            } as any,
+            { projection: { _id: 1, uname: 1, studentId: 1, realName: 1 } },
+        )
+        .limit(limit)
+        .toArray();
     return users.map((u: any) => ({
         _id: u._id,
         uname: u.uname,
@@ -534,24 +507,20 @@ export async function searchBindableUsers(
     }));
 }
 
-export async function importUsersToSchool(
-    domainId: string,
-    schoolId: ObjectId,
-    userIds: number[],
-    createdBy: number,
-): Promise<ImportStudentReport> {
+export async function importUsersToSchool(domainId: string, schoolId: ObjectId, userIds: number[], createdBy: number): Promise<ImportStudentReport> {
     const school = await schoolsColl.findOne({ domainId, _id: schoolId });
     if (!school) throw new ValidationError('schoolId', null, 'School not found');
     const report: ImportStudentReport = {
-        inserted: 0, duplicates: [], alreadyBound: 0, autoBound: 0, autoBindSkipped: [],
+        inserted: 0,
+        duplicates: [],
+        alreadyBound: 0,
+        autoBound: 0,
+        autoBindSkipped: [],
     };
     const uniqueUserIds = Array.from(new Set(userIds.filter((id) => Number.isSafeInteger(id) && id > 0)));
     if (uniqueUserIds.length === 0) return report;
 
-    const users = await UserModel.coll.find(
-        { _id: { $in: uniqueUserIds } },
-        { projection: { _id: 1, studentId: 1, realName: 1 } },
-    ).toArray();
+    const users = await UserModel.coll.find({ _id: { $in: uniqueUserIds } }, { projection: { _id: 1, studentId: 1, realName: 1 } }).toArray();
     const docs: StudentRecord[] = [];
     const autoBindCandidates: StudentRecord[] = [];
     const seenStudentIds = new Set<string>();
@@ -649,15 +618,25 @@ export async function importStudentsToGroup(
     const schoolId = group.schoolId;
 
     const report: ImportGroupReport = {
-        created: 0, attached: 0, alreadyMember: 0, failed: [], autoBound: 0, alreadyBound: 0, autoBindSkipped: [],
+        created: 0,
+        attached: 0,
+        alreadyMember: 0,
+        failed: [],
+        autoBound: 0,
+        alreadyBound: 0,
+        autoBindSkipped: [],
     };
     if (rows.length === 0) return report;
 
     // Look up existing students by studentId within this school in one shot.
     const studentIds = rows.map((r) => (r.studentId || '').trim()).filter(Boolean);
-    const existingRecords = await studentsColl.find({
-        domainId, schoolId, studentId: { $in: studentIds },
-    }).toArray();
+    const existingRecords = await studentsColl
+        .find({
+            domainId,
+            schoolId,
+            studentId: { $in: studentIds },
+        })
+        .toArray();
     const existingByStudentId = new Map(existingRecords.map((r) => [r.studentId, r]));
 
     const toCreate: StudentRecord[] = [];
@@ -725,21 +704,12 @@ export async function importStudentsToGroup(
         autoBindCandidates.push(...toCreate);
     }
     if (toAttach.length > 0) {
-        await studentsColl.updateMany(
-            { _id: { $in: toAttach } },
-            { $addToSet: { groupIds: groupId as any } },
-        );
+        await studentsColl.updateMany({ _id: { $in: toAttach } }, { $addToSet: { groupIds: groupId as any } });
         // Mirror onto already-bound users so their parentUserGroupId reflects membership.
-        const bound = await studentsColl.find(
-            { _id: { $in: toAttach }, boundUserId: { $ne: null } },
-            { projection: { boundUserId: 1 } },
-        ).toArray();
+        const bound = await studentsColl.find({ _id: { $in: toAttach }, boundUserId: { $ne: null } }, { projection: { boundUserId: 1 } }).toArray();
         const uids = bound.map((d) => d.boundUserId!).filter(Boolean);
         if (uids.length > 0) {
-            await UserModel.coll.updateMany(
-                { _id: { $in: uids } },
-                { $addToSet: { parentUserGroupId: groupId as any } },
-            );
+            await UserModel.coll.updateMany({ _id: { $in: uids } }, { $addToSet: { parentUserGroupId: groupId as any } });
         }
     }
     const autoBindReport = await autoBindStudentRecords(domainId, autoBindCandidates, [groupId]);
@@ -756,24 +726,18 @@ export interface RetryGroupAutoBindReport {
     autoBindSkipped: Array<{ studentId: string; reason: string }>;
 }
 
-export async function retryAutoBindStudentsInGroup(
-    domainId: string,
-    groupId: ObjectId,
-): Promise<RetryGroupAutoBindReport> {
+export async function retryAutoBindStudentsInGroup(domainId: string, groupId: ObjectId): Promise<RetryGroupAutoBindReport> {
     const group = await userGroupsColl.findOne({ domainId, _id: groupId });
     if (!group) throw new ValidationError('groupId', null, '用户组不存在');
-    const records = await studentsColl.find({
-        domainId,
-        schoolId: group.schoolId,
-        groupIds: groupId,
-        $or: [{ boundUserId: null }, { boundUserId: { $exists: false } }],
-    } as any).toArray();
-    const autoBindReport = await autoBindStudentRecords(
-        domainId,
-        records,
-        [],
-        { includeNoMatch: true },
-    );
+    const records = await studentsColl
+        .find({
+            domainId,
+            schoolId: group.schoolId,
+            groupIds: groupId,
+            $or: [{ boundUserId: null }, { boundUserId: { $exists: false } }],
+        } as any)
+        .toArray();
+    const autoBindReport = await autoBindStudentRecords(domainId, records, [], { includeNoMatch: true });
     return {
         unboundScanned: records.length,
         alreadyBound: autoBindReport.alreadyBound,
@@ -782,9 +746,7 @@ export async function retryAutoBindStudentsInGroup(
     };
 }
 
-export async function listStudents(
-    domainId: string, filter: ListStudentsFilter = {},
-): Promise<{ docs: StudentRecord[]; total: number }> {
+export async function listStudents(domainId: string, filter: ListStudentsFilter = {}): Promise<{ docs: StudentRecord[]; total: number }> {
     return listStudentsFromCollection(studentsColl, domainId, filter);
 }
 
@@ -792,9 +754,7 @@ export async function getStudent(domainId: string, id: ObjectId): Promise<Studen
     return await studentsColl.findOne({ domainId, _id: id });
 }
 
-export async function findStudentByStudentId(
-    domainId: string, schoolId: ObjectId, studentId: string,
-): Promise<StudentRecord | null> {
+export async function findStudentByStudentId(domainId: string, schoolId: ObjectId, studentId: string): Promise<StudentRecord | null> {
     return await studentsColl.findOne({ domainId, schoolId, studentId });
 }
 
@@ -806,9 +766,7 @@ export async function findStudentByStudentId(
  * or result limit. Used by krypton-tasks score entry/import to resolve
  * studentId → studentDocId safely (the scores are keyed by studentDocId).
  */
-export async function findStudentsByStudentId(
-    domainId: string, studentId: string,
-): Promise<StudentRecord[]> {
+export async function findStudentsByStudentId(domainId: string, studentId: string): Promise<StudentRecord[]> {
     return await studentsColl.find({ domainId, studentId }).toArray();
 }
 
@@ -818,9 +776,7 @@ export async function findStudentsByStudentId(
  * to resolve a user's school / group membership without reaching into our
  * collections directly.
  */
-export async function findStudentByUserId(
-    domainId: string, userId: number,
-): Promise<StudentRecord | null> {
+export async function findStudentByUserId(domainId: string, userId: number): Promise<StudentRecord | null> {
     return await studentsColl.findOne({ domainId, boundUserId: userId });
 }
 
@@ -829,13 +785,9 @@ export async function findStudentByUserId(
  * by uid (string) for cheap O(1) frontend access. Used by /record + /ranking
  * to show "学号 / 姓名" in the admin-only column without per-row roundtrips.
  */
-export async function findStudentsByUserIds(
-    domainId: string, userIds: number[],
-): Promise<Record<string, StudentRecord>> {
+export async function findStudentsByUserIds(domainId: string, userIds: number[]): Promise<Record<string, StudentRecord>> {
     if (!userIds.length) return {};
-    const docs = await studentsColl
-        .find({ domainId, boundUserId: { $in: userIds } })
-        .toArray();
+    const docs = await studentsColl.find({ domainId, boundUserId: { $in: userIds } }).toArray();
     const out: Record<string, StudentRecord> = {};
     for (const d of docs) {
         if (d.boundUserId != null) out[String(d.boundUserId)] = d;
@@ -867,10 +819,10 @@ export async function updateStudent(
         $set.realName = trimmed;
     }
     if (patch.enrollmentYear !== undefined) {
-        if (patch.enrollmentYear !== null
-            && (!Number.isInteger(patch.enrollmentYear)
-                || patch.enrollmentYear < 1900
-                || patch.enrollmentYear > 2099)) {
+        if (
+            patch.enrollmentYear !== null &&
+            (!Number.isInteger(patch.enrollmentYear) || patch.enrollmentYear < 1900 || patch.enrollmentYear > 2099)
+        ) {
             throw new ValidationError('enrollmentYear', null, '年份范围必须在 1900–2099');
         }
         $set.enrollmentYear = patch.enrollmentYear;
@@ -886,20 +838,14 @@ export async function deleteStudent(domainId: string, id: ObjectId): Promise<voi
     const doc = await studentsColl.findOne({ domainId, _id: id });
     if (!doc) return;
     if (doc.boundUserId) {
-        throw new ValidationError(
-            'student',
-            null,
-            'Cannot delete a student record that is bound to a user; unbind first',
-        );
+        throw new ValidationError('student', null, 'Cannot delete a student record that is bound to a user; unbind first');
     }
     // Drop any pending tokens for this student.
     await bindTokensColl.deleteMany({ studentRecordId: id, used: false });
     await studentsColl.deleteOne({ domainId, _id: id });
 }
 
-export async function assignStudentsToGroup(
-    domainId: string, groupId: ObjectId, studentRecordIds: ObjectId[],
-): Promise<void> {
+export async function assignStudentsToGroup(domainId: string, groupId: ObjectId, studentRecordIds: ObjectId[]): Promise<void> {
     if (studentRecordIds.length === 0) return;
     const group = await userGroupsColl.findOne({ domainId, _id: groupId });
     if (!group) throw new ValidationError('groupId', null, 'Group not found');
@@ -910,37 +856,24 @@ export async function assignStudentsToGroup(
     );
 
     // Mirror group membership onto bound users.
-    const bound = await studentsColl.find(
-        { domainId, _id: { $in: studentRecordIds }, boundUserId: { $ne: null } },
-        { projection: { boundUserId: 1 } },
-    ).toArray();
+    const bound = await studentsColl
+        .find({ domainId, _id: { $in: studentRecordIds }, boundUserId: { $ne: null } }, { projection: { boundUserId: 1 } })
+        .toArray();
     const uids = bound.map((d) => d.boundUserId!).filter(Boolean);
     if (uids.length > 0) {
-        await UserModel.coll.updateMany(
-            { _id: { $in: uids } },
-            { $addToSet: { parentUserGroupId: groupId } as any },
-        );
+        await UserModel.coll.updateMany({ _id: { $in: uids } }, { $addToSet: { parentUserGroupId: groupId } as any });
     }
 }
 
-export async function removeStudentsFromGroup(
-    domainId: string, groupId: ObjectId, studentRecordIds: ObjectId[],
-): Promise<void> {
+export async function removeStudentsFromGroup(domainId: string, groupId: ObjectId, studentRecordIds: ObjectId[]): Promise<void> {
     if (studentRecordIds.length === 0) return;
-    const records = await studentsColl.find(
-        { domainId, _id: { $in: studentRecordIds }, groupIds: groupId },
-        { projection: { boundUserId: 1 } },
-    ).toArray();
-    await studentsColl.updateMany(
-        { domainId, _id: { $in: studentRecordIds } },
-        { $pull: { groupIds: groupId } as any },
-    );
+    const records = await studentsColl
+        .find({ domainId, _id: { $in: studentRecordIds }, groupIds: groupId }, { projection: { boundUserId: 1 } })
+        .toArray();
+    await studentsColl.updateMany({ domainId, _id: { $in: studentRecordIds } }, { $pull: { groupIds: groupId } as any });
     const uids = records.map((d) => d.boundUserId!).filter(Boolean);
     if (uids.length > 0) {
-        await UserModel.coll.updateMany(
-            { _id: { $in: uids } },
-            { $pull: { parentUserGroupId: groupId } as any },
-        );
+        await UserModel.coll.updateMany({ _id: { $in: uids } }, { $pull: { parentUserGroupId: groupId } as any });
     }
 }
 
@@ -995,76 +928,93 @@ export const userBindModel = {
     // These will be set at module init by the binding.ts side-effect.
     /** @deprecated kept for legacy callers — alias of generateStudentInviteToken */
     generateInviteToken: null as unknown as (
-        domainId: string, studentRecordId: ObjectId, createdBy: number, ttlMs?: number,
+        domainId: string,
+        studentRecordId: ObjectId,
+        createdBy: number,
+        ttlMs?: number,
     ) => Promise<StudentBindToken>,
     generateStudentInviteToken: null as unknown as (
-        domainId: string, studentRecordId: ObjectId, createdBy: number, ttlMs?: number,
+        domainId: string,
+        studentRecordId: ObjectId,
+        createdBy: number,
+        ttlMs?: number,
     ) => Promise<StudentBindToken>,
     generateSchoolInviteToken: null as unknown as (
-        domainId: string, schoolId: ObjectId, createdBy: number, ttlMs?: number,
+        domainId: string,
+        schoolId: ObjectId,
+        createdBy: number,
+        ttlMs?: number,
     ) => Promise<SchoolBindToken>,
     generateUserGroupInviteToken: null as unknown as (
-        domainId: string, userGroupId: ObjectId, createdBy: number, ttlMs?: number,
+        domainId: string,
+        userGroupId: ObjectId,
+        createdBy: number,
+        ttlMs?: number,
     ) => Promise<UserGroupBindToken>,
     /** @deprecated routes to consumeStudentInviteToken for kind='student' */
-    consumeInviteToken: null as unknown as (
-        tokenId: string, userId: number,
-    ) => Promise<{ studentRecord: StudentRecord; school: School }>,
-    consumeStudentInviteToken: null as unknown as (
-        tokenId: string, userId: number,
-    ) => Promise<{ studentRecord: StudentRecord; school: School }>,
+    consumeInviteToken: null as unknown as (tokenId: string, userId: number) => Promise<{ studentRecord: StudentRecord; school: School }>,
+    consumeStudentInviteToken: null as unknown as (tokenId: string, userId: number) => Promise<{ studentRecord: StudentRecord; school: School }>,
     bindMatchedStudent: null as unknown as (
-        record: StudentRecord, userId: number, extraGroupId?: ObjectId,
+        record: StudentRecord,
+        userId: number,
+        extraGroupId?: ObjectId,
     ) => Promise<{ studentRecord: StudentRecord; school: School }>,
-    joinUserGroup: null as unknown as (
-        userId: number, studentRecord: StudentRecord, userGroupId: ObjectId,
-    ) => Promise<void>,
+    joinUserGroup: null as unknown as (userId: number, studentRecord: StudentRecord, userGroupId: ObjectId) => Promise<void>,
     getInviteToken: null as unknown as (tokenId: string) => Promise<BindToken>,
     rosterLookup: null as unknown as (
-        domainId: string, schoolId: ObjectId, studentIdInput: string, realNameInput: string, callerUid: number,
+        domainId: string,
+        schoolId: ObjectId,
+        studentIdInput: string,
+        realNameInput: string,
+        callerUid: number,
     ) => Promise<RosterLookupOutcome>,
     listInviteTokens: null as unknown as (
-        domainId: string, filter?: { studentRecordId?: ObjectId; schoolId?: ObjectId; userGroupId?: ObjectId; kind?: BindTokenKind; usedOnly?: boolean; unusedOnly?: boolean },
+        domainId: string,
+        filter?: {
+            studentRecordId?: ObjectId;
+            schoolId?: ObjectId;
+            userGroupId?: ObjectId;
+            kind?: BindTokenKind;
+            usedOnly?: boolean;
+            unusedOnly?: boolean;
+        },
     ) => Promise<BindToken[]>,
     revokeInviteToken: null as unknown as (tokenId: string) => Promise<void>,
 
     submitBindingRequest: null as unknown as (
-        domainId: string, userId: number, schoolId: ObjectId, studentIdInput: string, realNameInput: string,
+        domainId: string,
+        userId: number,
+        schoolId: ObjectId,
+        studentIdInput: string,
+        realNameInput: string,
         opts?: { sourceTokenId?: string; targetUserGroupId?: ObjectId; claimTempUserId?: number },
     ) => Promise<BindingRequest>,
     listBindingRequests: null as unknown as (
-        domainId: string, filter?: { status?: BindingRequest['status']; userId?: number; schoolId?: ObjectId; limit?: number; skip?: number },
+        domainId: string,
+        filter?: { status?: BindingRequest['status']; userId?: number; schoolId?: ObjectId; limit?: number; skip?: number },
     ) => Promise<{ docs: BindingRequest[]; total: number }>,
     getBindingRequest: null as unknown as (id: ObjectId) => Promise<BindingRequest | null>,
-    approveBindingRequest: null as unknown as (
-        requestId: ObjectId, reviewerUid: number,
-    ) => Promise<void>,
-    rejectBindingRequest: null as unknown as (
-        requestId: ObjectId, reviewerUid: number, reason: string,
-    ) => Promise<void>,
+    approveBindingRequest: null as unknown as (requestId: ObjectId, reviewerUid: number) => Promise<void>,
+    rejectBindingRequest: null as unknown as (requestId: ObjectId, reviewerUid: number, reason: string) => Promise<void>,
 
     lookupStudent: null as unknown as (
-        domainId: string, studentIdInput: string, realNameInput: string,
+        domainId: string,
+        studentIdInput: string,
+        realNameInput: string,
         options?: { contestId?: string },
     ) => Promise<LookupStudentResult>,
     /** @deprecated use computeEligibleContests */
-    computeEligibleExamContests: null as unknown as (
-        domainId: string, uid: number,
-    ) => Promise<ObjectId[]>,
-    computeEligibleContests: null as unknown as (
-        domainId: string, uid: number,
-    ) => Promise<ObjectId[]>,
+    computeEligibleExamContests: null as unknown as (domainId: string, uid: number) => Promise<ObjectId[]>,
+    computeEligibleContests: null as unknown as (domainId: string, uid: number) => Promise<ObjectId[]>,
 
-    claimTemporaryAccount: null as unknown as (
-        tempUid: number, realUid: number,
-    ) => Promise<{ recordsTransferred: number }>,
+    claimTemporaryAccount: null as unknown as (tempUid: number, realUid: number) => Promise<{ recordsTransferred: number }>,
     findClaimCandidates: null as unknown as (
-        domainId: string, studentIdInput: string, realNameInput: string,
+        domainId: string,
+        studentIdInput: string,
+        realNameInput: string,
     ) => Promise<Array<{ uid: number; uname: string; createdAt: Date; schoolId: ObjectId | null }>>,
 
     // Cross-domain migration (Issue 1.13)
     exportDomain: null as unknown as (domainId: string) => Promise<unknown>,
-    importDomain: null as unknown as (
-        targetDomainId: string, pkg: unknown, policy: ImportConflictPolicy,
-    ) => Promise<ImportReport>,
+    importDomain: null as unknown as (targetDomainId: string, pkg: unknown, policy: ImportConflictPolicy) => Promise<ImportReport>,
 };

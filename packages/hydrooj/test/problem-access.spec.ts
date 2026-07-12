@@ -13,9 +13,9 @@ const realUtils = require('@hydrooj/utils');
 const loggerErrorCalls: any[][] = [];
 
 const TYPE_PROBLEM = 10;
-const countCalls: Array<{ domainId: string, docType: number, query: unknown }> = [];
-const guardedUpdateCalls: Array<{ filter: any, update: any }> = [];
-const updateCalls: Array<{ filter: any, update: any }> = [];
+const countCalls: Array<{ domainId: string; docType: number; query: unknown }> = [];
+const guardedUpdateCalls: Array<{ filter: any; update: any }> = [];
+const updateCalls: Array<{ filter: any; update: any }> = [];
 let countResult = 0;
 let liveProblem: any = null;
 
@@ -25,8 +25,7 @@ function matchesGuardedFilter(doc: any, filter: any): boolean {
     }
     const revision = filter.aclMutationRevision;
     const actualRevision = doc.aclMutationRevision ?? null;
-    if (revision !== undefined
-        && (revision?.$in ? !revision.$in.includes(actualRevision) : actualRevision !== revision)) return false;
+    if (revision !== undefined && (revision?.$in ? !revision.$in.includes(actualRevision) : actualRevision !== revision)) return false;
     const lockedUid = filter['aclMutationLocks.uid']?.$ne;
     if (lockedUid !== undefined && doc.aclMutationLocks?.some((lock: any) => lock.uid === lockedUid)) return false;
     if (filter['aclMutationLocks.0']?.$exists === false && doc.aclMutationLocks?.length) return false;
@@ -35,10 +34,16 @@ function matchesGuardedFilter(doc: any, filter: any): boolean {
         if (filter[key] !== undefined && doc.aclWriteClaim?.[key.split('.')[1]] !== filter[key]) return false;
     }
     if (filter.maintainer !== undefined && !doc.maintainer?.includes(filter.maintainer)) return false;
-    if (filter.$or && !filter.$or.some((term: any) => (
-        (term.owner !== undefined && doc.owner === term.owner)
-        || (term.maintainer !== undefined && doc.maintainer?.includes(term.maintainer))
-    ))) return false;
+    if (
+        filter.$or &&
+        !filter.$or.some(
+            (term: any) =>
+                (term.owner !== undefined && doc.owner === term.owner) ||
+                (term.maintainer !== undefined && doc.maintainer?.includes(term.maintainer)),
+        )
+    ) {
+        return false;
+    }
     return true;
 }
 
@@ -106,7 +111,9 @@ try {
             return {
                 ...realUtils,
                 Logger: class TestLogger {
-                    error(...args: any[]) { loggerErrorCalls.push(args); }
+                    error(...args: any[]) {
+                        loggerErrorCalls.push(args);
+                    }
                 },
             };
         }
@@ -157,13 +164,7 @@ function makeUser(kind: UserKind, overrides: Record<string, unknown> = {}) {
     } as any;
 }
 
-function pdoc(
-    docId: number,
-    owner = 7,
-    hidden = true,
-    maintainer: number[] = [],
-    domainId = 'system',
-) {
+function pdoc(docId: number, owner = 7, hidden = true, maintainer: number[] = [], domainId = 'system') {
     return { domainId, docId, owner, hidden, maintainer } as any;
 }
 
@@ -210,18 +211,17 @@ describe('P2.11 problem-bank capability matrix', () => {
     });
 
     it('builds an owner plus active-maintainer Mongo scope and excludes fenced pairs', () => {
-        const scope = buildProblemBankScope(makeUser('creator', {
-            _permitPids: new Set([101, 102, 103]),
-            _maintainedPids: new Set([102, 103]),
-            _aclFencedPids: new Set([103, 104]),
-        }));
+        const scope = buildProblemBankScope(
+            makeUser('creator', {
+                _permitPids: new Set([101, 102, 103]),
+                _maintainedPids: new Set([102, 103]),
+                _aclFencedPids: new Set([103, 104]),
+            }),
+        );
         expect(scope).to.deep.equal({
             $and: [
                 {
-                    $or: [
-                        { owner: 42 },
-                        { $and: [{ docId: { $in: [102] } }, { maintainer: 42 }] },
-                    ],
+                    $or: [{ owner: 42 }, { $and: [{ docId: { $in: [102] } }, { maintainer: 42 }] }],
                 },
                 { docId: { $nin: [103, 104] } },
                 { 'aclMutationLocks.uid': { $ne: 42 } },
@@ -231,20 +231,19 @@ describe('P2.11 problem-bank capability matrix', () => {
 
     it('returns an impossible scope for students and every failed ACL preload', () => {
         expect(buildProblemBankScope(makeUser('student'))).to.deep.equal({ docId: { $in: [] } });
-        expect(buildProblemBankScope(makeUser('creator', { _problemAclLoaded: false })))
-            .to.deep.equal({ docId: { $in: [] } });
-        expect(buildProblemBankScope(makeUser('admin', { _problemAclLoaded: false })))
-            .to.deep.equal({ docId: { $in: [] } });
+        expect(buildProblemBankScope(makeUser('creator', { _problemAclLoaded: false }))).to.deep.equal({ docId: { $in: [] } });
+        expect(buildProblemBankScope(makeUser('admin', { _problemAclLoaded: false }))).to.deep.equal({ docId: { $in: [] } });
     });
 
     it('excludes an administrator own fenced pair from the otherwise global scope', () => {
-        expect(buildProblemBankScope(makeUser('admin', {
-            _aclFencedPids: new Set([103, 101]),
-        }))).to.deep.equal({
-            $and: [
-                { docId: { $nin: [101, 103] } },
-                { 'aclMutationLocks.uid': { $ne: 42 } },
-            ],
+        expect(
+            buildProblemBankScope(
+                makeUser('admin', {
+                    _aclFencedPids: new Set([103, 101]),
+                }),
+            ),
+        ).to.deep.equal({
+            $and: [{ docId: { $nin: [101, 103] } }, { 'aclMutationLocks.uid': { $ne: 42 } }],
         });
     });
 
@@ -264,29 +263,22 @@ describe('P2.11 problem-bank capability matrix', () => {
     });
 
     it('denies maintenance on fence or ACL preload failure, including owner and admin pairs', () => {
-        expect(canMaintainProblem(
-            makeUser('creator', { _aclFencedPids: new Set([100]) }),
-            pdoc(100, 42),
-        )).to.equal(false);
-        expect(canMaintainProblem(
-            makeUser('creator', { _problemAclLoaded: false }),
-            pdoc(100, 42),
-        )).to.equal(false);
-        expect(canMaintainProblem(
-            makeUser('admin', { _aclFencedPids: new Set([100]) }),
-            pdoc(100),
-        )).to.equal(false);
-        expect(canMaintainProblem(
-            makeUser('admin', { _problemAclLoaded: false }),
-            pdoc(100),
-        )).to.equal(false);
+        expect(canMaintainProblem(makeUser('creator', { _aclFencedPids: new Set([100]) }), pdoc(100, 42))).to.equal(false);
+        expect(canMaintainProblem(makeUser('creator', { _problemAclLoaded: false }), pdoc(100, 42))).to.equal(false);
+        expect(canMaintainProblem(makeUser('admin', { _aclFencedPids: new Set([100]) }), pdoc(100))).to.equal(false);
+        expect(canMaintainProblem(makeUser('admin', { _problemAclLoaded: false }), pdoc(100))).to.equal(false);
     });
 
     it('never applies current-domain maintenance state to the same pid in another domain', () => {
         const otherDomain = pdoc(100, 42, true, [], 'course-domain');
-        expect(canMaintainProblem(makeUser('creator', {
-            _maintainedPids: new Set([100]),
-        }), otherDomain)).to.equal(false);
+        expect(
+            canMaintainProblem(
+                makeUser('creator', {
+                    _maintainedPids: new Set([100]),
+                }),
+                otherDomain,
+            ),
+        ).to.equal(false);
         expect(canMaintainProblem(makeUser('creator'), otherDomain)).to.equal(false);
         expect(canMaintainProblem(makeUser('admin'), otherDomain)).to.equal(false);
     });
@@ -298,7 +290,10 @@ describe('P2.11 linearizable problem metadata writes', () => {
     it('rejects a stale maintainer snapshot when downgrade increments the live ProblemDoc revision first', async () => {
         const staleUser = makeUser('creator', { _maintainedPids: new Set([100]) });
         const stalePdoc = {
-            ...pdoc(100), docType: TYPE_PROBLEM, maintainer: [42], aclMutationRevision: 0,
+            ...pdoc(100),
+            docType: TYPE_PROBLEM,
+            maintainer: [42],
+            aclMutationRevision: 0,
         };
         expect(canMaintainProblem(staleUser, stalePdoc)).to.equal(true);
         liveProblem = {
@@ -314,7 +309,9 @@ describe('P2.11 linearizable problem metadata writes', () => {
         expect(result).to.equal(null);
         expect(liveProblem.title).to.equal('before');
         expect(guardedUpdateCalls[0].filter).to.deep.include({
-            domainId: 'system', docType: TYPE_PROBLEM, docId: 100,
+            domainId: 'system',
+            docType: TYPE_PROBLEM,
+            docId: 100,
             aclMutationRevision: { $in: [null, 0] },
             maintainer: 42,
             'aclMutationLocks.uid': { $ne: 42 },
@@ -328,11 +325,17 @@ describe('P2.11 linearizable problem metadata writes', () => {
             ['maintainer', makeUser('creator', { _maintainedPids: new Set([100]) }), 7, [42]],
         ] as const) {
             liveProblem = {
-                domainId: 'system', docType: TYPE_PROBLEM, docId: 100,
-                owner, maintainer, title: 'before', aclMutationRevision: 3, aclMutationLocks: [],
+                domainId: 'system',
+                docType: TYPE_PROBLEM,
+                docId: 100,
+                owner,
+                maintainer,
+                title: 'before',
+                aclMutationRevision: 3,
+                aclMutationLocks: [],
             };
             const snapshot = structuredClone(liveProblem);
-            // eslint-disable-next-line no-await-in-loop
+
             const result = await commit(user, snapshot, { title: kind }, {});
             expect(result?.title).to.equal(kind);
         }
@@ -341,8 +344,13 @@ describe('P2.11 linearizable problem metadata writes', () => {
     it('denies the guarded update while the same uid has a persistent ProblemDoc lock', async () => {
         const user = makeUser('admin');
         liveProblem = {
-            domainId: 'system', docType: TYPE_PROBLEM, docId: 100, owner: 7,
-            maintainer: [], title: 'before', aclMutationRevision: 4,
+            domainId: 'system',
+            docType: TYPE_PROBLEM,
+            docId: 100,
+            owner: 7,
+            maintainer: [],
+            title: 'before',
+            aclMutationRevision: 4,
             aclMutationLocks: [{ uid: 42, requestId: 'downgrade' }],
         };
 
@@ -362,25 +370,29 @@ describe('P2.11 durable global problem write claim', () => {
     it('lets a live maintainer claim the global latch and rejects every overlapping writer', async () => {
         const user = makeUser('creator', { _maintainedPids: new Set([100]) });
         liveProblem = {
-            ...pdoc(100), docType: TYPE_PROBLEM, maintainer: [42],
-            aclMutationRevision: 3, aclMutationLocks: [], title: 'before',
+            ...pdoc(100),
+            docType: TYPE_PROBLEM,
+            maintainer: [42],
+            aclMutationRevision: 3,
+            aclMutationLocks: [],
+            title: 'before',
         };
         const snapshot = structuredClone(liveProblem);
-        const claim = await acquire(
-            user, snapshot, 'files-100', 'files-upload',
-            { now: new Date('2026-07-11T00:00:00.000Z') },
-        );
+        const claim = await acquire(user, snapshot, 'files-100', 'files-upload', { now: new Date('2026-07-11T00:00:00.000Z') });
         expect(claim).to.deep.include({
-            domainId: 'system', pid: 100, requestId: 'files-100', actor: 42,
-            operation: 'files-upload', state: 'active', lastError: null,
+            domainId: 'system',
+            pid: 100,
+            requestId: 'files-100',
+            actor: 42,
+            operation: 'files-upload',
+            state: 'active',
+            lastError: null,
         });
         expect(liveProblem.aclMutationRevision).to.equal(4);
 
         const second = await acquire(user, structuredClone(liveProblem), 'other', 'metadata-edit');
         expect(second).to.equal(null);
-        const stale = await (access as any).commitProblemAclGuardedUpdate(
-            user, snapshot, { title: 'stale' }, {},
-        );
+        const stale = await (access as any).commitProblemAclGuardedUpdate(user, snapshot, { title: 'stale' }, {});
         expect(stale).to.equal(null);
         expect(liveProblem.title).to.equal('before');
     });
@@ -388,8 +400,11 @@ describe('P2.11 durable global problem write claim', () => {
     it('makes revoke-first and write-first mutually exclusive at revision plus lock state', async () => {
         const user = makeUser('creator', { _maintainedPids: new Set([100]) });
         const stale = {
-            ...pdoc(100), docType: TYPE_PROBLEM, maintainer: [42],
-            aclMutationRevision: 0, aclMutationLocks: [],
+            ...pdoc(100),
+            docType: TYPE_PROBLEM,
+            maintainer: [42],
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
         };
         liveProblem = {
             ...stale,
@@ -411,8 +426,12 @@ describe('P2.11 durable global problem write claim', () => {
     it('keeps one claim across metadata steps, then clears only the exact owner', async () => {
         const user = makeUser('creator');
         liveProblem = {
-            ...pdoc(100, 42), docType: TYPE_PROBLEM, aclMutationRevision: 0,
-            aclMutationLocks: [], title: 'before', config: '',
+            ...pdoc(100, 42),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+            title: 'before',
+            config: '',
         };
         const claim = await acquire(user, structuredClone(liveProblem), 'problem-save', 'problem-structure-save');
         expect((await commit(claim, { title: 'after' }, {}))?.title).to.equal('after');
@@ -425,14 +444,17 @@ describe('P2.11 durable global problem write claim', () => {
     it('persists an ERROR marker without TTL for the fenced repair service', async () => {
         const user = makeUser('creator');
         liveProblem = {
-            ...pdoc(100, 42), docType: TYPE_PROBLEM, aclMutationRevision: 0,
+            ...pdoc(100, 42),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
             aclMutationLocks: [],
         };
         const claim = await acquire(user, structuredClone(liveProblem), 'failed-upload', 'files-upload');
-        expect(await markError(claim, new Error('storage failed'), new Date('2026-07-11T00:01:00.000Z')))
-            .to.equal(true);
+        expect(await markError(claim, new Error('storage failed'), new Date('2026-07-11T00:01:00.000Z'))).to.equal(true);
         expect(liveProblem.aclWriteClaim).to.deep.include({
-            requestId: 'failed-upload', state: 'error', lastError: 'Error: storage failed',
+            requestId: 'failed-upload',
+            state: 'error',
+            lastError: 'Error: storage failed',
         });
         expect(await clear(claim)).to.equal(false);
         expect(liveProblem.aclWriteClaim.state).to.equal('error');
@@ -442,7 +464,9 @@ describe('P2.11 durable global problem write claim', () => {
     it('refuses to clear an ACTIVE claim while any ACL mutation lock remains', async () => {
         const user = makeUser('creator');
         liveProblem = {
-            ...pdoc(100, 42), docType: TYPE_PROBLEM, aclMutationRevision: 0,
+            ...pdoc(100, 42),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
             aclMutationLocks: [],
         };
         const claim = await acquire(user, structuredClone(liveProblem), 'permit-edit', 'permit-grant');
@@ -456,17 +480,18 @@ describe('P2.11 durable global problem write claim', () => {
     it('allows only an actor-exact self-revoke claim without maintenance authority', async () => {
         const verifier = makeUser('student', { _id: 55 });
         liveProblem = {
-            ...pdoc(100, 7), docType: TYPE_PROBLEM, aclMutationRevision: 2,
-            aclMutationLocks: [], maintainer: [],
+            ...pdoc(100, 7),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 2,
+            aclMutationLocks: [],
+            maintainer: [],
         };
-        const claim = await acquire(
-            verifier, structuredClone(liveProblem), 'self-revoke', 'permit-revoke', { selfRevokeUid: 55 },
-        );
+        const claim = await acquire(verifier, structuredClone(liveProblem), 'self-revoke', 'permit-revoke', { selfRevokeUid: 55 });
         expect(claim?.actor).to.equal(55);
         await clear(claim);
-        const error = await captureFailure(() => acquire(
-            verifier, structuredClone(liveProblem), 'forged-self', 'permit-revoke', { selfRevokeUid: 56 },
-        ));
+        const error = await captureFailure(() =>
+            acquire(verifier, structuredClone(liveProblem), 'forged-self', 'permit-revoke', { selfRevokeUid: 56 }),
+        );
         expect(error).to.be.instanceOf(TypeError);
     });
 });
@@ -480,54 +505,45 @@ describe('P2.11 concrete-problem viewing', () => {
 
     it('fails closed for public, owner, and administrator access when ACL preload fails', () => {
         const failedPreload = { _problemAclLoaded: false };
-        expect(canViewProblem(
-            makeUser('student', failedPreload),
-            pdoc(100, 7, false),
-        )).to.equal(false);
-        expect(canViewProblem(
-            makeUser('student', failedPreload),
-            pdoc(100, 42),
-        )).to.equal(false);
-        expect(canViewProblem(
-            makeUser('admin', {
-                ...failedPreload,
-                hasPerm: (...wanted: bigint[]) => wanted.some((perm) => [
-                    PERM.PERM_VIEW_PROBLEM,
-                    PERM.PERM_VIEW_PROBLEM_HIDDEN,
-                ].includes(perm)),
-            }),
-            pdoc(100),
-        )).to.equal(false);
+        expect(canViewProblem(makeUser('student', failedPreload), pdoc(100, 7, false))).to.equal(false);
+        expect(canViewProblem(makeUser('student', failedPreload), pdoc(100, 42))).to.equal(false);
+        expect(
+            canViewProblem(
+                makeUser('admin', {
+                    ...failedPreload,
+                    hasPerm: (...wanted: bigint[]) => wanted.some((perm) => [PERM.PERM_VIEW_PROBLEM, PERM.PERM_VIEW_PROBLEM_HIDDEN].includes(perm)),
+                }),
+                pdoc(100),
+            ),
+        ).to.equal(false);
     });
 
     it('fails closed for public, owner, and administrator access when ACL state belongs to another domain', () => {
         const wrongDomain = { _problemAclDomainId: 'course-domain' };
-        expect(canViewProblem(
-            makeUser('student', wrongDomain),
-            pdoc(100, 7, false),
-        )).to.equal(false);
-        expect(canViewProblem(
-            makeUser('student', wrongDomain),
-            pdoc(100, 42),
-        )).to.equal(false);
-        expect(canViewProblem(
-            makeUser('admin', {
-                ...wrongDomain,
-                hasPerm: (...wanted: bigint[]) => wanted.some((perm) => [
-                    PERM.PERM_VIEW_PROBLEM,
-                    PERM.PERM_VIEW_PROBLEM_HIDDEN,
-                ].includes(perm)),
-            }),
-            pdoc(100),
-        )).to.equal(false);
+        expect(canViewProblem(makeUser('student', wrongDomain), pdoc(100, 7, false))).to.equal(false);
+        expect(canViewProblem(makeUser('student', wrongDomain), pdoc(100, 42))).to.equal(false);
+        expect(
+            canViewProblem(
+                makeUser('admin', {
+                    ...wrongDomain,
+                    hasPerm: (...wanted: bigint[]) => wanted.some((perm) => [PERM.PERM_VIEW_PROBLEM, PERM.PERM_VIEW_PROBLEM_HIDDEN].includes(perm)),
+                }),
+                pdoc(100),
+            ),
+        ).to.equal(false);
     });
 
     it('accepts active verifier/maintainer permits only after ACL preload', () => {
         expect(canViewProblem(makeUser('student', { _permitPids: new Set([100]) }), pdoc(100))).to.equal(true);
-        expect(canViewProblem(makeUser('student', {
-            _permitPids: new Set([100]),
-            _problemAclLoaded: false,
-        }), pdoc(100))).to.equal(false);
+        expect(
+            canViewProblem(
+                makeUser('student', {
+                    _permitPids: new Set([100]),
+                    _problemAclLoaded: false,
+                }),
+                pdoc(100),
+            ),
+        ).to.equal(false);
         expect(canViewProblem(makeUser('student'), pdoc(100, 7, true, [42]))).to.equal(false);
     });
 
@@ -543,12 +559,22 @@ describe('P2.11 concrete-problem viewing', () => {
 
     it('does not reuse current-domain ACL state for the same pid in another domain', () => {
         const hiddenOther = pdoc(100, 7, true, [], 'course-domain');
-        expect(canViewProblem(makeUser('student', {
-            _permitPids: new Set([100]),
-        }), hiddenOther)).to.equal(false);
-        expect(canViewProblem(makeUser('student', {
-            _aclFencedPids: new Set([100]),
-        }), pdoc(100, 7, false, [], 'course-domain'))).to.equal(false);
+        expect(
+            canViewProblem(
+                makeUser('student', {
+                    _permitPids: new Set([100]),
+                }),
+                hiddenOther,
+            ),
+        ).to.equal(false);
+        expect(
+            canViewProblem(
+                makeUser('student', {
+                    _aclFencedPids: new Set([100]),
+                }),
+                pdoc(100, 7, false, [], 'course-domain'),
+            ),
+        ).to.equal(false);
     });
 });
 
@@ -579,7 +605,9 @@ describe('P2.11 stable direct-problem reads', () => {
 
     it('returns a stable permitted snapshot and strips every persistent coordination field', async () => {
         liveProblem = {
-            ...pdoc(100), docType: TYPE_PROBLEM, title: 'secret',
+            ...pdoc(100),
+            docType: TYPE_PROBLEM,
+            title: 'secret',
             aclMutationRevision: 4,
             aclMutationLocks: [],
             aclWriteClaim: { requestId: 'edit-1', state: 'active' },
@@ -596,8 +624,10 @@ describe('P2.11 stable direct-problem reads', () => {
 
     it('denies when revocation starts after the initial read but before ACL loading', async () => {
         liveProblem = {
-            ...pdoc(100), docType: TYPE_PROBLEM,
-            aclMutationRevision: 0, aclMutationLocks: [],
+            ...pdoc(100),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
         };
         (global as any).Hydro.model.permits.loadAclForUser = async () => {
             liveProblem.aclMutationRevision = 1;
@@ -611,8 +641,10 @@ describe('P2.11 stable direct-problem reads', () => {
 
     it('rejects an old ACL snapshot when revocation completes during ACL loading', async () => {
         liveProblem = {
-            ...pdoc(100), docType: TYPE_PROBLEM,
-            aclMutationRevision: 0, aclMutationLocks: [],
+            ...pdoc(100),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
         };
         let loads = 0;
         (global as any).Hydro.model.permits.loadAclForUser = async () => {
@@ -632,8 +664,10 @@ describe('P2.11 stable direct-problem reads', () => {
 
     it('rejects an old ACL snapshot when revocation wins immediately before the final read', async () => {
         liveProblem = {
-            ...pdoc(100), docType: TYPE_PROBLEM,
-            aclMutationRevision: 0, aclMutationLocks: [],
+            ...pdoc(100),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
         };
         let loads = 0;
         let finals = 0;
@@ -664,19 +698,22 @@ describe('P2.11 stable direct-problem reads', () => {
             [makeUser('student'), pdoc(100, 42, true), []],
             [makeUser('student'), pdoc(100), [100]],
             [makeUser('hidden-viewer'), pdoc(100), []],
-            [makeUser('admin', {
-                hasPerm: (...wanted: bigint[]) => wanted.some((perm) => [
-                    PERM.PERM_VIEW_PROBLEM,
-                    PERM.PERM_VIEW_PROBLEM_HIDDEN,
-                ].includes(perm)),
-            }), pdoc(100), []],
+            [
+                makeUser('admin', {
+                    hasPerm: (...wanted: bigint[]) => wanted.some((perm) => [PERM.PERM_VIEW_PROBLEM, PERM.PERM_VIEW_PROBLEM_HIDDEN].includes(perm)),
+                }),
+                pdoc(100),
+                [],
+            ],
         ] as const) {
             liveProblem = {
-                ...doc, docType: TYPE_PROBLEM,
-                aclMutationRevision: 2, aclMutationLocks: [],
+                ...doc,
+                docType: TYPE_PROBLEM,
+                aclMutationRevision: 2,
+                aclMutationLocks: [],
             };
             (global as any).Hydro.model.permits.loadAclForUser = async () => permitSnapshot(...permits);
-            // eslint-disable-next-line no-await-in-loop
+
             const result = await readStableViewableProblem('system', user, readLiveProblem());
             expect(result?.docId).to.equal(100);
         }
@@ -684,8 +721,11 @@ describe('P2.11 stable direct-problem reads', () => {
 
     it('rejects an old maintainer snapshot when downgrade completes before the final raw read', async () => {
         liveProblem = {
-            ...pdoc(100, 7, true, [42]), docType: TYPE_PROBLEM,
-            config: 'secret: true', aclMutationRevision: 0, aclMutationLocks: [],
+            ...pdoc(100, 7, true, [42]),
+            docType: TYPE_PROBLEM,
+            config: 'secret: true',
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
         };
         let loads = 0;
         let finals = 0;
@@ -714,20 +754,24 @@ describe('P2.11 stable direct-problem reads', () => {
 
     it('requires a stable owner-or-maintainer mirror for maintainer-only reads', async () => {
         liveProblem = {
-            ...pdoc(100, 7, true, []), docType: TYPE_PROBLEM,
-            config: 'secret: true', aclMutationRevision: 4, aclMutationLocks: [],
+            ...pdoc(100, 7, true, []),
+            docType: TYPE_PROBLEM,
+            config: 'secret: true',
+            aclMutationRevision: 4,
+            aclMutationLocks: [],
         };
         (global as any).Hydro.model.permits.loadAclForUser = async () => maintainerSnapshot(100);
         const finalFilters: any[] = [];
 
         const result = await readStableMaintainableProblem(
-            'system', makeUser('creator'), readLiveProblem((filter) => finalFilters.push(filter)),
+            'system',
+            makeUser('creator'),
+            readLiveProblem((filter) => finalFilters.push(filter)),
         );
 
         expect(result).to.equal(null);
         expect(finalFilters).to.have.length(2);
-        expect(finalFilters.every((filter) => filter.$or?.some((term: any) => term.maintainer === 42)))
-            .to.equal(true);
+        expect(finalFilters.every((filter) => filter.$or?.some((term: any) => term.maintainer === 42))).to.equal(true);
     });
 
     it('preserves stable raw reads for owners, active maintainers, and administrators', async () => {
@@ -737,12 +781,14 @@ describe('P2.11 stable direct-problem reads', () => {
             [makeUser('admin'), 7, [], maintainerSnapshot()],
         ] as const) {
             liveProblem = {
-                ...pdoc(100, owner, true, [...maintainer]), docType: TYPE_PROBLEM,
-                config: 'secret: true', aclMutationRevision: 5, aclMutationLocks: [],
+                ...pdoc(100, owner, true, [...maintainer]),
+                docType: TYPE_PROBLEM,
+                config: 'secret: true',
+                aclMutationRevision: 5,
+                aclMutationLocks: [],
             };
             (global as any).Hydro.model.permits.loadAclForUser = async () => snapshot;
 
-            // eslint-disable-next-line no-await-in-loop
             const result = await readStableMaintainableProblem('system', user, readLiveProblem());
 
             expect(result?.config).to.equal('secret: true');
@@ -762,7 +808,9 @@ describe('P2.11 ACL reload observability', () => {
             _problemAclDomainId: 'system',
             _problemAclLoaded: true,
         });
-        (global as any).Hydro.model.permits.loadAclForUser = async () => { throw raw; };
+        (global as any).Hydro.model.permits.loadAclForUser = async () => {
+            throw raw;
+        };
 
         const denied = await captureFailure(() => refreshProblemAcl(user, 'system'));
 
@@ -776,15 +824,12 @@ describe('P2.11 ACL reload observability', () => {
         expect([...user._aclFencedPids]).to.deep.equal([]);
         expect(user._problemAclDomainId).to.equal(undefined);
         expect(user._problemAclLoaded).to.equal(false);
-        expect(loggerErrorCalls).to.deep.equal([[
-            'Problem ACL reload failed domain=%s uid=%d error=%o',
-            'system',
-            42,
-            raw,
-        ]]);
+        expect(loggerErrorCalls).to.deep.equal([['Problem ACL reload failed domain=%s uid=%d error=%o', 'system', 42, raw]]);
 
         (global as any).Hydro.model.permits.loadAclForUser = async () => ({
-            permitPids: [], maintainedPids: new Set(), fencedPids: new Set(),
+            permitPids: [],
+            maintainedPids: new Set(),
+            fencedPids: new Set(),
         });
         const invalid = await captureFailure(() => refreshProblemAcl(user, 'system'));
         expect(invalid?.name).to.equal(denied?.name);
@@ -792,11 +837,7 @@ describe('P2.11 ACL reload observability', () => {
         expect(invalid?.params).to.deep.equal(denied?.params);
         expect(invalid?.cause).to.be.instanceOf(TypeError);
         expect(invalid?.cause?.message).to.equal('permits.loadAclForUser returned an invalid ACL snapshot');
-        expect(loggerErrorCalls[1]?.slice(0, 3)).to.deep.equal([
-            'Problem ACL reload failed domain=%s uid=%d error=%o',
-            'system',
-            42,
-        ]);
+        expect(loggerErrorCalls[1]?.slice(0, 3)).to.deep.equal(['Problem ACL reload failed domain=%s uid=%d error=%o', 'system', 42]);
         expect(loggerErrorCalls[1]?.[3]).to.equal(invalid?.cause);
     });
 });
@@ -804,9 +845,7 @@ describe('P2.11 ACL reload observability', () => {
 describe('P2.11 problem selection assertion', () => {
     it('accepts only successfully loaded ACL state for the authoritative domain', () => {
         expect(() => assertProblemAclDomain(makeUser('creator'), 'system')).not.to.throw();
-        expect(() => assertProblemAclDomain(
-            makeUser('creator', { _problemAclLoaded: false }), 'system',
-        )).to.throw(/permission/i);
+        expect(() => assertProblemAclDomain(makeUser('creator', { _problemAclLoaded: false }), 'system')).to.throw(/permission/i);
         expect(() => assertProblemAclDomain(makeUser('creator'), 'course-domain')).to.throw(/permission/i);
     });
 
@@ -814,16 +853,15 @@ describe('P2.11 problem selection assertion', () => {
         countResult = 1;
         const user = makeUser('creator', { _maintainedPids: new Set([20]) });
         await assertProblemBankSelection('system', [10, 20, 20], user, [10]);
-        expect(countCalls).to.deep.equal([{
-            domainId: 'system',
-            docType: TYPE_PROBLEM,
-            query: {
-                $and: [
-                    buildProblemBankScope(user),
-                    { docId: { $in: [20] }, archivedAt: { $exists: false } },
-                ],
+        expect(countCalls).to.deep.equal([
+            {
+                domainId: 'system',
+                docType: TYPE_PROBLEM,
+                query: {
+                    $and: [buildProblemBankScope(user), { docId: { $in: [20] }, archivedAt: { $exists: false } }],
+                },
             },
-        }]);
+        ]);
     });
 
     it('allows an all-grandfathered selection without requiring current browse ability or querying Mongo', async () => {
@@ -832,9 +870,7 @@ describe('P2.11 problem selection assertion', () => {
     });
 
     it('checks the authoritative ACL domain before an all-grandfathered early return', async () => {
-        const error = await captureFailure(() => assertProblemBankSelection(
-            'course-domain', [10], makeUser('student'), [10],
-        ));
+        const error = await captureFailure(() => assertProblemBankSelection('course-domain', [10], makeUser('student'), [10]));
         expect(error?.name).to.equal('PermissionError');
         expect(countCalls).to.deep.equal([]);
     });
@@ -852,25 +888,19 @@ describe('P2.11 problem selection assertion', () => {
     });
 
     it('rejects any newly added pid before Mongo when the user cannot browse', async () => {
-        const error = await captureFailure(() => assertProblemBankSelection(
-            'system', [20], makeUser('student'), [10],
-        ));
+        const error = await captureFailure(() => assertProblemBankSelection('system', [20], makeUser('student'), [10]));
         expect(error?.name).to.equal('PermissionError');
         expect(countCalls).to.deep.equal([]);
     });
 
     it('fails closed before Mongo when non-admin ACL state belongs to another domain', async () => {
-        const error = await captureFailure(() => assertProblemBankSelection(
-            'course-domain', [20], makeUser('creator'),
-        ));
+        const error = await captureFailure(() => assertProblemBankSelection('course-domain', [20], makeUser('creator')));
         expect(error?.name).to.equal('PermissionError');
         expect(countCalls).to.deep.equal([]);
     });
 
     it('also rejects an administrator selection when its loaded ACL belongs to another domain', async () => {
-        const error = await captureFailure(() => assertProblemBankSelection(
-            'course-domain', [20], makeUser('admin'),
-        ));
+        const error = await captureFailure(() => assertProblemBankSelection('course-domain', [20], makeUser('admin')));
         expect(error?.name).to.equal('PermissionError');
         expect(countCalls).to.deep.equal([]);
     });

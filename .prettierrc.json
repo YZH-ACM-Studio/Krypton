@@ -1,0 +1,28 @@
+{
+    "$schema": "https://json.schemastore.org/prettierrc",
+    "printWidth": 150,
+    "tabWidth": 4,
+    "useTabs": false,
+    "semi": true,
+    "singleQuote": true,
+    "trailingComma": "all",
+    "overrides": [
+        {
+            "files": [
+                "packages/ui-next/**/*.{ts,tsx,js,jsx,json,css,scss}",
+                "packages/ui-default/**/*.{ts,tsx,js,jsx,json,css,scss}",
+                "packages/*/frontend/**/*.{ts,tsx,js,jsx,json,css,scss}",
+                "packages/**/*.{page.ts,page.tsx,page.js,page.jsx}"
+            ],
+            "options": {
+                "tabWidth": 2
+            }
+        },
+        {
+            "files": "*.{yaml,yml}",
+            "options": {
+                "tabWidth": 2
+            }
+        }
+    ]
+}

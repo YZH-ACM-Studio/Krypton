@@ -4,20 +4,26 @@ import UserSelectAutoComplete from 'vj/components/autocomplete/UserSelectAutoCom
 import { ActionDialog, ConfirmDialog, prompt } from 'vj/components/dialog';
 import Notification from 'vj/components/notification';
 import { NamedPage } from 'vj/misc/Page';
-import {
-  api, delay, i18n, tpl,
-} from 'vj/utils';
+import { api, delay, i18n, tpl } from 'vj/utils';
 
 function update(name: string, uids: number[] = []) {
-  return api('domain.group', {
-    name,
-    uids,
-  }, []);
+  return api(
+    'domain.group',
+    {
+      name,
+      uids,
+    },
+    [],
+  );
 }
 function del(name: string) {
-  return api('domain.group', {
-    name,
-  }, []);
+  return api(
+    'domain.group',
+    {
+      name,
+    },
+    [],
+  );
 }
 
 const page = new NamedPage('domain_group', () => {
@@ -46,23 +52,31 @@ const page = new NamedPage('domain_group', () => {
     { multi: true, height: 'auto' },
   );
   const targets = {};
-  $('input[data-gid]').get().forEach((ele) => {
-    const input = UserSelectAutoComplete.getOrConstruct<UserSelectAutoComplete<true>>($(ele), { multi: true, height: 'auto' });
-    const gid = ele.getAttribute('data-gid');
-    targets[gid] = input;
-    let loaded = false;
-    const save = _.debounce(() => update(gid, input.value()), 500);
-    input.onChange(() => {
-      if (input.value().length && !loaded) {
-        loaded = true;
-        $(ele).closest('tr').find('.group-member-count').text(`${input.value().length} ${i18n('members')}`);
-        return;
-      }
-      if (!loaded) return;
-      $(ele).closest('tr').find('.group-member-count').text(`${input.value().length} ${i18n('members')}`);
-      save();
+  $('input[data-gid]')
+    .get()
+    .forEach((ele) => {
+      const input = UserSelectAutoComplete.getOrConstruct<UserSelectAutoComplete<true>>($(ele), { multi: true, height: 'auto' });
+      const gid = ele.getAttribute('data-gid');
+      targets[gid] = input;
+      let loaded = false;
+      const save = _.debounce(() => update(gid, input.value()), 500);
+      input.onChange(() => {
+        if (input.value().length && !loaded) {
+          loaded = true;
+          $(ele)
+            .closest('tr')
+            .find('.group-member-count')
+            .text(`${input.value().length} ${i18n('members')}`);
+          return;
+        }
+        if (!loaded) return;
+        $(ele)
+          .closest('tr')
+          .find('.group-member-count')
+          .text(`${input.value().length} ${i18n('members')}`);
+        save();
+      });
     });
-  });
 
   const createGroupDialog = new ActionDialog({
     $body: createGroupDialogContent,
@@ -82,10 +96,7 @@ const page = new NamedPage('domain_group', () => {
   };
 
   function ensureAndGetSelectedGroups() {
-    const groups = _.map(
-      $('.domain-group tbody [type="checkbox"]:checked'),
-      (ch) => $(ch).closest('tr').attr('data-gid'),
-    );
+    const groups = _.map($('.domain-group tbody [type="checkbox"]:checked'), (ch) => $(ch).closest('tr').attr('data-gid'));
     if (groups.length === 0) {
       Notification.error(i18n('Please select at least one group to perform this operation.'));
       return null;
@@ -146,7 +157,9 @@ const page = new NamedPage('domain_group', () => {
       },
     });
     if (!result) return;
-    const lines = String(result.groups || '').replace(/^\uFEFF/, '').split('\n');
+    const lines = String(result.groups || '')
+      .replace(/^\uFEFF/, '')
+      .split('\n');
     const parsed = new Map<string, number[]>();
     const errors: string[] = [];
     lines.forEach((raw, idx) => {

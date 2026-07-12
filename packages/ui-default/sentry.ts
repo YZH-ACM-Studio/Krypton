@@ -1,6 +1,4 @@
-import {
-  browserApiErrorsIntegration, browserTracingIntegration, captureException, init, replayIntegration, setTag,
-} from '@sentry/browser';
+import { browserApiErrorsIntegration, browserTracingIntegration, captureException, init, replayIntegration, setTag } from '@sentry/browser';
 
 init({
   dsn: UiContext.sentry_dsn,

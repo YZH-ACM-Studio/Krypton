@@ -3,18 +3,7 @@
  */
 
 import { useRef, useState } from 'react';
-import {
-  FileDown,
-  FileUp,
-  Pencil,
-  Plus,
-  Save,
-  Search,
-  Shield,
-  Trash2,
-  UserPlus,
-  Users,
-} from 'lucide-react';
+import { FileDown, FileUp, Pencil, Plus, Save, Search, Shield, Trash2, UserPlus, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,14 +15,7 @@ import { AdminPage } from '@/components/admin/admin-page';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
 import { bigIntLog2, bigIntPopcount, parseBigInt } from '@/lib/perms';
 
@@ -43,13 +25,7 @@ type R = Record<string, any>;
 /*  Shared layout for domain admin pages                               */
 /* ================================================================== */
 
-function DomainAdminShell({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function DomainAdminShell({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <AdminPage bypassPrivGate title={title}>
       {children}
@@ -68,18 +44,12 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
     <div className="grid gap-1.5 sm:grid-cols-[200px_1fr] sm:items-start">
       <div>
         <label className="text-sm font-medium">{setting.name || setting.key}</label>
-        {setting.desc ? (
-          <p className="text-[11px] leading-tight text-muted-foreground">{setting.desc}</p>
-        ) : null}
+        {setting.desc ? <p className="text-[11px] leading-tight text-muted-foreground">{setting.desc}</p> : null}
       </div>
       <div>
         {setting.type === 'boolean' || setting.type === 'checkbox' ? (
           <label className="inline-flex cursor-pointer items-center gap-2">
-            <Checkbox
-              name={setting.key}
-              defaultChecked={!!value}
-              disabled={isDisabled}
-             />
+            <Checkbox name={setting.key} defaultChecked={!!value} disabled={isDisabled} />
             <span className="text-sm text-muted-foreground">{setting.ui || '启用'}</span>
           </label>
         ) : setting.type === 'select' ? (
@@ -90,11 +60,7 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
             options={rangeOptions(setting.range)}
           />
         ) : setting.type === 'markdown' && !isDisabled ? (
-          <MarkdownEditor
-            name={setting.key}
-            value={value ?? setting.value ?? ''}
-            minHeight={260}
-          />
+          <MarkdownEditor name={setting.key} value={value ?? setting.value ?? ''} minHeight={260} />
         ) : setting.type === 'textarea' || setting.type === 'markdown' ? (
           <textarea
             name={setting.key}
@@ -113,21 +79,9 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
             className="max-w-xs"
           />
         ) : setting.type === 'password' ? (
-          <Input
-            type="password"
-            name={setting.key}
-            defaultValue=""
-            disabled={isDisabled}
-            autoComplete="new-password"
-            className="max-w-xs"
-          />
+          <Input type="password" name={setting.key} defaultValue="" disabled={isDisabled} autoComplete="new-password" className="max-w-xs" />
         ) : (
-          <Input
-            name={setting.key}
-            defaultValue={value ?? setting.value ?? ''}
-            disabled={isDisabled}
-            className="max-w-sm"
-          />
+          <Input name={setting.key} defaultValue={value ?? setting.value ?? ''} disabled={isDisabled} className="max-w-sm" />
         )}
       </div>
     </div>
@@ -141,9 +95,7 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
  * native form via the input's `form` property; the SimpleSelect popover
  * lives in a Portal, so `event.currentTarget.form` won't reach the row.
  */
-function RoleQuickSelect({
-  defaultValue, roleOptions,
-}: { defaultValue: string; roleOptions: string[] }) {
+function RoleQuickSelect({ defaultValue, roleOptions }: { defaultValue: string; roleOptions: string[] }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   return (
     <>
@@ -169,7 +121,7 @@ function rangeOptions(range: any): { value: string; label: string }[] {
   if (Array.isArray(range)) {
     return range.map((opt: any) => {
       const val = Array.isArray(opt) ? opt[0] : opt;
-      const label = Array.isArray(opt) ? (opt[1] || opt[0]) : opt;
+      const label = Array.isArray(opt) ? opt[1] || opt[0] : opt;
       return { value: String(val), label: String(label) };
     });
   }
@@ -211,15 +163,9 @@ export function DomainEditPage() {
           <form method="post" className="space-y-6">
             {Array.from(families.entries()).map(([fam, items]) => (
               <fieldset key={fam} className="space-y-4">
-                <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  {familyLabels[fam] || fam}
-                </legend>
+                <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{familyLabels[fam] || fam}</legend>
                 {items.map((setting) => (
-                  <SettingField
-                    key={setting.key}
-                    setting={setting}
-                    value={current[setting.key]}
-                  />
+                  <SettingField key={setting.key} setting={setting} value={current[setting.key]} />
                 ))}
               </fieldset>
             ))}
@@ -245,9 +191,7 @@ export function DomainUserPage() {
   const rudocs: R = data.rudocs || {};
   const [search, setSearch] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
-  const roleOptions = roles
-    .map((role) => String(role._id || role))
-    .filter((role) => role !== 'guest');
+  const roleOptions = roles.map((role) => String(role._id || role)).filter((role) => role !== 'guest');
   const selectableRoles = roleOptions.filter((role) => role !== 'default');
   const selectedList = Array.from(selectedUsers);
 
@@ -266,12 +210,7 @@ export function DomainUserPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="relative max-w-xs flex-1">
           <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            className="pl-8"
-            placeholder="搜索用户…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          <Input className="pl-8" placeholder="搜索用户…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
       </div>
 
@@ -286,11 +225,15 @@ export function DomainUserPage() {
           <form method="post" className="grid gap-3 sm:grid-cols-[1fr_180px_auto_auto] sm:items-end">
             <input type="hidden" name="operation" value="set_users" />
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground" htmlFor="domain-user-uids">UID（逗号分隔）</label>
+              <label className="text-xs text-muted-foreground" htmlFor="domain-user-uids">
+                UID（逗号分隔）
+              </label>
               <Input id="domain-user-uids" name="uids" placeholder="1001,1002" required />
             </div>
             <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground" htmlFor="domain-user-role">角色</label>
+              <label className="text-xs text-muted-foreground" htmlFor="domain-user-role">
+                角色
+              </label>
               <SimpleSelect
                 id="domain-user-role"
                 name="role"
@@ -302,7 +245,7 @@ export function DomainUserPage() {
               />
             </div>
             <label className="flex items-center gap-2 pb-2 text-sm">
-              <Checkbox name="join" value="true"  />
+              <Checkbox name="join" value="true" />
               标记已加入
             </label>
             <Button type="submit" size="sm" className="gap-1">
@@ -320,7 +263,9 @@ export function DomainUserPage() {
             <div className="flex flex-wrap gap-2">
               <form method="post" className="flex flex-wrap items-center gap-2">
                 <input type="hidden" name="operation" value="set_users" />
-                {selectedList.map((uid) => <input key={uid} type="hidden" name="uids" value={uid} />)}
+                {selectedList.map((uid) => (
+                  <input key={uid} type="hidden" name="uids" value={uid} />
+                ))}
                 <SimpleSelect
                   name="role"
                   defaultValue={roleOptions[0]}
@@ -338,7 +283,9 @@ export function DomainUserPage() {
                 }}
               >
                 <input type="hidden" name="operation" value="kick" />
-                {selectedList.map((uid) => <input key={uid} type="hidden" name="uids" value={uid} />)}
+                {selectedList.map((uid) => (
+                  <input key={uid} type="hidden" name="uids" value={uid} />
+                ))}
                 <Button type="submit" size="sm" variant="destructive">
                   移除用户
                 </Button>
@@ -351,10 +298,7 @@ export function DomainUserPage() {
       {/* Users grouped by role */}
       {Object.entries(rudocs).map(([role, users]) => {
         const roleUsers = (users as R[]).filter(
-          (u) =>
-            !search ||
-            (u.uname || '').toLowerCase().includes(search.toLowerCase()) ||
-            String(u._id).includes(search),
+          (u) => !search || (u.uname || '').toLowerCase().includes(search.toLowerCase()) || String(u._id).includes(search),
         );
         if (roleUsers.length === 0 && search) return null;
 
@@ -392,33 +336,27 @@ export function DomainUserPage() {
                       const uid = String(u._id);
                       return (
                         <TableRow key={u._id}>
-                        <TableCell className="pl-5">
-                          <Checkbox
-                            checked={selectedUsers.has(uid)}
-                            onChange={() => toggleUser(uid)}
-                           />
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">{u._id}</TableCell>
-                        <TableCell className="text-sm font-medium">{u.uname || u.displayName || '—'}</TableCell>
-                        <TableCell>
-                          <form method="post">
-                            <input type="hidden" name="operation" value="set_users" />
-                            <input type="hidden" name="uids" value={u._id} />
-                            <RoleQuickSelect
-                              defaultValue={u.role || role}
-                              roleOptions={roleOptions}
-                            />
-                          </form>
-                        </TableCell>
-                        <TableCell className="text-right pr-5">
-                          <form method="post" className="inline">
-                            <input type="hidden" name="operation" value="kick" />
-                            <input type="hidden" name="uids" value={u._id} />
-                            <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">
-                              移除
-                            </Button>
-                          </form>
-                        </TableCell>
+                          <TableCell className="pl-5">
+                            <Checkbox checked={selectedUsers.has(uid)} onChange={() => toggleUser(uid)} />
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">{u._id}</TableCell>
+                          <TableCell className="text-sm font-medium">{u.uname || u.displayName || '—'}</TableCell>
+                          <TableCell>
+                            <form method="post">
+                              <input type="hidden" name="operation" value="set_users" />
+                              <input type="hidden" name="uids" value={u._id} />
+                              <RoleQuickSelect defaultValue={u.role || role} roleOptions={roleOptions} />
+                            </form>
+                          </TableCell>
+                          <TableCell className="text-right pr-5">
+                            <form method="post" className="inline">
+                              <input type="hidden" name="operation" value="kick" />
+                              <input type="hidden" name="uids" value={u._id} />
+                              <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">
+                                移除
+                              </Button>
+                            </form>
+                          </TableCell>
                         </TableRow>
                       );
                     })
@@ -432,9 +370,7 @@ export function DomainUserPage() {
 
       {Object.keys(rudocs).length === 0 && (
         <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            暂无域用户
-          </CardContent>
+          <CardContent className="py-12 text-center text-sm text-muted-foreground">暂无域用户</CardContent>
         </Card>
       )}
     </DomainAdminShell>
@@ -457,7 +393,10 @@ const FAMILY_LABELS: Record<string, string> = {
   perm_ranking: '排名',
 };
 
-type Perm = { key: string; desc: string };
+interface Perm {
+  key: string;
+  desc: string;
+}
 type PermsByFamily = Record<string, Perm[]>;
 
 /**
@@ -475,9 +414,7 @@ export function DomainPermissionPage() {
   const roles: R[] = data.roles || [];
   const permsByFamily: PermsByFamily = (data.PERMS_BY_FAMILY || {}) as PermsByFamily;
   const editableRoles = roles.filter((r) => r._id !== 'root');
-  const totalPerms = Object.values(permsByFamily).reduce(
-    (sum, list) => sum + (list?.length || 0), 0,
-  );
+  const totalPerms = Object.values(permsByFamily).reduce((sum, list) => sum + (list?.length || 0), 0);
   const [editingRole, setEditingRole] = useState<R | null>(null);
 
   return (
@@ -521,13 +458,7 @@ export function DomainPermissionPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="pr-5 text-right">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-7 gap-1 text-xs"
-                          onClick={() => setEditingRole(r)}
-                        >
+                        <Button type="button" variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={() => setEditingRole(r)}>
                           <Pencil className="size-3" />
                           编辑
                         </Button>
@@ -542,24 +473,13 @@ export function DomainPermissionPage() {
       </Card>
 
       {editingRole ? (
-        <RolePermissionDialog
-          key={editingRole._id}
-          role={editingRole}
-          permsByFamily={permsByFamily}
-          onClose={() => setEditingRole(null)}
-        />
+        <RolePermissionDialog key={editingRole._id} role={editingRole} permsByFamily={permsByFamily} onClose={() => setEditingRole(null)} />
       ) : null}
     </DomainAdminShell>
   );
 }
 
-function RolePermissionDialog({
-  role, permsByFamily, onClose,
-}: {
-  role: R;
-  permsByFamily: PermsByFamily;
-  onClose: () => void;
-}) {
+function RolePermissionDialog({ role, permsByFamily, onClose }: { role: R; permsByFamily: PermsByFamily; onClose: () => void }) {
   const rolePerm = parseBigInt(role.perm);
   // Local state so the user sees their toggle right away (the form still
   // POSTs natively, no controlled inputs needed — but we want a live count).
@@ -576,7 +496,8 @@ function RolePermissionDialog({
   const toggle = (key: string) => {
     setChecked((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
@@ -594,10 +515,7 @@ function RolePermissionDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent
-        className="w-full sm:w-[680px]"
-        onClose={onClose}
-      >
+      <DialogContent className="w-full sm:w-[680px]" onClose={onClose}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <span>编辑角色权限：</span>
@@ -623,16 +541,8 @@ function RolePermissionDialog({
               return (
                 <div key={family} className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      {FAMILY_LABELS[family] || family}
-                    </h3>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 text-[11px]"
-                      onClick={() => toggleFamily(family, !familyAll)}
-                    >
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{FAMILY_LABELS[family] || family}</h3>
+                    <Button type="button" size="sm" variant="ghost" className="h-6 text-[11px]" onClick={() => toggleFamily(family, !familyAll)}>
                       {familyAll ? '全不选' : familySome ? '全选' : '全选'}
                     </Button>
                   </div>
@@ -642,16 +552,8 @@ function RolePermissionDialog({
                       const bitIndex = bigIntLog2(permKey);
                       const isChecked = checked.has(String(p.key));
                       return (
-                        <label
-                          key={p.key}
-                          className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1 text-xs hover:bg-muted/40"
-                        >
-                          <Checkbox size="sm"
-                            name={role._id}
-                            value={String(bitIndex)}
-                            checked={isChecked}
-                            onChange={() => toggle(String(p.key))}
-                           />
+                        <label key={p.key} className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1 text-xs hover:bg-muted/40">
+                          <Checkbox size="sm" name={role._id} value={String(bitIndex)} checked={isChecked} onChange={() => toggle(String(p.key))} />
                           <span className="text-foreground">{p.desc}</span>
                         </label>
                       );
@@ -663,11 +565,11 @@ function RolePermissionDialog({
           </ScrollArea>
 
           <div className="flex items-center justify-between gap-2 border-t bg-muted/20 px-5 py-3">
-            <p className="text-xs text-muted-foreground">
-              保存后立即生效，可继续编辑其它角色。
-            </p>
+            <p className="text-xs text-muted-foreground">保存后立即生效，可继续编辑其它角色。</p>
             <div className="flex gap-2">
-              <Button type="button" variant="ghost" onClick={onClose}>取消</Button>
+              <Button type="button" variant="ghost" onClick={onClose}>
+                取消
+              </Button>
               <Button type="submit" className="gap-1">
                 <Save className="size-3.5" />
                 保存
@@ -702,7 +604,9 @@ export function DomainRolePage() {
           <form method="post" className="flex items-end gap-2">
             <input type="hidden" name="operation" value="add" />
             <div className="space-y-1 flex-1 max-w-xs">
-              <label className="text-xs text-muted-foreground" htmlFor="new-role">角色名</label>
+              <label className="text-xs text-muted-foreground" htmlFor="new-role">
+                角色名
+              </label>
               <Input id="new-role" name="role" placeholder="输入角色名" />
             </div>
             <Button type="submit" size="sm" className="gap-1">
@@ -731,10 +635,7 @@ export function DomainRolePage() {
                   <TableRow key={r._id}>
                     <TableCell className="pl-5 text-sm font-medium">{r._id}</TableCell>
                     <TableCell>
-                      <Badge
-                        variant={isBuiltin ? 'secondary' : 'outline'}
-                        className="text-[10px]"
-                      >
+                      <Badge variant={isBuiltin ? 'secondary' : 'outline'} className="text-[10px]">
                         {isBuiltin ? '内置' : '自定义'}
                       </Badge>
                     </TableCell>
@@ -769,9 +670,9 @@ export function DomainGroupPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
   const groups: R[] = data.groups || [];
-  const [groupValues, setGroupValues] = useState<Record<string, string>>(() => Object.fromEntries(
-    groups.map((group) => [String(group.name), (group.uids || []).join(',')]),
-  ));
+  const [groupValues, setGroupValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(groups.map((group) => [String(group.name), (group.uids || []).join(',')])),
+  );
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState(false);
@@ -801,7 +702,6 @@ export function DomainGroupPage() {
 
   const saveAllGroups = async () => {
     for (const group of groups) {
-      // eslint-disable-next-line no-await-in-loop
       await postGroup('update', String(group.name), groupValues[group.name] || '');
     }
     window.location.reload();
@@ -809,16 +709,20 @@ export function DomainGroupPage() {
 
   const importGroups = async (event: React.FormEvent) => {
     event.preventDefault();
-    const rows = importText.replace(/^\uFEFF/, '').split('\n')
+    const rows = importText
+      .replace(/^\uFEFF/, '')
+      .split('\n')
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
-        const [name, ...uids] = line.split(',').map((item) => item.trim()).filter(Boolean);
+        const [name, ...uids] = line
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean);
         return { name, uids: uids.join(',') };
       })
       .filter((row) => row.name);
     for (const row of rows) {
-      // eslint-disable-next-line no-await-in-loop
       await postGroup('update', row.name, row.uids);
     }
     window.location.reload();
@@ -835,11 +739,15 @@ export function DomainGroupPage() {
           <form method="post" className="flex items-end gap-2">
             <input type="hidden" name="operation" value="update" />
             <div className="space-y-1 flex-1 max-w-xs">
-              <label className="text-xs text-muted-foreground" htmlFor="group-name">组名</label>
+              <label className="text-xs text-muted-foreground" htmlFor="group-name">
+                组名
+              </label>
               <Input id="group-name" name="name" placeholder="输入组名" />
             </div>
             <div className="space-y-1 flex-1 max-w-xs">
-              <label className="text-xs text-muted-foreground" htmlFor="group-uids">用户 UID（逗号分隔）</label>
+              <label className="text-xs text-muted-foreground" htmlFor="group-uids">
+                用户 UID（逗号分隔）
+              </label>
               <Input id="group-uids" name="uids" placeholder="如: 1,2,3" />
             </div>
             <Button type="submit" size="sm" className="gap-1">
@@ -890,12 +798,7 @@ export function DomainGroupPage() {
             <CardTitle className="text-sm">导出用户组</CardTitle>
           </CardHeader>
           <CardContent>
-            <textarea
-              value={exportText}
-              readOnly
-              rows={8}
-              className="w-full rounded-md border bg-muted/30 px-3 py-2 font-mono text-sm"
-            />
+            <textarea value={exportText} readOnly rows={8} className="w-full rounded-md border bg-muted/30 px-3 py-2 font-mono text-sm" />
           </CardContent>
         </Card>
       )}
@@ -911,7 +814,6 @@ export function DomainGroupPage() {
               onClick={async () => {
                 if (!window.confirm('确认删除选中的用户组吗？')) return;
                 for (const name of selectedGroupList) {
-                  // eslint-disable-next-line no-await-in-loop
                   await postGroup('del', name);
                 }
                 window.location.reload();
@@ -926,9 +828,7 @@ export function DomainGroupPage() {
       {/* Group list */}
       {groups.length === 0 ? (
         <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            暂无用户组
-          </CardContent>
+          <CardContent className="py-12 text-center text-sm text-muted-foreground">暂无用户组</CardContent>
         </Card>
       ) : (
         <Card>
@@ -947,10 +847,7 @@ export function DomainGroupPage() {
                 {groups.map((g) => (
                   <TableRow key={g.name}>
                     <TableCell className="pl-5">
-                      <Checkbox
-                        checked={selectedGroups.has(g.name)}
-                        onChange={() => toggleGroup(g.name)}
-                       />
+                      <Checkbox checked={selectedGroups.has(g.name)} onChange={() => toggleGroup(g.name)} />
                     </TableCell>
                     <TableCell className="text-sm font-medium">{g.name}</TableCell>
                     <TableCell>

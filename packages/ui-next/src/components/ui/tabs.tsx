@@ -7,15 +7,7 @@ export interface TabItem {
   content: ReactNode;
 }
 
-export function Tabs({
-  items,
-  defaultValue,
-  className,
-}: {
-  items: TabItem[];
-  defaultValue?: string;
-  className?: string;
-}) {
+export function Tabs({ items, defaultValue, className }: { items: TabItem[]; defaultValue?: string; className?: string }) {
   const [active, setActive] = useState(defaultValue || items[0]?.value || '');
   const current = items.find((t) => t.value === active);
 

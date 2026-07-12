@@ -1,6 +1,6 @@
 /// <reference no-default-lib="true" />
 /// <reference lib="webworker" />
-export { }; // make it a module so that declare self works
+export {}; // make it a module so that declare self works
 declare const self: ServiceWorkerGlobalScope;
 
 const map = new Map();
@@ -78,13 +78,15 @@ self.addEventListener('notificationclick', (event) => {
   console.log('On notification click: ', event.notification.tag);
   event.notification.close();
   if (!event.notification.tag.startsWith('message-')) return;
-  event.waitUntil(self.clients.matchAll({ type: 'window' }).then((clientList) => {
-    for (const client of clientList) {
-      if (client.url === '/home/messages' && 'focus' in client) return client.focus();
-    }
-    if (self.clients.openWindow) self.clients.openWindow('/home/messages');
-    return null;
-  }));
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window' }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url === '/home/messages' && 'focus' in client) return client.focus();
+      }
+      if (self.clients.openWindow) self.clients.openWindow('/home/messages');
+      return null;
+    }),
+  );
 });
 
 const PRECACHE = 'ui-resources-cache';
@@ -127,26 +129,30 @@ function initConfig(cfg) {
   console.log('Config:', config);
 }
 
-self.addEventListener('install', (event) => event.waitUntil((async () => {
-  if (process.env.NODE_ENV === 'production' && config?.preload) {
-    const [cache, manifest] = await Promise.all([
-      caches.open(PRECACHE),
-      fetch('/manifest.json').then((res) => res.json()),
-    ]);
-    const files = Object.values(manifest).filter(shouldPreCache)
-      .map((i: string) => new URL(i, config.preload).toString());
-    await cache.addAll(files); // NOTE: CORS header
-  }
-  self.skipWaiting();
-})()));
+self.addEventListener('install', (event) =>
+  event.waitUntil(
+    (async () => {
+      if (process.env.NODE_ENV === 'production' && config?.preload) {
+        const [cache, manifest] = await Promise.all([caches.open(PRECACHE), fetch('/manifest.json').then((res) => res.json())]);
+        const files = Object.values(manifest)
+          .filter(shouldPreCache)
+          .map((i: string) => new URL(i, config.preload).toString());
+        await cache.addAll(files); // NOTE: CORS header
+      }
+      self.skipWaiting();
+    })(),
+  ),
+);
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
   const valid = [PRECACHE];
-  caches.keys().then((names) => names
-    .filter((name) => name.startsWith('precache-'))
-    .filter((name) => !valid.includes(name))
-    .map((p) => caches.delete(p)));
+  caches.keys().then((names) =>
+    names
+      .filter((name) => name.startsWith('precache-'))
+      .filter((name) => !valid.includes(name))
+      .map((p) => caches.delete(p)),
+  );
 });
 
 async function get(request: Request) {
@@ -189,9 +195,7 @@ async function cached(request: Request, cacheKey: string, fetchFunc: () => Promi
   const url = transformUrl(request.url);
   const urlObject = new URL(url);
   const isAsset = config.assets.some((i) => request.url.startsWith(i));
-  const rewritable = !isAsset && config.domains.length > 1
-    && config.domains.includes(urlObject.hostname)
-    && urlObject.origin === location.origin;
+  const rewritable = !isAsset && config.domains.length > 1 && config.domains.includes(urlObject.hostname) && urlObject.origin === location.origin;
   let targets = [url];
   if (rewritable) {
     targets = config.domains.map((i) => {
@@ -209,10 +213,7 @@ async function cached(request: Request, cacheKey: string, fetchFunc: () => Promi
     console.debug('Serve from cache %s <- %s', request.url, found.url);
     return found;
   }
-  const [cache, response] = await Promise.all([
-    caches.open(cacheKey),
-    fetchFunc().catch(() => null),
-  ]);
+  const [cache, response] = await Promise.all([caches.open(cacheKey), fetchFunc().catch(() => null)]);
   if (response?.status === 206) return response; // partial response cannot be cached
   if (response?.ok) {
     console.log(`Cached ${url}`);
@@ -243,23 +244,26 @@ self.addEventListener('fetch', (event: FetchEvent) => {
   if (!config) return; // Don't do anything when not initialized
   const url = new URL(event.request.url);
   const isAsset = config.assets.some((i) => event.request.url.startsWith(i));
-  const rewritable = !isAsset && config.domains.length > 1
-    && config.domains.includes(url.hostname)
-    && url.origin === location.origin;
+  const rewritable = !isAsset && config.domains.length > 1 && config.domains.includes(url.hostname) && url.origin === location.origin;
   // Only handle whitelisted origins;
   if (!isAsset && !config.hosts.some((i) => event.request.url.startsWith(i))) return;
   // Do not cache range requests
   if (event.request.headers.get('range')?.trim()?.length) return;
 
-  event.respondWith((async () => cached(event.request, isAsset ? 'assets' : PRECACHE, () => (rewritable
-    ? get(event.request)
-    : fetch(url, {
-      method: event.request.method,
-      headers: event.request.headers,
-      redirect: event.request.redirect,
-      keepalive: event.request.keepalive,
-      referrer: event.request.referrer,
-      referrerPolicy: event.request.referrerPolicy,
-      signal: event.request.signal,
-    }))))());
+  event.respondWith(
+    (async () =>
+      cached(event.request, isAsset ? 'assets' : PRECACHE, () =>
+        rewritable
+          ? get(event.request)
+          : fetch(url, {
+              method: event.request.method,
+              headers: event.request.headers,
+              redirect: event.request.redirect,
+              keepalive: event.request.keepalive,
+              referrer: event.request.referrer,
+              referrerPolicy: event.request.referrerPolicy,
+              signal: event.request.signal,
+            }),
+      ))(),
+  );
 });

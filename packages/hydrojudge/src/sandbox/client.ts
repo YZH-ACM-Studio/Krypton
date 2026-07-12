@@ -5,9 +5,7 @@ import WebSocket from 'ws';
 import { pipeRequest } from '@hydrooj/utils';
 import { version } from '../../package.json';
 import { getConfig } from '../config';
-import {
-    Input, Output, Resize, SandboxRequest, SandboxResult, SandboxVersion,
-} from './interface';
+import { Input, Output, Resize, SandboxRequest, SandboxResult, SandboxVersion } from './interface';
 
 let url: string;
 const UA = `HydroJudge/${version} (${Math.random().toString(36).substring(2, 8)})`;
@@ -27,8 +25,8 @@ export class Stream extends EventEmitter {
                     break;
                 case 2:
                     this.emit('output', {
-                        index: (data[1] >> 4) & 0xF,
-                        fd: (data[1]) & 0xF,
+                        index: (data[1] >> 4) & 0xf,
+                        fd: data[1] & 0xf,
                         content: data.subarray(2),
                     });
                     break;
@@ -86,45 +84,48 @@ export class Stream extends EventEmitter {
 function _call(method: 'post' | 'get' | 'delete', endpoint: string, trace?: string) {
     return superagent[method](`${url}/${endpoint}`).set('User-Agent', trace ? `${UA} (${trace})` : UA);
 }
-const client = new Proxy({
-    async run(req: SandboxRequest, trace?: string): Promise<SandboxResult[]> {
-        const res = await _call('post', 'run', trace).send(req);
-        return res.body;
+const client = new Proxy(
+    {
+        async run(req: SandboxRequest, trace?: string): Promise<SandboxResult[]> {
+            const res = await _call('post', 'run', trace).send(req);
+            return res.body;
+        },
+        async getFile(fileId: string, dest?: string): Promise<Buffer> {
+            const req = _call('get', `file/${fileId}`);
+            if (dest) {
+                const w = fs.createWriteStream(dest);
+                return (await pipeRequest(req, w, 60000, fileId)) as any;
+            }
+            const res = await req.responseType('arraybuffer');
+            return res.body;
+        },
+        async deleteFile(fileId: string): Promise<void> {
+            const res = await _call('delete', `file/${fileId}`);
+            return res.body;
+        },
+        async listFiles(): Promise<Record<string, string>> {
+            const res = await _call('get', 'file');
+            return res.body;
+        },
+        async version(): Promise<SandboxVersion> {
+            const res = await _call('get', 'version');
+            return res.body;
+        },
+        async config(): Promise<Record<string, any>> {
+            const res = await _call('get', 'config');
+            return res.body;
+        },
+        stream(req: SandboxRequest): Stream {
+            return new Stream(url, req);
+        },
     },
-    async getFile(fileId: string, dest?: string): Promise<Buffer> {
-        const req = _call('get', `file/${fileId}`);
-        if (dest) {
-            const w = fs.createWriteStream(dest);
-            return await pipeRequest(req, w, 60000, fileId) as any;
-        }
-        const res = await req.responseType('arraybuffer');
-        return res.body;
+    {
+        get(self, key) {
+            url = getConfig('sandbox_host');
+            if (url.endsWith('/')) url = url.substring(0, url.length - 1);
+            return self[key];
+        },
     },
-    async deleteFile(fileId: string): Promise<void> {
-        const res = await _call('delete', `file/${fileId}`);
-        return res.body;
-    },
-    async listFiles(): Promise<Record<string, string>> {
-        const res = await _call('get', 'file');
-        return res.body;
-    },
-    async version(): Promise<SandboxVersion> {
-        const res = await _call('get', 'version');
-        return res.body;
-    },
-    async config(): Promise<Record<string, any>> {
-        const res = await _call('get', 'config');
-        return res.body;
-    },
-    stream(req: SandboxRequest): Stream {
-        return new Stream(url, req);
-    },
-}, {
-    get(self, key) {
-        url = getConfig('sandbox_host');
-        if (url.endsWith('/')) url = url.substring(0, url.length - 1);
-        return self[key];
-    },
-});
+);
 
 export default client;

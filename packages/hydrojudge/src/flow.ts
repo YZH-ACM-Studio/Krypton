@@ -1,20 +1,16 @@
 import Queue from 'p-queue';
-import {
-    JudgeResultBody, NormalizedCase, NormalizedSubtask, STATUS,
-} from '@hydrooj/common';
+import { JudgeResultBody, NormalizedCase, NormalizedSubtask, STATUS } from '@hydrooj/common';
 import { getConfig } from './config';
 import { FormatError } from './error';
 import { Context, ContextSubTask } from './judge/interface';
 
 interface Task {
     compile: () => Promise<void>;
-    judgeCase: (c: NormalizedCase) => (
-        (ctx: Context, ctxSubtask: ContextSubTask, runner?: Function) => Promise<JudgeResultBody['case']>
-    );
+    judgeCase: (c: NormalizedCase) => (ctx: Context, ctxSubtask: ContextSubTask, runner?: Function) => Promise<JudgeResultBody['case']>;
 }
 
 const Score = {
-    sum: (a: number, b: number) => (a + b),
+    sum: (a: number, b: number) => a + b,
     max: Math.max,
     min: Math.min,
 };
@@ -25,43 +21,45 @@ function judgeSubtask(subtask: NormalizedSubtask, sid: string, judgeCase: Task['
         const ctxSubtask = {
             subtask,
             status: 0,
-            score: subtask.type === 'min'
-                ? subtask.score
-                : 0,
+            score: subtask.type === 'min' ? subtask.score : 0,
         };
         const cases = [];
         for (const cid in subtask.cases) {
             const runner = judgeCase(subtask.cases[cid]);
-            cases.push(ctx.queue.add(async () => {
-                const res = (ctx.errored
-                    || (subtask.type === 'min' && ctxSubtask.score === 0)
-                    || (subtask.type === 'max' && ctxSubtask.score === subtask.score)
-                    || (subtask.if || []).filter((i) => ctx.failed[i]).length)
-                    ? {
-                        id: subtask.cases[cid].id,
-                        status: STATUS.STATUS_CANCELED,
-                        subtaskId: subtask.id,
-                        score: 0,
-                        time: 0,
-                        memory: 0,
-                        message: '',
-                    } : await (async () => {
-                        using span = ctx.startChildSpan('judge.case', { id: subtask.cases[cid].id, subtaskId: subtask.id });
-                        const r = await runner(ctx, ctxSubtask, runner);
-                        span.setAttributes({ status: r?.status, time: r?.time, memory: r?.memory });
-                        return r;
-                    })();
-                if (res?.status !== STATUS.STATUS_CANCELED) {
-                    ctxSubtask.score = Score[ctxSubtask.subtask.type](ctxSubtask.score, res.score);
-                    ctxSubtask.status = Math.max(ctxSubtask.status, res.status);
-                    if (ctxSubtask.status > STATUS.STATUS_ACCEPTED) ctx.failed[sid] = true;
-                    ctx.total_time += res.time;
-                    ctx.total_memory = Math.max(ctx.total_memory, res.memory);
-                }
-                if (ctx.config.detail !== 'none') {
-                    ctx.next({ ...res ? { case: res } : {}, addProgress: 100 / ctx.config.count });
-                }
-            }));
+            cases.push(
+                ctx.queue.add(async () => {
+                    const res =
+                        ctx.errored ||
+                        (subtask.type === 'min' && ctxSubtask.score === 0) ||
+                        (subtask.type === 'max' && ctxSubtask.score === subtask.score) ||
+                        (subtask.if || []).filter((i) => ctx.failed[i]).length
+                            ? {
+                                  id: subtask.cases[cid].id,
+                                  status: STATUS.STATUS_CANCELED,
+                                  subtaskId: subtask.id,
+                                  score: 0,
+                                  time: 0,
+                                  memory: 0,
+                                  message: '',
+                              }
+                            : await (async () => {
+                                  using span = ctx.startChildSpan('judge.case', { id: subtask.cases[cid].id, subtaskId: subtask.id });
+                                  const r = await runner(ctx, ctxSubtask, runner);
+                                  span.setAttributes({ status: r?.status, time: r?.time, memory: r?.memory });
+                                  return r;
+                              })();
+                    if (res?.status !== STATUS.STATUS_CANCELED) {
+                        ctxSubtask.score = Score[ctxSubtask.subtask.type](ctxSubtask.score, res.score);
+                        ctxSubtask.status = Math.max(ctxSubtask.status, res.status);
+                        if (ctxSubtask.status > STATUS.STATUS_ACCEPTED) ctx.failed[sid] = true;
+                        ctx.total_time += res.time;
+                        ctx.total_memory = Math.max(ctx.total_memory, res.memory);
+                    }
+                    if (ctx.config.detail !== 'none') {
+                        ctx.next({ ...(res ? { case: res } : {}), addProgress: 100 / ctx.config.count });
+                    }
+                }),
+            );
         }
         try {
             await Promise.all(cases);
@@ -112,10 +110,12 @@ export const runFlow = async (ctx: Context, task: Task) => {
         }
     } else {
         const infos = {};
-        await Promise.all(Object.entries(ctx.config.subtasks).map(async ([key, value]) => {
-            const sid = value.id?.toString() || key;
-            infos[sid] = await judgeSubtask(value, sid, task.judgeCase)(ctx);
-        }));
+        await Promise.all(
+            Object.entries(ctx.config.subtasks).map(async ([key, value]) => {
+                const sid = value.id?.toString() || key;
+                infos[sid] = await judgeSubtask(value, sid, task.judgeCase)(ctx);
+            }),
+        );
         for (const [key, value] of Object.entries(ctx.config.subtasks)) {
             let effective = true;
             const sid = value.id?.toString() || key;

@@ -1,9 +1,7 @@
 import path from 'path';
 import * as status from '@hydrooj/common/status';
 import { findFileSync, getAlphabeticId } from '@hydrooj/utils/lib/utils';
-import {
-  avatar, Context, difficultyAlgorithm, fs, PERM, PRIV, Service, STATUS, yaml,
-} from 'hydrooj';
+import { avatar, Context, difficultyAlgorithm, fs, PERM, PRIV, Service, STATUS, yaml } from 'hydrooj';
 import { cac } from 'cac';
 import { convert } from 'html-to-text';
 import jsesc from 'jsesc';
@@ -30,7 +28,7 @@ async function getFiles(folder: string, base = ''): Promise<string[]> {
   const f = await fs.readdir(folder);
   for (const i of f) {
     if ((await fs.stat(path.join(folder, i))).isDirectory()) {
-      files.push(...await getFiles(path.join(folder, i), path.join(base, i)));
+      files.push(...(await getFiles(path.join(folder, i), path.join(base, i))));
     } else files.push(path.join(base, i));
   }
   return files.map((item) => item.replace(/\\/g, '/'));
@@ -61,14 +59,18 @@ nunjucks.runtime.memberLookup = function memberLookup(obj, val) {
 class Nunjucks extends nunjucks.Environment {
   constructor(Loader: any) {
     super(new Loader(), { autoescape: true, trimBlocks: true });
-    this.addFilter('await', async (promise, callback) => {
-      try {
-        const result = await promise;
-        callback(null, result);
-      } catch (error) {
-        callback(error);
-      }
-    }, true);
+    this.addFilter(
+      'await',
+      async (promise, callback) => {
+        try {
+          const result = await promise;
+          callback(null, result);
+        } catch (error) {
+          callback(error);
+        }
+      },
+      true,
+    );
     this.addFilter('json', (self, s) => (self ? JSON.stringify(self, replacer(s)) : ''));
     this.addFilter('parseYaml', (self) => yaml.load(self));
     this.addFilter('dumpYaml', (self) => yaml.dump(self));
@@ -99,11 +101,13 @@ class Nunjucks extends nunjucks.Environment {
     });
     this.addFilter('problemPreview', (html) => {
       const res = convert(html, {
-        selectors: [
-          { selector: 'math', format: 'skip' },
-        ],
+        selectors: [{ selector: 'math', format: 'skip' }],
       });
-      return res.split('\n').map((i) => i.trim()).join('\n').replace(/\n+/g, '\n');
+      return res
+        .split('\n')
+        .map((i) => i.trim())
+        .join('\n')
+        .replace(/\n+/g, '\n');
     });
     this.addFilter('contentLang', (content) => {
       let s: any = '';
@@ -175,12 +179,13 @@ export class TemplateService extends Service {
       h.translate = h.translate.bind(h);
       h.url = h.url.bind(h);
       h.ctx = h.ctx.extend({ domain: h.domain });
-      h.renderHTML = ((orig) => function (name: string, args: Record<string, any>) {
-        const s = name.split('.');
-        let templateName = `${s[0]}.${args.domainId}.${s[1]}`;
-        if (!that.registry[templateName]) templateName = name;
-        return orig(templateName, args);
-      })(h.renderHTML).bind(h);
+      h.renderHTML = ((orig) =>
+        function (name: string, args: Record<string, any>) {
+          const s = name.split('.');
+          let templateName = `${s[0]}.${args.domainId}.${s[1]}`;
+          if (!that.registry[templateName]) templateName = name;
+          return orig(templateName, args);
+        })(h.renderHTML).bind(h);
     });
 
     class Loader extends nunjucks.Loader {
@@ -221,28 +226,36 @@ export class TemplateService extends Service {
     env.addGlobal('findSubModule', (prefix) => Object.keys(that.registry).filter((n) => n.startsWith(prefix)));
     env.addGlobal('templateExists', (name) => !!that.registry[name]);
 
-    const render = (name: string, state: any) => new Promise<string>((resolve, reject) => {
-      const start = Date.now();
-      env.render(name, {
-        page_name: name.split('.')[0],
-        ...state,
-        formatJudgeTexts: (texts) => texts.map((text) => {
-          if (typeof text === 'string') return text;
-          return state._(text.message).format(...text.params || []) + ((process.env.DEV && text.stack) ? `\n${text.stack}` : '');
-        }).join('\n'),
-        datetimeSpan: (arg0, arg1, arg2) => misc.datetimeSpan(arg0, arg1, arg2, state.handler.user?.timeZone),
-        ctx: state.handler?.ctx,
-        perm: PERM,
-        PRIV,
-        STATUS,
-        UiContext: state.handler?.UiContext || {},
-      }, (err, res) => {
-        const end = Date.now();
-        if (end - start > 5000) console.error(`Render of ${name} took ${end - start}ms`);
-        if (err) reject(err);
-        else resolve(res || '');
+    const render = (name: string, state: any) =>
+      new Promise<string>((resolve, reject) => {
+        const start = Date.now();
+        env.render(
+          name,
+          {
+            page_name: name.split('.')[0],
+            ...state,
+            formatJudgeTexts: (texts) =>
+              texts
+                .map((text) => {
+                  if (typeof text === 'string') return text;
+                  return state._(text.message).format(...(text.params || [])) + (process.env.DEV && text.stack ? `\n${text.stack}` : '');
+                })
+                .join('\n'),
+            datetimeSpan: (arg0, arg1, arg2) => misc.datetimeSpan(arg0, arg1, arg2, state.handler.user?.timeZone),
+            ctx: state.handler?.ctx,
+            perm: PERM,
+            PRIV,
+            STATUS,
+            UiContext: state.handler?.UiContext || {},
+          },
+          (err, res) => {
+            const end = Date.now();
+            if (end - start > 5000) console.error(`Render of ${name} took ${end - start}ms`);
+            if (err) reject(err);
+            else resolve(res || '');
+          },
+        );
       });
-    });
 
     ctx.server.registerRenderer('ui-default', {
       name: 'ui-default',

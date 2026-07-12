@@ -12,10 +12,7 @@
  *     and per-award scores.
  */
 import { useMemo, useState } from 'react';
-import {
-  Award as AwardIcon, Calendar, ChevronRight, Crown, Medal, Search, Trophy,
-  Users, X, ZoomIn,
-} from 'lucide-react';
+import { Award as AwardIcon, Calendar, ChevronRight, Crown, Medal, Search, Trophy, Users, X, ZoomIn } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { makeInitials } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
@@ -30,8 +27,14 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 
 interface AwardType {
-  _id: string; key: string; name: string; weight: number;
-  useRankDecay: boolean; hidden: boolean; order: number; builtin: boolean;
+  _id: string;
+  key: string;
+  name: string;
+  weight: number;
+  useRankDecay: boolean;
+  hidden: boolean;
+  order: number;
+  builtin: boolean;
 }
 
 interface Award {
@@ -50,10 +53,15 @@ interface Award {
 interface LeaderboardRow {
   person: { _id: string; studentDocId: string; awards: Award[]; employmentStatus?: string };
   student: {
-    _id: string; studentId: string; realName: string; schoolId: string;
-    schoolName: string; groupNames: string[]; boundUserId: number | null;
+    _id: string;
+    studentId: string;
+    realName: string;
+    schoolId: string;
+    schoolName: string;
+    groupNames: string[];
+    boundUserId: number | null;
   };
-  user: { uname: string; nAccept: number } | null;
+  user: { uname: string; nAccept: number; avatarUrl?: string } | null;
   totalScore: number;
   awardCount: number;
   rank: number;
@@ -86,7 +94,7 @@ function awardFields(typeKey: string) {
   const isICPC = /^icpc/i.test(typeKey);
   const isCCPC = /^ccpc/i.test(typeKey);
   const isPAT = /^pat/i.test(typeKey);
-  const isLadder = /^ladder_/.test(typeKey);
+  const isLadder = typeKey.startsWith('ladder_');
   const hasDualRank = isICPC || isCCPC;
   return {
     hasDualRank,
@@ -121,11 +129,33 @@ function tallyCategories(awards: Award[], typeMap: Map<string, AwardType>): Reco
 /* ─── podium card ─── */
 
 const PODIUM_STYLES: Array<{
-  border: string; gradient: string; icon: React.ElementType; iconColor: string; label: string;
+  border: string;
+  gradient: string;
+  icon: React.ElementType;
+  iconColor: string;
+  label: string;
 }> = [
-  { border: 'border-amber-400/60', gradient: 'from-amber-200/40 via-card to-card dark:from-amber-900/30', icon: Crown, iconColor: 'text-amber-500', label: '冠军' },
-  { border: 'border-slate-300/70', gradient: 'from-slate-200/50 via-card to-card dark:from-slate-700/30', icon: Trophy, iconColor: 'text-slate-400', label: '亚军' },
-  { border: 'border-orange-400/50', gradient: 'from-orange-200/40 via-card to-card dark:from-orange-900/30', icon: Medal, iconColor: 'text-orange-500', label: '季军' },
+  {
+    border: 'border-amber-400/60',
+    gradient: 'from-amber-200/40 via-card to-card dark:from-amber-900/30',
+    icon: Crown,
+    iconColor: 'text-amber-500',
+    label: '冠军',
+  },
+  {
+    border: 'border-slate-300/70',
+    gradient: 'from-slate-200/50 via-card to-card dark:from-slate-700/30',
+    icon: Trophy,
+    iconColor: 'text-slate-400',
+    label: '亚军',
+  },
+  {
+    border: 'border-orange-400/50',
+    gradient: 'from-orange-200/40 via-card to-card dark:from-orange-900/30',
+    icon: Medal,
+    iconColor: 'text-orange-500',
+    label: '季军',
+  },
 ];
 
 function PodiumCard({ row, rank }: { row: LeaderboardRow; rank: number }) {
@@ -136,7 +166,8 @@ function PodiumCard({ row, rank }: { row: LeaderboardRow; rank: number }) {
       href={`/rankboard/${row.student._id}`}
       className={cn(
         'group relative flex flex-col gap-2 rounded-xl border bg-linear-to-br p-5 transition-transform hover:-translate-y-1',
-        style.border, style.gradient,
+        style.border,
+        style.gradient,
       )}
     >
       <div className="flex items-center justify-between">
@@ -157,9 +188,7 @@ function PodiumCard({ row, rank }: { row: LeaderboardRow; rank: number }) {
         </div>
       </div>
       <div className="mt-1 flex items-baseline gap-2">
-        <span className="text-3xl font-bold tabular-nums">
-          {row.totalScore.toFixed(1)}
-        </span>
+        <span className="text-3xl font-bold tabular-nums">{row.totalScore.toFixed(1)}</span>
         <span className="text-xs text-muted-foreground">分 · {row.awardCount} 奖</span>
       </div>
     </a>
@@ -168,9 +197,7 @@ function PodiumCard({ row, rank }: { row: LeaderboardRow; rank: number }) {
 
 /* ─── awards drawer ─── */
 
-function AwardsDrawer({
-  row, typeMap, onClose,
-}: { row: LeaderboardRow; typeMap: Map<string, AwardType>; onClose: () => void }) {
+function AwardsDrawer({ row, typeMap, onClose }: { row: LeaderboardRow; typeMap: Map<string, AwardType>; onClose: () => void }) {
   const [lightbox, setLightbox] = useState<string | null>(null);
   return (
     <>
@@ -178,7 +205,9 @@ function AwardsDrawer({
       <aside className="fixed right-0 top-0 z-50 flex h-dvh w-full max-w-md flex-col border-l bg-card shadow-2xl">
         <header className="flex items-center justify-between border-b px-5 py-3.5">
           <div>
-            <p className="text-sm text-muted-foreground">第 {row.rank} 名 · {row.totalScore.toFixed(1)} 分</p>
+            <p className="text-sm text-muted-foreground">
+              第 {row.rank} 名 · {row.totalScore.toFixed(1)} 分
+            </p>
             <h2 className="text-xl font-semibold">{row.student.realName}</h2>
             <p className="text-xs text-muted-foreground">
               {row.student.studentId} · {row.student.schoolName}
@@ -202,7 +231,8 @@ function AwardsDrawer({
                 <Card key={idx} className="overflow-hidden">
                   {cover && (
                     <button
-                      type="button" onClick={() => setLightbox(cover)}
+                      type="button"
+                      onClick={() => setLightbox(cover)}
                       className="group relative block aspect-video w-full overflow-hidden bg-muted"
                     >
                       <img src={cover} alt={award.contest} className="size-full object-cover transition-transform group-hover:scale-105" />
@@ -215,36 +245,43 @@ function AwardsDrawer({
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold">{type?.name || award.type}</p>
-                        {award.contest && (
-                          <p className="text-xs text-muted-foreground">{award.contest}</p>
-                        )}
+                        {award.contest && <p className="text-xs text-muted-foreground">{award.contest}</p>}
                       </div>
                       <Badge variant="outline" className="font-mono text-[10px]">
                         +{score.toFixed(1)}
                       </Badge>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                      {award.date && <span className="inline-flex items-center gap-1"><Calendar className="size-3" />{award.date}</span>}
-                      {award.team && <span className="inline-flex items-center gap-1"><Users className="size-3" />{award.team}</span>}
+                      {award.date && (
+                        <span className="inline-flex items-center gap-1">
+                          <Calendar className="size-3" />
+                          {award.date}
+                        </span>
+                      )}
+                      {award.team && (
+                        <span className="inline-flex items-center gap-1">
+                          <Users className="size-3" />
+                          {award.team}
+                        </span>
+                      )}
                       {award.liveRank != null && fields.hasDualRank && <span>现场 #{award.liveRank}</span>}
                       {award.schoolRank != null && fields.hasDualRank && <span>校内 #{award.schoolRank}</span>}
                       {award.liveRank != null && fields.hasSingleRank && <span>排名 #{award.liveRank}</span>}
-                      {award.score != null && fields.hasExamScore && (
-                        <span className="font-semibold text-foreground">考试 {award.score} 分</span>
-                      )}
-                      {award.score != null && fields.hasLadderScore && (
-                        <span className="font-semibold text-foreground">天梯赛 {award.score} 分</span>
-                      )}
+                      {award.score != null && fields.hasExamScore && <span className="font-semibold text-foreground">考试 {award.score} 分</span>}
+                      {award.score != null && fields.hasLadderScore && <span className="font-semibold text-foreground">天梯赛 {award.score} 分</span>}
                     </div>
                     {award.teammates && award.teammates.length > 0 && (
-                      <p className="mt-1.5 text-[11px] text-muted-foreground">
-                        队友：{award.teammates.join(' · ')}
-                      </p>
+                      <p className="mt-1.5 text-[11px] text-muted-foreground">队友：{award.teammates.join(' · ')}</p>
                     )}
                     {thumbs.length > 0 && (
                       <div className="mt-2.5 flex flex-wrap gap-1.5">
                         {thumbs.map((u, j) => (
-                          <button key={j} type="button" onClick={() => setLightbox(u)} className="size-12 overflow-hidden rounded border bg-muted hover:opacity-80">
+                          <button
+                            key={j}
+                            type="button"
+                            onClick={() => setLightbox(u)}
+                            className="size-12 overflow-hidden rounded border bg-muted hover:opacity-80"
+                          >
                             <img src={u} alt="" className="size-full object-cover" />
                           </button>
                         ))}
@@ -258,10 +295,7 @@ function AwardsDrawer({
         </ScrollArea>
       </aside>
       {lightbox && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6"
-          onClick={() => setLightbox(null)}
-        >
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
           <img src={lightbox} alt="" className="max-h-[90vh] max-w-[90vw] object-contain" />
         </div>
       )}
@@ -333,7 +367,8 @@ export function RankBoardMainPage() {
   const toggleType = (key: string) => {
     setTypeFilter((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
@@ -354,7 +389,9 @@ export function RankBoardMainPage() {
       {/* Top 3 podium */}
       {top3.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-3">
-          {top3.map((r, i) => <PodiumCard key={r.person._id} row={r} rank={i + 1} />)}
+          {top3.map((r, i) => (
+            <PodiumCard key={r.person._id} row={r} rank={i + 1} />
+          ))}
           {Array.from({ length: 3 - top3.length }).map((_, i) => (
             <div key={`empty-${i}`} className="rounded-xl border border-dashed bg-muted/20 p-5 text-center text-xs text-muted-foreground">
               暂无第 {top3.length + i + 1} 名
@@ -368,42 +405,38 @@ export function RankBoardMainPage() {
         <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
           <div className="relative max-w-xs flex-1">
             <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="pl-8" placeholder="搜索学号 / 姓名"
-              value={search} onChange={(e) => setSearch(e.target.value)}
-            />
+            <Input className="pl-8" placeholder="搜索学号 / 姓名" value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <SimpleSelect
             value={schoolFilter}
             onValueChange={setSchoolFilter}
             className="w-auto min-w-[10rem]"
-            options={[
-              { value: 'all', label: '全部学校' },
-              ...schools.map((s) => ({ value: s, label: s })),
-            ]}
+            options={[{ value: 'all', label: '全部学校' }, ...schools.map((s) => ({ value: s, label: s }))]}
           />
           <SimpleSelect
             value={yearFilter}
             onValueChange={setYearFilter}
             className="w-auto min-w-[8rem]"
-            options={[
-              { value: 'all', label: '全部年级' },
-              ...enrollmentYears.map((y) => ({ value: String(y), label: `${y} 级` })),
-            ]}
+            options={[{ value: 'all', label: '全部年级' }, ...enrollmentYears.map((y) => ({ value: String(y), label: `${y} 级` }))]}
           />
           <details className="flex-1">
             <summary className="cursor-pointer rounded-md border bg-background px-3 py-2 text-sm">
-              奖项类型筛选 {typeFilter.size > 0 && <Badge variant="secondary" className="ml-1 text-[10px]">{typeFilter.size}</Badge>}
+              奖项类型筛选{' '}
+              {typeFilter.size > 0 && (
+                <Badge variant="secondary" className="ml-1 text-[10px]">
+                  {typeFilter.size}
+                </Badge>
+              )}
             </summary>
             <div className="mt-2 grid grid-cols-2 gap-1 rounded-md border bg-card p-2 sm:grid-cols-3 lg:grid-cols-4">
-              {data.awardTypes.filter((t) => !t.hidden).map((t) => (
-                <label key={t.key} className="flex items-center gap-1.5 rounded px-1.5 py-1 text-[11px] hover:bg-accent/40">
-                  <Checkbox checked={typeFilter.has(t.key)}
-                    onChange={() => toggleType(t.key)}
-                   />
-                  {t.name}
-                </label>
-              ))}
+              {data.awardTypes
+                .filter((t) => !t.hidden)
+                .map((t) => (
+                  <label key={t.key} className="flex items-center gap-1.5 rounded px-1.5 py-1 text-[11px] hover:bg-accent/40">
+                    <Checkbox checked={typeFilter.has(t.key)} onChange={() => toggleType(t.key)} />
+                    {t.name}
+                  </label>
+                ))}
             </div>
           </details>
         </CardContent>
@@ -436,20 +469,14 @@ export function RankBoardMainPage() {
                 {rest.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={14} className="py-10 text-center text-sm text-muted-foreground">
-                      {data.rows.length === 0
-                        ? '荣誉榜暂无成员，等待管理员添加。'
-                        : '当前筛选下没有匹配的成员。'}
+                      {data.rows.length === 0 ? '荣誉榜暂无成员，等待管理员添加。' : '当前筛选下没有匹配的成员。'}
                     </TableCell>
                   </TableRow>
                 ) : (
                   rest.map((r) => {
                     const counts = tallyCategories(r.person.awards, typeMap);
                     return (
-                      <TableRow
-                        key={r.person._id}
-                        className="cursor-pointer"
-                        onClick={() => setOpenRow(r)}
-                      >
+                      <TableRow key={r.person._id} className="cursor-pointer" onClick={() => setOpenRow(r)}>
                         <TableCell className="pl-5 font-mono text-sm font-semibold">#{r.rank}</TableCell>
                         <TableCell>
                           <div>
@@ -469,12 +496,8 @@ export function RankBoardMainPage() {
                         <TableCell className="text-center text-xs">{counts['PAT'] || ''}</TableCell>
                         <TableCell className="text-center text-xs">{counts['天梯赛'] || ''}</TableCell>
                         <TableCell className="text-center text-xs">{counts['其它'] || ''}</TableCell>
-                        <TableCell className="text-right font-mono text-sm">
-                          {r.user ? r.user.nAccept : '—'}
-                        </TableCell>
-                        <TableCell className="pr-5 text-right font-mono text-sm font-semibold">
-                          {r.totalScore.toFixed(1)}
-                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm">{r.user ? r.user.nAccept : '—'}</TableCell>
+                        <TableCell className="pr-5 text-right font-mono text-sm font-semibold">{r.totalScore.toFixed(1)}</TableCell>
                       </TableRow>
                     );
                   })
@@ -517,12 +540,14 @@ export function RankBoardDetailPage() {
           </p>
           {data.row.user && data.row.student.boundUserId ? (
             <p className="text-xs text-muted-foreground">
-              OJ：<a href={`/user/${data.row.student.boundUserId}`} className="text-primary hover:underline">{data.row.user.uname}</a> · 通过 {data.row.user.nAccept} 题
+              OJ：
+              <a href={`/user/${data.row.student.boundUserId}`} className="text-primary hover:underline">
+                {data.row.user.uname}
+              </a>{' '}
+              · 通过 {data.row.user.nAccept} 题
             </p>
           ) : null}
-          {data.row.person.employmentStatus && (
-            <p className="text-xs text-muted-foreground">就业去向：{data.row.person.employmentStatus}</p>
-          )}
+          {data.row.person.employmentStatus && <p className="text-xs text-muted-foreground">就业去向：{data.row.person.employmentStatus}</p>}
         </CardContent>
       </Card>
       <h2 className="text-base font-semibold">奖项（{data.row.awardCount}）</h2>
@@ -545,7 +570,9 @@ export function RankBoardDetailPage() {
                     <p className="font-semibold">{type?.name || award.type}</p>
                     {award.contest && <p className="text-xs text-muted-foreground">{award.contest}</p>}
                   </div>
-                  <Badge variant="outline" className="font-mono text-xs">+{score.toFixed(1)}</Badge>
+                  <Badge variant="outline" className="font-mono text-xs">
+                    +{score.toFixed(1)}
+                  </Badge>
                 </div>
                 <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   {award.date && <span>📅 {award.date}</span>}
@@ -553,12 +580,8 @@ export function RankBoardDetailPage() {
                   {award.liveRank != null && fields.hasDualRank && <span>现场 #{award.liveRank}</span>}
                   {award.schoolRank != null && fields.hasDualRank && <span>校内 #{award.schoolRank}</span>}
                   {award.liveRank != null && fields.hasSingleRank && <span>排名 #{award.liveRank}</span>}
-                  {award.score != null && fields.hasExamScore && (
-                    <span className="font-semibold text-foreground">考试 {award.score} 分</span>
-                  )}
-                  {award.score != null && fields.hasLadderScore && (
-                    <span className="font-semibold text-foreground">天梯赛 {award.score} 分</span>
-                  )}
+                  {award.score != null && fields.hasExamScore && <span className="font-semibold text-foreground">考试 {award.score} 分</span>}
+                  {award.score != null && fields.hasLadderScore && <span className="font-semibold text-foreground">天梯赛 {award.score} 分</span>}
                 </div>
                 {award.teammates && award.teammates.length > 0 && (
                   <p className="text-xs text-muted-foreground">队友：{award.teammates.join(' · ')}</p>

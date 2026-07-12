@@ -1,17 +1,12 @@
 import { useState } from 'react';
-import {
-  Archive, CheckCircle2, Copy, Eye, EyeOff, LockKeyhole, Pencil,
-  Plus, Search, SlidersHorizontal, Upload, XCircle,
-} from 'lucide-react';
+import { Archive, CheckCircle2, Copy, Eye, EyeOff, LockKeyhole, Pencil, Plus, Search, SlidersHorizontal, Upload, XCircle } from 'lucide-react';
 import { effectiveProblemKind, type ProblemKind } from '@hydrooj/common';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { SimpleSelect } from '@/components/ui/select';
-import {
-  Sheet, SheetContent, SheetHeader, SheetTitle,
-} from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 
@@ -47,13 +42,19 @@ function buildUrlWithQuery(baseUrl: string, params: Record<string, unknown>) {
 }
 
 function FilterForm({
-  action, query, sort, filters, problemKinds, canFilterOwner, compact = false,
+  action,
+  query,
+  sort,
+  filters,
+  problemKinds,
+  canFilterOwner,
+  compact = false,
 }: {
   action: string;
   query: string;
   sort: string;
   filters: BankFilters;
-  problemKinds: Array<{ kind: ProblemKind, slug: string }>;
+  problemKinds: Array<{ kind: ProblemKind; slug: string }>;
   canFilterOwner: boolean;
   compact?: boolean;
 }) {
@@ -72,10 +73,7 @@ function FilterForm({
           name="kind"
           defaultValue={filters.kind || ''}
           className="min-h-11"
-          options={[
-            { value: '', label: '全部题型' },
-            ...problemKinds.map((item) => ({ value: item.slug, label: KIND_LABEL[item.kind] })),
-          ]}
+          options={[{ value: '', label: '全部题型' }, ...problemKinds.map((item) => ({ value: item.slug, label: KIND_LABEL[item.kind] }))]}
         />
       </label>
       <label className="space-y-1.5">
@@ -128,7 +126,9 @@ function FilterForm({
         />
       </label>
       <div className={compact ? 'flex gap-2 pt-1' : 'flex items-end gap-2'}>
-        <Button type="submit" className="min-h-11 flex-1">应用</Button>
+        <Button type="submit" className="min-h-11 flex-1">
+          应用
+        </Button>
         <Button asChild type="button" variant="ghost" className="min-h-11">
           <a href={action}>清空</a>
         </Button>
@@ -153,16 +153,19 @@ export function ProblemsPage() {
   const query = String(data.qs || '');
   const sort = String(data.sort || 'default');
   const filters: BankFilters = data.filters || {};
-  const problemKinds: Array<{ kind: ProblemKind, slug: string }> = data.problemKinds || [];
+  const problemKinds: Array<{ kind: ProblemKind; slug: string }> = data.problemKinds || [];
   const ownerNames: Record<string, string> = data.ownerNames || {};
   const canManageByDocId: Record<string, boolean> = data.canManageByDocId || {};
   const psdict: Record<string, R> = data.psdict || {};
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const filtersActive = Boolean(
-    query || filters.kind || filters.tag || filters.owner
-    || (filters.visibility && filters.visibility !== 'all')
-    || (filters.lifecycle && filters.lifecycle !== 'active')
-    || sort !== 'default',
+    query ||
+    filters.kind ||
+    filters.tag ||
+    filters.owner ||
+    (filters.visibility && filters.visibility !== 'all') ||
+    (filters.lifecycle && filters.lifecycle !== 'active') ||
+    sort !== 'default',
   );
   const problemsBaseUrl = buildUrlWithQuery(bs.urls.problems, {
     q: query,
@@ -184,13 +187,20 @@ export function ProblemsPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" className="sm:hidden" onClick={() => setMobileFiltersOpen(true)}>
-            <SlidersHorizontal className="size-4" />筛选{filtersActive ? ' · 已启用' : ''}
+            <SlidersHorizontal className="size-4" />
+            筛选{filtersActive ? ' · 已启用' : ''}
           </Button>
           <Button asChild variant="outline">
-            <a href="/problem/import/hydro"><Upload className="size-4" />导入</a>
+            <a href="/problem/import/hydro">
+              <Upload className="size-4" />
+              导入
+            </a>
           </Button>
           <Button asChild>
-            <a href="/problem/create"><Plus className="size-4" />新建题目</a>
+            <a href="/problem/create">
+              <Plus className="size-4" />
+              新建题目
+            </a>
           </Button>
         </div>
       </header>
@@ -208,7 +218,9 @@ export function ProblemsPage() {
 
       <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
         <SheetContent side="bottom" className="max-h-[88vh] overflow-y-auto">
-          <SheetHeader><SheetTitle>筛选题库</SheetTitle></SheetHeader>
+          <SheetHeader>
+            <SheetTitle>筛选题库</SheetTitle>
+          </SheetHeader>
           <div className="p-5">
             <FilterForm
               action={bs.urls.problems}
@@ -229,7 +241,11 @@ export function ProblemsPage() {
             <div className="space-y-2">
               <p className="font-medium">没有符合条件的题目</p>
               <p className="text-sm text-muted-foreground">调整筛选条件，或创建一道新题。</p>
-              {filtersActive ? <Button asChild variant="outline" size="sm"><a href={bs.urls.problems}>清空筛选</a></Button> : null}
+              {filtersActive ? (
+                <Button asChild variant="outline" size="sm">
+                  <a href={bs.urls.problems}>清空筛选</a>
+                </Button>
+              ) : null}
             </div>
           </div>
         ) : (
@@ -247,7 +263,9 @@ export function ProblemsPage() {
                     <SubmissionStatus status={status} />
                     <div className="min-w-0 space-y-2">
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <Badge variant="secondary" className="font-normal">{KIND_LABEL[kind]}</Badge>
+                        <Badge variant="secondary" className="font-normal">
+                          {KIND_LABEL[kind]}
+                        </Badge>
                         <a href={detailUrl} className="min-w-0 truncate font-medium hover:text-primary hover:underline">
                           {pdoc.title || '未命名题目'}
                         </a>
@@ -259,30 +277,53 @@ export function ProblemsPage() {
                           {pdoc.hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
                           {pdoc.hidden ? '隐藏' : '已发布'}
                         </span>
-                        {pdoc.structureLockedAt ? <span className="inline-flex items-center gap-1"><LockKeyhole className="size-3.5" />结构已锁定</span> : null}
-                        {pdoc.archivedAt ? <span className="inline-flex items-center gap-1"><Archive className="size-3.5" />已归档</span> : null}
+                        {pdoc.structureLockedAt ? (
+                          <span className="inline-flex items-center gap-1">
+                            <LockKeyhole className="size-3.5" />
+                            结构已锁定
+                          </span>
+                        ) : null}
+                        {pdoc.archivedAt ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Archive className="size-3.5" />
+                            已归档
+                          </span>
+                        ) : null}
                       </div>
                       {pdoc.tag?.length ? (
                         <div className="flex flex-wrap gap-1">
-                          {(pdoc.tag as string[]).slice(0, 5).map((tag) => <Badge key={tag} variant="outline" className="font-normal">{tag}</Badge>)}
+                          {(pdoc.tag as string[]).slice(0, 5).map((tag) => (
+                            <Badge key={tag} variant="outline" className="font-normal">
+                              {tag}
+                            </Badge>
+                          ))}
                         </div>
                       ) : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-1 sm:justify-end">
-                      <Button asChild variant="ghost" size="sm"><a href={detailUrl}>查看</a></Button>
+                      <Button asChild variant="ghost" size="sm">
+                        <a href={detailUrl}>查看</a>
+                      </Button>
                       {canManage ? (
                         <>
-                          <Button asChild variant="ghost" size="sm"><a href={`${detailUrl}/edit`}><Pencil className="size-3.5" />编辑</a></Button>
+                          <Button asChild variant="ghost" size="sm">
+                            <a href={`${detailUrl}/edit`}>
+                              <Pencil className="size-3.5" />
+                              编辑
+                            </a>
+                          </Button>
                           <form method="post">
                             <input type="hidden" name="operation" value="clone" />
                             <input type="hidden" name="pid" value={docId} />
-                            <Button type="submit" variant="ghost" size="sm"><Copy className="size-3.5" />克隆</Button>
+                            <Button type="submit" variant="ghost" size="sm">
+                              <Copy className="size-3.5" />
+                              克隆
+                            </Button>
                           </form>
                           {!pdoc.archivedAt ? (
                             <form
                               method="post"
                               onSubmit={(event) => {
-                                // eslint-disable-next-line no-alert
                                 if (!window.confirm(`归档题目「${pdoc.title || displayPid}」？归档后将强制隐藏。`)) {
                                   event.preventDefault();
                                 }
@@ -291,7 +332,10 @@ export function ProblemsPage() {
                               <input type="hidden" name="operation" value="archive" />
                               <input type="hidden" name="pid" value={docId} />
                               <input type="hidden" name="reason" value="Archived from problem bank" />
-                              <Button type="submit" variant="ghost" size="sm"><Archive className="size-3.5" />归档</Button>
+                              <Button type="submit" variant="ghost" size="sm">
+                                <Archive className="size-3.5" />
+                                归档
+                              </Button>
                             </form>
                           ) : null}
                         </>

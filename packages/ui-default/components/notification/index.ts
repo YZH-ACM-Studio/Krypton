@@ -5,10 +5,8 @@ import React from 'react';
 import { theme } from 'vj/components/mantine.page';
 import { tpl, zIndexManager } from 'vj/utils/base';
 
-document.body.append(tpl(
-  React.createElement(MantineProvider, { theme },
-    React.createElement(Notifications, { position: 'bottom-left', zIndex: 99999 }),
-  ), true),
+document.body.append(
+  tpl(React.createElement(MantineProvider, { theme }, React.createElement(Notifications, { position: 'bottom-left', zIndex: 99999 })), true),
 );
 
 interface NotificationOptions {
@@ -28,23 +26,22 @@ export default class Notification {
   duration: number;
   autoHideTimer?: NodeJS.Timeout;
 
-  constructor({
-    avatar, title, message, type = '', duration = 3000, action,
-  }: NotificationOptions) {
+  constructor({ avatar, title, message, type = '', duration = 3000, action }: NotificationOptions) {
     this.type = type;
     if (avatar) this.type += ' avatar';
     if (title) this.type += ' title';
-    this.action = action || (() => { });
+    this.action = action || (() => {});
     this.$dom = $(tpl`<div class="notification ${this.type} hide"></div>`);
     if (avatar) $(tpl`<img width="32" height="32" class="avatar" src="${avatar}"></img>`).appendTo(this.$dom);
-    const content = message.split('\n').map((line) => tpl`<p>${line}</p>`).join('');
+    const content = message
+      .split('\n')
+      .map((line) => tpl`<p>${line}</p>`)
+      .join('');
     if (title) {
       $(tpl`<div class="notification-content"><h2>${title}</h2>${{ templateRaw: true, html: content }}</div>`).appendTo(this.$dom);
     } else $(`<div>${content}</div>`).appendTo(this.$dom);
     this.$dom.on('click', this.handleClick.bind(this));
-    this.$n = this.$dom
-      .css('z-index', zIndexManager.getNext())
-      .appendTo(document.body);
+    this.$n = this.$dom.css('z-index', zIndexManager.getNext()).appendTo(document.body);
     this.$n.width(); // force reflow
     this.duration = duration;
   }

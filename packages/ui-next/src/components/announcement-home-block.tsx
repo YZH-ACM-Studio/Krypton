@@ -43,8 +43,12 @@ export function AnnouncementHomeBlock() {
         setDocs(body.docs || []);
         setLoaded(true);
       })
-      .catch(() => { setLoaded(true); });
-    return () => { cancelled = true; };
+      .catch(() => {
+        setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (!loaded || docs.length === 0) return null;
@@ -69,18 +73,12 @@ export function AnnouncementHomeBlock() {
             <li key={doc._id}>
               <a
                 href={`/announce/${doc._id}`}
-                className={cn(
-                  'flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-accent/40',
-                  doc.pin && 'bg-primary/5',
-                )}
+                className={cn('flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-accent/40', doc.pin && 'bg-primary/5')}
               >
-                {doc.pin
-                  ? <Pin className="size-3.5 shrink-0 text-amber-600" />
-                  : <span className="size-3.5 shrink-0" />}
-                <span className={cn(
-                  'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium',
-                  COLOR_CLASSES[doc.categoryColor] || COLOR_CLASSES.gray,
-                )}>
+                {doc.pin ? <Pin className="size-3.5 shrink-0 text-amber-600" /> : <span className="size-3.5 shrink-0" />}
+                <span
+                  className={cn('shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium', COLOR_CLASSES[doc.categoryColor] || COLOR_CLASSES.gray)}
+                >
                   {doc.categoryName}
                 </span>
                 <span className="flex-1 truncate text-sm font-medium">{doc.title}</span>

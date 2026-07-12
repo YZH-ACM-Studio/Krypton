@@ -30,10 +30,7 @@ export function SpikeWebViewProbePage() {
   const channelLoadedRef = useRef(false);
 
   function log(direction: BridgeMessage['direction'], text: string) {
-    setMessages((prev) => [
-      ...prev.slice(-49),
-      { direction, text, timestamp: new Date().toISOString().slice(11, 19) },
-    ]);
+    setMessages((prev) => [...prev.slice(-49), { direction, text, timestamp: new Date().toISOString().slice(11, 19) }]);
   }
 
   useEffect(() => {
@@ -88,12 +85,7 @@ export function SpikeWebViewProbePage() {
   }
 
   return (
-    <motion.div
-      className="space-y-6"
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2 }}
-    >
+    <motion.div className="space-y-6" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
       <div className="flex items-center gap-2">
         <Cpu className="size-5 text-primary" />
         <h1 className="text-xl font-semibold">WebView Spike Probe</h1>
@@ -104,8 +96,12 @@ export function SpikeWebViewProbePage() {
           <CardTitle className="text-base">Bridge controls</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
-          <Button onClick={ping} disabled={!bridge}>Ping C++</Button>
-          <Button onClick={readPlatform} disabled={!bridge} variant="outline">Read platform name</Button>
+          <Button onClick={ping} disabled={!bridge}>
+            Ping C++
+          </Button>
+          <Button onClick={readPlatform} disabled={!bridge} variant="outline">
+            Read platform name
+          </Button>
         </CardContent>
       </Card>
 
@@ -122,10 +118,7 @@ export function SpikeWebViewProbePage() {
               <p className="text-muted-foreground">(no messages yet — click a control above)</p>
             ) : (
               messages.map((m, i) => (
-                <p
-                  key={i}
-                  className={m.direction === 'from' ? 'text-emerald-500' : 'text-blue-500'}
-                >
+                <p key={i} className={m.direction === 'from' ? 'text-emerald-500' : 'text-blue-500'}>
                   [{m.timestamp}] {m.direction === 'from' ? '←' : '→'} {m.text}
                 </p>
               ))

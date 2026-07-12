@@ -17,10 +17,7 @@ class MessageModel {
     static coll = db.collection('message');
 
     @ArgMethod
-    static async send(
-        from: number, to: number | number[],
-        content: string, flag: number = MessageModel.FLAG_UNREAD,
-    ) {
+    static async send(from: number, to: number | number[], content: string, flag: number = MessageModel.FLAG_UNREAD) {
         if (!Array.isArray(to)) to = [to];
         const base = { from, content, flag, to };
         if (!to.length) return base;
@@ -32,7 +29,10 @@ class MessageModel {
 
     static async sendInfo(to: number, content: string) {
         const mdoc: MessageDoc = {
-            from: 1, to, content, flag: MessageModel.FLAG_INFO | MessageModel.FLAG_I18N,
+            from: 1,
+            to,
+            content,
+            flag: MessageModel.FLAG_INFO | MessageModel.FLAG_I18N,
         };
         bus.broadcast('user/message', [to], mdoc);
     }
@@ -43,12 +43,19 @@ class MessageModel {
 
     @ArgMethod
     static async getByUser(uid: number) {
-        return await MessageModel.coll.find({ $or: [{ from: uid }, { to: uid }] }).sort('_id', -1).limit(1000).toArray();
+        return await MessageModel.coll
+            .find({ $or: [{ from: uid }, { to: uid }] })
+            .sort('_id', -1)
+            .limit(1000)
+            .toArray();
     }
 
     static async getMany(query: Filter<MessageDoc>, sort: any, page: number, limit: number) {
-        return await MessageModel.coll.find(query).sort(sort)
-            .skip((page - 1) * limit).limit(limit)
+        return await MessageModel.coll
+            .find(query)
+            .sort(sort)
+            .skip((page - 1) * limit)
+            .limit(limit)
             .toArray();
     }
 
@@ -66,21 +73,21 @@ class MessageModel {
     }
 
     static async sendNotification(message: string, ...args: any[]) {
-        const targets = await user.getMulti({ priv: { $bitsAllSet: PRIV.PRIV_VIEW_SYSTEM_NOTIFICATION } })
-            .project({ _id: 1, viewLang: 1 }).toArray();
-        return Promise.all(targets.map(({ _id, viewLang }) => {
-            const msg = app.i18n.translate(message, [viewLang || system.get('server.language')]).format(...args);
-            return MessageModel.send(1, _id, msg, MessageModel.FLAG_RICHTEXT);
-        }));
+        const targets = await user
+            .getMulti({ priv: { $bitsAllSet: PRIV.PRIV_VIEW_SYSTEM_NOTIFICATION } })
+            .project({ _id: 1, viewLang: 1 })
+            .toArray();
+        return Promise.all(
+            targets.map(({ _id, viewLang }) => {
+                const msg = app.i18n.translate(message, [viewLang || system.get('server.language')]).format(...args);
+                return MessageModel.send(1, _id, msg, MessageModel.FLAG_RICHTEXT);
+            }),
+        );
     }
 }
 
 export async function apply() {
-    return db.ensureIndexes(
-        MessageModel.coll,
-        { key: { to: 1, _id: -1 }, name: 'to' },
-        { key: { from: 1, _id: -1 }, name: 'from' },
-    );
+    return db.ensureIndexes(MessageModel.coll, { key: { to: 1, _id: -1 }, name: 'to' }, { key: { from: 1, _id: -1 }, name: 'from' });
 }
 export default MessageModel;
 global.Hydro.model.message = MessageModel;

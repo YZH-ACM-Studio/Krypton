@@ -5,10 +5,7 @@ import { projection } from '../api';
 const input = {
     foo: 1,
     bar: 'string',
-    arr: [
-        { sub: 1, another: 'key' },
-        { sub: 2 },
-    ],
+    arr: [{ sub: 1, another: 'key' }, { sub: 2 }],
     obj: {
         sub: 3,
     },
@@ -33,7 +30,6 @@ describe('projection', () => {
 });
 describe('safety', () => {
     it('prototype', () => {
-        // eslint-disable-next-line
         expect(projection({}, { __proto__: 1 })).to.deep.equal({});
         expect(projection({}, { prototype: 1 })).to.deep.equal({});
     });

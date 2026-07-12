@@ -79,11 +79,10 @@ const AssignSelectAutoComplete = forwardRef<AutoCompleteHandle<AssignItem>, Auto
         )}
         <div className="media__body medium">
           <div className="assign-select__name">
-            {item.name}{item.type === 'user' && item.displayName && ` (${item.displayName})`}
+            {item.name}
+            {item.type === 'user' && item.displayName && ` (${item.displayName})`}
           </div>
-          <div className="assign-select__desc">
-            {item.type === 'group' ? `Group • ${item.uids?.length || 0} users` : `User • UID = ${item.key}`}
-          </div>
+          <div className="assign-select__desc">{item.type === 'group' ? `Group • ${item.uids?.length || 0} users` : `User • UID = ${item.key}`}</div>
         </div>
       </div>
     )}

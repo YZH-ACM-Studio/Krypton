@@ -50,11 +50,15 @@ function parseRosterText(text: string): ParsedRow[] {
     const trimmed = raw.trim();
     if (!trimmed) continue;
     if (trimmed.startsWith('#')) continue;
-    const parts = trimmed.split(/[\s,;\t]+/).filter(Boolean);
+    const parts = trimmed.split(/[\s,;]+/).filter(Boolean);
     const studentId = (parts[0] || '').trim();
     const realName = parts.slice(1).join(' ').trim();
     const row: ParsedRow = {
-      line: i + 1, raw, studentId, realName, status: 'ok',
+      line: i + 1,
+      raw,
+      studentId,
+      realName,
+      status: 'ok',
     };
     if (!STUDENT_ID_RE.test(studentId)) {
       row.status = 'invalid_id';
@@ -94,7 +98,7 @@ export interface RosterImporterProps {
   enableSearch?: boolean;
   /** Search props — only used when enableSearch=true. */
   searchScope?: 'school_roster';
-  searchUrl?: string;  // URL to GET for search results, e.g. '/admin/userbind/groups/:id?q=' (server returns JSON via data)
+  searchUrl?: string; // URL to GET for search results, e.g. '/admin/userbind/groups/:id?q=' (server returns JSON via data)
   searchResults?: SearchStudent[];
   searchQuery?: string;
   searchParamName?: string;
@@ -111,18 +115,22 @@ export interface RosterImporterProps {
 }
 
 export function RosterImporter({
-  action, hiddenFields = {}, title = '导入名单',
-  enableSearch = false, searchResults = [], searchQuery = '',
+  action,
+  hiddenFields = {},
+  title = '导入名单',
+  enableSearch = false,
+  searchResults = [],
+  searchQuery = '',
   searchSelectFieldName = 'initialMemberIds',
   searchParamName = 'q',
   searchHiddenFields = {},
   searchResultHint = '已是成员的不在结果中',
   searchUrl,
-  submitLabel = '开始导入', className, description,
+  submitLabel = '开始导入',
+  className,
+  description,
 }: RosterImporterProps) {
-  const [mode, setMode] = useState<'text' | 'search'>(
-    enableSearch && (searchResults.length > 0 || searchQuery) ? 'search' : 'text',
-  );
+  const [mode, setMode] = useState<'text' | 'search'>(enableSearch && (searchResults.length > 0 || searchQuery) ? 'search' : 'text');
   const [text, setText] = useState('');
   const [checked, setChecked] = useState(false);
   const parsedRows = useMemo(() => parseRosterText(text), [text]);
@@ -135,7 +143,8 @@ export function RosterImporter({
   const toggleSelect = (id: string | number) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -167,11 +176,7 @@ export function RosterImporter({
             {Object.entries(hiddenFields).map(([k, v]) => (
               <input key={k} type="hidden" name={k} value={v} />
             ))}
-            <FormField
-              label="学生名单"
-              required
-              hint="每行一条 学号 姓名 — 学号 1-64 位字母/数字/._-；姓名最多 32 字符。以 # 开头的行会被忽略。"
-            >
+            <FormField label="学生名单" required hint="每行一条 学号 姓名 — 学号 1-64 位字母/数字/._-；姓名最多 32 字符。以 # 开头的行会被忽略。">
               <textarea
                 name="text"
                 rows={8}
@@ -184,9 +189,7 @@ export function RosterImporter({
               />
             </FormField>
 
-            {parsedRows.length > 0 && (
-              <PreviewTable rows={parsedRows} />
-            )}
+            {parsedRows.length > 0 && <PreviewTable rows={parsedRows} />}
 
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">
@@ -197,12 +200,7 @@ export function RosterImporter({
                 {checked && parsedRows.length > 0 && ' · 已检查'}
               </p>
               <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={parsedRows.length === 0}
-                  onClick={() => setChecked(true)}
-                >
+                <Button type="button" variant="outline" disabled={parsedRows.length === 0} onClick={() => setChecked(true)}>
                   检查名单
                 </Button>
                 <Button type="submit" disabled={validCount === 0}>
@@ -220,13 +218,10 @@ export function RosterImporter({
               {Object.entries(searchHiddenFields).map(([k, v]) => (
                 <input key={k} type="hidden" name={k} value={v} />
               ))}
-              <Input
-                name={searchParamName}
-                placeholder="搜索学号或姓名"
-                defaultValue={searchQuery}
-              />
+              <Input name={searchParamName} placeholder="搜索学号或姓名" defaultValue={searchQuery} />
               <Button type="submit" variant="outline" className="gap-1">
-                <Search className="size-4" />搜索
+                <Search className="size-4" />
+                搜索
               </Button>
             </form>
 
@@ -237,11 +232,15 @@ export function RosterImporter({
                 {searchResults.length > 0 && (
                   <>
                     {' · '}
-                    <button type="button" className="underline" onClick={selectAll}>全选</button>
+                    <button type="button" className="underline" onClick={selectAll}>
+                      全选
+                    </button>
                     {selectedIds.size > 0 && (
                       <>
                         {' · '}
-                        <button type="button" className="underline" onClick={clearSelection}>清除选择</button>
+                        <button type="button" className="underline" onClick={clearSelection}>
+                          清除选择
+                        </button>
                       </>
                     )}
                   </>
@@ -259,14 +258,13 @@ export function RosterImporter({
                       selectedIds.has(s._id) ? 'bg-primary/10' : 'hover:bg-muted/60',
                     )}
                   >
-                    <Checkbox
-                      checked={selectedIds.has(s._id)}
-                      onChange={() => toggleSelect(s._id)}
-                     />
+                    <Checkbox checked={selectedIds.has(s._id)} onChange={() => toggleSelect(s._id)} />
                     <span className="flex-1 font-mono">{s.studentId}</span>
                     <span className="text-foreground">{s.realName}</span>
                     {s.boundUserId && (
-                      <Badge variant="outline" className="text-[10px]">已绑定 UID {s.boundUserId}</Badge>
+                      <Badge variant="outline" className="text-[10px]">
+                        已绑定 UID {s.boundUserId}
+                      </Badge>
                     )}
                   </label>
                 ))}
@@ -277,14 +275,11 @@ export function RosterImporter({
               {Object.entries(hiddenFields).map(([k, v]) => (
                 <input key={k} type="hidden" name={k} value={v} />
               ))}
-              {selectedIds.size > 0 && Array.from(selectedIds).map((id) => (
-                <input key={id} type="hidden" name={searchSelectFieldName} value={String(id)} />
-              ))}
+              {selectedIds.size > 0 &&
+                Array.from(selectedIds).map((id) => <input key={id} type="hidden" name={searchSelectFieldName} value={String(id)} />)}
 
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-muted-foreground">
-                  {selectedIds.size > 0 ? `已选 ${selectedIds.size} 人` : '从结果中勾选要添加的学生'}
-                </p>
+                <p className="text-xs text-muted-foreground">{selectedIds.size > 0 ? `已选 ${selectedIds.size} 人` : '从结果中勾选要添加的学生'}</p>
                 <Button type="submit" disabled={selectedIds.size === 0}>
                   {submitLabel}
                 </Button>
@@ -297,9 +292,7 @@ export function RosterImporter({
   );
 }
 
-function TabBtn({
-  active, onClick, icon: Icon, children,
-}: { active: boolean; onClick: () => void; icon: any; children: ReactNode }) {
+function TabBtn({ active, onClick, icon: Icon, children }: { active: boolean; onClick: () => void; icon: any; children: ReactNode }) {
   return (
     <button
       type="button"
@@ -330,15 +323,7 @@ function PreviewTable({ rows }: { rows: ParsedRow[] }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr
-              key={r.line}
-              className={cn(
-                'border-t border-border/50',
-                r.status === 'ok'
-                  ? 'bg-background'
-                  : 'bg-rose-500/5',
-              )}
-            >
+            <tr key={r.line} className={cn('border-t border-border/50', r.status === 'ok' ? 'bg-background' : 'bg-rose-500/5')}>
               <td className="px-2 py-1 font-mono text-muted-foreground">{r.line}</td>
               <td className="px-2 py-1 font-mono">{r.studentId || '—'}</td>
               <td className="px-2 py-1">{r.realName || '—'}</td>
@@ -400,9 +385,7 @@ export function ImportResultPanel({ report }: { report: ImportResult }) {
         <p className="font-medium">{ok}</p>
         {failed.length > 0 && (
           <details className="rounded-md border border-rose-500/30 bg-rose-500/5 p-3">
-            <summary className="cursor-pointer text-xs font-medium text-rose-700 dark:text-rose-300">
-              {failed.length} 条未导入（点击展开）
-            </summary>
+            <summary className="cursor-pointer text-xs font-medium text-rose-700 dark:text-rose-300">{failed.length} 条未导入（点击展开）</summary>
             <ul className="mt-2 space-y-0.5 font-mono text-[11px]">
               {failed.map((d, i) => (
                 <li key={i}>
@@ -419,7 +402,9 @@ export function ImportResultPanel({ report }: { report: ImportResult }) {
             </summary>
             <ul className="mt-2 space-y-0.5 font-mono text-[11px]">
               {report.preflightInvalid.map((p, i) => (
-                <li key={i}>第 {p.line} 行: {p.studentId || '(空)'} — {p.reason}</li>
+                <li key={i}>
+                  第 {p.line} 行: {p.studentId || '(空)'} — {p.reason}
+                </li>
               ))}
             </ul>
           </details>
@@ -431,7 +416,9 @@ export function ImportResultPanel({ report }: { report: ImportResult }) {
             </summary>
             <ul className="mt-2 space-y-0.5 font-mono text-[11px]">
               {report.autoBindSkipped.map((p, i) => (
-                <li key={i}>{p.studentId || '(空)'}: {p.reason}</li>
+                <li key={i}>
+                  {p.studentId || '(空)'}: {p.reason}
+                </li>
               ))}
             </ul>
           </details>

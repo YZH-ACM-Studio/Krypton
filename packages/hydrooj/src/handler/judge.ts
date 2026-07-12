@@ -4,14 +4,10 @@ import yaml from 'js-yaml';
 import { omit } from 'lodash';
 import { ObjectId } from 'mongodb';
 import sanitize from 'sanitize-filename';
-import {
-    JudgeMeta, JudgeResultBody, ProblemConfigFile, TestCase,
-} from '@hydrooj/common';
+import { JudgeMeta, JudgeResultBody, ProblemConfigFile, TestCase } from '@hydrooj/common';
 import { sleep } from '@hydrooj/utils';
 import { Context } from '../context';
-import {
-    BadRequestError, FileLimitExceededError, ForbiddenError, ProblemIsReferencedError, ValidationError,
-} from '../error';
+import { BadRequestError, FileLimitExceededError, ForbiddenError, ProblemIsReferencedError, ValidationError } from '../error';
 import { RecordDoc, Task } from '../interface';
 import { Logger } from '../logger';
 import * as builtin from '../model/builtin';
@@ -27,9 +23,7 @@ import task, { Consumer } from '../model/task';
 import user from '../model/user';
 import bus from '../service/bus';
 import { updateJudge } from '../service/monitor';
-import {
-    ConnectionHandler, Handler, post, subscribe, Types,
-} from '../service/server';
+import { ConnectionHandler, Handler, post, subscribe, Types } from '../service/server';
 
 const logger = new Logger('judge');
 
@@ -69,7 +63,10 @@ function processPayload(body: Partial<JudgeResultBody>) {
     if (body.subtasks) $set.subtasks = body.subtasks;
     if (body.addProgress) $inc.progress = body.addProgress;
     return {
-        $set, $push, $unset, $inc,
+        $set,
+        $push,
+        $unset,
+        $inc,
     };
 }
 
@@ -80,23 +77,33 @@ export class JudgeResultCallbackContext {
     private relatedId = new ObjectId();
     private meta: { rejudge?: JudgeMeta['rejudge'] };
 
-    constructor(public ctx: Context, public readonly task: Omit<Task, '_id'> & { type: string }) { // eslint-disable-line ts/no-shadow
-        this.meta = task.meta as JudgeMeta || {};
+    constructor(
+        public ctx: Context,
+        // This public API name intentionally matches Hydro's imported task model.
+        // eslint-disable-next-line ts/no-shadow
+        public readonly task: Omit<Task, '_id'> & { type: string },
+    ) {
+        this.meta = (task.meta as JudgeMeta) || {};
         this.finishPromise = new Promise((resolve) => {
             this.resolve = resolve;
         });
     }
 
     async _next(body: Partial<JudgeResultBody>) {
-        const {
-            $set, $push, $unset, $inc,
-        } = processPayload(body);
+        const { $set, $push, $unset, $inc } = processPayload(body);
         if (this.meta?.rejudge === 'controlled') {
-            await record.collHistory.updateOne({
-                _id: this.relatedId,
-            }, {
-                $set, $push, $unset, $inc,
-            }, { upsert: true });
+            await record.collHistory.updateOne(
+                {
+                    _id: this.relatedId,
+                },
+                {
+                    $set,
+                    $push,
+                    $unset,
+                    $inc,
+                },
+                { upsert: true },
+            );
         } else {
             const rdoc = await record.update(this.task.domainId, new ObjectId(this.task.rid as string), $set, $push, $unset, $inc);
             body.key = 'next';
@@ -105,9 +112,7 @@ export class JudgeResultCallbackContext {
     }
 
     static async next(domainId: string, rid: ObjectId, body: Partial<JudgeResultBody>) {
-        const {
-            $set, $push, $unset, $inc,
-        } = processPayload(body);
+        const { $set, $push, $unset, $inc } = processPayload(body);
         body.key = 'next';
         const rdoc = await record.update(domainId, rid, $set, $push, $unset, $inc);
         if (rdoc) app.broadcast('record/change', rdoc, $set, $push, body);
@@ -125,12 +130,17 @@ export class JudgeResultCallbackContext {
         if (rdoc.contest) await contest.updateStatus(rdoc.domainId, rdoc.contest, rdoc.uid, rdoc._id, rdoc.pid, rdoc);
         else if (accept && updated) await domain.incUserInDomain(rdoc.domainId, rdoc.uid, 'nAccept', 1);
         const isNormalSubmission = ![
-            STATUS.STATUS_ETC, STATUS.STATUS_HACK_SUCCESSFUL, STATUS.STATUS_HACK_UNSUCCESSFUL,
-            STATUS.STATUS_FORMAT_ERROR, STATUS.STATUS_SYSTEM_ERROR, STATUS.STATUS_CANCELED,
+            STATUS.STATUS_ETC,
+            STATUS.STATUS_HACK_SUCCESSFUL,
+            STATUS.STATUS_HACK_UNSUCCESSFUL,
+            STATUS.STATUS_FORMAT_ERROR,
+            STATUS.STATUS_SYSTEM_ERROR,
+            STATUS.STATUS_CANCELED,
         ].includes(rdoc.status);
-        const pdoc = (accept && updated)
-            ? await problem.inc(rdoc.domainId, rdoc.pid, 'nAccept', 1)
-            : await problem.get(rdoc.domainId, rdoc.pid, undefined, true);
+        const pdoc =
+            accept && updated
+                ? await problem.inc(rdoc.domainId, rdoc.pid, 'nAccept', 1)
+                : await problem.get(rdoc.domainId, rdoc.pid, undefined, true);
         // STATUS_SHORT_TEXTS 无 WAITING 等键——含主观题的待阅记录不计入
         // 题目 stats，防止 `stats.undefined` 污染（对抗审查 MINOR）。
         if (pdoc && isNormalSubmission && builtin.STATUS_SHORT_TEXTS[rdoc.status]) {
@@ -149,11 +159,17 @@ export class JudgeResultCallbackContext {
         $set.judger = body.judger ?? 1;
 
         if (this.meta?.rejudge === 'controlled') {
-            await record.collHistory.updateOne({
-                _id: this.relatedId,
-            }, {
-                $set, $push, $unset,
-            }, { upsert: true });
+            await record.collHistory.updateOne(
+                {
+                    _id: this.relatedId,
+                },
+                {
+                    $set,
+                    $push,
+                    $unset,
+                },
+                { upsert: true },
+            );
             this.resolve(null);
             return;
         }
@@ -222,11 +238,7 @@ export class JudgeFilesDownloadHandler extends Handler {
         if (!pdoc) this.response.body.links = null;
         const links = {};
         for (const file of files) {
-            // eslint-disable-next-line no-await-in-loop
-            links[file] = await storage.signDownloadLink(
-                `problem/${pdoc.domainId}/${pdoc.docId}/testdata/${file}`,
-                file, true, 'judge',
-            );
+            links[file] = await storage.signDownloadLink(`problem/${pdoc.domainId}/${pdoc.docId}/testdata/${file}`, file, true, 'judge');
         }
         this.response.body.links = links;
     }
@@ -244,41 +256,31 @@ export async function processJudgeFileCallback(rid: ObjectId, filename: string, 
     const udoc = await user.getById(rdoc.domainId, rdoc.uid);
     if (!udoc) throw new ForbiddenError();
     let preflightError: unknown;
-    await problem.withAuthorizedStructuralWriteClaim(
-        rdoc.domainId,
-        rdoc.pid,
-        udoc,
-        'generate-testdata-callback',
-        async (claim) => {
-            try {
-                const pdoc = await problem.get(rdoc.domainId, rdoc.pid);
-                if (!pdoc) throw new ForbiddenError();
-                if (pdoc.reference) throw new ProblemIsReferencedError('edit files');
-                const stat = await fs.stat(filePath);
-                if ((pdoc.data?.length || 0)
-                    + (pdoc.additional_file?.length || 0)
-                    >= system.get('limit.problem_files_max')) {
-                    throw new FileLimitExceededError('count');
-                }
-                const size = Math.sum(
-                    (pdoc.data || []).map((i) => i.size),
-                    (pdoc.additional_file || []).map((i) => i.size),
-                    stat.size,
-                );
-                if (size >= system.get('limit.problem_files_max_size')) {
-                    throw new FileLimitExceededError('size');
-                }
-            } catch (error) {
-                // Preflight is read-only. Release the claim cleanly and throw
-                // after the critical section; write failures still retain ERROR.
-                preflightError = error;
-                return;
+    await problem.withAuthorizedStructuralWriteClaim(rdoc.domainId, rdoc.pid, udoc, 'generate-testdata-callback', async (claim) => {
+        try {
+            const pdoc = await problem.get(rdoc.domainId, rdoc.pid);
+            if (!pdoc) throw new ForbiddenError();
+            if (pdoc.reference) throw new ProblemIsReferencedError('edit files');
+            const stat = await fs.stat(filePath);
+            if ((pdoc.data?.length || 0) + (pdoc.additional_file?.length || 0) >= system.get('limit.problem_files_max')) {
+                throw new FileLimitExceededError('count');
             }
-            await problem.addTestdataWithClaim(
-                claim, sanitize(filename), fs.createReadStream(filePath), udoc._id,
+            const size = Math.sum(
+                (pdoc.data || []).map((i) => i.size),
+                (pdoc.additional_file || []).map((i) => i.size),
+                stat.size,
             );
-        },
-    );
+            if (size >= system.get('limit.problem_files_max_size')) {
+                throw new FileLimitExceededError('size');
+            }
+        } catch (error) {
+            // Preflight is read-only. Release the claim cleanly and throw
+            // after the critical section; write failures still retain ERROR.
+            preflightError = error;
+            return;
+        }
+        await problem.addTestdataWithClaim(claim, sanitize(filename), fs.createReadStream(filePath), udoc._id);
+    });
     if (preflightError) throw preflightError;
 }
 
@@ -321,7 +323,7 @@ export class JudgeConnectionHandler extends ConnectionHandler {
                     context.end({ message: 'Wait for previous judge timeout', status: STATUS.STATUS_SYSTEM_ERROR });
                     return;
                 }
-                await sleep(1000); // eslint-disable-line no-await-in-loop
+                await sleep(1000);
             }
         }
         this.tasks[rid] = context;
@@ -399,13 +401,22 @@ export async function apply(ctx: Context) {
                 problem.addTestdata(rdoc.domainId, rdoc.pid, 'config.yaml', Buffer.from(yaml.dump(config))),
             ]);
             // trigger rejudge
-            const rdocs = await record.getMulti(rdoc.domainId, {
-                pid: rdoc.pid,
-                status: STATUS.STATUS_ACCEPTED,
-                contest: { $nin: [record.RECORD_GENERATE, record.RECORD_PRETEST] },
-            }).project({ _id: 1, contest: 1 }).toArray();
+            const rdocs = await record
+                .getMulti(rdoc.domainId, {
+                    pid: rdoc.pid,
+                    status: STATUS.STATUS_ACCEPTED,
+                    contest: { $nin: [record.RECORD_GENERATE, record.RECORD_PRETEST] },
+                })
+                .project({ _id: 1, contest: 1 })
+                .toArray();
             const priority = await record.submissionPriority(rdoc.uid, -5000 - rdocs.length * 5 - 50);
-            await record.judge(rdoc.domainId, rdocs.map((r) => r._id), priority, {}, { hackRejudge: input });
+            await record.judge(
+                rdoc.domainId,
+                rdocs.map((r) => r._id),
+                priority,
+                {},
+                { hackRejudge: input },
+            );
         } catch (e) {
             t?.next?.({
                 rid: rdoc._id.toString(),

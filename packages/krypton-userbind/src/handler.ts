@@ -4,17 +4,8 @@
  * Templates set on `this.response.template` are consumed by ui-next's PAGE_MAP
  * (see packages/ui-next/src/pages/resolver.tsx).
  */
-import {
-    Context, Handler, NotFoundError, ObjectId, OplogModel, param, PRIV,
-    Types, UserModel, ValidationError,
-} from 'hydrooj';
-import {
-    bindingRequestsColl,
-    bindTokensColl,
-    schoolsColl,
-    studentsColl,
-    userGroupsColl,
-} from './db';
+import { Context, Handler, NotFoundError, ObjectId, OplogModel, param, PRIV, Types, UserModel, ValidationError } from 'hydrooj';
+import { bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl, userGroupsColl } from './db';
 import { userBindModel } from './model';
 import type { ParsedStudentFilterQuery } from './student-filter';
 import { parseStudentFilterQuery } from './student-filter';
@@ -53,9 +44,7 @@ async function buildSchoolDetailData(
     const studentFilters = options.studentFilters || parseStudentFilterQuery({});
     const groupQuery = (options.groupQuery || '').trim();
     const importQuery = (options.importQuery || '').trim();
-    const tab = ['students', 'import', 'groups', 'links'].includes(options.tab || '')
-        ? options.tab
-        : 'students';
+    const tab = ['students', 'import', 'groups', 'links'].includes(options.tab || '') ? options.tab : 'students';
 
     const [allGroups, { docs: students, total: studentTotal }, schoolTokens, groupCounts, importSearchResults] = await Promise.all([
         userBindModel.listUserGroups(domainId, schoolId),
@@ -71,14 +60,13 @@ async function buildSchoolDetailData(
             skip: (studentPage - 1) * studentLimit,
         }),
         userBindModel.listInviteTokens(domainId, { schoolId, kind: 'school' }),
-        studentsColl.aggregate<{ _id: ObjectId, count: number }>([
-            { $match: { domainId, schoolId } },
-            { $unwind: '$groupIds' },
-            { $group: { _id: '$groupIds', count: { $sum: 1 } } },
-        ]).toArray(),
-        importQuery
-            ? userBindModel.searchBindableUsers(domainId, schoolId, importQuery, 50)
-            : Promise.resolve([]),
+        studentsColl
+            .aggregate<{
+                _id: ObjectId;
+                count: number;
+            }>([{ $match: { domainId, schoolId } }, { $unwind: '$groupIds' }, { $group: { _id: '$groupIds', count: { $sum: 1 } } }])
+            .toArray(),
+        importQuery ? userBindModel.searchBindableUsers(domainId, schoolId, importQuery, 50) : Promise.resolve([]),
     ]);
 
     const groupMemberCount: Record<string, number> = {};
@@ -88,9 +76,7 @@ async function buildSchoolDetailData(
         name: g.name,
         memberCount: groupMemberCount[g._id.toString()] || 0,
     }));
-    const filteredGroups = groupQuery
-        ? groupsWithCount.filter((g) => g.name.toLowerCase().includes(groupQuery.toLowerCase()))
-        : groupsWithCount;
+    const filteredGroups = groupQuery ? groupsWithCount.filter((g) => g.name.toLowerCase().includes(groupQuery.toLowerCase())) : groupsWithCount;
     const groups = filteredGroups.slice((groupPage - 1) * groupLimit, groupPage * groupLimit);
 
     return {
@@ -132,27 +118,23 @@ class AdminSchoolsHandler extends UserbindAdminHandler {
 
     @param('name', Types.String)
     @param('initialRoster', Types.Content, true)
-    async postCreate(
-        { domainId }: { domainId: string }, name: string, initialRoster?: string,
-    ) {
+    async postCreate({ domainId }: { domainId: string }, name: string, initialRoster?: string) {
         const school = await userBindModel.createSchool(domainId, name, this.user._id);
         await OplogModel.log(this, 'userbind.school.create', { schoolId: school._id, name });
 
         // Optional initial roster — if rows are present and any are valid, import them.
         let importReport: any = null;
         if (initialRoster && initialRoster.trim()) {
-            const parsed = userBindModel.parseRosterText(initialRoster)
+            const parsed = userBindModel
+                .parseRosterText(initialRoster)
                 .filter((r) => r.status === 'ok')
                 .map((r) => ({ studentId: r.studentId, realName: r.realName }));
             if (parsed.length > 0) {
-                importReport = await userBindModel.importStudents(
-                    domainId, school._id, parsed, this.user._id,
-                );
+                importReport = await userBindModel.importStudents(domainId, school._id, parsed, this.user._id);
             }
         }
 
-        await OplogModel.log(this, 'userbind.school.create_initial_import',
-            { schoolId: school._id, inserted: importReport?.inserted || 0 });
+        await OplogModel.log(this, 'userbind.school.create_initial_import', { schoolId: school._id, inserted: importReport?.inserted || 0 });
         this.response.redirect = this.url('admin_userbind_school_detail', { schoolId: school._id });
     }
 
@@ -201,7 +183,11 @@ class AdminSchoolDetailHandler extends UserbindAdminHandler {
         importQ?: string,
     ) {
         const studentFilters = parseAdminStudentFilters({
-            enrollmentYear, bindingStatus, timeField, from, to,
+            enrollmentYear,
+            bindingStatus,
+            timeField,
+            from,
+            to,
         });
         this.response.template = 'admin_userbind_school_detail.html';
         this.response.body = await buildSchoolDetailData(domainId, schoolId, {
@@ -217,13 +203,9 @@ class AdminSchoolDetailHandler extends UserbindAdminHandler {
 
     @param('schoolId', Types.ObjectId)
     @param('ttlDays', Types.UnsignedInt, true)
-    async postGenerateLink(
-        { domainId }: { domainId: string }, schoolId: ObjectId, ttlDays = 0,
-    ) {
+    async postGenerateLink({ domainId }: { domainId: string }, schoolId: ObjectId, ttlDays = 0) {
         const ttlMs = ttlDays > 0 ? ttlDays * 86400 * 1000 : undefined;
-        const token = await userBindModel.generateSchoolInviteToken(
-            domainId, schoolId, this.user._id, ttlMs,
-        );
+        const token = await userBindModel.generateSchoolInviteToken(domainId, schoolId, this.user._id, ttlMs);
         await OplogModel.log(this, 'userbind.token.school.create', { schoolId, tokenId: token._id });
         this.response.redirect = this.url('admin_userbind_school_detail', { schoolId });
     }
@@ -231,32 +213,27 @@ class AdminSchoolDetailHandler extends UserbindAdminHandler {
     @param('schoolId', Types.ObjectId)
     @param('text', Types.Content, true)
     @param('userIds', Types.CommaSeperatedArray, true)
-    async postImportText(
-        { domainId }: { domainId: string }, schoolId: ObjectId, text?: string, userIds?: string[],
-    ) {
+    async postImportText({ domainId }: { domainId: string }, schoolId: ObjectId, text?: string, userIds?: string[]) {
         let importReport: any = null;
         let preflightInvalid: any[] = [];
         if (text && text.trim()) {
             const parsed = userBindModel.parseRosterText(text);
-            const rows = parsed.filter((r) => r.status === 'ok')
-                .map((r) => ({ studentId: r.studentId, realName: r.realName }));
-            importReport = await userBindModel.importStudents(
-                domainId, schoolId, rows, this.user._id,
-            );
+            const rows = parsed.filter((r) => r.status === 'ok').map((r) => ({ studentId: r.studentId, realName: r.realName }));
+            importReport = await userBindModel.importStudents(domainId, schoolId, rows, this.user._id);
             preflightInvalid = parsed.filter((r) => r.status !== 'ok');
             await OplogModel.log(this, 'userbind.student.import_school', {
-                schoolId, attempted: parsed.length, inserted: importReport.inserted,
+                schoolId,
+                attempted: parsed.length,
+                inserted: importReport.inserted,
                 autoBound: importReport.autoBound || 0,
             });
         } else if (userIds && userIds.length > 0) {
-            const ids = userIds
-                .map((s) => Number(s))
-                .filter((id) => Number.isSafeInteger(id) && id > 0);
-            importReport = await userBindModel.importUsersToSchool(
-                domainId, schoolId, ids, this.user._id,
-            );
+            const ids = userIds.map((s) => Number(s)).filter((id) => Number.isSafeInteger(id) && id > 0);
+            importReport = await userBindModel.importUsersToSchool(domainId, schoolId, ids, this.user._id);
             await OplogModel.log(this, 'userbind.student.import_school_pick', {
-                schoolId, picked: ids.length, inserted: importReport.inserted,
+                schoolId,
+                picked: ids.length,
+                inserted: importReport.inserted,
                 autoBound: importReport.autoBound || 0,
             });
         } else {
@@ -273,10 +250,7 @@ class AdminSchoolDetailHandler extends UserbindAdminHandler {
 class AdminGroupsHandler extends UserbindAdminHandler {
     @param('schoolId', Types.ObjectId, true)
     async get({ domainId }: { domainId: string }, schoolId?: ObjectId) {
-        const [groups, schools] = await Promise.all([
-            userBindModel.listUserGroups(domainId, schoolId),
-            userBindModel.listSchools(domainId),
-        ]);
+        const [groups, schools] = await Promise.all([userBindModel.listUserGroups(domainId, schoolId), userBindModel.listSchools(domainId)]);
         this.response.template = 'admin_userbind_groups.html';
         this.response.body = { groups, schools, filterSchoolId: schoolId };
     }
@@ -285,22 +259,18 @@ class AdminGroupsHandler extends UserbindAdminHandler {
     @param('name', Types.String)
     @param('initialRoster', Types.Content, true)
     @param('initialMemberIds', Types.CommaSeperatedArray, true)
-    async postCreate(
-        { domainId }: { domainId: string }, schoolId: ObjectId, name: string,
-        initialRoster?: string, initialMemberIds?: string[],
-    ) {
+    async postCreate({ domainId }: { domainId: string }, schoolId: ObjectId, name: string, initialRoster?: string, initialMemberIds?: string[]) {
         const group = await userBindModel.createUserGroup(domainId, schoolId, name, this.user._id);
         await OplogModel.log(this, 'userbind.group.create', { groupId: group._id, name });
 
         // Optional initial roster — text import.
         if (initialRoster && initialRoster.trim()) {
-            const parsed = userBindModel.parseRosterText(initialRoster)
+            const parsed = userBindModel
+                .parseRosterText(initialRoster)
                 .filter((r) => r.status === 'ok')
                 .map((r) => ({ studentId: r.studentId, realName: r.realName }));
             if (parsed.length > 0) {
-                await userBindModel.importStudentsToGroup(
-                    domainId, group._id, parsed, this.user._id,
-                );
+                await userBindModel.importStudentsToGroup(domainId, group._id, parsed, this.user._id);
             }
         }
         // Optional initial members — by ObjectId list (from search-pick UI).
@@ -369,7 +339,9 @@ async function buildGroupDetailData(
     const membersSkip = (page - 1) * membersLimit;
     const [{ docs: rawMembers, total: memberTotal }, groupTokens, school, unboundMemberCount] = await Promise.all([
         userBindModel.listStudents(domainId, {
-            groupId, skip: membersSkip, limit: membersLimit,
+            groupId,
+            skip: membersSkip,
+            limit: membersLimit,
         }),
         userBindModel.listInviteTokens(domainId, { userGroupId: groupId, kind: 'user_group' }),
         userBindModel.getSchool(domainId, group.schoolId),
@@ -380,14 +352,9 @@ async function buildGroupDetailData(
         } as any),
     ]);
 
-    const boundUids = Array.from(new Set(
-        rawMembers.map((m) => m.boundUserId).filter((uid): uid is number => typeof uid === 'number'),
-    ));
+    const boundUids = Array.from(new Set(rawMembers.map((m) => m.boundUserId).filter((uid): uid is number => typeof uid === 'number')));
     const boundUsers = boundUids.length
-        ? await UserModel.coll.find(
-            { _id: { $in: boundUids } },
-            { projection: { _id: 1, uname: 1, studentId: 1, realName: 1 } },
-        ).toArray()
+        ? await UserModel.coll.find({ _id: { $in: boundUids } }, { projection: { _id: 1, uname: 1, studentId: 1, realName: 1 } }).toArray()
         : [];
     const userByUid = new Map(boundUsers.map((u: any) => [u._id, u]));
     const members = rawMembers.map((m) => ({
@@ -400,20 +367,30 @@ async function buildGroupDetailData(
     const q = (options.query || '').trim();
     if (q) {
         const { docs: found } = await userBindModel.listStudents(domainId, {
-            schoolId: group.schoolId, query: q, limit: 50,
+            schoolId: group.schoolId,
+            query: q,
+            limit: 50,
         });
         searchResults = found
             .filter((r) => !r.groupIds.some((g) => g.equals(groupId)))
             .map((r) => ({
-                _id: r._id, studentId: r.studentId, realName: r.realName,
+                _id: r._id,
+                studentId: r.studentId,
+                realName: r.realName,
                 boundUserId: r.boundUserId,
             }));
     }
 
     return {
-        group, members, groupTokens, school,
-        memberTotal, page, membersLimit,
-        searchResults, q,
+        group,
+        members,
+        groupTokens,
+        school,
+        memberTotal,
+        page,
+        membersLimit,
+        searchResults,
+        q,
         tab,
         unboundMemberCount,
         importReport: options.importReport || null,
@@ -425,9 +402,7 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
     @param('tab', Types.String, true)
     @param('q', Types.String, true)
     @param('page', Types.PositiveInt, true)
-    async get(
-        { domainId }: { domainId: string }, groupId: ObjectId, tab?: string, q?: string, page = 1,
-    ) {
+    async get({ domainId }: { domainId: string }, groupId: ObjectId, tab?: string, q?: string, page = 1) {
         this.response.template = 'admin_userbind_group_detail.html';
         this.response.body = await buildGroupDetailData(domainId, groupId, {
             tab,
@@ -438,9 +413,7 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
 
     @param('groupId', Types.ObjectId)
     @param('studentIds', Types.CommaSeperatedArray)
-    async postAssign(
-        { domainId }: { domainId: string }, groupId: ObjectId, studentIds: string[],
-    ) {
+    async postAssign({ domainId }: { domainId: string }, groupId: ObjectId, studentIds: string[]) {
         const ids = studentIds.map((s) => new ObjectId(s));
         await userBindModel.assignStudentsToGroup(domainId, groupId, ids);
         this.response.redirect = `${this.url('admin_userbind_group_detail', { groupId })}?tab=members`;
@@ -448,9 +421,7 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
 
     @param('groupId', Types.ObjectId)
     @param('studentIds', Types.CommaSeperatedArray)
-    async postRemove(
-        { domainId }: { domainId: string }, groupId: ObjectId, studentIds: string[],
-    ) {
+    async postRemove({ domainId }: { domainId: string }, groupId: ObjectId, studentIds: string[]) {
         const ids = studentIds.map((s) => new ObjectId(s));
         await userBindModel.removeStudentsFromGroup(domainId, groupId, ids);
         this.response.redirect = `${this.url('admin_userbind_group_detail', { groupId })}?tab=members`;
@@ -458,24 +429,20 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
 
     @param('groupId', Types.ObjectId)
     @param('ttlDays', Types.UnsignedInt, true)
-    async postGenerateLink(
-        { domainId }: { domainId: string }, groupId: ObjectId, ttlDays = 0,
-    ) {
+    async postGenerateLink({ domainId }: { domainId: string }, groupId: ObjectId, ttlDays = 0) {
         const ttlMs = ttlDays > 0 ? ttlDays * 86400 * 1000 : undefined;
-        const token = await userBindModel.generateUserGroupInviteToken(
-            domainId, groupId, this.user._id, ttlMs,
-        );
+        const token = await userBindModel.generateUserGroupInviteToken(domainId, groupId, this.user._id, ttlMs);
         await OplogModel.log(this, 'userbind.token.user_group.create', { groupId, tokenId: token._id });
         this.response.redirect = `${this.url('admin_userbind_group_detail', { groupId })}?tab=overview`;
     }
 
     @param('groupId', Types.ObjectId)
-    async postRetryBind(
-        { domainId }: { domainId: string }, groupId: ObjectId,
-    ) {
+    async postRetryBind({ domainId }: { domainId: string }, groupId: ObjectId) {
         const report = await userBindModel.retryAutoBindStudentsInGroup(domainId, groupId);
         await OplogModel.log(this, 'userbind.student.retry_group_auto_bind', {
-            groupId, scanned: report.unboundScanned, autoBound: report.autoBound,
+            groupId,
+            scanned: report.unboundScanned,
+            autoBound: report.autoBound,
         });
         this.response.template = 'admin_userbind_group_detail.html';
         this.response.body = await buildGroupDetailData(domainId, groupId, {
@@ -500,41 +467,39 @@ class AdminGroupDetailHandler extends UserbindAdminHandler {
     @param('groupId', Types.ObjectId)
     @param('text', Types.Content, true)
     @param('studentIds', Types.CommaSeperatedArray, true)
-    async postImportText(
-        { domainId }: { domainId: string }, groupId: ObjectId,
-        text?: string, studentIds?: string[],
-    ) {
+    async postImportText({ domainId }: { domainId: string }, groupId: ObjectId, text?: string, studentIds?: string[]) {
         let importReport: any = null;
         let preflightInvalid: any[] = [];
 
         if (text && text.trim()) {
             const parsed = userBindModel.parseRosterText(text);
-            const rows = parsed.filter((r) => r.status === 'ok')
-                .map((r) => ({ studentId: r.studentId, realName: r.realName }));
-            importReport = await userBindModel.importStudentsToGroup(
-                domainId, groupId, rows, this.user._id,
-            );
+            const rows = parsed.filter((r) => r.status === 'ok').map((r) => ({ studentId: r.studentId, realName: r.realName }));
+            importReport = await userBindModel.importStudentsToGroup(domainId, groupId, rows, this.user._id);
             importReport.kind = 'user_group';
             preflightInvalid = parsed.filter((r) => r.status !== 'ok');
             await OplogModel.log(this, 'userbind.student.import_group_text', {
-                groupId, attempted: parsed.length,
-                created: importReport.created, attached: importReport.attached,
+                groupId,
+                attempted: parsed.length,
+                created: importReport.created,
+                attached: importReport.attached,
             });
         } else if (studentIds && studentIds.length > 0) {
             const ids = studentIds.map((s) => new ObjectId(s));
-            const picked = await studentsColl.find(
-                { domainId, _id: { $in: ids } },
-                { projection: { boundUserId: 1 } },
-            ).toArray();
+            const picked = await studentsColl.find({ domainId, _id: { $in: ids } }, { projection: { boundUserId: 1 } }).toArray();
             await userBindModel.assignStudentsToGroup(domainId, groupId, ids);
             importReport = {
-                kind: 'user_group', created: 0, attached: ids.length,
-                alreadyMember: 0, failed: [],
+                kind: 'user_group',
+                created: 0,
+                attached: ids.length,
+                alreadyMember: 0,
+                failed: [],
                 alreadyBound: picked.filter((p: any) => !!p.boundUserId).length,
-                autoBound: 0, autoBindSkipped: [],
+                autoBound: 0,
+                autoBindSkipped: [],
             };
             await OplogModel.log(this, 'userbind.student.import_group_pick', {
-                groupId, picked: ids.length,
+                groupId,
+                picked: ids.length,
             });
         } else {
             throw new ValidationError('input', null, '请输入名单或选择学生');
@@ -560,14 +525,24 @@ class AdminStudentsHandler extends UserbindAdminHandler {
     @param('page', Types.PositiveInt, true)
     async get(
         { domainId }: { domainId: string },
-        schoolId?: ObjectId, groupId?: ObjectId, q?: string,
-        enrollmentYear?: string, bindingStatus?: string, timeField?: string,
-        from?: string, to?: string, page = 1,
+        schoolId?: ObjectId,
+        groupId?: ObjectId,
+        q?: string,
+        enrollmentYear?: string,
+        bindingStatus?: string,
+        timeField?: string,
+        from?: string,
+        to?: string,
+        page = 1,
     ) {
         const limit = 50;
         const studentQuery = (q || '').trim();
         const studentFilters = parseAdminStudentFilters({
-            enrollmentYear, bindingStatus, timeField, from, to,
+            enrollmentYear,
+            bindingStatus,
+            timeField,
+            from,
+            to,
         });
         const { docs: students, total } = await userBindModel.listStudents(domainId, {
             schoolId,
@@ -584,21 +559,23 @@ class AdminStudentsHandler extends UserbindAdminHandler {
         const schools = await userBindModel.listSchools(domainId);
         this.response.template = 'admin_userbind_students.html';
         this.response.body = {
-            students, total, page, pageSize: limit,
-            schools, filterSchoolId: schoolId, filterGroupId: groupId, q: studentQuery,
+            students,
+            total,
+            page,
+            pageSize: limit,
+            schools,
+            filterSchoolId: schoolId,
+            filterGroupId: groupId,
+            q: studentQuery,
             studentFilters: studentFilters.values,
         };
     }
 
     @param('studentRecordId', Types.ObjectId)
     @param('ttlDays', Types.UnsignedInt, true)
-    async postGenerateStudentToken(
-        { domainId }: { domainId: string }, studentRecordId: ObjectId, ttlDays = 0,
-    ) {
+    async postGenerateStudentToken({ domainId }: { domainId: string }, studentRecordId: ObjectId, ttlDays = 0) {
         const ttlMs = ttlDays > 0 ? ttlDays * 86400 * 1000 : undefined;
-        const token = await userBindModel.generateStudentInviteToken(
-            domainId, studentRecordId, this.user._id, ttlMs,
-        );
+        const token = await userBindModel.generateStudentInviteToken(domainId, studentRecordId, this.user._id, ttlMs);
         await OplogModel.log(this, 'userbind.token.student.create', { studentRecordId, tokenId: token._id });
         this.response.redirect = this.url('admin_userbind_tokens');
     }
@@ -611,22 +588,20 @@ class AdminStudentsHandler extends UserbindAdminHandler {
     @param('studentRecordId', Types.ObjectId)
     @param('enrollmentYear', Types.String, true)
     @param('realName', Types.String, true)
-    async postUpdateStudent(
-        { domainId }: { domainId: string },
-        studentRecordId: ObjectId, enrollmentYear: string, realName: string,
-    ) {
+    async postUpdateStudent({ domainId }: { domainId: string }, studentRecordId: ObjectId, enrollmentYear: string, realName: string) {
         const patch: {
             enrollmentYear?: number | null;
             realName?: string;
         } = {};
         if (enrollmentYear !== undefined) {
             const trimmed = (enrollmentYear || '').trim();
-            patch.enrollmentYear = trimmed === '' ? null : parseInt(trimmed, 10);
+            patch.enrollmentYear = trimmed === '' ? null : Number.parseInt(trimmed, 10);
         }
         if (realName) patch.realName = realName;
         await userBindModel.updateStudent(domainId, studentRecordId, patch);
         await OplogModel.log(this, 'userbind.student.update', {
-            studentRecordId, fields: Object.keys(patch),
+            studentRecordId,
+            fields: Object.keys(patch),
         });
         this.response.body = { success: true };
     }
@@ -634,10 +609,7 @@ class AdminStudentsHandler extends UserbindAdminHandler {
 
 class AdminStudentImportHandler extends UserbindAdminHandler {
     async get({ domainId }: { domainId: string }) {
-        const [schools, groups] = await Promise.all([
-            userBindModel.listSchools(domainId),
-            userBindModel.listUserGroups(domainId),
-        ]);
+        const [schools, groups] = await Promise.all([userBindModel.listSchools(domainId), userBindModel.listUserGroups(domainId)]);
         this.response.template = 'admin_userbind_students_import.html';
         this.response.body = { schools, groups, report: null, preflightInvalid: null, targetKind: 'school' };
     }
@@ -650,40 +622,33 @@ class AdminStudentImportHandler extends UserbindAdminHandler {
     @param('schoolId', Types.ObjectId, true)
     @param('groupId', Types.ObjectId, true)
     @param('text', Types.Content)
-    async post(
-        { domainId }: { domainId: string },
-        targetKind: string, schoolId: ObjectId | undefined, groupId: ObjectId | undefined,
-        text: string,
-    ) {
+    async post({ domainId }: { domainId: string }, targetKind: string, schoolId: ObjectId | undefined, groupId: ObjectId | undefined, text: string) {
         const parsed = userBindModel.parseRosterText(text);
-        const validRows = parsed.filter((r) => r.status === 'ok')
-            .map((r) => ({ studentId: r.studentId, realName: r.realName }));
+        const validRows = parsed.filter((r) => r.status === 'ok').map((r) => ({ studentId: r.studentId, realName: r.realName }));
         const invalidRows = parsed.filter((r) => r.status !== 'ok');
 
         let report: any;
         if (targetKind === 'user_group') {
             if (!groupId) throw new ValidationError('groupId', null, '请选择用户组');
-            report = await userBindModel.importStudentsToGroup(
-                domainId, groupId, validRows, this.user._id,
-            );
+            report = await userBindModel.importStudentsToGroup(domainId, groupId, validRows, this.user._id);
             report.kind = 'user_group';
         } else {
             if (!schoolId) throw new ValidationError('schoolId', null, '请选择学校');
-            report = await userBindModel.importStudents(
-                domainId, schoolId, validRows, this.user._id,
-            );
+            report = await userBindModel.importStudents(domainId, schoolId, validRows, this.user._id);
             report.kind = 'school';
         }
         await OplogModel.log(this, 'userbind.student.import', {
-            targetKind, schoolId, groupId, attempted: validRows.length,
+            targetKind,
+            schoolId,
+            groupId,
+            attempted: validRows.length,
         });
-        const [schools, groups] = await Promise.all([
-            userBindModel.listSchools(domainId),
-            userBindModel.listUserGroups(domainId),
-        ]);
+        const [schools, groups] = await Promise.all([userBindModel.listSchools(domainId), userBindModel.listUserGroups(domainId)]);
         this.response.template = 'admin_userbind_students_import.html';
         this.response.body = {
-            schools, groups, report,
+            schools,
+            groups,
+            report,
             preflightInvalid: invalidRows,
             targetKind,
         };
@@ -693,10 +658,8 @@ class AdminStudentImportHandler extends UserbindAdminHandler {
 class AdminTokensHandler extends UserbindAdminHandler {
     @param('kind', Types.String, true)
     @param('unusedOnly', Types.Boolean, true)
-    async get(
-        { domainId }: { domainId: string }, kind?: string, unusedOnly = false,
-    ) {
-        const validKind = (kind === 'student' || kind === 'school' || kind === 'user_group') ? kind : undefined;
+    async get({ domainId }: { domainId: string }, kind?: string, unusedOnly = false) {
+        const validKind = kind === 'student' || kind === 'school' || kind === 'user_group' ? kind : undefined;
         const tokens = await userBindModel.listInviteTokens(domainId, { kind: validKind, unusedOnly });
         // Resolve target names for display.
         const tokenInfos: any[] = [];
@@ -728,27 +691,33 @@ class AdminTokensHandler extends UserbindAdminHandler {
 class AdminRequestsHandler extends UserbindAdminHandler {
     @param('status', Types.String, true)
     @param('page', Types.PositiveInt, true)
-    async get(
-        { domainId }: { domainId: string }, status?: string, page = 1,
-    ) {
+    async get({ domainId }: { domainId: string }, status?: string, page = 1) {
         const limit = 30;
         const validStatus = (['pending', 'approved', 'rejected'] as const).includes(status as any)
-            ? status as 'pending' | 'approved' | 'rejected'
+            ? (status as 'pending' | 'approved' | 'rejected')
             : undefined;
         const { docs, total } = await userBindModel.listBindingRequests(domainId, {
-            status: validStatus, limit, skip: (page - 1) * limit,
+            status: validStatus,
+            limit,
+            skip: (page - 1) * limit,
         });
         // Resolve school names for each request.
         const schoolIds = Array.from(new Set(docs.map((d) => d.schoolId.toString())));
-        const schools = await schoolsColl.find({
-            _id: { $in: schoolIds.map((id) => new ObjectId(id)) },
-        }).toArray();
+        const schools = await schoolsColl
+            .find({
+                _id: { $in: schoolIds.map((id) => new ObjectId(id)) },
+            })
+            .toArray();
         const schoolMap: Record<string, string> = {};
         for (const s of schools) schoolMap[s._id.toString()] = s.name;
 
         this.response.template = 'admin_userbind_requests.html';
         this.response.body = {
-            requests: docs, total, page, pageSize: limit, status: validStatus,
+            requests: docs,
+            total,
+            page,
+            pageSize: limit,
+            status: validStatus,
             schoolMap,
         };
     }
@@ -788,11 +757,14 @@ class UserBindHandler extends Handler {
         const schools = await userBindModel.listSchools(domainId);
         const alreadyBound = !!(this.user as any).studentId;
         const pendingApplication = await bindingRequestsColl.findOne({
-            domainId, userId: this.user._id, status: 'pending',
+            domainId,
+            userId: this.user._id,
+            status: 'pending',
         });
         this.response.template = 'user_bind.html';
         this.response.body = {
-            schools, alreadyBound,
+            schools,
+            alreadyBound,
             currentStudentId: (this.user as any).studentId || null,
             currentRealName: (this.user as any).realName || null,
             hasPending: !!pendingApplication,
@@ -802,13 +774,8 @@ class UserBindHandler extends Handler {
     @param('schoolId', Types.ObjectId)
     @param('studentId', Types.String)
     @param('realName', Types.String)
-    async post(
-        { domainId }: { domainId: string },
-        schoolId: ObjectId, studentId: string, realName: string,
-    ) {
-        await userBindModel.submitBindingRequest(
-            domainId, this.user._id, schoolId, studentId, realName,
-        );
+    async post({ domainId }: { domainId: string }, schoolId: ObjectId, studentId: string, realName: string) {
+        await userBindModel.submitBindingRequest(domainId, this.user._id, schoolId, studentId, realName);
         await OplogModel.log(this, 'userbind.request.create', { schoolId, studentId });
         this.response.redirect = this.url('user_bind_applications');
     }
@@ -825,17 +792,14 @@ class UserBindApplicationsHandler extends Handler {
 
     async get({ domainId }: { domainId: string }) {
         const { docs: requests } = await userBindModel.listBindingRequests(domainId, {
-            userId: this.user._id, limit: 50,
+            userId: this.user._id,
+            limit: 50,
         });
         const schoolIds = Array.from(new Set(requests.map((r) => r.schoolId.toString())));
-        const groupIds = Array.from(new Set(
-            requests.filter((r) => r.targetUserGroupId).map((r) => r.targetUserGroupId!.toString()),
-        ));
+        const groupIds = Array.from(new Set(requests.filter((r) => r.targetUserGroupId).map((r) => r.targetUserGroupId!.toString())));
         const [schools, groups] = await Promise.all([
             schoolsColl.find({ _id: { $in: schoolIds.map((s) => new ObjectId(s)) } }).toArray(),
-            groupIds.length > 0
-                ? userGroupsColl.find({ _id: { $in: groupIds.map((s) => new ObjectId(s)) } }).toArray()
-                : Promise.resolve([]),
+            groupIds.length > 0 ? userGroupsColl.find({ _id: { $in: groupIds.map((s) => new ObjectId(s)) } }).toArray() : Promise.resolve([]),
         ]);
         const schoolMap: Record<string, string> = {};
         for (const s of schools) schoolMap[s._id.toString()] = s.name;
@@ -844,7 +808,9 @@ class UserBindApplicationsHandler extends Handler {
 
         this.response.template = 'user_bind_applications.html';
         this.response.body = {
-            requests, schoolMap, groupMap,
+            requests,
+            schoolMap,
+            groupMap,
             alreadyBound: !!(this.user as any).studentId,
             currentStudentId: (this.user as any).studentId || null,
             currentRealName: (this.user as any).realName || null,
@@ -873,8 +839,10 @@ class BindLandingHandler extends Handler {
         if (!tokenDoc) {
             this.response.template = 'user_bind_landing.html';
             this.response.body = {
-                token, signedIn: this.user._id !== 0,
-                error: 'invalid_token', errorMessage: '邀请链接无效或已过期。',
+                token,
+                signedIn: this.user._id !== 0,
+                error: 'invalid_token',
+                errorMessage: '邀请链接无效或已过期。',
                 kind: null,
             };
             return;
@@ -882,8 +850,10 @@ class BindLandingHandler extends Handler {
         if (tokenDoc.expiresAt && tokenDoc.expiresAt < new Date()) {
             this.response.template = 'user_bind_landing.html';
             this.response.body = {
-                token, signedIn: this.user._id !== 0,
-                error: 'expired', errorMessage: '邀请链接已过期。',
+                token,
+                signedIn: this.user._id !== 0,
+                error: 'expired',
+                errorMessage: '邀请链接已过期。',
                 kind: tokenDoc.kind,
             };
             return;
@@ -892,33 +862,37 @@ class BindLandingHandler extends Handler {
             if (tokenDoc.used) {
                 this.response.template = 'user_bind_landing.html';
                 this.response.body = {
-                    token, signedIn: this.user._id !== 0,
-                    error: 'used', errorMessage: '邀请链接已被使用。',
+                    token,
+                    signedIn: this.user._id !== 0,
+                    error: 'used',
+                    errorMessage: '邀请链接已被使用。',
                     kind: 'student',
                 };
                 return;
             }
             const student = await studentsColl.findOne({ _id: tokenDoc.studentRecordId });
             const school = student ? await schoolsColl.findOne({ _id: student.schoolId }) : null;
-            const groups = student && student.groupIds.length > 0
-                ? await userGroupsColl.find({ _id: { $in: student.groupIds } }).toArray()
-                : [];
-            const inviterUser = await UserModel.getById(
-                this.domain?._id || 'system', tokenDoc.createdBy,
-            ).catch(() => null);
+            const groups = student && student.groupIds.length > 0 ? await userGroupsColl.find({ _id: { $in: student.groupIds } }).toArray() : [];
+            const inviterUser = await UserModel.getById(this.domain?._id || 'system', tokenDoc.createdBy).catch(() => null);
             this.response.template = 'user_bind_landing.html';
             this.response.body = {
-                token, signedIn: this.user._id !== 0,
+                token,
+                signedIn: this.user._id !== 0,
                 kind: 'student',
-                student: student ? {
-                    _id: student._id, studentId: student.studentId, realName: student.realName,
-                    boundUserId: student.boundUserId,
-                } : null,
+                student: student
+                    ? {
+                          _id: student._id,
+                          studentId: student.studentId,
+                          realName: student.realName,
+                          boundUserId: student.boundUserId,
+                      }
+                    : null,
                 school: school ? { _id: school._id, name: school.name } : null,
                 groups: groups.map((g) => ({ _id: g._id, name: g.name })),
                 inviter: inviterUser ? { uid: inviterUser._id, uname: inviterUser.uname } : null,
                 tokenInfo: {
-                    createdAt: tokenDoc.createdAt, expiresAt: tokenDoc.expiresAt,
+                    createdAt: tokenDoc.createdAt,
+                    expiresAt: tokenDoc.expiresAt,
                     used: tokenDoc.used,
                 },
             };
@@ -926,12 +900,11 @@ class BindLandingHandler extends Handler {
         }
         if (tokenDoc.kind === 'school') {
             const school = await schoolsColl.findOne({ _id: tokenDoc.schoolId });
-            const inviterUser = await UserModel.getById(
-                this.domain?._id || 'system', tokenDoc.createdBy,
-            ).catch(() => null);
+            const inviterUser = await UserModel.getById(this.domain?._id || 'system', tokenDoc.createdBy).catch(() => null);
             this.response.template = 'user_bind_landing.html';
             this.response.body = {
-                token, signedIn: this.user._id !== 0,
+                token,
+                signedIn: this.user._id !== 0,
                 kind: 'school',
                 school: school ? { _id: school._id, name: school.name } : null,
                 inviter: inviterUser ? { uid: inviterUser._id, uname: inviterUser.uname } : null,
@@ -945,19 +918,20 @@ class BindLandingHandler extends Handler {
             if (group?.archivedAt) {
                 this.response.template = 'user_bind_landing.html';
                 this.response.body = {
-                    token, signedIn: this.user._id !== 0,
-                    error: 'group_archived', errorMessage: '该邀请对应的用户组已归档，无法加入。',
+                    token,
+                    signedIn: this.user._id !== 0,
+                    error: 'group_archived',
+                    errorMessage: '该邀请对应的用户组已归档，无法加入。',
                     kind: 'user_group',
                 };
                 return;
             }
             const school = group ? await schoolsColl.findOne({ _id: group.schoolId }) : null;
-            const inviterUser = await UserModel.getById(
-                this.domain?._id || 'system', tokenDoc.createdBy,
-            ).catch(() => null);
+            const inviterUser = await UserModel.getById(this.domain?._id || 'system', tokenDoc.createdBy).catch(() => null);
             this.response.template = 'user_bind_landing.html';
             this.response.body = {
-                token, signedIn: this.user._id !== 0,
+                token,
+                signedIn: this.user._id !== 0,
                 kind: 'user_group',
                 group: group ? { _id: group._id, name: group.name, schoolId: group.schoolId } : null,
                 school: school ? { _id: school._id, name: school.name } : null,
@@ -969,8 +943,10 @@ class BindLandingHandler extends Handler {
         // Unknown kind
         this.response.template = 'user_bind_landing.html';
         this.response.body = {
-            token, signedIn: this.user._id !== 0,
-            error: 'unknown_kind', errorMessage: '邀请链接类型未知。',
+            token,
+            signedIn: this.user._id !== 0,
+            error: 'unknown_kind',
+            errorMessage: '邀请链接类型未知。',
             kind: null,
         };
     }
@@ -988,10 +964,7 @@ class BindLandingHandler extends Handler {
     @param('token', Types.String)
     @param('studentId', Types.String, true)
     @param('realName', Types.String, true)
-    async post(
-        { domainId }: { domainId: string },
-        token: string, studentIdInput?: string, realNameInput?: string,
-    ) {
+    async post({ domainId }: { domainId: string }, token: string, studentIdInput?: string, realNameInput?: string) {
         this.checkPriv(PRIV.PRIV_USER_PROFILE);
         const tokenDoc = await bindTokensColl.findOne({ _id: token });
         if (!tokenDoc) throw new NotFoundError('Bind token');
@@ -1000,11 +973,11 @@ class BindLandingHandler extends Handler {
         }
 
         if (tokenDoc.kind === 'student') {
-            const { studentRecord, school } = await userBindModel.consumeStudentInviteToken(
-                token, this.user._id,
-            );
+            const { studentRecord, school } = await userBindModel.consumeStudentInviteToken(token, this.user._id);
             await OplogModel.log(this, 'userbind.bind.student_invite', {
-                token, studentRecordId: studentRecord._id, schoolId: school._id,
+                token,
+                studentRecordId: studentRecord._id,
+                schoolId: school._id,
             });
             this.response.template = 'user_bind_success.html';
             this.response.body = { studentRecord, school };
@@ -1033,21 +1006,21 @@ class BindLandingHandler extends Handler {
             throw new ValidationError('token', null, 'Unknown token kind');
         }
 
-        const outcome = await userBindModel.rosterLookup(
-            domainId, targetSchoolId, studentIdInput, realNameInput, this.user._id,
-        );
+        const outcome = await userBindModel.rosterLookup(domainId, targetSchoolId, studentIdInput, realNameInput, this.user._id);
 
         if (outcome.kind === 'matched_unbound') {
-            const { studentRecord, school } = await userBindModel.bindMatchedStudent(
-                outcome.studentRecord, this.user._id, targetGroupId,
-            );
+            const { studentRecord, school } = await userBindModel.bindMatchedStudent(outcome.studentRecord, this.user._id, targetGroupId);
             await OplogModel.log(this, 'userbind.bind.shared_link', {
-                token, kind: tokenDoc.kind,
-                studentRecordId: studentRecord._id, schoolId: school._id, groupId: targetGroupId,
+                token,
+                kind: tokenDoc.kind,
+                studentRecordId: studentRecord._id,
+                schoolId: school._id,
+                groupId: targetGroupId,
             });
             this.response.template = 'user_bind_success.html';
             this.response.body = {
-                studentRecord, school,
+                studentRecord,
+                school,
                 joinedGroupId: targetGroupId || null,
             };
             return;
@@ -1057,13 +1030,15 @@ class BindLandingHandler extends Handler {
             if (targetGroupId) {
                 await userBindModel.joinUserGroup(this.user._id, outcome.studentRecord, targetGroupId);
                 await OplogModel.log(this, 'userbind.join.user_group', {
-                    token, groupId: targetGroupId,
+                    token,
+                    groupId: targetGroupId,
                 });
             }
             const school = await schoolsColl.findOne({ _id: outcome.studentRecord.schoolId });
             this.response.template = 'user_bind_success.html';
             this.response.body = {
-                studentRecord: outcome.studentRecord, school,
+                studentRecord: outcome.studentRecord,
+                school,
                 joinedGroupId: targetGroupId || null,
                 wasAlreadyBound: true,
             };
@@ -1072,26 +1047,28 @@ class BindLandingHandler extends Handler {
         if (outcome.kind === 'matched_other') {
             this.response.template = 'user_bind_landing.html';
             this.response.body = {
-                token, signedIn: true, kind: tokenDoc.kind,
-                school: tokenDoc.kind === 'school'
-                    ? await schoolsColl.findOne({ _id: tokenDoc.schoolId })
-                    : (await userGroupsColl.findOne({ _id: tokenDoc.userGroupId }))
-                        && await schoolsColl.findOne({ _id: targetSchoolId }),
-                group: tokenDoc.kind === 'user_group'
-                    ? await userGroupsColl.findOne({ _id: tokenDoc.userGroupId })
-                    : undefined,
+                token,
+                signedIn: true,
+                kind: tokenDoc.kind,
+                school:
+                    tokenDoc.kind === 'school'
+                        ? await schoolsColl.findOne({ _id: tokenDoc.schoolId })
+                        : (await userGroupsColl.findOne({ _id: tokenDoc.userGroupId })) && (await schoolsColl.findOne({ _id: targetSchoolId })),
+                group: tokenDoc.kind === 'user_group' ? await userGroupsColl.findOne({ _id: tokenDoc.userGroupId }) : undefined,
                 error: 'matched_other',
                 errorMessage: `该学生身份已被其他账号绑定（UID ${outcome.boundToUid}）。如有错误请联系管理员。`,
             };
             return;
         }
         // no_match → submit a binding request automatically
-        const req = await userBindModel.submitBindingRequest(
-            domainId, this.user._id, targetSchoolId, studentIdInput, realNameInput,
-            { sourceTokenId: token, targetUserGroupId: targetGroupId },
-        );
+        const req = await userBindModel.submitBindingRequest(domainId, this.user._id, targetSchoolId, studentIdInput, realNameInput, {
+            sourceTokenId: token,
+            targetUserGroupId: targetGroupId,
+        });
         await OplogModel.log(this, 'userbind.request.from_token', {
-            token, requestId: req._id, kind: tokenDoc.kind,
+            token,
+            requestId: req._id,
+            kind: tokenDoc.kind,
         });
         this.response.redirect = this.url('user_bind_applications');
     }
@@ -1115,9 +1092,7 @@ class UserBindClaimHandler extends Handler {
     async get({ domainId }: { domainId: string }) {
         // Show step 1 form (no candidates yet).
         const userSchoolId = (this.user as any).parentSchoolId?.[0] || null;
-        const schools = userSchoolId
-            ? await schoolsColl.find({ _id: userSchoolId }).toArray()
-            : await userBindModel.listSchools(domainId);
+        const schools = userSchoolId ? await schoolsColl.find({ _id: userSchoolId }).toArray() : await userBindModel.listSchools(domainId);
         this.response.template = 'user_bind_claim.html';
         this.response.body = {
             step: 1,
@@ -1137,8 +1112,10 @@ class UserBindClaimHandler extends Handler {
     async post(
         { domainId }: { domainId: string },
         action: string,
-        studentIdInput?: string, realNameInput?: string,
-        tempUserId?: number, schoolId?: ObjectId,
+        studentIdInput?: string,
+        realNameInput?: string,
+        tempUserId?: number,
+        schoolId?: ObjectId,
     ) {
         if (action === 'lookup') {
             const sid = (studentIdInput || '').trim();
@@ -1146,9 +1123,7 @@ class UserBindClaimHandler extends Handler {
             if (!sid || !name) throw new ValidationError('input', null, '请填写学号和姓名');
             const candidates = await userBindModel.findClaimCandidates(domainId, sid, name);
             const userSchoolId = (this.user as any).parentSchoolId?.[0] || null;
-            const schools = userSchoolId
-                ? await schoolsColl.find({ _id: userSchoolId }).toArray()
-                : await userBindModel.listSchools(domainId);
+            const schools = userSchoolId ? await schoolsColl.find({ _id: userSchoolId }).toArray() : await userBindModel.listSchools(domainId);
             this.response.template = 'user_bind_claim.html';
             this.response.body = {
                 step: 2,
@@ -1166,12 +1141,13 @@ class UserBindClaimHandler extends Handler {
             if (!tempUserId || !schoolId || !studentIdInput || !realNameInput) {
                 throw new ValidationError('input', null, '请补全所有字段');
             }
-            const req = await userBindModel.submitBindingRequest(
-                domainId, this.user._id, schoolId, studentIdInput, realNameInput,
-                { claimTempUserId: tempUserId },
-            );
+            const req = await userBindModel.submitBindingRequest(domainId, this.user._id, schoolId, studentIdInput, realNameInput, {
+                claimTempUserId: tempUserId,
+            });
             await OplogModel.log(this, 'userbind.claim.submit', {
-                requestId: req._id, tempUserId, schoolId,
+                requestId: req._id,
+                tempUserId,
+                schoolId,
             });
             this.response.redirect = this.url('user_bind_applications');
             return;
@@ -1183,8 +1159,16 @@ class UserBindClaimHandler extends Handler {
 // ─── Force-bind middleware (before-prepare hook) ──────────────────────────
 
 const FORCE_BIND_BYPASS_PREFIX = [
-    '/userbind', '/bind', '/login', '/logout', '/register',
-    '/lostpass', '/sudo', '/api', '/manifest.json', '/favicon',
+    '/userbind',
+    '/bind',
+    '/login',
+    '/logout',
+    '/register',
+    '/lostpass',
+    '/sudo',
+    '/api',
+    '/manifest.json',
+    '/favicon',
     '/_spike-webview',
 ];
 
@@ -1228,13 +1212,15 @@ export function applyHandlers(ctx: Context) {
         const signedIn = (h as Handler).user?.hasPriv?.(PRIV.PRIV_USER_PROFILE);
         h.response.body.studentBinding = student
             ? {
-                bound: true,
-                ...(signedIn ? {
-                    realName: student.realName,
-                    studentId: student.studentId,
-                    enrollmentYear: student.enrollmentYear ?? null,
-                } : {}),
-            }
+                  bound: true,
+                  ...(signedIn
+                      ? {
+                            realName: student.realName,
+                            studentId: student.studentId,
+                            enrollmentYear: student.enrollmentYear ?? null,
+                        }
+                      : {}),
+              }
             : { bound: false };
     });
 

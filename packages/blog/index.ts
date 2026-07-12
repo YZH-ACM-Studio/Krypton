@@ -1,8 +1,19 @@
 import {
-    _, Context, DiscussionNotFoundError, DocumentModel, Filter,
-    Handler, NumberKeys, ObjectId, OplogModel,
-    param, PRIV, Types, UserModel,
+    _,
+    Context,
+    DiscussionNotFoundError,
+    DocumentModel,
+    Filter,
+    Handler,
+    NumberKeys,
+    ObjectId,
+    OplogModel,
+    param,
+    PRIV,
+    Types,
+    UserModel,
 } from 'hydrooj';
+import type { FindCursor } from 'mongodb';
 
 export const TYPE_BLOG = 70 as const;
 export interface BlogDoc {
@@ -28,9 +39,7 @@ declare module 'hydrooj' {
 }
 
 export class BlogModel {
-    static async add(
-        owner: number, title: string, content: string, ip?: string,
-    ): Promise<ObjectId> {
+    static async add(owner: number, title: string, content: string, ip?: string): Promise<ObjectId> {
         const payload: Partial<BlogDoc> = {
             content,
             owner,
@@ -41,8 +50,14 @@ export class BlogModel {
             views: 0,
         };
         const res = await DocumentModel.add(
-            'system', payload.content!, payload.owner!, TYPE_BLOG,
-            null, null, null, _.omit(payload, ['domainId', 'content', 'owner']),
+            'system',
+            payload.content!,
+            payload.owner!,
+            TYPE_BLOG,
+            null,
+            null,
+            null,
+            _.omit(payload, ['domainId', 'content', 'owner']),
         );
         payload.docId = res;
         return payload.docId;
@@ -72,9 +87,8 @@ export class BlogModel {
         return DocumentModel.count('system', TYPE_BLOG, query);
     }
 
-    static getMulti(query: Filter<BlogDoc> = {}) {
-        return DocumentModel.getMulti('system', TYPE_BLOG, query)
-            .sort({ _id: -1 });
+    static getMulti(query: Filter<BlogDoc> = {}): FindCursor<BlogDoc> {
+        return DocumentModel.getMulti('system', TYPE_BLOG, query).sort({ _id: -1 });
     }
 
     static async addReply(did: ObjectId, owner: number, content: string, ip: string): Promise<ObjectId> {
@@ -116,11 +130,7 @@ class BlogUserHandler extends BlogHandler {
     @param('uid', Types.Int)
     @param('page', Types.PositiveInt, true)
     async get(domainId: string, uid: number, page = 1) {
-        const [ddocs, dpcount] = await this.ctx.db.paginate(
-            BlogModel.getMulti({ owner: uid }),
-            page,
-            10,
-        );
+        const [ddocs, dpcount] = await this.ctx.db.paginate(BlogModel.getMulti({ owner: uid }), page, 10);
         const udoc = await UserModel.getById(domainId, uid);
         this.response.template = 'blog_main.html';
         this.response.body = {
@@ -135,19 +145,16 @@ class BlogUserHandler extends BlogHandler {
 class BlogDetailHandler extends BlogHandler {
     @param('did', Types.ObjectId)
     async get({ domainId }, did: ObjectId) {
-        const dsdoc = this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
-            ? await BlogModel.getStatus(did, this.user._id)
-            : null;
+        const dsdoc = this.user.hasPriv(PRIV.PRIV_USER_PROFILE) ? await BlogModel.getStatus(did, this.user._id) : null;
         const udoc = await UserModel.getById(domainId, this.ddoc!.owner);
         if (!dsdoc?.view) {
-            await Promise.all([
-                BlogModel.inc(did, 'views', 1),
-                BlogModel.setStatus(did, this.user._id, { view: true }),
-            ]);
+            await Promise.all([BlogModel.inc(did, 'views', 1), BlogModel.setStatus(did, this.user._id, { view: true })]);
         }
         this.response.template = 'blog_detail.html';
         this.response.body = {
-            ddoc: this.ddoc, dsdoc, udoc,
+            ddoc: this.ddoc,
+            dsdoc,
+            udoc,
         };
     }
 
@@ -156,13 +163,13 @@ class BlogDetailHandler extends BlogHandler {
     }
 
     @param('did', Types.ObjectId)
-    async postStar({ }, did: ObjectId) {
+    async postStar({}, did: ObjectId) {
         await BlogModel.setStar(did, this.user._id, true);
         this.back({ star: true });
     }
 
     @param('did', Types.ObjectId)
-    async postUnstar({ }, did: ObjectId) {
+    async postUnstar({}, did: ObjectId) {
         await BlogModel.setStar(did, this.user._id, false);
         this.back({ star: false });
     }
@@ -176,7 +183,7 @@ class BlogEditHandler extends BlogHandler {
 
     @param('title', Types.Title)
     @param('content', Types.Content)
-    async postCreate({ }, title: string, content: string) {
+    async postCreate({}, title: string, content: string) {
         await this.limitRate('add_blog', 3600, 60);
         const did = await BlogModel.add(this.user._id, title, content, this.request.ip);
         this.response.body = { did };
@@ -186,23 +193,17 @@ class BlogEditHandler extends BlogHandler {
     @param('did', Types.ObjectId)
     @param('title', Types.Title)
     @param('content', Types.Content)
-    async postUpdate({ }, did: ObjectId, title: string, content: string) {
+    async postUpdate({}, did: ObjectId, title: string, content: string) {
         if (!this.user.own(this.ddoc!)) this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
-        await Promise.all([
-            BlogModel.edit(did, title, content),
-            OplogModel.log(this, 'blog.edit', this.ddoc),
-        ]);
+        await Promise.all([BlogModel.edit(did, title, content), OplogModel.log(this, 'blog.edit', this.ddoc)]);
         this.response.body = { did };
         this.response.redirect = this.url('blog_detail', { uid: this.user._id, did });
     }
 
     @param('did', Types.ObjectId)
-    async postDelete({ }, did: ObjectId) {
+    async postDelete({}, did: ObjectId) {
         if (!this.user.own(this.ddoc!)) this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
-        await Promise.all([
-            BlogModel.del(did),
-            OplogModel.log(this, 'blog.delete', this.ddoc),
-        ]);
+        await Promise.all([BlogModel.del(did), OplogModel.log(this, 'blog.delete', this.ddoc)]);
         this.response.redirect = this.url('blog_main', { uid: this.ddoc!.owner });
     }
 }
@@ -212,8 +213,7 @@ export async function apply(ctx: Context) {
     ctx.Route('blog_create', '/blog/:uid/create', BlogEditHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('blog_detail', '/blog/:uid/:did', BlogDetailHandler);
     ctx.Route('blog_edit', '/blog/:uid/:did/edit', BlogEditHandler, PRIV.PRIV_USER_PROFILE);
-    ctx.injectUI('UserDropdown', 'blog_main', (h) => ({ icon: 'book', displayName: 'Blog', uid: h.user._id.toString() }),
-        PRIV.PRIV_USER_PROFILE);
+    ctx.injectUI('UserDropdown', 'blog_main', (h) => ({ icon: 'book', displayName: 'Blog', uid: h.user._id.toString() }), PRIV.PRIV_USER_PROFILE);
     ctx.i18n.load('zh', {
         "{0}'s blog": '{0} 的博客',
         Blog: '博客',

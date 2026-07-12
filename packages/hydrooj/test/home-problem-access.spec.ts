@@ -6,7 +6,9 @@ const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {} };
 let homeworkGroupIds: MongoObjectId[] = [];
 (global as any).Hydro.model.userbind = {
-    async findStudentByUserId() { return { groupIds: homeworkGroupIds }; },
+    async findStudentByUserId() {
+        return { groupIds: homeworkGroupIds };
+    },
 };
 const homeworkAccessModule = require('../src/model/homework-access.ts');
 const actualBuiltin = require('../src/model/builtin.ts');
@@ -28,9 +30,16 @@ let starredStatuses: any[] = [];
 function cursor(docs: any[]) {
     const state = { limit: Infinity };
     const value: any = {
-        limit(limit: number) { state.limit = limit; return value; },
-        sort() { return value; },
-        async toArray() { return docs.slice(0, state.limit); },
+        limit(limit: number) {
+            state.limit = limit;
+            return value;
+        },
+        sort() {
+            return value;
+        },
+        async toArray() {
+            return docs.slice(0, state.limit);
+        },
     };
     return value;
 }
@@ -65,19 +74,23 @@ const contestStub = {
         calls.homeworkQueries.push({ domainId, query });
         return cursor([]);
     },
-    async getListStatus() { return {}; },
+    async getListStatus() {
+        return {};
+    },
 };
 
 const userStub = {
-    async listGroup() { return []; },
+    async listGroup() {
+        return [];
+    },
 };
 
 function noopDecorator() {
     return (_target: unknown, _key: string, descriptor: PropertyDescriptor) => descriptor;
 }
 
-class HandlerStub { }
-class GenericError extends Error { }
+class HandlerStub {}
+class GenericError extends Error {}
 const emptyModel = new Proxy({}, { get: () => () => undefined });
 const serverStub = {
     Handler: HandlerStub,
@@ -93,8 +106,10 @@ const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     if (request === 'mongodb') {
         return {
-            Binary: class Binary { constructor(public buffer: Buffer) { } },
-            ObjectId: class ObjectId { },
+            Binary: class Binary {
+                constructor(public buffer: Buffer) {}
+            },
+            ObjectId: class ObjectId {},
         };
     }
     if (request === '../error') return errors;
@@ -113,7 +128,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
 };
 
 // Mirrors the exported handler class name while allowing cache restoration below.
-// eslint-disable-next-line ts/naming-convention
+
 let HomeHandlerClass: any;
 try {
     delete require.cache[homePath];
@@ -186,15 +201,14 @@ describe('P2.11 homepage problem enumeration', () => {
         const [pdocs] = await handler.getRecentProblems('system', 10);
 
         expect(pdocs).to.deep.equal(recentDocs);
-        expect(calls.getMulti).to.deep.equal([{
-            domainId: 'system',
-            query: {
-                $and: [
-                    user.problemBankScope,
-                    { hidden: false },
-                ],
+        expect(calls.getMulti).to.deep.equal([
+            {
+                domainId: 'system',
+                query: {
+                    $and: [user.problemBankScope, { hidden: false }],
+                },
             },
-        }]);
+        ]);
         expect(calls.getListStatus).to.have.lengthOf(1);
     });
 
@@ -223,11 +237,8 @@ describe('P3.7 homepage homework scope', () => {
         const groupId = new MongoObjectId('aaaaaaaaaaaaaaaaaaaaaaaa');
         homeworkGroupIds = [groupId];
         const user = makeUser({
-            hasPerm: (...perms: bigint[]) => perms.some((perm) => (
-                perm === undefined
-                || perm === PERM.PERM_VIEW_PROBLEM
-                || perm === actualBuiltin.PERM.PERM_VIEW_HOMEWORK
-            )),
+            hasPerm: (...perms: bigint[]) =>
+                perms.some((perm) => perm === undefined || perm === PERM.PERM_VIEW_PROBLEM || perm === actualBuiltin.PERM.PERM_VIEW_HOMEWORK),
         });
         const handler = makeHandler(user);
 

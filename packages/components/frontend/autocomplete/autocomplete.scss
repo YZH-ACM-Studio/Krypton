@@ -13,7 +13,9 @@
 
   background-color: $input-background-color;
   outline: $input-outline;
-  transition: outline-color .2s, border-color .2s;
+  transition:
+    outline-color 0.2s,
+    border-color 0.2s;
   transition-timing-function: ease-out-cubic;
 
   &:focus,
@@ -39,7 +41,7 @@
 
   input {
     background-color: $input-background-color;
-    color: rgba(0, 0, 0, .85);
+    color: rgba(0, 0, 0, 0.85);
     height: 30px;
     box-sizing: border-box;
     padding: 4px 6px;
@@ -70,7 +72,7 @@
     background-color: #e6f7ff;
   }
 
-  &>div {
+  & > div {
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -94,7 +96,7 @@
     padding: 5px 12px;
     display: flex;
 
-    &>div {
+    & > div {
       flex-grow: 1;
     }
 

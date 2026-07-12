@@ -1,4 +1,4 @@
-import { motion } from 'motion/react';
+import 'motion/react';
 import { Activity, Code2, Cpu, HardDrive, LayoutDashboard, MemoryStick, MessageSquare, Power, Server, Trash2, Users, Wrench } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -28,15 +28,14 @@ export function DomainDashboardPage() {
 
   return (
     <AdminPage
-      title={(
+      title={
         <div className="flex items-center gap-2">
           <LayoutDashboard className="size-5 text-primary" />
           <h1 className="text-xl font-semibold">域管理</h1>
         </div>
-      )}
+      }
       bypassPrivGate
     >
-
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
           { label: '题目数', value: data.pcount || 0, href: bs.urls.problems },
@@ -57,7 +56,9 @@ export function DomainDashboardPage() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
-          <CardHeader><CardTitle className="text-base">域设置</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-base">域设置</CardTitle>
+          </CardHeader>
           <CardContent className="space-y-2">
             {[
               { label: '编辑域信息', href: '/domain/edit' },
@@ -75,9 +76,7 @@ export function DomainDashboardPage() {
               >
                 <span>
                   {link.label}
-                  {(link as any).hint && (
-                    <span className="ml-2 text-xs text-muted-foreground">({(link as any).hint})</span>
-                  )}
+                  {(link as any).hint && <span className="ml-2 text-xs text-muted-foreground">({(link as any).hint})</span>}
                 </span>
                 <span className="text-muted-foreground">→</span>
               </a>
@@ -86,7 +85,9 @@ export function DomainDashboardPage() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle className="text-base">域信息</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-base">域信息</CardTitle>
+          </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <div className="flex justify-between">
               <span className="text-muted-foreground">域 ID</span>
@@ -140,19 +141,17 @@ export function DomainDashboardPage() {
 
 export function ManageDashboardPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
 
   return (
     <AdminPage
-      title={(
+      title={
         <div className="flex items-center gap-2">
           <Wrench className="size-5 text-primary" />
           <h1 className="text-xl font-semibold">系统管理</h1>
         </div>
-      )}
+      }
       bypassPrivGate
     >
-
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {[
           { label: '系统设置', desc: '全局配置与参数', href: '/manage/setting', icon: Wrench },
@@ -215,15 +214,14 @@ export function StatusPage() {
 
   return (
     <AdminPage
-      title={(
+      title={
         <div className="flex items-center gap-2">
           <Server className="size-5 text-primary" />
           <h1 className="text-xl font-semibold">系统状态</h1>
         </div>
-      )}
+      }
       bypassPrivGate
     >
-
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
           { label: '服务器', value: data.ServerVersion || '—' },
@@ -243,9 +241,12 @@ export function StatusPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2 text-base">
-            <Server className="size-4" />服务器
+            <Server className="size-4" />
+            服务器
           </CardTitle>
-          <Button size="sm" variant="outline" onClick={() => window.location.reload()}>刷新状态</Button>
+          <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
+            刷新状态
+          </Button>
         </CardHeader>
         <CardContent className="p-0">
           {stats.length > 0 ? (
@@ -286,7 +287,9 @@ export function StatusPage() {
                     <TableCell className="text-right text-sm">
                       <div className="flex items-center justify-end gap-1.5">
                         <MemoryStick className="size-3.5 text-muted-foreground" />
-                        <span>{formatSize(Number(stat.memory?.used || 0))} / {formatSize(Number(stat.memory?.total || 0))}</span>
+                        <span>
+                          {formatSize(Number(stat.memory?.used || 0))} / {formatSize(Number(stat.memory?.total || 0))}
+                        </span>
                       </div>
                       {stat.stack ? <div className="text-xs text-muted-foreground">Stack {stat.stack} MB</div> : null}
                     </TableCell>
@@ -305,16 +308,23 @@ export function StatusPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <Code2 className="size-4" />编译器版本
+              <Code2 className="size-4" />
+              编译器版本
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {compilers.map((compiler) => (
               <div key={`${compiler.key.join(',')}-${compiler.message}`} className="rounded-md border bg-muted/20 p-3">
                 <div className="mb-2 flex flex-wrap gap-1">
-                  {compiler.key.map((key) => <Badge key={key} variant="outline" className="text-[10px]">{key}</Badge>)}
+                  {compiler.key.map((key) => (
+                    <Badge key={key} variant="outline" className="text-[10px]">
+                      {key}
+                    </Badge>
+                  ))}
                 </div>
-                <pre className="overflow-auto whitespace-pre-wrap rounded bg-background p-3 text-xs leading-relaxed text-muted-foreground">{compiler.message}</pre>
+                <pre className="overflow-auto whitespace-pre-wrap rounded bg-background p-3 text-xs leading-relaxed text-muted-foreground">
+                  {compiler.message}
+                </pre>
               </div>
             ))}
           </CardContent>
@@ -324,7 +334,8 @@ export function StatusPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Code2 className="size-4" />编译命令
+            <Code2 className="size-4" />
+            编译命令
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">

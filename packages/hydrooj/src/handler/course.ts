@@ -11,31 +11,42 @@
  * 权限：查看 PERM_VIEW_TRAINING；建/改 PERM_CREATE_COURSE / PERM_EDIT_COURSE。
  */
 import assert from 'assert';
-import { escapeRegExp } from 'lodash';
+import { escapeRegExp, pick } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
-import { ValidationError } from '../error';
+import { Logger } from '@hydrooj/utils';
+import { sortFiles } from '@hydrooj/utils/lib/utils';
+import {
+    FileLimitExceededError, FileUploadError, NotFoundError, PermissionError, ValidationError,
+} from '../error';
 import { TrainingDoc, TrainingNode } from '../interface';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as oplog from '../model/oplog';
 import problem from '../model/problem';
 import { assertProblemBankSelection } from '../model/problem-access';
+import storage from '../model/storage';
+import system from '../model/system';
 import * as training from '../model/training';
 import user from '../model/user';
 import {
-    Handler, param, Types,
+    Handler, param, post, Types,
 } from '../service/server';
 import { getVisibleReferencedProblems, normalizeProblemDocIds } from './problem-reference';
 
-/** 当前用户所属的 userbind 班级 id 集合（跨插件，缺失时空集）。 */
+const logger = new Logger('course');
+
+/** 当前用户所属的 userbind 班级 id 集合；查询失败必须向上抛出。 */
 async function userGroupIds(domainId: string, uid: number): Promise<Set<string>> {
+    const userbind = (global as any).Hydro?.model?.userbind;
+    if (typeof userbind?.findStudentByUserId !== 'function') {
+        throw new TypeError('userbind.findStudentByUserId is unavailable');
+    }
     try {
-        const userbind = (global as any).Hydro?.model?.userbind;
-        if (!userbind?.findStudentByUserId) return new Set();
         const student = await userbind.findStudentByUserId(domainId, uid);
         return new Set((student?.groupIds || []).map((g: ObjectId) => String(g)));
-    } catch {
-        return new Set();
+    } catch (error) {
+        logger.error('Course user-group lookup failed domain=%s uid=%d error=%o', domainId, uid, error);
+        throw error;
     }
 }
 
@@ -45,6 +56,16 @@ function courseVisibleTo(tdoc: TrainingDoc, myGroups: Set<string>, canManage: bo
     const groups = tdoc.courseGroupIds || [];
     if (!groups.length) return true;
     return groups.some((g) => myGroups.has(String(g)));
+}
+
+function courseFilePrefix(domainId: string, tid: ObjectId): string {
+    return `course/${domainId}/${tid}/`;
+}
+
+function listedCourseFile(tdoc: TrainingDoc, filename: string) {
+    const file = (tdoc.files || []).find((item) => item.name === filename);
+    if (!file) throw new NotFoundError('file');
+    return file;
 }
 
 async function parseChaptersJson(domainId: string, raw: string): Promise<TrainingNode[]> {
@@ -157,7 +178,7 @@ class CourseDetailHandler extends Handler {
             || this.user.hasPerm(PERM.PERM_EDIT_COURSE)
             || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         // 可见性拦截（非管理者且不属于课程班级 → 拒绝）。
-        if (!canManage) {
+        if (!canManage && (tdoc.courseGroupIds || []).length) {
             const myGroups = await userGroupIds(domainId, this.user._id);
             if (!courseVisibleTo(tdoc, myGroups, false)) {
                 throw new ValidationError('tid', null, '你不在该课程的可见范围内');
@@ -203,9 +224,12 @@ class CourseDetailHandler extends Handler {
             };
         });
         this.response.template = 'course_detail.html';
+        const canDownloadFiles = this.user.hasPriv(PRIV.PRIV_USER_PROFILE);
         this.response.body = {
             tdoc, chapters, pdict, psdict, cdict, udoc, canManage, tsdoc,
-            canEnroll: this.user.hasPriv(PRIV.PRIV_USER_PROFILE) && !tsdoc?.enroll,
+            canEnroll: canDownloadFiles && !tsdoc?.enroll,
+            canDownloadFiles,
+            files: canDownloadFiles ? sortFiles(tdoc.files || []) : [],
         };
     }
 
@@ -215,9 +239,11 @@ class CourseDetailHandler extends Handler {
         const tdoc = await training.get(domainId, tid);
         if (tdoc.kind !== 'course') throw new ValidationError('tid', null, 'Not a course');
         // 可见范围外不允许报名。
-        const myGroups = await userGroupIds(domainId, this.user._id);
-        if (!courseVisibleTo(tdoc, myGroups, this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM))) {
-            throw new ValidationError('tid', null, '你不在该课程的可见范围内');
+        if ((tdoc.courseGroupIds || []).length) {
+            const myGroups = await userGroupIds(domainId, this.user._id);
+            if (!courseVisibleTo(tdoc, myGroups, this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM))) {
+                throw new PermissionError(PERM.PERM_VIEW_TRAINING);
+            }
         }
         await training.enroll(domainId, tdoc.docId, this.user._id);
         this.back();
@@ -250,6 +276,8 @@ class CourseEditHandler extends Handler {
         this.response.body = {
             page_name: this.tdoc ? 'course_edit' : 'course_create',
             groups: groups.map((g: any) => ({ _id: String(g._id), name: g.name, archivedAt: g.archivedAt || null })),
+            canManageFiles: !!this.tdoc && (this.user.own(this.tdoc) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)),
+            files: sortFiles(this.tdoc?.files || []),
         };
         if (this.tdoc) {
             this.response.body.tdoc = this.tdoc;
@@ -311,13 +339,101 @@ class CourseEditHandler extends Handler {
     }
 
     @param('tid', Types.ObjectId)
-    async postDelete(domainId: string, tid: ObjectId) {
+    async postDelete(_domainId: string, tid: ObjectId) {
+        const domainId = String(this.domain?._id);
         const tdoc = await training.get(domainId, tid);
         if (tdoc.kind !== 'course') throw new ValidationError('tid', null, 'Not a course');
         if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_COURSE);
-        await training.del(domainId, tid);
+        await Promise.all([
+            training.del(domainId, tid),
+            storage.del((tdoc.files || []).map((file) => `${courseFilePrefix(domainId, tid)}${file.name}`), this.user._id),
+        ]);
         await oplog.log(this, 'course.delete', { tid });
         this.response.redirect = this.url('course_main');
+    }
+}
+
+class CourseFilesHandler extends Handler {
+    tdoc: TrainingDoc;
+    domainId: string;
+
+    @param('tid', Types.ObjectId)
+    async prepare(_domainId: string, tid: ObjectId) {
+        this.domainId = String(this.domain?._id);
+        this.tdoc = await training.get(this.domainId, tid);
+        if (this.tdoc.kind !== 'course') throw new NotFoundError('course');
+        if (!this.user.own(this.tdoc)) this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
+    }
+
+    async get() {
+        this.response.body = { files: sortFiles(this.tdoc.files || []) };
+    }
+
+    @param('tid', Types.ObjectId)
+    @post('filename', Types.Filename)
+    async postUploadFile(_domainId: string, tid: ObjectId, filename: string) {
+        const files = this.tdoc.files || [];
+        const previous = files.find((item) => item.name === filename);
+        if (!previous && files.length >= system.get('limit.contest_files')) {
+            throw new FileLimitExceededError('count');
+        }
+        const file = this.request.files?.file;
+        if (!file) throw new ValidationError('file');
+        const retainedSize = Math.sum(files.filter((item) => item.name !== filename).map((item) => item.size));
+        if (retainedSize + file.size >= system.get('limit.contest_files_size')) {
+            throw new FileLimitExceededError('size');
+        }
+        const target = `${courseFilePrefix(this.domainId, tid)}${filename}`;
+        await storage.put(target, file.filepath, this.user._id);
+        const meta = await storage.getMeta(target);
+        if (!meta) throw new FileUploadError();
+        const payload = { _id: filename, name: filename, ...pick(meta, ['size', 'lastModified', 'etag']) };
+        await training.edit(this.domainId, tid, {
+            files: files.filter((item) => item.name !== filename).concat(payload),
+        });
+        await oplog.log(this, 'course.file.upload', { tid, filename, size: payload.size });
+        this.response.body = { file: payload };
+    }
+
+    @param('tid', Types.ObjectId)
+    @post('files', Types.ArrayOf(Types.Filename))
+    async postDeleteFiles(_domainId: string, tid: ObjectId, files: string[]) {
+        for (const filename of files) listedCourseFile(this.tdoc, filename);
+        await Promise.all([
+            storage.del(files.map((filename) => `${courseFilePrefix(this.domainId, tid)}${filename}`), this.user._id),
+            training.edit(this.domainId, tid, {
+                files: (this.tdoc.files || []).filter((item) => !files.includes(item.name)),
+            }),
+        ]);
+        await oplog.log(this, 'course.file.delete', { tid, files });
+        this.response.body = { deleted: files };
+    }
+}
+
+class CourseFileDownloadHandler extends Handler {
+    @param('tid', Types.ObjectId)
+    @param('filename', Types.Filename)
+    @param('noDisposition', Types.Boolean, true)
+    async get(_domainId: string, tid: ObjectId, filename: string, noDisposition = false) {
+        this.checkPriv(PRIV.PRIV_USER_PROFILE);
+        const domainId = String(this.domain?._id);
+        const tdoc = await training.get(domainId, tid);
+        if (tdoc.kind !== 'course') throw new NotFoundError('course');
+        const file = listedCourseFile(tdoc, filename);
+        const canManage = this.user.own(tdoc) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        if (!canManage && (tdoc.courseGroupIds || []).length) {
+            const myGroups = await userGroupIds(domainId, this.user._id);
+            if (!courseVisibleTo(tdoc, myGroups, false)) throw new PermissionError(PERM.PERM_VIEW_TRAINING);
+        }
+        const target = `${courseFilePrefix(domainId, tid)}${filename}`;
+        this.response.addHeader('Cache-Control', 'private');
+        await oplog.log(this, 'course.file.download', { tid, filename, size: file.size || 0 });
+        this.response.redirect = await storage.signDownloadLink(
+            target,
+            noDisposition ? undefined : filename,
+            false,
+            'user',
+        );
     }
 }
 
@@ -326,4 +442,6 @@ export async function apply(ctx) {
     ctx.Route('course_create', '/course/create', CourseEditHandler);
     ctx.Route('course_detail', '/course/:tid', CourseDetailHandler, PERM.PERM_VIEW_TRAINING);
     ctx.Route('course_edit', '/course/:tid/edit', CourseEditHandler);
+    ctx.Route('course_files', '/course/:tid/file', CourseFilesHandler);
+    ctx.Route('course_file_download', '/course/:tid/file/:filename', CourseFileDownloadHandler);
 }

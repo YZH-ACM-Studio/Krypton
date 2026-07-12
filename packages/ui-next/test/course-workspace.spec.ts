@@ -48,4 +48,25 @@ describe('P3.8 course workspace', () => {
         expect(detail).to.include('content={activeChapter.content}');
         expect(detail).to.include('!course.content && !activeChapter.content');
     });
+
+    it('uses protected course file routes without reloading the editor draft', () => {
+        const handler = readFileSync(resolve(root, '../hydrooj/src/handler/course.ts'), 'utf8');
+        const training = readFileSync(resolve(root, '../hydrooj/src/handler/training.ts'), 'utf8');
+        const uploader = readFileSync(resolve(root, 'src/components/uploader.tsx'), 'utf8');
+        const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
+        const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
+        expect(handler).to.include('return `course/');
+        expect(handler).to.include('ctx.Route(\'course_files\', \'/course/:tid/file\'');
+        expect(handler).to.include('ctx.Route(\'course_file_download\', \'/course/:tid/file/:filename\'');
+        expect(handler).to.include('@post(\'filename\', Types.Filename)');
+        expect(handler).to.include('listedCourseFile(tdoc, filename)');
+        expect(training).to.include('assertNotCourse(tdoc)');
+        expect(training).to.include('throw new NotFoundError(\'file\')');
+        expect(editor).to.include('<FileUploader');
+        expect(editor).to.include('uploadConcurrency={1}');
+        expect(uploader).to.include('limit: uploadConcurrency');
+        expect(editor).to.include('void refreshFiles()');
+        expect(editor).to.not.include('window.location.reload');
+        expect(detail).to.include('encodeURIComponent(file.name)');
+    });
 });

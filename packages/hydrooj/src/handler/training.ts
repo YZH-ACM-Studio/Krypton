@@ -95,7 +95,10 @@ class TrainingMainHandler extends Handler {
                 // enroll:1 会命中已报名的 course，getList 不区分 kind——剔除
                 // course，避免课程串进训练页「已报名」列表（对抗性审查 #4）。
                 for (const k of Object.keys(tdict)) {
-                    if (tdict[k]?.kind === 'course') { delete tdict[k]; tsdict[k] = undefined; }
+                    if (tdict[k]?.kind === 'course') {
+                        delete tdict[k];
+                        tsdict[k] = undefined;
+                    }
                 }
             }
         }
@@ -356,7 +359,11 @@ export class TrainingFileDownloadHandler extends Handler {
     @param('tid', Types.ObjectId)
     @param('filename', Types.Filename)
     @param('noDisposition', Types.Boolean)
-    async get(domainId: string, tid: ObjectId, filename: string, noDisposition = false) {
+    async get(_domainId: string, tid: ObjectId, filename: string, noDisposition = false) {
+        const domainId = String(this.domain?._id);
+        const tdoc = await training.get(domainId, tid);
+        assertNotCourse(tdoc);
+        if (!(tdoc.files || []).some((file) => file.name === filename)) throw new NotFoundError('file');
         this.response.addHeader('Cache-Control', 'public');
         const target = `training/${domainId}/${tid}/${filename}`;
         const file = await storage.getMeta(target);

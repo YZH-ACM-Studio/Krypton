@@ -1,5 +1,5 @@
 import {
-  ArrowLeft, BookOpen, CheckCircle2, ListTree, Pencil, Trophy,
+  ArrowLeft, BookOpen, CheckCircle2, Download, FileText, ListTree, Pencil, Trophy,
 } from 'lucide-react';
 import { useState } from 'react';
 import { MarkdownView } from '@/components/markdown-renderer';
@@ -78,7 +78,9 @@ export function CourseDetailPage() {
     udoc?: CourseRecord;
     canManage: boolean;
     canEnroll: boolean;
+    canDownloadFiles: boolean;
     tsdoc?: CourseRecord;
+    files: CourseRecord[];
   };
   const course = data.tdoc || {};
   const tid = String(course.docId || course._id);
@@ -180,7 +182,30 @@ export function CourseDetailPage() {
             ) : <div data-course-slot="chapterContent" />}
             <ProblemList chapter={activeChapter} problems={data.pdict || {}} />
             <ContestList chapter={activeChapter} contests={data.cdict || {}} />
-            <div data-course-slot="files" />
+            {data.canDownloadFiles && data.files?.length ? (
+              <section data-course-slot="files" aria-labelledby="course-files-title" className="space-y-2">
+                <h3 id="course-files-title" className="text-xs font-semibold text-muted-foreground">课程课件</h3>
+                <div className="divide-y divide-border/70 border-y border-border/70">
+                  {data.files.map((file) => (
+                    <a
+                      key={file.name}
+                      href={`/course/${tid}/file/${encodeURIComponent(file.name)}`}
+                      className={cn(
+                        'flex min-h-11 items-center gap-3 px-1 py-2.5 text-sm transition-colors duration-200',
+                        'hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                      )}
+                    >
+                      <FileText className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate font-medium">{file.name}</span>
+                      <span className="text-[11px] tabular-nums text-muted-foreground">
+                        {Math.max(1, Math.ceil(Number(file.size || 0) / 1024))} KB
+                      </span>
+                      <Download className="size-4" />
+                    </a>
+                  ))}
+                </div>
+              </section>
+            ) : <div data-course-slot="files" />}
             <div data-course-slot="quiz" />
 
             {!course.content && !activeChapter.content

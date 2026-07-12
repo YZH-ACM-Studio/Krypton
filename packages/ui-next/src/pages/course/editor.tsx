@@ -1,5 +1,5 @@
 import {
-  ArrowLeft, ListTree, Plus, Save,
+  ArrowLeft, Download, FileText, ListTree, Plus, Save, Trash2,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { FileUploader } from '@/components/uploader';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { ChapterOutline } from './chapter-outline';
@@ -23,7 +24,7 @@ async function responseError(response: Response): Promise<string> {
     const message = body?.error?.message || body?.message || body?.error;
     if (typeof message === 'string' && message.trim()) return message;
   }
-  return `保存失败（${response.status} ${response.statusText || 'Unknown Error'}）`;
+  return `请求失败（${response.status} ${response.statusText || 'Unknown Error'}）`;
 }
 
 function initialChapterDrafts(serialized?: string): ChapterDraft[] {
@@ -46,6 +47,8 @@ export function CourseEditPage() {
     chapters?: string;
     page_name: string;
     groups: Array<{ _id: string, name: string, archivedAt?: string | null }>;
+    canManageFiles: boolean;
+    files: CourseRecord[];
   };
   const isEdit = data.page_name === 'course_edit';
   const course = data.tdoc || {};
@@ -62,6 +65,8 @@ export function CourseEditPage() {
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState('');
   const [outlineOpen, setOutlineOpen] = useState(false);
+  const [courseFiles, setCourseFiles] = useState<CourseRecord[]>(data.files || []);
+  const [fileError, setFileError] = useState('');
   const { activeId, selectChapter } = useChapterQuery(chapters);
   const activeChapter = chapters.find((chapter) => chapter._id === activeId) || chapters[0];
 
@@ -128,6 +133,34 @@ export function CourseEditPage() {
   })));
   const activeGroups = (data.groups || []).filter((group) => !group.archivedAt || selectedGroups.has(group._id));
   const formAction = isEdit ? `/course/${tid}/edit` : '/course/create';
+  const fileEndpoint = isEdit ? `/course/${tid}/file` : '';
+
+  const refreshFiles = async () => {
+    if (!fileEndpoint) return;
+    const response = await fetch(fileEndpoint, {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) throw new Error(await responseError(response));
+    const body = await response.json();
+    if (!Array.isArray(body?.files)) throw new Error('课件列表响应格式错误');
+    setCourseFiles(body.files);
+  };
+
+  const deleteFile = async (filename: string) => {
+    setFileError('');
+    const body = new URLSearchParams({ operation: 'delete_files' });
+    body.append('files', filename);
+    try {
+      const response = await fetch(fileEndpoint, {
+        method: 'POST', body, credentials: 'same-origin',
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      setCourseFiles((current) => current.filter((file) => file.name !== filename));
+    } catch (error: any) {
+      setFileError(error?.message || '课件删除失败');
+    }
+  };
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -329,7 +362,53 @@ export function CourseEditPage() {
             </div>
           </section>
 
-          <div data-course-slot="files" />
+          <section data-course-slot="files" className="space-y-3" aria-labelledby="course-files-editor-title">
+            <div>
+              <h2 id="course-files-editor-title" className="text-sm font-semibold">课程课件</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">学生按课程班级范围下载。</p>
+            </div>
+            {fileError ? <p role="alert" className="text-xs text-destructive">{fileError}</p> : null}
+            {isEdit && data.canManageFiles ? (
+              <FileUploader
+                endpoint={fileEndpoint}
+                maxFiles={10}
+                uploadConcurrency={1}
+                onBatchComplete={() => {
+                  void refreshFiles().catch((error) => setFileError(error?.message || '课件列表刷新失败'));
+                }}
+              />
+            ) : !isEdit ? (
+              <p className="text-xs text-muted-foreground">先保存课程，再上传课件。</p>
+            ) : null}
+            {courseFiles.length ? (
+              <div className="divide-y divide-border/70 border-y border-border/70">
+                {courseFiles.map((file) => (
+                  <div key={file.name} className="flex min-h-11 items-center gap-2 py-2 text-xs">
+                    <FileText className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate font-medium">{file.name}</span>
+                    <a
+                      href={`/course/${tid}/file/${encodeURIComponent(file.name)}`}
+                      className={cn(
+                        'inline-flex size-10 items-center justify-center rounded-md hover:bg-muted',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                      )}
+                      aria-label={`下载${file.name}`}
+                    ><Download className="size-4" /></a>
+                    {data.canManageFiles ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-10 text-destructive"
+                        onClick={() => deleteFile(file.name)}
+                        aria-label={`删除${file.name}`}
+                      ><Trash2 className="size-4" /></Button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </section>
           <div data-course-slot="collaborators" />
         </aside>
       </form>

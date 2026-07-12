@@ -439,6 +439,8 @@ export interface FileUploaderProps {
   maxFileSize?: number;
   /** Maximum number of files in one batch */
   maxFiles?: number;
+  /** Maximum number of simultaneous XHR uploads (defaults to Uppy's 5) */
+  uploadConcurrency?: number;
   /** Allowed mime types (e.g. `['image/*']`) */
   accept?: string[];
   /** Called after each successful upload */
@@ -463,6 +465,7 @@ export function FileUploader({
   meta,
   maxFileSize = 64 * 1024 * 1024,
   maxFiles = 50,
+  uploadConcurrency = 5,
   accept,
   onUploaded,
   onBatchComplete,
@@ -487,6 +490,7 @@ export function FileUploader({
       endpoint,
       fieldName,
       method: 'POST',
+      limit: uploadConcurrency,
       formData: true,
       withCredentials: true,
       allowedMetaFields: true,

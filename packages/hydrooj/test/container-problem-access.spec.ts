@@ -3,6 +3,14 @@ import { beforeEach, describe, it } from 'node:test';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {} };
+let boundGroupIds: string[] = [];
+let boundGroupError: Error | null = null;
+(global as any).Hydro.model.userbind = {
+    async findStudentByUserId() {
+        if (boundGroupError) throw boundGroupError;
+        return { groupIds: boundGroupIds };
+    },
+};
 
 const PERM = {
     PERM_CREATE_COURSE: 1n,
@@ -39,6 +47,10 @@ class TestProblemNotFoundError extends Error {
     name = 'ProblemNotFoundError';
 }
 
+class TestNotFoundError extends Error {
+    name = 'NotFoundError';
+}
+
 const calls = {
     add: [] as any[],
     edit: [] as any[],
@@ -48,6 +60,9 @@ const calls = {
     getList: [] as any[],
     getViewableAuthorized: [] as any[],
     selections: [] as any[],
+    storageDeletes: [] as any[],
+    storagePuts: [] as any[],
+    storageSigns: [] as any[],
     trainingQueries: [] as any[],
 };
 let denySelection = false;
@@ -139,6 +154,16 @@ const contestStub = {
     getMulti() { return cursor(); },
 };
 
+const storageStub = {
+    async put(...args: any[]) { calls.storagePuts.push(args); },
+    async getMeta() { return { size: 12, lastModified: new Date('2026-07-12'), etag: 'etag' }; },
+    async del(...args: any[]) { calls.storageDeletes.push(args); },
+    async signDownloadLink(...args: any[]) {
+        calls.storageSigns.push(args);
+        return '/signed';
+    },
+};
+
 const userStub = {
     async getById() { return { _id: 7, uname: 'owner' }; },
     async getListForRender() { return {}; },
@@ -160,9 +185,10 @@ const serverStub = {
 const errors = {
     FileLimitExceededError: class extends Error { },
     FileUploadError: class extends Error { },
-    NotFoundError: class extends Error { },
+    NotFoundError: TestNotFoundError,
     ProblemNotFoundError: TestProblemNotFoundError,
     ValidationError: TestValidationError,
+    PermissionError: TestPermissionError,
 };
 
 const trainingRoutes: Record<string, any> = {};
@@ -177,7 +203,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromHandler && request === '../model/oplog') return { async log() { return undefined; } };
     if (fromHandler && request === '../model/problem') return problemStub;
     if (fromHandler && request === '../model/problem-access') return problemAccessStub;
-    if (fromHandler && request === '../model/storage') return {};
+    if (fromHandler && request === '../model/storage') return storageStub;
     if (fromHandler && request === '../model/system') return { get: () => 1000 };
     if (fromHandler && request === '../model/training') return trainingStub;
     if (fromHandler && request === '../model/user') return userStub;
@@ -227,10 +253,14 @@ function makeHandler(HandlerClass: any, user = makeUser()) {
     Object.assign(handler, {
         ctx: { parallel: async () => undefined, setting: { get: () => false } },
         domain: { _id: 'system' },
-        response: { body: {} },
         user,
         url: () => '/target',
         checkPerm: () => undefined,
+        checkPriv(priv: number) {
+            if (!user.hasPriv(priv)) throw new TestPermissionError();
+        },
+        request: { files: {} },
+        response: { body: {}, addHeader() { return undefined; } },
         async paginate(value: any) {
             const docs = await value.toArray();
             return [docs, 1, docs.length];
@@ -257,12 +287,17 @@ beforeEach(() => {
     calls.getList.length = 0;
     calls.getViewableAuthorized.length = 0;
     calls.selections.length = 0;
+    calls.storageDeletes.length = 0;
+    calls.storagePuts.length = 0;
+    calls.storageSigns.length = 0;
     calls.trainingQueries.length = 0;
     denySelection = false;
     problemDocs.clear();
     currentContainer = null;
     currentTrainingStatus = null;
     trainingRows = [];
+    boundGroupIds = [];
+    boundGroupError = null;
 });
 
 describe('P3.8 course workspace capabilities', () => {
@@ -323,6 +358,110 @@ describe('P3.5 course chapter content', () => {
         ));
         expect(error?.name).to.equal('ValidationError');
         expect(calls.add).to.have.length(0);
+    });
+});
+
+describe('P3.6 protected course files', () => {
+    const courseWithFile = (overrides: Record<string, unknown> = {}) => ({
+        domainId: 'system', docId: 'course', owner: 7, kind: 'course', title: 'Course',
+        content: '', description: '', courseGroupIds: ['group-a'], dag: [],
+        files: [{ _id: 'slides.pdf', name: 'slides.pdf', size: 12 }],
+        ...overrides,
+    });
+
+    it('stores uploads under the isolated course prefix and updates the declared file list', async () => {
+        currentContainer = courseWithFile({ owner: 42, files: [] });
+        const handler = makeHandler(courseRoutes.course_files);
+        await handler.prepare('forged-domain', 'course');
+        handler.request.files.file = { filepath: '/tmp/slides.pdf', size: 12 };
+        await handler.postUploadFile('forged-domain', 'course', 'slides.pdf');
+
+        expect(calls.containerGets.at(-1)?.domainId).to.equal('system');
+        expect(calls.storagePuts.at(-1)?.[0]).to.equal('course/system/course/slides.pdf');
+        expect(calls.edit.at(-1)?.[0]).to.equal('system');
+        expect(calls.edit.at(-1)?.[2].files.map((file: any) => file.name)).to.deep.equal(['slides.pdf']);
+    });
+
+    it('allows only the owner or a system administrator to manage files', async () => {
+        currentContainer = courseWithFile();
+        const regular = makeHandler(courseRoutes.course_files);
+        expect((await captureFailure(() => regular.prepare('forged-domain', 'course')))?.name)
+            .to.equal('PermissionError');
+
+        const admin = makeHandler(courseRoutes.course_files, makeUser({
+            hasPriv: (priv: number) => priv === PRIV.PRIV_USER_PROFILE || priv === PRIV.PRIV_EDIT_SYSTEM,
+        }));
+        await admin.prepare('forged-domain', 'course');
+    });
+
+    it('allows an in-scope student to download only a file declared by that course', async () => {
+        currentContainer = courseWithFile();
+        boundGroupIds = ['group-a'];
+        const handler = makeHandler(courseRoutes.course_file_download);
+        await handler.get('forged-domain', 'course', 'slides.pdf');
+
+        expect(calls.containerGets.at(-1)?.domainId).to.equal('system');
+        expect(calls.storageSigns.at(-1)?.[0]).to.equal('course/system/course/slides.pdf');
+        expect(handler.response.redirect).to.equal('/signed');
+    });
+
+    it('rejects an out-of-scope student before signing any storage URL', async () => {
+        currentContainer = courseWithFile();
+        boundGroupIds = ['group-b'];
+        const handler = makeHandler(courseRoutes.course_file_download);
+        const error = await captureFailure(() => handler.get('forged-domain', 'course', 'slides.pdf'));
+
+        expect(error?.name).to.equal('PermissionError');
+        expect(calls.storageSigns).to.have.length(0);
+    });
+
+    it('rejects anonymous downloads and propagates membership lookup failures', async () => {
+        currentContainer = courseWithFile();
+        const anonymous = makeHandler(courseRoutes.course_file_download, makeUser({ hasPriv: () => false }));
+        expect((await captureFailure(() => anonymous.get('forged-domain', 'course', 'slides.pdf')))?.name)
+            .to.equal('PermissionError');
+
+        boundGroupError = new Error('userbind unavailable');
+        const lookupFailure = makeHandler(courseRoutes.course_file_download);
+        const error = await captureFailure(() => lookupFailure.get('forged-domain', 'course', 'slides.pdf'));
+        expect(error?.message).to.equal('userbind unavailable');
+        expect(calls.storageSigns).to.have.length(0);
+    });
+
+    it('validates the complete delete list before deleting storage or metadata', async () => {
+        currentContainer = courseWithFile({ owner: 42 });
+        const handler = makeHandler(courseRoutes.course_files);
+        await handler.prepare('forged-domain', 'course');
+        const error = await captureFailure(() => handler.postDeleteFiles(
+            'forged-domain', 'course', ['slides.pdf', 'secret.pdf'],
+        ));
+        expect(error?.name).to.equal('NotFoundError');
+        expect(calls.storageDeletes).to.have.length(0);
+        expect(calls.edit).to.have.length(0);
+    });
+
+    it('rejects undeclared filenames and non-course tids before signing', async () => {
+        currentContainer = courseWithFile({ courseGroupIds: [] });
+        const missing = makeHandler(courseRoutes.course_file_download);
+        expect((await captureFailure(() => missing.get('forged-domain', 'course', 'secret.pdf')))?.name)
+            .to.equal('NotFoundError');
+        expect(calls.storageSigns).to.have.length(0);
+
+        currentContainer = courseWithFile({ kind: undefined });
+        const swapped = makeHandler(courseRoutes.course_file_download);
+        expect((await captureFailure(() => swapped.get('forged-domain', 'training', 'slides.pdf')))?.name)
+            .to.equal('NotFoundError');
+        expect(calls.storageSigns).to.have.length(0);
+    });
+
+    it('blocks a course tid through the legacy training download route', async () => {
+        currentContainer = courseWithFile();
+        const handler = makeHandler(trainingRoutes.training_file_download);
+        const error = await captureFailure(() => handler.get('forged-domain', 'course', 'slides.pdf'));
+
+        expect(error?.name).to.equal('NotFoundError');
+        expect(calls.containerGets.at(-1)?.domainId).to.equal('system');
+        expect(calls.storageSigns).to.have.length(0);
     });
 });
 

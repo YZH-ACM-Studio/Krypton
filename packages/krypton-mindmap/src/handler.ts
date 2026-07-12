@@ -11,7 +11,6 @@ import type { Context } from 'hydrooj';
 import {
     ForbiddenError, Handler, ObjectId, param, PRIV, PrivilegeError, ProblemModel, Types,
 } from 'hydrooj';
-import { rebuildFromCategories } from './db';
 import {
     clearAllPositions,
     createNode, deleteNodeRecursive, getConfig, listAllNodes,
@@ -187,15 +186,19 @@ class AdminConfig extends AdminBase {
 }
 
 /**
- * Drop all nodes + rebuild from the hydrooj `problem.categories` setting.
- * POST /admin/mindmap/rebuild — destructive (loses node-attached problemIds).
- * Returns { ok, categories, leaves }.
+ * PLAN 2026-07 P2.2：rebuild 路由已永久下线（Rev.7 顺序约束——P2.1 多级树
+ * 迁移后误触 rebuild 会 drop 全部节点重建成二级树，直接毁掉迁移成果）。
+ * 保留 410 handler 而非删注册：给可能残存的脚本/书签一个明确的
+ * "Gone"，而不是落到 404/GenericPage 造成误判。
+ * `rebuildFromCategories`（db.ts）保留为库函数，不再暴露任何路由。
  */
-class AdminRebuildFromCategories extends Handler {
+class AdminRebuildGoneHandler extends Handler {
     async post() {
         if (!this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) throw new PrivilegeError();
-        const stats = await rebuildFromCategories();
-        this.response.body = { ok: true, ...stats };
+        this.response.status = 410;
+        this.response.body = {
+            error: 'rebuild 功能已下线（PLAN P2.2）：多级树由迁移脚本维护，从 problem.categories 重建会摧毁多级结构与挂题。',
+        };
     }
 }
 
@@ -204,5 +207,5 @@ export function applyHandlers(ctx: Context) {
     ctx.Route('mindmap_api_problems', '/api/mindmap/problems', ProblemsApi);
     ctx.Route('admin_mindmap_nodes', '/admin/mindmap/nodes', AdminMutateNodes);
     ctx.Route('admin_mindmap_config', '/admin/mindmap/config', AdminConfig);
-    ctx.Route('admin_mindmap_rebuild', '/admin/mindmap/rebuild', AdminRebuildFromCategories);
+    ctx.Route('admin_mindmap_rebuild', '/admin/mindmap/rebuild', AdminRebuildGoneHandler);
 }

@@ -65,6 +65,7 @@ import { ProblemCreateHubPage } from '@/pages/problem-create-hub';
 import { ProblemEditPage } from '@/pages/problem-edit';
 import { ProblemHackPage } from '@/pages/problem-hack';
 import { ProblemConfigPage, ProblemFilesPage, ProblemImportPage, ProblemSolutionPage, ProblemStatisticsPage } from '@/pages/problem-manage';
+import { AdminStatsPage } from '@/pages/admin-stats';
 import { ProblemMinePage } from '@/pages/problem-mine';
 import { ProblemSubmitPage } from '@/pages/problem-submit';
 import { ProblemsPage } from '@/pages/problems';
@@ -224,6 +225,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'manage_user_import.html': ManageUserImportPage,
   'manage_user_priv.html': ManageUserPrivPage,
   'manage_realpass.html': RealPassManagePage,
+  'admin_stats.html': AdminStatsPage,
 
   // Misc
   'status.html': StatusPage,

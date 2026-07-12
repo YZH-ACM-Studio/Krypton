@@ -231,6 +231,12 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           ],
         });
         adminItems.push({
+          label: '统计中心',
+          href: '/admin/stats',
+          icon: BarChart3,
+          templates: ['admin_stats.html'],
+        });
+        adminItems.push({
           label: '赛时通过率',
           href: '/manage/realpass',
           icon: BarChart3,

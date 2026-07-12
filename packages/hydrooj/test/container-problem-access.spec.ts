@@ -48,9 +48,12 @@ const calls = {
     getList: [] as any[],
     getViewableAuthorized: [] as any[],
     selections: [] as any[],
+    trainingQueries: [] as any[],
 };
 let denySelection = false;
 let currentContainer: any;
+let currentTrainingStatus: any;
+let trainingRows: any[] = [];
 const problemDocs = new Map<number, any>();
 
 function problemDict(docs: any[]) {
@@ -123,6 +126,11 @@ const trainingStub = {
     async add(...args: any[]) { calls.add.push(args); return 'new-container'; },
     async edit(...args: any[]) { calls.edit.push(args); },
     async setStatus() { return {}; },
+    async getStatus() { return currentTrainingStatus; },
+    getMulti(domainId: string, query: any) {
+        calls.trainingQueries.push({ domainId, query: structuredClone(query) });
+        return cursor(trainingRows);
+    },
     getMultiStatus() { return cursor(); },
 };
 
@@ -223,6 +231,10 @@ function makeHandler(HandlerClass: any, user = makeUser()) {
         user,
         url: () => '/target',
         checkPerm: () => undefined,
+        async paginate(value: any) {
+            const docs = await value.toArray();
+            return [docs, 1, docs.length];
+        },
     });
     return handler;
 }
@@ -245,9 +257,40 @@ beforeEach(() => {
     calls.getList.length = 0;
     calls.getViewableAuthorized.length = 0;
     calls.selections.length = 0;
+    calls.trainingQueries.length = 0;
     denySelection = false;
     problemDocs.clear();
     currentContainer = null;
+    currentTrainingStatus = null;
+    trainingRows = [];
+});
+
+describe('P3.8 course workspace capabilities', () => {
+    it('does not treat create permission as edit-all permission', async () => {
+        trainingRows = [
+            { docId: 'own', owner: 42, kind: 'course', title: 'Own', dag: [] },
+            { docId: 'other', owner: 7, kind: 'course', title: 'Other', dag: [] },
+        ];
+        const handler = makeHandler(courseRoutes.course_main);
+        await handler.get('forged-domain', 1, '');
+        expect(handler.response.body.canCreate).to.equal(true);
+        expect(handler.response.body.managedIds).to.deep.equal(['own']);
+        expect(handler.response.body.tcount).to.equal(2);
+        expect(calls.trainingQueries[0].domainId).to.equal('system');
+        expect(calls.trainingQueries[0].query.$or).to.deep.include({ owner: 42 });
+    });
+
+    it('passes the real enrollment status to course detail', async () => {
+        currentTrainingStatus = { enroll: 1, donePids: [11] };
+        currentContainer = {
+            domainId: 'system', docId: 'course', owner: 7, kind: 'course', title: 'Course',
+            content: '', description: '', courseGroupIds: [], dag: [],
+        };
+        const handler = makeHandler(courseRoutes.course_detail);
+        await handler.get('forged-domain', 'course');
+        expect(handler.response.body.tsdoc).to.equal(currentTrainingStatus);
+        expect(handler.response.body.canEnroll).to.equal(false);
+    });
 });
 
 describe('training/course problem selection', () => {

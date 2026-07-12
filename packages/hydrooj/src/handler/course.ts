@@ -64,7 +64,11 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
             const tids: ObjectId[] = [];
             for (const t of rawTids) {
                 let tid: ObjectId;
-                try { tid = new ObjectId(t); } catch { throw new ValidationError('tids', null, `无效的比赛 id: ${t}`); }
+                try {
+                    tid = new ObjectId(t);
+                } catch {
+                    throw new ValidationError('tids', null, `无效的比赛 id: ${t}`);
+                }
                 // eslint-disable-next-line no-await-in-loop
                 const tdoc = await contest.get(domainId, tid).catch(() => null);
                 if (!tdoc) throw new ValidationError('tids', null, `比赛不存在: ${t}`);
@@ -87,31 +91,42 @@ async function parseChaptersJson(domainId: string, raw: string): Promise<Trainin
 class CourseMainHandler extends Handler {
     @param('page', Types.PositiveInt, true)
     @param('q', Types.String, true)
-    async get(domainId: string, page = 1, q = '') {
+    async get(_domainId: string, page = 1, q = '') {
+        const domainId = String(this.domain?._id);
         const query: Filter<TrainingDoc> = { kind: 'course' };
         if (q) query.title = { $regex: new RegExp(escapeRegExp(q), 'i') };
-        const canManage = this.user.hasPerm(PERM.PERM_CREATE_COURSE)
-            || this.user.hasPerm(PERM.PERM_EDIT_COURSE)
-            || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        const isAdmin = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        const canCreate = this.user.hasPerm(PERM.PERM_CREATE_COURSE) || isAdmin;
+        const canManageAll = this.user.hasPerm(PERM.PERM_EDIT_COURSE) || isAdmin;
         // 可见性下推进 mongo query，使分页计数准确（对抗性审查 #5）：全域
         // 课程(空/无 courseGroupIds)或用户所属班级的课程。管理者看全部。
-        if (!canManage) {
+        if (!canManageAll) {
             const myGroups = await userGroupIds(domainId, this.user._id);
             // 容错构造（对齐 post 路径）：畸形 id 跳过，避免整个列表页 500。
             const groupOids = Array.from(myGroups)
-                .map((s) => { try { return new ObjectId(s); } catch { return null; } })
+                .map((s) => {
+                    try {
+                        return new ObjectId(s);
+                    } catch {
+                        return null;
+                    }
+                })
                 .filter((x): x is ObjectId => !!x);
             query.$or = [
+                { owner: this.user._id },
                 { courseGroupIds: { $exists: false } },
                 { courseGroupIds: { $size: 0 } },
                 ...(groupOids.length ? [{ courseGroupIds: { $in: groupOids } }] : []),
             ];
         }
-        const [tdocs, tpcount] = await this.paginate(
+        const [tdocs, tpcount, tcount] = await this.paginate(
             training.getMulti(domainId, query),
             page,
             'training',
         );
+        const managedIds = tdocs
+            .filter((tdoc) => canManageAll || this.user.own(tdoc))
+            .map((tdoc) => String(tdoc.docId));
         const tids = tdocs.map((t) => t.docId);
         const tsdict = {};
         if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) {
@@ -122,7 +137,7 @@ class CourseMainHandler extends Handler {
         }
         this.response.template = 'course_main.html';
         this.response.body = {
-            tdocs, page, tpcount, tsdict, q, canManage,
+            tdocs, page, tpcount, tcount, tsdict, q, canCreate, managedIds,
         };
     }
 }
@@ -149,7 +164,7 @@ class CourseDetailHandler extends Handler {
         const allTids = Array.from(new Set<string>(
             tdoc.dag.flatMap((n) => (n.tids || []).map((t) => String(t))),
         )).map((s) => new ObjectId(s));
-        const [udoc, pdict, psdict, ctdocs] = await Promise.all([
+        const [udoc, pdict, psdict, ctdocs, tsdoc] = await Promise.all([
             user.getById(domainId, tdoc.owner),
             getVisibleReferencedProblems(domainId, pids, this.user),
             this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
@@ -158,6 +173,8 @@ class CourseDetailHandler extends Handler {
                 ? contest.getMulti(domainId, { docId: { $in: allTids } })
                     .project({ docId: 1, title: 1, rule: 1, beginAt: 1, endAt: 1 }).toArray()
                 : [],
+            this.user.hasPriv(PRIV.PRIV_USER_PROFILE)
+                ? training.getStatus(domainId, tdoc.docId, this.user._id) : null,
         ]);
         const cdict: Record<string, any> = {};
         for (const c of ctdocs) cdict[String(c.docId)] = c;
@@ -182,7 +199,8 @@ class CourseDetailHandler extends Handler {
         });
         this.response.template = 'course_detail.html';
         this.response.body = {
-            tdoc, chapters, pdict, psdict, cdict, udoc, canManage,
+            tdoc, chapters, pdict, psdict, cdict, udoc, canManage, tsdoc,
+            canEnroll: this.user.hasPriv(PRIV.PRIV_USER_PROFILE) && !tsdoc?.enroll,
         };
     }
 
@@ -258,7 +276,13 @@ class CourseEditHandler extends Handler {
         const existingPids = training.getPids(this.tdoc?.dag || []);
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, existingPids);
         const groupIds = (courseGroupIds || [])
-            .map((s) => { try { return new ObjectId(s); } catch { return null; } })
+            .map((s) => {
+                try {
+                    return new ObjectId(s);
+                } catch {
+                    return null;
+                }
+            })
             .filter((x): x is ObjectId => !!x);
         if (!tid) {
             tid = await training.add(authoritativeDomainId, title, content, this.user._id, dag, description, 0, {

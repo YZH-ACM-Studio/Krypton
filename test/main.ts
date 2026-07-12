@@ -29,7 +29,7 @@ describe('App', () => {
         console.log('Application inited in %d ms', Date.now() - init);
     }, { timeout: 30000 });
 
-    const routes = ['/', '/contest', '/homework', '/user/1', '/training'];
+    const routes = ['/', '/contest', '/homework', '/user/1', '/training', '/course'];
     for (const route of routes) {
         // eslint-disable-next-line ts/no-loop-func
         it(`GET ${route}`, () => agent.get(route).expect(200));

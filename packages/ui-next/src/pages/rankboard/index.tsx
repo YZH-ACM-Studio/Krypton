@@ -184,7 +184,7 @@ function PodiumCard({ row, rank }: { row: LeaderboardRow; rank: number }) {
         </Avatar>
         <div className="min-w-0">
           <p className="truncate text-lg font-semibold">{row.student.realName}</p>
-          <p className="truncate text-xs text-muted-foreground">{row.student.schoolName}</p>
+          <p className="truncate font-mono text-xs text-muted-foreground">{row.student.studentId}</p>
         </div>
       </div>
       <div className="mt-1 flex items-baseline gap-2">
@@ -209,9 +209,7 @@ function AwardsDrawer({ row, typeMap, onClose }: { row: LeaderboardRow; typeMap:
               第 {row.rank} 名 · {row.totalScore.toFixed(1)} 分
             </p>
             <h2 className="text-xl font-semibold">{row.student.realName}</h2>
-            <p className="text-xs text-muted-foreground">
-              {row.student.studentId} · {row.student.schoolName}
-            </p>
+            <p className="font-mono text-xs text-muted-foreground">{row.student.studentId}</p>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose}>
             <X className="size-4" />
@@ -377,7 +375,7 @@ export function RankBoardMainPage() {
     <div className="space-y-5">
       <header className="flex items-center gap-2">
         <AwardIcon className="size-5 text-primary" />
-        <h1 className="text-xl font-semibold">荣誉榜</h1>
+        <h1 className="text-xl font-semibold">中国民航大学荣誉榜</h1>
         <span className="ml-3 text-xs text-muted-foreground">
           共 {data.rows.length} 人 · 基础分 {data.config.baseScore} · 衰减 {data.config.decayFactor}
         </span>
@@ -535,9 +533,7 @@ export function RankBoardDetailPage() {
             第 {data.row.rank} 名 · {data.row.totalScore.toFixed(1)} 分
           </p>
           <h1 className="text-3xl font-bold">{data.row.student.realName}</h1>
-          <p className="text-sm text-muted-foreground">
-            {data.row.student.studentId} · {data.row.student.schoolName}
-          </p>
+          <p className="font-mono text-sm text-muted-foreground">{data.row.student.studentId}</p>
           {data.row.user && data.row.student.boundUserId ? (
             <p className="text-xs text-muted-foreground">
               OJ：

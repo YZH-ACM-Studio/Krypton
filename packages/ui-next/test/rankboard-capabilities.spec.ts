@@ -1,4 +1,6 @@
 import { expect } from 'chai';
+import { readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 import { describe, it } from 'node:test';
 import { resolveRankboardCapabilities } from '../rankboard-capabilities.ts';
 
@@ -87,5 +89,22 @@ describe('rankboard bootstrap capabilities', () => {
       canManageRankboard: false,
     });
     expect(observed).to.deep.equal([failure]);
+  });
+});
+
+describe('rankboard public branding', () => {
+  const source = readFileSync(resolvePath(process.cwd(), 'packages/ui-next/src/pages/rankboard/index.tsx'), 'utf8');
+  const gallerySource = readFileSync(resolvePath(process.cwd(), 'packages/ui-next/src/pages/rankboard/gallery.tsx'), 'utf8');
+
+  it('uses the university title and does not render school names', () => {
+    expect(source).to.include('中国民航大学荣誉榜');
+    expect(source).not.to.match(/\{(?:row|data\.row)\.student\.schoolName\}/);
+    expect(gallerySource).not.to.include('schoolName');
+  });
+
+  it('keeps school data for the existing filter', () => {
+    expect(source).to.include("const [schoolFilter, setSchoolFilter] = useState<string>('all')");
+    expect(source).to.include('r.student.schoolName !== schoolFilter');
+    expect(source).to.include("label: '全部学校'");
   });
 });

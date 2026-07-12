@@ -1,26 +1,25 @@
-import { useEffect, useMemo, useState } from 'react';
-import { motion } from 'motion/react';
 import {
   Award,
   CheckCircle2,
   ChevronRight,
   Clock,
-  GitBranch,
   LayoutGrid,
   List,
   Lock,
   PlayCircle,
   Search,
-  Trophy,
   Users,
   X,
 } from 'lucide-react';
+import { motion } from 'motion/react';
+import { useEffect, useMemo, useState } from 'react';
+import { MarkdownView } from '@/components/markdown-renderer';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
-import { MarkdownView } from '@/components/markdown-renderer';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatPlainTextSummary, replaceRouteTokens } from '@/lib/format';
 
@@ -164,7 +163,7 @@ export function TrainingPage() {
   );
 }
 
-function StatCell({ label, value, icon, active, onClick }: { label: string; value: number; icon: React.ReactNode; active?: boolean; onClick?: () => void }) {
+function StatCell({ label, value, icon, active, onClick }: { label: string, value: number, icon: React.ReactNode, active?: boolean, onClick?: () => void }) {
   const clickable = !!onClick;
   return (
     <button
@@ -182,7 +181,7 @@ function StatCell({ label, value, icon, active, onClick }: { label: string; valu
   );
 }
 
-function TrainingCard({ e, bs }: { e: any; bs: ReturnType<typeof useBootstrap> }) {
+function TrainingCard({ e, bs }: { e: any, bs: ReturnType<typeof useBootstrap> }) {
   const { t, ts, total, done, pct, sectionCount, enrolled, fullyDone } = e;
   const url = replaceRouteTokens(bs.urls.trainingDetail, { TID: String(t.docId) });
   return (
@@ -234,7 +233,7 @@ function TrainingCard({ e, bs }: { e: any; bs: ReturnType<typeof useBootstrap> }
   );
 }
 
-function TrainingTable({ rows, bs }: { rows: any[]; bs: ReturnType<typeof useBootstrap> }) {
+function TrainingTable({ rows, bs }: { rows: any[], bs: ReturnType<typeof useBootstrap> }) {
   return (
     <Card>
       <CardContent className="p-0">
@@ -248,9 +247,9 @@ function TrainingTable({ rows, bs }: { rows: any[]; bs: ReturnType<typeof useBoo
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="font-medium truncate">{e.t.title || '未命名'}</span>
-                  {e.fullyDone ? <Badge variant="default" className="text-[10px]">已完成</Badge> :
-                    e.enrolled ? <Badge variant="secondary" className="text-[10px]">进行中</Badge> :
-                      <Badge variant="outline" className="text-[10px]">未参加</Badge>}
+                  {e.fullyDone ? <Badge variant="default" className="text-[10px]">已完成</Badge>
+                    : e.enrolled ? <Badge variant="secondary" className="text-[10px]">进行中</Badge>
+                      : <Badge variant="outline" className="text-[10px]">未参加</Badge>}
                 </div>
                 <p className="line-clamp-1 text-xs text-muted-foreground">
                   {formatPlainTextSummary(e.t.content || e.t.desc) || '—'}
@@ -618,11 +617,105 @@ export function TrainingDetailPage() {
           </Card>
         </div>
       </div>
+
+      {/* 参加名单（P2.3）：服务端仅对管理员/教师下发 members 字段 */}
+      {Array.isArray(data.members) ? (
+        <TrainingMembersCard members={data.members} trainingTitle={tdoc.title || ''} truncated={!!data.membersTruncated} />
+      ) : null}
     </motion.div>
   );
 }
 
-function StatBlock({ label, big, small, progress }: { label: string; big: string; small?: string; progress?: number }) {
+/** 参加名单区块（管理员+教师可见；数据由服务端 gate，前端只负责展示/导出）。 */
+function TrainingMembersCard({ members, trainingTitle, truncated }: { members: R[], trainingTitle: string, truncated?: boolean }) {
+  const [q, setQ] = useState('');
+  const kw = q.trim().toLowerCase();
+  const filtered = kw
+    ? members.filter((m) => [m.uname, m.realName, m.studentId, ...(m.groups || [])]
+      .some((f: string) => String(f || '').toLowerCase().includes(kw)))
+    : members;
+
+  const exportCsv = () => {
+    // 公式注入防护：uname/realName 学生可控，= + - @ 开头的单元格前置
+    // 单引号，防 Excel 打开时求值（对抗审查发现）。
+    const esc = (v: any) => {
+      let s = String(v ?? '');
+      if (/^[=+\-@]/.test(s)) s = `'${s}`;
+      return `"${s.replace(/"/g, '""')}"`;
+    };
+    const lines = [
+      ['用户名', '真实姓名', '学号', '班级组', '已完成题数', '总题数', '完成率'].map(esc).join(','),
+      ...filtered.map((m) => [
+        m.uname, m.realName, m.studentId, (m.groups || []).join(' / '),
+        m.done, m.total, m.total > 0 ? `${Math.round((m.done / m.total) * 100)}%` : '-',
+      ].map(esc).join(',')),
+    ];
+    // BOM 让 Excel 正确识别 UTF-8 中文
+    const blob = new Blob([`﻿${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8' });
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(blob),
+      download: `${trainingTitle || '训练'}-参加名单.csv`,
+    });
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  return (
+    <Card className="mt-4">
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle className="text-sm">参加名单</CardTitle>
+          <span className="text-[10px] text-muted-foreground">
+            共 {members.length} 人（仅管理员/教师可见）{truncated ? ' · 仅显示前 1000 人' : ''}
+          </span>
+          <div className="flex-1" />
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="搜索用户名/姓名/学号/班级"
+            className="h-8 w-56 text-xs"
+          />
+          <Button variant="outline" size="sm" onClick={exportCsv} disabled={!filtered.length}>
+            导出 CSV{kw ? `（${filtered.length} 条）` : ''}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="max-h-[28rem] overflow-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-card">
+              <tr className="border-b text-left text-xs text-muted-foreground">
+                <th className="px-4 py-2 font-medium">用户名</th>
+                <th className="px-4 py-2 font-medium">真实姓名</th>
+                <th className="px-4 py-2 font-medium">学号</th>
+                <th className="px-4 py-2 font-medium">班级组</th>
+                <th className="px-4 py-2 text-right font-medium">进度</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-xs text-muted-foreground">{kw ? '没有匹配的成员' : '还没有人报名'}</td></tr>
+              ) : filtered.map((m) => (
+                <tr key={m.uid} className="border-b last:border-0 hover:bg-muted/20">
+                  <td className="px-4 py-2">{m.uname}</td>
+                  <td className="px-4 py-2">{m.realName || <span className="text-xs text-muted-foreground">未绑定</span>}</td>
+                  <td className="px-4 py-2 font-mono text-xs">{m.studentId || '—'}</td>
+                  <td className="px-4 py-2 text-xs">{(m.groups || []).join(' / ') || '—'}</td>
+                  <td className="px-4 py-2 text-right font-mono text-xs tabular-nums">
+                    {m.done}/{m.total}
+                    <span className="ml-1 text-muted-foreground">({m.total > 0 ? Math.round((m.done / m.total) * 100) : 0}%)</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function StatBlock({ label, big, small, progress }: { label: string, big: string, small?: string, progress?: number }) {
   return (
     <div>
       <p className="text-[11px] text-muted-foreground">{label}</p>
@@ -646,8 +739,8 @@ function StatBlock({ label, big, small, progress }: { label: string; big: string
 interface DagLayout {
   width: number;
   height: number;
-  nodes: { id: any; x: number; y: number; depth: number }[];
-  edges: { from: any; to: any; d: string }[];
+  nodes: { id: any, x: number, y: number, depth: number }[];
+  edges: { from: any, to: any, d: string }[];
 }
 
 /**
@@ -692,7 +785,7 @@ function computeDagLayout(dag: R[], width: number, height: number, padding: numb
 
   const cols = maxDepth + 1;
   const colWidth = (width - padding * 2) / Math.max(1, cols - 1 || 1);
-  const positions = new Map<any, { x: number; y: number; depth: number }>();
+  const positions = new Map<any, { x: number, y: number, depth: number }>();
   for (const [d, ids] of layers) {
     const rowCount = ids.length;
     ids.forEach((id, i) => {
@@ -704,7 +797,7 @@ function computeDagLayout(dag: R[], width: number, height: number, padding: numb
 
   const nodes = dag.map((n) => ({ id: n._id, ...positions.get(n._id)! }));
 
-  const edges: { from: any; to: any; d: string }[] = [];
+  const edges: { from: any, to: any, d: string }[] = [];
   for (const n of dag) {
     if (!Array.isArray(n.requireNids)) continue;
     const to = positions.get(n._id);
@@ -834,7 +927,7 @@ function DagCanvas({
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({ label, value }: { label: string, value: string }) {
   return (
     <div className="flex items-center justify-between gap-2">
       <span className="text-xs text-muted-foreground">{label}</span>
@@ -843,7 +936,7 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Legend({ color, label }: { color: string; label: string }) {
+function Legend({ color, label }: { color: string, label: string }) {
   return (
     <span className="flex items-center gap-1">
       <span className={`size-2.5 rounded-full ${color}`} />

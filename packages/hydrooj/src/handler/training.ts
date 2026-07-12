@@ -7,6 +7,7 @@ import {
 } from '../error';
 import { Tdoc, TrainingDoc } from '../interface';
 import { PERM, PRIV, STATUS } from '../model/builtin';
+import * as document from '../model/document';
 import * as oplog from '../model/oplog';
 import problem from '../model/problem';
 import { assertProblemBankSelection } from '../model/problem-access';
@@ -174,6 +175,47 @@ class TrainingDetailHandler extends Handler {
         this.response.body.tdoc.description = this.response.body.tdoc.description
             .replace(/\(file:\/\//g, `(./${tdoc.docId}/file/`)
             .replace(/="file:\/\//g, `="./${tdoc.docId}/file/`);
+
+        // ── Krypton P2.3：参加名单（服务端 gate：管理员+教师）────────────
+        // PERM_USERBIND_MANAGE_STUDENTS 是教师档的"学生数据操作"位
+        // （permission.ts PERM_TEACHER 含之，学生无）——名单含真实姓名/
+        // 学号 PII，与审批页/record 学号列同档。学生响应不含 members 字段。
+        // 纯读聚合（PLAN Rev.8）：4 条批量查询 + 内存归并，零写库零 N+1。
+        if (this.user.hasPerm(PERM.PERM_USERBIND_MANAGE_STUDENTS)) {
+            const enrollDocs = await training.getMultiStatus(domainId, { docId: tid, uid: { $gt: 1 }, enroll: 1 })
+                .project({ uid: 1 }).limit(1000).toArray();
+            const memberUids = enrollDocs.map((x) => +x.uid);
+            const ub = (global as any).Hydro?.model?.userbind;
+            const [memberUdict, students, ubGroups, acDocs] = await Promise.all([
+                // getListForRender = 单条批量查询；getList 是 N 个 getById（对抗审查发现）
+                user.getListForRender(domainId, memberUids, false),
+                ub?.findStudentsByUserIds ? ub.findStudentsByUserIds(domainId, memberUids) : {},
+                ub?.listUserGroups ? ub.listUserGroups(domainId) : [],
+                (memberUids.length && exist.length)
+                    ? document.getMultiStatus(domainId, document.TYPE_PROBLEM, {
+                        uid: { $in: memberUids }, docId: { $in: exist }, status: STATUS.STATUS_ACCEPTED,
+                    }).project({ uid: 1, docId: 1 }).toArray()
+                    : [],
+            ]);
+            // limit 1000 截断不许静默（对抗审查发现）——前端据此提示。
+            this.response.body.membersTruncated = enrollDocs.length >= 1000;
+            const doneByUid = new Map<number, number>();
+            for (const d of acDocs) doneByUid.set(d.uid, (doneByUid.get(d.uid) || 0) + 1);
+            const groupNameById = new Map((ubGroups as any[]).map((g) => [String(g._id), g.name]));
+            this.response.body.members = memberUids.map((mUid) => {
+                const s = (students as any)[String(mUid)];
+                return {
+                    uid: mUid,
+                    uname: memberUdict[mUid]?.uname || `UID ${mUid}`,
+                    realName: s?.realName || '',
+                    studentId: s?.studentId || '',
+                    groups: (s?.groupIds || []).map((g: any) => groupNameById.get(String(g))).filter(Boolean),
+                    done: doneByUid.get(mUid) || 0,
+                    total: exist.length,
+                };
+            });
+        }
+
         this.response.pjax = 'partials/training_detail.html';
         this.response.template = 'training_detail.html';
     }

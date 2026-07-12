@@ -56,6 +56,8 @@ const calls = {
     recordAdd: [] as any[],
     renameFile: [] as any[],
     status: [] as any[],
+    structuredMetadataSaves: [] as any[],
+    structuredSaves: [] as any[],
     storageGet: [] as any[],
     storageGetMeta: [] as any[],
     storageSign: [] as any[],
@@ -66,6 +68,7 @@ let maintainableResults: any[] = [];
 let countResult = 0;
 let maintainResult = false;
 let claimAllowed = true;
+const createKinds: string[] = [];
 
 function cursor(docs: any[] = []) {
     const state = { skip: 0, limit: Infinity };
@@ -102,6 +105,7 @@ const problemStub = {
         return 7;
     },
     async createProblemByKind(_kind: string, ...args: any[]) {
+        createKinds.push(_kind);
         calls.add.push(args);
         return 7;
     },
@@ -173,6 +177,14 @@ const problemStub = {
     },
     async refreshProblemAcl(user: any, domainId: string) {
         calls.refresh.push({ user, domainId });
+    },
+    async saveStructuredProblem(input: any) {
+        calls.structuredSaves.push(input);
+        return { domainId: input.domainId, docId: input.pid, structureRevision: input.expectedStructureRevision + 1 };
+    },
+    async saveStructuredProblemMetadata(input: any) {
+        calls.structuredMetadataSaves.push(input);
+        return { domainId: input.domainId, docId: input.pid, structureRevision: 5 };
     },
     async renameAdditionalFile(...args: any[]) {
         calls.renameFile.push(args);
@@ -269,6 +281,7 @@ const {
     defaultSearch,
     ProblemApi,
     ProblemCreateHandler,
+    ProblemCreateSingleHandler,
     ProblemDetailHandler,
     ProblemEditHandler,
     ProblemConfigHandler,
@@ -326,6 +339,7 @@ beforeEach(() => {
     countResult = 0;
     maintainResult = false;
     claimAllowed = true;
+    createKinds.length = 0;
     (global as any).Hydro.module.problemSearch = {};
 });
 
@@ -435,6 +449,105 @@ describe('P2.11 authoritative problem route domain', () => {
         };
         await files.postUploadFile('forged', 'config.yaml', 'testdata');
         expect(calls.renameFile[0][0]).to.equal('system');
+    });
+});
+
+describe('P3.9 basic objective HTTP boundaries', () => {
+    it('creates a hidden single problem in the authoritative domain with a fixed URL kind', async () => {
+        const handler = makeHandler(ProblemCreateSingleHandler, {});
+        await handler.post(
+            'forged', 'Single', 'Statement', '', 3, ['tag'], 'single',
+            JSON.stringify({ main: { options: ['A text', 'B text'], answerIndex: 1 } }),
+        );
+        expect(createKinds).to.deep.equal(['single']);
+        expect(calls.add[0][0]).to.equal('system');
+        expect(calls.add[0][6].structuredConfig).to.deep.equal({
+            main: { options: ['A text', 'B text'], answerIndex: 1 },
+        });
+        expect(handler.response.body.hidden).to.equal(true);
+    });
+
+    it('rejects a create-route kind mismatch before creating anything', async () => {
+        const handler = makeHandler(ProblemCreateSingleHandler, {});
+        const error = await captureFailure(() => handler.post(
+            'forged', 'Single', 'Statement', '', 0, [], 'multi',
+            JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
+        ));
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.add).to.deep.equal([]);
+    });
+
+    it('saves metadata, content, and config through one revision-checked structured write', async () => {
+        const handler = makeHandler(ProblemEditHandler, {});
+        handler.pdoc = {
+            domainId: 'system', docId: 7, pid: 'P7', problemKind: 'multi', structureRevision: 4,
+        };
+        await handler.post(
+            'forged', 'P7', 'Multi', 'Statement', 'P7', false, ['tag'], 2,
+            false, 4, 'multi',
+            JSON.stringify({
+                main: { options: ['A', 'B'], answerIndexes: [0], partialCreditPercent: 25 },
+            }),
+        );
+        expect(calls.structuredSaves).to.have.length(1);
+        expect(calls.structuredSaves[0]).to.deep.include({
+            domainId: 'system', pid: 7, problemKind: 'multi', expectedStructureRevision: 4,
+        });
+        expect(calls.structuredSaves[0].metadata).to.deep.include({ title: 'Multi', hidden: false });
+        expect(calls.edit).to.deep.equal([]);
+    });
+
+    it('updates only title, tags, and visibility after an objective problem is structurally locked', async () => {
+        const handler = makeHandler(ProblemEditHandler, {});
+        handler.pdoc = {
+            domainId: 'system', docId: 7, pid: 'P7', problemKind: 'multi',
+            structureRevision: 5, structureLockedAt: new Date(), content: 'Original statement',
+        };
+        await handler.post(
+            'forged', 'P7', 'Renamed', undefined, undefined, true, ['new-tag'],
+            undefined, undefined, undefined, '', '', true,
+        );
+        expect(calls.structuredMetadataSaves).to.have.length(1);
+        expect(calls.structuredMetadataSaves[0]).to.deep.include({
+            domainId: 'system', pid: 7, actor: 42, problemKind: 'multi',
+            metadata: { title: 'Renamed', hidden: true, tag: ['new-tag'] },
+        });
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.structuredSaves).to.deep.equal([]);
+    });
+
+    it('rejects structural fields smuggled into an objective metadata-only save', async () => {
+        const handler = makeHandler(ProblemEditHandler, {});
+        handler.pdoc = {
+            domainId: 'system', docId: 7, pid: 'P7', problemKind: 'multi',
+            structureRevision: 5, structureLockedAt: new Date(), content: 'Original statement',
+        };
+        const error = await captureFailure(() => handler.post(
+            'forged', 'P7', 'Renamed', 'Changed statement', undefined, true, ['new-tag'],
+            undefined, undefined, undefined, '', '', true,
+        ));
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.structuredMetadataSaves).to.deep.equal([]);
+        expect(calls.structuredSaves).to.deep.equal([]);
+    });
+
+    it('serves the dedicated editor from stable raw config without returning derived answers', async () => {
+        const handler = makeHandler(ProblemEditHandler, {});
+        handler.pdoc = {
+            domainId: 'system', docId: 7, pid: 'P7', owner: 42, problemKind: 'blank',
+            data: [], additional_file: [], tag: [], content: '',
+        };
+        maintainableResults = [{
+            config: {
+                type: 'objective', main: { answer: 'Case' },
+                answers: { main: ['Case', 100, { kind: 'blank' }] },
+            },
+        }];
+        await handler.get();
+        expect(handler.response.template).to.equal('problem_edit_blank.html');
+        expect(handler.response.body.structuredConfig).to.deep.equal({ main: { answer: 'Case' } });
+        expect(handler.response.body.structuredConfig).not.to.have.property('answers');
     });
 });
 

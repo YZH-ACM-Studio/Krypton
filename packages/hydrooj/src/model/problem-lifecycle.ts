@@ -15,6 +15,26 @@ export const PROBLEM_STRUCTURAL_FIELDS = new Set([
     'content', 'config', 'problemKind', 'data', 'additional_file', 'reference',
 ]);
 
+export function problemCreateChangedFields(
+    problemKind: ProblemKind,
+    created: { pid?: string, difficulty?: number, reference?: unknown },
+): string[] {
+    return [
+        'title', 'content', 'owner', 'tag', 'hidden', 'problemKind',
+        'structureRevision', 'sort', 'data', 'additional_file',
+        ...(created.pid ? ['pid'] : []),
+        ...(created.difficulty ? ['difficulty'] : []),
+        ...(created.reference ? ['reference'] : []),
+        ...(problemKind !== 'programming' ? ['config'] : []),
+    ];
+}
+
+export function problemEditAuditedFields($set: Record<string, unknown>): string[] {
+    const fields = Object.keys($set);
+    if (Object.hasOwn($set, 'pid')) fields.push('sort');
+    return fields;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
     const prototype = Object.getPrototypeOf(value);
@@ -37,6 +57,95 @@ function assertNoSecondaryStatement(value: unknown, path = 'config'): void {
     }
 }
 
+function normalizeOptions(value: unknown): string[] {
+    if (!Array.isArray(value) || value.length < 2 || value.length > 26) {
+        throw new ValidationError('config', null, '选项数量必须为 2–26');
+    }
+    const options = value.map((option) => {
+        if (typeof option !== 'string' || !option.trim()) {
+            throw new ValidationError('config', null, '选项不能为空');
+        }
+        return option.trim();
+    });
+    if (new Set(options).size !== options.length) {
+        throw new ValidationError('config', null, '选项内容不能重复');
+    }
+    return options;
+}
+
+function optionKey(index: number): string {
+    return String.fromCharCode(65 + index);
+}
+
+function normalizeBasicObjective(kind: ProblemKind, main: Record<string, unknown>): Record<string, unknown> {
+    if (kind === 'single') {
+        const options = normalizeOptions(main.options);
+        if (!Number.isSafeInteger(main.answerIndex) || Number(main.answerIndex) < 0
+            || Number(main.answerIndex) >= options.length) {
+            throw new ValidationError('config', null, '单选题正确项必须属于选项');
+        }
+        const answerIndex = Number(main.answerIndex);
+        return {
+            type: 'objective', score: 100,
+            main: { options, answerIndex },
+            answers: { main: [optionKey(answerIndex), 100, { kind: 'single', choices: options }] },
+            options: { main: options },
+        };
+    }
+    if (kind === 'true_false') {
+        if (typeof main.answer !== 'boolean') {
+            throw new ValidationError('config', null, '判断题答案必须为正确或错误');
+        }
+        const options = ['正确', '错误'];
+        return {
+            type: 'objective', score: 100,
+            main: { answer: main.answer },
+            answers: {
+                main: [main.answer ? 'A' : 'B', 100, {
+                    kind: 'single', choices: options, presentation: 'truefalse',
+                }],
+            },
+            options: { main: options },
+        };
+    }
+    if (kind === 'blank') {
+        if (typeof main.answer !== 'string' || !main.answer.trim()) {
+            throw new ValidationError('config', null, '填空题可接受答案不能为空');
+        }
+        return {
+            type: 'objective', score: 100,
+            main: { answer: main.answer },
+            answers: { main: [main.answer, 100, { kind: 'blank' }] },
+        };
+    }
+    const options = normalizeOptions(main.options);
+    if (!Array.isArray(main.answerIndexes) || !main.answerIndexes.length
+        || main.answerIndexes.some((index) => !Number.isSafeInteger(index)
+            || Number(index) < 0 || Number(index) >= options.length)) {
+        throw new ValidationError('config', null, '多选题正确项必须是非空选项子集');
+    }
+    const answerIndexes = Array.from(new Set(main.answerIndexes.map(Number))).sort((a, b) => a - b);
+    if (answerIndexes.length !== main.answerIndexes.length) {
+        throw new ValidationError('config', null, '多选题正确项不能重复');
+    }
+    const rawPartialCreditPercent = main.partialCreditPercent ?? 0;
+    if (!Number.isSafeInteger(rawPartialCreditPercent)
+        || Number(rawPartialCreditPercent) < 0 || Number(rawPartialCreditPercent) > 100) {
+        throw new ValidationError('config', null, '多选题部分分比例必须是 0–100 整数');
+    }
+    const partialCreditPercent = Number(rawPartialCreditPercent);
+    return {
+        type: 'objective', score: 100,
+        main: { options, answerIndexes, partialCreditPercent },
+        answers: {
+            main: [answerIndexes.map(optionKey), 100, {
+                kind: 'multi', choices: options, partialCreditPercent,
+            }],
+        },
+        options: { main: options },
+    };
+}
+
 export function normalizeStructuredProblemConfig(
     kind: ProblemKind,
     config: unknown,
@@ -52,6 +161,10 @@ export function normalizeStructuredProblemConfig(
         throw new ValidationError('config', null, '共享测试数据尚未实现');
     }
     assertNoSecondaryStatement(config);
+    if (['single', 'multi', 'true_false', 'blank'].includes(kind)) {
+        if (!isPlainObject(config.main)) throw new ValidationError('config', null, 'main 必须是对象');
+        return normalizeBasicObjective(kind, config.main);
+    }
     return { ...config, score: 100 };
 }
 

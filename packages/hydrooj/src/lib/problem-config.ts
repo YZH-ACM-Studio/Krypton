@@ -33,7 +33,14 @@ export function parseProblemConfigObject(pdoc: { config?: unknown } | null | und
 export function unpackAnswerEntry(entry: AnswerEntry): {
     stdAns: string | string[];
     score: number;
-    meta: { kind?: QuestionKind, prompt?: string, type?: QuestionKind, choices?: string[] };
+    meta: {
+        kind?: QuestionKind;
+        prompt?: string;
+        type?: QuestionKind;
+        choices?: string[];
+        presentation?: string;
+        partialCreditPercent?: number;
+    };
 } {
     const stdAns = entry[0];
     const score = entry[1];
@@ -88,6 +95,7 @@ export interface ClientQuestion {
     /** 选项文本（A/B/C… 按下标映射）；来源 meta.choices ?? config.options[key] */
     choices?: string[];
     score: number;
+    presentation?: string;
 }
 
 /** 自然序：'2' < '10'，'1-2' 按段比较。 */
@@ -132,6 +140,7 @@ export function clientQuestions(
             ?? (Array.isArray(config.options?.[key]) && config.options[key].length ? config.options[key] : undefined);
         const q: ClientQuestion = { key, kind, score: Number(entry[1]) || 0 };
         if (typeof meta.prompt === 'string' && meta.prompt) q.prompt = meta.prompt;
+        if (meta.presentation === 'truefalse') q.presentation = 'truefalse';
         if (choices) q.choices = choices.map((c) => String(c ?? ''));
         out.push(q);
     }

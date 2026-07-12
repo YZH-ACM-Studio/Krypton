@@ -20,6 +20,9 @@ import {
   LostPasswordWithCodePage,
   RegisterMailSentPage, RegisterPage, UserDeletePendingPage } from '@/pages/auth';
 import { AdminAuthTokenPage } from '@/pages/authtoken';
+import {
+  BlankProblemEditorPage, MultiProblemEditorPage, SingleProblemEditorPage, TrueFalseProblemEditorPage,
+} from '@/pages/basic-objective-editors';
 import { BlogDetailPage, BlogEditPage, BlogMainPage } from '@/pages/blog';
 import { ClientRequiredNoticePage } from '@/pages/client-required-notice';
 import {
@@ -127,6 +130,10 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'problem_submit.html': ProblemSubmitPage,
   'problem_hack.html': ProblemHackPage,
   'problem_edit.html': ProblemEditPage,
+  'problem_edit_single.html': SingleProblemEditorPage,
+  'problem_edit_multi.html': MultiProblemEditorPage,
+  'problem_edit_true_false.html': TrueFalseProblemEditorPage,
+  'problem_edit_blank.html': BlankProblemEditorPage,
   'problem_config.html': ProblemConfigPage,
   'problem_files.html': ProblemFilesPage,
   'problem_solution.html': ProblemSolutionPage,

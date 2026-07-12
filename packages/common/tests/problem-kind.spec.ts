@@ -1,6 +1,8 @@
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
 import {
+    BASIC_OBJECTIVE_KIND,
+    BASIC_OBJECTIVE_KINDS,
     effectiveProblemKind,
     parseProblemKind,
     parseProblemKindSlug,
@@ -22,6 +24,17 @@ describe('problem kind contract', () => {
         for (const kind of PROBLEM_KINDS) {
             expect(parseProblemKindSlug(problemKindToSlug(kind))).to.equal(kind);
         }
+    });
+
+    it('provides the shared basic-objective subset without redefining kind or slug pairs', () => {
+        expect(BASIC_OBJECTIVE_KINDS).to.deep.equal([
+            BASIC_OBJECTIVE_KIND.single,
+            BASIC_OBJECTIVE_KIND.multi,
+            BASIC_OBJECTIVE_KIND.trueFalse,
+            BASIC_OBJECTIVE_KIND.blank,
+        ]);
+        expect(BASIC_OBJECTIVE_KINDS.map(problemKindToSlug))
+            .to.deep.equal(['single', 'multi', 'true-false', 'blank']);
     });
 
     it('interprets a missing legacy kind as programming without mutating it', () => {

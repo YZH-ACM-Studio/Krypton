@@ -9,6 +9,10 @@ import { Filter, ObjectId } from 'mongodb';
 import { nanoid } from 'nanoid';
 import sanitize from 'sanitize-filename';
 import Schema from 'schemastery';
+import {
+    BASIC_OBJECTIVE_KIND, type BasicObjectiveKind, effectiveProblemKind,
+    isBasicObjectiveKind, problemKindToSlug,
+} from '@hydrooj/common';
 import parser from '@hydrooj/utils/lib/search';
 import { randomstring, sortFiles, streamToBuffer } from '@hydrooj/utils/lib/utils';
 import type { Context } from '../context';
@@ -22,6 +26,7 @@ import {
 import {
     ProblemDoc, ProblemSearchOptions, ProblemStatusDoc, RecordDoc, User,
 } from '../interface';
+import { parseProblemConfigObject } from '../lib/problem-config';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
@@ -40,6 +45,32 @@ import {
 import { ContestDetailBaseHandler } from './contest';
 
 export const parseCategory = (value: string) => value.replace(/，/g, ',').split(',').map((e) => e.trim());
+
+const BASIC_OBJECTIVE_TEMPLATES: Record<BasicObjectiveKind, string> = {
+    [BASIC_OBJECTIVE_KIND.single]: 'problem_edit_single.html',
+    [BASIC_OBJECTIVE_KIND.multi]: 'problem_edit_multi.html',
+    [BASIC_OBJECTIVE_KIND.trueFalse]: 'problem_edit_true_false.html',
+    [BASIC_OBJECTIVE_KIND.blank]: 'problem_edit_blank.html',
+};
+
+function defaultBasicObjectiveConfig(kind: BasicObjectiveKind): Record<string, unknown> {
+    if (kind === BASIC_OBJECTIVE_KIND.single) return { main: { options: ['', ''], answerIndex: 0 } };
+    if (kind === BASIC_OBJECTIVE_KIND.multi) {
+        return { main: { options: ['', ''], answerIndexes: [0], partialCreditPercent: 0 } };
+    }
+    if (kind === BASIC_OBJECTIVE_KIND.trueFalse) return { main: { answer: true } };
+    return { main: { answer: '' } };
+}
+
+function parseStructuredConfigInput(raw: string): unknown {
+    try {
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('config must be an object');
+        return parsed;
+    } catch (error) {
+        throw new ValidationError('structuredConfig', null, error.message);
+    }
+}
 
 function exactProblemFilter(id: string | number): Filter<ProblemDoc> {
     return Number.isSafeInteger(+id) ? { docId: +id } : { pid: id as string };
@@ -712,31 +743,82 @@ export class ProblemEditHandler extends ProblemManageHandler {
         const rawPdoc = await requireStableMaintainableProblem(
             this.user, this.pdoc, ['config'] as any, true,
         );
+        const problemKind = effectiveProblemKind(this.pdoc);
+        if (isBasicObjectiveKind(problemKind)) {
+            const config = parseProblemConfigObject(rawPdoc);
+            if (!config?.main) throw new ValidationError('config', null, '结构化题缺少 main 配置');
+            this.response.body.editorProblemKind = problemKind;
+            this.response.body.structuredConfig = { main: config.main };
+            this.response.template = BASIC_OBJECTIVE_TEMPLATES[problemKind];
+            return;
+        }
         this.response.body.configRaw = typeof rawPdoc?.config === 'string' ? rawPdoc.config : '';
         this.response.template = 'problem_edit.html';
     }
 
     @route('pid', Types.ProblemId)
     @post('title', Types.Title)
-    @post('content', Types.Content)
+    @post('content', Types.Content, true)
     @post('pid', Types.ProblemId, true, (i) => /^(?:[a-z0-9]{1,10}-)?[a-z][a-z0-9]*$/i.test(i))
     @post('hidden', Types.Boolean)
     @post('tag', Types.Content, true, null, parseCategory)
     @post('difficulty', Types.PositiveInt, (i) => +i <= 10, true)
     @post('lockHidden', Types.Boolean, true)
     @post('expectedStructureRevision', Types.PositiveInt, true)
+    @post('editorProblemKind', Types.String, true)
+    @post('structuredConfig', Types.Content, true)
+    @post('metadataOnly', Types.Boolean, true)
     async post(
-        _domainId: string, pid: string | number, title: string, content: string,
-        newPid: string | number = '', hidden = false, tag: string[] = [], difficulty = 0,
-        lockHidden = false, expectedStructureRevision?: number,
+        _domainId: string, pid: string | number, title: string, content: string | undefined,
+        newPid: string | number | undefined, hidden = false, tag: string[] = [], difficulty?: number,
+        lockHidden?: boolean, expectedStructureRevision?: number,
+        editorProblemKind = '', structuredConfig = '', metadataOnly = false,
     ) {
         const domainId = this.pdoc.domainId;
+        const problemKind = effectiveProblemKind(this.pdoc);
+        if (metadataOnly) {
+            if (!isBasicObjectiveKind(problemKind)
+                || content !== undefined || newPid !== undefined || difficulty !== undefined
+                || lockHidden !== undefined || expectedStructureRevision !== undefined
+                || editorProblemKind || structuredConfig) {
+                throw new ValidationError('metadataOnly');
+            }
+            const pdoc = await problem.saveStructuredProblemMetadata({
+                domainId,
+                pid: this.pdoc.docId,
+                actor: this.user._id,
+                user: this.user,
+                problemKind,
+                metadata: { title, hidden, tag: tag ?? [] },
+            });
+            this.response.redirect = this.url('problem_detail', { pid: this.pdoc.pid || pdoc.docId });
+            return;
+        }
+        if (content === undefined) throw new ValidationError('content');
         if (typeof newPid !== 'string') newPid = `P${newPid}`;
         if (newPid !== this.pdoc.pid && await problem.get(domainId, newPid)) throw new ProblemAlreadyExistError(newPid);
         const $update: Partial<ProblemDoc> = {
-            title, content, pid: newPid, hidden, tag: tag ?? [], difficulty, html: false,
+            title, content, pid: newPid, hidden, tag: tag ?? [], difficulty: difficulty ?? 0, html: false,
             lockHidden: !!lockHidden,
         };
+        if (isBasicObjectiveKind(problemKind)) {
+            if (editorProblemKind !== problemKind) throw new ValidationError('editorProblemKind');
+            if (!structuredConfig) throw new ValidationError('structuredConfig');
+            const pdoc = await problem.saveStructuredProblem({
+                domainId,
+                pid: this.pdoc.docId,
+                actor: this.user._id,
+                user: this.user,
+                expectedStructureRevision,
+                problemKind,
+                content,
+                config: parseStructuredConfigInput(structuredConfig),
+                metadata: $update,
+            });
+            this.response.redirect = this.url('problem_detail', { pid: newPid || pdoc.docId });
+            return;
+        }
+        if (editorProblemKind || structuredConfig) throw new ValidationError('problemKind');
         const pdoc = await problem.editAuthorized(
             domainId,
             this.pdoc.docId,
@@ -747,6 +829,74 @@ export class ProblemEditHandler extends ProblemManageHandler {
         );
         this.response.redirect = this.url('problem_detail', { pid: newPid || pdoc.docId });
     }
+}
+
+abstract class BasicObjectiveCreateHandler extends Handler {
+    abstract problemKind: BasicObjectiveKind;
+
+    async get() {
+        this.response.template = BASIC_OBJECTIVE_TEMPLATES[this.problemKind];
+        this.response.body = {
+            page_name: `problem_create_${this.problemKind}`,
+            editorProblemKind: this.problemKind,
+            structuredConfig: defaultBasicObjectiveConfig(this.problemKind),
+            pdoc: { hidden: true, problemKind: this.problemKind },
+        };
+    }
+
+    @post('title', Types.Title)
+    @post('content', Types.Content)
+    @post('pid', Types.ProblemId, true, (i) => /^(?:[a-z0-9]{1,10}-)?[a-z][a-z0-9]*$/i.test(i))
+    @post('difficulty', Types.PositiveInt, (i) => +i <= 10, true)
+    @post('tag', Types.Content, true, null, parseCategory)
+    @post('editorProblemKind', Types.String)
+    @post('structuredConfig', Types.Content)
+    async post(
+        _domainId: string, title: string, content: string, pid: string | number = '',
+        difficulty = 0, tag: string[] = [], editorProblemKind = '', structuredConfig = '',
+    ) {
+        const domainId = String(this.domain?._id);
+        await problem.refreshProblemAcl(this.user, domainId);
+        problem.assertProblemAclDomain(this.user, domainId);
+        if (editorProblemKind !== this.problemKind) {
+            throw new ValidationError('editorProblemKind');
+        }
+        if (typeof pid !== 'string') pid = `P${pid}`;
+        if (pid && await problem.get(domainId, pid)) throw new ProblemAlreadyExistError(pid);
+        const docId = await problem.createProblemByKind(
+            this.problemKind,
+            domainId,
+            pid,
+            title,
+            content,
+            this.user._id,
+            tag ?? [],
+            {
+                difficulty,
+                structuredConfig: parseStructuredConfigInput(structuredConfig),
+            },
+        );
+        this.response.body = {
+            pid: pid || docId,
+            hidden: true,
+            problemKind: this.problemKind,
+            structureRevision: 1,
+        };
+        this.response.redirect = this.url('problem_edit', { pid: pid || docId });
+    }
+}
+
+export class ProblemCreateSingleHandler extends BasicObjectiveCreateHandler {
+    problemKind = BASIC_OBJECTIVE_KIND.single;
+}
+export class ProblemCreateMultiHandler extends BasicObjectiveCreateHandler {
+    problemKind = BASIC_OBJECTIVE_KIND.multi;
+}
+export class ProblemCreateTrueFalseHandler extends BasicObjectiveCreateHandler {
+    problemKind = BASIC_OBJECTIVE_KIND.trueFalse;
+}
+export class ProblemCreateBlankHandler extends BasicObjectiveCreateHandler {
+    problemKind = BASIC_OBJECTIVE_KIND.blank;
 }
 
 export class ProblemConfigHandler extends ProblemManageHandler {
@@ -1360,6 +1510,22 @@ export async function apply(ctx: Context) {
     ctx.Route('problem_statistics', '/p/:pid/stat', ProblemStatisticsHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_mine', '/problem/mine', ProblemMineHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('problem_create', '/problem/create', ProblemCreateHandler, PERM.PERM_CREATE_PROBLEM);
+    ctx.Route(
+        'problem_create_single', `/problem/create/${problemKindToSlug(BASIC_OBJECTIVE_KIND.single)}`,
+        ProblemCreateSingleHandler, PERM.PERM_CREATE_PROBLEM,
+    );
+    ctx.Route(
+        'problem_create_multi', `/problem/create/${problemKindToSlug(BASIC_OBJECTIVE_KIND.multi)}`,
+        ProblemCreateMultiHandler, PERM.PERM_CREATE_PROBLEM,
+    );
+    ctx.Route(
+        'problem_create_true_false', `/problem/create/${problemKindToSlug(BASIC_OBJECTIVE_KIND.trueFalse)}`,
+        ProblemCreateTrueFalseHandler, PERM.PERM_CREATE_PROBLEM,
+    );
+    ctx.Route(
+        'problem_create_blank', `/problem/create/${problemKindToSlug(BASIC_OBJECTIVE_KIND.blank)}`,
+        ProblemCreateBlankHandler, PERM.PERM_CREATE_PROBLEM,
+    );
     await ctx.inject(['api'], ({ api }) => {
         api.provide(ProblemApi);
     });

@@ -12,6 +12,15 @@ export const PROBLEM_KIND_TO_SLUG = {
 export type ProblemKind = keyof typeof PROBLEM_KIND_TO_SLUG;
 export type ProblemKindSlug = typeof PROBLEM_KIND_TO_SLUG[ProblemKind];
 
+export const BASIC_OBJECTIVE_KIND = Object.freeze({
+    single: 'single',
+    multi: 'multi',
+    trueFalse: 'true_false',
+    blank: 'blank',
+} as const satisfies Record<string, ProblemKind>);
+export type BasicObjectiveKind = typeof BASIC_OBJECTIVE_KIND[keyof typeof BASIC_OBJECTIVE_KIND];
+export const BASIC_OBJECTIVE_KINDS = Object.freeze(Object.values(BASIC_OBJECTIVE_KIND) as BasicObjectiveKind[]);
+
 export const PROBLEM_KINDS = Object.freeze(Object.keys(PROBLEM_KIND_TO_SLUG) as ProblemKind[]);
 export const PROBLEM_KIND_SLUGS = Object.freeze(Object.values(PROBLEM_KIND_TO_SLUG) as ProblemKindSlug[]);
 
@@ -33,6 +42,10 @@ export function parseProblemKindSlug(value: unknown): ProblemKind {
 
 export function problemKindToSlug(value: ProblemKind): ProblemKindSlug {
     return PROBLEM_KIND_TO_SLUG[parseProblemKind(value)];
+}
+
+export function isBasicObjectiveKind(value: ProblemKind): value is BasicObjectiveKind {
+    return (BASIC_OBJECTIVE_KINDS as readonly ProblemKind[]).includes(value);
 }
 
 /** Missing means a legacy programming problem. Unknown explicit values are corrupt and fail fast. */

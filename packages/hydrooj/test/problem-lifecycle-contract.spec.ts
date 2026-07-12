@@ -29,6 +29,13 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(insert).to.be.greaterThan(lock);
     });
 
+    it('passes the private raw objective config to the judge without exposing it through page reads', () => {
+        const source = readFileSync(resolve(root, 'src/model/record.ts'), 'utf8');
+        expect(source).to.include('problem.get(domainId, rdocs[0].pid, undefined, true)');
+        expect(source).to.include('const judgeConfig = parseProblemConfigObject(pdoc)');
+        expect(source).to.include('...judgeConfig');
+    });
+
     it('forces new problems to be hidden and explicitly typed', () => {
         const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
         expect(source).to.include('const problemKind = parseProblemKind(meta?.problemKind)');
@@ -46,5 +53,27 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
         expect(source.match(/assertDirectStructureWritable\(domainId, pid, true\)/g)).to.have.length(3);
         expect(source).to.include("key === 'data' && doc.problemKind !== undefined");
+    });
+
+    it('audits successful metadata-only saves for locked structured problems', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const start = source.indexOf('static async saveStructuredProblemMetadata');
+        const end = source.indexOf('static async archiveProblem', start);
+        const method = source.slice(start, end);
+        expect(start).to.be.greaterThan(-1);
+        expect(method).to.include('await ProblemModel.editAuthorizedWithSnapshot({');
+        expect(method).to.include("type: 'problem.metadata.save'");
+        expect(method.indexOf('await OplogModel.add('))
+            .to.be.greaterThan(method.indexOf('await ProblemModel.editAuthorizedWithSnapshot({'));
+        expect(method).to.include('auditedFields.filter((field) => !isEqual(before[field], result[field]))');
+    });
+
+    it('records only actual fields changed by a structured save', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const start = source.indexOf('static async saveStructuredProblem(input');
+        const end = source.indexOf('static async saveStructuredProblemMetadata', start);
+        const method = source.slice(start, end);
+        expect(method).to.include('auditedFields.filter((field) => !isEqual(before[field], result[field]))');
+        expect(method).not.to.include("changedFields: ['title'");
     });
 });

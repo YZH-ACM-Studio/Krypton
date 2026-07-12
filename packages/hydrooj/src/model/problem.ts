@@ -6,7 +6,7 @@ import { Readable } from 'stream';
 import { Entry, ZipReader } from '@zip.js/zip.js';
 import fs from 'fs-extra';
 import yaml from 'js-yaml';
-import { keyBy, pick } from 'lodash';
+import { isEqual, keyBy, pick } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import {
     parseProblemKind, ProblemConfigFile, type ProblemKind, ProblemType,
@@ -57,6 +57,8 @@ import {
     hasStartedProblemContainer,
     normalizeStructuredProblemConfig,
     PROBLEM_STRUCTURAL_FIELDS,
+    problemCreateChangedFields,
+    problemEditAuditedFields,
     problemReferenceCount,
 } from './problem-lifecycle';
 import RecordModel from './record';
@@ -124,6 +126,7 @@ interface ProblemCreateOptions {
     hidden?: boolean;
     reference?: { domainId: string, pid: number };
     problemKind: ProblemKind;
+    structuredConfig?: unknown;
 }
 
 const PROJECTION_BASE: Field[] = [
@@ -273,6 +276,9 @@ export class ProblemModel {
         if (pid) args.pid = pid;
         if (meta.difficulty) args.difficulty = meta.difficulty;
         if (meta.reference) args.reference = meta.reference;
+        if (problemKind !== 'programming') {
+            args.config = normalizeStructuredProblemConfig(problemKind, meta.structuredConfig) as any;
+        }
         await bus.parallel('problem/before-add', domainId, content, owner, docId, args);
         const result = await document.add(domainId, content, owner, document.TYPE_PROBLEM, docId, null, null, args);
         args.content = content;
@@ -287,7 +293,11 @@ export class ProblemModel {
             problemId: result,
             problemKind,
             revision: 1,
-            changedFields: ['title', 'content', 'tag', 'hidden', 'problemKind'],
+            changedFields: problemCreateChangedFields(problemKind, {
+                pid: args.pid,
+                difficulty: args.difficulty,
+                reference: args.reference,
+            }),
             time: new Date(),
         } as any);
         return result;
@@ -358,6 +368,48 @@ export class ProblemModel {
         if (!current?.structureLockedAt) throw new ProblemStructureConflictError(pid);
     }
 
+    private static async editAuthorizedWithSnapshot(input: {
+        domainId: string;
+        pid: number;
+        user: ProblemAclUser;
+        operation: string;
+        $set: Partial<ProblemDoc>;
+        expectedProblemKind: ProblemKind;
+        expectedStructureRevision?: number;
+    }): Promise<{ before: ProblemDoc, result: ProblemDoc, auditedFields: string[] }> {
+        const auditedFields = problemEditAuditedFields(input.$set as Record<string, unknown>);
+        return ProblemModel.withAuthorizedWriteClaim(
+            input.domainId,
+            input.pid,
+            input.user,
+            input.operation,
+            async (claim) => {
+                const projection = Object.fromEntries([
+                    ...new Set([...auditedFields, 'problemKind', 'structureRevision']),
+                ].map((field) => [field, 1]));
+                const before = await document.coll.findOne({
+                    domainId: input.domainId,
+                    docType: document.TYPE_PROBLEM,
+                    docId: input.pid,
+                    'aclWriteClaim.requestId': claim.requestId,
+                    'aclWriteClaim.actor': claim.actor,
+                    'aclWriteClaim.state': 'active',
+                }, { projection }) as ProblemDoc | null;
+                if (!before) {
+                    throw new Error(`problem write claim ownership lost before snapshot: ${claim.requestId}`);
+                }
+                if (parseProblemKind(before.problemKind) !== input.expectedProblemKind) {
+                    throw new ValidationError('problemKind');
+                }
+                const result = await ProblemModel.editWithClaim(claim, input.$set, {}, {
+                    expectedStructureRevision: input.expectedStructureRevision,
+                    requireExpectedStructureRevision: true,
+                });
+                return { before, result, auditedFields };
+            },
+        );
+    }
+
     static async saveStructuredProblem(input: {
         domainId: string;
         pid: number;
@@ -367,17 +419,24 @@ export class ProblemModel {
         problemKind: ProblemKind;
         content: string;
         config: unknown;
+        metadata?: Partial<Pick<
+            ProblemDoc,
+            'title' | 'pid' | 'hidden' | 'tag' | 'difficulty' | 'lockHidden' | 'html'
+        >>;
     }): Promise<ProblemDoc> {
         const problemKind = parseProblemKind(input.problemKind);
         const config = normalizeStructuredProblemConfig(problemKind, input.config);
-        const result = await ProblemModel.editAuthorized(
-            input.domainId,
-            input.pid,
-            { content: input.content, config, problemKind } as any,
-            input.user,
-            {},
-            { expectedStructureRevision: input.expectedStructureRevision },
-        );
+        const $set = { ...input.metadata, content: input.content, config, problemKind } as any;
+        const { before, result, auditedFields } = await ProblemModel.editAuthorizedWithSnapshot({
+            domainId: input.domainId,
+            pid: input.pid,
+            user: input.user,
+            operation: 'structure-save',
+            $set,
+            expectedProblemKind: problemKind,
+            expectedStructureRevision: input.expectedStructureRevision,
+        });
+        const changedFields = auditedFields.filter((field) => !isEqual(before[field], result[field]));
         await OplogModel.add({
             type: 'problem.structure.save',
             domainId: input.domainId,
@@ -385,7 +444,39 @@ export class ProblemModel {
             problemId: input.pid,
             problemKind,
             revision: result.structureRevision,
-            changedFields: ['content', 'config'],
+            changedFields,
+            time: new Date(),
+        } as any);
+        return result;
+    }
+
+    static async saveStructuredProblemMetadata(input: {
+        domainId: string;
+        pid: number;
+        actor: number;
+        user: ProblemAclUser;
+        problemKind: ProblemKind;
+        metadata: Pick<ProblemDoc, 'title' | 'hidden' | 'tag'>;
+    }): Promise<ProblemDoc> {
+        const problemKind = parseProblemKind(input.problemKind);
+        if (problemKind === 'programming') throw new ValidationError('problemKind');
+        const { before, result, auditedFields } = await ProblemModel.editAuthorizedWithSnapshot({
+            domainId: input.domainId,
+            pid: input.pid,
+            user: input.user,
+            operation: 'metadata-save',
+            $set: input.metadata,
+            expectedProblemKind: problemKind,
+        });
+        const changedFields = auditedFields.filter((field) => !isEqual(before[field], result[field]));
+        await OplogModel.add({
+            type: 'problem.metadata.save',
+            domainId: input.domainId,
+            operator: input.actor,
+            problemId: input.pid,
+            problemKind,
+            revision: result.structureRevision,
+            changedFields,
             time: new Date(),
         } as any);
         return result;
@@ -897,7 +988,7 @@ export class ProblemModel {
             original.content,
             original.owner,
             original.tag,
-            { difficulty: original.difficulty },
+            { difficulty: original.difficulty, structuredConfig: original.config },
         );
         const sourcePrefix = `problem/${domainId}/${_id}/`;
         const targetPrefix = `problem/${target}/${cloneId}/`;

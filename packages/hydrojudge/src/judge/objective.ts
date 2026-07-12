@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { STATUS } from '@hydrooj/common';
+import { gradeObjectiveAnswer, STATUS } from '@hydrooj/common';
 import { fs, yaml } from '@hydrooj/utils';
 import { FormatError } from '../error';
 import { Context } from './interface';
@@ -11,7 +11,7 @@ export async function judge({
     const answer = ('src' in code)
         ? await fs.readFile(code.src, 'utf-8')
         : ('content' in code)
-            ? code.content.toString().replace(/\r/g, '')
+            ? code.content.toString().replace(/\r\n/g, '\n')
             : '';
     let answers: { [x: string]: string | string[] } = {};
     try {
@@ -70,16 +70,11 @@ export async function judge({
         }
         const usrAns = answers[key].toString().trim();
         if (ansInfo instanceof Array) {
-            const fullScore = (+ansInfo[1]) || 0;
-            const stdAns = ansInfo[0];
-            if (stdAns instanceof Array) {
-                const stdSet = new Set(stdAns);
-                const ans = new Set(answers[key] instanceof Array ? answers[key] : [answers[key]]);
-                if (stdAns.length === ans.size && stdSet.isSupersetOf(ans)) report(STATUS.STATUS_ACCEPTED, fullScore, 'Correct');
-                else if (ans.size && stdSet.isSupersetOf(ans)) report(STATUS.STATUS_WRONG_ANSWER, Math.floor(fullScore / 2), 'Partially Correct');
-                else report(STATUS.STATUS_WRONG_ANSWER, 0, 'Incorrect');
-            } else if (stdAns.toString() === usrAns) report(STATUS.STATUS_ACCEPTED, fullScore, 'Correct');
-            else report(STATUS.STATUS_WRONG_ANSWER, 0, 'Incorrect');
+            const grade = gradeObjectiveAnswer(ansInfo, answers[key]);
+            if (grade.outcome === 'correct') report(STATUS.STATUS_ACCEPTED, grade.score, 'Correct');
+            else if (grade.outcome === 'partial') {
+                report(STATUS.STATUS_WRONG_ANSWER, grade.score, 'Partially Correct');
+            } else report(STATUS.STATUS_WRONG_ANSWER, 0, 'Incorrect');
         } else if (!ansInfo[usrAns]) report(STATUS.STATUS_WRONG_ANSWER, 0, 'Incorrect');
         else report(STATUS.STATUS_ACCEPTED, +ansInfo[usrAns] || 0, 'Correct');
     }

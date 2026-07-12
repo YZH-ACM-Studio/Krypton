@@ -1,8 +1,8 @@
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
 import {
-    inferQuestionKind, questionKindMap, spliceFillFunction, templateSourceHash,
-    validateRegions, problemFingerprint,
+    clientProblemConfig, inferQuestionKind, problemFingerprint, questionKindMap,
+    spliceFillFunction, templateSourceHash, validateRegions,
 } from '../src/lib/problem-config';
 
 // ─── inferQuestionKind ────────────────────────────────────────────────────
@@ -40,6 +40,27 @@ describe('questionKindMap', () => {
     });
 });
 
+describe('objective client config', () => {
+    it('exposes render data but never the canonical main answer or partial-credit config', () => {
+        const client = clientProblemConfig({
+            type: 'objective',
+            main: { options: ['Yes', 'No'], answerIndexes: [0], partialCreditPercent: 40 },
+            answers: {
+                main: [['A'], 100, {
+                    kind: 'multi', choices: ['Yes', 'No'], partialCreditPercent: 40,
+                }],
+            },
+            options: { main: ['Yes', 'No'] },
+        });
+        expect(client.questions).to.deep.equal([{
+            key: 'main', kind: 'multi', choices: ['Yes', 'No'], score: 100,
+        }]);
+        expect(client).not.to.have.property('answers');
+        expect(client).not.to.have.property('main');
+        expect(JSON.stringify(client)).not.to.include('partialCreditPercent');
+    });
+});
+
 // ─── spliceFillFunction ──────────────────────────────────────────────────
 
 describe('spliceFillFunction', () => {
@@ -64,7 +85,8 @@ describe('spliceFillFunction', () => {
     it('replaces a single-line region with single-line content', () => {
         const out = spliceFillFunction(template, { r1: 'return max(a, max(b, c));' });
         expect(out).to.include('return max(a, max(b, c));');
-        expect(out).to.not.include('return 0;');
+        const max3Body = out.slice(out.indexOf('int max3'), out.indexOf('int main'));
+        expect(max3Body).to.not.include('return 0;');
         // Ensure rest of source is preserved.
         expect(out).to.include('int main() { return 0; }');
     });

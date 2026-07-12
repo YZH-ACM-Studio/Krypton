@@ -9,6 +9,7 @@ import { Logger } from '@hydrooj/utils';
 import { Context } from '../context';
 import { ProblemNotFoundError } from '../error';
 import { JudgeMeta, RecordDoc } from '../interface';
+import { parseProblemConfigObject } from '../lib/problem-config';
 import db from '../service/db';
 import { MaybeArray, NumberKeys } from '../typeutils';
 import { ArgMethod, buildProjection, Time } from '../utils';
@@ -102,31 +103,33 @@ export default class RecordModel {
         if (!rdocs.length) return null;
         let source = `${domainId}/${rdocs[0].pid}`;
         let [pdoc] = await Promise.all([
-            problem.get(domainId, rdocs[0].pid),
+            problem.get(domainId, rdocs[0].pid, undefined, true),
             task.deleteMany({ rid: { $in: _rids } }),
         ]);
         if (!pdoc) throw new ProblemNotFoundError(domainId, rdocs[0].pid);
         if (pdoc.reference) {
-            pdoc = await problem.get(pdoc.reference.domainId, pdoc.reference.pid);
+            pdoc = await problem.get(pdoc.reference.domainId, pdoc.reference.pid, undefined, true);
             if (!pdoc) throw new ProblemNotFoundError(domainId, rdocs[0].pid);
             source = `${pdoc.domainId}/${pdoc.docId}`;
         }
+        const judgeConfig = parseProblemConfigObject(pdoc)
+            ?? (pdoc.config == null || (typeof pdoc.config === 'string' && !pdoc.config.trim()) ? {} : null);
+        if (!judgeConfig) throw new Error(`Cannot parse problem config: ${pdoc.domainId}/${pdoc.docId}`);
         meta = { ...meta, problemOwner: pdoc.owner };
         const ddoc = await DomainModel.get(pdoc.domainId);
         return await task.addMany(rdocs.map((rdoc) => {
             let type = 'judge';
-            if (typeof pdoc.config === 'string') throw new Error(pdoc.config);
-            if (pdoc.config.type === 'remote_judge' && rdoc.contest?.toHexString() !== '0'.repeat(24)) type = 'remotejudge';
+            if (judgeConfig.type === 'remote_judge' && rdoc.contest?.toHexString() !== '0'.repeat(24)) type = 'remotejudge';
             else if (meta?.type === 'generate') type = 'generate';
             return ({
                 ...rdoc,
-                ...(pdoc.config as any), // TODO deprecate this
+                ...judgeConfig, // TODO deprecate this
                 priority,
                 type,
                 rid: rdoc._id,
                 domainId,
                 config: {
-                    ...(pdoc.config as any),
+                    ...judgeConfig,
                     ...config,
                 },
                 data: pdoc.data,

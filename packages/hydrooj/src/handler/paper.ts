@@ -11,6 +11,7 @@
  */
 import yaml from 'js-yaml';
 import { ObjectId } from 'mongodb';
+import { gradeObjectiveAnswer } from '@hydrooj/common';
 import {
     clientProblemConfig,
     Context, Handler, NotFoundError, OplogModel, PaperDraftModel, param,
@@ -303,27 +304,7 @@ async function ensureExamModeAccess(handler: Handler, domainId: string, tid: Obj
 function gradeObjective(
     answerSpec: any, studentAnswer: any,
 ): 'correct' | 'wrong' | 'partial' {
-    if (!Array.isArray(answerSpec)) return 'wrong';
-    const expected = answerSpec[0];
-    if (Array.isArray(expected)) {
-        // Multi-select.
-        const exp = [...expected].sort();
-        const got = Array.isArray(studentAnswer)
-            ? [...studentAnswer].sort()
-            : (typeof studentAnswer === 'string' ? [studentAnswer] : []);
-        if (exp.length === got.length && exp.every((v, i) => v === got[i])) return 'correct';
-        // Partial credit if some expected match but not all
-        const setExp = new Set(exp);
-        const setGot = new Set(got);
-        const inter = [...setExp].filter((v) => setGot.has(v));
-        const wrong = [...setGot].filter((v) => !setExp.has(v));
-        if (inter.length > 0 && wrong.length === 0) return 'partial';
-        return 'wrong';
-    }
-    // Single-select or blank
-    const got = Array.isArray(studentAnswer) ? studentAnswer[0] : studentAnswer;
-    if (String(expected).trim() === String(got || '').trim()) return 'correct';
-    return 'wrong';
+    return gradeObjectiveAnswer(answerSpec, studentAnswer).outcome;
 }
 
 async function gradeObjectiveDraft(

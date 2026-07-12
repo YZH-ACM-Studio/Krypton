@@ -1,5 +1,6 @@
 export * from './datetime';
 export * from './lang';
+export * from './objective';
 export * from './permission';
 export * from './problem-kind';
 export * from './status';

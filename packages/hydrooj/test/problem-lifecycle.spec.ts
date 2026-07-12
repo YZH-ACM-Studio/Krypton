@@ -78,10 +78,29 @@ beforeEach(() => {
 });
 
 describe('P2.12 minimal problem lifecycle', () => {
+    it('records every created problem field that varies by create input', () => {
+        expect(lifecycle.problemCreateChangedFields('programming', {})).not.to.include('config');
+        expect(lifecycle.problemCreateChangedFields('multi', {
+            pid: 'M1', difficulty: 3, reference: { domainId: 'system', pid: 1 },
+        })).to.include.members(['pid', 'difficulty', 'reference', 'config']);
+        expect(lifecycle.problemCreateChangedFields('blank', {})).to.include('config');
+    });
+
+    it('audits the sort key derived when a custom problem id is set or cleared', () => {
+        expect(lifecycle.problemEditAuditedFields({ pid: 'NEW-ID' })).to.deep.equal(['pid', 'sort']);
+        expect(lifecycle.problemEditAuditedFields({ pid: '' })).to.deep.equal(['pid', 'sort']);
+        expect(lifecycle.problemEditAuditedFields({ title: 'Only metadata' })).to.deep.equal(['title']);
+    });
+
     it('keeps content as the only statement and fixes the structured score at 100', () => {
         expect(lifecycle.normalizeStructuredProblemConfig('single', {
-            main: { options: ['A', 'B'] }, score: 1,
-        })).to.deep.equal({ main: { options: ['A', 'B'] }, score: 100 });
+            main: { options: ['Alpha', 'Beta'], answerIndex: 1 }, score: 1,
+        })).to.deep.equal({
+            type: 'objective', score: 100,
+            main: { options: ['Alpha', 'Beta'], answerIndex: 1 },
+            answers: { main: ['B', 100, { kind: 'single', choices: ['Alpha', 'Beta'] }] },
+            options: { main: ['Alpha', 'Beta'] },
+        });
         for (const config of [
             {},
             { main: {}, meta: { prompt: 'duplicate' } },
@@ -89,6 +108,32 @@ describe('P2.12 minimal problem lifecycle', () => {
         ]) {
             expect(() => lifecycle.normalizeStructuredProblemConfig('single', config))
                 .to.throw(TestValidationError);
+        }
+    });
+
+    it('normalizes all basic single-problem objective kinds and validates on the server', () => {
+        expect(lifecycle.normalizeStructuredProblemConfig('true_false', { main: { answer: false } }))
+            .to.have.nested.property('answers.main[0]', 'B');
+        expect(lifecycle.normalizeStructuredProblemConfig('blank', { main: { answer: 'CaseSensitive' } }))
+            .to.have.nested.property('answers.main[0]', 'CaseSensitive');
+        const multi = lifecycle.normalizeStructuredProblemConfig('multi', {
+            main: { options: ['A1', 'B1', 'C1'], answerIndexes: [2, 0], partialCreditPercent: 35 },
+        });
+        expect(multi).to.have.nested.property('answers.main[2].partialCreditPercent', 35);
+        expect(multi).to.have.nested.property('answers.main[0]').that.deep.equals(['A', 'C']);
+        expect(lifecycle.normalizeStructuredProblemConfig('multi', {
+            main: { options: ['A1', 'B1'], answerIndexes: [0] },
+        })).to.have.nested.property('main.partialCreditPercent', 0);
+
+        for (const [kind, config] of [
+            ['single', { main: { options: ['same', 'same'], answerIndex: 0 } }],
+            ['single', { main: { options: ['a', 'b'], answerIndex: 3 } }],
+            ['multi', { main: { options: ['a', 'b'], answerIndexes: [], partialCreditPercent: 0 } }],
+            ['multi', { main: { options: ['a', 'b'], answerIndexes: [0], partialCreditPercent: 1.5 } }],
+            ['true_false', { main: { answer: 'true' } }],
+            ['blank', { main: { answer: '   ' } }],
+        ] as const) {
+            expect(() => lifecycle.normalizeStructuredProblemConfig(kind, config)).to.throw(TestValidationError);
         }
     });
 

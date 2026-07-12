@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/cn';
 
 export interface ObjectiveClientQuestion {
   key: string;
@@ -31,6 +32,7 @@ export interface ObjectiveClientQuestion {
   prompt?: string;
   choices?: string[];
   score: number;
+  presentation?: string;
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -195,7 +197,9 @@ export function ObjectiveAnswerPanel({
           <div key={q.key} className="rounded-lg border">
             <div className="flex items-center gap-2 border-b bg-muted/40 px-4 py-2">
               <span className="text-sm font-medium">第 {q.key} 题</span>
-              <Badge variant="secondary" className="text-[10px]">{KIND_LABEL[q.kind] || q.kind}</Badge>
+              <Badge variant="secondary" className="text-[10px]">
+                {q.presentation === 'truefalse' ? '判断' : (KIND_LABEL[q.kind] || q.kind)}
+              </Badge>
               {answered(answers[q.key]) ? <Badge variant="outline" className="text-[10px]">已答</Badge> : null}
               <span className="ml-auto text-xs text-muted-foreground">{q.score} 分</span>
             </div>
@@ -258,7 +262,10 @@ export function ObjectiveAnswerPanel({
         ))}
 
         {error ? (
-          <div className="flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+          <div className={cn(
+            'flex items-center gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700',
+            'dark:border-red-900 dark:bg-red-950/30 dark:text-red-300',
+          )}>
             <AlertTriangle className="size-4 shrink-0" />
             {error}
           </div>

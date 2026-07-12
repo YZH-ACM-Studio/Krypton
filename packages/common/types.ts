@@ -52,7 +52,28 @@ export type AnswerEntry =
          * choices 锁定「正确/错误」）。判题/统计不区分，仅编辑器回读用。
          */
         presentation?: string;
+        /** New single-problem multi-select scoring; absent keeps legacy 50%. */
+        partialCreditPercent?: number;
     }];
+
+export interface ObjectiveSingleMain {
+    options: string[];
+    answerIndex: number;
+}
+
+export interface ObjectiveMultiMain {
+    options: string[];
+    answerIndexes: number[];
+    partialCreditPercent: number;
+}
+
+export interface ObjectiveTrueFalseMain {
+    answer: boolean;
+}
+
+export interface ObjectiveBlankMain {
+    answer: string;
+}
 
 /**
  * Fill-function problem template — see PRD §1.7.
@@ -135,6 +156,8 @@ export interface ProblemConfigFile {
     judge_extra_files?: string[];
     detail?: DetailType | boolean;
     answers?: Record<string, AnswerEntry>;
+    /** Canonical single-question config used by revision-managed problem kinds. */
+    main?: ObjectiveSingleMain | ObjectiveMultiMain | ObjectiveTrueFalseMain | ObjectiveBlankMain | Record<string, unknown>;
     /**
      * 客观题选项：questionKey → 选项文本数组（A/B/C… 按下标映射）。
      * 与 answers[key][2].choices 双写；考试页/结构化渲染器消费此处。

@@ -414,7 +414,7 @@ describe('P2.11 durable global problem write claim', () => {
             ...pdoc(100, 42), docType: TYPE_PROBLEM, aclMutationRevision: 0,
             aclMutationLocks: [], title: 'before', config: '',
         };
-        const claim = await acquire(user, structuredClone(liveProblem), 'paper-save', 'paper-center-save');
+        const claim = await acquire(user, structuredClone(liveProblem), 'problem-save', 'problem-structure-save');
         expect((await commit(claim, { title: 'after' }, {}))?.title).to.equal('after');
         expect((await commit(claim, { config: 'type: objective' }, {}))?.config).to.equal('type: objective');
         expect(await clear({ ...claim, requestId: 'forged' })).to.equal(false);

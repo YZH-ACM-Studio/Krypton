@@ -33,13 +33,11 @@ describe('P3.10 subjective lifecycle contract', () => {
         expect(judgeops).to.include('manualGrade: { $exists: false }');
     });
 
-    it('removes the composite subjective score scheme and old grading route', () => {
+    it('removes the composite subjective score scheme', () => {
         const types = readFileSync(resolve(root, '../common/types.ts'), 'utf8');
         const config = readFileSync(resolve(root, 'src/lib/problem-config.ts'), 'utf8');
-        const paperCenter = readFileSync(resolve(root, 'src/handler/paper-center.ts'), 'utf8');
         expect(types).not.to.include('subjective?:');
         expect(config).not.to.include('mergeSubjectiveScores');
-        expect(paperCenter).not.to.include('/paper-center/grading');
     });
 
     it('authorizes only the container owner or a site administrator to grade', () => {

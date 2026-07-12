@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
@@ -19,14 +19,13 @@ describe('P3.10 subjective editor and grading workspace', () => {
         expect(editor).not.to.include('内存限制');
     });
 
-    it('uses the shared container grading route and removes the old paper-center grader', () => {
+    it('uses the shared container grading route', () => {
         const resolver = readFileSync(resolve(root, 'src/pages/resolver.tsx'), 'utf8');
         const contest = readFileSync(resolve(root, 'src/pages/contest-manage.tsx'), 'utf8');
         const homework = readFileSync(resolve(root, 'src/pages/homework.tsx'), 'utf8');
         expect(resolver).to.include("'manual_grading.html': ManualGradingPage");
         expect(contest).to.include('/manage/grading/');
         expect(homework).to.include('/manage/grading/');
-        expect(existsSync(resolve(root, 'src/pages/paper-center-grading.tsx'))).to.equal(false);
     });
 
     it('keeps the exam-mode student DOM implementation untouched', () => {

@@ -72,6 +72,9 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(method).to.include('filename=%s');
         expect(cloneHelper).to.include('Problem clone failed while copying ');
         expect(method).to.include('createProblemByKind(');
+        expect(method).to.include('const cloneOwner = attribution.owner ?? original.owner');
+        expect(method).to.include('const cloneActor = attribution.actor ?? cloneOwner');
+        expect(method).to.include('operator: cloneActor');
         expect(method.indexOf('createProblemByKind(')).to.be.lessThan(method.indexOf('copyProblemStorageFiles({'));
         expect(method).not.to.include('testdataSourcePid');
     });
@@ -114,5 +117,27 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(source).to.include('assertConfigTestdataEventAllowed(domainId, docId)');
         expect(handler).to.include('[...files, ...newNames].some(isProblemConfigFilename)');
         expect(handler).to.include('files.some(isProblemConfigFilename)');
+    });
+
+    it('validates config rename sources and Hydro imports before their first mutation', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const directStart = source.indexOf('static async renameTestdata(');
+        const directEnd = source.indexOf('static async delTestdata(', directStart);
+        const directRename = source.slice(directStart, directEnd);
+        expect(directRename.indexOf('normalizeProblemTestdataUpload(newName, source)'))
+            .to.be.lessThan(directRename.indexOf('storage.rename('));
+
+        const claimStart = source.indexOf('static async renameTestdataWithClaim(');
+        const claimEnd = source.indexOf('static async delTestdataWithClaim(', claimStart);
+        const claimedRename = source.slice(claimStart, claimEnd);
+        expect(claimedRename.indexOf('normalizeProblemTestdataUpload(newName, source)'))
+            .to.be.lessThan(claimedRename.indexOf('storage.rename('));
+
+        const importStart = source.indexOf('static async import(');
+        const importEnd = source.indexOf('static async export(', importStart);
+        const importer = source.slice(importStart, importEnd);
+        expect(importer).to.include("'testdata', 'attachments', 'generators', 'include', 'data', 'output_validators'");
+        expect(importer.indexOf('await validateImportedTestdataConfigs()'))
+            .to.be.lessThan(importer.indexOf('const overrideDoc = overridePid'));
     });
 });

@@ -63,7 +63,7 @@ export function SubjectiveProblemEditorPage() {
     <main className="mx-auto w-full max-w-5xl space-y-5 pb-10">
       <header className="flex items-center gap-3 border-b border-border/70 pb-4">
         <Button asChild variant="ghost" size="icon" className="size-11">
-          <a href={isCreate ? '/p' : `/p/${pid}`} aria-label="返回"><ArrowLeft className="size-4" /></a>
+          <a href={isCreate ? '/problem/create' : `/p/${pid}`} aria-label="返回"><ArrowLeft className="size-4" /></a>
         </Button>
         <div className="min-w-0 flex-1">
           <p className="text-xs text-muted-foreground">主观题编辑器</p>

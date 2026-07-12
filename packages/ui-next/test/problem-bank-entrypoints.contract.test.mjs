@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -13,7 +13,10 @@ function read(path) {
 const uiServer = read('packages/ui-next/index.ts');
 const bootstrap = read('packages/ui-next/src/lib/bootstrap.tsx');
 const sidebar = read('packages/ui-next/src/components/layout/sidebar.tsx');
-const paperCenter = read('packages/hydrooj/src/handler/paper-center.ts');
+const problemHandler = read('packages/hydrooj/src/handler/problem.ts');
+const problemResolver = read('packages/ui-next/src/pages/resolver.tsx');
+const problemCreateHub = read('packages/ui-next/src/pages/problem-create-hub.tsx');
+const problemConfigEditor = read('packages/ui-next/src/pages/problem-config-editor.tsx');
 const manualGrading = read('packages/hydrooj/src/handler/manual-grading.ts');
 const contest = read('packages/hydrooj/src/handler/contest.ts');
 const homework = read('packages/hydrooj/src/handler/homework.ts');
@@ -52,38 +55,57 @@ test('bootstrap exposes one fail-closed observable problem-bank capability', () 
 test('sidebar consumes only canBrowseProblemBank for all enumeration entries', () => {
     assert.doesNotMatch(sidebar, /canViewProblemBank|canCreateProblem/);
     assert.match(sidebar, /bs\.user\.canBrowseProblemBank/);
-    for (const label of ['题库', '我的题目', '出卷中心']) {
-        assert.equal((sidebar.match(new RegExp(`label: '${label}'`, 'g')) || []).length, 1);
-    }
+    assert.equal((sidebar.match(/label: '题库'/g) || []).length, 1);
+    assert.equal((sidebar.match(/label: '我的题目'/g) || []).length, 0);
+    assert.equal((sidebar.match(/label: '出卷中心'/g) || []).length, 0);
     const bankGate = methodBody(sidebar, '...(bs.user.canBrowseProblemBank', "{ label: '导图'");
-    for (const label of ['题库', '我的题目', '出卷中心']) {
-        assert.ok(bankGate.includes(`label: '${label}'`), `${label} must be inside the bank capability gate`);
-    }
+    assert.ok(bankGate.includes("label: '题库'"), '题库 must be inside the bank capability gate');
+    assert.match(bankGate, /problem_mine\.html/);
+    assert.match(bankGate, /problem_create_hub\.html/);
     assert.match(sidebar, /label: '比赛'/);
     assert.match(sidebar, /label: '荣誉榜'[\s\S]*?href: '\/rankboard'/);
 });
 
-test('paper-center list and editing use the canonical scope and maintenance capability', () => {
-    assert.match(paperCenter, /buildProblemBankScope/);
-    assert.match(paperCenter, /getMaintainableAuthorized/);
-    const list = methodBody(paperCenter, 'class PaperCenterHandler', '// ─── Rev.12');
-    assert.match(list, /const authoritativeDomainId = String\(this\.domain\?\._id\)/);
-    assertBefore(list, 'assertProblemAclDomain', 'problem.getMulti', 'paper-center list');
-    assert.match(list, /problem\.getMulti\(authoritativeDomainId/);
-    assert.match(list, /\$and:\s*\[buildProblemBankScope\(this\.user\)/);
-    assert.match(list, /problem\.getMaintainableAuthorized\(/);
-    assert.doesNotMatch(list, /PERM_VIEW_PROBLEM_HIDDEN|maintainer:\s*this\.user\._id|hidden:\s*false/);
+test('unified problem bank pushes filters into the canonical author scope', () => {
+    const list = methodBody(problemHandler, 'export class ProblemMainHandler', 'export class ProblemRandomHandler');
+    assertBefore(list, 'refreshProblemAcl', 'buildProblemBankScope', 'problem bank ACL refresh');
+    assert.match(list, /parseProblemKindSlug\(kindSlug\)/);
+    assert.match(list, /problemKind:\s*\{\s*\$exists:\s*false\s*\}/);
+    assert.match(list, /filterParts\.push\(\{ tag: normalizedTag \}\)/);
+    assert.match(list, /if \(owner && !isBankAdmin\) throw new PermissionError/);
+    assert.match(list, /archivedAt:\s*\{\s*\$exists:/);
+    assert.match(list, /hidden:\s*\{\s*\$ne:\s*true\s*\}/);
+    assertBefore(list, 'buildProblemTextFilter(text)', 'this.paginate(', 'problem bank scoped search');
+    assert.match(list, /problem\.canMaintainProblem\(this\.user, pdoc\)/);
+    assert.match(list, /async postClone/);
+    assert.match(list, /async postArchive/);
+});
 
-    const create = methodBody(paperCenter, 'class PaperCenterCreateHandler', 'class PaperCenterEditHandler');
-    assertBefore(create, 'assertProblemAclDomain', 'problem.add(', 'paper-center create');
-    assert.match(create, /problem\.add\(authoritativeDomainId/);
+test('creation hub and all eight routes consume the shared kind mapping', () => {
+    assert.match(problemHandler, /problem_create_hub\.html/);
+    assert.match(problemHandler, /problemKindToSlug\('programming'\)/);
+    assert.equal((problemHandler.match(/problemKindToSlug\(/g) || []).length >= 9, true);
+    assert.match(problemResolver, /'problem_create_hub\.html': ProblemCreateHubPage/);
+    assert.match(problemCreateHub, /PROBLEM_KINDS/);
+    assert.match(problemCreateHub, /PROBLEM_KIND_TO_SLUG\[kind\]/);
+    for (const kind of ['programming', 'single', 'multi', 'true_false', 'blank', 'subjective', 'program_fill', 'function']) {
+        assert.match(problemCreateHub, new RegExp(`(?:^|\\s)${kind}: \\{`));
+    }
+});
 
-    const edit = methodBody(paperCenter, 'class PaperCenterEditHandler', 'export async function apply');
-    assertBefore(edit, 'assertProblemAclDomain', 'problem.getMaintainableAuthorized(', 'paper-center edit read');
-    assert.match(edit, /problem\.getMaintainableAuthorized\(\s*authoritativeDomainId/);
-    assert.match(edit, /problem\.withAuthorizedWriteClaim\(\s*authoritativeDomainId/);
-    assert.match(edit, /problem\.editWithClaim\(claim/);
-    assert.match(edit, /problem\.addTestdataWithClaim\(\s*claim/);
+test('legacy composite authoring runtime files are deleted without an alias', () => {
+    const legacy = 'paper' + '-center';
+    assert.equal(existsSync(resolve(ROOT, `packages/hydrooj/src/handler/${legacy}.ts`)), false);
+    assert.equal(existsSync(resolve(ROOT, `packages/ui-next/src/pages/${legacy}.tsx`)), false);
+    assert.equal(existsSync(resolve(ROOT, `packages/ui-next/src/pages/${legacy}-edit.tsx`)), false);
+    assert.equal(existsSync(resolve(ROOT, 'packages/ui-next/src/pages/problem-type-editor.tsx')), false);
+    assert.equal(problemHandler.includes(`/${legacy}`), false);
+    assert.equal(sidebar.includes(`/${legacy}`), false);
+    assert.equal(problemResolver.includes('paper_center'), false);
+    assert.doesNotMatch(problemConfigEditor, /\{ value: 'objective', label:/);
+    assert.doesNotMatch(problemConfigEditor, /\{ value: 'fill_function', label:/);
+    const model = read('packages/hydrooj/src/model/problem.ts');
+    assert.equal((model.match(/normalizeProblemTestdataUpload\(name, f\)/g) || []).length, 2);
 });
 
 test('manual grading derives the authoritative domain before every domain-sensitive operation', () => {

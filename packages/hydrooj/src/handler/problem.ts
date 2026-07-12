@@ -12,7 +12,8 @@ import sanitize from 'sanitize-filename';
 import Schema from 'schemastery';
 import {
     BASIC_OBJECTIVE_KIND, type BasicObjectiveKind, effectiveProblemKind,
-    isBasicObjectiveKind, PROBLEM_KIND_TO_SLUG, problemKindToSlug,
+    isBasicObjectiveKind, parseProblemKindSlug, PROBLEM_KINDS,
+    PROBLEM_KIND_SLUGS, PROBLEM_KIND_TO_SLUG, problemKindToSlug,
 } from '@hydrooj/common';
 import parser from '@hydrooj/utils/lib/search';
 import {
@@ -27,7 +28,7 @@ import {
     ProblemNotFoundError, RecordNotFoundError, SolutionNotFoundError, ValidationError,
 } from '../error';
 import {
-    ProblemDoc, ProblemSearchOptions, ProblemStatusDoc, RecordDoc, User,
+    ProblemDoc, ProblemStatusDoc, RecordDoc, User,
 } from '../interface';
 import {
     isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission,
@@ -117,15 +118,9 @@ function exactProblemFilter(id: string | number): Filter<ProblemDoc> {
     return Number.isSafeInteger(+id) ? { docId: +id } : { pid: id as string };
 }
 
-export const defaultSearch = async (
-    domainId: string,
-    q: string,
-    options: ProblemSearchOptions = {},
-    scope: Filter<ProblemDoc> = {},
-) => {
+function buildProblemTextFilter(q: string): Filter<ProblemDoc> {
     const escaped = escapeRegExp(q.toLowerCase());
-    const projection: (keyof ProblemDoc)[] = ['domainId', 'docId', 'pid'];
-    const $regex = new RegExp(q.length >= 2 ? escaped : `\\A${escaped}`, 'gim');
+    const $regex = new RegExp(q.length >= 2 ? escaped : `^${escaped}`, 'i');
     const alternatives: Filter<ProblemDoc>[] = [
         { pid: { $regex } },
         { title: { $regex } },
@@ -135,18 +130,8 @@ export const defaultSearch = async (
     else if (/^P\d+$/i.test(q) && Number.isSafeInteger(+q.substring(1))) {
         alternatives.unshift({ docId: +q.substring(1) });
     }
-    const filter: Filter<ProblemDoc> = { $and: [scope, { $or: alternatives }] };
-    const [pdocs, total] = await Promise.all([
-        problem.getMulti(domainId, filter, projection)
-            .skip(options.skip || 0).limit(options.limit || system.get('pagination.problem')).toArray(),
-        problem.count(domainId, filter),
-    ]);
-    return {
-        hits: Array.from(new Set(pdocs.map((i) => `${i.domainId}/${i.docId}`))),
-        total,
-        countRelation: 'eq',
-    };
-};
+    return { $or: alternatives };
+}
 
 function assertCanMaintainProblem(udoc: User, pdoc: ProblemDoc) {
     if (!problem.canMaintainProblem(udoc, pdoc)) {
@@ -197,8 +182,26 @@ export class ProblemMainHandler extends Handler {
     @param('limit', Types.PositiveInt, true)
     @param('pjax', Types.Boolean)
     @param('quick', Types.Boolean)
-    @param('sort', Types.Range(['default', 'recent']), true)
-    async get(_domainId: string, page = 1, q = '', limit: number, pjax = false, quick = false, sortStrategy = 'default') {
+    @param('sort', Types.Range(['default', 'recent', 'title']), true)
+    @param('kind', Types.Range([...PROBLEM_KIND_SLUGS]), true)
+    @param('tag', Types.Content, true)
+    @param('owner', Types.PositiveInt, true)
+    @param('visibility', Types.Range(['all', 'hidden', 'published']), true)
+    @param('lifecycle', Types.Range(['active', 'archived', 'all']), true)
+    async get(
+        _domainId: string,
+        page = 1,
+        q = '',
+        limit: number,
+        pjax = false,
+        quick = false,
+        sortStrategy: 'default' | 'recent' | 'title' = 'default',
+        kindSlug = '',
+        tag = '',
+        owner = 0,
+        visibility: 'all' | 'hidden' | 'published' = 'all',
+        lifecycle: 'active' | 'archived' | 'all' = 'active',
+    ) {
         const domainId = String(this.domain?._id);
         if (!problem.canBrowseProblemBank(this.user)) {
             if (quick || this.request.json) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
@@ -215,9 +218,25 @@ export class ProblemMainHandler extends Handler {
         this.response.template = 'problem_main.html';
         if (!limit || limit > this.ctx.setting.get('pagination.problem') || page > 1) limit = this.ctx.setting.get('pagination.problem');
         const problemBankScope = problem.buildProblemBankScope(this.user);
-        const canUseGlobalSearch = problem.isProblemBankAdmin(this.user)
-            && !Object.keys(problemBankScope).length;
-        this.queryContext.query = problemBankScope;
+        const isBankAdmin = problem.isProblemBankAdmin(this.user);
+        if (owner && !isBankAdmin) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
+        const filterParts: Filter<ProblemDoc>[] = [problemBankScope];
+        if (kindSlug) {
+            const problemKind = parseProblemKindSlug(kindSlug);
+            filterParts.push(problemKind === 'programming'
+                ? { $or: [{ problemKind: 'programming' }, { problemKind: { $exists: false } }] }
+                : { problemKind });
+        }
+        const normalizedTag = tag.trim();
+        if (normalizedTag) filterParts.push({ tag: normalizedTag });
+        if (owner) filterParts.push({ owner });
+        if (visibility === 'hidden') filterParts.push({ hidden: true });
+        else if (visibility === 'published') filterParts.push({ hidden: { $ne: true } });
+        if (lifecycle === 'active') filterParts.push({ archivedAt: { $exists: false } });
+        else if (lifecycle === 'archived') filterParts.push({ archivedAt: { $exists: true } });
+        this.queryContext.query = filterParts.length === 1
+            ? problemBankScope
+            : { $and: filterParts };
         if (sortStrategy === 'recent') this.queryContext.hint = 'basic';
         // eslint-disable-next-line ts/no-shadow
         const query = this.queryContext.query;
@@ -235,7 +254,7 @@ export class ProblemMainHandler extends Handler {
         }
         if (category.length) {
             query.$and ||= [];
-            query.$and.push(...category.map((tag) => ({ tag })));
+            query.$and.push(...category.map((categoryTag) => ({ tag: categoryTag })));
         }
         if (parsed.namespace?.length) {
             const mappedPrefix = this.domain.namespaces?.[parsed.namespace[0]];
@@ -245,26 +264,17 @@ export class ProblemMainHandler extends Handler {
         }
         if (text) category.push(text);
         if (category.length) this.UiContext.extraTitleContent = category.join(',');
-        let total = 0;
         if (text) {
-            const provider = canUseGlobalSearch
-                ? Object.values(global.Hydro.module.problemSearch)[0]
-                : null;
-            const result = provider
-                ? await provider(domainId, q, { skip: (page - 1) * limit, limit })
-                : await defaultSearch(domainId, text, { skip: (page - 1) * limit, limit }, query);
-            total = result.total;
-            this.queryContext.pcountRelation = result.countRelation;
-            if (!result.hits.length) this.queryContext.fail = true;
-            query.docId = { $in: result.hits.map((t) => +t.split('/')[1]) };
+            query.$and ||= [];
+            query.$and.push(buildProblemTextFilter(text));
             this.queryContext.hint = 'basic';
-            this.queryContext.sort = result.hits;
         }
         const sort = this.queryContext.sort;
         await this.ctx.parallel('problem/list', query, this, sort);
         const sortKey = ({
             default: { sort: 1, docId: 1 },
             recent: { docId: -1 },
+            title: { title: 1, docId: 1 },
         } as const)[sortStrategy];
         let [pdocs, ppcount, pcount] = this.queryContext.fail
             ? [[], 0, 0]
@@ -273,10 +283,6 @@ export class ProblemMainHandler extends Handler {
                     .sort(sortKey).hint(this.queryContext.hint),
                 sort.length ? 1 : page, limit,
             );
-        if (text) {
-            pcount = total;
-            ppcount = Math.ceil(total / limit);
-        }
         if (sort.length) pdocs = pdocs.sort((a, b) => sort.indexOf(`${a.domainId}/${a.docId}`) - sort.indexOf(`${b.domainId}/${b.docId}`));
         if (this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) {
             Object.assign(psdict, await problem.getListStatus(
@@ -284,6 +290,18 @@ export class ProblemMainHandler extends Handler {
                 pdocs.map((i) => i.docId),
             ));
         }
+        const ownerIds = quick
+            ? []
+            : Array.from(new Set(pdocs.map((pdoc) => pdoc.owner)));
+        const ownerDict = ownerIds.length ? await user.getList(domainId, ownerIds) : {};
+        const ownerNames = Object.fromEntries(pdocs.map((pdoc) => [
+            pdoc.owner,
+            ownerDict[pdoc.owner]?.uname || `UID ${pdoc.owner}`,
+        ]));
+        const canManageByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [
+            pdoc.docId,
+            problem.canMaintainProblem(this.user, pdoc),
+        ]));
         if (pjax) {
             this.response.body = {
                 title: this.renderTitle(this.translate('problem_main')),
@@ -305,6 +323,19 @@ export class ProblemMainHandler extends Handler {
                 psdict,
                 qs: q,
                 sort: sortStrategy,
+                filters: {
+                    kind: kindSlug,
+                    tag: normalizedTag,
+                    owner: owner || '',
+                    visibility,
+                    lifecycle,
+                },
+                problemKinds: PROBLEM_KINDS.map((kind) => ({
+                    kind, slug: problemKindToSlug(kind),
+                })),
+                canFilterOwner: isBankAdmin,
+                ownerNames,
+                canManageByDocId,
             };
         }
     }
@@ -360,6 +391,7 @@ export class ProblemMainHandler extends Handler {
             // eslint-disable-next-line no-await-in-loop
             ids.push(await problem.copy(
                 pdoc.domainId, pdoc.docId, target, undefined, hidden, cloneLang,
+                { actor: this.user._id },
             ));
         }
         if (redirect) this.response.redirect = this.url('problem_detail', { domainId: target, pid: ids[0] });
@@ -416,6 +448,40 @@ export class ProblemMainHandler extends Handler {
         }
         this.back();
     }
+
+    @param('pid', Types.PositiveInt)
+    async postClone(_domainId: string, pid: number) {
+        const domainId = String(this.domain?._id);
+        await problem.refreshProblemAcl(this.user, domainId);
+        problem.assertProblemAclDomain(this.user, domainId);
+        const pdoc = await problem.get(domainId, pid);
+        if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
+        assertCanMaintainProblem(this.user, pdoc);
+        const cloneId = await problem.withAuthorizedWriteClaim(
+            domainId,
+            pid,
+            this.user,
+            'clone-revision',
+            () => problem.copy(
+                domainId, pid, domainId, undefined, true, undefined,
+                { owner: this.user._id, actor: this.user._id },
+            ),
+        );
+        this.response.redirect = this.url('problem_edit', { pid: cloneId });
+    }
+
+    @param('pid', Types.PositiveInt)
+    @param('reason', Types.Content)
+    async postArchive(_domainId: string, pid: number, reason: string) {
+        const domainId = String(this.domain?._id);
+        await problem.refreshProblemAcl(this.user, domainId);
+        problem.assertProblemAclDomain(this.user, domainId);
+        const pdoc = await problem.get(domainId, pid);
+        if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
+        assertCanMaintainProblem(this.user, pdoc);
+        await problem.archiveProblem(domainId, pid, this.user._id, reason, this.user);
+        this.back();
+    }
 }
 
 export class ProblemRandomHandler extends Handler {
@@ -435,7 +501,12 @@ export class ProblemRandomHandler extends Handler {
         const category = flattenDeep(qs.split(' ')
             .filter((i) => i.startsWith('category:'))
             .map((i) => i.split('category:')[1]?.split(',')));
-        const q = problem.buildProblemBankScope(this.user);
+        const q: Filter<ProblemDoc> = {
+            $and: [
+                problem.buildProblemBankScope(this.user),
+                { archivedAt: { $exists: false } },
+            ],
+        };
         if (category.length) {
             q.$and ||= [];
             q.$and.push(...category.map((tag) => ({ tag })));
@@ -1542,13 +1613,26 @@ export class ProblemMineHandler extends Handler {
     }
 }
 
-export class ProblemCreateHandler extends Handler {
+export class ProblemCreateHubHandler extends Handler {
     async get() {
-        this.response.body.statementLangs = this.ctx.i18n.langs(false);
+        this.response.template = 'problem_create_hub.html';
+        this.response.body = {
+            problemKinds: PROBLEM_KINDS.map((kind) => ({
+                kind,
+                slug: problemKindToSlug(kind),
+            })),
+        };
+    }
+}
+
+export class ProblemCreateProgrammingHandler extends Handler {
+    async get() {
         this.response.template = 'problem_edit.html';
         this.response.body = {
-            page_name: 'problem_create',
+            page_name: 'problem_create_programming',
             additional_file: [],
+            statementLangs: this.ctx.i18n.langs(false),
+            pdoc: { hidden: true, problemKind: 'programming' },
         };
     }
 
@@ -1662,7 +1746,11 @@ export async function apply(ctx: Context) {
     ctx.Route('problem_solution_reply_raw', '/p/:pid/solution/:psid/:psrid/raw', ProblemSolutionRawHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_statistics', '/p/:pid/stat', ProblemStatisticsHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_mine', '/problem/mine', ProblemMineHandler, PRIV.PRIV_USER_PROFILE);
-    ctx.Route('problem_create', '/problem/create', ProblemCreateHandler, PERM.PERM_CREATE_PROBLEM);
+    ctx.Route('problem_create', '/problem/create', ProblemCreateHubHandler, PERM.PERM_CREATE_PROBLEM);
+    ctx.Route(
+        'problem_create_programming', `/problem/create/${problemKindToSlug('programming')}`,
+        ProblemCreateProgrammingHandler, PERM.PERM_CREATE_PROBLEM,
+    );
     ctx.Route(
         'problem_create_single', `/problem/create/${problemKindToSlug(BASIC_OBJECTIVE_KIND.single)}`,
         ProblemCreateSingleHandler, PERM.PERM_CREATE_PROBLEM,

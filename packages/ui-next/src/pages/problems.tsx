@@ -1,41 +1,39 @@
 import { useState } from 'react';
-import { motion } from 'motion/react';
-import { CheckCircle2, Copy, Eye, EyeOff, Lock, MinusCircle, Plus, Search, Trash2, Upload, XCircle } from 'lucide-react';
+import {
+  Archive, CheckCircle2, Copy, Eye, EyeOff, LockKeyhole, Pencil,
+  Plus, Search, SlidersHorizontal, Upload, XCircle,
+} from 'lucide-react';
+import { effectiveProblemKind, type ProblemKind } from '@hydrooj/common';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { SimpleSelect } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Pagination } from '@/components/ui/pagination';
-import { Checkbox } from '@/components/ui/checkbox';
+import { SimpleSelect } from '@/components/ui/select';
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle,
+} from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 
 type R = Record<string, any>;
 
-function statusIcon(status: number | undefined) {
-  if (status === 1) return <CheckCircle2 className="size-4 text-green-500" />;
-  if (status === 2) return <XCircle className="size-4 text-red-500" />;
-  if (status === 3) return <MinusCircle className="size-4 text-yellow-500" />;
-  return null;
-}
+const KIND_LABEL: Record<ProblemKind, string> = {
+  programming: '编程题',
+  single: '单选题',
+  multi: '多选题',
+  true_false: '判断题',
+  blank: '填空题',
+  subjective: '主观题',
+  program_fill: '程序填空题',
+  function: '函数题',
+};
 
-function difficultyBadge(d: number | undefined) {
-  if (!d) return null;
-  const colors: Record<number, string> = {
-    1: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
-    2: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300',
-    3: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300',
-    4: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300',
-    5: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300',
-  };
-  const labels: Record<number, string> = { 1: '入门', 2: '普及', 3: '提高', 4: '省选', 5: 'NOI' };
-  return (
-    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${colors[d] || ''}`}>
-      {labels[d] || `Lv${d}`}
-    </span>
-  );
+interface BankFilters {
+  kind?: string;
+  tag?: string;
+  owner?: string | number;
+  visibility?: 'all' | 'hidden' | 'published';
+  lifecycle?: 'active' | 'archived' | 'all';
 }
 
 function buildUrlWithQuery(baseUrl: string, params: Record<string, unknown>) {
@@ -48,271 +46,266 @@ function buildUrlWithQuery(baseUrl: string, params: Record<string, unknown>) {
   return query ? `${baseUrl}?${query}` : baseUrl;
 }
 
-function SelectedPids({ pids }: { pids: string[] }) {
+function FilterForm({
+  action, query, sort, filters, problemKinds, canFilterOwner, compact = false,
+}: {
+  action: string;
+  query: string;
+  sort: string;
+  filters: BankFilters;
+  problemKinds: Array<{ kind: ProblemKind, slug: string }>;
+  canFilterOwner: boolean;
+  compact?: boolean;
+}) {
   return (
-    <>
-      {pids.map((pid) => (
-        <input key={pid} type="hidden" name="pids" value={pid} />
-      ))}
-    </>
+    <form method="get" action={action} className={compact ? 'space-y-4' : 'grid gap-3 lg:grid-cols-4 xl:grid-cols-7'}>
+      <label className={compact ? 'block space-y-1.5' : 'space-y-1.5 lg:col-span-2'}>
+        <span className="text-xs font-medium text-muted-foreground">关键词或题号</span>
+        <span className="relative block">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input name="q" defaultValue={query} placeholder="标题、PID、题号或标签" className="min-h-11 pl-9" />
+        </span>
+      </label>
+      <label className="space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">题型</span>
+        <SimpleSelect
+          name="kind"
+          defaultValue={filters.kind || ''}
+          className="min-h-11"
+          options={[
+            { value: '', label: '全部题型' },
+            ...problemKinds.map((item) => ({ value: item.slug, label: KIND_LABEL[item.kind] })),
+          ]}
+        />
+      </label>
+      <label className="space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">标签</span>
+        <Input name="tag" defaultValue={filters.tag || ''} placeholder="精确标签" className="min-h-11" />
+      </label>
+      {canFilterOwner ? (
+        <label className="space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">Owner UID</span>
+          <Input name="owner" type="number" min={1} defaultValue={filters.owner || ''} placeholder="全部" className="min-h-11" />
+        </label>
+      ) : null}
+      <label className="space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">可见性</span>
+        <SimpleSelect
+          name="visibility"
+          defaultValue={filters.visibility || 'all'}
+          className="min-h-11"
+          options={[
+            { value: 'all', label: '全部' },
+            { value: 'hidden', label: '隐藏' },
+            { value: 'published', label: '已发布' },
+          ]}
+        />
+      </label>
+      <label className="space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">生命周期</span>
+        <SimpleSelect
+          name="lifecycle"
+          defaultValue={filters.lifecycle || 'active'}
+          className="min-h-11"
+          options={[
+            { value: 'active', label: '使用中' },
+            { value: 'archived', label: '已归档' },
+            { value: 'all', label: '全部' },
+          ]}
+        />
+      </label>
+      <label className="space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">排序</span>
+        <SimpleSelect
+          name="sort"
+          defaultValue={sort}
+          className="min-h-11"
+          options={[
+            { value: 'default', label: '题号顺序' },
+            { value: 'recent', label: '最近创建' },
+            { value: 'title', label: '标题 A–Z' },
+          ]}
+        />
+      </label>
+      <div className={compact ? 'flex gap-2 pt-1' : 'flex items-end gap-2'}>
+        <Button type="submit" className="min-h-11 flex-1">应用</Button>
+        <Button asChild type="button" variant="ghost" className="min-h-11">
+          <a href={action}>清空</a>
+        </Button>
+      </div>
+    </form>
   );
+}
+
+function SubmissionStatus({ status }: { status?: number }) {
+  if (status === 1) return <CheckCircle2 className="size-4 text-emerald-600" aria-label="已通过" />;
+  if (status === 2) return <XCircle className="size-4 text-rose-600" aria-label="未通过" />;
+  return <span className="size-4" aria-hidden="true" />;
 }
 
 export function ProblemsPage() {
   const bs = useBootstrap();
-  const data = bs.page.data;
+  const data = bs.page.data as R;
   const pdocs: R[] = data.pdocs || [];
   const page = Number(data.page) || 1;
   const ppcount = Number(data.ppcount) || 1;
   const pcount = Number(data.pcount) || pdocs.length;
-  const category = data.category || '';
+  const query = String(data.qs || '');
+  const sort = String(data.sort || 'default');
+  const filters: BankFilters = data.filters || {};
+  const problemKinds: Array<{ kind: ProblemKind, slug: string }> = data.problemKinds || [];
+  const ownerNames: Record<string, string> = data.ownerNames || {};
+  const canManageByDocId: Record<string, boolean> = data.canManageByDocId || {};
   const psdict: Record<string, R> = data.psdict || {};
-  const query = data.qs || data.query || data.q || '';
-  const sort = data.sort || 'default';
-  const [selected, setSelected] = useState<string[]>([]);
-  const visibleIds = pdocs.map((p) => String(p.docId || '')).filter(Boolean);
-  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.includes(id));
-  const problemsBaseUrl = buildUrlWithQuery(bs.urls.problems, { q: query, sort: sort === 'default' ? '' : sort });
-
-  const toggleVisible = (checked: boolean) => {
-    setSelected((current) => {
-      if (!checked) return current.filter((id) => !visibleIds.includes(id));
-      return Array.from(new Set([...current, ...visibleIds]));
-    });
-  };
-
-  const toggleOne = (id: string, checked: boolean) => {
-    setSelected((current) => {
-      if (checked) return Array.from(new Set([...current, id]));
-      return current.filter((item) => item !== id);
-    });
-  };
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const filtersActive = Boolean(
+    query || filters.kind || filters.tag || filters.owner
+    || (filters.visibility && filters.visibility !== 'all')
+    || (filters.lifecycle && filters.lifecycle !== 'active')
+    || sort !== 'default',
+  );
+  const problemsBaseUrl = buildUrlWithQuery(bs.urls.problems, {
+    q: query,
+    kind: filters.kind,
+    tag: filters.tag,
+    owner: filters.owner,
+    visibility: filters.visibility === 'all' ? '' : filters.visibility,
+    lifecycle: filters.lifecycle === 'active' ? '' : filters.lifecycle,
+    sort: sort === 'default' ? '' : sort,
+  });
 
   return (
-    <motion.div
-      className="space-y-4"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">题库</h1>
-          <p className="text-sm text-muted-foreground">共 {pcount} 道题目</p>
+    <main className="mx-auto min-w-0 max-w-[1440px] space-y-6 overflow-x-clip pb-12">
+      <header className="flex flex-col gap-4 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="space-y-1">
+          <p className="text-xs font-medium tracking-wide text-muted-foreground">统一题库</p>
+          <h1 className="text-3xl font-semibold tracking-tight">题目</h1>
+          <p className="text-sm text-muted-foreground">当前条件下共 {pcount} 道题</p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Button asChild variant="outline" size="sm">
-            <a href="/problem/import/hydro">
-              <Upload className="size-4" />
-              导入
-            </a>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" className="sm:hidden" onClick={() => setMobileFiltersOpen(true)}>
+            <SlidersHorizontal className="size-4" />筛选{filtersActive ? ' · 已启用' : ''}
           </Button>
-          <Button asChild size="sm">
-            <a href="/problem/create">
-              <Plus className="size-4" />
-              新建题目
-            </a>
+          <Button asChild variant="outline">
+            <a href="/problem/import/hydro"><Upload className="size-4" />导入</a>
+          </Button>
+          <Button asChild>
+            <a href="/problem/create"><Plus className="size-4" />新建题目</a>
           </Button>
         </div>
-      </div>
+      </header>
 
-      <Card>
-        <CardContent className="p-4">
-          <form className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px_auto] sm:items-end" method="get" action={bs.urls.problems}>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">搜索</label>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input name="q" defaultValue={query} placeholder="题目、标签、难度…" className="pl-8" />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">排序</label>
-              <SimpleSelect
-                name="sort"
-                defaultValue={sort}
-                className="h-9"
-                options={[
-                  { value: 'default', label: '默认顺序' },
-                  { value: 'recent', label: '最近添加' },
-                ]}
-              />
-            </div>
-            <Button type="submit" size="sm">搜索</Button>
-          </form>
-        </CardContent>
-      </Card>
+      <section aria-label="题库筛选" className="hidden rounded-2xl bg-muted/45 p-4 sm:block">
+        <FilterForm
+          action={bs.urls.problems}
+          query={query}
+          sort={sort}
+          filters={filters}
+          problemKinds={problemKinds}
+          canFilterOwner={!!data.canFilterOwner}
+        />
+      </section>
 
-      {selected.length ? (
-        <Card>
-          <CardContent className="flex flex-col gap-3 p-4">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-medium">已选择 {selected.length} 道题目</p>
-                <p className="text-xs text-muted-foreground">批量隐藏、取消隐藏、删除或复制到其他域</p>
-              </div>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setSelected([])}>
-                清空选择
-              </Button>
-            </div>
-            <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-              <div className="flex flex-wrap gap-2">
-                <form method="post">
-                  <input type="hidden" name="operation" value="hide" />
-                  <SelectedPids pids={selected} />
-                  <Button type="submit" variant="outline" size="sm">
-                    <EyeOff className="size-4" />
-                    隐藏
-                  </Button>
-                </form>
-                <form method="post">
-                  <input type="hidden" name="operation" value="unhide" />
-                  <SelectedPids pids={selected} />
-                  <Button type="submit" variant="outline" size="sm">
-                    <Eye className="size-4" />
-                    取消隐藏
-                  </Button>
-                </form>
-                <form method="post" onSubmit={(event) => {
-                  if (!window.confirm(`确定删除选中的 ${selected.length} 道题目？`)) event.preventDefault();
-                }}>
-                  <input type="hidden" name="operation" value="delete" />
-                  <SelectedPids pids={selected} />
-                  <Button type="submit" variant="ghost" size="sm" className="text-destructive">
-                    <Trash2 className="size-4" />
-                    删除
-                  </Button>
-                </form>
-              </div>
-              <form method="post" className="grid gap-2 sm:grid-cols-[180px_auto_auto] sm:items-center">
-                <input type="hidden" name="operation" value="copy" />
-                <input type="hidden" name="redirect" value="true" />
-                <SelectedPids pids={selected} />
-                <Input name="target" placeholder="目标域 ID" className="h-8" />
-                <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                  <Checkbox size="sm" name="hidden" value="true"  />
-                  复制后隐藏
-                </label>
-                <Button type="submit" variant="outline" size="sm">
-                  <Copy className="size-4" />
-                  复制
-                </Button>
-              </form>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
+      <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
+        <SheetContent side="bottom" className="max-h-[88vh] overflow-y-auto">
+          <SheetHeader><SheetTitle>筛选题库</SheetTitle></SheetHeader>
+          <div className="p-5">
+            <FilterForm
+              action={bs.urls.problems}
+              query={query}
+              sort={sort}
+              filters={filters}
+              problemKinds={problemKinds}
+              canFilterOwner={!!data.canFilterOwner}
+              compact
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
 
-      {category ? (
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">分类:</span>
-          <Badge variant="secondary">{category}</Badge>
-        </div>
-      ) : null}
-
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {bs.user.signedIn ? (
-                  <TableHead className="w-10">
-                    <Checkbox
-                      checked={allVisibleSelected}
-                      onChange={(event) => toggleVisible(event.currentTarget.checked)}
-                      aria-label="选择当前页"
-                     />
-                  </TableHead>
-                ) : null}
-                <TableHead className="w-12">状态</TableHead>
-                <TableHead className="w-24">编号</TableHead>
-                <TableHead>标题</TableHead>
-                <TableHead className="w-20 text-center">难度</TableHead>
-                <TableHead className="w-20 text-right">通过率</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pdocs.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={bs.user.signedIn ? 6 : 5} className="py-8 text-center text-sm text-muted-foreground">
-                    没有找到题目
-                  </TableCell>
-                </TableRow>
-              ) : (
-                pdocs.map((p) => {
-                  const ps = psdict[String(p.docId)] || psdict[String(p._id)];
-                  const selectableId = String(p.docId || '');
-                  const nSubmit = p.nSubmit || 0;
-                  const nAccept = p.nAccept || 0;
-                  const rate = nSubmit > 0 ? Math.round((nAccept / nSubmit) * 100) : 0;
-                  return (
-                    <TableRow key={String(p.docId || p._id)}>
-                      {bs.user.signedIn ? (
-                        <TableCell>
-                          <Checkbox
-                            checked={selected.includes(selectableId)}
-                            onChange={(event) => toggleOne(selectableId, event.currentTarget.checked)}
-                            aria-label={`选择题目 ${p.pid || p.docId}`}
-                           />
-                        </TableCell>
-                      ) : null}
-                      <TableCell>{statusIcon(ps?.status)}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {p.pid || p.docId}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1.5">
-                          <a
-                            href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(p.pid || p.docId) })}
-                            className="font-medium hover:text-primary hover:underline"
-                          >
-                            {p.title || '未命名'}
-                          </a>
-                          {p.hidden ? (
-                            <Badge
-                              variant="outline"
-                              className="gap-0.5 border-amber-500/40 bg-amber-50 px-1 py-0 text-[10px] text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
-                              title="该题目已隐藏，只有有权限的用户可见"
-                            >
-                              <EyeOff className="size-2.5" />
-                              隐藏
-                            </Badge>
-                          ) : null}
-                          {p.lockHidden ? (
-                            <Badge
-                              variant="outline"
-                              className="gap-0.5 border-rose-500/40 bg-rose-50 px-1 py-0 text-[10px] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
-                              title="该题目设为「锁定隐藏」，比赛结束后不会自动公开"
-                            >
-                              <Lock className="size-2.5" />
-                              锁定
-                            </Badge>
-                          ) : null}
+      <section aria-label="题目列表" className="overflow-hidden rounded-2xl border border-border/80 bg-background">
+        {pdocs.length === 0 ? (
+          <div className="grid min-h-56 place-items-center px-6 py-12 text-center">
+            <div className="space-y-2">
+              <p className="font-medium">没有符合条件的题目</p>
+              <p className="text-sm text-muted-foreground">调整筛选条件，或创建一道新题。</p>
+              {filtersActive ? <Button asChild variant="outline" size="sm"><a href={bs.urls.problems}>清空筛选</a></Button> : null}
+            </div>
+          </div>
+        ) : (
+          <ul className="divide-y divide-border/70">
+            {pdocs.map((pdoc) => {
+              const docId = String(pdoc.docId);
+              const displayPid = String(pdoc.pid || pdoc.docId);
+              const kind = effectiveProblemKind(pdoc);
+              const canManage = !!canManageByDocId[docId];
+              const detailUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: displayPid });
+              const status = psdict[docId]?.status;
+              return (
+                <li key={docId} className="px-4 py-4 sm:px-5">
+                  <div className="grid min-w-0 gap-3 sm:grid-cols-[1.2rem_minmax(0,1fr)_auto] sm:items-center">
+                    <SubmissionStatus status={status} />
+                    <div className="min-w-0 space-y-2">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <Badge variant="secondary" className="font-normal">{KIND_LABEL[kind]}</Badge>
+                        <a href={detailUrl} className="min-w-0 truncate font-medium hover:text-primary hover:underline">
+                          {pdoc.title || '未命名题目'}
+                        </a>
+                        <span className="font-mono text-xs text-muted-foreground">{displayPid}</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                        <span>Owner · {ownerNames[String(pdoc.owner)] || `UID ${pdoc.owner}`}</span>
+                        <span className="inline-flex items-center gap-1">
+                          {pdoc.hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                          {pdoc.hidden ? '隐藏' : '已发布'}
+                        </span>
+                        {pdoc.structureLockedAt ? <span className="inline-flex items-center gap-1"><LockKeyhole className="size-3.5" />结构已锁定</span> : null}
+                        {pdoc.archivedAt ? <span className="inline-flex items-center gap-1"><Archive className="size-3.5" />已归档</span> : null}
+                      </div>
+                      {pdoc.tag?.length ? (
+                        <div className="flex flex-wrap gap-1">
+                          {(pdoc.tag as string[]).slice(0, 5).map((tag) => <Badge key={tag} variant="outline" className="font-normal">{tag}</Badge>)}
                         </div>
-                        {p.tag?.length ? (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {(p.tag as string[]).slice(0, 4).map((t: string) => (
-                              <Badge key={t} variant="outline" className="text-[10px] px-1 py-0">{t}</Badge>
-                            ))}
-                          </div>
-                        ) : null}
-                      </TableCell>
-                      <TableCell className="text-center">{difficultyBadge(p.difficulty)}</TableCell>
-                      <TableCell className="text-right tabular-nums text-sm">
-                        <span className="text-green-600 dark:text-green-400">{nAccept}</span>
-                        <span className="text-muted-foreground">/{nSubmit}</span>
-                        <span className="ml-1 text-xs text-muted-foreground">({rate}%)</span>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1 sm:justify-end">
+                      <Button asChild variant="ghost" size="sm"><a href={detailUrl}>查看</a></Button>
+                      {canManage ? (
+                        <>
+                          <Button asChild variant="ghost" size="sm"><a href={`${detailUrl}/edit`}><Pencil className="size-3.5" />编辑</a></Button>
+                          <form method="post">
+                            <input type="hidden" name="operation" value="clone" />
+                            <input type="hidden" name="pid" value={docId} />
+                            <Button type="submit" variant="ghost" size="sm"><Copy className="size-3.5" />克隆</Button>
+                          </form>
+                          {!pdoc.archivedAt ? (
+                            <form
+                              method="post"
+                              onSubmit={(event) => {
+                                // eslint-disable-next-line no-alert
+                                if (!window.confirm(`归档题目「${pdoc.title || displayPid}」？归档后将强制隐藏。`)) {
+                                  event.preventDefault();
+                                }
+                              }}
+                            >
+                              <input type="hidden" name="operation" value="archive" />
+                              <input type="hidden" name="pid" value={docId} />
+                              <input type="hidden" name="reason" value="Archived from problem bank" />
+                              <Button type="submit" variant="ghost" size="sm"><Archive className="size-3.5" />归档</Button>
+                            </form>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
 
       <Pagination current={page} total={ppcount} baseUrl={problemsBaseUrl} />
-    </motion.div>
+    </main>
   );
 }

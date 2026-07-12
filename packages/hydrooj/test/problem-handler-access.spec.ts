@@ -41,8 +41,10 @@ const errors = new Proxy({ PermissionError: TestPermissionError }, {
 
 const calls = {
     add: [] as any[],
+    archive: [] as any[],
     count: [] as any[],
     claims: [] as any[],
+    copy: [] as any[],
     edit: [] as any[],
     get: [] as any[],
     getMaintainableAuthorized: [] as any[],
@@ -73,15 +75,28 @@ let claimAllowed = true;
 const createKinds: string[] = [];
 
 function cursor(docs: any[] = []) {
-    const state = { skip: 0, limit: Infinity };
+    const state: { skip: number, limit: number, sort: Record<string, 1 | -1> | null } = {
+        skip: 0, limit: Infinity, sort: null,
+    };
     const value: any = {
         hint() { return value; },
         limit(limit: number) { state.limit = limit; return value; },
         project() { return value; },
         skip(skip: number) { state.skip = skip; return value; },
-        sort() { return value; },
+        sort(sort: Record<string, 1 | -1>) { state.sort = sort; return value; },
         async count() { return countResult; },
-        async toArray() { return docs.slice(state.skip, state.skip + state.limit); },
+        async toArray() {
+            const sorted = state.sort
+                ? [...docs].sort((left, right) => {
+                    for (const [key, direction] of Object.entries(state.sort)) {
+                        if (left[key] < right[key]) return -direction;
+                        if (left[key] > right[key]) return direction;
+                    }
+                    return 0;
+                })
+                : docs;
+            return sorted.slice(state.skip, state.skip + state.limit);
+        },
     };
     return value;
 }
@@ -119,6 +134,14 @@ const problemStub = {
     },
     async addTestdataWithClaim(claim: any, ...args: any[]) {
         calls.renameFile.push([claim.domainId, claim.pid, ...args]);
+    },
+    async copy(...args: any[]) {
+        calls.copy.push(args);
+        return 8;
+    },
+    async archiveProblem(...args: any[]) {
+        calls.archive.push(args);
+        return { domainId: args[0], docId: args[1], archivedAt: new Date() };
     },
     async addAdditionalFileWithClaim(claim: any, ...args: any[]) {
         calls.renameFile.push([claim.domainId, claim.pid, ...args]);
@@ -254,6 +277,9 @@ const storageStub = {
 const oplogStub = { async log() { return undefined; } };
 const userStub = {
     async getById() { return { _id: 42 }; },
+    async getList(_domainId: string, ownerIds: number[]) {
+        return Object.fromEntries(ownerIds.map((ownerId) => [ownerId, { _id: ownerId, uname: `user-${ownerId}` }]));
+    },
     async setById() { return undefined; },
 };
 
@@ -263,6 +289,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../error') return errors;
     if (request === '../lib/problem-config') {
         return {
+            isProblemConfigFilename: (name: string) => name.toLowerCase() === 'config.yaml',
             parseProblemConfigObject: (pdoc: any) => (
                 pdoc?.config && typeof pdoc.config === 'object' ? pdoc.config : null
             ),
@@ -327,9 +354,8 @@ try {
 }
 
 const {
-    defaultSearch,
     ProblemApi,
-    ProblemCreateHandler,
+    ProblemCreateProgrammingHandler,
     ProblemCreateFunctionHandler,
     ProblemCreateProgramFillHandler,
     ProblemCreateSingleHandler,
@@ -365,7 +391,11 @@ function makeHandler(HandlerClass: any, user: Record<string, unknown>) {
             parallel: async () => undefined,
         },
         url: (name: string) => name === 'training_main' ? '/training' : `/${name}`,
-        paginate: async (source: any) => [await source.toArray(), 1, countResult],
+        paginate: async (source: any, page: number, limit: number) => [
+            await source.skip((page - 1) * limit).limit(limit).toArray(),
+            Math.ceil(countResult / limit),
+            countResult,
+        ],
         back: () => undefined,
         progress: () => undefined,
         limitRate: async () => undefined,
@@ -433,10 +463,78 @@ describe('P2.11 enumeration entry gates', () => {
         await main.get('system', 1, '', 20, false, false);
         const mine = makeHandler(ProblemMineHandler, user);
         await mine.get('system', 1);
-        expect(calls.getMulti[0].query).to.deep.equal(scope);
+        expect(calls.getMulti[0].query.$and).to.deep.equal([
+            scope,
+            { archivedAt: { $exists: false } },
+        ]);
         expect(calls.getMulti[1].query).to.deep.equal(scope);
         expect(calls.getMulti[2].query).to.deep.equal(scope);
         expect(calls.refresh.map(({ domainId }) => domainId)).to.deep.equal(['system', 'system']);
+    });
+
+    it('combines every unified-bank filter before find and count', async () => {
+        const scope = { docId: { $nin: [99] } };
+        const handler = makeHandler(ProblemMainHandler, {
+            canBrowse: true, admin: true, scope, hasPriv: () => false,
+        });
+        getMultiResults = [[]];
+        await handler.get(
+            'system', 1, '', 20, false, false,
+            'title', 'multi', 'arrays', 7, 'hidden', 'archived',
+        );
+        expect(calls.getMulti[0].query).to.deep.equal({
+            $and: [
+                scope,
+                { problemKind: 'multi' },
+                { tag: 'arrays' },
+                { owner: 7 },
+                { hidden: true },
+                { archivedAt: { $exists: true } },
+            ],
+        });
+    });
+
+    it('treats missing kind as programming and rejects owner filtering for teachers', async () => {
+        const admin = makeHandler(ProblemMainHandler, {
+            canBrowse: true, admin: true, scope: {}, hasPriv: () => false,
+        });
+        getMultiResults = [[]];
+        await admin.get(
+            'system', 1, '', 20, false, false,
+            'default', 'programming', '', 0, 'all', 'all',
+        );
+        expect(calls.getMulti[0].query.$and[1]).to.deep.equal({
+            $or: [{ problemKind: 'programming' }, { problemKind: { $exists: false } }],
+        });
+
+        calls.getMulti.length = 0;
+        const teacher = makeHandler(ProblemMainHandler, {
+            canBrowse: true, admin: false, scope: { owner: 42 }, hasPriv: () => false,
+        });
+        const error = await captureFailure(() => teacher.get(
+            'system', 1, '', 20, false, false,
+            'default', '', '', 7, 'all', 'active',
+        ));
+        expect(error).to.be.instanceOf(TestPermissionError);
+        expect(calls.getMulti).to.deep.equal([]);
+    });
+
+    it('gates row clone and archive through canonical maintenance', async () => {
+        maintainResult = true;
+        const clone = makeHandler(ProblemMainHandler, { canBrowse: true });
+        getResults = [{ domainId: 'system', docId: 7, owner: 42 }];
+        await clone.postClone('forged', 7);
+        expect(calls.copy).to.deep.equal([[
+            'system', 7, 'system', undefined, true, undefined, { owner: 42, actor: 42 },
+        ]]);
+        expect(calls.claims[0]).to.deep.include({
+            domainId: 'system', pid: 7, operation: 'clone-revision',
+        });
+
+        const archive = makeHandler(ProblemMainHandler, { canBrowse: true });
+        getResults = [{ domainId: 'system', docId: 7, owner: 42 }];
+        await archive.postArchive('forged', 7, 'retired');
+        expect(calls.archive[0].slice(0, 4)).to.deep.equal(['system', 7, 42, 'retired']);
     });
 
     it('ignores a forged method domainId and queries only the authoritative handler domain', async () => {
@@ -449,7 +547,10 @@ describe('P2.11 enumeration entry gates', () => {
         await makeHandler(ProblemMineHandler, user).get('forged', 1);
         await makeHandler(ProblemRandomHandler, user).get('forged', '');
         expect(calls.getMulti.every((call) => call.domainId === 'system')).to.equal(true);
-        expect(calls.random).to.deep.equal([{ domainId: 'system', query: scope }]);
+        expect(calls.random).to.deep.equal([{
+            domainId: 'system',
+            query: { $and: [scope, { archivedAt: { $exists: false } }] },
+        }]);
     });
 });
 
@@ -467,7 +568,7 @@ describe('P2.11 authoritative problem route domain', () => {
     });
 
     it('creates a problem only in the authoritative handler domain', async () => {
-        const handler = makeHandler(ProblemCreateHandler, {});
+        const handler = makeHandler(ProblemCreateProgrammingHandler, {});
         await handler.post('forged', 'Title', 'Statement', '', false, 0, []);
         expect(calls.add[0][0]).to.equal('system');
     });
@@ -725,32 +826,57 @@ describe('P3.11 program-fill and function HTTP boundaries', () => {
 });
 
 describe('P2.11 scoped Mongo search', () => {
-    it('pushes scope into text find and count before pagination', async () => {
+    it('sorts the full scoped text result before taking a later page', async () => {
         const scope = { $or: [{ owner: 42 }, { docId: { $in: [7] } }] };
-        getMultiResults = [[
-            ...Array.from({ length: 20 }, (_, i) => ({ domainId: 'system', docId: 100 + i, pid: `P${100 + i}` })),
-            { domainId: 'system', docId: 7, pid: 'P7' },
-        ]];
-        countResult = 31;
-        const result = await defaultSearch('system', 'alpha', { skip: 20, limit: 10 }, scope);
+        getMultiResults = [Array.from({ length: 25 }, (_, index) => ({
+            domainId: 'system',
+            docId: index + 1,
+            owner: 42,
+            pid: `P${index + 1}`,
+            title: `Title ${String(24 - index).padStart(2, '0')}`,
+        }))];
+        countResult = 25;
+        const handler = makeHandler(ProblemMainHandler, {
+            _id: 42, canBrowse: true, admin: false, scope, hasPriv: () => false,
+        });
+        await handler.get('system', 2, 'alpha', 20, false, false, 'title');
         expect(calls.getMulti).to.have.lengthOf(1);
         expect(calls.getMulti[0].query.$and[0]).to.deep.equal(scope);
-        expect(calls.count).to.have.lengthOf(1);
-        expect(calls.count[0].query).to.deep.equal(calls.getMulti[0].query);
-        expect(result.total).to.equal(31);
-        expect(result.hits).to.deep.equal(['system/7']);
+        expect(calls.getMulti[0].query.$and[2]).to.have.property('$or');
+        expect(handler.response.body.pdocs.map((pdoc: any) => pdoc.title)).to.deep.equal([
+            'Title 20', 'Title 21', 'Title 22', 'Title 23', 'Title 24',
+        ]);
+        expect(handler.response.body.pcount).to.equal(25);
     });
 
     it('includes exact pid lookup in the same scoped Mongo query', async () => {
         const scope = { owner: 42 };
         getMultiResults = [[{ domainId: 'system', docId: 42, pid: 'P42' }]];
         countResult = 1;
-        const result = await defaultSearch('system', 'P42', { skip: 0, limit: 10 }, scope);
+        const handler = makeHandler(ProblemMainHandler, {
+            _id: 42, canBrowse: true, admin: false, scope, hasPriv: () => false,
+        });
+        await handler.get('system', 1, 'P42', 20, false, false);
         expect(calls.getMulti).to.have.lengthOf(1);
-        expect(calls.getMulti.every((call) => call.query.$and[0] === scope)).to.equal(true);
+        expect(calls.getMulti[0].query.$and[0]).to.equal(scope);
+        expect(calls.getMulti[0].query.$and[2].$or[0]).to.deep.equal({ docId: 42 });
         expect(calls.get).to.deep.equal([]);
-        expect(result.hits).to.deep.equal(['system/42']);
-        expect(result.total).to.equal(1);
+        expect(handler.response.body.pdocs.map((pdoc: any) => pdoc.docId)).to.deep.equal([42]);
+        expect(handler.response.body.pcount).to.equal(1);
+    });
+
+    it('matches a single-character prefix in both pid and title search', async () => {
+        getMultiResults = [[]];
+        const handler = makeHandler(ProblemMainHandler, {
+            _id: 42, canBrowse: true, admin: false, scope: { owner: 42 }, hasPriv: () => false,
+        });
+        await handler.get('system', 1, 'P', 20, false, false);
+        const alternatives = calls.getMulti[0].query.$and[2].$or;
+        const pidPattern = alternatives.find((item: any) => item.pid).pid.$regex;
+        const titlePattern = alternatives.find((item: any) => item.title).title.$regex;
+        expect(pidPattern.test('P42')).to.equal(true);
+        expect(titlePattern.test('Problem title')).to.equal(true);
+        expect(pidPattern.flags).to.equal('i');
     });
 
     it('forces non-admin text search to Mongo even when a global provider is registered', async () => {
@@ -773,7 +899,7 @@ describe('P2.11 scoped Mongo search', () => {
         expect(calls.getMulti.length).to.be.greaterThan(0);
     });
 
-    it('allows an administrator to retain the registered search provider', async () => {
+    it('uses scoped Mongo for an administrator so every filter shares one count query', async () => {
         (global as any).Hydro.module.problemSearch = {
             elastic: async (...args: any[]) => {
                 calls.provider.push(args);
@@ -788,7 +914,8 @@ describe('P2.11 scoped Mongo search', () => {
             hasPriv: () => false,
         });
         await handler.get('system', 1, 'alpha', 20, false, false);
-        expect(calls.provider).to.have.lengthOf(1);
+        expect(calls.provider).to.deep.equal([]);
+        expect(calls.getMulti.length).to.be.greaterThan(0);
     });
 
     it('falls back to scoped Mongo when an administrator has a fenced exclusion', async () => {

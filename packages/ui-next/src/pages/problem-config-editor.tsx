@@ -86,8 +86,6 @@ type R = Record<string, any>;
 
 const PROBLEM_TYPES: { value: ProblemType; label: string; desc: string }[] = [
   { value: 'default', label: '传统评测', desc: '标准输入输出，逐用例判分' },
-  { value: 'objective', label: '客观题', desc: '选择/填空' },
-  { value: 'fill_function', label: '函数填空', desc: '填入指定函数体' },
   { value: 'submit_answer', label: '提交答案', desc: '上传答案文件' },
   { value: 'interactive', label: '交互题', desc: '需要 interactor' },
   { value: 'communication', label: '通信题', desc: '需要 user + manager' },

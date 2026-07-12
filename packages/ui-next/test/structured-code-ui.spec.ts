@@ -49,16 +49,6 @@ describe('P3.11 structured code UI contract', () => {
         expect(detail).to.include('!isObjective && !isStructuredCompile');
     });
 
-    it('removes the old composite paper-center program-fill authoring path', () => {
-        const handler = read('packages/hydrooj/src/handler/paper-center.ts');
-        const editor = read('packages/ui-next/src/pages/problem-type-editor.tsx');
-        const paperCenter = read('packages/ui-next/src/pages/paper-center.tsx');
-        expect(handler).not.to.include("'fill_program'");
-        expect(handler).not.to.include("Types.Range(['objective', 'fill_function'])");
-        expect(editor).not.to.include("value: 'fill_program'");
-        expect(paperCenter).not.to.include('新建函数题');
-    });
-
     it('offers a hidden physical clone with an explicit different target language', () => {
         const editor = read('packages/ui-next/src/pages/structured-code-editors.tsx');
         const handler = read('packages/hydrooj/src/handler/problem.ts');

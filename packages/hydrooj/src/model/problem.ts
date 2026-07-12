@@ -27,6 +27,7 @@ import {
     isProblemConfigFilename, parseProblemConfigObject,
     validateCompiledStructuredConfig, validateFillFunctionTestdataFiles,
 } from '../lib/problem-config';
+import { normalizeProblemTestdataUpload } from '../lib/problem-testdata-upload';
 import { parseConfig } from '../lib/testdataConfig';
 import bus from '../service/bus';
 import db from '../service/db';
@@ -1070,6 +1071,7 @@ export class ProblemModel {
         pid?: string,
         _hidden?: boolean,
         structuredLanguage?: string,
+        attribution: { owner?: number, actor?: number } = {},
     ) {
         const original = await ProblemModel.get(domainId, _id, ProblemModel.PROJECTION_PUBLIC, true);
         if (!original) throw new ProblemNotFoundError(domainId, _id);
@@ -1082,13 +1084,15 @@ export class ProblemModel {
         const cloneConfig = structuredLanguage
             ? cloneStructuredProblemForLanguage(problemKind, original.config, structuredLanguage)
             : original.config;
+        const cloneOwner = attribution.owner ?? original.owner;
+        const cloneActor = attribution.actor ?? cloneOwner;
         const cloneId = await ProblemModel.createProblemByKind(
             problemKind,
             target,
             pid || '',
             original.title,
             original.content,
-            original.owner,
+            cloneOwner,
             original.tag,
             { difficulty: original.difficulty, structuredConfig: cloneConfig },
         );
@@ -1130,7 +1134,7 @@ export class ProblemModel {
             throw error;
         }
         await OplogModel.add({
-            type: 'problem.clone', domainId: target, operator: original.owner,
+            type: 'problem.clone', domainId: target, operator: cloneActor,
             problemId: cloneId, sourceDomainId: domainId, sourceProblemId: _id,
             problemKind, revision: 1, changedFields: ['all'], time: new Date(),
         } as any);
@@ -1230,6 +1234,7 @@ export class ProblemModel {
         name = name.trim();
         if (!name) throw new ValidationError('name');
         const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid, true, [name]);
+        f = await normalizeProblemTestdataUpload(name, f);
         const [[, fileinfo]] = await Promise.all([
             document.getSub(domainId, document.TYPE_PROBLEM, pid, 'data', name),
             storage.put(`problem/${domainId}/${pid}/testdata/${name}`, f, operator),
@@ -1249,6 +1254,10 @@ export class ProblemModel {
         const revisionManaged = await ProblemModel.assertDirectStructureWritable(
             domainId, pid, true, [file, newName],
         );
+        if (isProblemConfigFilename(newName)) {
+            const source = await storage.get(`problem/${domainId}/${pid}/testdata/${file}`);
+            await normalizeProblemTestdataUpload(newName, source);
+        }
         const [, sdoc] = await document.getSub(domainId, document.TYPE_PROBLEM, pid, 'data', newName);
         if (sdoc) await ProblemModel.delTestdata(domainId, pid, newName);
         const payload = { _id: newName, name: newName, lastModified: new Date() };
@@ -1357,6 +1366,7 @@ export class ProblemModel {
         name = name.trim();
         if (!name) throw new ValidationError('name');
         const current = await ProblemModel.getClaimedProblemFiles(claim, 'data', [name]);
+        f = await normalizeProblemTestdataUpload(name, f);
         await storage.put(`problem/${claim.domainId}/${claim.pid}/testdata/${name}`, f, operator);
         const meta = await storage.getMeta(`problem/${claim.domainId}/${claim.pid}/testdata/${name}`);
         if (!meta) throw new FileUploadError();
@@ -1378,6 +1388,10 @@ export class ProblemModel {
     ) {
         if (file === newName) return;
         const current = await ProblemModel.getClaimedProblemFiles(claim, 'data', [file, newName]);
+        if (isProblemConfigFilename(newName)) {
+            const source = await storage.get(`problem/${claim.domainId}/${claim.pid}/testdata/${file}`);
+            await normalizeProblemTestdataUpload(newName, source);
+        }
         if (current.some((item) => item.name === newName)) {
             await storage.del([`problem/${claim.domainId}/${claim.pid}/testdata/${newName}`], operator);
         }
@@ -1698,6 +1712,28 @@ export class ProblemModel {
                 const totalSize = allFiles.map((f) => fs.statSync(f[1]).size).reduce((a, b) => a + b, 0);
                 if (allFiles.length > SystemModel.get('limit.problem_files')) throw new ValidationError('files', null, 'Too many files');
                 if (totalSize > SystemModel.get('limit.problem_files_size')) throw new ValidationError('files', null, 'Files too large');
+                const validateImportedTestdataConfigs = async () => {
+                    const entries = await getFiles(
+                        'testdata', 'attachments', 'generators', 'include', 'data', 'output_validators',
+                    );
+                    for (const [entry, location] of entries) {
+                        if (entry.isFile()) {
+                            if (isProblemConfigFilename(entry.name)) {
+                                await normalizeProblemTestdataUpload(entry.name, location);
+                            }
+                            continue;
+                        }
+                        if (!entry.isDirectory()) continue;
+                        const children = await fs.readdir(location, { withFileTypes: true });
+                        for (const childEntry of children) {
+                            if (!childEntry.isFile() || !isProblemConfigFilename(childEntry.name)) continue;
+                            await normalizeProblemTestdataUpload(
+                                childEntry.name, path.join(location, childEntry.name),
+                            );
+                        }
+                    }
+                };
+                await validateImportedTestdataConfigs();
                 const tag = (pdoc.tag || []).map((t) => t.toString());
                 let configChanged = false;
                 let config: ProblemConfigFile = {};

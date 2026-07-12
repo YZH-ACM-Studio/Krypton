@@ -31,16 +31,17 @@ describe('P3.12 programming editor workspace', () => {
         expect(shell).to.include('lg:hidden');
     });
 
-    it('keeps the root create route programming-only and removes the conversion picker', () => {
+    it('moves programming creation under the shared hub without adding a conversion picker', () => {
         const edit = read('packages/ui-next/src/pages/problem-edit.tsx');
         const handler = read('packages/hydrooj/src/handler/problem.ts');
         expect(edit).not.to.include('TypePicker');
         expect(edit).not.to.include("from '@/pages/problem-type-editor'");
         expect(edit).not.to.include('buildConfigYaml');
         expect(edit).not.to.include("cfgForm.append('filename', 'config.yaml')");
-        expect(handler).to.include("ctx.Route('problem_create', '/problem/create', ProblemCreateHandler");
+        expect(handler).to.include("ctx.Route('problem_create', '/problem/create', ProblemCreateHubHandler");
+        expect(handler).to.include("problemKindToSlug('programming')");
+        expect(handler).to.include('ProblemCreateProgrammingHandler');
         expect(handler).to.include("problem.createProblemByKind(\n            'programming'");
-        expect(handler).not.to.include("'/problem/create/programming'");
     });
 
     it('preserves existing form fields and file/config APIs', () => {

@@ -1,5 +1,5 @@
 import {
-  FileArchive, FileText, FolderInput, Settings2, ShieldCheck, SlidersHorizontal,
+  ArrowLeft, FileArchive, FileText, FolderInput, Settings2, ShieldCheck, SlidersHorizontal,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { cn } from '@/lib/cn';
@@ -105,6 +105,11 @@ export function ProblemEditorWorkspace({
       >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0 space-y-1">
+            {isCreate ? (
+              <a href="/problem/create" className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                <ArrowLeft className="size-3.5" />选择其他题型
+              </a>
+            ) : null}
             <p className="text-xs font-medium tracking-wide text-muted-foreground">编程题工作区 · {pid || '新题'}</p>
             <h1 className="truncate text-2xl font-semibold tracking-tight text-balance">{title || '新建编程题'}</h1>
             <p className="max-w-[65ch] text-sm leading-6 text-muted-foreground">

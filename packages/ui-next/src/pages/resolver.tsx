@@ -57,11 +57,10 @@ import { HomeworkEditPage, HomeworkFilesPage } from '@/pages/homework-manage';
 import { ManualGradingPage } from '@/pages/manual-grading';
 import { MindmapPage } from '@/pages/mindmap';
 import { DomainsPage } from '@/pages/misc';
-import { PaperCenterPage } from '@/pages/paper-center';
-import { PaperCenterEditPage } from '@/pages/paper-center-edit';
 import { MyVerifyInboxPage } from '@/pages/permits/inbox';
 import { FpsImportPage, TelegramLoginPage, XcpcioBoardPage } from '@/pages/plugin-pages';
 import { ProblemDetailPage } from '@/pages/problem-detail';
+import { ProblemCreateHubPage } from '@/pages/problem-create-hub';
 import { ProblemEditPage } from '@/pages/problem-edit';
 import { ProblemHackPage } from '@/pages/problem-hack';
 import {
@@ -127,6 +126,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
 
   // Problems
   'problem_main.html': ProblemsPage,
+  'problem_create_hub.html': ProblemCreateHubPage,
   'problem_mine.html': ProblemMinePage,
   'problem_detail.html': ProblemDetailPage,
   'problem_submit.html': ProblemSubmitPage,
@@ -237,8 +237,6 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'manage_user_import.html': ManageUserImportPage,
   'manage_user_priv.html': ManageUserPrivPage,
   'manage_realpass.html': RealPassManagePage,
-  'paper_center.html': PaperCenterPage,
-  'paper_center_edit.html': PaperCenterEditPage,
 
   // Misc
   'status.html': StatusPage,

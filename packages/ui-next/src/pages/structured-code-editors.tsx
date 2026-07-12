@@ -173,7 +173,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
     <main className="mx-auto w-full max-w-6xl space-y-5 pb-10">
       <header className="flex flex-wrap items-center gap-3 border-b border-border/70 pb-4">
         <Button asChild variant="ghost" size="icon" className="size-11">
-          <a href={isCreate ? '/p' : `/p/${pid}`} aria-label="返回"><ArrowLeft className="size-4" /></a>
+          <a href={isCreate ? '/problem/create' : `/p/${pid}`} aria-label="返回"><ArrowLeft className="size-4" /></a>
         </Button>
         <div className="min-w-0 flex-1">
           <p className="text-xs text-muted-foreground">代码评测单题编辑器</p>

@@ -796,6 +796,19 @@ export async function findStudentsByUserIds(domainId: string, userIds: number[])
 }
 
 /**
+ * Return bound roster entries that belong to any requested user group.
+ * Statistics callers keep the full groupIds array so one student can
+ * contribute independently to every selected group they belong to.
+ */
+export async function findBoundStudentsByGroupIds(domainId: string, groupIds: ObjectId[]): Promise<StudentRecord[]> {
+    if (!groupIds.length) return [];
+    return await studentsColl
+        .find({ domainId, groupIds: { $in: groupIds }, boundUserId: { $gt: 1 } })
+        .sort({ studentId: 1, _id: 1 })
+        .toArray();
+}
+
+/**
  * Update mutable student fields. Admin-only. Pass `enrollmentYear: null`
  * explicitly to clear it; `undefined` leaves it unchanged. `realName` and
  * `groupIds` patches are also accepted — useful for typo fixes and class
@@ -915,6 +928,7 @@ export const userBindModel = {
     findStudentsByStudentId,
     findStudentByUserId,
     findStudentsByUserIds,
+    findBoundStudentsByGroupIds,
     updateStudent,
     deleteStudent,
     assignStudentsToGroup,

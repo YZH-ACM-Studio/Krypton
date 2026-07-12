@@ -1,4 +1,40 @@
 export const ADMIN_STATS_MAX_TIME_MS = 5_000;
+const DAY_MS = 24 * 60 * 60 * 1_000;
+const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1_000;
+
+export function shanghaiDayWindow(days: number, now = new Date()) {
+    if (!Number.isInteger(days) || days <= 0) throw new RangeError('days must be a positive integer');
+    const shifted = new Date(now.getTime() + SHANGHAI_OFFSET_MS);
+    const todayLocalAsUtc = Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate());
+    const firstLocalAsUtc = todayLocalAsUtc - (days - 1) * DAY_MS;
+    return {
+        since: new Date(firstLocalAsUtc - SHANGHAI_OFFSET_MS),
+        days: Array.from({ length: days }, (_, index) => new Date(firstLocalAsUtc + index * DAY_MS).toISOString().slice(0, 10)),
+    };
+}
+
+export interface UserStats {
+    total: number;
+    accepted: number;
+    activeDays: number;
+    byDay: Array<{ day: string; total: number; accepted: number }>;
+}
+
+export interface DashboardStats {
+    total: number;
+    accepted: number;
+    participants: number;
+    byDay: Array<{ day: string; total: number; accepted: number; activeUsers: number }>;
+}
+
+export interface ProblemStatsRow {
+    pid: number;
+    total: number;
+    accepted: number;
+    wrongAnswer: number;
+    timeLimit: number;
+    compileError: number;
+}
 
 export interface ContestStats {
     total: number;
@@ -74,6 +110,179 @@ export function normalizeContestStats(rows: any[]): ContestStats {
         byHour: (facet.byHour || []).map((row) => ({ hour: String(row._id), count: Number(row.count || 0) })),
         byLanguage: (facet.byLanguage || []).map((row) => ({ language: String(row._id), count: Number(row.count || 0) })),
     };
+}
+
+export function userStatsPipeline(
+    domainId: string,
+    uid: number,
+    acceptedStatus: number,
+    since: unknown,
+    timezone = 'Asia/Shanghai',
+) {
+    const dayExpression = {
+        $dateToString: { format: '%Y-%m-%d', date: { $toDate: '$_id' }, timezone },
+    };
+    return [
+        { $match: { domainId, uid } },
+        {
+            $facet: {
+                overall: [
+                    {
+                        $group: {
+                            _id: null,
+                            total: { $sum: 1 },
+                            accepted: { $sum: { $cond: [{ $eq: ['$status', acceptedStatus] }, 1, 0] } },
+                            days: { $addToSet: dayExpression },
+                        },
+                    },
+                    { $project: { _id: 0, total: 1, accepted: 1, activeDays: { $size: '$days' } } },
+                ],
+                byDay: [
+                    { $match: { _id: { $gte: since } } },
+                    {
+                        $group: {
+                            _id: dayExpression,
+                            total: { $sum: 1 },
+                            accepted: { $sum: { $cond: [{ $eq: ['$status', acceptedStatus] }, 1, 0] } },
+                        },
+                    },
+                    { $sort: { _id: 1 } },
+                ],
+            },
+        },
+    ];
+}
+
+export function normalizeUserStats(rows: any[], expectedDays: string[] = []): UserStats {
+    const facet = rows[0] || {};
+    const overall = facet.overall?.[0] || {};
+    const byDay = new Map<string, any>((facet.byDay || []).map((row) => [String(row._id), row]));
+    return {
+        total: Number(overall.total || 0),
+        accepted: Number(overall.accepted || 0),
+        activeDays: Number(overall.activeDays || 0),
+        byDay: (expectedDays.length ? expectedDays : Array.from(byDay.keys()).sort()).map((day) => ({
+            day,
+            total: Number(byDay.get(day)?.total || 0),
+            accepted: Number(byDay.get(day)?.accepted || 0),
+        })),
+    };
+}
+
+export function groupUserStatsPipeline(domainId: string, uids: number[], acceptedStatus: number) {
+    return [
+        { $match: { domainId, uid: { $in: uids } } },
+        {
+            $group: {
+                _id: '$uid',
+                total: { $sum: 1 },
+                accepted: { $sum: { $cond: [{ $eq: ['$status', acceptedStatus] }, 1, 0] } },
+            },
+        },
+        { $sort: { _id: 1 } },
+    ];
+}
+
+export function dashboardStatsPipeline(
+    domainId: string,
+    acceptedStatus: number,
+    since: unknown,
+    timezone = 'Asia/Shanghai',
+) {
+    return [
+        { $match: { domainId } },
+        {
+            $facet: {
+                overall: [
+                    {
+                        $group: {
+                            _id: null,
+                            total: { $sum: 1 },
+                            accepted: { $sum: { $cond: [{ $eq: ['$status', acceptedStatus] }, 1, 0] } },
+                            participantIds: { $addToSet: '$uid' },
+                        },
+                    },
+                    { $project: { _id: 0, total: 1, accepted: 1, participants: { $size: '$participantIds' } } },
+                ],
+                byDay: [
+                    { $match: { _id: { $gte: since } } },
+                    {
+                        $group: {
+                            _id: {
+                                $dateToString: {
+                                    format: '%Y-%m-%d',
+                                    date: { $toDate: '$_id' },
+                                    timezone,
+                                },
+                            },
+                            total: { $sum: 1 },
+                            accepted: { $sum: { $cond: [{ $eq: ['$status', acceptedStatus] }, 1, 0] } },
+                            participantIds: { $addToSet: '$uid' },
+                        },
+                    },
+                    {
+                        $project: {
+                            _id: 1,
+                            total: 1,
+                            accepted: 1,
+                            activeUsers: { $size: '$participantIds' },
+                        },
+                    },
+                    { $sort: { _id: 1 } },
+                ],
+            },
+        },
+    ];
+}
+
+export function normalizeDashboardStats(rows: any[], expectedDays: string[] = []): DashboardStats {
+    const facet = rows[0] || {};
+    const overall = facet.overall?.[0] || {};
+    const byDay = new Map<string, any>((facet.byDay || []).map((row) => [String(row._id), row]));
+    return {
+        total: Number(overall.total || 0),
+        accepted: Number(overall.accepted || 0),
+        participants: Number(overall.participants || 0),
+        byDay: (expectedDays.length ? expectedDays : Array.from(byDay.keys()).sort()).map((day) => ({
+            day,
+            total: Number(byDay.get(day)?.total || 0),
+            accepted: Number(byDay.get(day)?.accepted || 0),
+            activeUsers: Number(byDay.get(day)?.activeUsers || 0),
+        })),
+    };
+}
+
+export function problemStatsPipeline(
+    domainId: string,
+    pids: number[],
+    statuses: { accepted: number; wrongAnswer: number; timeLimit: number; compileError: number },
+) {
+    const countStatus = (status: number) => ({ $sum: { $cond: [{ $eq: ['$status', status] }, 1, 0] } });
+    return [
+        { $match: { domainId, pid: { $in: pids } } },
+        {
+            $group: {
+                _id: '$pid',
+                total: { $sum: 1 },
+                accepted: countStatus(statuses.accepted),
+                wrongAnswer: countStatus(statuses.wrongAnswer),
+                timeLimit: countStatus(statuses.timeLimit),
+                compileError: countStatus(statuses.compileError),
+            },
+        },
+        { $sort: { _id: 1 } },
+    ];
+}
+
+export function normalizeProblemStats(rows: any[]): ProblemStatsRow[] {
+    return rows.map((row) => ({
+        pid: Number(row._id),
+        total: Number(row.total || 0),
+        accepted: Number(row.accepted || 0),
+        wrongAnswer: Number(row.wrongAnswer || 0),
+        timeLimit: Number(row.timeLimit || 0),
+        compileError: Number(row.compileError || 0),
+    }));
 }
 
 export function trainingEnrollmentPipeline(domainId: string, trainingId: unknown) {

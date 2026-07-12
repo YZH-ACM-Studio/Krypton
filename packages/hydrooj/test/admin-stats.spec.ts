@@ -6,9 +6,17 @@ import {
     ADMIN_STATS_MAX_TIME_MS,
     buildTrainingStats,
     contestStatsPipeline,
+    dashboardStatsPipeline,
+    groupUserStatsPipeline,
+    normalizeDashboardStats,
     normalizeContestStats,
+    normalizeProblemStats,
+    normalizeUserStats,
+    problemStatsPipeline,
+    shanghaiDayWindow,
     trainingAcceptedPairsPipeline,
     trainingEnrollmentPipeline,
+    userStatsPipeline,
 } from '../src/lib/admin-stats';
 
 describe('admin statistics aggregation contracts', () => {
@@ -102,23 +110,120 @@ describe('admin statistics aggregation contracts', () => {
         expect(accepted[1]).to.deep.equal({ $group: { _id: { uid: '$uid', pid: '$docId' } } });
     });
 
+    it('builds and normalizes per-user and dashboard facets', () => {
+        const userPipeline = userStatsPipeline('system', 42, 1, 'since-id');
+        expect(userPipeline[0]).to.deep.equal({ $match: { domainId: 'system', uid: 42 } });
+        expect(JSON.stringify(userPipeline[1])).to.include('activeDays');
+        expect(JSON.stringify(userPipeline[1])).to.include('since-id');
+        expect(normalizeUserStats([{
+            overall: [{ total: 8, accepted: 3, activeDays: 4 }],
+            byDay: [{ _id: '2026-07-12', total: 2, accepted: 1 }],
+        }])).to.deep.equal({
+            total: 8,
+            accepted: 3,
+            activeDays: 4,
+            byDay: [{ day: '2026-07-12', total: 2, accepted: 1 }],
+        });
+
+        const dashboard = dashboardStatsPipeline('system', 1, 'since-id');
+        expect(dashboard[0]).to.deep.equal({ $match: { domainId: 'system' } });
+        expect(JSON.stringify(dashboard[1])).to.include('activeUsers');
+        expect(normalizeDashboardStats([{
+            overall: [{ total: 10, accepted: 5, participants: 3 }],
+            byDay: [{ _id: '2026-07-12', total: 4, accepted: 2, activeUsers: 2 }],
+        }])).to.deep.equal({
+            total: 10,
+            accepted: 5,
+            participants: 3,
+            byDay: [{ day: '2026-07-12', total: 4, accepted: 2, activeUsers: 2 }],
+        });
+    });
+
+    it('uses strict Shanghai natural-day windows and fills inactive days with zeroes', () => {
+        const window = shanghaiDayWindow(3, new Date('2026-07-13T17:30:00.000Z'));
+        expect(window.since.toISOString()).to.equal('2026-07-11T16:00:00.000Z');
+        expect(window.days).to.deep.equal(['2026-07-12', '2026-07-13', '2026-07-14']);
+
+        const user = normalizeUserStats([{
+            overall: [{ total: 2, accepted: 1, activeDays: 1 }],
+            byDay: [{ _id: '2026-07-13', total: 2, accepted: 1 }],
+        }], window.days);
+        expect(user.byDay).to.deep.equal([
+            { day: '2026-07-12', total: 0, accepted: 0 },
+            { day: '2026-07-13', total: 2, accepted: 1 },
+            { day: '2026-07-14', total: 0, accepted: 0 },
+        ]);
+
+        const dashboard = normalizeDashboardStats([{
+            overall: [{ total: 2, accepted: 1, participants: 1 }],
+            byDay: [{ _id: '2026-07-12', total: 2, accepted: 1, activeUsers: 1 }],
+        }], window.days);
+        expect(dashboard.byDay).to.deep.equal([
+            { day: '2026-07-12', total: 2, accepted: 1, activeUsers: 1 },
+            { day: '2026-07-13', total: 0, accepted: 0, activeUsers: 0 },
+            { day: '2026-07-14', total: 0, accepted: 0, activeUsers: 0 },
+        ]);
+        expect(shanghaiDayWindow(30, new Date('2026-07-13T17:30:00.000Z')).days).to.have.lengthOf(30);
+        expect(shanghaiDayWindow(90, new Date('2026-07-13T17:30:00.000Z')).days).to.have.lengthOf(90);
+    });
+
+    it('scopes group and problem aggregations and preserves error counts', () => {
+        const groups = groupUserStatsPipeline('system', [2, 3], 1);
+        expect(groups[0]).to.deep.equal({ $match: { domainId: 'system', uid: { $in: [2, 3] } } });
+        expect(JSON.stringify(groups[1])).to.include('accepted');
+
+        const problems = problemStatsPipeline('system', [10, 11], {
+            accepted: 1,
+            wrongAnswer: 2,
+            timeLimit: 3,
+            compileError: 7,
+        });
+        expect(problems[0]).to.deep.equal({ $match: { domainId: 'system', pid: { $in: [10, 11] } } });
+        expect(JSON.stringify(problems[1])).to.include('wrongAnswer');
+        expect(JSON.stringify(problems[1])).to.include('timeLimit');
+        expect(JSON.stringify(problems[1])).to.include('compileError');
+        expect(normalizeProblemStats([{
+            _id: 10,
+            total: 12,
+            accepted: 5,
+            wrongAnswer: 4,
+            timeLimit: 2,
+            compileError: 1,
+        }])).to.deep.equal([{
+            pid: 10,
+            total: 12,
+            accepted: 5,
+            wrongAnswer: 4,
+            timeLimit: 2,
+            compileError: 1,
+        }]);
+    });
+
     it('keeps the server gate, timeout, route, navigation, and UI dimensions wired', () => {
         const handler = readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/handler/admin-stats.ts'), 'utf8');
         const page = readFileSync(resolve(process.cwd(), 'packages/ui-next/src/pages/admin-stats.tsx'), 'utf8');
         const resolver = readFileSync(resolve(process.cwd(), 'packages/ui-next/src/pages/resolver.tsx'), 'utf8');
         const sidebar = readFileSync(resolve(process.cwd(), 'packages/ui-next/src/components/layout/sidebar.tsx'), 'utf8');
+        const userbindModel = readFileSync(resolve(process.cwd(), 'packages/krypton-userbind/src/model.ts'), 'utf8');
 
         expect(ADMIN_STATS_MAX_TIME_MS).to.equal(5_000);
         expect(handler).to.include('this.checkPriv(PRIV.PRIV_EDIT_SYSTEM)');
         expect(handler).to.include("ctx.Route('admin_stats', '/admin/stats', AdminStatsHandler, PRIV.PRIV_EDIT_SYSTEM)");
-        expect(handler.match(/maxTimeMS: ADMIN_STATS_MAX_TIME_MS/g)).to.have.lengthOf(3);
-        expect(handler).not.to.match(/catch\s*\{/);
+        expect(handler.match(/maxTimeMS: ADMIN_STATS_MAX_TIME_MS/g)).to.have.lengthOf(7);
+        expect(handler).not.to.match(/catch(?:\s*\([^)]*\))?\s*\{\s*\}/);
         for (const label of ['总提交', 'AC 提交', '参赛人数', '每题通过分布', '按小时提交曲线', '语言分布']) {
             expect(page).to.include(label);
         }
         for (const label of ['报名人数', '每题完成人数', '完成率分布', '成员进度榜']) {
             expect(page).to.include(label);
         }
+        for (const label of ['按人', '班级组', '大盘', '按题目', '导出 CSV', '日活跃用户', '错误类型占比']) {
+            expect(page).to.include(label);
+        }
+        expect(page).to.include('if (/^[=+\\-@\\t\\r]/.test(text))');
+        expect(handler).to.include('\'contest\', \'training\', \'user\', \'group\', \'dashboard\', \'problem\'');
+        expect(userbindModel).to.include('findBoundStudentsByGroupIds');
+        expect(userbindModel).to.include('boundUserId: { $gt: 1 }');
         expect(resolver).to.include("'admin_stats.html': AdminStatsPage");
         expect(sidebar).to.include("href: '/admin/stats'");
     });

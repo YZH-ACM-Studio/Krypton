@@ -12,6 +12,7 @@
  *   - vigil-bridge.verifyAccessTokenWithVigil (outbound)
  */
 import { randomBytes } from 'node:crypto';
+import { escapeRegExp } from 'lodash';
 import { ObjectId } from 'mongodb';
 import { Context, Handler, OplogModel, param, PRIV, requireServiceToken, Types, UserModel } from 'hydrooj';
 import * as contestModel from '../model/contest';
@@ -867,6 +868,46 @@ class VigilAdminOverviewHandler extends Handler {
     }
 }
 
+const VIGIL_CONTESTS_PAGE_SIZE = 20;
+
+class VigilAdminContestsHandler extends Handler {
+    async prepare() {
+        this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
+    }
+
+    @param('page', Types.PositiveInt, true)
+    @param('q', Types.String, true)
+    async get(_domainId: string, page = 1, q = '') {
+        const filter: any = { docType: document.TYPE_CONTEST };
+        const query = q.trim();
+        if (query) filter.title = { $regex: new RegExp(escapeRegExp(query), 'i') };
+        const [items, total] = await Promise.all([
+            document.coll
+                .find(filter)
+                .project({ domainId: 1, docId: 1, title: 1, beginAt: 1, endAt: 1, rule: 1, vigilEnabled: 1 })
+                .sort({ beginAt: -1, docId: -1 })
+                .skip((page - 1) * VIGIL_CONTESTS_PAGE_SIZE)
+                .limit(VIGIL_CONTESTS_PAGE_SIZE)
+                .toArray(),
+            document.coll.countDocuments(filter),
+        ]);
+        this.response.body = {
+            page,
+            pageSize: VIGIL_CONTESTS_PAGE_SIZE,
+            total,
+            items: items.map((tdoc: any) => ({
+                domainId: tdoc.domainId,
+                examId: String(tdoc.docId),
+                title: tdoc.title || String(tdoc.docId),
+                beginAt: tdoc.beginAt,
+                endAt: tdoc.endAt,
+                rule: tdoc.rule || '',
+                vigilEnabled: !!tdoc.vigilEnabled,
+            })),
+        };
+    }
+}
+
 // Exam-scoped detail handler — all sub-views (sessions / approvals / events
 // / overview) for one Hydro contest. The React page reads :examId and
 // filters client-side.
@@ -1005,6 +1046,7 @@ class VigilCheckHlsAccessHandler extends Handler {
 
 export async function apply(ctx: Context) {
     ctx.Route('admin_vigil_overview', '/admin/vigil', VigilAdminOverviewHandler, PRIV.PRIV_EDIT_SYSTEM);
+    ctx.Route('admin_vigil_contests', '/api/admin/vigil/contests', VigilAdminContestsHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('admin_vigil_exam_detail', '/admin/vigil/exams/:examId', VigilAdminExamDetailHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('admin_vigil_resolve_contests', '/api/admin/vigil/resolve-contests', VigilResolveContestsHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('vigil_lookup_student', '/api/vigil/lookup-student', VigilLookupStudentHandler);

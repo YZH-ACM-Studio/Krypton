@@ -24,6 +24,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Film,
   Inbox,
   Layers,
   Megaphone,
@@ -46,6 +47,7 @@ import { DateTime } from '@/components/ui/datetime';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { SimpleSelect } from '@/components/ui/select';
+import { MiniTabs } from '@/components/ui/mini-tabs';
 import { ToastProvider } from '@/components/ui/toast';
 import { useBootstrap } from '@/lib/bootstrap';
 import {
@@ -63,6 +65,9 @@ import {
   type VigilEvent,
   type VigilExamSession,
   listContestStudents,
+  listContestRecordings,
+  buildRecordingUrl,
+  type VigilRecording,
   type VigilStudentCard as VigilStudentCardData,
   type VigilStudentListResponse,
   type VigilStudentStatus,
@@ -165,6 +170,8 @@ function useVigilData<T>(
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setOfflineErr(null);
+    setErr(null);
     loader()
       .then((d) => {
         if (cancelled) return;
@@ -374,7 +381,184 @@ function displayExam(id: string, names: Map<string, string>): string {
   return names.get(id) || id;
 }
 
+interface AllContestRow {
+  domainId: string;
+  examId: string;
+  title: string;
+  beginAt: string;
+  endAt: string;
+  rule: string;
+  vigilEnabled: boolean;
+}
+
+interface AllContestsResponse {
+  page: number;
+  pageSize: number;
+  total: number;
+  items: AllContestRow[];
+}
+
+function VigilOverviewTabs({ value }: { value: 'overview' | 'all' }) {
+  return (
+    <MiniTabs
+      value={value}
+      items={[
+        { value: 'overview', label: '监考总览', href: '/admin/vigil' },
+        { value: 'all', label: '全部比赛', href: '/admin/vigil?view=all' },
+      ]}
+    />
+  );
+}
+
+function AllContestsPage() {
+  const initialUrl = useMemo(() => new URL(window.location.href), []);
+  const [page, setPage] = useState(() => Math.max(1, Number(initialUrl.searchParams.get('page')) || 1));
+  const [query, setQuery] = useState(initialUrl.searchParams.get('q') || '');
+  const [debouncedQuery, setDebouncedQuery] = useState(query);
+  const [data, setData] = useState<AllContestsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setDebouncedQuery(query.trim()), 250);
+    return () => clearTimeout(timeout);
+  }, [query]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('view', 'all');
+    if (page > 1) url.searchParams.set('page', String(page));
+    else url.searchParams.delete('page');
+    if (debouncedQuery) url.searchParams.set('q', debouncedQuery);
+    else url.searchParams.delete('q');
+    window.history.replaceState(null, '', url.toString());
+
+    const controller = new AbortController();
+    const params = new URLSearchParams({ page: String(page) });
+    if (debouncedQuery) params.set('q', debouncedQuery);
+    setLoading(true);
+    setError(null);
+    fetch(`/api/admin/vigil/contests?${params}`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json() as AllContestsResponse;
+      })
+      .then((response) => {
+        setData(response);
+        setLoading(false);
+      })
+      .catch((reason) => {
+        if (controller.signal.aborted) return;
+        setError(reason instanceof Error ? reason.message : '加载比赛列表失败');
+        setLoading(false);
+      });
+    return () => controller.abort();
+  }, [page, debouncedQuery]);
+
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
+  return (
+    <AdminPage
+      title={(
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="size-5 text-primary" />
+          <h1 className="text-xl font-semibold">反作弊总览</h1>
+        </div>
+      )}
+      requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
+      description="浏览 OJ 中的全部比赛，进入现有监考详情查看会话与录像。"
+      actions={<VigilOverviewTabs value="all" />}
+      hideSidebar
+    >
+      <Card>
+        <CardHeader className="px-5 pb-3 pt-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <CardTitle className="text-base">全部比赛{data ? `（${data.total}）` : ''}</CardTitle>
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="搜索比赛标题"
+                className="pl-8"
+              />
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {loading && !data ? (
+            <SkeletonTable rows={8} cols={5} />
+          ) : error ? (
+            <div className="flex flex-col items-center gap-2 py-12 text-sm text-destructive">
+              <AlertCircle className="size-5" />
+              <span>比赛列表加载失败：{error}</span>
+            </div>
+          ) : !data?.items.length ? (
+            <EmptyTable message={debouncedQuery ? '没有匹配的比赛。' : '暂无比赛。'} icon={Inbox} />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="pl-5">比赛</TableHead>
+                  <TableHead>开始时间</TableHead>
+                  <TableHead>结束时间</TableHead>
+                  <TableHead className="w-24">赛制</TableHead>
+                  <TableHead className="w-24">监考</TableHead>
+                  <TableHead className="w-10 pr-5" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.items.map((contest) => (
+                  <TableRow
+                    key={contest.examId}
+                    className="cursor-pointer hover:bg-accent/40"
+                    onClick={() => {
+                      window.location.href = `/admin/vigil/exams/${encodeURIComponent(contest.examId)}`;
+                    }}
+                  >
+                    <TableCell className="pl-5">
+                      <p className="font-medium">{contest.title}</p>
+                      <p className="font-mono text-[10px] text-muted-foreground">{contest.examId}</p>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground"><DateTime value={new Date(contest.beginAt)} /></TableCell>
+                    <TableCell className="text-xs text-muted-foreground"><DateTime value={new Date(contest.endAt)} /></TableCell>
+                    <TableCell><Badge variant="outline" className="text-[10px]">{contest.rule || '—'}</Badge></TableCell>
+                    <TableCell>
+                      <Badge variant={contest.vigilEnabled ? 'default' : 'secondary'} className="text-[10px]">
+                        {contest.vigilEnabled ? '已启用' : '未启用'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="pr-5"><ChevronRight className="size-3.5 text-muted-foreground" /></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+      {data && data.total > data.pageSize ? (
+        <div className="flex items-center justify-center gap-3">
+          <Button size="sm" variant="outline" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>
+            <ChevronLeft className="mr-1 size-3.5" />上一页
+          </Button>
+          <span className="text-xs text-muted-foreground">第 {page} / {totalPages} 页</span>
+          <Button size="sm" variant="outline" disabled={page >= totalPages || loading} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
+            下一页<ChevronRight className="ml-1 size-3.5" />
+          </Button>
+        </div>
+      ) : null}
+    </AdminPage>
+  );
+}
+
 export function AdminVigilOverviewPage() {
+  const view = new URL(window.location.href).searchParams.get('view');
+  return view === 'all' ? <AllContestsPage /> : <VigilLiveOverviewPage />;
+}
+
+function VigilLiveOverviewPage() {
   const bs = useBootstrap();
   const localContests = ((bs.page.data as any)?.activeVigilContests || []) as LocalVigilContest[];
   const clientsQ = useVigilData<VigilClient[]>(() => fetchClients());
@@ -413,6 +597,7 @@ export function AdminVigilOverviewPage() {
       }
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       description="按考试聚合的会话 / 审批 / 事件。点击具体考试查看详情。"
+      actions={<VigilOverviewTabs value="overview" />}
       hideSidebar
     >
       {offline && <OfflineBanner err={offline} onRetry={retryAll} />}
@@ -564,6 +749,13 @@ function ExamCard({ group, active, name }: { group: ExamGroup; active?: boolean;
   );
 }
 
+function formatRecordingBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
 /* ─── Per-exam detail page (Phase 1 monitoring refactor) ──────────────── */
 
 /**
@@ -577,10 +769,10 @@ function ExamCard({ group, active, name }: { group: ExamGroup; active?: boolean;
  * Real-time updates flow via useVigilSocket (contest subscription) and bump
  * targeted React state — we never re-fetch the whole list on a single delta.
  *
- * Secondary views (会话 / 审批 / 事件 / 审计) are accessed via a "更多视图"
+ * Secondary views (会话 / 审批 / 事件 / 录像) are accessed via a "更多视图"
  * dropdown so the card wall stays the primary surface.
  */
-type SecondaryView = 'sessions' | 'approvals' | 'events';
+type SecondaryView = 'sessions' | 'approvals' | 'events' | 'recordings';
 
 type StatusFilter = '' | VigilStudentStatus;
 type SortKey = 'status_priority' | 'student_id' | 'name' | 'exam_time' | 'event_count';
@@ -861,6 +1053,10 @@ export function AdminVigilExamDetailPage() {
   const sessionsQ = useVigilData<VigilExamSession[]>(() => fetchExamSessions(), [secondary]);
   const approvalsQ = useVigilData<VigilApproval[]>(() => fetchApprovals(), [secondary]);
   const eventsQ = useVigilData<VigilEvent[]>(() => fetchEvents({ limit: '500' }), [secondary]);
+  const recordingsQ = useVigilData<VigilRecording[]>(
+    () => secondary === 'recordings' ? listContestRecordings(examId) : Promise.resolve([]),
+    [secondary, examId],
+  );
   const examSessions = useMemo(() => (sessionsQ.data || []).filter((s) => s.oj_contest_id === examId), [sessionsQ.data, examId]);
   const examApprovals = useMemo(() => (approvalsQ.data || []).filter((a) => a.oj_contest_id === examId), [approvalsQ.data, examId]);
   const examEvents = useMemo(() => {
@@ -872,6 +1068,7 @@ export function AdminVigilExamDetailPage() {
     sessionsQ.retry();
     approvalsQ.retry();
     eventsQ.retry();
+    if (secondary === 'recordings') recordingsQ.retry();
   };
   const retryStudents = () => setReloadVer((v) => v + 1);
 
@@ -979,6 +1176,7 @@ export function AdminVigilExamDetailPage() {
             { value: 'sessions', label: '会话表' },
             { value: 'approvals', label: '审批表' },
             { value: 'events', label: '事件表' },
+            { value: 'recordings', label: '录像' },
           ]}
         />
 
@@ -1068,6 +1266,7 @@ export function AdminVigilExamDetailPage() {
                 {secondary === 'sessions' && '会话表'}
                 {secondary === 'approvals' && '审批表'}
                 {secondary === 'events' && '事件表'}
+                {secondary === 'recordings' && '录像'}
               </span>
               <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => setSecondary(null)}>
                 <XCircle className="size-3" /> 关闭
@@ -1098,6 +1297,47 @@ export function AdminVigilExamDetailPage() {
                 <EmptyTable message="此考试暂无风险事件。" icon={Activity} />
               ) : (
                 <EventTable events={examEvents} />
+              ))}
+            {secondary === 'recordings' &&
+              (recordingsQ.loading ? (
+                <SkeletonTable rows={5} cols={5} />
+              ) : recordingsQ.offlineErr ? (
+                <div className="p-4"><OfflineBanner err={recordingsQ.offlineErr} onRetry={recordingsQ.retry} /></div>
+              ) : recordingsQ.err ? (
+                <div className="flex flex-col items-center gap-3 py-10 text-sm text-destructive">
+                  <AlertCircle className="size-6" />
+                  <p>录像加载失败：{recordingsQ.err}</p>
+                  <Button size="sm" variant="outline" onClick={recordingsQ.retry}>重试</Button>
+                </div>
+              ) : !recordingsQ.data?.length ? (
+                <EmptyTable message="此比赛暂无录像。" icon={Film} />
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="pl-5">机器</TableHead>
+                      <TableHead>类型</TableHead>
+                      <TableHead>开始时间</TableHead>
+                      <TableHead className="text-right">大小</TableHead>
+                      <TableHead className="w-24 pr-5" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {recordingsQ.data.map((recording) => (
+                      <TableRow key={recording.recordingId}>
+                        <TableCell className="pl-5 font-mono text-xs">{recording.machineId}</TableCell>
+                        <TableCell><Badge variant="outline">{recording.streamType === 'screen' ? '屏幕' : '摄像头'}</Badge></TableCell>
+                        <TableCell className="text-xs text-muted-foreground"><VigilDateTime value={recording.startTs} mode="datetime" /></TableCell>
+                        <TableCell className="text-right text-xs tabular-nums">{formatRecordingBytes(recording.size)}</TableCell>
+                        <TableCell className="pr-5">
+                          <Button asChild size="sm" variant="outline" className="h-7 text-xs">
+                            <a href={buildRecordingUrl(recording.filename)} target="_blank" rel="noreferrer">播放</a>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               ))}
           </CardContent>
         </Card>

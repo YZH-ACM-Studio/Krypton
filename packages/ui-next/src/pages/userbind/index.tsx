@@ -44,6 +44,20 @@ import { type ImportResult, ImportResultPanel, RosterImporter } from '@/componen
 import { useBootstrap } from '@/lib/bootstrap';
 import { PRIV } from '@/lib/perms';
 
+function BindingRequestsNavLabel() {
+  const pending = Number(useBootstrap().page.data.pendingBindingRequests || 0);
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      绑定申请
+      {pending > 0 ? (
+        <Badge variant="destructive" className="h-5 min-w-5 justify-center px-1.5 text-[10px]">
+          {pending}
+        </Badge>
+      ) : null}
+    </span>
+  );
+}
+
 const USERBIND_WORKSPACE_NAV = [
   {
     key: 'schools',
@@ -77,7 +91,7 @@ const USERBIND_WORKSPACE_NAV = [
   },
   {
     key: 'requests',
-    label: '绑定申请',
+    label: <BindingRequestsNavLabel />,
     href: '/admin/userbind/requests',
     templateNames: ['admin_userbind_requests.html'],
   },

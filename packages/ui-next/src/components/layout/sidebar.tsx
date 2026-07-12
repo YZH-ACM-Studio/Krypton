@@ -23,6 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -35,6 +36,7 @@ interface NavItem {
   href: string;
   icon: LucideIcon;
   templates: string[];
+  badge?: number;
 }
 
 interface NavGroup {
@@ -57,6 +59,14 @@ function SidebarLink({ item, active, collapsed }: { item: NavItem; active: boole
     >
       <item.icon className="size-4 shrink-0" />
       {!collapsed && <span>{item.label}</span>}
+      {item.badge ? (
+        <Badge
+          variant="destructive"
+          className={cn('h-5 min-w-5 justify-center px-1.5 text-[10px]', collapsed ? 'absolute -right-1 -top-1' : 'ml-auto')}
+        >
+          {item.badge}
+        </Badge>
+      ) : null}
     </a>
   );
 
@@ -65,7 +75,7 @@ function SidebarLink({ item, active, collapsed }: { item: NavItem; active: boole
       <Tooltip>
         <TooltipTrigger asChild>{link}</TooltipTrigger>
         <TooltipContent side="right" sideOffset={8}>
-          {item.label}
+          {item.label}{item.badge ? ` (${item.badge})` : ''}
         </TooltipContent>
       </Tooltip>
     );
@@ -195,6 +205,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           label: '用户绑定',
           href: '/admin/userbind/schools',
           icon: UserRoundCog,
+          badge: Number(bs.page.data.pendingBindingRequests || 0),
           templates: [
             'admin_userbind_overview.html',
             'admin_userbind_schools.html',

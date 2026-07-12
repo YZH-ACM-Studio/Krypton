@@ -144,6 +144,10 @@ export interface BindingRequest {
     targetUserGroupId: ObjectId | null;
     /** Set when the request is a claim of a temporary OJ user's records. */
     claimTempUserId: number | null;
+    /** Short-lived delivery claim for the administrator notification. */
+    notifyClaimedAt?: Date;
+    /** Set only after the administrator notification was sent successfully. */
+    notifiedAt?: Date;
 }
 
 /** Result of `lookupStudent(domainId, sid, realName)` — Phase 2 / 3 contract. */

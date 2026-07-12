@@ -221,7 +221,7 @@ describe('P2.9 UI and index source contracts', () => {
 
     it('declares four ordinary compound indexes without partialFilterExpression', () => {
         expect(dbSource).not.to.include('partialFilterExpression');
-        expect(dbSource.match(/enrollmentYear: 1, boundUserId: 1, createdAt: -1/g)).to.have.lengthOf(2);
-        expect(dbSource.match(/enrollmentYear: 1, boundUserId: 1, boundAt: -1/g)).to.have.lengthOf(2);
+        expect(dbSource.match(/enrollmentYear:\s*1,\s*boundUserId:\s*1,\s*createdAt:\s*-1/g)).to.have.lengthOf(2);
+        expect(dbSource.match(/enrollmentYear:\s*1,\s*boundUserId:\s*1,\s*boundAt:\s*-1/g)).to.have.lengthOf(2);
     });
 });

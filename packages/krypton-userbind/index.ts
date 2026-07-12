@@ -13,6 +13,7 @@ import { applyHandlers } from './src/handler';
 import { applyLegacyRedirects } from './src/legacy-redirects';
 import { ensureIndexes, userBindModel } from './src/model';
 import { migrationScripts } from './src/migration';
+import { sweepPendingBindingNotifications } from './src/binding-notification';
 // Side-effect imports: register binding-path methods + export/import methods on userBindModel.
 import './src/binding';
 import './src/migrate-domain';
@@ -40,6 +41,14 @@ export function apply(ctx: Context) {
     ensureIndexes().catch((e) => {
         console.error('[krypton-userbind] ensureIndexes failed:', e);
     });
+
+    if (!process.env.HYDRO_CLI) {
+        const sweepNotifications = () => sweepPendingBindingNotifications().catch((error) => {
+            console.error('[krypton-userbind] binding notification sweep failed:', error);
+        });
+        ctx.on('app/started', sweepNotifications);
+        ctx.effect(() => ctx.setInterval(sweepNotifications, 60_000));
+    }
 
     // Register migration channel — independent version number from hydrooj core.
     ctx.inject(['migration'], (c) => {

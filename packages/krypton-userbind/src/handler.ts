@@ -1201,6 +1201,20 @@ export function applyHandlers(ctx: Context) {
     ctx.Route('user_bind_claim', '/userbind/claim', UserBindClaimHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('user_bind_landing', '/bind/:token', BindLandingHandler);
 
+    // The pending count uses the exact same privilege gate as the approval
+    // route. It is injected only into administrator HTML bootstraps so ordinary
+    // users do not gain a request-volume side channel.
+    ctx.on('handler/after', async (h) => {
+        const handler = h as Handler;
+        if (!handler.user?.hasPriv?.(PRIV.PRIV_EDIT_SYSTEM)) return;
+        if (!h.response?.template || !h.response.body || typeof h.response.body !== 'object') return;
+        const domainId = (h.args as any)?.domainId || (handler.domain as any)?._id || 'system';
+        h.response.body.pendingBindingRequests = await bindingRequestsColl.countDocuments({
+            domainId,
+            status: 'pending',
+        });
+    });
+
     // 个人主页真实身份注入（PLAN 2026-07-02 §3）。绑定状态对所有访客可见；
     // 真实姓名/学号仅登录用户可见（校园网内未登录也能访问，防止被爬成
     // 全校学号姓名名录）。有绑定时前端以此为准、隐藏用户自填的 studentId。

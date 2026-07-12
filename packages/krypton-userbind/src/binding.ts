@@ -22,6 +22,7 @@ import { ObjectId, ValidationError, UserModel, NotFoundError } from 'hydrooj';
 import RecordModel from 'hydrooj/src/model/record';
 import { randomBytes } from 'node:crypto';
 import { bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl, userGroupsColl } from './db';
+import { notifyBindingRequest } from './binding-notification';
 import { deriveEnrollmentYear, userBindModel } from './model';
 import type {
     BindToken,
@@ -374,6 +375,7 @@ export async function submitBindingRequest(
         claimTempUserId: opts.claimTempUserId ?? null,
     };
     await bindingRequestsColl.insertOne(doc);
+    await notifyBindingRequest(doc._id);
     return doc;
 }
 

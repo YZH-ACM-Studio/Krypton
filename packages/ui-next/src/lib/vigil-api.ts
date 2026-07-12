@@ -381,7 +381,7 @@ export interface ListStudentsParams {
   status?: string;
   /** Free-text query against name + studentId. */
   q?: string;
-  /** Server-side sort key; defaults to "status_priority". */
+  /** Server-side sort key; defaults to "student_id". */
   sort?: 'status_priority' | 'student_id' | 'name' | 'exam_time' | 'event_count';
 }
 

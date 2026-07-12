@@ -80,6 +80,7 @@ import { LivePlayerDialog } from '@/pages/vigil/live-player-dialog';
 import { SendMessageDialog } from '@/pages/vigil/send-message-dialog';
 import { VigilDateTime, parseVigilTimestamp } from '@/pages/vigil/timestamp';
 import { cn } from '@/lib/cn';
+import { parseVigilSortKey, type VigilSortKey as SortKey } from '@/pages/vigil/sort';
 
 /* ─── Defensive UI primitives ─────────────────────────────────────────── */
 
@@ -775,8 +776,6 @@ function formatRecordingBytes(bytes: number) {
 type SecondaryView = 'sessions' | 'approvals' | 'events' | 'recordings';
 
 type StatusFilter = '' | VigilStudentStatus;
-type SortKey = 'status_priority' | 'student_id' | 'name' | 'exam_time' | 'event_count';
-
 const ALL_STATUSES: VigilStudentStatus[] = ['online', 'anomaly', 'offline', 'disconnected', 'locked', 'ended'];
 const PAGE_SIZE = 30;
 
@@ -799,7 +798,7 @@ export function AdminVigilExamDetailPage() {
     const raw = initialUrl.searchParams.get('status') || '';
     return new Set(raw.split(',').filter(Boolean) as VigilStudentStatus[]);
   });
-  const [sortKey, setSortKey] = useState<SortKey>((initialUrl.searchParams.get('sort') as SortKey) || 'status_priority');
+  const [sortKey, setSortKey] = useState<SortKey>(() => parseVigilSortKey(initialUrl.searchParams.get('sort')));
   const [secondary, setSecondary] = useState<SecondaryView | null>(null);
   const [groupMessageOpen, setGroupMessageOpen] = useState(false);
 
@@ -818,7 +817,7 @@ export function AdminVigilExamDetailPage() {
     else url.searchParams.delete('q');
     if (statusFilter.size) url.searchParams.set('status', Array.from(statusFilter).join(','));
     else url.searchParams.delete('status');
-    if (sortKey !== 'status_priority') url.searchParams.set('sort', sortKey);
+    if (sortKey !== 'student_id') url.searchParams.set('sort', sortKey);
     else url.searchParams.delete('sort');
     window.history.replaceState(null, '', url.toString());
   }, [page, queryDebounced, statusFilter, sortKey]);

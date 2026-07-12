@@ -9,18 +9,15 @@
  * still bounce to /:pid for the full info bar, but the actual code
  * editor lives here with full-height real estate.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { motion } from 'motion/react';
 import { ChevronRight, Loader2, Send } from 'lucide-react';
+import { motion } from 'motion/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { KryptonIDE } from '@/components/krypton-ide';
+import { StructuredRegionInputs } from '@/components/structured-region-inputs';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SimpleSelect } from '@/components/ui/select';
-import { MarkdownView } from '@/components/markdown-renderer';
-import { KryptonIDE } from '@/components/krypton-ide';
-import { SampleBlocks } from '@/components/sample-blocks';
 import { useBootstrap } from '@/lib/bootstrap';
-import { extractSamples, stripSampleBlocks } from '@/lib/samples';
 import { replaceRouteTokens } from '@/lib/format';
 
 type R = Record<string, any>;
@@ -32,16 +29,16 @@ export function ProblemSubmitPage() {
   const tdoc: R | null = data.tdoc || null;
   const langRange: Record<string, string> = data.langRange || {};
   const config: R = typeof pdoc.config === 'object' ? pdoc.config : {};
-  const content = pdoc.content || '';
   const pid = pdoc.pid || pdoc.docId || '';
   const baseTitle = pdoc.title || String(pid);
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const tid = tdoc?.docId ? String(tdoc.docId) : null;
   const contestQS = tid ? `?tid=${tid}` : '';
   const submitUrl = `${problemUrl}/submit${contestQS}`;
-  const preferredLang = bs.locale?.startsWith('zh') ? 'zh' : 'en';
-  const samples = useMemo(() => extractSamples(content), [content]);
-  const stripped = useMemo(() => (samples.length ? maybeStripJsonContent(content) : content), [content, samples]);
+  const isStructuredCompile = config.type === 'fill_function'
+    && ['program_fill', 'function'].includes(String(pdoc.problemKind));
+  const regions = Array.isArray(config.template?.regions) ? config.template.regions : [];
+  const singleLineRegion = pdoc.problemKind === 'program_fill';
 
   // Alphabetic letter when entering via contest
   const contestPids: any[] = Array.isArray(tdoc?.pids) ? tdoc!.pids : [];
@@ -54,6 +51,7 @@ export function ProblemSubmitPage() {
   const langKey = `krypton:submit-lang:${pid}${tid ? `:${tid}` : ''}`;
   const availableLangs = useMemo(() => Object.keys(langRange), [langRange]);
   const [lang, setLang] = useState<string>(() => {
+    if (isStructuredCompile) return config.template?.lang || availableLangs[0] || '';
     try {
       const saved = localStorage.getItem(langKey);
       if (saved && (availableLangs.length === 0 || availableLangs.includes(saved))) return saved;
@@ -61,8 +59,24 @@ export function ProblemSubmitPage() {
     return availableLangs[0] || 'cc.cc17';
   });
   const [code, setCode] = useState<string>(() => {
-    try { return localStorage.getItem(cacheKey) || ''; } catch { return ''; }
+    try {
+      const saved = localStorage.getItem(cacheKey);
+      if (saved) return saved;
+    } catch { /* */ }
+    return isStructuredCompile
+      ? JSON.stringify(Object.fromEntries(regions.map((region: R) => [region.id, ''])))
+      : '';
   });
+  const regionValues = useMemo(() => {
+    if (!isStructuredCompile) return {};
+    try {
+      const parsed = JSON.parse(code);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch { return {}; }
+  }, [code, isStructuredCompile]);
+  const updateRegion = (id: string, value: string) => {
+    setCode(JSON.stringify({ ...regionValues, [id]: value }));
+  };
 
   // Persist code (debounced) + lang (immediate)
   const cacheTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -82,7 +96,9 @@ export function ProblemSubmitPage() {
 
   const handleSubmit = useCallback(async () => {
     if (submitting) return;
-    if (!code.trim()) { setSubmitError('代码不能为空'); return; }
+    if (!code.trim() || (isStructuredCompile && regions.some((region: R) => !(regionValues[region.id] || '').trim()))) {
+      setSubmitError('作答内容不能为空'); return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -125,7 +141,7 @@ export function ProblemSubmitPage() {
       setSubmitError(e?.message || '提交失败');
       setSubmitting(false);
     }
-  }, [code, lang, tid, submitUrl, submitting, bs.urls.recordDetail]);
+  }, [code, lang, tid, submitUrl, submitting, bs.urls.recordDetail, isStructuredCompile, regionValues, regions]);
 
   return (
     <motion.div
@@ -142,7 +158,15 @@ export function ProblemSubmitPage() {
               {tdoc.rule === 'homework' ? '作业' : '比赛'}
             </a>
             <ChevronRight className="size-3" />
-            <a href={replaceRouteTokens(tdoc.rule === 'homework' ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid! })} className="hover:text-primary truncate max-w-[200px]">{tdoc.title || '比赛'}</a>
+            <a
+              href={replaceRouteTokens(
+                tdoc.rule === 'homework' ? bs.urls.homeworkDetail : bs.urls.contestDetail,
+                { TID: tid! },
+              )}
+              className="hover:text-primary truncate max-w-[200px]"
+            >
+              {tdoc.title || '比赛'}
+            </a>
           </>
         ) : (
           <a href={bs.urls.problems} className="hover:text-primary">题库</a>
@@ -156,7 +180,7 @@ export function ProblemSubmitPage() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">提交代码</h1>
+          <h1 className="text-xl font-semibold">{isStructuredCompile ? '提交作答' : '提交代码'}</h1>
           <p className="text-sm text-muted-foreground">{title}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -172,34 +196,47 @@ export function ProblemSubmitPage() {
         {/* Language picker + meta */}
         <div className="flex flex-wrap items-center gap-2">
           <label className="text-xs text-muted-foreground">语言</label>
-          <SimpleSelect
-            value={lang}
-            onValueChange={setLang}
-            size="sm"
-            className="w-auto min-w-[8rem]"
-            options={
-              availableLangs.length === 0
-                ? [{ value: lang, label: lang }]
-                : availableLangs.map((id) => ({ value: id, label: langRange[id] || id }))
-            }
-          />
+          {isStructuredCompile ? <Badge variant="outline">{lang}</Badge> : (
+            <SimpleSelect
+              value={lang}
+              onValueChange={setLang}
+              size="sm"
+              className="w-auto min-w-[8rem]"
+              options={
+                availableLangs.length === 0
+                  ? [{ value: lang, label: lang }]
+                  : availableLangs.map((id) => ({ value: id, label: langRange[id] || id }))
+              }
+            />
+          )}
           {config.time ? <Badge variant="outline" className="text-[10px]">{config.time}</Badge> : null}
           {config.memory ? <Badge variant="outline" className="text-[10px]">{config.memory}</Badge> : null}
           <span className="ml-auto text-[11px] text-muted-foreground">已自动缓存草稿</span>
         </div>
 
         {/* Editor in simple mode */}
-        <div className="rounded-md border overflow-hidden" style={{ height: 'calc(100vh - 220px)', minHeight: 480 }}>
-          <KryptonIDE
-            mode="simple"
-            langs={availableLangs}
-            defaultLang={lang}
-            value={code}
-            onValueChange={setCode}
-            minHeight={480}
-            className="h-full"
-          />
-        </div>
+        {isStructuredCompile ? (
+          <div className="border-y border-border/70 py-5">
+            <StructuredRegionInputs
+              regions={regions}
+              values={regionValues}
+              onChange={updateRegion}
+              singleLine={singleLineRegion}
+            />
+          </div>
+        ) : (
+          <div className="rounded-md border overflow-hidden" style={{ height: 'calc(100vh - 220px)', minHeight: 480 }}>
+            <KryptonIDE
+              mode="simple"
+              langs={availableLangs}
+              defaultLang={lang}
+              value={code}
+              onValueChange={setCode}
+              minHeight={480}
+              className="h-full"
+            />
+          </div>
+        )}
 
         {/* Submit row */}
         <div className="flex items-center justify-between gap-2">
@@ -214,32 +251,4 @@ export function ProblemSubmitPage() {
       </div>
     </motion.div>
   );
-}
-
-/** Best-effort: if content is a JSON multi-lang blob, strip sample blocks
- *  from each value; otherwise treat as plain markdown. */
-function maybeStripJsonContent(content: any): any {
-  if (content == null) return content;
-  if (typeof content === 'object') {
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(content)) {
-      out[k] = typeof v === 'string' ? stripSampleBlocks(v) : (v as string);
-    }
-    return out;
-  }
-  if (typeof content !== 'string') return content;
-  const trimmed = content.trim();
-  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        const out: Record<string, string> = {};
-        for (const [k, v] of Object.entries(parsed)) {
-          out[k] = typeof v === 'string' ? stripSampleBlocks(v) : (v as string);
-        }
-        return out;
-      }
-    } catch { /* fall through */ }
-  }
-  return stripSampleBlocks(trimmed);
 }

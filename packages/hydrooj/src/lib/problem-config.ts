@@ -28,6 +28,31 @@ export function parseProblemConfigObject(pdoc: { config?: unknown } | null | und
     return null;
 }
 
+export function isProblemConfigFilename(name: string): boolean {
+    return /^config\.ya?ml$/i.test(name);
+}
+
+export function validateTextProgramFillSubmission(
+    problemKind: unknown,
+    config: any,
+    submitted: unknown,
+): boolean {
+    if (problemKind !== 'program_fill'
+        || config?.type !== 'objective'
+        || config?.subType !== 'program_fill_text') return false;
+    if (!submitted || typeof submitted !== 'object' || Array.isArray(submitted)) {
+        throw new Error('program_fill: text submission must be an object');
+    }
+    const keys = Object.keys(submitted as Record<string, unknown>);
+    if (keys.length !== 1 || keys[0] !== 'main') {
+        throw new Error('program_fill: text submission must contain only main');
+    }
+    const answer = (submitted as Record<string, unknown>).main;
+    if (typeof answer !== 'string') throw new Error('program_fill: text submission main must be a string');
+    if (/[\r\n]/.test(answer)) throw new Error('program_fill: text submission must be one line');
+    return true;
+}
+
 /** Pull `(stdAns, score, meta?)` out of an AnswerEntry regardless of arity. */
 export function unpackAnswerEntry(entry: AnswerEntry): {
     stdAns: string | string[];
@@ -162,9 +187,17 @@ export function clientProblemConfig(config: any): any {
         for (const q of out.questions) if (q.choices) options[q.key] = q.choices;
         if (Object.keys(options).length) out.options = options;
     }
-    // fill_function 模板本身就是要展示给学生的（挖空区外只读可见），
-    // 不含标准答案，原样透传。
-    if (config.type === 'fill_function' && config.template) out.template = config.template;
+    if (config.type === 'fill_function' && config.template) {
+        out.template = {
+            lang: config.template.lang,
+            regions: Array.isArray(config.template.regions)
+                ? config.template.regions.map((region) => ({
+                    id: region.id,
+                    ...(region.prompt ? { prompt: region.prompt } : {}),
+                }))
+                : [],
+        };
+    }
     if (config.subType) out.subType = config.subType;
     return out;
 }
@@ -189,6 +222,9 @@ export function templateSourceHash(source: string): string {
 export function spliceFillFunction(
     template: FillFunctionTemplate, regionContents: Record<string, string>,
 ): string {
+    const expected = new Set(template.regions.map((region) => region.id));
+    const unknown = Object.keys(regionContents).find((id) => !expected.has(id));
+    if (unknown) throw new Error(`fill_function: unknown region "${unknown}"`);
     const lines = template.source.split('\n');
     const sortedRegions = [...template.regions].sort((a, b) => {
         if (a.start.line !== b.start.line) return b.start.line - a.start.line;
@@ -200,8 +236,8 @@ export function spliceFillFunction(
         if (content === undefined) {
             throw new Error(`fill_function: missing region "${region.id}"`);
         }
-        validateRegionBounds(lines, region);
-        spliceOne(lines, region, content);
+        validateRegionBounds(lines, region); // eslint-disable-line ts/no-use-before-define
+        spliceOne(lines, region, content); // eslint-disable-line ts/no-use-before-define
     }
     return lines.join('\n');
 }
@@ -215,6 +251,15 @@ function validateRegionBounds(lines: string[], region: FillRegion): void {
     }
     if (region.start.col < 0) {
         throw new Error(`fill_function: region "${region.id}" start.col negative`);
+    }
+    if (region.start.col > lines[region.start.line].length) {
+        throw new Error(`fill_function: region "${region.id}" start.col out of bounds`);
+    }
+    if (region.end.col < 0 || region.end.col > lines[region.end.line].length) {
+        throw new Error(`fill_function: region "${region.id}" end.col out of bounds`);
+    }
+    if (region.start.line === region.end.line && region.end.col < region.start.col) {
+        throw new Error(`fill_function: region "${region.id}" end precedes start`);
     }
 }
 
@@ -260,6 +305,164 @@ export function validateRegions(template: Pick<FillFunctionTemplate, 'source' | 
             throw new Error(`fill_function: regions "${prev.id}" and "${cur.id}" overlap`);
         }
     }
+}
+
+export interface RegionMarkerMetadata {
+    id: string;
+    prompt?: string;
+}
+
+const REGION_START = /^\s*\/\/\s*@krypton-region\s+([A-Za-z][A-Za-z0-9_-]{0,31})\s*$/;
+const REGION_END = /^\s*\/\/\s*@krypton-endregion\s+([A-Za-z][A-Za-z0-9_-]{0,31})\s*$/;
+
+export function parseRegionMarkers(
+    markerSource: string,
+    metadata: RegionMarkerMetadata[],
+): FillFunctionTemplate {
+    if (typeof markerSource !== 'string' || !markerSource.trim()) {
+        throw new Error('fill_function: template source is required');
+    }
+    if (!Array.isArray(metadata) || !metadata.length) {
+        throw new Error('fill_function: at least one region is required');
+    }
+    const metaById = new Map<string, RegionMarkerMetadata>();
+    for (const item of metadata) {
+        if (!item || typeof item.id !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(item.id)) {
+            throw new Error('fill_function: invalid region id');
+        }
+        if (metaById.has(item.id)) throw new Error(`fill_function: duplicate region id "${item.id}"`);
+        if (item.prompt !== undefined && typeof item.prompt !== 'string') {
+            throw new Error(`fill_function: invalid prompt for region "${item.id}"`);
+        }
+        metaById.set(item.id, { id: item.id, ...(item.prompt?.trim() ? { prompt: item.prompt.trim() } : {}) });
+    }
+    const output: string[] = [];
+    const parsed = new Map<string, FillRegion>();
+    let active: { id: string, startLine: number } | null = null;
+    for (const line of markerSource.replace(/\r\n/g, '\n').split('\n')) {
+        const start = line.match(REGION_START);
+        const end = line.match(REGION_END);
+        if (start) {
+            if (active) throw new Error(`fill_function: nested region "${start[1]}"`);
+            if (parsed.has(start[1])) throw new Error(`fill_function: duplicate marker "${start[1]}"`);
+            active = { id: start[1], startLine: output.length };
+            continue;
+        }
+        if (end) {
+            if (!active || active.id !== end[1]) {
+                throw new Error(`fill_function: unmatched end marker "${end[1]}"`);
+            }
+            if (output.length === active.startLine) {
+                throw new Error(`fill_function: region "${active.id}" needs a placeholder line`);
+            }
+            const endLine = output.length - 1;
+            parsed.set(active.id, {
+                id: active.id,
+                start: { line: active.startLine, col: 0 },
+                end: { line: endLine, col: output[endLine].length },
+            });
+            active = null;
+            continue;
+        }
+        if (line.includes('@krypton-region') || line.includes('@krypton-endregion')) {
+            throw new Error('fill_function: malformed region marker');
+        }
+        output.push(line);
+    }
+    if (active) throw new Error(`fill_function: missing end marker for "${active.id}"`);
+    if (parsed.size !== metaById.size) throw new Error('fill_function: marker and region metadata do not match');
+    const regions = metadata.map((item) => {
+        const region = parsed.get(item.id);
+        if (!region) throw new Error(`fill_function: missing marker for "${item.id}"`);
+        return { ...region, ...(metaById.get(item.id)?.prompt ? { prompt: metaById.get(item.id)!.prompt } : {}) };
+    });
+    const source = output.join('\n');
+    const template = { lang: '', source, regions, sourceHash: templateSourceHash(source) };
+    validateRegions(template);
+    return template;
+}
+
+export function validateCompiledStructuredConfig(kind: string, config: any): void {
+    if (kind === 'program_fill' && config?.main?.mode === 'text') return;
+    if (!['program_fill', 'function'].includes(kind)) return;
+    const expectedSubType = kind === 'program_fill' ? 'program_fill_compile' : 'function';
+    if (config?.type !== 'fill_function' || config?.subType !== expectedSubType) {
+        throw new Error(`${kind}: invalid compile configuration`);
+    }
+    validateFillFunctionJudgeConfig(config); // eslint-disable-line ts/no-use-before-define
+    const template = config.template as FillFunctionTemplate;
+    if (!Array.isArray(config.langs) || config.langs.length !== 1 || config.langs[0] !== template.lang) {
+        throw new Error(`${kind}: language mismatch`);
+    }
+    if (kind === 'program_fill') {
+        if (template.regions.length !== 1 || template.regions[0].id !== 'main') {
+            throw new Error('program_fill: compile mode requires exactly one main region');
+        }
+        const region = template.regions[0];
+        if (region.start.line !== region.end.line) throw new Error('program_fill: editable region must be one line');
+    }
+}
+
+/** Validate the private configuration required before any fill-function record is created. */
+export function validateFillFunctionJudgeConfig(config: any): void {
+    if (config?.type !== 'fill_function') throw new Error('fill_function: invalid problem type');
+    const template = config.template as FillFunctionTemplate;
+    if (!template?.source || !template.lang || !Array.isArray(template.regions) || !template.regions.length) {
+        throw new Error('fill_function: missing template configuration');
+    }
+    validateRegions(template);
+    if (!Array.isArray(config.cases) || !config.cases.length) {
+        throw new Error('fill_function: testdata cases are required');
+    }
+}
+
+export function validateFillFunctionTestdataFiles(
+    config: any,
+    files: Array<{ name: string }>,
+): void {
+    validateFillFunctionJudgeConfig(config);
+    const available = new Set((files || []).map((item) => item.name));
+    const missing = (config.cases || [])
+        .flatMap((item) => [item.input, item.output])
+        .find((name) => !available.has(name));
+    if (missing) throw new Error(`fill_function: missing testdata file ${missing}`);
+}
+
+/** Parse and validate a student region payload before inserting a Record. */
+export function parseStructuredRegionSubmission(
+    kind: 'program_fill' | 'function' | 'fill_function',
+    template: { lang: string, regions: Array<{ id: string }> } | null | undefined,
+    rawCode: string,
+): Record<string, string> {
+    if (!template?.lang || !Array.isArray(template.regions) || !template.regions.length) {
+        throw new Error(`${kind}: missing template region description`);
+    }
+    let regions: unknown;
+    try {
+        regions = JSON.parse(rawCode);
+    } catch (error: any) {
+        throw new Error(`${kind}: region payload is not valid JSON`, { cause: error });
+    }
+    if (!regions || typeof regions !== 'object' || Array.isArray(regions)) {
+        throw new Error(`${kind}: region payload must be an object`);
+    }
+    const expected = template.regions.map((region) => region.id).sort();
+    if (expected.some((id) => typeof id !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(id))) {
+        throw new Error(`${kind}: invalid template region id`);
+    }
+    if (new Set(expected).size !== expected.length) throw new Error(`${kind}: duplicate template region id`);
+    const actual = Object.keys(regions).sort();
+    if (expected.length !== actual.length || expected.some((id, index) => id !== actual[index])) {
+        throw new Error(`${kind}: region payload keys do not match template`);
+    }
+    const result = regions as Record<string, unknown>;
+    if (actual.some((id) => typeof result[id] !== 'string')) {
+        throw new Error(`${kind}: every region value must be a string`);
+    }
+    if (kind === 'program_fill' && /[\r\n]/.test(result.main as string)) {
+        throw new Error('program_fill: compile submission must be one line');
+    }
+    return result as Record<string, string>;
 }
 
 /**

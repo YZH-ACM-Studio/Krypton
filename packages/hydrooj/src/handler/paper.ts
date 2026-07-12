@@ -12,13 +12,15 @@
 import yaml from 'js-yaml';
 import { ObjectId } from 'mongodb';
 import { effectiveProblemKind, gradeObjectiveAnswer } from '@hydrooj/common';
+import { Logger } from '@hydrooj/utils';
 import {
     clientProblemConfig,
     Context, Handler, NotFoundError, OplogModel, PaperDraftModel, param,
-    parseProblemConfigObject, PERM,
+    parseProblemConfigObject, parseStructuredRegionSubmission, PERM,
     PermissionError, PRIV, problemFingerprint, ProblemModel, questionKindMap,
     route,
-    Types, UserModel, ValidationError } from 'hydrooj';
+    Types, UserModel, validateCompiledStructuredConfig, validateFillFunctionJudgeConfig,
+    validateTextProgramFillSubmission, ValidationError } from 'hydrooj';
 import { ContestClientFinishedError } from '../error';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
@@ -76,6 +78,66 @@ function absolutizeProblemFileUrls(handler: Handler, content: string, pdoc: any,
  * 客户端一律经 clientProblemConfig 净化。
  */
 const parsedProblemConfig = parseProblemConfigObject;
+const logger = new Logger('paper');
+
+function validatePaperRegionSubmission(
+    pdoc: any,
+    config: any,
+    rawCode: string | undefined,
+    context: { domainId: string, tid: ObjectId, uid: number, stage: string },
+) {
+    const effectiveKind = effectiveProblemKind(pdoc);
+    const kind = effectiveKind === 'program_fill' || effectiveKind === 'function'
+        ? effectiveKind
+        : 'fill_function';
+    try {
+        validateFillFunctionJudgeConfig(config);
+        validateCompiledStructuredConfig(effectiveKind, config);
+        if (typeof rawCode !== 'string') throw new Error(`${kind}: region payload is required`);
+        parseStructuredRegionSubmission(kind, config.template, rawCode);
+    } catch (error: any) {
+        logger.error(
+            'Paper structured submission rejected stage=%s domain=%s tid=%s pid=%d kind=%s revision=%s uid=%d error=%o',
+            context.stage, context.domainId, context.tid, pdoc.docId, kind,
+            pdoc.structureRevision, context.uid, error,
+        );
+        throw new ValidationError('code', null, error.message);
+    }
+    return { code: rawCode, lang: config.template.lang as string };
+}
+
+function validatePaperTextProgramFillSubmission(
+    pdoc: any,
+    config: any,
+    answers: unknown,
+    context: { domainId: string, tid: ObjectId, uid: number, stage: string },
+) {
+    try {
+        validateTextProgramFillSubmission(effectiveProblemKind(pdoc), config, answers);
+    } catch (error: any) {
+        logger.error(
+            'Paper text program-fill rejected stage=%s domain=%s tid=%s pid=%d kind=%s revision=%s uid=%d error=%o',
+            context.stage, context.domainId, context.tid, pdoc.docId,
+            effectiveProblemKind(pdoc), pdoc.structureRevision, context.uid, error,
+        );
+        throw new ValidationError('answers', null, error.message);
+    }
+}
+
+function preflightPaperTextProgramFillDrafts(
+    drafts: Array<{ pid: number, answers?: unknown }>,
+    pdict: Record<number, any>,
+    context: { domainId: string, tid: ObjectId, uid: number },
+) {
+    for (const draft of drafts) {
+        const pdoc = pdict[draft.pid];
+        if (!pdoc) continue;
+        const config = parsedProblemConfig(pdoc);
+        validatePaperTextProgramFillSubmission(pdoc, config, draft.answers, {
+            ...context, stage: 'finalize-preflight',
+        });
+    }
+}
 
 class PaperBaseHandler extends Handler {
     tdoc: any;
@@ -362,7 +424,15 @@ class PaperLayoutHandler extends PaperBaseHandler {
                     });
                 }
             } else if (type === 'fill_function') {
-                cells.push({ pid, questionKey: null, kind: 'fill_function', score: pdoc.score || 100 });
+                const kind = effectiveProblemKind(pdoc);
+                cells.push({
+                    pid,
+                    questionKey: null,
+                    kind: kind === 'program_fill'
+                        ? 'program_fill_compile'
+                        : kind === 'function' ? 'function' : 'fill_function',
+                    score: pdoc.score || 100,
+                });
             } else {
                 cells.push({ pid, questionKey: null, kind: type === 'submit_answer' ? 'submit_answer' : 'default', score: pdoc.score || 100 });
             }
@@ -498,6 +568,16 @@ class PaperDraftUpsertHandler extends PaperBaseHandler {
         }
 
         const config = parsedProblemConfig(pdoc);
+        validatePaperTextProgramFillSubmission(pdoc, config, parsedAnswers, {
+            domainId, tid: this.tid, uid: this.user._id, stage: 'draft-save',
+        });
+        if (config?.type === 'fill_function') {
+            const validated = validatePaperRegionSubmission(pdoc, config, code, {
+                domainId, tid: this.tid, uid: this.user._id, stage: 'draft-save',
+            });
+            code = validated.code;
+            lang = validated.lang;
+        }
         const fp = problemFingerprint(config);
         const draft = await PaperDraftModel.upsertDraft(domainId, this.tid, pid, this.user._id, {
             answers: parsedAnswers,
@@ -524,10 +604,22 @@ class PaperLockKindHandler extends PaperBaseHandler {
                 'This contest does not allow per-kind submission. Use finalize to submit.',
             );
         }
+        const pdict = await this.getProblemDict();
+        if (kind === 'fill_program') {
+            for (const pid of this.tdoc.pids as number[]) {
+                const pdoc = pdict[pid];
+                if (!pdoc) continue;
+                // eslint-disable-next-line no-await-in-loop
+                const draft = await PaperDraftModel.getDraft(domainId, this.tid, pid, this.user._id);
+                if (!draft) continue;
+                validatePaperTextProgramFillSubmission(pdoc, pdoc.config, draft.answers, {
+                    domainId, tid: this.tid, uid: this.user._id, stage: 'lock-kind',
+                });
+            }
+        }
         await PaperDraftModel.lockKindForUser(domainId, this.tid, this.user._id, kind as any);
 
         // Immediate grading for that kind across all objective problems.
-        const pdict = await this.getProblemDict();
         const aggregateResults: Record<string, Record<string, 'correct' | 'wrong' | 'partial'>> = {};
         for (const pid of this.tdoc.pids as number[]) {
             const pdoc = pdict[pid];
@@ -560,8 +652,13 @@ class PaperSubmitCodeHandler extends PaperBaseHandler {
         if (!draft || !draft.code) {
             throw new ValidationError('draft', null, 'No code saved yet — call save first');
         }
-        const lang = draft.lang || (config?.langs?.[0]) || 'cpp';
-        const finalCode = draft.code;
+        const validated = type === 'fill_function'
+            ? validatePaperRegionSubmission(pdoc, config, draft.code, {
+                domainId, tid: this.tid, uid: this.user._id, stage: 'immediate-submit',
+            })
+            : null;
+        const lang = validated?.lang || draft.lang || (config?.langs?.[0]) || 'cpp';
+        const finalCode = validated?.code || draft.code;
 
         const rid = await record.add(
             domainId, pid, this.user._id, lang, finalCode, true,
@@ -590,6 +687,7 @@ export async function finalizePaperForUser(
         const pdoc = await ProblemModel.get(tdoc.domainId, pid, undefined, true);
         if (pdoc) pdict[pid] = pdoc;
     }));
+    preflightPaperTextProgramFillDrafts(drafts, pdict, { domainId, tid, uid });
 
     const rids: ObjectId[] = [];
     const manualRids = new Set<string>();
@@ -620,9 +718,11 @@ export async function finalizePaperForUser(
             rids.push(rid);
         } else if (type === 'fill_function') {
             const codeBody = draft.code || JSON.stringify(draft.answers || {});
-            const lang = draft.lang || config?.template?.lang || 'cpp';
+            const validated = validatePaperRegionSubmission(pdoc, config, codeBody, {
+                domainId, tid, uid, stage: 'finalize',
+            });
             const rid = await record.add(
-                domainId, draft.pid, uid, lang, codeBody, true,
+                domainId, draft.pid, uid, validated.lang, validated.code, true,
                 { contest: tid, type: 'judge', ...recordMeta } as any,
             );
             rids.push(rid);

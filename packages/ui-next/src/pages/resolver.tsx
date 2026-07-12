@@ -54,8 +54,8 @@ import { GenericPage } from '@/pages/generic';
 import { KryptonHomePage } from '@/pages/home';
 import { HomeworkDetailPage, HomeworkPage } from '@/pages/homework';
 import { HomeworkEditPage, HomeworkFilesPage } from '@/pages/homework-manage';
-import { MindmapPage } from '@/pages/mindmap';
 import { ManualGradingPage } from '@/pages/manual-grading';
+import { MindmapPage } from '@/pages/mindmap';
 import { DomainsPage } from '@/pages/misc';
 import { PaperCenterPage } from '@/pages/paper-center';
 import { PaperCenterEditPage } from '@/pages/paper-center-edit';
@@ -80,6 +80,7 @@ import { RankingPage } from '@/pages/ranking';
 import { RealPassManagePage } from '@/pages/realpass-manage';
 import { RecordDetailPage, RecordsPage } from '@/pages/records';
 import { SpikeWebViewProbePage } from '@/pages/spike-webview';
+import { FunctionProblemEditorPage, ProgramFillProblemEditorPage } from '@/pages/structured-code-editors';
 import { SubjectiveProblemEditorPage } from '@/pages/subjective-editor';
 import { SudoPage, SudoRedirectPage } from '@/pages/sudo';
 import {
@@ -136,6 +137,8 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'problem_edit_true_false.html': TrueFalseProblemEditorPage,
   'problem_edit_blank.html': BlankProblemEditorPage,
   'problem_edit_subjective.html': SubjectiveProblemEditorPage,
+  'problem_edit_program_fill.html': ProgramFillProblemEditorPage,
+  'problem_edit_function.html': FunctionProblemEditorPage,
   'problem_config.html': ProblemConfigPage,
   'problem_files.html': ProblemFilesPage,
   'problem_solution.html': ProblemSolutionPage,

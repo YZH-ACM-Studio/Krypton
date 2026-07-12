@@ -1,12 +1,12 @@
 /**
- * 出卷中心（PLAN 2026-07 P3.1 骨架 / Rev.12 全量）——客观题 / 函数题的
+ * 出卷中心（PLAN 2026-07 P3.1 骨架 / Rev.12 全量）——旧复合客观题的
  * 独立管理列表。后端见 packages/hydrooj/src/handler/paper-center.ts
  * （/paper-center，PERM_CREATE_PROBLEM：管理员+教师）。
  *
  * Rev.12：新建走弹标题框 → POST /paper-center/create → 客观题直达独立
- * 编辑器（/paper-center/:docId/edit），函数题跳现有 problem-edit 链路。
+ * 编辑器（/paper-center/:docId/edit）。函数题统一从 /problem/create/function 创建。
  */
-import { FilePlus2, FunctionSquare, Loader2, NotebookPen, Search } from 'lucide-react';
+import { FilePlus2, Loader2, NotebookPen, Search } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -70,7 +70,7 @@ function CreateDialog({
   open, ptype, onClose,
 }: {
   open: boolean;
-  ptype: 'objective' | 'fill_function';
+  ptype: 'objective';
   onClose: () => void;
 }) {
   const [title, setTitle] = useState('');
@@ -107,7 +107,7 @@ function CreateDialog({
     <Dialog open={open} onOpenChange={(v) => !v && !busy && onClose()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{ptype === 'objective' ? '新建客观题' : '新建函数题'}</DialogTitle>
+          <DialogTitle>新建客观题</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <Input
@@ -118,9 +118,7 @@ function CreateDialog({
             onKeyDown={(e) => e.key === 'Enter' && !busy && create()}
           />
           <p className="text-xs text-muted-foreground">
-            {ptype === 'objective'
-              ? '创建后进入独立编辑器添加小题（默认对学生隐藏）。'
-              : '创建后进入题目编辑页配置代码模板、挖空区与测试数据（默认对学生隐藏）。'}
+            创建后进入独立编辑器添加小题（默认对学生隐藏）。
           </p>
           {err ? <p className="text-xs text-red-600 dark:text-red-400">{err}</p> : null}
           <div className="flex justify-end gap-2">
@@ -143,7 +141,7 @@ export function PaperCenterPage() {
   };
   const rows = data.rows || [];
   const page = data.page || 1;
-  const [createType, setCreateType] = useState<'objective' | 'fill_function' | null>(null);
+  const [createType, setCreateType] = useState<'objective' | null>(null);
 
   const problemHref = (r: Row) => `/p/${r.pid || r.docId}`;
   const editHref = (r: Row) => (r.summary.type === 'fill_function'
@@ -156,12 +154,9 @@ export function PaperCenterPage() {
         <NotebookPen className="size-5 text-primary" />
         <h1 className="text-xl font-semibold">出卷中心</h1>
         <span className="ml-2 text-xs text-muted-foreground">
-          共 {data.pcount ?? rows.length} 道客观题类题目（客观题 / 函数题）
+          共 {data.pcount ?? rows.length} 道旧复合客观题
         </span>
         <div className="flex-1" />
-        <Button variant="outline" onClick={() => setCreateType('fill_function')}>
-          <FunctionSquare className="mr-1 size-4" />新建函数题
-        </Button>
         <Button onClick={() => setCreateType('objective')}>
           <FilePlus2 className="mr-1 size-4" />新建客观题
         </Button>

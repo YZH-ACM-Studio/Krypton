@@ -41,7 +41,7 @@ export function gradeObjectiveAnswer(entry: AnswerEntry | unknown, submitted: un
     }
     if (Array.isArray(submitted)) return { outcome: 'wrong', score: 0 };
     const got = submitted;
-    const matches = (meta as any).kind === 'blank'
+    const matches = ['blank', 'fill_program'].includes((meta as any).kind)
         ? blankText(expected) === blankText(got)
         : String(expected).trim() === String(got ?? '').trim();
     return matches

@@ -42,6 +42,14 @@ describe('objective judge integration', () => {
             .to.deep.include({ status: STATUS.STATUS_WRONG_ANSWER, score: 0 });
     });
 
+    it('uses the same one-line trim and case-sensitive rules for text program-fill', async () => {
+        const config = { answers: { main: ['i++', 100, { kind: 'fill_program' }] } };
+        expect((await run(config, { main: '  i++\r\n' })).result)
+            .to.deep.include({ status: STATUS.STATUS_ACCEPTED, score: 100 });
+        expect((await run(config, { main: 'I++' })).result)
+            .to.deep.include({ status: STATUS.STATUS_WRONG_ANSWER, score: 0 });
+    });
+
     it('rejects array-shaped submissions for scalar objective problems', async () => {
         const results = await Promise.all([
             ['single', 'B'], ['true_false', 'A'], ['blank', 'Answer'],

@@ -663,6 +663,8 @@ export function ProblemDetailPage() {
   const objectiveQuestions: ObjectiveClientQuestion[] = (config.type === 'objective' && Array.isArray(config.questions))
     ? config.questions : [];
   const isObjective = objectiveQuestions.length > 0;
+  const isStructuredCompile = config.type === 'fill_function'
+    && ['program_fill', 'function'].includes(String(pdoc.problemKind));
   const isSubjective = pdoc.problemKind === 'subjective';
   const canPreviewSubjective = !!data.canPreviewSubjective;
   const objectiveDraftKey = `objective-draft:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pdoc.docId || pid}${tid ? `@${tid}` : ''}`;
@@ -1021,7 +1023,7 @@ export function ProblemDetailPage() {
         </div>
         <div className="flex shrink-0 gap-2">
           {/* 客观题在下方面板作答，IDE 模式无意义 */}
-          {!isObjective ? (
+          {!isObjective && !isStructuredCompile ? (
             <Button size="sm" variant="default" className="gap-1" onClick={() => setIdeMode(true)}>
               <Code2 className="size-3.5" />
               IDE 模式

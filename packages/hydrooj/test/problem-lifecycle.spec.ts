@@ -151,6 +151,95 @@ describe('P2.12 minimal problem lifecycle', () => {
         })).to.throw(TestValidationError);
     });
 
+    it('normalizes text and compile program-fill modes without sharing schemas', () => {
+        expect(lifecycle.normalizeStructuredProblemConfig('program_fill', {
+            main: { mode: 'text', answer: ' i++ ' },
+        })).to.deep.equal({
+            type: 'objective', subType: 'program_fill_text', score: 100,
+            main: { mode: 'text', answer: ' i++ ' },
+            answers: { main: [' i++ ', 100, { kind: 'fill_program' }] },
+        });
+        expect(() => lifecycle.normalizeStructuredProblemConfig('program_fill', {
+            main: { mode: 'text', answer: 'i++\nj++' },
+        })).to.throw(TestValidationError);
+
+        const compiled = lifecycle.normalizeStructuredProblemConfig('program_fill', {
+            main: {
+                mode: 'compile', lang: 'cc.cc17',
+                markerSource: [
+                    'int main() {',
+                    '// @krypton-region main',
+                    'i++;',
+                    '// @krypton-endregion main',
+                    '}',
+                ].join('\n'),
+                regions: [{ id: 'main', prompt: '填写一行' }],
+                cases: [{ input: '1.in', output: '1.out' }],
+            },
+        });
+        expect(compiled).to.include({
+            type: 'fill_function', subType: 'program_fill_compile', score: 100,
+        });
+        expect(compiled).to.have.nested.property('template.lang', 'cc.cc17');
+        expect(compiled).to.have.nested.property('template.regions[0].id', 'main');
+        expect(lifecycle.structuredProblemUsesTestdata('program_fill', compiled)).to.equal(true);
+        expect(lifecycle.structuredProblemUsesTestdata('program_fill', {
+            main: { mode: 'text' },
+        })).to.equal(false);
+        expect(lifecycle.structuredProblemUsesTestdata('program_fill', {
+            subType: 'program_fill_compile',
+        })).to.equal(true);
+    });
+
+    it('normalizes function problems with multiple multi-line regions', () => {
+        const compiled = lifecycle.normalizeStructuredProblemConfig('function', {
+            main: {
+                mode: 'function', lang: 'cc.cc17',
+                markerSource: [
+                    '// @krypton-region first',
+                    'int first() {',
+                    '  return 1;',
+                    '}',
+                    '// @krypton-endregion first',
+                    '// @krypton-region second',
+                    'int second() {',
+                    '  return 2;',
+                    '}',
+                    '// @krypton-endregion second',
+                ].join('\n'),
+                regions: [{ id: 'first' }, { id: 'second', prompt: '第二个函数' }],
+                cases: [{ input: '1.in', output: '1.out' }],
+            },
+        });
+        expect(compiled).to.include({ type: 'fill_function', subType: 'function', score: 100 });
+        expect(compiled).to.have.nested.property('template.regions').with.length(2);
+        expect(compiled).to.have.nested.property('template.regions[1].prompt', '第二个函数');
+        expect(lifecycle.structuredProblemUsesTestdata('function', compiled)).to.equal(true);
+    });
+
+    it('creates an immutable different-language clone config with the same private source hash', () => {
+        const source = lifecycle.normalizeStructuredProblemConfig('function', {
+            main: {
+                mode: 'function', lang: 'cc.cc17',
+                markerSource: [
+                    '// @krypton-region solve',
+                    'int solve() { return 1; }',
+                    '// @krypton-endregion solve',
+                ].join('\n'),
+                regions: [{ id: 'solve' }],
+                cases: [{ input: '1.in', output: '1.out' }],
+            },
+        });
+        const clone = lifecycle.cloneStructuredProblemForLanguage('function', source, 'py.py3');
+        expect(clone).to.have.nested.property('main.lang', 'py.py3');
+        expect(clone).to.have.nested.property('template.lang', 'py.py3');
+        expect(clone).to.have.nested.property('langs[0]', 'py.py3');
+        expect(clone).to.have.nested.property('template.source', (source as any).template.source);
+        expect(clone).to.have.nested.property('template.sourceHash', (source as any).template.sourceHash);
+        expect(() => lifecycle.cloneStructuredProblemForLanguage('function', source, 'cc.cc17'))
+            .to.throw(TestValidationError);
+    });
+
     it('runs the fixed reference scan and reports every reference class', async () => {
         counts.set('document:30:', 1);
         counts.set('document:40:', 2);

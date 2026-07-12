@@ -49,10 +49,31 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(source).to.include('html: !!original.html');
     });
 
-    it('rejects structured testdata writes in both direct and claimed model helpers', () => {
+    it('limits structured testdata writes to compile program-fill and function problems', () => {
         const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
-        expect(source.match(/assertDirectStructureWritable\(domainId, pid, true\)/g)).to.have.length(3);
+        expect(source).to.include('domainId, pid, true, [name]');
+        expect(source).to.include('domainId, pid, true, [file, newName]');
+        expect(source).to.include('domainId, pid, true, names');
         expect(source).to.include("key === 'data' && doc.problemKind !== undefined");
+        expect(source).to.include('structuredProblemUsesTestdata(problemKind, pdoc.config)');
+        expect(source).to.include('structuredProblemUsesTestdata(kind, doc.config)');
+    });
+
+    it('keeps clone data physical and fails with the exact file name', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const cloneHelper = readFileSync(resolve(root, 'src/lib/problem-clone.ts'), 'utf8');
+        const start = source.indexOf('static async copy(');
+        const end = source.indexOf('static push<', start);
+        const method = source.slice(start, end);
+        expect(method).to.include('await copyProblemStorageFiles({');
+        expect(method).to.include('const content = await storage.get(sourcePath)');
+        expect(method).to.include('await storage.put(targetPath, content)');
+        expect(method).not.to.include('storage.copy(sourcePath, targetPath)');
+        expect(method).to.include('filename=%s');
+        expect(cloneHelper).to.include('Problem clone failed while copying ');
+        expect(method).to.include('createProblemByKind(');
+        expect(method.indexOf('createProblemByKind(')).to.be.lessThan(method.indexOf('copyProblemStorageFiles({'));
+        expect(method).not.to.include('testdataSourcePid');
     });
 
     it('audits successful metadata-only saves for locked structured problems', () => {
@@ -75,5 +96,23 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const method = source.slice(start, end);
         expect(method).to.include('auditedFields.filter((field) => !isEqual(before[field], result[field]))');
         expect(method).not.to.include("changedFields: ['title'");
+    });
+
+    it('rejects every type-only fill-function publication, including legacy programming problems', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        expect(source).to.include('function assertPublishableFillFunction');
+        expect(source.match(/assertPublishableFillFunction\(\{/g)).to.have.length(3);
+        expect(source).to.include('validateCompiledStructuredConfig(problemKind, config)');
+        expect(source).to.include('validateFillFunctionTestdataFiles(config, input.data || [])');
+        expect(source.match(/config: 1, data: 1/g)).to.have.length(2);
+    });
+
+    it('blocks every config yaml alias at direct, claimed, and event-backed structured writes', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const handler = readFileSync(resolve(root, 'src/handler/problem.ts'), 'utf8');
+        expect(source).to.include('testdataNames.some(isProblemConfigFilename)');
+        expect(source).to.include('assertConfigTestdataEventAllowed(domainId, docId)');
+        expect(handler).to.include('[...files, ...newNames].some(isProblemConfigFilename)');
+        expect(handler).to.include('files.some(isProblemConfigFilename)');
     });
 });

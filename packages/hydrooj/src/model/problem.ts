@@ -22,6 +22,11 @@ import {
 import type {
     Document, ProblemDict, ProblemStatusDoc, User,
 } from '../interface';
+import { copyProblemStorageFiles } from '../lib/problem-clone';
+import {
+    isProblemConfigFilename, parseProblemConfigObject,
+    validateCompiledStructuredConfig, validateFillFunctionTestdataFiles,
+} from '../lib/problem-config';
 import { parseConfig } from '../lib/testdataConfig';
 import bus from '../service/bus';
 import db from '../service/db';
@@ -53,6 +58,7 @@ import {
 } from './problem-access';
 import {
     assertStructureRevision,
+    cloneStructuredProblemForLanguage,
     findProblemReferences,
     hasStartedProblemContainer,
     normalizeStructuredProblemConfig,
@@ -60,6 +66,7 @@ import {
     problemCreateChangedFields,
     problemEditAuditedFields,
     problemReferenceCount,
+    structuredProblemUsesTestdata,
 } from './problem-lifecycle';
 import RecordModel from './record';
 import SolutionModel from './solution';
@@ -79,6 +86,29 @@ function sortable(source: string, namespaces: Record<string, string>) {
 function isStructuralPatch($set: Record<string, unknown>, $unset: Record<string, unknown> = {}) {
     return [...Object.keys($set), ...Object.keys($unset)]
         .some((field) => PROBLEM_STRUCTURAL_FIELDS.has(field));
+}
+
+function assertPublishableFillFunction(input: {
+    domainId: string;
+    pid: number;
+    problemKind?: unknown;
+    structureRevision?: unknown;
+    config: unknown;
+    data?: Array<{ name: string }>;
+}) {
+    const config = parseProblemConfigObject({ config: input.config });
+    if (config?.type !== 'fill_function') return;
+    const problemKind = input.problemKind === undefined ? 'programming' : parseProblemKind(input.problemKind);
+    try {
+        validateCompiledStructuredConfig(problemKind, config);
+        validateFillFunctionTestdataFiles(config, input.data || []);
+    } catch (error: any) {
+        logger.error(
+            'Fill-function publish rejected domain=%s pid=%d kind=%s revision=%s error=%o',
+            input.domainId, input.pid, problemKind, input.structureRevision, error,
+        );
+        throw new ValidationError('hidden', null, error.message);
+    }
 }
 
 function revisionClaimFilter(claim: ProblemWriteClaim, expectedStructureRevision: number) {
@@ -277,7 +307,15 @@ export class ProblemModel {
         if (meta.difficulty) args.difficulty = meta.difficulty;
         if (meta.reference) args.reference = meta.reference;
         if (problemKind !== 'programming') {
-            args.config = normalizeStructuredProblemConfig(problemKind, meta.structuredConfig) as any;
+            try {
+                args.config = normalizeStructuredProblemConfig(problemKind, meta.structuredConfig) as any;
+            } catch (error) {
+                logger.error(
+                    'Structured problem create rejected domain=%s pid=%d kind=%s revision=1 error=%o',
+                    domainId, docId, problemKind, error,
+                );
+                throw error;
+            }
         }
         await bus.parallel('problem/before-add', domainId, content, owner, docId, args);
         const result = await document.add(domainId, content, owner, document.TYPE_PROBLEM, docId, null, null, args);
@@ -385,7 +423,7 @@ export class ProblemModel {
             input.operation,
             async (claim) => {
                 const projection = Object.fromEntries([
-                    ...new Set([...auditedFields, 'problemKind', 'structureRevision']),
+                    ...new Set([...auditedFields, 'problemKind', 'structureRevision', 'config', 'data']),
                 ].map((field) => [field, 1]));
                 const before = await document.coll.findOne({
                     domainId: input.domainId,
@@ -400,6 +438,31 @@ export class ProblemModel {
                 }
                 if (parseProblemKind(before.problemKind) !== input.expectedProblemKind) {
                     throw new ValidationError('problemKind');
+                }
+                const hasConfigUpdate = input.$set.config !== undefined;
+                const existingConfig = before.config as any;
+                const nextConfig = hasConfigUpdate ? input.$set.config as any : existingConfig;
+                const existingMain = existingConfig?.main;
+                const nextMain = nextConfig?.main;
+                if (hasConfigUpdate && input.expectedProblemKind === 'program_fill' && existingMain) {
+                    if (existingMain.mode !== nextMain?.mode) throw new ValidationError('mode', null, '程序填空模式创建后不可修改');
+                    if (existingMain.mode === 'compile' && existingMain.lang !== nextMain?.lang) {
+                        throw new ValidationError('lang', null, '评测语言创建后不可修改');
+                    }
+                }
+                if (hasConfigUpdate && input.expectedProblemKind === 'function'
+                    && existingMain && existingMain.lang !== nextMain?.lang) {
+                    throw new ValidationError('lang', null, '评测语言创建后不可修改');
+                }
+                if (input.$set.hidden === false) {
+                    assertPublishableFillFunction({
+                        domainId: input.domainId,
+                        pid: input.pid,
+                        problemKind: input.expectedProblemKind,
+                        structureRevision: before.structureRevision,
+                        config: nextConfig,
+                        data: before.data,
+                    });
                 }
                 const result = await ProblemModel.editWithClaim(claim, input.$set, {}, {
                     expectedStructureRevision: input.expectedStructureRevision,
@@ -425,7 +488,16 @@ export class ProblemModel {
         >>;
     }): Promise<ProblemDoc> {
         const problemKind = parseProblemKind(input.problemKind);
-        const config = normalizeStructuredProblemConfig(problemKind, input.config);
+        let config: Record<string, unknown>;
+        try {
+            config = normalizeStructuredProblemConfig(problemKind, input.config);
+        } catch (error) {
+            logger.error(
+                'Structured problem save rejected domain=%s pid=%d kind=%s revision=%d error=%o',
+                input.domainId, input.pid, problemKind, input.expectedStructureRevision, error,
+            );
+            throw error;
+        }
         const $set = { ...input.metadata, content: input.content, config, problemKind } as any;
         const { before, result, auditedFields } = await ProblemModel.editAuthorizedWithSnapshot({
             domainId: input.domainId,
@@ -682,10 +754,18 @@ export class ProblemModel {
         const current = await document.coll.findOne({
             domainId, docType: document.TYPE_PROBLEM, docId: _id,
         }, { projection: {
-            content: 1, problemKind: 1, structureRevision: 1, structureLockedAt: 1, archivedAt: 1,
+            content: 1, config: 1, data: 1,
+            problemKind: 1, structureRevision: 1, structureLockedAt: 1, archivedAt: 1,
         } });
         if (!current) throw new ProblemNotFoundError(domainId, _id);
         if (current.archivedAt && $set.hidden === false) throw new ValidationError('hidden');
+        if ($set.hidden === false) {
+            assertPublishableFillFunction({
+                domainId, pid: _id, problemKind: current.problemKind,
+                structureRevision: current.structureRevision, config: $set.config ?? current.config,
+                data: ($set.data ?? current.data) as any,
+            });
+        }
         if ($set.content === current.content) delete $set.content;
         let result: ProblemDoc | null;
         if (current.problemKind !== undefined && isStructuralPatch($set as any, $unset)
@@ -854,15 +934,19 @@ export class ProblemModel {
         domainId: string,
         pid: number,
         testdata = false,
+        testdataNames: string[] = [],
     ): Promise<boolean> {
         const pdoc = await document.coll.findOne({
             domainId, docType: document.TYPE_PROBLEM, docId: pid,
-        }, { projection: { problemKind: 1, structureLockedAt: 1, archivedAt: 1 } });
+        }, { projection: { problemKind: 1, config: 1, structureLockedAt: 1, archivedAt: 1 } });
         if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
         if (pdoc.problemKind === undefined) return false;
         const problemKind = parseProblemKind(pdoc.problemKind);
-        if (testdata && problemKind !== 'programming') {
+        if (testdata && problemKind !== 'programming' && !structuredProblemUsesTestdata(problemKind, pdoc.config)) {
             throw new ValidationError('problemKind', null, '结构化题不接受 testdata/config.yaml 文件写入');
+        }
+        if (testdata && problemKind !== 'programming' && testdataNames.some(isProblemConfigFilename)) {
+            throw new ValidationError('name', null, '结构化题配置不通过 testdata 文件修改');
         }
         if (pdoc.archivedAt || pdoc.structureLockedAt
             || await ProblemModel.materializeStartedContainerLock(domainId, pid)) {
@@ -913,10 +997,18 @@ export class ProblemModel {
             'aclWriteClaim.actor': claim.actor,
             'aclWriteClaim.state': 'active',
         }, { projection: {
-            content: 1, problemKind: 1, structureRevision: 1, structureLockedAt: 1, archivedAt: 1,
+            content: 1, config: 1, data: 1,
+            problemKind: 1, structureRevision: 1, structureLockedAt: 1, archivedAt: 1,
         } });
         if (!current) throw new Error(`problem write claim ownership lost before edit: ${claim.requestId}`);
         if (current.archivedAt && $set.hidden === false) throw new ValidationError('hidden');
+        if ($set.hidden === false) {
+            assertPublishableFillFunction({
+                domainId, pid: _id, problemKind: current.problemKind,
+                structureRevision: current.structureRevision, config: $set.config ?? current.config,
+                data: ($set.data ?? current.data) as any,
+            });
+        }
         if ($set.content === current.content) delete $set.content;
         let result: ProblemDoc | null;
         if (current.problemKind !== undefined && isStructuralPatch($set as any, $unset)
@@ -971,7 +1063,14 @@ export class ProblemModel {
         );
     }
 
-    static async copy(domainId: string, _id: number, target: string, pid?: string, _hidden?: boolean) {
+    static async copy(
+        domainId: string,
+        _id: number,
+        target: string,
+        pid?: string,
+        _hidden?: boolean,
+        structuredLanguage?: string,
+    ) {
         const original = await ProblemModel.get(domainId, _id, ProblemModel.PROJECTION_PUBLIC, true);
         if (!original) throw new ProblemNotFoundError(domainId, _id);
         if (original.reference) throw new ValidationError('reference');
@@ -980,6 +1079,9 @@ export class ProblemModel {
         const problemKind = original.problemKind === undefined
             ? 'programming'
             : parseProblemKind(original.problemKind);
+        const cloneConfig = structuredLanguage
+            ? cloneStructuredProblemForLanguage(problemKind, original.config, structuredLanguage)
+            : original.config;
         const cloneId = await ProblemModel.createProblemByKind(
             problemKind,
             target,
@@ -988,19 +1090,34 @@ export class ProblemModel {
             original.content,
             original.owner,
             original.tag,
-            { difficulty: original.difficulty, structuredConfig: original.config },
+            { difficulty: original.difficulty, structuredConfig: cloneConfig },
         );
         const sourcePrefix = `problem/${domainId}/${_id}/`;
         const targetPrefix = `problem/${target}/${cloneId}/`;
         try {
             const files = await storage.list(sourcePrefix);
-            for (const file of files) {
-                // Cloning is rare and deliberately synchronous. A copy error is
-                // surfaced with the exact file instead of scheduled for replay.
-                await storage.copy(file.path, `${targetPrefix}${file.name}`);
-            }
+            await copyProblemStorageFiles({
+                files,
+                sourceDomainId: domainId,
+                sourceProblemId: _id,
+                targetDomainId: target,
+                targetProblemId: cloneId,
+                targetPrefix,
+                copy: async (sourcePath, targetPath) => {
+                    const content = await storage.get(sourcePath);
+                    await storage.put(targetPath, content);
+                },
+                onFailure: (failure) => {
+                    logger.error(
+                        'Problem clone file copy failed source=%s/%d target=%s/%d filename=%s error=%o',
+                        failure.sourceDomainId, failure.sourceProblemId,
+                        failure.targetDomainId, failure.targetProblemId,
+                        failure.filename, failure.error,
+                    );
+                },
+            });
             await document.set(target, document.TYPE_PROBLEM, cloneId, {
-                config: original.config,
+                config: cloneConfig as any,
                 data: original.data || [],
                 additional_file: original.additional_file || [],
                 html: !!original.html,
@@ -1110,9 +1227,9 @@ export class ProblemModel {
     }
 
     static async addTestdata(domainId: string, pid: number, name: string, f: Readable | Buffer | string, operator = 1) {
-        const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid, true);
         name = name.trim();
         if (!name) throw new ValidationError('name');
+        const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid, true, [name]);
         const [[, fileinfo]] = await Promise.all([
             document.getSub(domainId, document.TYPE_PROBLEM, pid, 'data', name),
             storage.put(`problem/${domainId}/${pid}/testdata/${name}`, f, operator),
@@ -1129,7 +1246,9 @@ export class ProblemModel {
 
     static async renameTestdata(domainId: string, pid: number, file: string, newName: string, operator = 1) {
         if (file === newName) return;
-        const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid, true);
+        const revisionManaged = await ProblemModel.assertDirectStructureWritable(
+            domainId, pid, true, [file, newName],
+        );
         const [, sdoc] = await document.getSub(domainId, document.TYPE_PROBLEM, pid, 'data', newName);
         if (sdoc) await ProblemModel.delTestdata(domainId, pid, newName);
         const payload = { _id: newName, name: newName, lastModified: new Date() };
@@ -1146,8 +1265,8 @@ export class ProblemModel {
     }
 
     static async delTestdata(domainId: string, pid: number, name: string | string[], operator = 1) {
-        const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid, true);
         const names = (name instanceof Array) ? name : [name];
+        const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid, true, names);
         await Promise.all([
             storage.del(names.map((t) => `problem/${domainId}/${pid}/testdata/${t}`), operator),
             ProblemModel.pull(domainId, pid, 'data', names),
@@ -1206,6 +1325,7 @@ export class ProblemModel {
     private static async getClaimedProblemFiles(
         claim: ProblemWriteClaim,
         key: 'data' | 'additional_file',
+        testdataNames: string[] = [],
     ): Promise<any[]> {
         const doc = await document.coll.findOne({
             domainId: claim.domainId,
@@ -1214,10 +1334,16 @@ export class ProblemModel {
             'aclWriteClaim.requestId': claim.requestId,
             'aclWriteClaim.actor': claim.actor,
             'aclWriteClaim.state': 'active',
-        }, { projection: { [key]: 1, problemKind: 1 } });
+        }, { projection: { [key]: 1, problemKind: 1, config: 1 } });
         if (!doc) throw new Error(`problem write claim ownership lost before file operation: ${claim.requestId}`);
-        if (key === 'data' && doc.problemKind !== undefined && parseProblemKind(doc.problemKind) !== 'programming') {
-            throw new ValidationError('problemKind', null, '结构化题不接受 testdata/config.yaml 文件写入');
+        if (key === 'data' && doc.problemKind !== undefined) {
+            const kind = parseProblemKind(doc.problemKind);
+            if (kind !== 'programming' && !structuredProblemUsesTestdata(kind, doc.config)) {
+                throw new ValidationError('problemKind', null, '此结构化题不接受 testdata 文件写入');
+            }
+            if (kind !== 'programming' && testdataNames.some(isProblemConfigFilename)) {
+                throw new ValidationError('name', null, '结构化题配置不通过 testdata 文件修改');
+            }
         }
         return Array.isArray(doc[key]) ? doc[key] : [];
     }
@@ -1230,7 +1356,7 @@ export class ProblemModel {
     ) {
         name = name.trim();
         if (!name) throw new ValidationError('name');
-        const current = await ProblemModel.getClaimedProblemFiles(claim, 'data');
+        const current = await ProblemModel.getClaimedProblemFiles(claim, 'data', [name]);
         await storage.put(`problem/${claim.domainId}/${claim.pid}/testdata/${name}`, f, operator);
         const meta = await storage.getMeta(`problem/${claim.domainId}/${claim.pid}/testdata/${name}`);
         if (!meta) throw new FileUploadError();
@@ -1251,7 +1377,7 @@ export class ProblemModel {
         operator = 1,
     ) {
         if (file === newName) return;
-        const current = await ProblemModel.getClaimedProblemFiles(claim, 'data');
+        const current = await ProblemModel.getClaimedProblemFiles(claim, 'data', [file, newName]);
         if (current.some((item) => item.name === newName)) {
             await storage.del([`problem/${claim.domainId}/${claim.pid}/testdata/${newName}`], operator);
         }
@@ -1275,7 +1401,7 @@ export class ProblemModel {
         operator = 1,
     ) {
         const names = name instanceof Array ? name : [name];
-        const current = await ProblemModel.getClaimedProblemFiles(claim, 'data');
+        const current = await ProblemModel.getClaimedProblemFiles(claim, 'data', names);
         await storage.del(names.map((item) => `problem/${claim.domainId}/${claim.pid}/testdata/${item}`), operator);
         if (!await commitProblemWriteClaimUpdate(
             claim,
@@ -1757,25 +1883,40 @@ export class ProblemModel {
     }
 }
 
+async function assertConfigTestdataEventAllowed(domainId: string, docId: number) {
+    const pdoc = await document.coll.findOne({
+        domainId, docType: document.TYPE_PROBLEM, docId,
+    }, { projection: { problemKind: 1 } });
+    if (!pdoc) throw new ProblemNotFoundError(domainId, docId);
+    if (pdoc.problemKind !== undefined && parseProblemKind(pdoc.problemKind) !== 'programming') {
+        throw new ValidationError('name', null, '结构化题配置不通过 testdata 文件修改');
+    }
+}
+
 export function apply(ctx: Context) {
     ctx.on('problem/addTestdata', async (domainId, docId, name, _payload, claim?: ProblemWriteClaim) => {
-        if (!['config.yaml', 'config.yml', 'Config.yaml', 'Config.yml'].includes(name)) return;
+        if (!isProblemConfigFilename(name)) return;
+        await assertConfigTestdataEventAllowed(domainId, docId);
         const buf = await storage.get(`problem/${domainId}/${docId}/testdata/${name}`);
         const update = { config: (await streamToBuffer(buf)).toString() };
         if (claim) await ProblemModel.editWithClaim(claim, update, {}, { skipStructureGuard: true });
         else await ProblemModel.edit(domainId, docId, update, { skipStructureGuard: true });
     });
     ctx.on('problem/delTestdata', async (domainId, docId, names, claim?: ProblemWriteClaim) => {
-        if (!names.includes('config.yaml')) return;
+        if (!names.some(isProblemConfigFilename)) return;
+        await assertConfigTestdataEventAllowed(domainId, docId);
         if (claim) await ProblemModel.editWithClaim(claim, { config: '' }, {}, { skipStructureGuard: true });
         else await ProblemModel.edit(domainId, docId, { config: '' }, { skipStructureGuard: true });
     });
     ctx.on('problem/renameTestdata', async (domainId, docId, file, newName, claim?: ProblemWriteClaim) => {
-        if (['config.yaml', 'config.yml', 'Config.yaml', 'Config.yml'].includes(file)) {
+        if (isProblemConfigFilename(file) || isProblemConfigFilename(newName)) {
+            await assertConfigTestdataEventAllowed(domainId, docId);
+        }
+        if (isProblemConfigFilename(file)) {
             if (claim) await ProblemModel.editWithClaim(claim, { config: '' }, {}, { skipStructureGuard: true });
             else await ProblemModel.edit(domainId, docId, { config: '' }, { skipStructureGuard: true });
         }
-        if (['config.yaml', 'config.yml', 'Config.yaml', 'Config.yml'].includes(newName)) {
+        if (isProblemConfigFilename(newName)) {
             const buf = await storage.get(`problem/${domainId}/${docId}/testdata/${newName}`);
             const update = { config: (await streamToBuffer(buf)).toString() };
             if (claim) await ProblemModel.editWithClaim(claim, update, {}, { skipStructureGuard: true });

@@ -1,6 +1,7 @@
 import type { ProblemKind } from '@hydrooj/common';
 import { parseProblemKind } from '@hydrooj/common';
 import { ValidationError } from '../error';
+import { parseRegionMarkers, validateCompiledStructuredConfig } from '../lib/problem-config';
 import db from '../service/db';
 import * as document from './document';
 
@@ -50,11 +51,67 @@ function assertNoSecondaryStatement(value: unknown, path = 'config'): void {
     }
     if (!isPlainObject(value)) return;
     for (const [key, child] of Object.entries(value)) {
-        if (FORBIDDEN_STATEMENT_FIELDS.has(key)) {
+        const regionPrompt = key === 'prompt' && /\.regions\[\d+\]$/.test(path);
+        if (FORBIDDEN_STATEMENT_FIELDS.has(key) && !regionPrompt) {
             throw new ValidationError('config', null, `题面只能存放在 content，禁止字段 ${path}.${key}`);
         }
         assertNoSecondaryStatement(child, `${path}.${key}`);
     }
+}
+
+function normalizeCases(value: unknown): Array<{ input: string, output: string, score?: number }> {
+    if (!Array.isArray(value) || !value.length) throw new ValidationError('config', null, '至少需要一个测试点');
+    return value.map((item, index) => {
+        if (!isPlainObject(item)) throw new ValidationError('config', null, `测试点 ${index + 1} 格式错误`);
+        const input = typeof item.input === 'string' ? item.input.trim() : '';
+        const output = typeof item.output === 'string' ? item.output.trim() : '';
+        const validName = (name: string) => !!name && name !== 'config.yaml' && !/[\\/]/.test(name);
+        if (!validName(input) || !validName(output)) {
+            throw new ValidationError('config', null, `测试点 ${index + 1} 文件名非法`);
+        }
+        if (item.score !== undefined && (!Number.isFinite(item.score) || Number(item.score) < 0)) {
+            throw new ValidationError('config', null, `测试点 ${index + 1} 分值非法`);
+        }
+        return { input, output, ...(item.score !== undefined ? { score: Number(item.score) } : {}) };
+    });
+}
+
+function normalizeCompilableStructured(kind: 'program_fill' | 'function', main: Record<string, unknown>) {
+    const lang = typeof main.lang === 'string' ? main.lang.trim() : '';
+    if (!lang || !/^[A-Za-z0-9_.+-]{1,64}$/.test(lang)) throw new ValidationError('config', null, '必须选择唯一评测语言');
+    const markerSource = typeof main.markerSource === 'string' ? main.markerSource : '';
+    const metadata = Array.isArray(main.regions) ? main.regions.map((item) => ({
+        id: isPlainObject(item) && typeof item.id === 'string' ? item.id : '',
+        ...(isPlainObject(item) && item.prompt !== undefined ? { prompt: item.prompt as string } : {}),
+    })) : [];
+    let template;
+    try {
+        template = parseRegionMarkers(markerSource, metadata);
+    } catch (error: any) {
+        throw new ValidationError('config', null, error.message);
+    }
+    template.lang = lang;
+    if (kind === 'program_fill') {
+        if (metadata.length !== 1 || metadata[0].id !== 'main') {
+            throw new ValidationError('config', null, '编译型程序填空必须且只能使用 main region');
+        }
+        const region = template.regions[0];
+        if (region.start.line !== region.end.line) {
+            throw new ValidationError('config', null, '程序填空占位内容必须只有一行');
+        }
+    }
+    const cases = normalizeCases(main.cases);
+    const config = {
+        type: 'fill_function',
+        subType: kind === 'program_fill' ? 'program_fill_compile' : 'function',
+        score: 100,
+        langs: [lang],
+        main: { mode: kind === 'program_fill' ? 'compile' : 'function', lang, markerSource, regions: metadata, cases },
+        template,
+        cases,
+    };
+    validateCompiledStructuredConfig(kind, config);
+    return config;
 }
 
 function normalizeOptions(value: unknown): string[] {
@@ -176,7 +233,46 @@ export function normalizeStructuredProblemConfig(
         if (!isPlainObject(config.main)) throw new ValidationError('config', null, 'main 必须是对象');
         return normalizeBasicObjective(kind, config.main);
     }
+    if (kind === 'program_fill') {
+        if (!isPlainObject(config.main)) throw new ValidationError('config', null, 'main 必须是对象');
+        if (config.main.mode === 'text') {
+            if (typeof config.main.answer !== 'string' || !config.main.answer.trim() || /[\r\n]/.test(config.main.answer)) {
+                throw new ValidationError('config', null, '文本程序填空答案必须是非空单行文本');
+            }
+            return {
+                type: 'objective', subType: 'program_fill_text', score: 100,
+                main: { mode: 'text', answer: config.main.answer },
+                answers: { main: [config.main.answer, 100, { kind: 'fill_program' }] },
+            };
+        }
+        if (config.main.mode !== 'compile') throw new ValidationError('config', null, '程序填空模式必须是 text 或 compile');
+        return normalizeCompilableStructured('program_fill', config.main);
+    }
+    if (kind === 'function') {
+        if (!isPlainObject(config.main)) throw new ValidationError('config', null, 'main 必须是对象');
+        return normalizeCompilableStructured('function', config.main);
+    }
     return { ...config, score: 100 };
+}
+
+export function structuredProblemUsesTestdata(kind: ProblemKind, config: any): boolean {
+    return kind === 'function'
+        || (kind === 'program_fill'
+            && (config?.main?.mode === 'compile' || config?.subType === 'program_fill_compile'));
+}
+
+export function cloneStructuredProblemForLanguage(
+    kind: ProblemKind,
+    config: unknown,
+    language: string,
+): Record<string, unknown> {
+    if (!['program_fill', 'function'].includes(kind)) throw new ValidationError('cloneLang');
+    if (!isPlainObject(config) || !isPlainObject(config.main)
+        || !structuredProblemUsesTestdata(kind, config)) throw new ValidationError('cloneLang');
+    if (config.main.lang === language) throw new ValidationError('cloneLang');
+    return normalizeStructuredProblemConfig(kind, {
+        main: { ...config.main, lang: language },
+    });
 }
 
 export function assertStructureRevision(value: unknown): asserts value is number {

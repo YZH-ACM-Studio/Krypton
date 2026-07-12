@@ -6,14 +6,15 @@
  * See PRD §1.7 for the visual editor + splicing algorithm.
  */
 import { STATUS } from '@hydrooj/common';
-import { spliceFillFunction } from 'hydrooj';
-import { FormatError } from '../error';
+import { spliceFillFunction, validateFillFunctionJudgeConfig } from 'hydrooj';
 import { judge as defaultJudge } from './default';
 import { Context } from './interface';
 
 export const judge = async (ctx: Context) => {
     const template = (ctx.config as any).template;
-    if (!template || !template.source || !Array.isArray(template.regions)) {
+    try {
+        validateFillFunctionJudgeConfig(ctx.config);
+    } catch (error: any) {
         ctx.next({
             status: STATUS.STATUS_JUDGING,
             progress: 0,
@@ -21,7 +22,17 @@ export const judge = async (ctx: Context) => {
         ctx.end({
             status: STATUS.STATUS_FORMAT_ERROR,
             score: 0,
-            message: 'fill_function: missing template configuration',
+            message: error.message,
+            time: 0,
+            memory: 0,
+        });
+        return;
+    }
+    if (ctx.lang !== template.lang) {
+        ctx.end({
+            status: STATUS.STATUS_FORMAT_ERROR,
+            score: 0,
+            message: `fill_function: language mismatch (${ctx.lang} != ${template.lang})`,
             time: 0,
             memory: 0,
         });

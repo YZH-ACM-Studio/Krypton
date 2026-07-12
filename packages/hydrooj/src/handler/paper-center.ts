@@ -1,8 +1,8 @@
 /**
- * 出卷中心（PLAN 2026-07 P3.1 骨架 / Rev.12 全量）——客观题与函数题的
+ * 出卷中心（PLAN 2026-07 P3.1 骨架 / Rev.12 全量）——旧复合客观题的
  * 独立管理入口：
  *   GET  /paper-center                 列表（题号/标题/题型构成/创建时间 + 搜索）
- *   POST /paper-center/create          弹标题框创建（objective / fill_function）
+ *   POST /paper-center/create          弹标题框创建旧 objective
  *   GET/POST /paper-center/:docId/edit 客观题独立编辑器（Rev.12：不再走 problem-edit）
  *
  * 权限：路由级 PERM_CREATE_PROBLEM（管理员 + 教师）；编辑 = 题目 owner
@@ -124,7 +124,7 @@ export class PaperCenterHandler extends Handler {
 
 // ─── Rev.12：创建 / 独立编辑器 / 阅卷 ─────────────────────────────────────
 
-const QUESTION_KINDS = ['single', 'multi', 'blank', 'fill_program'] as const;
+const QUESTION_KINDS = ['single', 'multi', 'blank'] as const;
 type EditorKind = typeof QUESTION_KINDS[number];
 
 interface EditorQuestion {
@@ -193,7 +193,7 @@ function buildObjectiveConfigYaml(questions: EditorQuestion[], existingRaw: stri
             meta.choices = choices;
             options[key] = choices;
         } else {
-            // blank / fill_program：单字符串答案（blank v1 约束，PLAN P3.2）
+            // blank：单字符串答案（blank v1 约束，PLAN P3.2）
             answer = Array.isArray(q.answer) ? String(q.answer[0] ?? '') : String(q.answer ?? '');
             if (!answer.trim()) throw new ValidationError('questions', null, `${label}标准答案不能为空`);
             if (answer.length > 65536) throw new ValidationError('questions', null, `${label}标准答案过长`);
@@ -214,7 +214,7 @@ function buildObjectiveConfigYaml(questions: EditorQuestion[], existingRaw: stri
 
 export class PaperCenterCreateHandler extends Handler {
     @param('title', Types.Title)
-    @param('ptype', Types.Range(['objective', 'fill_function']))
+    @param('ptype', Types.Range(['objective']))
     async post(_domainId: string, title: string, ptype: string) {
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
@@ -222,17 +222,13 @@ export class PaperCenterCreateHandler extends Handler {
             hidden: true,
             problemKind: 'programming',
         });
-        const config = ptype === 'objective'
-            ? yaml.dump({ type: 'objective', answers: {} })
-            : yaml.dump({ type: 'fill_function' });
+        const config = yaml.dump({ type: 'objective', answers: {} });
         await problem.addTestdata(authoritativeDomainId, docId, 'config.yaml', Buffer.from(config), this.user._id);
         await OplogModel.log(this, 'paperCenter.create', { docId, ptype });
         this.response.body = {
             ok: true,
             docId,
-            url: ptype === 'objective'
-                ? this.url('paper_center_edit', { docId })
-                : `${this.url('problem_detail', { pid: docId })}/edit`,
+            url: this.url('paper_center_edit', { docId }),
         };
     }
 }

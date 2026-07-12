@@ -5,7 +5,7 @@
  *
  * Persistence: the editor reads + writes the problem's `config.yaml` testdata
  * file. The objective sub-editor renders a list of question cards, each with
- * a sub-type (single / multi / blank / fill_program), choices, correct
+ * a sub-type (single / multi / blank), choices, correct
  * answer and score. On save the parent serialises everything into the YAML
  * config and uploads it via Hydro's existing `/p/:pid/files` testdata API.
  */
@@ -16,9 +16,7 @@ import { useId, useState } from 'react';
 /* ─── Serialise → config.yaml ─────────────────────────────────────── */
 import * as YAML from 'yaml';
 import { MarkdownView } from '@/components/markdown-renderer';
-import {
-  BlankRenderer, FillProgramRenderer, MultiChoiceRenderer, SingleChoiceRenderer,
-} from '@/components/paper/paper-shell';
+import { BlankRenderer, MultiChoiceRenderer, SingleChoiceRenderer } from '@/components/paper/paper-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -46,7 +44,7 @@ export const PROBLEM_TYPES: Array<{ key: ProblemType, label: string, desc: strin
   { key: 'communication', label: '通信题', desc: '多个进程通过函数调用通信', icon: FileQuestion },
 ];
 
-export type ObjectiveSubKind = 'single' | 'multi' | 'blank' | 'fill_program';
+export type ObjectiveSubKind = 'single' | 'multi' | 'blank';
 
 /** 编辑器 UI 的展示题型：在 kind 之上叠加「判断」伪题型（single 预设）。 */
 export type DisplayKind = ObjectiveSubKind | 'truefalse';
@@ -63,7 +61,6 @@ export interface ObjectiveQuestion {
    *   blank:        answer is a SINGLE string —— 判题器把数组按多选集合判
    *                 （全对满分/子集半分），blank v1 明确不支持多个可接受答案
    *                 （PLAN 2026-07 P3.2）
-   *   fill_program: answer is a single string (expected program output)
    */
   answer: string | string[];
   score: number;
@@ -88,8 +85,6 @@ export function newQuestionOf(display: DisplayKind, key: string): ObjectiveQuest
       };
     case 'blank':
       return { key, kind: 'blank', prompt: '', choices: [], answer: '', score: 5 };
-    case 'fill_program':
-      return { key, kind: 'fill_program', prompt: '', choices: [], answer: '', score: 5 };
     case 'single':
     default:
       return { key, kind: 'single', prompt: '', choices: ['', '', '', ''], answer: 'A', score: 5 };
@@ -164,7 +159,6 @@ const ADD_KINDS: Array<{ display: DisplayKind, label: string }> = [
   { display: 'multi', label: '多选' },
   { display: 'truefalse', label: '判断' },
   { display: 'blank', label: '填空' },
-  { display: 'fill_program', label: '程序填空' },
 ];
 
 export function ObjectiveEditor({
@@ -274,10 +268,6 @@ function ObjectiveQuestionCard({
       next.choices = [];
       // blank v1 单答案（判题器把数组按多选集合判，PLAN P3.2）
       next.answer = Array.isArray(question.answer) ? (question.answer[0] || '') : (typeof question.answer === 'string' ? question.answer : '');
-    } else if (nextDisplay === 'fill_program') {
-      next.kind = 'fill_program';
-      next.choices = [];
-      next.answer = typeof question.answer === 'string' ? question.answer : '';
     }
     onUpdate(next);
   };
@@ -342,7 +332,6 @@ function ObjectiveQuestionCard({
             { value: 'multi', label: '多选' },
             { value: 'truefalse', label: '判断' },
             { value: 'blank', label: '填空' },
-            { value: 'fill_program', label: '程序填空' },
           ]}
         />
 
@@ -413,18 +402,6 @@ function ObjectiveQuestionCard({
           </div>
         )}
 
-        {question.kind === 'fill_program' && (
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium">期望输出 / 标准答案代码</label>
-            <textarea
-              value={typeof question.answer === 'string' ? question.answer : ''}
-              onChange={(e) => onUpdate({ answer: e.target.value })}
-              rows={4}
-              className="w-full rounded-md border bg-background p-2 font-mono text-xs"
-              placeholder="考生代码的预期输出，或参考实现代码…"
-            />
-          </div>
-        )}
       </CardContent>
     </Card>
   );
@@ -544,7 +521,7 @@ function ChoiceList({
 /* ─── Objective live preview（复用 paper-shell 学生端 renderer）────── */
 
 const KIND_LABEL: Record<DisplayKind, string> = {
-  single: '单选', multi: '多选', truefalse: '判断', blank: '填空', fill_program: '程序填空',
+  single: '单选', multi: '多选', truefalse: '判断', blank: '填空',
 };
 
 export function ObjectivePreview({ questions }: { questions: ObjectiveQuestion[] }) {
@@ -591,12 +568,6 @@ export function ObjectivePreview({ questions }: { questions: ObjectiveQuestion[]
               )}
               {q.kind === 'blank' && (
                 <BlankRenderer
-                  value={(answers[q.key] as string) || ''}
-                  onChange={(v) => set(q.key, v)}
-                />
-              )}
-              {q.kind === 'fill_program' && (
-                <FillProgramRenderer
                   value={(answers[q.key] as string) || ''}
                   onChange={(v) => set(q.key, v)}
                 />

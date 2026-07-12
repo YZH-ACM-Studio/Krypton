@@ -3,7 +3,7 @@ import { normalizeSubtasks, ProblemConfigFile, readSubtasksFromFiles } from '@hy
 import { readYamlCases } from '@hydrooj/common/cases';
 import { parseMemoryMB, parseTimeMS } from '@hydrooj/utils';
 import type { ProblemConfig } from '../interface';
-import { clientQuestions } from './problem-config';
+import { clientProblemConfig, clientQuestions } from './problem-config';
 
 export async function parseConfig(config: string | ProblemConfigFile = {}, files: string[]) {
     const cfg: ProblemConfigFile = typeof config === 'string'
@@ -45,6 +45,9 @@ export async function parseConfig(config: string | ProblemConfigFile = {}, files
         const options: Record<string, string[]> = {};
         for (const q of result.questions) if (q.choices) options[q.key] = q.choices;
         if (Object.keys(options).length) result.options = options;
+    } else if (result.type === 'fill_function') {
+        const client = clientProblemConfig(cfg);
+        result.template = client.template;
     }
     result.count ||= Math.sum(readSubtasksFromFiles(files, cfg).map((i) => i.cases.length));
     if (cfg.subtasks?.length) {

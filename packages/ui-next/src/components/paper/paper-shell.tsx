@@ -12,7 +12,8 @@ import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { cn } from '@/lib/cn';
 
-export type QuestionKind = 'single' | 'multi' | 'blank' | 'fill_program' | 'subjective' | 'fill_function' | 'default' | 'submit_answer';
+export type QuestionKind = 'single' | 'multi' | 'blank' | 'fill_program' | 'program_fill_compile'
+  | 'subjective' | 'function' | 'fill_function' | 'default' | 'submit_answer';
 
 export interface PaperCell {
   pid: number;
@@ -30,8 +31,10 @@ export const KIND_LABELS: Record<QuestionKind, string> = {
   multi: '多选',
   blank: '填空',
   fill_program: '程序填空',
+  program_fill_compile: '程序填空（编译）',
   subjective: '主观题',
   fill_function: '函数题',
+  function: '函数题',
   default: '编程',
   submit_answer: '提交答案',
 };
@@ -41,8 +44,10 @@ const KIND_SHORT: Record<QuestionKind, string> = {
   multi: '多',
   blank: '填',
   fill_program: '程',
+  program_fill_compile: '编',
   subjective: '主',
   fill_function: '函',
+  function: '函',
   default: '编',
   submit_answer: '答',
 };
@@ -57,7 +62,10 @@ export function groupCellsByKind(cells: PaperCell[]): Map<QuestionKind, PaperCel
   return map;
 }
 
-const KIND_ORDER: QuestionKind[] = ['single', 'multi', 'blank', 'fill_program', 'subjective', 'fill_function', 'default', 'submit_answer'];
+const KIND_ORDER: QuestionKind[] = [
+  'single', 'multi', 'blank', 'fill_program', 'program_fill_compile',
+  'subjective', 'function', 'fill_function', 'default', 'submit_answer',
+];
 
 // ─── Mini Tab Bar (horizontal, lives at top of sub-sidebar) ──────────────
 //
@@ -263,22 +271,19 @@ export function BlankRenderer({
 }
 
 export function FillProgramRenderer({
-  value, onChange, disabled, rows = 6,
+  value, onChange, disabled,
 }: {
   value: string;
   onChange: (next: string) => void;
   disabled?: boolean;
-  rows?: number;
 }) {
   return (
-    <textarea
+    <Input
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(e) => onChange(e.target.value.replace(/[\r\n]/g, ''))}
       disabled={disabled}
-      rows={rows}
-      spellCheck={false}
-      className="w-full rounded-md border bg-card p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60"
-      placeholder="// 在此填入代码片段"
+      className="font-mono"
+      placeholder="在此填入一行代码"
     />
   );
 }

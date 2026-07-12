@@ -163,6 +163,11 @@ export interface ProblemConfig {
     questions?: ClientQuestion[];
     /** 客观题选项（questionKey → 选项文本），与 questions[].choices 同源。 */
     options?: Record<string, string[]>;
+    /** 编译型程序填空/函数题的学生端安全描述，不含私有完整模板。 */
+    template?: {
+        lang: string;
+        regions: Array<{ id: string, prompt?: string }>;
+    };
 }
 
 export type Content = string | Record<string, string>;

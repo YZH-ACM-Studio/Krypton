@@ -2,6 +2,7 @@ import { createReadStream } from 'fs';
 import { PassThrough, Readable, Writable } from 'stream';
 import { Entry, ZipReader } from '@zip.js/zip.js';
 import { readFile } from 'fs-extra';
+import yaml from 'js-yaml';
 import {
     escapeRegExp, flattenDeep, intersection, pick,
 } from 'lodash';
@@ -14,7 +15,9 @@ import {
     isBasicObjectiveKind, PROBLEM_KIND_TO_SLUG, problemKindToSlug,
 } from '@hydrooj/common';
 import parser from '@hydrooj/utils/lib/search';
-import { randomstring, sortFiles, streamToBuffer } from '@hydrooj/utils/lib/utils';
+import {
+    Logger, randomstring, sortFiles, streamToBuffer,
+} from '@hydrooj/utils/lib/utils';
 import type { Context } from '../context';
 import {
     BadRequestError, ContestNotAttendedError, ContestNotEndedError, ContestNotFoundError, ContestNotLiveError,
@@ -26,7 +29,10 @@ import {
 import {
     ProblemDoc, ProblemSearchOptions, ProblemStatusDoc, RecordDoc, User,
 } from '../interface';
-import { parseProblemConfigObject } from '../lib/problem-config';
+import {
+    isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission,
+    validateCompiledStructuredConfig, validateTextProgramFillSubmission,
+} from '../lib/problem-config';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
@@ -34,6 +40,7 @@ import domain from '../model/domain';
 import { markManualPending } from '../model/manual-grade';
 import * as oplog from '../model/oplog';
 import problem from '../model/problem';
+import { structuredProblemUsesTestdata } from '../model/problem-lifecycle';
 import record from '../model/record';
 import * as setting from '../model/setting';
 import solution from '../model/solution';
@@ -46,6 +53,7 @@ import {
 import { ContestDetailBaseHandler } from './contest';
 
 export const parseCategory = (value: string) => value.replace(/，/g, ',').split(',').map((e) => e.trim());
+const logger = new Logger('problem-handler');
 
 const BASIC_OBJECTIVE_TEMPLATES: Record<BasicObjectiveKind, string> = {
     [BASIC_OBJECTIVE_KIND.single]: 'problem_edit_single.html',
@@ -54,9 +62,23 @@ const BASIC_OBJECTIVE_TEMPLATES: Record<BasicObjectiveKind, string> = {
     [BASIC_OBJECTIVE_KIND.blank]: 'problem_edit_blank.html',
 };
 const SUBJECTIVE_KIND = PROBLEM_KIND_TO_SLUG.subjective;
+const PROGRAM_FILL_KIND = 'program_fill' as const;
+const FUNCTION_KIND = 'function' as const;
+type DedicatedStructuredEditorKind = BasicObjectiveKind
+    | typeof SUBJECTIVE_KIND | typeof PROGRAM_FILL_KIND | typeof FUNCTION_KIND;
 
-function isDedicatedStructuredEditorKind(kind: ReturnType<typeof effectiveProblemKind>) {
-    return isBasicObjectiveKind(kind) || kind === SUBJECTIVE_KIND;
+function isDedicatedStructuredEditorKind(
+    kind: ReturnType<typeof effectiveProblemKind>,
+): kind is DedicatedStructuredEditorKind {
+    return isBasicObjectiveKind(kind)
+        || [SUBJECTIVE_KIND, PROGRAM_FILL_KIND, FUNCTION_KIND].includes(kind as any);
+}
+
+function structuredEditorTemplate(kind: DedicatedStructuredEditorKind): string {
+    if (kind === SUBJECTIVE_KIND) return 'problem_edit_subjective.html';
+    if (kind === PROGRAM_FILL_KIND) return 'problem_edit_program_fill.html';
+    if (kind === FUNCTION_KIND) return 'problem_edit_function.html';
+    return BASIC_OBJECTIVE_TEMPLATES[kind];
 }
 
 function defaultBasicObjectiveConfig(kind: BasicObjectiveKind): Record<string, unknown> {
@@ -66,6 +88,19 @@ function defaultBasicObjectiveConfig(kind: BasicObjectiveKind): Record<string, u
     }
     if (kind === BASIC_OBJECTIVE_KIND.trueFalse) return { main: { answer: true } };
     return { main: { answer: '' } };
+}
+
+function defaultDedicatedConfig(kind: DedicatedStructuredEditorKind): Record<string, unknown> {
+    if (kind === SUBJECTIVE_KIND) return { main: { gradingInstructions: '' } };
+    if (kind === PROGRAM_FILL_KIND) return { main: { mode: 'text', answer: '' } };
+    if (kind === FUNCTION_KIND) return { main: { lang: '', markerSource: '', regions: [], cases: [] } };
+    return defaultBasicObjectiveConfig(kind);
+}
+
+function allowsStructuredTestdata(pdoc: ProblemDoc): boolean {
+    if (pdoc.problemKind === undefined || pdoc.problemKind === 'programming') return true;
+    const kind = effectiveProblemKind(pdoc);
+    return structuredProblemUsesTestdata(kind, parseProblemConfigObject(pdoc));
 }
 
 function parseStructuredConfigInput(raw: string): unknown {
@@ -278,7 +313,15 @@ export class ProblemMainHandler extends Handler {
     @param('target', Types.String)
     @param('hidden', Types.Boolean)
     @param('redirect', Types.Boolean)
-    async postCopy(_domainId: string, pids: number[], target: string, hidden?: boolean, redirect = false) {
+    @param('cloneLang', Types.Name, true)
+    async postCopy(
+        _domainId: string,
+        pids: number[],
+        target: string,
+        hidden?: boolean,
+        redirect = false,
+        cloneLang?: string,
+    ) {
         const domainId = String(this.domain?._id);
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
@@ -289,6 +332,12 @@ export class ProblemMainHandler extends Handler {
         const dudoc = await user.getById(target, this.user._id);
         if (!dudoc.hasPerm(PERM.PERM_CREATE_PROBLEM)) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
         if (!pids.length) throw new ValidationError('pids');
+        if (cloneLang) {
+            if (pids.length !== 1) throw new ValidationError('cloneLang');
+            if (!setting.langs[cloneLang] || setting.langs[cloneLang].disabled) {
+                throw new ValidationError('cloneLang');
+            }
+        }
         await problem.assertProblemBankSelection(domainId, pids, this.user);
         const pdict = await problem.getList(
             domainId, pids, true,
@@ -309,7 +358,9 @@ export class ProblemMainHandler extends Handler {
                 if (t !== ',*,' && !t.includes(`,${target},`)) throw new ProblemNotAllowCopyError(sourceDdoc._id, target);
             }
             // eslint-disable-next-line no-await-in-loop
-            ids.push(await problem.copy(pdoc.domainId, pdoc.docId, target, undefined, hidden));
+            ids.push(await problem.copy(
+                pdoc.domainId, pdoc.docId, target, undefined, hidden, cloneLang,
+            ));
         }
         if (redirect) this.response.redirect = this.url('problem_detail', { domainId: target, pid: ids[0] });
         else this.response.body = ids;
@@ -592,6 +643,20 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
         }
         if (typeof this.pdoc.config === 'string') throw new ProblemConfigError();
         if (this.pdoc.config.langs && !this.pdoc.config.langs.length) throw new ProblemConfigError();
+        const kind = effectiveProblemKind(this.pdoc);
+        if (['program_fill', 'function'].includes(kind)) {
+            try {
+                const rawPdoc = await problem.get(this.pdoc.domainId, this.pdoc.docId, undefined, true);
+                validateCompiledStructuredConfig(kind, parseProblemConfigObject(rawPdoc));
+            } catch (error) {
+                logger.error(
+                    'Structured submit prepare rejected domain=%s container=%s pid=%d kind=%s revision=%s uid=%d error=%o',
+                    this.pdoc.domainId, tid || '-', this.pdoc.docId, kind,
+                    this.pdoc.structureRevision, this.user._id, error,
+                );
+                throw new ProblemConfigError();
+            }
+        }
     }
 
     async get() {
@@ -616,10 +681,14 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
         const domainId = this.pdoc.domainId;
         const config = this.pdoc.config;
         const isSubjective = effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND;
+        const problemKind = effectiveProblemKind(this.pdoc);
         if (isSubjective && (pretest || !tid || !this.tdoc || !['exam', 'homework', 'oi'].includes(this.tdoc.rule))) {
             throw new ValidationError('rule', null, '主观题仅允许在 exam、homework 或 oi 容器中提交');
         }
         if (typeof config === 'string' || config === null) throw new ProblemConfigError();
+        if (config.type === 'fill_function' && ['program_fill', 'function'].includes(problemKind)) {
+            lang = config.template?.lang || '';
+        }
         if (['submit_answer', 'objective'].includes(config.type)) {
             lang = '_';
         } else if ((config.langs && !config.langs.includes(lang)) || !setting.langs[lang] || setting.langs[lang].disabled) {
@@ -656,6 +725,33 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
         } else {
             if (!isSubjective) code = code.replace(/\r\n/g, '\n');
             if (code.length > lengthLimit) throw new ValidationError('code');
+        }
+        if (problemKind === PROGRAM_FILL_KIND
+            && config.type === 'objective'
+            && config.subType === 'program_fill_text') {
+            try {
+                validateTextProgramFillSubmission(problemKind, config, yaml.load(code));
+            } catch (error: any) {
+                logger.error(
+                    'Text program-fill submission rejected domain=%s container=%s pid=%d kind=%s revision=%s uid=%d error=%o',
+                    domainId, tid || '-', this.pdoc.docId, problemKind,
+                    this.pdoc.structureRevision, this.user._id, error,
+                );
+                throw new ValidationError('code', null, error.message);
+            }
+        }
+        if (config.type === 'fill_function' && ['program_fill', 'function'].includes(problemKind)) {
+            try {
+                const structuredKind = problemKind === 'program_fill' ? 'program_fill' : 'function';
+                parseStructuredRegionSubmission(structuredKind, config.template, code);
+            } catch (error: any) {
+                logger.error(
+                    'Structured submission rejected domain=%s container=%s pid=%d kind=%s revision=%s uid=%d error=%o',
+                    domainId, tid || '-', this.pdoc.docId, problemKind,
+                    this.pdoc.structureRevision, this.user._id, error,
+                );
+                throw new ValidationError('code', null, error.message);
+            }
         }
         const rid = await record.add(
             domainId, this.pdoc.docId, this.user._id, lang, code, true,
@@ -777,9 +873,10 @@ export class ProblemEditHandler extends ProblemManageHandler {
             if (!config?.main) throw new ValidationError('config', null, '结构化题缺少 main 配置');
             this.response.body.editorProblemKind = problemKind;
             this.response.body.structuredConfig = { main: config.main };
-            this.response.template = problemKind === SUBJECTIVE_KIND
-                ? 'problem_edit_subjective.html'
-                : BASIC_OBJECTIVE_TEMPLATES[problemKind];
+            if ([PROGRAM_FILL_KIND, FUNCTION_KIND].includes(problemKind as any)) {
+                this.response.body.langRange = setting.SETTINGS_BY_KEY.codeLang.range;
+            }
+            this.response.template = structuredEditorTemplate(problemKind);
             return;
         }
         this.response.body.configRaw = typeof rawPdoc?.config === 'string' ? rawPdoc.config : '';
@@ -862,23 +959,20 @@ export class ProblemEditHandler extends ProblemManageHandler {
     }
 }
 
-type DedicatedStructuredEditorKind = BasicObjectiveKind | typeof SUBJECTIVE_KIND;
-
 abstract class DedicatedStructuredCreateHandler extends Handler {
     abstract problemKind: DedicatedStructuredEditorKind;
 
     async get() {
-        this.response.template = this.problemKind === SUBJECTIVE_KIND
-            ? 'problem_edit_subjective.html'
-            : BASIC_OBJECTIVE_TEMPLATES[this.problemKind];
+        this.response.template = structuredEditorTemplate(this.problemKind);
         this.response.body = {
             page_name: `problem_create_${this.problemKind}`,
             editorProblemKind: this.problemKind,
-            structuredConfig: this.problemKind === SUBJECTIVE_KIND
-                ? { main: { gradingInstructions: '' } }
-                : defaultBasicObjectiveConfig(this.problemKind),
+            structuredConfig: defaultDedicatedConfig(this.problemKind),
             pdoc: { hidden: true, problemKind: this.problemKind },
         };
+        if ([PROGRAM_FILL_KIND, FUNCTION_KIND].includes(this.problemKind as any)) {
+            this.response.body.langRange = setting.SETTINGS_BY_KEY.codeLang.range;
+        }
     }
 
     @post('title', Types.Title)
@@ -938,6 +1032,12 @@ export class ProblemCreateBlankHandler extends DedicatedStructuredCreateHandler 
 
 export class ProblemCreateSubjectiveHandler extends DedicatedStructuredCreateHandler {
     problemKind = SUBJECTIVE_KIND;
+}
+export class ProblemCreateProgramFillHandler extends DedicatedStructuredCreateHandler {
+    problemKind = PROGRAM_FILL_KIND;
+}
+export class ProblemCreateFunctionHandler extends DedicatedStructuredCreateHandler {
+    problemKind = FUNCTION_KIND;
 }
 
 export class ProblemConfigHandler extends ProblemManageHandler {
@@ -1021,12 +1121,18 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     @post('type', Types.Range(['testdata', 'additional_file']), true)
     async postUploadFile(_domainId: string, filename: string, type = 'testdata') {
         const domainId = this.pdoc.domainId;
-        if (this.pdoc.problemKind && this.pdoc.problemKind !== 'programming' && type === 'testdata') {
-            throw new ValidationError('type', null, '结构化题不接受 testdata/config.yaml 文件写入');
+        if (type === 'testdata' && !allowsStructuredTestdata(this.pdoc)) {
+            throw new ValidationError('type', null, '此结构化题不接受 testdata 文件写入');
         }
         const file = this.request.files.file;
         if (!file) throw new ValidationError('file');
         filename ||= file.originalFilename || randomstring(16);
+        if (type === 'testdata' && this.pdoc.problemKind !== undefined && this.pdoc.problemKind !== 'programming') {
+            if (isProblemConfigFilename(filename)) {
+                throw new ValidationError('filename', null, '结构化题配置不通过 testdata 文件修改');
+            }
+            if (filename.toLowerCase().endsWith('.zip')) throw new ValidationError('filename', null, '结构化编译题请直接上传测试数据文件');
+        }
         const files = [];
         if (filename.toLowerCase().endsWith('.zip') && type === 'testdata') {
             const zip = new ZipReader(Readable.toWeb(createReadStream(file.filepath)));
@@ -1103,9 +1209,12 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
         type = 'testdata',
     ) {
         const domainId = this.pdoc.domainId;
-        if (this.pdoc.problemKind && this.pdoc.problemKind !== 'programming' && type === 'testdata') {
-            throw new ValidationError('type', null, '结构化题不接受 testdata/config.yaml 文件写入');
+        if (type === 'testdata' && !allowsStructuredTestdata(this.pdoc)) {
+            throw new ValidationError('type', null, '此结构化题不接受 testdata 文件写入');
         }
+        if (type === 'testdata' && this.pdoc.problemKind !== undefined
+            && this.pdoc.problemKind !== 'programming'
+            && [...files, ...newNames].some(isProblemConfigFilename)) throw new ValidationError('newNames');
         if (files.length !== newNames.length) throw new ValidationError('files', 'newNames');
         await problem.withAuthorizedStructuralWriteClaim(
             domainId,
@@ -1133,9 +1242,12 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     @post('type', Types.Range(['testdata', 'additional_file']), true)
     async postDeleteFiles(_domainId: string, files: string[], type = 'testdata') {
         const domainId = this.pdoc.domainId;
-        if (this.pdoc.problemKind && this.pdoc.problemKind !== 'programming' && type === 'testdata') {
-            throw new ValidationError('type', null, '结构化题不接受 testdata/config.yaml 文件写入');
+        if (type === 'testdata' && !allowsStructuredTestdata(this.pdoc)) {
+            throw new ValidationError('type', null, '此结构化题不接受 testdata 文件写入');
         }
+        if (type === 'testdata' && this.pdoc.problemKind !== undefined
+            && this.pdoc.problemKind !== 'programming'
+            && files.some(isProblemConfigFilename)) throw new ValidationError('files');
         await problem.withAuthorizedStructuralWriteClaim(
             domainId,
             this.pdoc.docId,
@@ -1570,6 +1682,14 @@ export async function apply(ctx: Context) {
     ctx.Route(
         'problem_create_subjective', `/problem/create/${problemKindToSlug(SUBJECTIVE_KIND)}`,
         ProblemCreateSubjectiveHandler, PERM.PERM_CREATE_PROBLEM,
+    );
+    ctx.Route(
+        'problem_create_program_fill', `/problem/create/${problemKindToSlug(PROGRAM_FILL_KIND)}`,
+        ProblemCreateProgramFillHandler, PERM.PERM_CREATE_PROBLEM,
+    );
+    ctx.Route(
+        'problem_create_function', `/problem/create/${problemKindToSlug(FUNCTION_KIND)}`,
+        ProblemCreateFunctionHandler, PERM.PERM_CREATE_PROBLEM,
     );
     await ctx.inject(['api'], ({ api }) => {
         api.provide(ProblemApi);

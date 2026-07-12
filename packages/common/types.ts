@@ -78,10 +78,10 @@ export interface ObjectiveBlankMain {
 /**
  * Fill-function problem template — see PRD §1.7.
  *
- * `source` is the complete compilable program. Regions are the ranges the
- * student may edit; everything else is rendered read-only but visible in the
- * student UI. At submission, the server splices each region's content back
- * into `source` and submits the result as a normal `default` record.
+ * `source` is the private, complete compilable program. Student-facing payloads
+ * contain only the language plus sanitized region ids/prompts. At submission,
+ * the server splices each region's content back into `source` and delegates to
+ * the normal `default` judge.
  */
 export interface FillFunctionTemplate {
     lang: string;

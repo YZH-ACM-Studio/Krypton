@@ -20,10 +20,10 @@ import {
   groupCellsByKind, KIND_LABELS, MiniTabBar, MultiChoiceRenderer, type PaperCell, PaperStatusPill,
   type QuestionKind,
   SingleChoiceRenderer } from '@/components/paper/paper-shell';
-import { RegionEditor } from '@/components/paper/region-editor';
 import {
   AnnouncementsSection, OverviewSection, RankingSection,
 } from '@/components/paper/sections';
+import { StructuredRegionInputs } from '@/components/structured-region-inputs';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
@@ -35,12 +35,11 @@ interface PdocLike {
   content: string;
   config: {
     type?: string;
+    subType?: string;
     answers?: Record<string, any>;
     template?: {
       lang: string;
-      source: string;
-      regions: Array<{ id: string, start: { line: number, col: number }, end: { line: number, col: number }, prompt?: string }>;
-      sourceHash: string;
+      regions: Array<{ id: string, prompt?: string }>;
     };
     langs?: string[];
     options?: Record<string, string[]>;
@@ -80,6 +79,25 @@ const EMPTY_DRAFT: DraftState = {
 };
 
 const SUBSIDEBAR_KEY = 'krypton:exam-subsidebar-collapsed';
+const COMPILED_REGION_KINDS: QuestionKind[] = ['program_fill_compile', 'function', 'fill_function'];
+
+function parseSavedRegionContents(pdoc: PdocLike | undefined, rawCode: unknown): Record<string, string> | undefined {
+  if (pdoc?.config.type !== 'fill_function') return undefined;
+  if (typeof rawCode !== 'string') throw new Error(`题目 ${pdoc.docId} 的 region 草稿缺少 code`);
+  const parsed = JSON.parse(rawCode);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`题目 ${pdoc.docId} 的 region 草稿格式错误`);
+  }
+  const expected = (pdoc.config.template?.regions || []).map((region) => region.id).sort();
+  const actual = Object.keys(parsed).sort();
+  if (expected.length !== actual.length || expected.some((id, index) => id !== actual[index])) {
+    throw new Error(`题目 ${pdoc.docId} 的 region 草稿与当前模板不匹配`);
+  }
+  if (actual.some((id) => typeof parsed[id] !== 'string')) {
+    throw new Error(`题目 ${pdoc.docId} 的 region 草稿包含非文本值`);
+  }
+  return parsed as Record<string, string>;
+}
 
 export function ExamPaperPage() {
   const bs = useBootstrap();
@@ -165,6 +183,8 @@ function ProblemsSection({
   const tabCells = activeKind ? (groups.get(activeKind) || []) : [];
 
   const [drafts, setDrafts] = useState<Record<number, DraftState>>({});
+  const [draftLoadState, setDraftLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [draftLoadError, setDraftLoadError] = useState('');
   const [lockedKinds, setLockedKinds] = useState<Set<QuestionKind>>(new Set());
   const [saving, setSaving] = useState(false);
   const [activeCellIndex, setActiveCellIndex] = useState(0);
@@ -192,8 +212,15 @@ function ProblemsSection({
 
   // Load drafts on mount.
   useEffect(() => {
+    setDraftLoadState('loading');
+    setDraftLoadError('');
     fetch(`/paper/${tid}/draft`, { headers: { Accept: 'application/json' } })
-      .then((r) => r.json())
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`草稿接口返回 HTTP ${response.status}`);
+        const body = await response.json();
+        if (!Array.isArray(body?.drafts)) throw new Error('草稿接口响应缺少 drafts 数组');
+        return body;
+      })
       .then((res) => {
         const map: Record<number, DraftState> = {};
         const locked = new Set<QuestionKind>();
@@ -202,7 +229,7 @@ function ProblemsSection({
           map[d.pid] = {
             answers: d.answers || {},
             code: d.code,
-            regionContents: d.answers,
+            regionContents: parseSavedRegionContents(pdict[d.pid], d.code),
             lang: d.lang,
             lockedKinds: d.lockedKinds || [],
             judgeResult: d.judgeResult || {},
@@ -215,12 +242,22 @@ function ProblemsSection({
         }
         setDrafts(map);
         setLockedKinds(locked);
+        setDraftLoadState('ready');
       })
-      .catch(() => {});
-  }, [tid]);
+      .catch((error) => {
+        console.error('Failed to load exam drafts', error);
+        setDraftLoadError(error instanceof Error ? error.message : '答题草稿加载失败');
+        setDraftLoadState('error');
+      });
+  }, [pdict, tid]);
 
+  const draftReady = draftLoadState === 'ready';
   const getDraft = (pid: number): DraftState => drafts[pid] ?? EMPTY_DRAFT;
   const updateDraft = (pid: number, patch: Partial<DraftState>) => {
+    if (!draftReady) {
+      console.error('Rejected exam draft edit before server drafts were ready', { pid, draftLoadState });
+      return;
+    }
     setDrafts((prev) => ({
       ...prev,
       [pid]: { ...(prev[pid] ?? EMPTY_DRAFT), ...patch, dirty: true },
@@ -247,7 +284,7 @@ function ProblemsSection({
         const filled = v && (Array.isArray(v) ? v.length > 0 : String(v).length > 0);
         return filled ? 'answered' : 'unanswered';
       }
-      if (c.kind === 'fill_function') {
+      if (!c.questionKey && COMPILED_REGION_KINDS.includes(c.kind)) {
         return Object.keys(draft.regionContents || {}).length > 0 ? 'answered' : 'unanswered';
       }
       return draft.code ? 'answered' : 'unanswered';
@@ -269,11 +306,16 @@ function ProblemsSection({
         if (!draft?.dirty) return;
         await saveDraftForPid(pid);
       }));
+      return true;
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '保存失败');
+      return false;
     } finally {
       setSaving(false);
     }
   };
   const saveDraftForPid = async (pid: number) => {
+    if (!draftReady) throw new Error('服务端草稿尚未成功加载，禁止保存');
     const draft = drafts[pid];
     if (!draft) return;
     const pdoc = pdict[pid];
@@ -298,8 +340,7 @@ function ProblemsSection({
       body: form.toString(),
     });
     if (!res.ok) {
-      alert(`保存失败：${res.statusText}`);
-      return;
+      throw new Error(`保存失败：${res.statusText}`);
     }
     setDrafts((prev) => ({
       ...prev,
@@ -315,7 +356,7 @@ function ProblemsSection({
       `确认提交「${KIND_LABELS[activeKind]}」类的全部答案？提交后将立即批改并锁定该类，无法再修改。`,
     )) return;
     // Save first to ensure latest state is on server.
-    await saveCurrentTab();
+    if (!await saveCurrentTab()) return;
     const form = new URLSearchParams({ kind: activeKind });
     const res = await fetch(`/paper/${tid}/lock-kind`, {
       method: 'POST',
@@ -345,7 +386,12 @@ function ProblemsSection({
   };
 
   const submitProgramming = async (pid: number) => {
-    await saveDraftForPid(pid);
+    try {
+      await saveDraftForPid(pid);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '保存失败');
+      return;
+    }
     const res = await fetch(`/paper/${tid}/submit-code/${pid}`, { method: 'POST' });
     if (!res.ok) {
       alert(`提交失败：${res.statusText}`);
@@ -357,6 +403,14 @@ function ProblemsSection({
 
   const finalize = async () => {
     if (!window.confirm('确认交卷？交卷后将不能再编辑答案。')) return;
+    try {
+      await Promise.all(Object.entries(drafts)
+        .filter(([, draft]) => draft.dirty)
+        .map(([pid]) => saveDraftForPid(Number(pid))));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '保存失败，未交卷');
+      return;
+    }
     const res = await fetch(`/paper/${tid}/finalize`, { method: 'POST' });
     if (!res.ok) {
       alert(`交卷失败：${res.statusText}`);
@@ -414,7 +468,7 @@ function ProblemsSection({
           size="sm"
           className="h-8 gap-1.5"
           onClick={saveCurrentTab}
-          disabled={!inWindow || saving || dirtyCountInTab === 0}
+          disabled={!inWindow || !draftReady || saving || dirtyCountInTab === 0}
         >
           <Save className="size-4" />保存
         </Button>
@@ -422,11 +476,22 @@ function ProblemsSection({
           size="sm"
           className="h-8 gap-1.5"
           onClick={finalize}
-          disabled={!inWindow}
+          disabled={!inWindow || !draftReady}
         >
           <Send className="size-4" />交卷
         </Button>
       </div>
+
+      {draftLoadState === 'loading' ? (
+        <p role="status" className="border-b px-4 py-3 text-sm text-muted-foreground">
+          正在加载服务端草稿，加载完成前暂不可作答。
+        </p>
+      ) : null}
+      {draftLoadState === 'error' ? (
+        <p role="alert" className="border-b border-destructive/40 px-4 py-3 text-sm text-destructive">
+          草稿加载失败：{draftLoadError}。已阻止作答、保存和交卷，请刷新重试。
+        </p>
+      ) : null}
 
       <div className="flex min-h-0 flex-1">
         {/* Sub-sidebar */}
@@ -454,7 +519,7 @@ function ProblemsSection({
                   size="sm"
                   className="w-full gap-1.5"
                   onClick={lockCurrentKind}
-                  disabled={!inWindow}
+                  disabled={!inWindow || !draftReady}
                 >
                   <Lock className="size-4" />
                   提交「{KIND_LABELS[activeKind]}」
@@ -487,7 +552,7 @@ function ProblemsSection({
                   draft={getDraft(cell.pid)}
                   status={statuses[i]}
                   locked={lockedKinds.has(cell.kind)}
-                  disabled={!inWindow}
+                  disabled={!inWindow || !draftReady}
                   onAnswerChange={(answer) => {
                     if (!cell.questionKey) return;
                     updateDraft(cell.pid, {
@@ -503,7 +568,7 @@ function ProblemsSection({
                       regionContents: { ...(draft.regionContents || {}), [regionId]: content },
                     });
                   }}
-                  onSubmitProgramming={['default', 'fill_function'].includes(cell.kind)
+                  onSubmitProgramming={['default', ...COMPILED_REGION_KINDS].includes(cell.kind)
                     ? () => submitProgramming(cell.pid)
                     : undefined}
                 />
@@ -582,7 +647,7 @@ function CellEditor({
           disabled={isLocked}
         />
       )}
-      {cell.kind === 'fill_program' && (
+      {cell.kind === 'fill_program' && !!cell.questionKey && (
         <FillProgramRenderer
           value={(draft.answers[cell.questionKey!] as string) || ''}
           onChange={onAnswerChange}
@@ -602,17 +667,16 @@ function CellEditor({
           <p className="text-[11px] text-muted-foreground">本题为主观题，交卷后由老师人工评分。</p>
         </div>
       )}
-      {cell.kind === 'fill_function' && pdoc.config.template && (
-        <RegionEditor
-          lang={pdoc.config.template.lang}
-          templateSource={pdoc.config.template.source}
+      {!cell.questionKey && COMPILED_REGION_KINDS.includes(cell.kind) && pdoc.config.template && (
+        <StructuredRegionInputs
           regions={pdoc.config.template.regions}
-          regionContents={draft.regionContents || {}}
+          values={draft.regionContents || {}}
           onChange={onRegionChange}
           readOnly={isLocked}
+          singleLine={cell.kind === 'program_fill_compile'}
         />
       )}
-      {cell.kind === 'fill_function' && !pdoc.config.template && (
+      {!cell.questionKey && COMPILED_REGION_KINDS.includes(cell.kind) && !pdoc.config.template && (
         <p className="text-sm text-destructive">题目模板缺失。</p>
       )}
       {(cell.kind === 'default' || cell.kind === 'submit_answer') && (

@@ -261,8 +261,40 @@ const handlerPath = require.resolve('../src/handler/problem.ts');
 const originalLoad = Module._load;
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     if (request === '../error') return errors;
+    if (request === '../lib/problem-config') {
+        return {
+            parseProblemConfigObject: (pdoc: any) => (
+                pdoc?.config && typeof pdoc.config === 'object' ? pdoc.config : null
+            ),
+            parseStructuredRegionSubmission: (kind: string, template: any, rawCode: string) => {
+                const parsed = JSON.parse(rawCode);
+                const expected = template.regions.map((region: any) => region.id).sort();
+                const actual = Object.keys(parsed).sort();
+                if (expected.join('\0') !== actual.join('\0')
+                    || actual.some((id) => typeof parsed[id] !== 'string')
+                    || (kind === 'program_fill' && /[\r\n]/.test(parsed.main))) throw new Error('invalid regions');
+                return parsed;
+            },
+            validateCompiledStructuredConfig: () => undefined,
+            validateTextProgramFillSubmission: (kind: string, config: any, submitted: any) => {
+                if (kind !== 'program_fill' || config?.subType !== 'program_fill_text') return false;
+                if (!submitted || typeof submitted !== 'object' || Array.isArray(submitted)) throw new Error('invalid text');
+                if (Object.keys(submitted).join('') !== 'main'
+                    || typeof submitted.main !== 'string'
+                    || /[\r\n]/.test(submitted.main)) throw new Error('invalid text');
+                return true;
+            },
+        };
+    }
     if (request === '../model/builtin') return builtinStub;
     if (request === '../model/problem') return problemStub;
+    if (request === '../model/problem-lifecycle') {
+        return {
+            structuredProblemUsesTestdata: (kind: string, config: any) => (
+                kind === 'function' || (kind === 'program_fill' && config?.main?.mode === 'compile')
+            ),
+        };
+    }
     if (request === '../model/system') return systemStub;
     if (request === '../service/server') return serverStub;
     if (request === './contest') return contestHandlerStub;
@@ -298,6 +330,8 @@ const {
     defaultSearch,
     ProblemApi,
     ProblemCreateHandler,
+    ProblemCreateFunctionHandler,
+    ProblemCreateProgramFillHandler,
     ProblemCreateSingleHandler,
     ProblemCreateSubjectiveHandler,
     ProblemDetailHandler,
@@ -607,6 +641,86 @@ describe('P3.10 subjective problem HTTP boundaries', () => {
         expect(calls.recordAdd.at(-1)[6]).to.deep.include({ contest: 'homework', type: 'manual' });
         expect(calls.manualStatus).to.have.length(1);
         expect(calls.contestUpdates).to.have.length(1);
+    });
+});
+
+describe('P3.11 program-fill and function HTTP boundaries', () => {
+    it('creates each kind through a fixed dedicated route', async () => {
+        const programFill = makeHandler(ProblemCreateProgramFillHandler, {});
+        await programFill.post(
+            'forged', 'Program fill', 'Statement', '', 0, [], 'program_fill',
+            JSON.stringify({ main: { mode: 'text', answer: 'i++' } }),
+        );
+        const fn = makeHandler(ProblemCreateFunctionHandler, {});
+        await fn.post(
+            'forged', 'Function', 'Statement', '', 0, [], 'function',
+            JSON.stringify({
+                main: {
+                    mode: 'function', lang: 'cpp', markerSource: 'source',
+                    regions: [{ id: 'solve' }], cases: [{ input: '1.in', output: '1.out' }],
+                },
+            }),
+        );
+        expect(createKinds.slice(-2)).to.deep.equal(['program_fill', 'function']);
+        expect(calls.add.at(-2)[6].structuredConfig).to.have.nested.property('main.mode', 'text');
+        expect(calls.add.at(-1)[6].structuredConfig).to.have.nested.property('main.lang', 'cpp');
+    });
+
+    it('forces the immutable template language and requires the exact function region map', async () => {
+        const handler = makeHandler(ProblemSubmitHandler, {});
+        handler.pdoc = {
+            domainId: 'system', docId: 7, problemKind: 'function',
+            config: {
+                type: 'fill_function', langs: ['cpp'],
+                template: { lang: 'cpp', regions: [{ id: 'solve' }, { id: 'format' }] },
+            },
+        };
+        await handler.post(
+            'forged', 'forged-lang', JSON.stringify({ solve: 'body', format: 'body' }),
+            false, [], undefined,
+        );
+        expect(calls.recordAdd.at(-1)[3]).to.equal('cpp');
+
+        const error = await captureFailure(() => handler.post(
+            'forged', 'cpp', JSON.stringify({ solve: 'body', extra: 'body' }),
+            false, [], undefined,
+        ));
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.recordAdd).to.have.length(1);
+    });
+
+    it('rejects a multi-line compile program-fill submission', async () => {
+        const handler = makeHandler(ProblemSubmitHandler, {});
+        handler.pdoc = {
+            domainId: 'system', docId: 7, problemKind: 'program_fill',
+            config: {
+                type: 'fill_function', langs: ['cpp'],
+                template: { lang: 'cpp', regions: [{ id: 'main' }] },
+            },
+        };
+        const error = await captureFailure(() => handler.post(
+            'forged', 'cpp', JSON.stringify({ main: 'i++\nj++' }),
+            false, [], undefined,
+        ));
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.recordAdd).to.deep.equal([]);
+    });
+
+    it('rejects multi-line and extra-key text program-fill submissions before Record insertion', async () => {
+        const handler = makeHandler(ProblemSubmitHandler, {});
+        handler.pdoc = {
+            domainId: 'system', docId: 7, problemKind: 'program_fill',
+            config: { type: 'objective', subType: 'program_fill_text', langs: ['_'] },
+        };
+        for (const code of ['main: |\n  i++\n  j++\n', 'main: i++\nextra: hidden\n']) {
+            // eslint-disable-next-line no-await-in-loop
+            const error = await captureFailure(() => handler.post('forged', '_', code, false, [], undefined));
+            expect(error).to.be.instanceOf(GenericError);
+        }
+        expect(calls.recordAdd).to.deep.equal([]);
+
+        await handler.post('forged', '_', 'main: i++\n', false, [], undefined);
+        expect(calls.recordAdd).to.have.length(1);
     });
 });
 

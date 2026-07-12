@@ -4,12 +4,14 @@ import {
     Filter, FindOptions, MatchKeysAndValues,
     ObjectId, OnlyFieldsOfType, PushOperator, UpdateFilter,
 } from 'mongodb';
-import { ProblemConfigFile, STATUS_TEXTS } from '@hydrooj/common';
+import { effectiveProblemKind, ProblemConfigFile, STATUS_TEXTS } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
 import { Context } from '../context';
 import { ProblemNotFoundError, ValidationError } from '../error';
 import { JudgeMeta, RecordDoc } from '../interface';
-import { parseProblemConfigObject } from '../lib/problem-config';
+import {
+    parseProblemConfigObject, validateCompiledStructuredConfig, validateFillFunctionJudgeConfig,
+} from '../lib/problem-config';
 import db from '../service/db';
 import { MaybeArray, NumberKeys } from '../typeutils';
 import { ArgMethod, buildProjection, Time } from '../utils';
@@ -118,6 +120,24 @@ export default class RecordModel {
         const judgeConfig = parseProblemConfigObject(pdoc)
             ?? (pdoc.config == null || (typeof pdoc.config === 'string' && !pdoc.config.trim()) ? {} : null);
         if (!judgeConfig) throw new Error(`Cannot parse problem config: ${pdoc.domainId}/${pdoc.docId}`);
+        const problemKind = effectiveProblemKind(pdoc);
+        try {
+            if (judgeConfig.type === 'fill_function') {
+                validateFillFunctionJudgeConfig(judgeConfig);
+            }
+            validateCompiledStructuredConfig(problemKind, judgeConfig);
+            if (judgeConfig.type === 'fill_function' && ['program_fill', 'function'].includes(problemKind)
+                && rdocs.some((rdoc) => rdoc.lang !== judgeConfig.template?.lang)) {
+                throw new Error(`${problemKind}: submission language mismatch`);
+            }
+        } catch (error) {
+            logger.error(
+                'Structured judge config rejected domain=%s pid=%d kind=%s revision=%s rids=%s error=%o',
+                pdoc.domainId, pdoc.docId, problemKind, pdoc.structureRevision,
+                rdocs.map((rdoc) => rdoc._id).join(','), error,
+            );
+            throw error;
+        }
         meta = { ...meta, problemOwner: pdoc.owner };
         const ddoc = await DomainModel.get(pdoc.domainId);
         return await task.addMany(rdocs.map((rdoc) => {

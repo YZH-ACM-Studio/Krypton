@@ -25,6 +25,7 @@ const PERM = {
     PERM_VIEW_USER_PRIVATE_INFO: 512n,
     PERM_VIEW_TRAINING: 1024n,
     PERM_VIEW_PROBLEM: 2048n,
+    PERM_CREATE_HOMEWORK: 4096n,
 };
 const PRIV = { PRIV_EDIT_SYSTEM: 1, PRIV_USER_PROFILE: 2 };
 const STATUS = { STATUS_ACCEPTED: 1 };
@@ -325,6 +326,23 @@ describe('P3.8 course workspace capabilities', () => {
         await handler.get('forged-domain', 'course');
         expect(handler.response.body.tsdoc).to.equal(currentTrainingStatus);
         expect(handler.response.body.canEnroll).to.equal(false);
+    });
+
+    it('publishes quiz creation only when a course manager can also create homework', async () => {
+        currentContainer = {
+            domainId: 'system', docId: 'course', owner: 42, kind: 'course', title: 'Course',
+            content: '', description: '', courseGroupIds: [], dag: [],
+        };
+        const denied = makeHandler(courseRoutes.course_detail);
+        await denied.get('forged-domain', 'course');
+        expect(denied.response.body.canCreateQuiz).to.equal(false);
+
+        const allowedUser = makeUser({
+            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_HOMEWORK,
+        });
+        const allowed = makeHandler(courseRoutes.course_detail, allowedUser);
+        await allowed.get('forged-domain', 'course');
+        expect(allowed.response.body.canCreateQuiz).to.equal(true);
     });
 });
 

@@ -54,6 +54,26 @@ export function edit(domainId: string, tid: ObjectId, $set: Partial<TrainingDoc>
     return document.set(domainId, document.TYPE_TRAINING, tid, $set);
 }
 
+export async function attachContestToCourseChapter(
+    domainId: string,
+    tid: ObjectId,
+    chapterId: number,
+    contestId: ObjectId,
+): Promise<boolean> {
+    const result = await document.coll.updateOne(
+        {
+            domainId,
+            docType: document.TYPE_TRAINING,
+            docId: tid,
+            kind: 'course',
+            'dag._id': chapterId,
+        },
+        { $addToSet: { 'dag.$[chapter].tids': contestId } } as any,
+        { arrayFilters: [{ 'chapter._id': chapterId }] },
+    );
+    return result.matchedCount === 1;
+}
+
 export function del(domainId: string, tid: ObjectId) {
     return Promise.all([
         document.deleteOne(domainId, document.TYPE_TRAINING, tid),
@@ -122,6 +142,7 @@ global.Hydro.model.training = {
     isInvalid,
     add,
     edit,
+    attachContestToCourseChapter,
     del,
     count,
     get,

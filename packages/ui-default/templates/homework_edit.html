@@ -5,6 +5,11 @@
     <div class="section">
       <div class="section__body">
         <form method="post">
+          {% if fromCourse %}
+            <input type="hidden" name="fromCourse" value="{{ fromCourse }}">
+            <input type="hidden" name="chapter" value="{{ chapter }}">
+            <p class="help-text">{{ courseContext.courseTitle }} · {{ courseContext.chapterTitle }}</p>
+          {% endif %}
           {{ form.form_text({
               columns:12,
               label:'Title',
@@ -59,6 +64,21 @@
                 value:extensionDays
             }) }}
           </div>
+          <input type="hidden" name="participantScopeMode" value="{% if participantGroupIds.length %}groups{% else %}none{% endif %}">
+          {% if fromCourse %}
+            <input type="hidden" name="participantGroupIds" value="{{ participantGroupIds|join(',') }}">
+            <div class="row"><div class="columns">
+              <p class="help-text">可见班级跟随课程设置：{% if participantGroupIds.length %}{{ participantGroupIds|join(', ') }}{% else %}全域可见{% endif %}</p>
+            </div></div>
+          {% else %}
+            {{ form.form_text({
+                columns:12,
+                label:'Participant group IDs',
+                name:'participantGroupIds',
+                value:participantGroupIds|join(','),
+                placeholder:'Userbind group ObjectId, separated with comma'
+            }) }}
+          {% endif %}
           <div class="row">
             {{ form.form_text({
                 row:false,

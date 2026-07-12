@@ -28,7 +28,8 @@ import { Badge } from '@/components/ui/badge';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, replaceRouteTokens } from '@/lib/format';
 
-type R = Record<string, any>;
+interface R { [key: string]: any }
+interface ScopeOption { _id: string, name: string }
 
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -36,11 +37,11 @@ function formatSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-type PenaltyRuleRow = {
+interface PenaltyRuleRow {
   id: string;
   hours: string;
   coefficient: string;
-};
+}
 
 const DEFAULT_PENALTY_RULES: PenaltyRuleRow[] = [
   { id: 'default-1', hours: '1', coefficient: '0.9' },
@@ -76,13 +77,19 @@ export function HomeworkEditPage() {
   const data = bs.page.data;
   const tdoc: R = data.tdoc || {};
   const isEdit = data.page_name === 'homework_edit';
-  const hwUrl = isEdit
-    ? replaceRouteTokens(bs.urls.homeworkDetail, { TID: String(tdoc.docId || tdoc._id) })
-    : bs.urls.homework;
+  const hwUrl = data.fromCourse
+    ? `/course/${data.fromCourse}?chapter=${data.chapter}`
+    : isEdit
+      ? replaceRouteTokens(bs.urls.homeworkDetail, { TID: String(tdoc.docId || tdoc._id) })
+      : bs.urls.homework;
   const [penaltyRules, setPenaltyRules] = useState<PenaltyRuleRow[]>(() => parsePenaltyRules(data.penaltyRules));
 
   const updatePenaltyRule = (id: string, patch: Partial<PenaltyRuleRow>) => {
     setPenaltyRules((rows) => rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  };
+  const confirmDelete = (event: { preventDefault: () => void }) => {
+    // eslint-disable-next-line no-alert
+    if (!confirm('确定要删除此作业吗？')) event.preventDefault();
   };
 
   /* MultiSelect state — pids resolved async on mount, langs sync. */
@@ -96,11 +103,22 @@ export function HomeworkEditPage() {
     let cancelled = false;
     fetchProblemsByIds(initialPidIds).then((res) => { if (!cancelled) setPidValue(res); });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const initialLangIds: string[] = Array.isArray(tdoc.langs) ? tdoc.langs
     : typeof tdoc.langs === 'string' ? tdoc.langs.split(',').filter(Boolean) : [];
   const [langValue, setLangValue] = useState<LangOption[]>(() => resolveLangs(initialLangIds));
+  const initialGroupIds: string[] = (data.participantGroupIds || tdoc.participantGroupIds || []).map(String);
+  const groupCatalog: ScopeOption[] = (data.scopeGroups || [])
+    .filter((group: R) => !group.archivedAt || initialGroupIds.includes(String(group._id)))
+    .map((group: R) => ({
+      _id: String(group._id),
+      name: group.archivedAt ? `${group.name}（已归档）` : group.name,
+    }));
+  const [participantGroups, setParticipantGroups] = useState<ScopeOption[]>(
+    initialGroupIds.map((groupId) => (
+      groupCatalog.find((group) => group._id === groupId) || { _id: groupId, name: groupId }
+    )),
+  );
 
   return (
     <motion.div
@@ -113,12 +131,25 @@ export function HomeworkEditPage() {
         <Button asChild variant="ghost" size="icon">
           <a href={hwUrl}><ArrowLeft className="size-4" /></a>
         </Button>
-        <h1 className="text-xl font-semibold">{isEdit ? '编辑作业' : '创建作业'}</h1>
+        <div>
+          <h1 className="text-xl font-semibold">{isEdit ? '编辑作业' : '创建作业'}</h1>
+          {data.courseContext ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {data.courseContext.courseTitle} · {data.courseContext.chapterTitle}
+            </p>
+          ) : null}
+        </div>
       </div>
 
       <Card>
         <CardContent className="p-6">
           <form method="post" className="space-y-4">
+            {data.fromCourse ? (
+              <>
+                <input type="hidden" name="fromCourse" value={data.fromCourse} />
+                <input type="hidden" name="chapter" value={data.chapter} />
+              </>
+            ) : null}
             <div className="space-y-1.5">
               <label htmlFor="title" className="text-sm font-medium">作业标题</label>
               <Input id="title" name="title" defaultValue={tdoc.title || ''} required />
@@ -170,6 +201,39 @@ export function HomeworkEditPage() {
                   placeholder="UID，逗号分隔"
                 />
               </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">可见班级</label>
+              <input
+                type="hidden"
+                name="participantScopeMode"
+                value={participantGroups.length ? 'groups' : 'none'}
+              />
+              {data.courseContext ? (
+                <>
+                  <input type="hidden" name="participantGroupIds" value={participantGroups.map((group) => group._id).join(',')} />
+                  <div className="border-y border-border/70 py-2 text-sm text-muted-foreground">
+                    {participantGroups.length
+                      ? participantGroups.map((group) => group.name).join('、')
+                      : '课程未限定班级，本作业对全域用户开放。'}
+                  </div>
+                  <p className="text-xs text-muted-foreground">范围跟随课程设置，创建时由服务端再次校验。</p>
+                </>
+              ) : (
+                <>
+                  <MultiSelect<ScopeOption>
+                    options={groupCatalog}
+                    value={participantGroups}
+                    onChange={setParticipantGroups}
+                    getKey={(group) => group._id}
+                    getLabel={(group) => group.name}
+                    name="participantGroupIds"
+                    placeholder="留空 = 不启用班级范围"
+                  />
+                  <p className="text-xs text-muted-foreground">与旧“分配给”规则同时满足；留空时普通作业行为不变。</p>
+                </>
+              )}
             </div>
 
             <div className="space-y-1.5">
@@ -285,7 +349,7 @@ export function HomeworkEditPage() {
             </div>
 
             <label className="flex items-center gap-2 text-sm">
-              <Checkbox name="rated" value="true" defaultChecked={tdoc.rated}  />
+              <Checkbox name="rated" value="true" defaultChecked={tdoc.rated} />
               计入 Rating
             </label>
 
@@ -303,7 +367,7 @@ export function HomeworkEditPage() {
                   variant="destructive"
                   size="sm"
                   formNoValidate
-                  onClick={(e) => { if (!confirm('确定要删除此作业吗？')) e.preventDefault(); }}
+                  onClick={confirmDelete}
                 >
                   <Trash2 className="mr-1 size-3" />删除
                 </Button>

@@ -1,5 +1,5 @@
 import {
-  ArrowLeft, Download, FileText, ListTree, Plus, Save, Trash2,
+  ArrowLeft, ClipboardPlus, Download, FileText, ListTree, Plus, Save, Trash2,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
@@ -48,6 +48,7 @@ export function CourseEditPage() {
     page_name: string;
     groups: Array<{ _id: string, name: string, archivedAt?: string | null }>;
     canManageFiles: boolean;
+    canCreateQuiz: boolean;
     files: CourseRecord[];
   };
   const isEdit = data.page_name === 'course_edit';
@@ -311,7 +312,24 @@ export function CourseEditPage() {
             >前往比赛模块创建</a>
           </section>
 
-          <div data-course-slot="quiz" />
+          <section data-course-slot="quiz" className="border-y border-border/70 py-3">
+            {isEdit && data.canCreateQuiz && saveState === 'idle' ? (
+              <Button asChild type="button" variant="outline" className="min-h-11 gap-1.5">
+                <a href={`/homework/create?fromCourse=${encodeURIComponent(tid)}&chapter=${activeChapter._id}`}>
+                  <ClipboardPlus className="size-4" />为本章建小测
+                </a>
+              </Button>
+            ) : isEdit && data.canCreateQuiz ? (
+              <div className="space-y-1.5">
+                <Button type="button" variant="outline" className="min-h-11 gap-1.5" disabled>
+                  <ClipboardPlus className="size-4" />为本章建小测
+                </Button>
+                <p className="text-xs text-muted-foreground">请先保存课程修改，再按最新标题与班级范围创建小测。</p>
+              </div>
+            ) : !isEdit ? (
+              <p className="text-xs text-muted-foreground">保存课程后即可创建并自动挂载章节小测。</p>
+            ) : null}
+          </section>
         </section>
 
         <aside className={cn(

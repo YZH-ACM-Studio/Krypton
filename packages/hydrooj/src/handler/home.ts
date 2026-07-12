@@ -20,6 +20,10 @@ import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
 import domain from '../model/domain';
+import {
+    buildHomeworkListAccessFilter, canBypassHomeworkAccess,
+    getHomeworkUserGroupIds, participantGroupObjectIds,
+} from '../model/homework-access';
 import message from '../model/message';
 import ProblemModel from '../model/problem';
 import * as setting from '../model/setting';
@@ -50,20 +54,16 @@ export class HomeHandler extends Handler {
 
     async getHomework(domainId: string, limit = 5) {
         if (!this.user.hasPerm(PERM.PERM_VIEW_HOMEWORK)) return [[], {}];
-        const groups = (await user.listGroup(domainId, this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_HOMEWORK) ? undefined : this.user._id))
+        const canBypass = canBypassHomeworkAccess(this.user);
+        const groups = (await user.listGroup(domainId, canBypass ? undefined : this.user._id))
             .map((i) => i.name);
+        const participantGroups = canBypass
+            ? []
+            : participantGroupObjectIds(await getHomeworkUserGroupIds(domainId, this.user._id));
         const tdocs = await contest.getMulti(domainId, {
             rule: 'homework',
-            ...this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_HOMEWORK)
-                ? {}
-                : {
-                    $or: [
-                        { maintainer: this.user._id },
-                        { owner: this.user._id },
-                        { assign: { $in: groups } },
-                        { assign: { $size: 0 } },
-                    ],
-                },
+            ...canBypass
+                ? {} : buildHomeworkListAccessFilter(this.user._id, groups, participantGroups),
         }).sort({
             penaltySince: -1, endAt: -1, beginAt: -1, _id: -1,
         }).limit(limit).toArray();

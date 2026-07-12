@@ -1,8 +1,15 @@
 import { expect } from 'chai';
 import { beforeEach, describe, it } from 'node:test';
+import { ObjectId as MongoObjectId } from 'mongodb';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {} };
+let homeworkGroupIds: MongoObjectId[] = [];
+(global as any).Hydro.model.userbind = {
+    async findStudentByUserId() { return { groupIds: homeworkGroupIds }; },
+};
+const homeworkAccessModule = require('../src/model/homework-access.ts');
+const actualBuiltin = require('../src/model/builtin.ts');
 
 const PERM = { PERM_VIEW_PROBLEM: 1n };
 const PRIV = { PRIV_USER_PROFILE: 1 };
@@ -12,6 +19,7 @@ const calls = {
     getMulti: [] as any[],
     getMultiStatus: [] as any[],
     getViewableAuthorized: [] as any[],
+    homeworkQueries: [] as any[],
 };
 let recentDocs: any[] = [];
 let starredDocs: Record<string, any> = {};
@@ -52,6 +60,18 @@ const problemStub = {
     },
 };
 
+const contestStub = {
+    getMulti(domainId: string, query: unknown) {
+        calls.homeworkQueries.push({ domainId, query });
+        return cursor([]);
+    },
+    async getListStatus() { return {}; },
+};
+
+const userStub = {
+    async listGroup() { return []; },
+};
+
 function noopDecorator() {
     return (_target: unknown, _key: string, descriptor: PropertyDescriptor) => descriptor;
 }
@@ -82,7 +102,10 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
         return { __esModule: true, default: () => '', validate: () => true };
     }
     if (request === '../model/builtin') return { PERM, PRIV };
+    if (request === '../model/contest') return contestStub;
+    if (request === '../model/homework-access') return homeworkAccessModule;
     if (request === '../model/problem') return problemStub;
+    if (request === '../model/user') return userStub;
     if (request === '../service/server') return serverStub;
     if (request === '../utils') return { camelCase: (value: string) => value, md5: (value: string) => value };
     if (request.startsWith('../model/') || request.startsWith('../lib/')) return emptyModel;
@@ -109,6 +132,8 @@ function makeUser(overrides: Record<string, unknown> = {}) {
         viewableProblemIds: new Set<number>(),
         hasPerm: (...perms: bigint[]) => perms.includes(PERM.PERM_VIEW_PROBLEM),
         hasPriv: () => false,
+        own: () => false,
+        group: [],
         ...overrides,
     } as any;
 }
@@ -128,6 +153,7 @@ beforeEach(() => {
     recentDocs = [];
     starredDocs = {};
     starredStatuses = [];
+    homeworkGroupIds = [];
 });
 
 describe('P2.11 homepage problem enumeration', () => {
@@ -189,5 +215,27 @@ describe('P2.11 homepage problem enumeration', () => {
             { domainId: 'system', pid: 8 },
             { domainId: 'system', pid: 9 },
         ]);
+    });
+});
+
+describe('P3.7 homepage homework scope', () => {
+    it('pushes the bound group into the homepage query before applying the limit', async () => {
+        const groupId = new MongoObjectId('aaaaaaaaaaaaaaaaaaaaaaaa');
+        homeworkGroupIds = [groupId];
+        const user = makeUser({
+            hasPerm: (...perms: bigint[]) => perms.some((perm) => (
+                perm === undefined
+                || perm === PERM.PERM_VIEW_PROBLEM
+                || perm === actualBuiltin.PERM.PERM_VIEW_HOMEWORK
+            )),
+        });
+        const handler = makeHandler(user);
+
+        await handler.getHomework('system', 5);
+
+        const query = calls.homeworkQueries[0].query;
+        const participantClause = query.$or[2].$and[1].$or[2];
+        expect(participantClause.participantScopeMode).to.equal('groups');
+        expect(participantClause.participantGroupIds.$in.map(String)).to.deep.equal([String(groupId)]);
     });
 });

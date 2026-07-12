@@ -1,5 +1,5 @@
 import {
-  ArrowLeft, BookOpen, CheckCircle2, Download, FileText, ListTree, Pencil, Trophy,
+  ArrowLeft, BookOpen, CheckCircle2, ClipboardPlus, Download, FileText, ListTree, Pencil, Trophy,
 } from 'lucide-react';
 import { useState } from 'react';
 import { MarkdownView } from '@/components/markdown-renderer';
@@ -77,6 +77,7 @@ export function CourseDetailPage() {
     cdict: Record<string, CourseRecord>;
     udoc?: CourseRecord;
     canManage: boolean;
+    canCreateQuiz: boolean;
     canEnroll: boolean;
     canDownloadFiles: boolean;
     tsdoc?: CourseRecord;
@@ -206,7 +207,17 @@ export function CourseDetailPage() {
                 </div>
               </section>
             ) : <div data-course-slot="files" />}
-            <div data-course-slot="quiz" />
+            <section data-course-slot="quiz" className="border-y border-border/70 py-3">
+              {data.canCreateQuiz ? (
+                <Button asChild variant="outline" className="min-h-11 gap-1.5">
+                  <a href={`/homework/create?fromCourse=${encodeURIComponent(tid)}&chapter=${activeChapter._id}`}>
+                    <ClipboardPlus className="size-4" />建小测
+                  </a>
+                </Button>
+              ) : (
+                <p className="text-xs text-muted-foreground">具备作业创建权限的课程教师可建立本章小测。</p>
+              )}
+            </section>
 
             {!course.content && !activeChapter.content
               && !activeChapter.pids.length && !activeChapter.tids.length ? (

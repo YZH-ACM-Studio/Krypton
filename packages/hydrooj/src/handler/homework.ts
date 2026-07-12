@@ -2,24 +2,82 @@ import yaml from 'js-yaml';
 import { escapeRegExp, pick } from 'lodash';
 import moment from 'moment-timezone';
 import { ObjectId } from 'mongodb';
+import { Logger } from '@hydrooj/utils';
 import { sortFiles, Time } from '@hydrooj/utils/lib/utils';
 import {
-    ContestNotFoundError, FileLimitExceededError, FileUploadError, HomeworkNotLiveError, NotAssignedError, ValidationError,
+    ContestNotFoundError, FileLimitExceededError, FileUploadError, HomeworkNotLiveError,
+    NotAssignedError, PermissionError, ValidationError,
 } from '../error';
-import { PenaltyRules, Tdoc } from '../interface';
+import { PenaltyRules, Tdoc, TrainingDoc, TrainingNode } from '../interface';
 import { PERM, PRIV } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
+import {
+    assertHomeworkAccess, buildHomeworkListAccessFilter, canBypassHomeworkAccess,
+    getHomeworkUserGroupIds, participantGroupObjectIds,
+} from '../model/homework-access';
 import problem from '../model/problem';
 import { assertProblemBankSelection } from '../model/problem-access';
 import record from '../model/record';
 import storage from '../model/storage';
 import system from '../model/system';
+import * as training from '../model/training';
 import user from '../model/user';
 import {
     Handler, param, post, Types,
 } from '../service/server';
 import { ContestCodeHandler, ContestFileDownloadHandler, ContestScoreboardHandler } from './contest';
+
+const logger = new Logger('homework');
+
+async function listHomeworkScopeGroups(domainId: string, required: boolean): Promise<any[]> {
+    const userbind = (global as any).Hydro?.model?.userbind;
+    if (typeof userbind?.listUserGroups !== 'function') {
+        if (required) throw new TypeError('userbind.listUserGroups is unavailable');
+        return [];
+    }
+    try {
+        return await userbind.listUserGroups(domainId);
+    } catch (error) {
+        logger.error('Homework group catalog lookup failed domain=%s error=%o', domainId, error);
+        throw error;
+    }
+}
+
+function normalizeParticipantGroups(
+    mode: 'none' | 'groups',
+    rawGroupIds: string[],
+): { participantScopeMode: 'none' | 'groups', participantGroupIds: ObjectId[] } {
+    if (mode === 'none') return { participantScopeMode: 'none', participantGroupIds: [] };
+    if (!rawGroupIds.length) throw new ValidationError('participantGroupIds');
+    try {
+        return {
+            participantScopeMode: 'groups',
+            participantGroupIds: Array.from(new Set(rawGroupIds.map((groupId) => groupId.trim())))
+                .map((groupId) => new ObjectId(groupId)),
+        };
+    } catch {
+        throw new ValidationError('participantGroupIds');
+    }
+}
+
+async function loadCourseQuizContext(
+    domainId: string,
+    courseId: ObjectId,
+    chapterId: number,
+    handlerUser: any,
+): Promise<{ course: TrainingDoc, chapter: TrainingNode }> {
+    const course = await training.get(domainId, courseId);
+    if (course.kind !== 'course') throw new ValidationError('fromCourse');
+    if (!handlerUser.own(course)
+        && !handlerUser.hasPerm(PERM.PERM_EDIT_COURSE)
+        && !handlerUser.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
+        throw new PermissionError(PERM.PERM_EDIT_COURSE);
+    }
+    const chapter = course.dag.find((node) => node._id === chapterId);
+    if (!chapter) throw new ValidationError('chapter');
+    return { course, chapter };
+}
 
 function parseProblemDocIds(input: string) {
     const tokens = input.replace(/，/g, ',').split(',').map((i) => i.trim()).filter(Boolean);
@@ -44,24 +102,20 @@ class HomeworkMainHandler extends Handler {
     @param('q', Types.String, true)
     async get(_domainId: string, group = '', page = 1, q = '') {
         const authoritativeDomainId = String(this.domain?._id);
-        const groups = (await user.listGroup(authoritativeDomainId, this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_HOMEWORK) ? undefined : this.user._id))
+        const canBypass = canBypassHomeworkAccess(this.user);
+        const groups = (await user.listGroup(authoritativeDomainId, canBypass ? undefined : this.user._id))
             .map((i) => i.name);
         if (group && !groups.includes(group)) throw new NotAssignedError(group);
+        const participantGroups = canBypass
+            ? []
+            : participantGroupObjectIds(await getHomeworkUserGroupIds(authoritativeDomainId, this.user._id));
         const escaped = escapeRegExp(q.toLowerCase());
         const cursor = contest.getMulti(authoritativeDomainId, {
             rule: 'homework',
-            ...this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_HOMEWORK) && !group
-                ? {}
-                : {
-                    $or: [
-                        { maintainer: this.user._id },
-                        { owner: this.user._id },
-                        { assign: { $in: groups } },
-                        { assign: { $size: 0 } },
-                    ],
-                },
+            ...canBypass
+                ? {} : buildHomeworkListAccessFilter(this.user._id, groups, participantGroups),
             ...group ? { assign: { $in: [group] } } : {},
-            ...q ? { title: { $regex: new RegExp(q.length >= 2 ? escaped : `\\A${escaped}`, 'gim') } } : {},
+            ...q ? { title: { $regex: new RegExp(q.length >= 2 ? escaped : `^${escaped}`, 'i') } } : {},
         }).sort({
             penaltySince: -1, endAt: -1, beginAt: -1, _id: -1,
         });
@@ -93,11 +147,7 @@ class HomeworkDetailHandler extends Handler {
         const authoritativeDomainId = String(this.domain?._id);
         this.tdoc = await contest.get(authoritativeDomainId, tid);
         if (this.tdoc.rule !== 'homework') throw new ContestNotFoundError(authoritativeDomainId, tid);
-        if (this.tdoc.assign?.length && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_HOMEWORK)) {
-            if (!new Set(this.tdoc.assign).intersection(new Set(this.user.group)).size) {
-                throw new NotAssignedError('homework', this.tdoc.docId);
-            }
-        }
+        await assertHomeworkAccess(authoritativeDomainId, this.tdoc, this.user);
     }
 
     @param('tid', Types.ObjectId)
@@ -159,9 +209,12 @@ class HomeworkDetailHandler extends Handler {
 
 class HomeworkEditHandler extends Handler {
     @param('tid', Types.ObjectId, true)
-    async get(_domainId: string, tid: ObjectId) {
+    @param('fromCourse', Types.ObjectId, true)
+    @param('chapter', Types.PositiveInt, true)
+    async get(_domainId: string, tid: ObjectId, fromCourse: ObjectId | undefined, chapter = 0) {
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
+        if (tid && (fromCourse || chapter)) throw new ValidationError('fromCourse', 'chapter');
         const tdoc = tid ? await contest.get(authoritativeDomainId, tid) : null;
         if (!tid) this.checkPerm(PERM.PERM_CREATE_HOMEWORK);
         else if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_HOMEWORK);
@@ -177,9 +230,34 @@ class HomeworkEditHandler extends Handler {
         const penaltySince = tid
             ? moment(tdoc.penaltySince).tz(this.user.timeZone)
             : beginAt.clone().add(7, 'days').tz(this.user.timeZone).hour(23).minute(59).millisecond(0);
+        const quizContext = fromCourse
+            ? await loadCourseQuizContext(authoritativeDomainId, fromCourse, chapter, this.user)
+            : null;
+        if (!fromCourse && chapter) throw new ValidationError('chapter');
+        const courseGroupIds = (quizContext?.course.courseGroupIds || []).map(String);
+        const participantScopeMode = quizContext
+            ? (courseGroupIds.length ? 'groups' : 'none')
+            : (tdoc?.participantScopeMode === 'groups' ? 'groups' : 'none');
+        const participantGroupIds = quizContext
+            ? courseGroupIds
+            : (tdoc?.participantGroupIds || []).map(String);
+        const scopeGroups = await listHomeworkScopeGroups(
+            authoritativeDomainId,
+            !!quizContext || participantScopeMode === 'groups',
+        );
+        const formDoc = tdoc || (quizContext ? {
+            title: `${quizContext.course.title} · ${quizContext.chapter.title}`,
+            content: '',
+            assign: [],
+            maintainer: [],
+            langs: [],
+            rated: false,
+            participantScopeMode,
+            participantGroupIds,
+        } : null);
         this.response.template = 'homework_edit.html';
         this.response.body = {
-            tdoc,
+            tdoc: formDoc,
             dateBeginText: beginAt.format('YYYY-M-D'),
             timeBeginText: beginAt.format('H:mm'),
             datePenaltyText: penaltySince.format('YYYY-M-D'),
@@ -188,6 +266,19 @@ class HomeworkEditHandler extends Handler {
             penaltyRules: tid ? yaml.dump(tdoc.penaltyRules) : null,
             pids: tid ? tdoc.pids.join(',') : '',
             page_name: tid ? 'homework_edit' : 'homework_create',
+            participantScopeMode,
+            participantGroupIds,
+            scopeGroups: scopeGroups.map((scopeGroup: any) => ({
+                _id: String(scopeGroup._id),
+                name: scopeGroup.name,
+                archivedAt: scopeGroup.archivedAt || null,
+            })),
+            fromCourse: fromCourse ? String(fromCourse) : '',
+            chapter: chapter || '',
+            courseContext: quizContext ? {
+                courseTitle: quizContext.course.title,
+                chapterTitle: quizContext.chapter.title,
+            } : null,
         };
     }
 
@@ -205,16 +296,23 @@ class HomeworkEditHandler extends Handler {
     @param('maintainer', Types.NumericArray, true)
     @param('assign', Types.CommaSeperatedArray, true)
     @param('langs', Types.CommaSeperatedArray, true)
+    @param('participantScopeMode', Types.Range(['none', 'groups']), true)
+    @param('participantGroupIds', Types.CommaSeperatedArray, true)
+    @param('fromCourse', Types.ObjectId, true)
+    @param('chapter', Types.PositiveInt, true)
     async postUpdate(
         _domainId: string, tid: ObjectId, beginAtDate: string, beginAtTime: string,
         penaltySinceDate: string, penaltySinceTime: string, extensionDays: number,
         penaltyRules: PenaltyRules, title: string, content: string, _pids: string, rated = false,
         maintainer: number[] = [], assign: string[] = [], langs: string[] = [],
+        participantScopeMode: 'none' | 'groups' = 'none', participantGroupIds: string[] = [],
+        fromCourse: ObjectId | undefined, chapter = 0,
     ) {
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         const pids = parseProblemDocIds(_pids);
         const tdoc = tid ? await contest.get(authoritativeDomainId, tid) : null;
+        if (tid && (fromCourse || chapter)) throw new ValidationError('fromCourse', 'chapter');
         if (!tid) this.checkPerm(PERM.PERM_CREATE_HOMEWORK);
         else if (!this.user.own(tdoc)) this.checkPerm(PERM.PERM_EDIT_HOMEWORK);
         else this.checkPerm(PERM.PERM_EDIT_HOMEWORK_SELF);
@@ -226,10 +324,45 @@ class HomeworkEditHandler extends Handler {
         if (beginAt.isSameOrAfter(penaltySince)) throw new ValidationError('endAtDate', 'endAtTime');
         if (penaltySince.isAfter(endAt)) throw new ValidationError('extensionDays');
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, tdoc?.pids);
+        const quizContext = fromCourse
+            ? await loadCourseQuizContext(authoritativeDomainId, fromCourse, chapter, this.user)
+            : null;
+        if (!fromCourse && chapter) throw new ValidationError('chapter');
+        const participantScope = quizContext
+            ? {
+                participantScopeMode: quizContext.course.courseGroupIds?.length ? 'groups' as const : 'none' as const,
+                participantGroupIds: quizContext.course.courseGroupIds || [],
+            }
+            : normalizeParticipantGroups(participantScopeMode, participantGroupIds);
         if (!tid) {
             tid = await contest.add(authoritativeDomainId, title, content, this.user._id,
                 'homework', beginAt.toDate(), endAt.toDate(), pids, rated,
-                { penaltySince: penaltySince.toDate(), penaltyRules, assign });
+                { penaltySince: penaltySince.toDate(), penaltyRules, assign, ...participantScope });
+            if (quizContext) {
+                try {
+                    const attached = await training.attachContestToCourseChapter(
+                        authoritativeDomainId, fromCourse!, chapter, tid,
+                    );
+                    if (!attached) throw new ValidationError('fromCourse', 'chapter');
+                } catch (error) {
+                    logger.error(
+                        'Course quiz attach failed; deleting orphan domain=%s course=%s chapter=%d homework=%s error=%o',
+                        authoritativeDomainId, fromCourse, chapter, tid, error,
+                    );
+                    try {
+                        await contest.del(authoritativeDomainId, tid);
+                    } catch (cleanupError) {
+                        logger.error(
+                            'Course quiz orphan cleanup failed domain=%s homework=%s error=%o cleanupError=%o',
+                            authoritativeDomainId, tid, error, cleanupError,
+                        );
+                        throw new Error(`course quiz attach and orphan cleanup failed: ${tid}`, {
+                            cause: cleanupError,
+                        });
+                    }
+                    throw error;
+                }
+            }
         } else {
             await contest.edit(authoritativeDomainId, tid, {
                 title,
@@ -243,6 +376,7 @@ class HomeworkEditHandler extends Handler {
                 maintainer,
                 assign,
                 langs,
+                ...participantScope,
             });
             if (tdoc.beginAt !== beginAt.toDate()
                 || tdoc.endAt !== endAt.toDate()
@@ -252,7 +386,9 @@ class HomeworkEditHandler extends Handler {
             }
         }
         this.response.body = { tid };
-        this.response.redirect = this.url('homework_detail', { tid });
+        this.response.redirect = quizContext
+            ? `${this.url('course_detail', { tid: fromCourse })}?chapter=${chapter}`
+            : this.url('homework_detail', { tid });
     }
 
     @param('tid', Types.ObjectId)

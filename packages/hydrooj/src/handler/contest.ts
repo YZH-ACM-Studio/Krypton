@@ -19,6 +19,7 @@ import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
 import * as document from '../model/document';
+import { assertHomeworkAccess } from '../model/homework-access';
 import message from '../model/message';
 import * as oplog from '../model/oplog';
 import problem from '../model/problem';
@@ -130,12 +131,15 @@ export class ContestDetailBaseHandler extends Handler {
             contest.get(authoritativeDomainId, tid),
             contest.getStatus(authoritativeDomainId, tid, this.user._id),
         ]);
-        if (this.tdoc.assign?.length && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)) {
-            const groups = await user.listGroup(authoritativeDomainId, this.user._id);
-            if (!new Set(this.tdoc.assign).intersection(new Set(groups.map((i) => i.name))).size) {
-                throw new NotAssignedError('contest', tid);
+        if (this.tdoc.rule === 'homework') {
+            await assertHomeworkAccess(authoritativeDomainId, this.tdoc, this.user);
+        } else {
+            if (this.tdoc.assign?.length && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)) {
+                const groups = await user.listGroup(authoritativeDomainId, this.user._id);
+                if (!new Set(this.tdoc.assign).intersection(new Set(groups.map((i) => i.name))).size) {
+                    throw new NotAssignedError('contest', tid);
+                }
             }
-        }
         // ── Krypton: client-required contest gate ────────────────────────
         //
         // Two-part overlay layered on top of the legacy `assign` check above:
@@ -149,10 +153,10 @@ export class ContestDetailBaseHandler extends Handler {
         // preview mode (DESIGN §11.3). Preview mode is signaled to the UI
         // via `this.response.body.previewMode` so the frontend can show a
         // banner; that gets set by the concrete handler that needs it.
-        const isAdminBypass = this.user.own(this.tdoc)
-            || this.user.hasPerm(PERM.PERM_EDIT_CONTEST)
-            || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
-        if (!isAdminBypass) {
+            const isAdminBypass = this.user.own(this.tdoc)
+                || this.user.hasPerm(PERM.PERM_EDIT_CONTEST)
+                || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+            if (!isAdminBypass) {
             // The client-required gate (must enter through the locked-down Vigil
             // client) protects exam integrity only WHILE the contest is running.
             // Once it has ended, lift it so participants can review the problems
@@ -162,24 +166,25 @@ export class ContestDetailBaseHandler extends Handler {
             // early can't open the scoreboard while others are still competing.
             // Participant scope (scope_miss) is eligibility, not integrity, so it
             // stays enforced regardless.
-            const contestDone = contest.isDone(this.tdoc);
-            if (!contestDone && contest.isClientRequired(this.tdoc) && contest.isClientFinished(this.tsdoc)) {
-                throw new ContestClientFinishedError();
-            }
-            const vg = (global as any).Hydro?.model?.vigilguard;
-            if (vg?.effectiveContestAccess) {
-                const sid = vg.clientSessionKeyFromSession
-                    ? vg.clientSessionKeyFromSession((this as any).session)
-                    : ((this as any).session?.sessionId || (this as any).session?._id || '');
-                const result = await vg.effectiveContestAccess(
-                    authoritativeDomainId, this.tdoc, this.user._id, sid,
-                );
-                if (!result.ok) {
-                    if (result.reason === 'scope_miss') {
-                        throw new NotAssignedError('contest', tid);
-                    }
-                    if (result.reason === 'client_only' && !contestDone) {
-                        throw new ContestClientRequiredError();
+                const contestDone = contest.isDone(this.tdoc);
+                if (!contestDone && contest.isClientRequired(this.tdoc) && contest.isClientFinished(this.tsdoc)) {
+                    throw new ContestClientFinishedError();
+                }
+                const vg = (global as any).Hydro?.model?.vigilguard;
+                if (vg?.effectiveContestAccess) {
+                    const sid = vg.clientSessionKeyFromSession
+                        ? vg.clientSessionKeyFromSession((this as any).session)
+                        : ((this as any).session?.sessionId || (this as any).session?._id || '');
+                    const result = await vg.effectiveContestAccess(
+                        authoritativeDomainId, this.tdoc, this.user._id, sid,
+                    );
+                    if (!result.ok) {
+                        if (result.reason === 'scope_miss') {
+                            throw new NotAssignedError('contest', tid);
+                        }
+                        if (result.reason === 'client_only' && !contestDone) {
+                            throw new ContestClientRequiredError();
+                        }
                     }
                 }
             }
@@ -844,6 +849,7 @@ export class ContestCodeHandler extends Handler {
         const authoritativeDomainId = String(this.domain?._id);
         await this.limitRate('contest_code', 60, 10);
         const [tdoc, tsdocs] = await contest.getAndListStatus(authoritativeDomainId, tid);
+        if (tdoc.rule === 'homework') await assertHomeworkAccess(authoritativeDomainId, tdoc, this.user);
         if (!this.user.own(tdoc)) {
             if (!this.user.hasPriv(PRIV.PRIV_READ_RECORD_CODE)) {
                 this.checkPerm(PERM.PERM_READ_RECORD_CODE);
@@ -1359,7 +1365,7 @@ export async function apply(ctx: Context) {
                 // when the viewer is a system admin so student identities never
                 // leak to ordinary contestants (the frontend hides the columns
                 // when the dict is empty).
-                let studentDict: Record<string, { studentId: string; realName: string }> = {};
+                let studentDict: Record<string, { studentId: string, realName: string }> = {};
                 if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && global.Hydro?.model?.userbind?.findStudentsByUserIds) {
                     const uids = Object.keys(udict).map(Number).filter((u) => u && u > 1);
                     const students = await global.Hydro.model.userbind.findStudentsByUserIds(tdoc.domainId, uids);

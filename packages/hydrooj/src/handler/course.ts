@@ -227,6 +227,7 @@ class CourseDetailHandler extends Handler {
         const canDownloadFiles = this.user.hasPriv(PRIV.PRIV_USER_PROFILE);
         this.response.body = {
             tdoc, chapters, pdict, psdict, cdict, udoc, canManage, tsdoc,
+            canCreateQuiz: canManage && this.user.hasPerm(PERM.PERM_CREATE_HOMEWORK),
             canEnroll: canDownloadFiles && !tsdoc?.enroll,
             canDownloadFiles,
             files: canDownloadFiles ? sortFiles(tdoc.files || []) : [],
@@ -277,6 +278,7 @@ class CourseEditHandler extends Handler {
             page_name: this.tdoc ? 'course_edit' : 'course_create',
             groups: groups.map((g: any) => ({ _id: String(g._id), name: g.name, archivedAt: g.archivedAt || null })),
             canManageFiles: !!this.tdoc && (this.user.own(this.tdoc) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)),
+            canCreateQuiz: !!this.tdoc && this.user.hasPerm(PERM.PERM_CREATE_HOMEWORK),
             files: sortFiles(this.tdoc?.files || []),
         };
         if (this.tdoc) {

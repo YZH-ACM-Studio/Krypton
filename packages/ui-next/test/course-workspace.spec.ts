@@ -69,4 +69,29 @@ describe('P3.8 course workspace', () => {
         expect(editor).to.not.include('window.location.reload');
         expect(detail).to.include('encodeURIComponent(file.name)');
     });
+
+    it('connects both quiz slots to the course-homework prefill route', () => {
+        const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
+        const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
+        for (const source of [detail, editor]) {
+            expect(source).to.include('/homework/create?fromCourse=');
+            expect(source).to.match(/&chapter=\$\{activeChapter\._id\}/);
+        }
+        expect(detail).to.include('data.canCreateQuiz');
+        expect(editor).to.include("isEdit && data.canCreateQuiz && saveState === 'idle'");
+        expect(editor).to.include('请先保存课程修改');
+    });
+
+    it('keeps course context and participant groups in the homework form post', () => {
+        const homework = readFileSync(resolve(root, 'src/pages/homework-manage.tsx'), 'utf8');
+        const fallback = readFileSync(resolve(root, '../ui-default/templates/homework_edit.html'), 'utf8');
+        expect(homework).to.include('name="fromCourse"');
+        expect(homework).to.include('name="chapter"');
+        expect(homework).to.include('name="participantScopeMode"');
+        expect(homework).to.include('name="participantGroupIds"');
+        expect(homework).to.include('data.courseContext');
+        expect(fallback).to.include('name="fromCourse"');
+        expect(fallback).to.include('name="participantScopeMode"');
+        expect(fallback).to.include('name="participantGroupIds"');
+    });
 });

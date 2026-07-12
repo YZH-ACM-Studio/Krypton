@@ -14,11 +14,12 @@
 import { randomBytes } from 'node:crypto';
 import { escapeRegExp } from 'lodash';
 import { ObjectId } from 'mongodb';
-import { Context, Handler, OplogModel, param, PRIV, requireServiceToken, Types, UserModel } from 'hydrooj';
+import { Context, Handler, NotFoundError, OplogModel, param, PRIV, requireServiceToken, Types, UserModel, ValidationError } from 'hydrooj';
 import * as contestModel from '../model/contest';
 import * as document from '../model/document';
 import system from '../model/system';
 import db from '../service/db';
+import { executeRecordingDelete, previewRecordingDelete } from '../service/vigil-bridge';
 
 function parseStringList(value: any): string[] {
     if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
@@ -908,6 +909,89 @@ class VigilAdminContestsHandler extends Handler {
     }
 }
 
+function recordingDeleteScope(cid: ObjectId, ojUserId?: number, examSessionId?: string, recordingId?: string) {
+    const selectors = [ojUserId, examSessionId, recordingId].filter((value) => value !== undefined && value !== '').length;
+    if (selectors > 1) throw new ValidationError('recordingScope', null, 'Choose only one recording deletion scope');
+    return {
+        cid: String(cid),
+        ...(ojUserId ? { ojUserId } : {}),
+        ...(examSessionId ? { examSessionId } : {}),
+        ...(recordingId ? { recordingId } : {}),
+    };
+}
+
+async function recordingDeleteContest(cid: ObjectId) {
+    const tdoc = await document.coll.findOne({ docType: document.TYPE_CONTEST, docId: cid }, { projection: { title: 1 } });
+    if (!tdoc) throw new NotFoundError('Contest');
+    return tdoc;
+}
+
+class VigilRecordingDeletePreviewHandler extends Handler {
+    async prepare() {
+        this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
+    }
+
+    @param('cid', Types.ObjectId)
+    @param('ojUserId', Types.PositiveInt, true)
+    @param('examSessionId', Types.String, true)
+    @param('recordingId', Types.String, true)
+    async get(_domainId: string, cid: ObjectId, ojUserId?: number, examSessionId?: string, recordingId?: string) {
+        const contest = await recordingDeleteContest(cid);
+        const scope = recordingDeleteScope(cid, ojUserId, examSessionId, recordingId);
+        const preview = await previewRecordingDelete(scope, { uid: this.user._id, uname: this.user.uname });
+        if (preview.contestTitle !== contest.title) {
+            throw new ValidationError(
+                'cid',
+                null,
+                'OJ and Vigil contest titles differ; synchronize before deleting recordings',
+            );
+        }
+        this.response.body = preview;
+    }
+}
+
+class VigilRecordingDeleteHandler extends Handler {
+    async prepare() {
+        this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
+    }
+
+    @param('cid', Types.ObjectId)
+    @param('intent', Types.String)
+    @param('confirmTitle', Types.String, true)
+    @param('ojUserId', Types.PositiveInt, true)
+    @param('examSessionId', Types.String, true)
+    @param('recordingId', Types.String, true)
+    async post(
+        _domainId: string,
+        cid: ObjectId,
+        intent: string,
+        confirmTitle?: string,
+        ojUserId?: number,
+        examSessionId?: string,
+        recordingId?: string,
+    ) {
+        const contest = await recordingDeleteContest(cid);
+        const scope = recordingDeleteScope(cid, ojUserId, examSessionId, recordingId);
+        const isContestScope = !ojUserId && !examSessionId && !recordingId;
+        if (isContestScope && confirmTitle !== contest.title) {
+            throw new ValidationError('confirmTitle', null, 'Contest title confirmation mismatch');
+        }
+        try {
+            const result = await executeRecordingDelete(
+                scope,
+                { uid: this.user._id, uname: this.user.uname },
+                intent,
+                confirmTitle,
+            );
+            await OplogModel.log(this as any, 'vigil.recordings.delete', { ...scope, ...result });
+            this.response.body = result;
+        } catch (error: any) {
+            await OplogModel.log(this as any, 'vigil.recordings.delete_failed', { ...scope, error: error?.message || String(error) });
+            throw error;
+        }
+    }
+}
+
 // Exam-scoped detail handler — all sub-views (sessions / approvals / events
 // / overview) for one Hydro contest. The React page reads :examId and
 // filters client-side.
@@ -1047,6 +1131,8 @@ class VigilCheckHlsAccessHandler extends Handler {
 export async function apply(ctx: Context) {
     ctx.Route('admin_vigil_overview', '/admin/vigil', VigilAdminOverviewHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('admin_vigil_contests', '/api/admin/vigil/contests', VigilAdminContestsHandler, PRIV.PRIV_EDIT_SYSTEM);
+    ctx.Route('admin_vigil_recordings_delete_preview', '/api/admin/vigil/recordings/delete-preview', VigilRecordingDeletePreviewHandler, PRIV.PRIV_EDIT_SYSTEM);
+    ctx.Route('admin_vigil_recordings_delete', '/api/admin/vigil/recordings/delete', VigilRecordingDeleteHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('admin_vigil_exam_detail', '/admin/vigil/exams/:examId', VigilAdminExamDetailHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('admin_vigil_resolve_contests', '/api/admin/vigil/resolve-contests', VigilResolveContestsHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('vigil_lookup_student', '/api/vigil/lookup-student', VigilLookupStudentHandler);

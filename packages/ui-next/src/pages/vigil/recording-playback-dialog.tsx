@@ -12,10 +12,18 @@
  * SRS at segment close).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Film, Pause, Play, X } from 'lucide-react';
+import { AlertCircle, Film, Pause, Play, Trash2, X } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { buildRecordingUrl, listContestRecordings, type VigilRecording, type VigilStudentCard, VigilOfflineError } from '@/lib/vigil-api';
+import {
+  buildRecordingUrl,
+  listContestRecordings,
+  recordingBelongsToStudent,
+  type VigilRecording,
+  type VigilStudentCard,
+  VigilOfflineError,
+} from '@/lib/vigil-api';
+import { RecordingDeleteDialog } from '@/pages/vigil/recording-delete-dialog';
 
 interface RecordingPlaybackDialogProps {
   open: boolean;
@@ -31,6 +39,8 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
   const [items, setItems] = useState<VigilRecording[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [deleteRecording, setDeleteRecording] = useState<VigilRecording | null>(null);
+  const [reloadVersion, setReloadVersion] = useState(0);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -55,22 +65,23 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
     return () => {
       cancelled = true;
     };
-  }, [open, contestId]);
+  }, [open, contestId, reloadVersion]);
 
   // Filter to this machine + selected stream type, sorted by startTs asc so
   // the dropdown reads naturally as "earliest → latest".
   const candidates = useMemo(
     () =>
       (items || [])
-        .filter((r) => r.machineId === student.machineId && r.streamType === streamType)
+        .filter((recording) => recordingBelongsToStudent(recording, student) && recording.streamType === streamType)
         .sort((a, b) => new Date(a.startTs).getTime() - new Date(b.startTs).getTime()),
-    [items, student.machineId, streamType],
+    [items, student, streamType],
   );
 
   const totalBytes = useMemo(() => candidates.reduce((s, c) => s + (c.size || 0), 0), [candidates]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[80vh] w-[80vw] max-w-[1200px] flex-col overflow-hidden p-0">
         <div className="flex items-center justify-between border-b px-4 py-2.5">
           <div className="min-w-0">
@@ -127,11 +138,22 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
               <p>此学生在当前比赛暂无 {streamType === 'screen' ? '屏幕' : '摄像头'} 录屏。</p>
             </div>
           ) : (
-            <UnifiedTimelinePlayer chunks={candidates} />
+            <UnifiedTimelinePlayer chunks={candidates} onDelete={setDeleteRecording} />
           )}
         </div>
       </DialogContent>
-    </Dialog>
+      </Dialog>
+      {deleteRecording ? (
+        <RecordingDeleteDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setDeleteRecording(null);
+          }}
+          scope={{ cid: contestId, recordingId: deleteRecording.recordingId }}
+          onDeleted={() => setReloadVersion((value) => value + 1)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -165,7 +187,7 @@ function probeDuration(url: string): Promise<number> {
  * durationMs = 0). The single <video> + faststart mp4 (now produced by the AV1
  * transcode) gives a working, seekable scrubber.
  */
-function UnifiedTimelinePlayer({ chunks }: { chunks: VigilRecording[] }) {
+function UnifiedTimelinePlayer({ chunks, onDelete }: { chunks: VigilRecording[]; onDelete: (chunk: VigilRecording) => void }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pendingSeekRef = useRef<number | null>(null);
   const [durations, setDurations] = useState<Record<string, number>>({});
@@ -309,6 +331,9 @@ function UnifiedTimelinePlayer({ chunks }: { chunks: VigilRecording[] }) {
           />
         </div>
         <span className="w-16 shrink-0 font-mono text-[11px] text-white/60">{formatClock(layout.total)}</span>
+        <button type="button" onClick={() => onDelete(activeChunk)} className="text-white/70 hover:text-red-400" title="删除当前录像分段">
+          <Trash2 className="size-4" />
+        </button>
       </div>
     </div>
   );

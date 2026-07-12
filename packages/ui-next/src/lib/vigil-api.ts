@@ -234,6 +234,8 @@ export type VigilEventSeverity = 'info' | 'warning' | 'error' | 'critical';
 export interface VigilStudentCard {
   /** Stable per-machine identity used everywhere else in this API. */
   machineId: string;
+  /** Exact Vigil session represented by this card; used for unknown-student evidence scope. */
+  examSessionId: string;
   /** OJ uid resolved by the server when login_request matched a profile. */
   uid?: number;
   /** Display name (real name if available, otherwise login handle). */
@@ -317,6 +319,7 @@ export interface VigilRecording {
   recordingId: string;
   machineId: string;
   uid?: number;
+  examSessionId?: string | null;
   streamType: 'screen' | 'camera';
   filename: string;
   url: string;
@@ -324,6 +327,61 @@ export interface VigilRecording {
   durationMs: number;
   startTs: string;
   endTs: string;
+}
+
+export function recordingBelongsToStudent(recording: VigilRecording, student: VigilStudentCard): boolean {
+  if (student.uid != null) return recording.uid === student.uid;
+  return recording.examSessionId === student.examSessionId;
+}
+
+export interface RecordingDeleteScope {
+  cid: string;
+  ojUserId?: number;
+  examSessionId?: string;
+  recordingId?: string;
+}
+
+export interface RecordingDeletePreview {
+  intent: string;
+  expiresAt: string;
+  scope: 'contest' | 'student' | 'unknown_session' | 'recording';
+  contestTitle: string;
+  count: number;
+  totalBytes: number;
+}
+
+async function recordingRequestError(response: Response, action: string): Promise<Error> {
+  const detail = await response.text();
+  return new Error(`${action}（HTTP ${response.status}）${detail ? `：${detail}` : ''}`);
+}
+
+export async function previewRecordingDelete(scope: RecordingDeleteScope): Promise<RecordingDeletePreview> {
+  const query = new URLSearchParams({ cid: scope.cid });
+  if (scope.ojUserId != null) query.set('ojUserId', String(scope.ojUserId));
+  if (scope.examSessionId) query.set('examSessionId', scope.examSessionId);
+  if (scope.recordingId) query.set('recordingId', scope.recordingId);
+  const response = await fetch(`/api/admin/vigil/recordings/delete-preview?${query}`);
+  if (!response.ok) throw await recordingRequestError(response, '录像删除预检失败');
+  return await response.json();
+}
+
+export async function executeRecordingDelete(
+  scope: RecordingDeleteScope,
+  intent: string,
+  confirmTitle?: string,
+): Promise<{ ok: boolean; deleted: number; missing: number; failures: Array<{ recordingId: string; error: string }> }> {
+  const form = new URLSearchParams({ cid: scope.cid, intent });
+  if (scope.ojUserId != null) form.set('ojUserId', String(scope.ojUserId));
+  if (scope.examSessionId) form.set('examSessionId', scope.examSessionId);
+  if (scope.recordingId) form.set('recordingId', scope.recordingId);
+  if (confirmTitle != null) form.set('confirmTitle', confirmTitle);
+  const response = await fetch('/api/admin/vigil/recordings/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+    body: form,
+  });
+  if (!response.ok) throw await recordingRequestError(response, '录像删除失败');
+  return await response.json();
 }
 
 export interface VigilAuditEntry {

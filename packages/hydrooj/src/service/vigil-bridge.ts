@@ -132,6 +132,44 @@ export async function closeSessionOnVigil(ojContestId: string, sessionId: string
     }
 }
 
+export interface RecordingDeleteScope {
+    cid: string;
+    ojUserId?: number;
+    examSessionId?: string;
+    recordingId?: string;
+}
+
+export async function previewRecordingDelete(
+    scope: RecordingDeleteScope,
+    actor: { uid: number; uname: string },
+): Promise<any> {
+    const query = new URLSearchParams({
+        cid: scope.cid,
+        actorUid: String(actor.uid),
+        actorUname: actor.uname,
+    });
+    if (scope.ojUserId != null) query.set('ojUserId', String(scope.ojUserId));
+    if (scope.examSessionId) query.set('examSessionId', scope.examSessionId);
+    if (scope.recordingId) query.set('recordingId', scope.recordingId);
+    const response = await fetchWithRetry(`${baseUrl()}/api/integrations/oj/recordings/delete-preview?${query}`, { retries: 1 });
+    return await response.json();
+}
+
+export async function executeRecordingDelete(
+    scope: RecordingDeleteScope,
+    actor: { uid: number; uname: string },
+    intent: string,
+    confirmTitle?: string,
+): Promise<any> {
+    const response = await fetchWithRetry(`${baseUrl()}/api/integrations/oj/recordings/delete`, {
+        method: 'POST',
+        retries: 1,
+        timeout: 30_000,
+        body: { ...scope, actor, intent, confirmTitle },
+    });
+    return await response.json();
+}
+
 export interface VigilAccessVerification {
     valid: boolean;
     ojUserId?: number;

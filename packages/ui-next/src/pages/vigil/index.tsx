@@ -32,6 +32,7 @@ import {
   Search,
   ServerOff,
   ShieldAlert,
+  Trash2,
   Users,
   XCircle,
 } from 'lucide-react';
@@ -68,6 +69,7 @@ import {
   listContestRecordings,
   buildRecordingUrl,
   type VigilRecording,
+  type RecordingDeleteScope,
   type VigilStudentCard as VigilStudentCardData,
   type VigilStudentListResponse,
   type VigilStudentStatus,
@@ -81,6 +83,7 @@ import { SendMessageDialog } from '@/pages/vigil/send-message-dialog';
 import { VigilDateTime, parseVigilTimestamp } from '@/pages/vigil/timestamp';
 import { cn } from '@/lib/cn';
 import { parseVigilSortKey, type VigilSortKey as SortKey } from '@/pages/vigil/sort';
+import { RecordingDeleteDialog } from '@/pages/vigil/recording-delete-dialog';
 
 /* ─── Defensive UI primitives ─────────────────────────────────────────── */
 
@@ -801,6 +804,7 @@ export function AdminVigilExamDetailPage() {
   const [sortKey, setSortKey] = useState<SortKey>(() => parseVigilSortKey(initialUrl.searchParams.get('sort')));
   const [secondary, setSecondary] = useState<SecondaryView | null>(null);
   const [groupMessageOpen, setGroupMessageOpen] = useState(false);
+  const [recordingDeleteScope, setRecordingDeleteScope] = useState<RecordingDeleteScope | null>(null);
 
   // Debounce search input — typing 张三 shouldn't fire 2 requests.
   useEffect(() => {
@@ -1267,9 +1271,16 @@ export function AdminVigilExamDetailPage() {
                 {secondary === 'events' && '事件表'}
                 {secondary === 'recordings' && '录像'}
               </span>
-              <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => setSecondary(null)}>
-                <XCircle className="size-3" /> 关闭
-              </Button>
+              <div className="flex items-center gap-2">
+                {secondary === 'recordings' ? (
+                  <Button size="sm" variant="destructive" className="h-7 gap-1 text-xs" onClick={() => setRecordingDeleteScope({ cid: examId })}>
+                    <Trash2 className="size-3" />删除整场录像
+                  </Button>
+                ) : null}
+                <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => setSecondary(null)}>
+                  <XCircle className="size-3" /> 关闭
+                </Button>
+              </div>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
@@ -1318,7 +1329,7 @@ export function AdminVigilExamDetailPage() {
                       <TableHead>类型</TableHead>
                       <TableHead>开始时间</TableHead>
                       <TableHead className="text-right">大小</TableHead>
-                      <TableHead className="w-24 pr-5" />
+                      <TableHead className="w-48 pr-5" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1329,9 +1340,25 @@ export function AdminVigilExamDetailPage() {
                         <TableCell className="text-xs text-muted-foreground"><VigilDateTime value={recording.startTs} mode="datetime" /></TableCell>
                         <TableCell className="text-right text-xs tabular-nums">{formatRecordingBytes(recording.size)}</TableCell>
                         <TableCell className="pr-5">
-                          <Button asChild size="sm" variant="outline" className="h-7 text-xs">
-                            <a href={buildRecordingUrl(recording.filename)} target="_blank" rel="noreferrer">播放</a>
-                          </Button>
+                          <div className="flex justify-end gap-1">
+                            <Button asChild size="sm" variant="outline" className="h-7 text-xs">
+                              <a href={buildRecordingUrl(recording.filename)} target="_blank" rel="noreferrer">播放</a>
+                            </Button>
+                            {(recording.uid || recording.examSessionId) ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs"
+                                onClick={() => setRecordingDeleteScope({
+                                  cid: examId,
+                                  ...(recording.uid ? { ojUserId: recording.uid } : { examSessionId: recording.examSessionId! }),
+                                })}
+                              >删该生</Button>
+                            ) : null}
+                            <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => setRecordingDeleteScope({ cid: examId, recordingId: recording.recordingId })}>
+                              删本段
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1362,6 +1389,17 @@ export function AdminVigilExamDetailPage() {
           recordEnabled={selectedStudent.recordEnabled ?? recordEnabled}
         />
       )}
+
+      {recordingDeleteScope ? (
+        <RecordingDeleteDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setRecordingDeleteScope(null);
+          }}
+          scope={recordingDeleteScope}
+          onDeleted={() => recordingsQ.retry()}
+        />
+      ) : null}
 
       {/* Top-bar group message */}
       <GroupMessageInvoker open={groupMessageOpen} onOpenChange={setGroupMessageOpen} contestId={examId} counters={counters} />

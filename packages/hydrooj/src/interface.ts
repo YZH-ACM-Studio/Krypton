@@ -221,10 +221,34 @@ declare module './model/problem' {
         problemKind?: import('@hydrooj/common').ProblemKind;
         /** Missing means the legacy owner/maintainer authorization model. */
         authoringMode?: 'managed';
-        /** Managed draft metadata; P2.14 extends this canonical object. */
+        /** Canonical source identity for a managed programming problem. */
+        sourceMeta?: {
+            template:
+                | 'pat_basic'
+                | 'pat_advanced'
+                | 'gplt_national'
+                | 'gplt_provincial'
+                | 'cauc'
+                | 'self'
+                | 'nowcoder_summer'
+                | 'hdu_summer'
+                | 'hdu_spring';
+            year: number;
+            season?: 'spring' | 'autumn';
+            level?: 'L1' | 'L2' | 'L3';
+            round?: number;
+        };
+        /** Internal managed-authoring state; never part of public problem projections. */
         managedAuthoring?: {
             workingTitle: string;
+            selectedMindmapNodeIds?: ObjectId[];
             metadataStatus: 'draft' | 'confirmed';
+            pendingTrainingPlacement?: {
+                trainingId: ObjectId;
+                chapterId: number;
+            };
+            approvedBy?: number;
+            approvedAt?: Date;
         };
         structureRevision?: number;
         structureLockedAt?: Date;

@@ -60,6 +60,7 @@ const calls = {
     manualStatus: [] as any[],
     oplog: [] as any[],
     provider: [] as any[],
+    publish: [] as any[],
     random: [] as any[],
     refresh: [] as any[],
     recordAdd: [] as any[],
@@ -126,6 +127,8 @@ function cursor(docs: any[] = []) {
 
 const problemStub = {
     PROJECTION_PUBLIC: ['domainId', 'docId', 'pid'],
+    PROJECTION_MANAGED_BANK: ['domainId', 'docId', 'pid', 'sourceMeta', 'managedAuthoring'],
+    PROJECTION_MANAGED_EDITOR: ['domainId', 'docId', 'pid', 'sourceMeta', 'managedAuthoring'],
     assertProblemAclDomain(user: any, domainId: string) {
         if (user._problemAclDomainId !== domainId) throw new TestPermissionError(PERM.PERM_CREATE_PROBLEM);
     },
@@ -163,7 +166,7 @@ const problemStub = {
     async createManagedProgrammingDraft(...args: any[]) {
         createKinds.push('managed-programming');
         calls.add.push(args);
-        return 7;
+        return { docId: 7, pid: 'P3101' };
     },
     async addAdditionalFile(...args: any[]) {
         calls.renameFile.push(args);
@@ -181,6 +184,10 @@ const problemStub = {
     async archiveProblem(...args: any[]) {
         calls.archive.push(args);
         return { domainId: args[0], docId: args[1], archivedAt: new Date() };
+    },
+    async publishManagedProgrammingProblem(input: any) {
+        calls.publish.push(input);
+        return { domainId: input.domainId, docId: input.docId, hidden: false };
     },
     async addAdditionalFileWithClaim(claim: any, ...args: any[]) {
         calls.renameFile.push([claim.domainId, claim.pid, ...args]);
@@ -349,8 +356,8 @@ const oplogStub = {
     },
 };
 const userStub = {
-    async getById() {
-        return { _id: 42 };
+    async getById(_domainId: string, uid: number) {
+        return { _id: uid };
     },
     async getList(_domainId: string, ownerIds: number[]) {
         return Object.fromEntries(ownerIds.map((ownerId) => [ownerId, { _id: ownerId, uname: `user-${ownerId}` }]));
@@ -362,6 +369,14 @@ const userStub = {
 
 const handlerPath = require.resolve('../src/handler/problem.ts');
 const originalLoad = Module._load;
+const managedAuthoringStub = {
+    MANAGED_SOURCE_TEMPLATES: [
+        { id: 'pat_basic', label: 'PAT 乙级', fields: ['year', 'season'] },
+        { id: 'self', label: '自命题', fields: ['year'] },
+    ],
+    listManagedMindmapOptions: async () => [{ id: 'node-1', label: '数据结构 / 线段树', tags: ['线段树'] }],
+    listManagedTrainingOptions: async () => [],
+};
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     if (request === '../error') return errors;
     if (request === '../lib/problem-config') {
@@ -405,6 +420,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === './contest') return contestHandlerStub;
     if (request === '../model/contest') return emptyModel;
     if (request === '../model/oplog') return oplogStub;
+    if (request === '../model/managed-problem-authoring') return managedAuthoringStub;
     if (request === '../model/discussion') return discussionStub;
     if (request === '../model/domain') return domainStub;
     if (request === '../model/manual-grade') {
@@ -621,6 +637,51 @@ describe('P2.11 enumeration entry gates', () => {
         expect(calls.archive[0].slice(0, 4)).to.deep.equal(['system', 7, 42, 'retired']);
     });
 
+    it('shows the managed metadata review scope only to administrators', async () => {
+        getMultiResults = [[{ domainId: 'system', docId: 7, owner: 42, authoringMode: 'managed', hidden: true, managedAuthoring: { metadataStatus: 'draft' } }]];
+        countResult = 1;
+        const admin = makeHandler(ProblemMainHandler, { canBrowse: true, admin: true, hasPriv: () => false });
+        await admin.get('system', 1, '', 20, false, false, 'default', '', '', 0, 'all', 'active', 'pending');
+        expect(calls.getMulti[0].querySnapshot.$and).to.deep.include({
+            authoringMode: 'managed',
+            hidden: true,
+            'managedAuthoring.metadataStatus': 'draft',
+        });
+        expect(admin.response.body.canReviewManaged).to.equal(true);
+        expect(admin.response.body.managedReviewableByDocId[7]).to.equal(true);
+
+        calls.getMulti.length = 0;
+        const author = makeHandler(ProblemMainHandler, { canBrowse: true, admin: false, hasPriv: () => false });
+        const error = await captureFailure(() =>
+            author.get('system', 1, '', 20, false, false, 'default', '', '', 0, 'all', 'active', 'pending'),
+        );
+        expect(error).to.be.instanceOf(TestPermissionError);
+        expect(calls.getMulti).to.deep.equal([]);
+    });
+
+    it('publishes managed drafts only through the administrator review service', async () => {
+        const admin = makeHandler(ProblemMainHandler, { canBrowse: true, admin: true });
+        await admin.postManagedPublish('forged', 7, '正式标题', 4);
+        expect(calls.publish).to.have.lengthOf(1);
+        expect(calls.publish[0]).to.deep.include({
+            domainId: 'system',
+            docId: 7,
+            formalTitle: '正式标题',
+            difficulty: 4,
+            actor: 42,
+        });
+
+        const author = makeHandler(ProblemMainHandler, { canBrowse: true, admin: false });
+        const denied = await captureFailure(() => author.postManagedPublish('forged', 7, '正式标题', 4));
+        expect(denied).to.be.instanceOf(TestPermissionError);
+        expect(calls.publish).to.have.lengthOf(1);
+
+        getResults = [{ domainId: 'system', docId: 7, authoringMode: 'managed', hidden: true }];
+        const bypass = await captureFailure(() => admin.postUnhide('forged', [7]));
+        expect(bypass).to.be.instanceOf(GenericError);
+        expect(calls.publish).to.have.lengthOf(1);
+    });
+
     it('ignores a forged method domainId and queries only the authoritative handler domain', async () => {
         const scope = { owner: 42 };
         const user = {
@@ -678,18 +739,144 @@ describe('P2.11 authoritative problem route domain', () => {
         const handler = makeHandler(ProblemCreateProgrammingHandler, {
             hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROGRAMMING_DRAFT,
         });
-        handler.request.body = { title: 'Working title', content: 'Statement' };
+        handler.request.body = {
+            title: 'Working title',
+            content: 'Statement',
+            template: 'pat_basic',
+            year: '2026',
+            season: 'spring',
+            difficulty: '4',
+            mindmapNodeIds: 'node-1',
+        };
 
-        await handler.post('forged', 'Working title', 'Statement', '', false, 0, []);
+        await handler.post('forged', 'Working title', 'Statement', '', false, 4, [], false, 'pat_basic', 2026, 'spring', '', 0, ['node-1']);
 
         expect(createKinds).to.deep.equal(['managed-programming']);
-        expect(calls.add[0]).to.deep.equal(['system', 'Working title', 'Statement', 42]);
+        expect(calls.add[0]).to.deep.equal([
+            'system',
+            {
+                workingTitle: 'Working title',
+                content: 'Statement',
+                difficulty: 4,
+                sourceMeta: { template: 'pat_basic', year: 2026, season: 'spring' },
+                mindmapNodeIds: ['node-1'],
+            },
+            42,
+            undefined,
+        ]);
         expect(handler.response.body).to.include({ docId: 7, authoringMode: 'managed', hidden: true });
 
-        handler.request.body = { title: 'Working title', content: 'Statement', pid: 'P9999' };
-        const forged = await captureFailure(() => handler.post('forged', 'Working title', 'Statement', 'P9999', false, 0, []));
-        expect(forged).to.be.instanceOf(GenericError);
+        const validBody = { ...handler.request.body };
+        for (const [field, value] of [
+            ['pid', 'P9999'],
+            ['tag', 'forged'],
+            ['sourceMeta', '{"template":"self"}'],
+            ['hidden', 'false'],
+            ['authorUid', '77'],
+        ]) {
+            handler.request.body = { ...validBody, [field]: value };
+            const forged = await captureFailure(() =>
+                handler.post('forged', 'Working title', 'Statement', 'P9999', false, 4, [], false, 'pat_basic', 2026, 'spring', '', 0, ['node-1']),
+            );
+            expect(forged).to.be.instanceOf(GenericError);
+        }
         expect(calls.add).to.have.lengthOf(1);
+    });
+
+    it('delegates managed source, mindmap, and training semantics to the observable model boundary', async () => {
+        const handler = makeHandler(ProblemCreateProgrammingHandler, {
+            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROGRAMMING_DRAFT,
+        });
+        const commonBody = {
+            title: 'Working title',
+            content: 'Statement',
+            year: '2026',
+            difficulty: '4',
+        };
+        const trainingId = '64b000000000000000000010';
+        const cases = [
+            {
+                body: { ...commonBody, template: 'unknown', mindmapNodeIds: 'node-1' },
+                args: ['unknown', 2026, ['node-1'], '', ''],
+            },
+            {
+                body: { ...commonBody, template: 'self' },
+                args: ['self', 2026, [], '', ''],
+            },
+            {
+                body: { ...commonBody, template: 'self', mindmapNodeIds: 'node-1', trainingId },
+                args: ['self', 2026, ['node-1'], trainingId, ''],
+            },
+        ] as const;
+
+        for (const testCase of cases) {
+            calls.add.length = 0;
+            handler.request.body = testCase.body;
+            await handler.post(
+                'forged',
+                'Working title',
+                'Statement',
+                '',
+                false,
+                4,
+                [],
+                false,
+                testCase.args[0],
+                testCase.args[1],
+                '',
+                '',
+                '',
+                [...testCase.args[2]],
+                testCase.args[3],
+                testCase.args[4],
+            );
+
+            expect(calls.add).to.have.lengthOf(1);
+        }
+        expect(calls.add[0][1].pendingTrainingPlacement).to.deep.equal({ trainingId, chapterId: '' });
+
+        const source = readFileSync(resolve(__dirname, '../src/handler/problem.ts'), 'utf8');
+        const start = source.indexOf('export class ProblemCreateProgrammingHandler');
+        const end = source.indexOf('export const ProblemApi', start);
+        const create = source.slice(start, end);
+        expect(create).to.include("@post('template', Types.String, true)");
+        expect(create).to.include("@post('trainingId', Types.String, true)");
+        expect(create).to.include("@post('chapterId', Types.String, true)");
+        expect(create).not.to.include('Types.Range(MANAGED_SOURCE_TEMPLATES.map');
+    });
+
+    it('lets only a bank administrator pre-create a managed draft for one explicit author', async () => {
+        const handler = makeHandler(ProblemCreateProgrammingHandler, {
+            admin: true,
+            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM,
+        });
+        handler.request.body = {
+            title: 'Admin draft',
+            content: 'Statement',
+            managed: 'true',
+            template: 'self',
+            year: '2026',
+            difficulty: '3',
+            mindmapNodeIds: 'node-1',
+            authorUid: '77',
+        };
+        await handler.post('forged', 'Admin draft', 'Statement', '', false, 3, [], true, 'self', 2026, '', '', 0, ['node-1'], undefined, 0, 77);
+        expect(calls.add.at(-1)?.[1]).to.deep.include({
+            workingTitle: 'Admin draft',
+            difficulty: 3,
+            authorUid: 77,
+        });
+        expect(calls.add.at(-1)?.[2]).to.equal(42);
+        expect(calls.add.at(-1)?.[3]).to.equal(handler.user);
+
+        const teacher = makeHandler(ProblemCreateProgrammingHandler, {
+            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM,
+        });
+        teacher.request.body = { ...handler.request.body };
+        const denied = await captureFailure(() =>
+            teacher.post('forged', 'Admin draft', 'Statement', '', false, 3, [], true, 'self', 2026, '', '', 0, ['node-1'], undefined, 0, 77),
+        );
+        expect(denied).to.be.instanceOf(TestPermissionError);
     });
 
     it('submits and hacks against the loaded problem domain', async () => {
@@ -755,6 +942,26 @@ describe('P2.13 managed programming edit boundary', () => {
         expect(calls.edit[0][2]).to.deep.equal({ content: 'New statement', html: false });
     });
 
+    it('keeps a confirmed formal title out of generic content saves and rejects a forged title', async () => {
+        maintainResult = true;
+        const handler = managedHandler();
+        handler.pdoc.hidden = false;
+        handler.pdoc.managedAuthoring.metadataStatus = 'confirmed';
+        handler.request.body = { content: 'New statement', expectedStructureRevision: '2' };
+
+        await handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, undefined, 2);
+        expect(calls.edit[0][2]).to.deep.equal({ content: 'New statement', html: false });
+
+        calls.edit.length = 0;
+        handler.request.body = { content: 'Newer statement', title: 'Working title', expectedStructureRevision: '2' };
+        const error = await captureFailure(() =>
+            handler.post('forged', 'P7', 'Working title', 'Newer statement', undefined, false, [], undefined, undefined, 2),
+        );
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.oplog.at(-1)?.[2]?.fields).to.deep.equal(['title']);
+    });
+
     it('rejects forbidden managed fields as one audited request even when the value is unchanged', async () => {
         const handler = managedHandler();
         handler.request.body = { content: 'New statement', title: 'Formal title', pid: 'P7' };
@@ -766,7 +973,41 @@ describe('P2.13 managed programming edit boundary', () => {
         expect(error).to.be.instanceOf(GenericError);
         expect(calls.edit).to.deep.equal([]);
         expect(calls.oplog.at(-1)?.[1]).to.equal('problem.managed.write.denied');
-        expect(calls.oplog.at(-1)?.[2]?.fields).to.deep.equal(['title', 'pid']);
+        expect(calls.oplog.at(-1)?.[2]?.fields).to.deep.equal(['pid']);
+    });
+
+    it('rejects administrator-forged managed PID and system tags before generic model entrypoint', async () => {
+        maintainResult = true;
+        const handler = managedHandler();
+
+        const forgedFields: Array<{ field: 'pid' | 'tag'; value: string | string[] }> = [
+            { field: 'pid', value: 'P9999' },
+            { field: 'tag', value: ['forged'] },
+        ];
+        for (const { field, value } of forgedFields) {
+            calls.edit.length = 0;
+            handler.request.body = { content: 'New statement', expectedStructureRevision: '2', [field]: value };
+
+            const error = await captureFailure(() =>
+                handler.post(
+                    'forged',
+                    'P7',
+                    undefined,
+                    'New statement',
+                    field === 'pid' ? String(value) : undefined,
+                    false,
+                    field === 'tag' ? (value as string[]) : [],
+                    undefined,
+                    undefined,
+                    2,
+                ),
+            );
+
+            expect(error).to.be.instanceOf(GenericError);
+            expect(calls.edit).to.deep.equal([]);
+            expect(calls.oplog.at(-1)?.[1]).to.equal('problem.managed.write.denied');
+            expect(calls.oplog.at(-1)?.[2]?.fields).to.deep.equal([field]);
+        }
     });
 
     it('rejects a mixed managed file request before acquiring a storage write claim', async () => {

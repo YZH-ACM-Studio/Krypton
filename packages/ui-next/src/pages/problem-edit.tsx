@@ -18,8 +18,22 @@ import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { downloadProblemPackage } from '@/lib/problem-package';
+import { managedSourceFieldViews, managedSourceTagPreview, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
 
 type R = Record<string, any>;
+
+interface ManagedMindmapOption {
+  id: string;
+  label: string;
+  tags: string[];
+}
+
+interface ManagedTrainingOption {
+  id: string;
+  title: string;
+  templates: string[];
+  chapters: Array<{ id: number; title: string }>;
+}
 
 const DIFFICULTY_OPTIONS = [
   { value: '', label: '未评定' },
@@ -323,18 +337,22 @@ export function ProblemEditPage() {
   const data = bs.page.data;
   const pdoc: R = data.pdoc || {};
   const capabilities: R = data.problemAuthoringCapabilities || {};
-  const managed = pdoc.authoringMode === 'managed' || capabilities.managed === true;
-
+  const isCreate = !pdoc.docId;
+  const managedExisting = pdoc.authoringMode === 'managed' || capabilities.managed === true;
+  const canChooseManagedCreate = isCreate && data.canCreateManagedProblem === true && !data.managedCreateDefault;
+  const [managedCreateMode, setManagedCreateMode] = useState(data.managedCreateDefault === true);
+  const managed = managedExisting || (isCreate && managedCreateMode);
   const pid = pdoc.pid || pdoc.docId || '';
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const additionalFiles: R[] = data.additional_file || [];
   const testdataFiles: R[] = data.testdata || pdoc.data || [];
-  const isCreate = !pdoc.docId;
   const canEditDraftMetadata = !managed || capabilities.canEditDraftMetadata === true;
   const canEditCanonicalMetadata = !managed || capabilities.canPublish === true;
-  const canPublish = !managed || capabilities.canPublish === true;
+  const canPublish = !managed;
   const canDelete = !managed || capabilities.canDelete === true;
   const canManageCollaborators = !managed || capabilities.canManageCollaborators === true;
+  const managedMetadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft';
+  const canSubmitManagedWorkingTitle = isCreate || (managedMetadataDraft && canEditDraftMetadata);
   const filesBase = pdoc.docId ? `${problemUrl}/files` : '';
 
   const rawContent = pdoc.content || '';
@@ -356,6 +374,36 @@ export function ProblemEditPage() {
   const [hiddenValue, setHiddenValue] = useState(isCreate || !!pdoc.hidden);
   const [lockHiddenValue, setLockHiddenValue] = useState(!!pdoc.lockHidden);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const sourceTemplates: ManagedSourceTemplateOption[] = data.managedSourceTemplates || [];
+  const mindmapOptions: ManagedMindmapOption[] = data.managedMindmapOptions || [];
+  const trainingOptions: ManagedTrainingOption[] = data.managedTrainingOptions || [];
+  const initialTemplate = pdoc.sourceMeta?.template || sourceTemplates[0]?.id || '';
+  const [sourceTemplate, setSourceTemplate] = useState(initialTemplate);
+  const [sourceYear, setSourceYear] = useState(String(pdoc.sourceMeta?.year || new Date().getFullYear()));
+  const [sourceSeason, setSourceSeason] = useState(String(pdoc.sourceMeta?.season || 'spring'));
+  const [sourceLevel, setSourceLevel] = useState(String(pdoc.sourceMeta?.level || 'L1'));
+  const [sourceRound, setSourceRound] = useState(String(pdoc.sourceMeta?.round || 1));
+  const initialMindmapIds = new Set((pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String));
+  const [selectedMindmapNodes, setSelectedMindmapNodes] = useState<ManagedMindmapOption[]>(
+    mindmapOptions.filter((option) => initialMindmapIds.has(option.id)),
+  );
+  const [selectedTrainingId, setSelectedTrainingId] = useState(String(pdoc.managedAuthoring?.pendingTrainingPlacement?.trainingId || ''));
+  const [selectedChapterId, setSelectedChapterId] = useState(String(pdoc.managedAuthoring?.pendingTrainingPlacement?.chapterId || ''));
+  const selectedTemplateDefinition = sourceTemplates.find((template) => template.id === sourceTemplate);
+  const persistedTemplateDefinition = sourceTemplates.find((template) => template.id === pdoc.sourceMeta?.template);
+  const persistedSourceFields = managedSourceFieldViews(pdoc.sourceMeta, persistedTemplateDefinition);
+  const eligibleTrainings = trainingOptions.filter((training) => training.templates.includes(sourceTemplate));
+  const selectedTraining = eligibleTrainings.find((training) => training.id === selectedTrainingId);
+  const sourcePreviewTags = managedSourceTagPreview(sourceTemplate, sourceYear, sourceSeason, sourceLevel);
+  const managedTags = [
+    ...new Set([...(isCreate ? sourcePreviewTags : pdoc.tag || []), ...(isCreate ? selectedMindmapNodes.flatMap((node) => node.tags) : [])]),
+  ];
+
+  useEffect(() => {
+    if (!selectedTrainingId || eligibleTrainings.some((training) => training.id === selectedTrainingId)) return;
+    setSelectedTrainingId('');
+    setSelectedChapterId('');
+  }, [eligibleTrainings, selectedTrainingId]);
 
   useEffect(() => {
     const warnBeforeLeave = (event: BeforeUnloadEvent) => {
@@ -523,6 +571,21 @@ export function ProblemEditPage() {
           {!isCreate && pdoc.problemKind && pdoc.structureRevision ? (
             <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision)} />
           ) : null}
+          {isCreate && managed ? <input type="hidden" name="managed" value="true" /> : null}
+
+          {canChooseManagedCreate ? (
+            <section className="rounded-2xl border border-border/70 bg-card/30 p-5">
+              <label className="flex cursor-pointer items-start gap-3">
+                <Checkbox checked={managedCreateMode} onCheckedChange={setManagedCreateMode} aria-label="创建托管题" />
+                <span>
+                  <span className="block text-sm font-semibold">创建托管题并指定出题人</span>
+                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                    PID、来源标签和算法标签由服务端生成；关闭后保留管理员原有的完整创建方式。
+                  </span>
+                </span>
+              </label>
+            </section>
+          ) : null}
 
           <section id="basic" aria-labelledby="basic-heading" className="scroll-mt-44 rounded-2xl border border-border/70 bg-card/30">
             <header className="border-b border-border/60 px-5 py-4">
@@ -535,14 +598,20 @@ export function ProblemEditPage() {
               <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_13rem]">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium" htmlFor="edit-title">
-                    {managed && isCreate ? '工作标题' : '标题'}
+                    {managed ? (isCreate || managedMetadataDraft ? '工作标题' : '正式标题') : '标题'}
                   </label>
                   <Input
                     id="edit-title"
-                    name={!managed || isCreate || canEditDraftMetadata ? 'title' : undefined}
-                    defaultValue={pdoc.title || ''}
+                    name={!managed || canSubmitManagedWorkingTitle ? 'title' : undefined}
+                    defaultValue={
+                      managed && !isCreate
+                        ? managedMetadataDraft
+                          ? pdoc.managedAuthoring?.workingTitle || ''
+                          : pdoc.title || ''
+                        : pdoc.title || ''
+                    }
                     placeholder={managed ? '用于审核协作，不会直接作为正式标题发布' : '题目标题'}
-                    readOnly={!isCreate && !canEditDraftMetadata}
+                    readOnly={managed ? !canSubmitManagedWorkingTitle : !isCreate && !canEditDraftMetadata}
                     required
                   />
                 </div>
@@ -570,24 +639,26 @@ export function ProblemEditPage() {
                   <Input
                     id="edit-tag"
                     name={managed ? undefined : 'tag'}
-                    value={tagInput}
+                    value={managed ? managedTags.join(', ') : tagInput}
                     onChange={(event) => {
                       if (canEditCanonicalMetadata) setTagInput(event.target.value);
                     }}
                     placeholder={managed ? '托管题标签由审核流程确定' : '用逗号分隔，如：模拟, 数学, 贪心'}
                     readOnly={managed}
                   />
-                  {tagInput ? (
+                  {(managed ? managedTags.length : tagInput) ? (
                     <div className="flex flex-wrap gap-1 pt-1">
-                      {tagInput
-                        .split(',')
-                        .map((tag) => tag.trim())
-                        .filter(Boolean)
-                        .map((tag) => (
-                          <Badge key={tag} variant="secondary" className="text-[10px]">
-                            {tag}
-                          </Badge>
-                        ))}
+                      {(managed
+                        ? managedTags
+                        : tagInput
+                            .split(',')
+                            .map((tag) => tag.trim())
+                            .filter(Boolean)
+                      ).map((tag) => (
+                        <Badge key={tag} variant="secondary" className="text-[10px]">
+                          {tag}
+                        </Badge>
+                      ))}
                     </div>
                   ) : null}
                 </div>
@@ -595,7 +666,7 @@ export function ProblemEditPage() {
                   <label className="text-sm font-medium" htmlFor="edit-difficulty">
                     难度
                   </label>
-                  {managed && (isCreate || !canEditDraftMetadata) ? (
+                  {managed && !isCreate && !canEditDraftMetadata ? (
                     <Input
                       id="edit-difficulty"
                       value={DIFFICULTY_OPTIONS.find((option) => Number(option.value) === Number(pdoc.difficulty || 0))?.label || '未评定'}
@@ -606,13 +677,213 @@ export function ProblemEditPage() {
                       id="edit-difficulty"
                       name="difficulty"
                       defaultValue={String(pdoc.difficulty || '')}
-                      options={DIFFICULTY_OPTIONS.map((option) => ({ value: String(option.value), label: option.label }))}
+                      options={DIFFICULTY_OPTIONS.filter((option) => !managed || option.value !== '').map((option) => ({
+                        value: String(option.value),
+                        label: option.label,
+                      }))}
                     />
                   )}
                 </div>
               </div>
             </div>
           </section>
+
+          {managed ? (
+            <section id="managed-source" aria-labelledby="managed-source-heading" className="rounded-2xl border border-border/70 bg-card/30">
+              <header className="border-b border-border/60 px-5 py-4">
+                <h2 id="managed-source-heading" className="text-base font-semibold tracking-tight">
+                  来源与归档
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {isCreate
+                    ? '选择固定来源和知识导图节点；PID 与标签仅由服务端计算。训练选择只记录待审核位置。'
+                    : '来源、PID 与系统标签已锁定；最终发布由管理员审核。'}
+                </p>
+              </header>
+              {isCreate ? (
+                <div className="space-y-5 p-5">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium" htmlFor="managed-template">
+                        来源模板
+                      </label>
+                      <SimpleSelect
+                        id="managed-template"
+                        name="template"
+                        value={sourceTemplate}
+                        onValueChange={(value) => {
+                          setSourceTemplate(value);
+                          setSelectedTrainingId('');
+                          setSelectedChapterId('');
+                        }}
+                        options={sourceTemplates.map((template) => ({ value: template.id, label: template.label }))}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium" htmlFor="managed-year">
+                        年份
+                      </label>
+                      <Input
+                        id="managed-year"
+                        name="year"
+                        type="number"
+                        min={2000}
+                        max={2100}
+                        value={sourceYear}
+                        onChange={(event) => setSourceYear(event.target.value)}
+                        required
+                      />
+                    </div>
+                    {selectedTemplateDefinition?.fields.includes('season') ? (
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium" htmlFor="managed-season">
+                          季度
+                        </label>
+                        <SimpleSelect
+                          id="managed-season"
+                          name="season"
+                          value={sourceSeason}
+                          onValueChange={setSourceSeason}
+                          options={[
+                            { value: 'spring', label: '春季' },
+                            { value: 'autumn', label: '秋季' },
+                          ]}
+                        />
+                      </div>
+                    ) : null}
+                    {selectedTemplateDefinition?.fields.includes('level') ? (
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium" htmlFor="managed-level">
+                          题目等级
+                        </label>
+                        <SimpleSelect
+                          id="managed-level"
+                          name="level"
+                          value={sourceLevel}
+                          onValueChange={setSourceLevel}
+                          options={['L1', 'L2', 'L3'].map((value) => ({ value, label: value }))}
+                        />
+                      </div>
+                    ) : null}
+                    {selectedTemplateDefinition?.fields.includes('round') ? (
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium" htmlFor="managed-round">
+                          场次
+                        </label>
+                        <Input
+                          id="managed-round"
+                          name="round"
+                          type="number"
+                          min={1}
+                          max={99}
+                          value={sourceRound}
+                          onChange={(event) => setSourceRound(event.target.value)}
+                          required
+                        />
+                        <p className="text-xs text-muted-foreground">场次只进入来源元数据和训练章节，不生成标签。</p>
+                      </div>
+                    ) : null}
+                    {canChooseManagedCreate ? (
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium" htmlFor="managed-author-uid">
+                          出题人 UID
+                        </label>
+                        <Input id="managed-author-uid" name="authorUid" type="number" min={1} required />
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium">算法知识点</label>
+                    <MultiSelect
+                      options={mindmapOptions}
+                      value={selectedMindmapNodes}
+                      onChange={setSelectedMindmapNodes}
+                      getKey={(node) => node.id}
+                      getLabel={(node) => node.label}
+                      getDescription={(node) => node.tags.join(' / ')}
+                      name="mindmapNodeIds"
+                      placeholder="从知识导图选择，可多选"
+                      emptyText="没有可选的带标签节点"
+                    />
+                    <p className="text-xs text-muted-foreground">服务端会同时物化每个节点路径上所有带标签的祖先。</p>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium" htmlFor="managed-training">
+                        待挂训练（可选）
+                      </label>
+                      <SimpleSelect
+                        id="managed-training"
+                        name="trainingId"
+                        value={selectedTrainingId}
+                        onValueChange={(value) => {
+                          setSelectedTrainingId(value);
+                          setSelectedChapterId('');
+                        }}
+                        options={[
+                          { value: '', label: '暂不加入训练' },
+                          ...eligibleTrainings.map((training) => ({ value: training.id, label: training.title })),
+                        ]}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium" htmlFor="managed-chapter">
+                        现有章节
+                      </label>
+                      <SimpleSelect
+                        id="managed-chapter"
+                        name={selectedTrainingId ? 'chapterId' : undefined}
+                        value={selectedChapterId}
+                        onValueChange={setSelectedChapterId}
+                        disabled={!selectedTraining}
+                        options={[
+                          { value: '', label: selectedTraining ? '请选择章节' : '先选择训练' },
+                          ...(selectedTraining?.chapters || []).map((chapter) => ({ value: String(chapter.id), label: chapter.title })),
+                        ]}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl bg-muted/45 px-4 py-3">
+                    <p className="text-xs font-medium text-muted-foreground">服务端将生成的来源标签</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {sourcePreviewTags.map((tag) => (
+                        <Badge key={tag} variant="secondary">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid gap-4 p-5 md:grid-cols-2">
+                  <div className="grid gap-3 rounded-xl bg-muted/45 px-4 py-3 sm:grid-cols-2">
+                    {persistedSourceFields.map((field) => (
+                      <div key={field.label}>
+                        <p className="text-xs text-muted-foreground">{field.label}</p>
+                        <p className="mt-1 text-sm font-medium">{field.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="rounded-xl bg-muted/45 px-4 py-3">
+                    <p className="text-xs text-muted-foreground">待挂训练</p>
+                    <p className="mt-1 text-sm font-medium">
+                      {pdoc.managedAuthoring?.pendingTrainingPlacement
+                        ? `${trainingOptions.find((training) => training.id === String(pdoc.managedAuthoring.pendingTrainingPlacement.trainingId))?.title || '训练'} / ${
+                            trainingOptions
+                              .flatMap((training) => training.chapters)
+                              .find((chapter) => chapter.id === pdoc.managedAuthoring.pendingTrainingPlacement.chapterId)?.title ||
+                            `章节 ${pdoc.managedAuthoring.pendingTrainingPlacement.chapterId}`
+                          }`
+                        : '未选择'}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </section>
+          ) : null}
 
           <section id="statement" aria-labelledby="statement-heading" className="scroll-mt-44 rounded-2xl border border-border/70 bg-card/30">
             <header className="flex items-start gap-3 border-b border-border/60 px-5 py-4">
@@ -657,7 +928,7 @@ export function ProblemEditPage() {
                 权限与可见性
               </h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                {managed ? '托管题仅管理员可以调整可见性与锁定状态。' : '新题固定以隐藏状态创建；发布与维护权限沿用现有模型。'}
+                {managed ? '托管草稿保持隐藏；管理员从统一题库确认元数据并发布。' : '新题固定以隐藏状态创建；发布与维护权限沿用现有模型。'}
               </p>
             </header>
             <div className="grid gap-4 p-5 sm:grid-cols-2">

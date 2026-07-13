@@ -51,7 +51,9 @@ describe('P3.12 programming editor workspace', () => {
     for (const name of ['difficulty', 'content', 'hidden', 'lockHidden']) {
       expect(edit).to.include(`name="${name}"`);
     }
-    expect(edit).to.include("name={!managed || isCreate || canEditDraftMetadata ? 'title' : undefined}");
+    expect(edit).to.include("name={!managed || canSubmitManagedWorkingTitle ? 'title' : undefined}");
+    expect(edit).to.include("const managedMetadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft'");
+    expect(edit).to.include("managedMetadataDraft\n                          ? pdoc.managedAuthoring?.workingTitle || ''\n                          : pdoc.title || ''");
     expect(edit).to.include("name={managed ? undefined : 'pid'}");
     expect(edit).to.include("name={managed ? undefined : 'tag'}");
     expect(config).to.include("formData.append('operation', 'upload_file')");

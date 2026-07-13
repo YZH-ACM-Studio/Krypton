@@ -88,6 +88,37 @@ beforeEach(() => {
 });
 
 describe('P2.12 minimal problem lifecycle', () => {
+    for (const failureStage of ['problem/add', 'problem.create audit'] as const) {
+        it(`captures the exact inserted docId before a ${failureStage} failure`, async () => {
+            let persistedDocId: number | null = null;
+            let emitted = false;
+            let audited = false;
+            let caught: Error | null = null;
+            try {
+                await lifecycle.completePersistedProblemCreate(
+                    3101,
+                    (docId) => {
+                        persistedDocId = docId;
+                    },
+                    async () => {
+                        emitted = true;
+                        if (failureStage === 'problem/add') throw new Error('injected problem/add failure');
+                    },
+                    async () => {
+                        audited = true;
+                        if (failureStage === 'problem.create audit') throw new Error('injected problem.create audit failure');
+                    },
+                );
+            } catch (error) {
+                caught = error as Error;
+            }
+            expect(caught?.message).to.include(`injected ${failureStage} failure`);
+            expect(persistedDocId).to.equal(3101);
+            expect(emitted).to.equal(true);
+            expect(audited).to.equal(failureStage === 'problem.create audit');
+        });
+    }
+
     it('records every created problem field that varies by create input', () => {
         expect(lifecycle.problemCreateChangedFields('programming', {})).not.to.include('config');
         expect(
@@ -98,6 +129,13 @@ describe('P2.12 minimal problem lifecycle', () => {
             }),
         ).to.include.members(['pid', 'difficulty', 'reference', 'config']);
         expect(lifecycle.problemCreateChangedFields('blank', {})).to.include('config');
+        expect(
+            lifecycle.problemCreateChangedFields('programming', {
+                authoringMode: 'managed',
+                sourceMeta: { template: 'self' },
+                managedAuthoring: { metadataStatus: 'draft' },
+            }),
+        ).to.include.members(['authoringMode', 'sourceMeta', 'managedAuthoring']);
     });
 
     it('audits the sort key derived when a custom problem id is set or cleared', () => {

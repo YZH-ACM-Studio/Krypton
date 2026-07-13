@@ -61,6 +61,7 @@ import domain from '../model/domain';
 import { markManualPending } from '../model/manual-grade';
 import * as oplog from '../model/oplog';
 import problem from '../model/problem';
+import { listManagedMindmapOptions, listManagedTrainingOptions, MANAGED_SOURCE_TEMPLATES } from '../model/managed-problem-authoring';
 import { structuredProblemUsesTestdata } from '../model/problem-lifecycle';
 import record from '../model/record';
 import * as setting from '../model/setting';
@@ -253,6 +254,7 @@ export class ProblemMainHandler extends Handler {
     @param('owner', Types.PositiveInt, true)
     @param('visibility', Types.Range(['all', 'hidden', 'published']), true)
     @param('lifecycle', Types.Range(['active', 'archived', 'all']), true)
+    @param('managedReview', Types.Range(['all', 'pending']), true)
     async get(
         _domainId: string,
         page = 1,
@@ -266,6 +268,7 @@ export class ProblemMainHandler extends Handler {
         owner = 0,
         visibility: 'all' | 'hidden' | 'published' = 'all',
         lifecycle: 'active' | 'archived' | 'all' = 'active',
+        managedReview: 'all' | 'pending' = 'all',
     ) {
         const domainId = String(this.domain?._id);
         if (!problem.canBrowseProblemBank(this.user)) {
@@ -285,6 +288,7 @@ export class ProblemMainHandler extends Handler {
         const problemBankScope = problem.buildProblemBankScope(this.user);
         const isBankAdmin = problem.isProblemBankAdmin(this.user);
         if (owner && !isBankAdmin) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
+        if (managedReview === 'pending' && !isBankAdmin) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
         const filterParts: Filter<ProblemDoc>[] = [problemBankScope];
         if (kindSlug) {
             const problemKind = parseProblemKindSlug(kindSlug);
@@ -299,6 +303,9 @@ export class ProblemMainHandler extends Handler {
         else if (visibility === 'published') filterParts.push({ hidden: { $ne: true } });
         if (lifecycle === 'active') filterParts.push({ archivedAt: { $exists: false } });
         else if (lifecycle === 'archived') filterParts.push({ archivedAt: { $exists: true } });
+        if (managedReview === 'pending') {
+            filterParts.push({ authoringMode: 'managed', hidden: true, 'managedAuthoring.metadataStatus': 'draft' });
+        }
         this.queryContext.query = filterParts.length === 1 ? problemBankScope : { $and: filterParts };
         if (sortStrategy === 'recent') this.queryContext.hint = 'basic';
         // eslint-disable-next-line ts/no-shadow
@@ -345,7 +352,7 @@ export class ProblemMainHandler extends Handler {
             ? [[], 0, 0]
             : await this.paginate(
                   problem
-                      .getMulti(domainId, query, quick ? ['title', 'pid', 'domainId', 'docId'] : undefined)
+                      .getMulti(domainId, query, quick ? ['title', 'pid', 'domainId', 'docId'] : problem.PROJECTION_MANAGED_BANK)
                       .sort(sortKey)
                       .hint(this.queryContext.hint),
                   sort.length ? 1 : page,
@@ -366,6 +373,20 @@ export class ProblemMainHandler extends Handler {
         const ownerDict = ownerIds.length ? await user.getList(domainId, ownerIds) : {};
         const ownerNames = Object.fromEntries(pdocs.map((pdoc) => [pdoc.owner, ownerDict[pdoc.owner]?.uname || `UID ${pdoc.owner}`]));
         const canManageByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canEditProblemContent(this.user, pdoc)]));
+        const managedReviewableByDocId = Object.fromEntries(
+            (quick ? [] : pdocs).map((pdoc) => [
+                pdoc.docId,
+                isBankAdmin &&
+                    pdoc.authoringMode === 'managed' &&
+                    pdoc.hidden === true &&
+                    ['draft', 'confirmed'].includes(pdoc.managedAuthoring?.metadataStatus || '') &&
+                    !pdoc.archivedAt,
+            ]),
+        );
+        const managedTrainingOptions =
+            !quick && isBankAdmin && pdocs.some((pdoc) => pdoc.managedAuthoring?.pendingTrainingPlacement)
+                ? await listManagedTrainingOptions(domainId)
+                : [];
         if (pjax) {
             this.response.body = {
                 title: this.renderTitle(this.translate('problem_main')),
@@ -401,14 +422,19 @@ export class ProblemMainHandler extends Handler {
                     owner: owner || '',
                     visibility,
                     lifecycle,
+                    managedReview,
                 },
                 problemKinds: PROBLEM_KINDS.map((kind) => ({
                     kind,
                     slug: problemKindToSlug(kind),
                 })),
                 canFilterOwner: isBankAdmin,
+                canReviewManaged: isBankAdmin,
                 ownerNames,
                 canManageByDocId,
+                managedReviewableByDocId,
+                managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
+                managedTrainingOptions,
             };
         }
     }
@@ -520,11 +546,34 @@ export class ProblemMainHandler extends Handler {
         for (const pid of pids) {
             const pdoc = await problem.get(domainId, pid);
             if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
+            if (pdoc.authoringMode === 'managed') {
+                throw new ValidationError('hidden', null, '托管草稿必须从统一题库审核入口发布');
+            }
             await assertProblemWriteCapability(this, pdoc, problem.canPublishProblem(this.user, pdoc), 'publish', 'publish');
 
             await problem.editAuthorized(domainId, pid, { hidden: false }, this.user);
         }
         this.back();
+    }
+
+    @param('pid', Types.UnsignedInt)
+    @param('formalTitle', Types.Title)
+    @param('difficulty', Types.UnsignedInt)
+    async postManagedPublish(_domainId: string, pid: number, formalTitle: string, difficulty: number) {
+        const domainId = String(this.domain?._id);
+        await problem.refreshProblemAcl(this.user, domainId);
+        problem.assertProblemAclDomain(this.user, domainId);
+        if (!problem.isProblemBankAdmin(this.user)) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+        if (difficulty > 10) throw new ValidationError('difficulty');
+        await problem.publishManagedProgrammingProblem({
+            domainId,
+            docId: pid,
+            formalTitle,
+            difficulty,
+            actor: this.user._id,
+            user: this.user,
+        });
+        this.response.redirect = this.url('problem_main', { query: { managedReview: 'pending' } });
     }
 
     @param('pid', Types.PositiveInt)
@@ -1055,7 +1104,7 @@ export class ProblemHackHandler extends ProblemDetailHandler {
 
 export class ProblemManageHandler extends ProblemDetailHandler {
     async prepare() {
-        this.pdoc = await requireStableEditableProblem(this.user, this.pdoc);
+        this.pdoc = await requireStableEditableProblem(this.user, this.pdoc, problem.PROJECTION_MANAGED_EDITOR);
         // `_prepare` may have loaded the statement through a contest `tid`.
         // That container access never upgrades the response to editor data.
         if (this.response.body) {
@@ -1072,6 +1121,17 @@ export class ProblemEditHandler extends ProblemManageHandler {
         this.response.body.testdata = sortFiles(this.pdoc.data || []);
         this.response.body.additional_file = sortFiles(this.pdoc.additional_file || []);
         this.response.body.statementLangs = this.ctx.i18n.langs(false);
+        if (this.pdoc.authoringMode === 'managed') {
+            const [managedMindmapOptions, managedTrainingOptions] = await Promise.all([
+                listManagedMindmapOptions(),
+                listManagedTrainingOptions(this.pdoc.domainId),
+            ]);
+            Object.assign(this.response.body, {
+                managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
+                managedMindmapOptions,
+                managedTrainingOptions,
+            });
+        }
         // 原始 config YAML（本页 gated by ProblemManageHandler）：前端类型
         // 编辑器直接从页面数据初始化。此前前端 fetch 文件下载路由读取——
         // 该路由对缺失文件不返回 404（照签跳转链接），新题/无 config 题的
@@ -1144,9 +1204,14 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 await auditManagedWriteDenied(this, this.pdoc, 'edit', 'unknown', unknownFields);
                 throw new ValidationError('fields', null, `托管题编辑不接受字段：${unknownFields.join(', ')}`);
             }
+            const canonicalFields = ['pid', 'tag'].filter((field) => Object.hasOwn(body, field));
+            if (canonicalFields.length) {
+                await auditManagedWriteDenied(this, this.pdoc, 'edit', 'fields', canonicalFields);
+                throw new ValidationError('fields', null, `托管题字段只能由服务端派生：${canonicalFields.join(', ')}`);
+            }
             const capabilities = problemAuthoringCapabilities(this.user, this.pdoc);
             const metadataFields = ['title', 'difficulty'].filter((field) => Object.hasOwn(body, field));
-            const publishFields = ['pid', 'hidden', 'tag', 'lockHidden'].filter((field) => Object.hasOwn(body, field));
+            const publishFields = ['hidden', 'lockHidden'].filter((field) => Object.hasOwn(body, field));
             const forbiddenFields = [
                 ...(!capabilities.canEditDraftMetadata ? metadataFields : []),
                 ...(!capabilities.canPublish ? publishFields : []),
@@ -1195,7 +1260,16 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 lockHidden: !!lockHidden,
             });
         } else {
-            if (Object.hasOwn(body, 'title')) $update.title = title;
+            if (Object.hasOwn(body, 'title')) {
+                if (this.pdoc.managedAuthoring?.metadataStatus !== 'draft') {
+                    await auditManagedWriteDenied(this, this.pdoc, 'edit', 'fields', ['title']);
+                    throw new ValidationError('title', null, '正式标题只能从统一题库审核入口确认');
+                }
+                const workingTitle = title?.trim();
+                if (!workingTitle) throw new ValidationError('title');
+                $update.title = `待审核 · ${workingTitle}`;
+                $update.managedAuthoring = { ...this.pdoc.managedAuthoring!, workingTitle };
+            }
             if (Object.hasOwn(body, 'pid')) $update.pid = newPid;
             if (Object.hasOwn(body, 'hidden')) $update.hidden = hidden;
             if (Object.hasOwn(body, 'tag')) $update.tag = tag ?? [];
@@ -1808,7 +1882,7 @@ export class ProblemMineHandler extends Handler {
         const bankScope = problem.buildProblemBankScope(this.user);
         const [pdocs, pcount] = await Promise.all([
             problem
-                .getMulti(domainId, bankScope)
+                .getMulti(domainId, bankScope, problem.PROJECTION_MANAGED_BANK)
                 .sort({ docId: -1 })
                 .skip((page - 1) * limit)
                 .limit(limit)
@@ -1845,6 +1919,10 @@ export class ProblemCreateProgrammingHandler extends Handler {
         const managedCreate = this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         if (!legacyCreate && !managedCreate) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         const restricted = !legacyCreate;
+        const canCreateManagedProblem = restricted || problem.isProblemBankAdmin(this.user);
+        const [managedMindmapOptions, managedTrainingOptions] = canCreateManagedProblem
+            ? await Promise.all([listManagedMindmapOptions(), listManagedTrainingOptions(String(this.domain?._id))])
+            : [[], []];
         this.response.template = 'problem_edit.html';
         this.response.body = {
             page_name: 'problem_create_programming',
@@ -1856,10 +1934,15 @@ export class ProblemCreateProgrammingHandler extends Handler {
                 ...(restricted
                     ? {
                           authoringMode: 'managed',
-                          managedAuthoring: { workingTitle: '', metadataStatus: 'draft' },
+                          managedAuthoring: { workingTitle: '', selectedMindmapNodeIds: [], metadataStatus: 'draft' },
                       }
                     : {}),
             },
+            canCreateManagedProblem,
+            managedCreateDefault: restricted,
+            managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
+            managedMindmapOptions,
+            managedTrainingOptions,
             problemAuthoringCapabilities: restricted
                 ? {
                       managed: true,
@@ -1882,15 +1965,60 @@ export class ProblemCreateProgrammingHandler extends Handler {
     @post('hidden', Types.Boolean)
     @post('difficulty', Types.PositiveInt, (i) => +i <= 10, true)
     @post('tag', Types.Content, true, null, parseCategory)
-    async post(_domainId: string, title: string, content: string, pid: string | number = '', _hidden = false, difficulty = 0, tag: string[] = []) {
+    @post('managed', Types.Boolean, true)
+    @post('template', Types.String, true)
+    @post('year', Types.String, true)
+    @post('season', Types.String, true)
+    @post('level', Types.String, true)
+    @post('round', Types.String, true)
+    @post('mindmapNodeIds', Types.CommaSeperatedArray, true)
+    @post('trainingId', Types.String, true)
+    @post('chapterId', Types.String, true)
+    @post('authorUid', Types.PositiveInt, true)
+    async post(
+        _domainId: string,
+        title: string,
+        content: string,
+        pid: string | number = '',
+        _hidden = false,
+        difficulty = 0,
+        tag: string[] = [],
+        managed = false,
+        template = '',
+        year: string | number = '',
+        season = '',
+        level = '',
+        round: string | number = '',
+        mindmapNodeIds: string[] = [],
+        trainingId = '',
+        chapterId: string | number = '',
+        authorUid = 0,
+    ) {
         const domainId = String(this.domain?._id);
         const legacyCreate = this.user.hasPerm(PERM.PERM_CREATE_PROBLEM);
         const managedCreate = this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         if (!legacyCreate && !managedCreate) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
-        if (!legacyCreate) {
-            const allowed = new Set(['title', 'content']);
+        const managedMode = !legacyCreate || managed;
+        if (managedMode) {
+            const isBankAdmin = problem.isProblemBankAdmin(this.user);
+            if (legacyCreate && !isBankAdmin) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
+            const allowed = new Set([
+                'title',
+                'content',
+                'managed',
+                'template',
+                'year',
+                'season',
+                'level',
+                'round',
+                'difficulty',
+                'mindmapNodeIds',
+                'trainingId',
+                'chapterId',
+                ...(isBankAdmin ? ['authorUid'] : []),
+            ]);
             const unknownFields = Object.keys(this.request.body || {}).filter((field) => !allowed.has(field));
             if (unknownFields.length) {
                 logger.warn('Managed draft create rejected domain=%s actor=%d fields=%o result=denied', domainId, this.user._id, unknownFields);
@@ -1901,16 +2029,42 @@ export class ProblemCreateProgrammingHandler extends Handler {
                 });
                 throw new ValidationError('fields', null, `托管草稿不接受字段：${unknownFields.join(', ')}`);
             }
-            const docId = await problem.createManagedProgrammingDraft(domainId, title, content, this.user._id);
+            if (isBankAdmin && !authorUid) throw new ValidationError('authorUid');
+            if (!isBankAdmin && authorUid) throw new ValidationError('authorUid');
+            if (isBankAdmin) {
+                const author = await user.getById(domainId, authorUid);
+                if (!author || author._id !== authorUid) throw new ValidationError('authorUid');
+            }
+            const sourceMeta = {
+                template,
+                year,
+                ...(season ? { season } : {}),
+                ...(level ? { level } : {}),
+                ...(round ? { round } : {}),
+            };
+            const created = await problem.createManagedProgrammingDraft(
+                domainId,
+                {
+                    workingTitle: title,
+                    content,
+                    difficulty,
+                    sourceMeta,
+                    mindmapNodeIds,
+                    ...(trainingId || chapterId ? { pendingTrainingPlacement: { trainingId, chapterId } } : {}),
+                    ...(isBankAdmin ? { authorUid } : {}),
+                },
+                this.user._id,
+                isBankAdmin ? this.user : undefined,
+            );
             this.response.body = {
-                pid: docId,
-                docId,
+                pid: created.pid,
+                docId: created.docId,
                 hidden: true,
                 problemKind: 'programming',
                 authoringMode: 'managed',
                 structureRevision: 1,
             };
-            this.response.redirect = this.url('problem_edit', { pid: docId });
+            this.response.redirect = this.url('problem_edit', { pid: created.pid });
             return;
         }
         if (typeof pid !== 'string') pid = `P${pid}`;

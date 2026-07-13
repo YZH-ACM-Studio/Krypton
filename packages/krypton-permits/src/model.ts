@@ -15,6 +15,12 @@ const aclService = createAclService(mongoAclRepository);
 
 type BoundWriteCapability = 'collaborators' | 'publish' | 'maintain' | 'hard-delete';
 
+interface ManagedDraftIdentity {
+    documentId: ObjectIdType;
+    publicPid: string;
+    owner: number;
+}
+
 async function assertBoundWriteClaimCapability(
     domainId: string,
     pid: number,
@@ -253,26 +259,136 @@ export async function bootstrapManagedDraftAuthor(
     return created;
 }
 
-/** Narrow cleanup companion for a failed managed-draft bootstrap. */
-export async function cleanupManagedDraftCreation(
+/** Admin-only bootstrap bound to the new draft's active publish claim. */
+export async function bootstrapManagedDraftAuthorForAdmin(
     domainId: string,
     pid: number,
-    creator: number,
-    opts: { requestId?: string } = {},
-): Promise<number> {
+    authorUid: number,
+    actor: number,
+    opts: { requestId?: string; note?: string; writeClaimRequestId?: string } = {},
+): Promise<PermitDoc> {
+    await assertBoundWriteClaimCapability(domainId, pid, opts.writeClaimRequestId, ['publish'], actor, true);
     const [state, sources, canonical] = await Promise.all([
         mongoAclRepository.getManagedDraftBootstrapState(domainId, pid),
         mongoAclRepository.listSourcesForProblem(domainId, pid),
         mongoAclRepository.listCanonicalForProblem(domainId, pid),
     ]);
+    if (
+        !state ||
+        state.authoringMode !== 'managed' ||
+        state.owner !== actor ||
+        state.hidden !== true ||
+        state.metadataStatus !== 'draft' ||
+        sources.length ||
+        canonical.length
+    ) {
+        throw new Error(`managed draft admin author bootstrap is not available for ${domainId}/${pid}`);
+    }
+    const requestId = newRequestId('managed-draft-admin-author-bootstrap', opts.requestId);
+    await aclService.grantDirect(
+        domainId,
+        pid,
+        authorUid,
+        'author',
+        actor,
+        requestId,
+        opts.note || 'administrator pre-created managed draft',
+        opts.writeClaimRequestId,
+    );
+    const created = await permitsColl.findOne({ domainId, pid, uid: authorUid, active: canonicalActiveFilter() });
+    if (!created || created.role !== 'author') {
+        throw new Error(`managed draft admin author bootstrap did not create canonical author for ${domainId}/${pid}`);
+    }
+    return created;
+}
+
+/** Narrow cleanup companion for a failed managed-draft bootstrap. */
+export async function cleanupManagedDraftCreation(
+    domainId: string,
+    pid: number,
+    creator: number,
+    opts: ManagedDraftIdentity & { requestId?: string; authorUid?: number; writeClaimRequestId?: string },
+): Promise<{ removed: number; writeClaimRequestId?: string }> {
+    if (opts.owner !== creator) throw new Error(`managed draft cleanup owner mismatch for ${domainId}/${pid}`);
+    const identity = { documentId: opts.documentId, publicPid: opts.publicPid, owner: opts.owner };
+    const [state, sources, canonical, claim] = await Promise.all([
+        mongoAclRepository.getManagedDraftBootstrapState(domainId, pid, identity),
+        mongoAclRepository.listSourcesForProblem(domainId, pid),
+        mongoAclRepository.listCanonicalForProblem(domainId, pid),
+        mongoAclRepository.getProblemWriteClaim(domainId, pid),
+    ]);
     if (!state || state.authoringMode !== 'managed' || state.owner !== creator || state.hidden !== true || state.metadataStatus !== 'draft') {
         throw new Error(`managed draft cleanup is not available for ${domainId}/${pid}`);
     }
     const rows = [...sources, ...canonical];
-    if (rows.some((row) => row.uid !== creator || row.role !== 'author')) {
+    const expectedAuthor = opts.authorUid || creator;
+    if (rows.some((row) => row.uid !== expectedAuthor || row.role !== 'author')) {
         throw new Error(`managed draft cleanup refused unexpected ACL rows for ${domainId}/${pid}`);
     }
-    return aclService.clearForProblem(domainId, pid, newRequestId('managed-draft-cleanup', opts.requestId), creator);
+    let writeClaimRequestId: string | undefined;
+    if (claim) {
+        if (
+            !opts.writeClaimRequestId ||
+            claim.requestId !== opts.writeClaimRequestId ||
+            claim.state !== 'active' ||
+            claim.actor !== creator ||
+            claim.capability !== 'publish'
+        ) {
+            throw new Error(`managed draft cleanup claim mismatch for ${domainId}/${pid}`);
+        }
+        writeClaimRequestId = claim.requestId;
+    }
+    const removed = await aclService.clearForProblem(
+        domainId,
+        pid,
+        newRequestId('managed-draft-cleanup', opts.requestId),
+        creator,
+        writeClaimRequestId,
+    );
+    return { removed, ...(writeClaimRequestId ? { writeClaimRequestId } : {}) };
+}
+
+/**
+ * The managed-create failure path already cleared ACL after validating a
+ * pristine hidden draft. Recheck that exact invariant before the delete hook
+ * skips its otherwise claim-bound duplicate cleanup.
+ */
+export async function assertManagedDraftCreationCleanupComplete(
+    domainId: string,
+    pid: number,
+    creator: number,
+    identity: ManagedDraftIdentity,
+    writeClaimRequestId?: string,
+): Promise<void> {
+    if (identity.owner !== creator) throw new Error(`managed draft cleanup owner mismatch for ${domainId}/${pid}`);
+    const [state, sources, canonical, fences, mirror, claim] = await Promise.all([
+        mongoAclRepository.getManagedDraftBootstrapState(domainId, pid, identity),
+        mongoAclRepository.listSourcesForProblem(domainId, pid),
+        mongoAclRepository.listCanonicalForProblem(domainId, pid),
+        mongoAclRepository.listFencesForProblem(domainId, pid),
+        mongoAclRepository.getProblemMirror(domainId, pid),
+        mongoAclRepository.getProblemWriteClaim(domainId, pid),
+    ]);
+    if (
+        !state ||
+        state.authoringMode !== 'managed' ||
+        state.owner !== creator ||
+        state.hidden !== true ||
+        state.metadataStatus !== 'draft' ||
+        sources.length ||
+        canonical.length ||
+        fences.length ||
+        mirror.length ||
+        (writeClaimRequestId
+            ? !claim ||
+              claim.requestId !== writeClaimRequestId ||
+              claim.state !== 'active' ||
+              claim.actor !== creator ||
+              claim.capability !== 'publish'
+            : !!claim)
+    ) {
+        throw new Error(`managed draft creation cleanup is incomplete for ${domainId}/${pid}`);
+    }
 }
 
 export async function grantBulkViaContest(
@@ -553,6 +669,7 @@ export const permitsModel = {
     loadFencedPidsFor,
     clearVerifiersForProblem,
     clearForProblem,
+    assertManagedDraftCreationCleanupComplete,
     countByContest,
     buildDriftReport,
     repairLegacyMaintainerWithoutCanonical,
@@ -585,6 +702,7 @@ export const publicPermitsModel = {
     clearVerifiersForProblem,
     clearForProblem,
     bootstrapManagedDraftAuthor,
+    bootstrapManagedDraftAuthorForAdmin,
     cleanupManagedDraftCreation,
     countByContest,
     prepareProblemWriteClaim,

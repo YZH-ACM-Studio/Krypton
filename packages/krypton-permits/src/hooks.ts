@@ -19,7 +19,21 @@ export function attachHooks(ctx: Context) {
     // Run before destructive work starts. The downstream `problem/delete`
     // event is parallel with ProblemDoc deletion and is too late to verify the
     // legacy mirror deterministically.
-    ctx.on('problem/before-del', async (domainId, docId, writeClaimRequestId) => {
+    ctx.on('problem/before-del', async (domainId, docId, writeClaimRequestId, context) => {
+        if (context?.kind === 'managed-draft-creation-cleanup') {
+            await permitsModel.assertManagedDraftCreationCleanupComplete(
+                domainId,
+                docId,
+                context.creator,
+                {
+                    documentId: context.documentId,
+                    publicPid: context.publicPid,
+                    owner: context.owner,
+                },
+                context.writeClaimRequestId,
+            );
+            return;
+        }
         await permitsModel.clearForProblem(domainId, docId, {
             requestId: `problem-hard-delete:${domainId}:${docId}`,
             writeClaimRequestId,

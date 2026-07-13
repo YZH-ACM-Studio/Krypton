@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { expect } from 'chai';
 import { beforeEach, describe, it } from 'node:test';
 
@@ -11,6 +12,7 @@ const previousDocumentCache = require.cache[documentPath];
 const originalLoad = Module._load;
 const realUtils = require('@hydrooj/utils');
 const loggerErrorCalls: any[][] = [];
+const loggerWarnCalls: any[][] = [];
 
 const TYPE_PROBLEM = 10;
 const countCalls: Array<{ domainId: string; docType: number; query: unknown }> = [];
@@ -18,6 +20,8 @@ const guardedUpdateCalls: Array<{ filter: any; update: any }> = [];
 const updateCalls: Array<{ filter: any; update: any }> = [];
 let countResult = 0;
 let liveProblem: any = null;
+let failNextUpdateAfterApply = false;
+let beforeFindOneAndUpdate: (() => void) | null = null;
 
 function matchesGuardedFilter(doc: any, filter: any): boolean {
     if (!doc || doc.domainId !== filter.domainId || doc.docType !== filter.docType || doc.docId !== filter.docId) {
@@ -33,6 +37,11 @@ function matchesGuardedFilter(doc: any, filter: any): boolean {
     for (const key of ['aclWriteClaim.requestId', 'aclWriteClaim.actor', 'aclWriteClaim.capability', 'aclWriteClaim.state']) {
         if (filter[key] !== undefined && doc.aclWriteClaim?.[key.split('.')[1]] !== filter[key]) return false;
     }
+    if (filter.authoringMode !== undefined && doc.authoringMode !== filter.authoringMode) return false;
+    if (filter.hidden !== undefined && doc.hidden !== filter.hidden) return false;
+    if (filter.managedAuthoring !== undefined && !isDeepStrictEqual(doc.managedAuthoring, filter.managedAuthoring)) return false;
+    if (filter.structureRevision !== undefined && doc.structureRevision !== filter.structureRevision) return false;
+    if (filter.structureLockedAt?.$exists === false && doc.structureLockedAt !== undefined) return false;
     if (filter.maintainer !== undefined && !doc.maintainer?.includes(filter.maintainer)) return false;
     if (
         filter.$or &&
@@ -83,6 +92,8 @@ require.cache[documentPath] = {
         coll: {
             async findOneAndUpdate(filter: any, update: any) {
                 guardedUpdateCalls.push({ filter: structuredClone(filter), update: structuredClone(update) });
+                beforeFindOneAndUpdate?.();
+                beforeFindOneAndUpdate = null;
                 if (!matchesGuardedFilter(liveProblem, filter)) return null;
                 applyUpdate(liveProblem, update);
                 return structuredClone(liveProblem);
@@ -91,6 +102,10 @@ require.cache[documentPath] = {
                 updateCalls.push({ filter: structuredClone(filter), update: structuredClone(update) });
                 if (!matchesGuardedFilter(liveProblem, filter)) return { matchedCount: 0 };
                 applyUpdate(liveProblem, update);
+                if (failNextUpdateAfterApply) {
+                    failNextUpdateAfterApply = false;
+                    throw new Error('injected update response loss');
+                }
                 return { matchedCount: 1 };
             },
             async findOne(filter: any) {
@@ -113,6 +128,10 @@ try {
                 Logger: class TestLogger {
                     error(...args: any[]) {
                         loggerErrorCalls.push(args);
+                    }
+
+                    warn(...args: any[]) {
+                        loggerWarnCalls.push(args);
                     }
                 },
             };
@@ -202,7 +221,10 @@ beforeEach(() => {
     updateCalls.length = 0;
     countResult = 0;
     liveProblem = null;
+    failNextUpdateAfterApply = false;
+    beforeFindOneAndUpdate = null;
     loggerErrorCalls.length = 0;
+    loggerWarnCalls.length = 0;
     (global as any).Hydro.model.permits = {
         async loadAclForUser() {
             return {
@@ -585,6 +607,106 @@ describe('P2.11 durable global problem write claim', () => {
         expect(await clear({ ...claim, requestId: 'forged' })).to.equal(false);
         expect(await clear(claim)).to.equal(true);
         expect(liveProblem.aclWriteClaim).to.equal(undefined);
+    });
+
+    it('rejects direct managed publication and canonical bypasses at the lowest claim commit primitive', async () => {
+        const admin = makeUser('admin');
+        liveProblem = {
+            ...managedPdoc(100),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+            content: 'before',
+            sourceMeta: { template: 'pat_basic', year: 2026, season: 'spring' },
+            tag: ['PAT乙级'],
+        };
+        const claim = await acquire(admin, structuredClone(liveProblem), 'managed-direct-publish', 'managed-review', { capability: 'publish' });
+        expect(claim?.capability).to.equal('publish');
+
+        for (const [$set, $unset] of [
+            [{ hidden: false }, {}],
+            [{ hidden: null }, {}],
+            [{ hidden: undefined }, {}],
+            [{}, { hidden: '' }],
+            [{ hidden: true }, { hidden: '' }],
+            [{ 'sourceMeta.template': 'self' }, {}],
+            [{ 'tag.0': 'forged' }, {}],
+        ] as Array<[Record<string, unknown>, Record<string, unknown>]>) {
+            const error = await captureFailure(() => commit(claim, $set as any, $unset, 'publish'));
+            expect(error).to.have.property('name', 'ValidationError');
+            expect(liveProblem.hidden).to.equal(true);
+            expect(liveProblem.sourceMeta.template).to.equal('pat_basic');
+            expect(liveProblem.tag).to.deep.equal(['PAT乙级']);
+        }
+
+        const aclError = await captureFailure(() => commit(claim, { 'aclWriteClaim.state': 'error' } as any));
+        expect(aclError).to.be.instanceOf(TypeError);
+        expect((await commit(claim, { content: 'after' }, {}, 'content'))?.content).to.equal('after');
+        expect(await clear(claim)).to.equal(true);
+    });
+
+    it('rejects a stale managed structural save when publication wins between guard read and final CAS', async () => {
+        const admin = makeUser('admin');
+        liveProblem = {
+            ...managedPdoc(100),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+            structureRevision: 3,
+            title: '待审核 · working',
+            content: 'before',
+        };
+        const claim = await acquire(admin, structuredClone(liveProblem), 'managed-structural-race', 'managed-review', {
+            capability: 'publish',
+        });
+        beforeFindOneAndUpdate = () => {
+            liveProblem.hidden = false;
+            liveProblem.title = '正式标题';
+            liveProblem.managedAuthoring = {
+                ...liveProblem.managedAuthoring,
+                metadataStatus: 'confirmed',
+                approvedBy: admin._id,
+            };
+        };
+
+        const result = await commit(
+            claim,
+            {
+                content: 'stale content',
+                title: '待审核 · revised',
+                managedAuthoring: { workingTitle: 'revised', metadataStatus: 'draft' },
+            },
+            {},
+            'metadata',
+            { expectedStructureRevision: 3 },
+        );
+
+        expect(result).to.equal(null);
+        expect(liveProblem).to.include({ hidden: false, title: '正式标题', content: 'before', structureRevision: 3 });
+        expect(liveProblem.managedAuthoring).to.include({ metadataStatus: 'confirmed', approvedBy: admin._id });
+        expect(guardedUpdateCalls.at(-1)?.filter).to.deep.include({
+            authoringMode: 'managed',
+            hidden: true,
+            structureRevision: 3,
+            structureLockedAt: { $exists: false },
+        });
+    });
+
+    it('confirms an exact claim was cleared when the database response is lost', async () => {
+        const user = makeUser('creator');
+        liveProblem = {
+            ...pdoc(100, 42),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+        };
+        const claim = await acquire(user, structuredClone(liveProblem), 'response-loss', 'metadata-edit');
+        failNextUpdateAfterApply = true;
+
+        expect(await clear(claim)).to.equal(true);
+        expect(liveProblem.aclWriteClaim).to.equal(undefined);
+        expect(loggerWarnCalls).to.have.length(1);
+        expect(loggerWarnCalls[0][0]).to.include('clear confirmed after lost response');
     });
 
     it('persists an ERROR marker without TTL for the fenced repair service', async () => {

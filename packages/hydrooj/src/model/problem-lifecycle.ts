@@ -12,7 +12,17 @@ const FORBIDDEN_STATEMENT_FIELDS = new Set(['prompt', 'statement', 'description'
 
 export const PROBLEM_STRUCTURAL_FIELDS = new Set(['content', 'config', 'problemKind', 'data', 'additional_file', 'reference']);
 
-export function problemCreateChangedFields(problemKind: ProblemKind, created: { pid?: string; difficulty?: number; reference?: unknown }): string[] {
+export function problemCreateChangedFields(
+    problemKind: ProblemKind,
+    created: {
+        pid?: string;
+        difficulty?: number;
+        reference?: unknown;
+        authoringMode?: unknown;
+        sourceMeta?: unknown;
+        managedAuthoring?: unknown;
+    },
+): string[] {
     return [
         'title',
         'content',
@@ -27,8 +37,27 @@ export function problemCreateChangedFields(problemKind: ProblemKind, created: { 
         ...(created.pid ? ['pid'] : []),
         ...(created.difficulty ? ['difficulty'] : []),
         ...(created.reference ? ['reference'] : []),
+        ...(created.authoringMode ? ['authoringMode'] : []),
+        ...(created.sourceMeta ? ['sourceMeta'] : []),
+        ...(created.managedAuthoring ? ['managedAuthoring'] : []),
         ...(problemKind !== 'programming' ? ['config'] : []),
     ];
+}
+
+/**
+ * Preserve the exact inserted docId before either fallible post-create step.
+ * Managed creation uses the callback to synchronously clean up failed drafts.
+ */
+export async function completePersistedProblemCreate(
+    docId: number,
+    onPersisted: ((docId: number) => void) | undefined,
+    emitCreated: () => Promise<unknown>,
+    writeAudit: () => Promise<unknown>,
+): Promise<number> {
+    onPersisted?.(docId);
+    await emitCreated();
+    await writeAudit();
+    return docId;
 }
 
 export function problemEditAuditedFields($set: Record<string, unknown>): string[] {

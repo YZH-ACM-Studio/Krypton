@@ -80,7 +80,19 @@ export interface EventMap {
     'problem/add': (doc: Partial<ProblemDoc>, docId: number) => VoidReturn;
     'problem/before-edit': (doc: Partial<ProblemDoc>, $unset: OnlyFieldsOfType<ProblemDoc, any, true | '' | 1>) => VoidReturn;
     'problem/edit': (doc: ProblemDoc, writeClaimRequestId?: string) => VoidReturn;
-    'problem/before-del': (domainId: string, docId: number, writeClaimRequestId?: string) => VoidReturn;
+    'problem/before-del': (
+        domainId: string,
+        docId: number,
+        writeClaimRequestId?: string,
+        context?: {
+            kind: 'managed-draft-creation-cleanup';
+            creator: number;
+            owner: number;
+            documentId: ObjectId;
+            publicPid: string;
+            writeClaimRequestId?: string;
+        },
+    ) => VoidReturn;
     'problem/list': (query: Filter<ProblemDoc>, handler: any, sort?: string[]) => VoidReturn;
     'problem/get': (doc: ProblemDoc, handler: any) => VoidReturn;
     'problem/delete': (domainId: string, docId: number) => VoidReturn;

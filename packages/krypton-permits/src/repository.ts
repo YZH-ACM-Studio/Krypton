@@ -400,6 +400,7 @@ export class MongoAclRepository implements AclServiceRepository {
     async getManagedDraftBootstrapState(
         domainId: string,
         pid: number,
+        expected?: { documentId: ObjectId; publicPid: string; owner: number },
     ): Promise<{
         owner: number;
         hidden: boolean;
@@ -407,7 +408,12 @@ export class MongoAclRepository implements AclServiceRepository {
         metadataStatus?: string;
     } | null> {
         const doc = await documentColl.findOne(
-            { domainId, docType: TYPE_PROBLEM, docId: pid },
+            {
+                domainId,
+                docType: TYPE_PROBLEM,
+                docId: pid,
+                ...(expected ? { _id: expected.documentId, pid: expected.publicPid, owner: expected.owner } : {}),
+            },
             {
                 ...this.options(),
                 projection: {

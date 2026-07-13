@@ -9,6 +9,7 @@ import { SimpleSelect } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
+import { managedSourceFieldViews, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
 
 type R = Record<string, any>;
 
@@ -29,6 +30,7 @@ interface BankFilters {
   owner?: string | number;
   visibility?: 'all' | 'hidden' | 'published';
   lifecycle?: 'active' | 'archived' | 'all';
+  managedReview?: 'all' | 'pending';
 }
 
 function buildUrlWithQuery(baseUrl: string, params: Record<string, unknown>) {
@@ -48,6 +50,7 @@ function FilterForm({
   filters,
   problemKinds,
   canFilterOwner,
+  canReviewManaged,
   compact = false,
 }: {
   action: string;
@@ -56,10 +59,11 @@ function FilterForm({
   filters: BankFilters;
   problemKinds: Array<{ kind: ProblemKind; slug: string }>;
   canFilterOwner: boolean;
+  canReviewManaged: boolean;
   compact?: boolean;
 }) {
   return (
-    <form method="get" action={action} className={compact ? 'space-y-4' : 'grid gap-3 lg:grid-cols-4 xl:grid-cols-7'}>
+    <form method="get" action={action} className={compact ? 'space-y-4' : 'grid gap-3 lg:grid-cols-4 xl:grid-cols-8'}>
       <label className={compact ? 'block space-y-1.5' : 'space-y-1.5 lg:col-span-2'}>
         <span className="text-xs font-medium text-muted-foreground">关键词或题号</span>
         <span className="relative block">
@@ -84,6 +88,20 @@ function FilterForm({
         <label className="space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">Owner UID</span>
           <Input name="owner" type="number" min={1} defaultValue={filters.owner || ''} placeholder="全部" className="min-h-11" />
+        </label>
+      ) : null}
+      {canReviewManaged ? (
+        <label className="space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">托管审核</span>
+          <SimpleSelect
+            name="managedReview"
+            defaultValue={filters.managedReview || 'all'}
+            className="min-h-11"
+            options={[
+              { value: 'all', label: '全部' },
+              { value: 'pending', label: '元数据待确认' },
+            ]}
+          />
         </label>
       ) : null}
       <label className="space-y-1.5">
@@ -156,6 +174,9 @@ export function ProblemsPage() {
   const problemKinds: Array<{ kind: ProblemKind; slug: string }> = data.problemKinds || [];
   const ownerNames: Record<string, string> = data.ownerNames || {};
   const canManageByDocId: Record<string, boolean> = data.canManageByDocId || {};
+  const managedReviewableByDocId: Record<string, boolean> = data.managedReviewableByDocId || {};
+  const managedSourceTemplates: ManagedSourceTemplateOption[] = data.managedSourceTemplates || [];
+  const managedTrainingOptions: R[] = data.managedTrainingOptions || [];
   const psdict: Record<string, R> = data.psdict || {};
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const filtersActive = Boolean(
@@ -165,6 +186,7 @@ export function ProblemsPage() {
     filters.owner ||
     (filters.visibility && filters.visibility !== 'all') ||
     (filters.lifecycle && filters.lifecycle !== 'active') ||
+    (filters.managedReview && filters.managedReview !== 'all') ||
     sort !== 'default',
   );
   const problemsBaseUrl = buildUrlWithQuery(bs.urls.problems, {
@@ -174,6 +196,7 @@ export function ProblemsPage() {
     owner: filters.owner,
     visibility: filters.visibility === 'all' ? '' : filters.visibility,
     lifecycle: filters.lifecycle === 'active' ? '' : filters.lifecycle,
+    managedReview: filters.managedReview === 'all' ? '' : filters.managedReview,
     sort: sort === 'default' ? '' : sort,
   });
 
@@ -213,6 +236,7 @@ export function ProblemsPage() {
           filters={filters}
           problemKinds={problemKinds}
           canFilterOwner={!!data.canFilterOwner}
+          canReviewManaged={!!data.canReviewManaged}
         />
       </section>
 
@@ -229,6 +253,7 @@ export function ProblemsPage() {
               filters={filters}
               problemKinds={problemKinds}
               canFilterOwner={!!data.canFilterOwner}
+              canReviewManaged={!!data.canReviewManaged}
               compact
             />
           </div>
@@ -255,8 +280,14 @@ export function ProblemsPage() {
               const displayPid = String(pdoc.pid || pdoc.docId);
               const kind = effectiveProblemKind(pdoc);
               const canManage = !!canManageByDocId[docId];
+              const canReviewManaged = !!managedReviewableByDocId[docId];
               const detailUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: displayPid });
               const status = psdict[docId]?.status;
+              const sourceTemplate = managedSourceTemplates.find((template) => template.id === pdoc.sourceMeta?.template);
+              const sourceFields = managedSourceFieldViews(pdoc.sourceMeta, sourceTemplate);
+              const pendingPlacement = pdoc.managedAuthoring?.pendingTrainingPlacement;
+              const pendingTraining = managedTrainingOptions.find((training) => training.id === String(pendingPlacement?.trainingId || ''));
+              const pendingChapter = pendingTraining?.chapters?.find((chapter: R) => chapter.id === pendingPlacement?.chapterId);
               return (
                 <li key={docId} className="px-4 py-4 sm:px-5">
                   <div className="grid min-w-0 gap-3 sm:grid-cols-[1.2rem_minmax(0,1fr)_auto] sm:items-center">
@@ -270,6 +301,11 @@ export function ProblemsPage() {
                           {pdoc.title || '未命名题目'}
                         </a>
                         <span className="font-mono text-xs text-muted-foreground">{displayPid}</span>
+                        {canReviewManaged ? (
+                          <Badge variant="outline">
+                            {pdoc.managedAuthoring?.metadataStatus === 'draft' ? '元数据待确认' : '等待重新公开'}
+                          </Badge>
+                        ) : null}
                       </div>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                         <span>Owner · {ownerNames[String(pdoc.owner)] || `UID ${pdoc.owner}`}</span>
@@ -298,6 +334,69 @@ export function ProblemsPage() {
                             </Badge>
                           ))}
                         </div>
+                      ) : null}
+                      {canReviewManaged ? (
+                        <section className="mt-3 space-y-3 rounded-xl border border-primary/20 bg-primary/[0.025] p-4" aria-label="托管草稿审核">
+                          <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 lg:grid-cols-4">
+                            <span>
+                              工作标题 · <strong className="font-medium text-foreground">{pdoc.managedAuthoring?.workingTitle || '—'}</strong>
+                            </span>
+                            {sourceFields.map((field) => (
+                              <span key={field.label}>
+                                {field.label} · <strong className="font-medium text-foreground">{field.value}</strong>
+                              </span>
+                            ))}
+                            {pdoc.managedAuthoring?.metadataStatus === 'draft' ? (
+                              <span>
+                                待挂训练 ·{' '}
+                                <strong className="font-medium text-foreground">
+                                  {pendingPlacement
+                                    ? `${pendingTraining?.title || '训练已失效'} / ${pendingChapter?.title || `章节 ${pendingPlacement.chapterId}`}`
+                                    : '不挂入训练'}
+                                </strong>
+                              </span>
+                            ) : null}
+                          </div>
+                          <form
+                            method="post"
+                            className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto] sm:items-end"
+                            onSubmit={(event) => {
+                              const action = pdoc.managedAuthoring?.metadataStatus === 'draft' ? '确认元数据并发布' : '重新公开';
+                              if (!window.confirm(`${action}「${pdoc.title || displayPid}」？`)) event.preventDefault();
+                            }}
+                          >
+                            <input type="hidden" name="operation" value="managedPublish" />
+                            <input type="hidden" name="pid" value={docId} />
+                            <label className="space-y-1.5">
+                              <span className="text-xs font-medium text-muted-foreground">正式标题</span>
+                              <Input
+                                name="formalTitle"
+                                defaultValue={
+                                  pdoc.managedAuthoring?.metadataStatus === 'draft'
+                                    ? pdoc.managedAuthoring?.workingTitle || ''
+                                    : pdoc.title || pdoc.managedAuthoring?.workingTitle || ''
+                                }
+                                required
+                                className="min-h-10"
+                              />
+                            </label>
+                            <label className="space-y-1.5">
+                              <span className="text-xs font-medium text-muted-foreground">难度</span>
+                              <SimpleSelect
+                                name="difficulty"
+                                defaultValue={String(pdoc.difficulty ?? 0)}
+                                className="min-h-10"
+                                options={Array.from({ length: 11 }, (_, value) => ({
+                                  value: String(value),
+                                  label: value === 0 ? '未设置' : String(value),
+                                }))}
+                              />
+                            </label>
+                            <Button type="submit" className="min-h-10">
+                              {pdoc.managedAuthoring?.metadataStatus === 'draft' ? '确认并发布' : '重新公开'}
+                            </Button>
+                          </form>
+                        </section>
                       ) : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-1 sm:justify-end">

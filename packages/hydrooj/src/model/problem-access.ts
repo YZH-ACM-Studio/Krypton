@@ -1,9 +1,10 @@
 import type { Filter } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
-import { PermissionError } from '../error';
+import { PermissionError, ValidationError } from '../error';
 import type { User } from '../interface';
 import { PERM, PRIV } from './builtin';
 import * as document from './document';
+import { managedProblemPatchCapability, managedProblemPatchStateFilter } from './managed-problem-patch';
 import type { ProblemDoc } from './problem';
 
 /**
@@ -303,17 +304,60 @@ export async function commitProblemWriteClaimUpdate(
     $set: Partial<ProblemDoc>,
     $unset: Record<string, unknown> = {},
     requiredCapability: ProblemWriteCapability = claim.capability,
+    options: { expectedStructureRevision?: number } = {},
 ): Promise<ProblemDoc | null> {
-    if ([...Object.keys($set || {}), ...Object.keys($unset || {})].some((key) => PROBLEM_ACL_INTERNAL_FIELDS.has(key))) {
+    const requestedFields = [...Object.keys($set || {}), ...Object.keys($unset || {})];
+    if (requestedFields.some((key) => PROBLEM_ACL_INTERNAL_FIELDS.has(key.split('.')[0]))) {
         throw new TypeError('ACL mutation fields cannot be written through a problem write claim');
     }
     if (!problemWriteCapabilityAllows(claim.capability, requiredCapability)) {
         throw new TypeError(`problem write claim capability ${claim.capability} cannot perform ${requiredCapability}`);
     }
+    let filter: Filter<ProblemDoc> = {
+        ...claimFilter(claim),
+        ...(options.expectedStructureRevision === undefined
+            ? {}
+            : {
+                  structureRevision: options.expectedStructureRevision,
+                  structureLockedAt: { $exists: false },
+              }),
+    };
+    const current = await document.coll.findOne(filter, {
+        projection: {
+            ...Object.fromEntries(requestedFields.map((field) => [field, 1])),
+            authoringMode: 1,
+            hidden: 1,
+            managedAuthoring: 1,
+        },
+    });
+    if (!current) return null;
+    if (current.authoringMode === 'managed') {
+        const guard = managedProblemPatchCapability(current, $set, $unset);
+        if (
+            guard.immutableFields.length ||
+            guard.publishes ||
+            !problemWriteCapabilityAllows(claim.capability, guard.capability)
+        ) {
+            logger.warn(
+                'Managed claim commit rejected domain=%s pid=%d actor=%d requestId=%s claimCapability=%s requiredCapability=%s fields=%o publishes=%s result=denied',
+                claim.domainId,
+                claim.pid,
+                claim.actor,
+                claim.requestId,
+                claim.capability,
+                guard.capability,
+                guard.requestedFields,
+                guard.publishes,
+            );
+            throw new ValidationError('fields', null, '写入字段不能绕过托管题统一服务');
+        }
+        filter = { ...filter, ...managedProblemPatchStateFilter(current) };
+    }
     const update: any = {};
     if (Object.keys($set || {}).length) update.$set = $set;
     if (Object.keys($unset || {}).length) update.$unset = $unset;
-    return document.coll.findOneAndUpdate(claimFilter(claim), update, { returnDocument: 'after' });
+    if (options.expectedStructureRevision !== undefined) update.$inc = { structureRevision: 1 };
+    return document.coll.findOneAndUpdate(filter, update, { returnDocument: 'after' });
 }
 
 /** Persist a failed write; ERROR claims never expire or auto-clear. */
@@ -327,18 +371,66 @@ export async function markProblemWriteClaimError(claim: ProblemWriteClaim, error
 
 /** Clear only the exact successful owner; ERROR claims require explicit repair. */
 export async function clearProblemWriteClaim(claim: ProblemWriteClaim): Promise<boolean> {
-    const result = await document.coll.updateOne(
-        {
-            ...claimFilter(claim),
-            // Never clear the global writer while a claim-bound ACL mutation
-            // still owns a ProblemDoc lock. This closes the check/clear race
-            // that would otherwise strand a fence after its parent claim was
-            // removed.
-            'aclMutationLocks.0': { $exists: false },
-        },
-        { $unset: { aclWriteClaim: '' } },
-    );
-    return result.matchedCount === 1;
+    try {
+        const result = await document.coll.updateOne(
+            {
+                ...claimFilter(claim),
+                // Never clear the global writer while a claim-bound ACL mutation
+                // still owns a ProblemDoc lock. This closes the check/clear race
+                // that would otherwise strand a fence after its parent claim was
+                // removed.
+                'aclMutationLocks.0': { $exists: false },
+            },
+            { $unset: { aclWriteClaim: '' } },
+        );
+        return result.matchedCount === 1;
+    } catch (clearError) {
+        let remaining: ProblemWriteClaim | null;
+        try {
+            remaining = await inspectProblemWriteClaim(claim.domainId, claim.pid);
+        } catch (confirmationError) {
+            logger.error(
+                'Problem write claim clear response and confirmation read failed domain=%s pid=%d actor=%d capability=%s requestId=%s clearError=%o confirmationError=%o',
+                claim.domainId,
+                claim.pid,
+                claim.actor,
+                claim.capability,
+                claim.requestId,
+                clearError,
+                confirmationError,
+            );
+            throw new Error(`problem write claim clear could not be confirmed: ${claim.requestId}`, {
+                cause: new AggregateError([clearError, confirmationError]),
+            });
+        }
+        const exactClaimRemains =
+            remaining?.requestId === claim.requestId &&
+            remaining.actor === claim.actor &&
+            remaining.capability === claim.capability;
+        if (exactClaimRemains) {
+            logger.error(
+                'Problem write claim clear failed and exact claim remains domain=%s pid=%d actor=%d capability=%s requestId=%s state=%s clearError=%o',
+                claim.domainId,
+                claim.pid,
+                claim.actor,
+                claim.capability,
+                claim.requestId,
+                remaining.state,
+                clearError,
+            );
+            throw new Error(`problem write claim clear failed: ${claim.requestId}`, { cause: clearError });
+        }
+        logger.warn(
+            'Problem write claim clear confirmed after lost response domain=%s pid=%d actor=%d capability=%s requestId=%s replacementRequestId=%s',
+            claim.domainId,
+            claim.pid,
+            claim.actor,
+            claim.capability,
+            claim.requestId,
+            remaining?.requestId,
+        );
+        return true;
+    }
 }
 
 export async function inspectProblemWriteClaim(domainId: string, pid: number): Promise<ProblemWriteClaim | null> {

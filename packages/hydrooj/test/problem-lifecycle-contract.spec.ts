@@ -43,6 +43,71 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(source).to.include('structureRevision: 1');
     });
 
+    it('retains and confirms the exact managed draft identity before insert responses or post-create events can fail', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const createStart = source.indexOf('static async createManagedProgrammingDraft');
+        const createEnd = source.indexOf('static async publishManagedProgrammingProblem', createStart);
+        const managedCreate = source.slice(createStart, createEnd);
+        expect(source).to.include('completePersistedProblemCreate(');
+        expect(managedCreate).to.include('onAllocated: (allocatedDocId, allocatedDocumentId) =>');
+        expect(managedCreate).to.include('documentId = allocatedDocumentId');
+        expect(managedCreate).to.include('onPersisted: (persistedDocId) =>');
+        expect(managedCreate).to.include('docId = persistedDocId');
+        expect(managedCreate).to.include('_id: documentId');
+        expect(managedCreate.indexOf('_id: documentId')).to.be.lessThan(managedCreate.indexOf('cleanupManagedDraftCreation'));
+        expect(managedCreate.indexOf('if (!persisted) throw error')).to.be.lessThan(managedCreate.indexOf('cleanupManagedDraftCreation'));
+        expect(managedCreate).to.include('authorAssignmentClaim = await ProblemModel.beginAuthorizedWriteClaim(');
+        expect(managedCreate).not.to.include('await ProblemModel.withAuthorizedWriteClaim(');
+        expect(managedCreate).to.include('authorAssignmentClaimRequestId = `problem-write:managed-draft-author-assignment:');
+        expect(managedCreate.indexOf('authorAssignmentClaimRequestId = `problem-write:managed-draft-author-assignment:')).to.be.lessThan(
+            managedCreate.indexOf('authorAssignmentClaim = await ProblemModel.beginAuthorizedWriteClaim('),
+        );
+        expect(managedCreate).to.include('requestId: authorAssignmentClaimRequestId');
+        expect(managedCreate).to.include('writeClaimRequestId: authorAssignmentClaimRequestId');
+        expect(managedCreate).to.include('await ProblemModel.deleteProblemDocumentUnchecked(domainId, docId, {');
+        expect(managedCreate).to.include('documentId,');
+        expect(managedCreate).to.include('publicPid,');
+        expect(managedCreate).to.include('owner: creator,');
+    });
+
+    it('deletes only the exact failed managed draft before touching docId-scoped peripherals', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const start = source.indexOf('private static async deleteProblemDocumentUnchecked');
+        const end = source.indexOf('static async del(', start);
+        const cleanup = source.slice(start, end);
+        const exactDelete = cleanup.indexOf('const deleted = await document.coll.deleteOne({');
+        const identityCheck = cleanup.indexOf('if (deleted.deletedCount !== 1)');
+        const statusDelete = cleanup.indexOf('document.deleteMultiStatus(', exactDelete);
+        const storageDelete = cleanup.indexOf('.list(`problem/', exactDelete);
+        const deleteEvent = cleanup.indexOf("bus.parallel('problem/delete', domainId, docId)", exactDelete);
+
+        expect(cleanup).to.include('_id: context.documentId');
+        expect(cleanup).to.include('pid: context.publicPid');
+        expect(cleanup).to.include('owner: context.owner');
+        expect(cleanup).to.include("authoringMode: 'managed'");
+        expect(exactDelete).to.be.greaterThan(-1);
+        expect(identityCheck).to.be.greaterThan(exactDelete);
+        for (const peripheral of [statusDelete, storageDelete, deleteEvent]) {
+            expect(peripheral).to.be.greaterThan(identityCheck);
+        }
+    });
+
+    it('logs managed validation context at both create and publish service boundaries', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const createStart = source.indexOf('static async createManagedProgrammingDraft');
+        const publishStart = source.indexOf('static async publishManagedProgrammingProblem', createStart);
+        const create = source.slice(createStart, publishStart);
+        const publishEnd = source.indexOf('static createProblemByKind', publishStart);
+        const publish = source.slice(publishStart, publishEnd);
+
+        expect(create).to.include('prepared = await prepareManagedProblemDraft(domainId, input)');
+        expect(create).to.include('domain=%s actor=%d template=%o training=%o chapter=%o stage=create-validate error=%o');
+        expect(publish).to.include('prepared = await prepareManagedProblemPublication(input.domainId, pdoc)');
+        expect(publish).to.include(
+            'domain=%s pid=%d publicPid=%s actor=%d template=%o training=%o chapter=%o stage=publish-validate error=%o',
+        );
+    });
+
     it('keeps archived problems hidden and preserves HTML when cloning', () => {
         const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
         expect(source.match(/current\.archivedAt && \$set\.hidden === false/g)).to.have.length(2);
@@ -103,10 +168,10 @@ describe('P2.12 YAGNI lifecycle contract', () => {
     it('rejects every type-only fill-function publication, including legacy programming problems', () => {
         const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
         expect(source).to.include('function assertPublishableFillFunction');
-        expect(source.match(/assertPublishableFillFunction\(\{/g)).to.have.length(3);
+        expect(source.match(/assertPublishableFillFunction\(\{/g)).to.have.length(4);
         expect(source).to.include('validateCompiledStructuredConfig(problemKind, config)');
         expect(source).to.include('validateFillFunctionTestdataFiles(config, input.data || [])');
-        expect(source.match(/config:\s*1,\s*data:\s*1/g)).to.have.length(2);
+        expect(source.match(/config:\s*1,\s*data:\s*1/g)).to.have.length(3);
     });
 
     it('blocks every config yaml alias at direct, claimed, and event-backed structured writes', () => {
@@ -137,19 +202,31 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(importer.indexOf('await validateImportedTestdataConfigs()')).to.be.lessThan(importer.indexOf('const overrideDoc = overridePid'));
     });
 
-    it('audits managed publication before clearing verifiers and before unhide mutation', () => {
+    it('routes managed publication through one audited review service with transaction or bounded compensation', () => {
         const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
-        const publishStart = source.indexOf('async function prepareManagedPublish(');
-        const publishEnd = source.indexOf('function revisionClaimFilter', publishStart);
+        const publishStart = source.indexOf('static async publishManagedProgrammingProblem(');
+        const publishEnd = source.indexOf('static createProblemByKind(', publishStart);
         const publish = source.slice(publishStart, publishEnd);
-        expect(publish.indexOf("type: 'problem.managed.publish'")).to.be.lessThan(publish.indexOf('await permits.clearVerifiersForProblem('));
-        expect(publish).to.include('operator: claim.actor');
-        expect(publish).to.include("type: 'problem.permit.revoke'");
+        expect(publish.indexOf('prepareManagedProblemPublication(')).to.be.lessThan(publish.indexOf('await prepareManagedPublish(claim)'));
+        expect(publish.indexOf('await prepareManagedPublish(claim)')).to.be.lessThan(publish.indexOf('commitManagedProblemPublication({'));
+        expect(publish.indexOf('commitManagedProblemPublication({')).to.be.lessThan(publish.lastIndexOf("type: 'problem.managed.publish'"));
+        expect(publish.indexOf('const published = await ProblemModel.withAuthorizedWriteClaim(')).to.be.lessThan(
+            publish.indexOf('if (!finalization)'),
+        );
+        expect(publish.indexOf('if (!finalization)')).to.be.lessThan(publish.indexOf('await OplogModel.add({'));
+        expect(publish.indexOf('await OplogModel.add({')).to.be.lessThan(publish.indexOf("await bus.emit('problem/edit'"));
+        expect(publish).to.include("{ capability: 'publish' }");
 
         const editStart = source.indexOf('static async editAuthorized(');
         const editEnd = source.indexOf('static async copy(', editStart);
         const edit = source.slice(editStart, editEnd);
-        expect(edit.indexOf('await prepareManagedPublish(claim)')).to.be.lessThan(edit.indexOf('ProblemModel.editWithClaim('));
+        expect(edit).not.to.include('prepareManagedPublish(claim)');
+
+        const persistence = readFileSync(resolve(root, 'src/model/managed-problem-publication.ts'), 'utf8');
+        expect(persistence).to.include('session.withTransaction');
+        expect(persistence).to.include("{ $addToSet: { 'dag.$.pids': input.docId } }");
+        expect(persistence).to.include("{ $pull: { 'dag.$.pids': { $in: [input.docId, String(input.docId)] } } }");
+        expect(persistence).to.include('managed publication compensation failed: pid=');
     });
 
     it('requires a durable capability claim for every managed clone, delete, edit, and file mutation', () => {
@@ -187,5 +264,31 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(hook).to.be.greaterThan(-1);
         expect(postHookAudit).to.be.greaterThan(hook);
         expect(rejection).to.be.greaterThan(postHookAudit);
+    });
+
+    it('commits structural managed edits through the state-CAS claim primitive', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const editStart = source.indexOf('static async editWithClaim(');
+        const editEnd = source.indexOf('static async editAuthorized(', editStart);
+        const edit = source.slice(editStart, editEnd);
+        const structuralStart = edit.indexOf('if (current.problemKind !== undefined && isStructuralPatch');
+        const structuralEnd = edit.indexOf('} else {', structuralStart);
+        const structural = edit.slice(structuralStart, structuralEnd);
+
+        expect(structural).to.include('result = await commitProblemWriteClaimUpdate(');
+        expect(structural).to.include('{ expectedStructureRevision: expectedRevision }');
+        expect(structural).not.to.include('document.coll.findOneAndUpdate(');
+    });
+
+    it('keeps managed PID, kind, system tags, source metadata, and confirmed title outside generic edits', () => {
+        const source = readFileSync(resolve(root, 'src/model/managed-problem-patch.ts'), 'utf8');
+        const guardStart = source.indexOf('export function managedProblemPatchCapability(');
+        const guardEnd = source.indexOf('interface MindmapNodeRecord', guardStart);
+        const guard = source.slice(guardStart, guardEnd);
+        expect(source).to.include("new Set(['authoringMode', 'problemKind', 'pid', 'sort', 'tag', 'sourceMeta'])");
+        expect(guard).to.include("field.includes('.') || MANAGED_CANONICAL_FIELDS.has(field)");
+        expect(guard).to.include("if (requestedFields.includes('title')) immutableFields.push('title')");
+        expect(guard).to.include("if (requestedFields.includes('managedAuthoring')) immutableFields.push('managedAuthoring')");
+        expect(guard.indexOf('if (!workingTitleOnly)')).to.be.lessThan(guard.indexOf("immutableFields.push('title')"));
     });
 });

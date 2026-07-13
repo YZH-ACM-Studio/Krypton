@@ -68,6 +68,12 @@ export const ProblemStructureConflictError = Err(
     'Problem {0} has changed or its structure is locked. Reload and try again.',
     409,
 );
+export const ManagedProblemMetadataConflictError = Err(
+    'ManagedProblemMetadataConflictError',
+    UserFacingError,
+    'Managed problem metadata changed ({0}). Reselect the affected item and try again.',
+    409,
+);
 export const ManualGradeConflictError = Err(
     'ManualGradeConflictError',
     UserFacingError,

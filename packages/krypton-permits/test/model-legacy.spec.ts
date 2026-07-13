@@ -18,9 +18,10 @@ const ids = {
     inactive: new FakeObjectId('inactive'),
     managedAuthor: new FakeObjectId('managed-author'),
     managedMaintainer: new FakeObjectId('managed-maintainer'),
+    cleanupDocument: new FakeObjectId('cleanup-document'),
 };
 
-const rows = [
+const rows: any[] = [
     { _id: ids.directVerifier, domainId: 'system', pid: 1, uid: 9, role: 'verifier', viaContest: null },
     { _id: ids.directMaintainer, domainId: 'system', pid: 2, uid: 9, role: 'maintainer', viaContest: null },
     { _id: ids.contestVerifier, domainId: 'system', pid: 3, uid: 9, role: 'verifier', viaContest: new FakeObjectId('c1') },
@@ -31,8 +32,11 @@ const rows = [
 ];
 
 const managedPids = new Set([6, 7, 8]);
+const problemDocs = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
 const claims = new Map<number, any>();
 let sourceRows: any[] = [];
+let fenceRows: any[] = [];
+const mirrors = new Map<number, number[]>();
 
 function sameValue(actual: any, expected: any): boolean {
     if (expected && typeof expected === 'object' && '$ne' in expected) return actual !== expected.$ne;
@@ -45,7 +49,9 @@ function matches(doc: any, filter: Record<string, any>): boolean {
 }
 
 const calls = {
+    bootstrapStates: [] as any[],
     grantDirect: [] as any[],
+    clearForProblem: [] as any[],
     resumeMarkers: [] as any[],
     revokePairs: [] as any[],
     revokeSource: [] as any[],
@@ -68,8 +74,31 @@ const permitsColl = {
     },
 };
 const aclService = {
+    async clearForProblem(domainId: string, pid: number, ...args: any[]) {
+        calls.clearForProblem.push([domainId, pid, ...args]);
+        const removed = sourceRows.filter((row) => row.domainId === domainId && row.pid === pid).length;
+        sourceRows = sourceRows.filter((row) => row.domainId !== domainId || row.pid !== pid);
+        fenceRows = fenceRows.filter((row) => row.domainId !== domainId || row.pid !== pid);
+        mirrors.delete(pid);
+        for (let index = rows.length - 1; index >= 0; index--) {
+            if (rows[index].domainId === domainId && rows[index].pid === pid) rows.splice(index, 1);
+        }
+        return removed;
+    },
     async grantDirect(...args: any[]) {
         calls.grantDirect.push(args);
+        if (args[1] === 8) {
+            rows.push({
+                _id: new FakeObjectId(`bootstrap-${args[2]}`),
+                domainId: args[0],
+                pid: args[1],
+                uid: args[2],
+                role: args[3],
+                active: true,
+                grantedBy: args[4],
+                viaContest: null,
+            });
+        }
         return { active: true };
     },
     async loadUserAcl() {
@@ -130,6 +159,7 @@ require.cache[repositoryPath] = {
                 );
             },
             async isManagedProblem(_domainId: string, pid: number) {
+                if (!problemDocs.has(pid)) throw new Error(`problem system/${pid} does not exist`);
                 return managedPids.has(pid);
             },
             async getProblemWriteClaim(_domainId: string, pid: number) {
@@ -141,7 +171,15 @@ require.cache[repositoryPath] = {
             async listCanonicalForProblem(domainId: string, pid: number) {
                 return rows.filter((row) => row.domainId === domainId && row.pid === pid && row.active !== false);
             },
-            async getManagedDraftBootstrapState(_domainId: string, pid: number) {
+            async listFencesForProblem(domainId: string, pid: number) {
+                return fenceRows.filter((row) => row.domainId === domainId && row.pid === pid);
+            },
+            async getProblemMirror(_domainId: string, pid: number) {
+                return mirrors.get(pid) || [];
+            },
+            async getManagedDraftBootstrapState(_domainId: string, pid: number, expected?: any) {
+                calls.bootstrapStates.push({ pid, expected });
+                if (!problemDocs.has(pid)) return null;
                 return managedPids.has(pid)
                     ? { owner: 9, hidden: true, authoringMode: 'managed', metadataStatus: 'draft' }
                     : { owner: 9, hidden: true };
@@ -170,8 +208,12 @@ try {
         else if (path !== modelPath) delete require.cache[path];
     }
 }
+const { attachHooks } = require('../src/hooks.ts') as typeof import('../src/hooks');
 
 beforeEach(() => {
+    rows.splice(7);
+    calls.bootstrapStates.length = 0;
+    calls.clearForProblem.length = 0;
     calls.grantDirect.length = 0;
     calls.revokePairs.length = 0;
     calls.revokeSource.length = 0;
@@ -179,7 +221,74 @@ beforeEach(() => {
     calls.writes.length = 0;
     claims.clear();
     sourceRows = [];
+    fenceRows = [];
+    mirrors.clear();
+    problemDocs.clear();
+    for (let pid = 1; pid <= 8; pid++) problemDocs.add(pid);
 });
+
+async function verifyManagedCleanupWithRealHook(failureStage: string, retainPublishClaim = false) {
+    const authorUid = 77;
+    rows.push({
+        _id: new FakeObjectId(`cleanup-${failureStage}`),
+        domainId: 'system',
+        pid: 8,
+        uid: authorUid,
+        role: 'author',
+        active: true,
+        viaContest: null,
+    });
+    sourceRows = [{ domainId: 'system', pid: 8, uid: authorUid, role: 'author', active: true }];
+    fenceRows = [{ domainId: 'system', pid: 8, uid: authorUid, requestId: `fence-${failureStage}` }];
+    mirrors.set(8, [authorUid]);
+    const writeClaimRequestId = retainPublishClaim ? `publish-${failureStage}` : undefined;
+    const identity = { documentId: ids.cleanupDocument, publicPid: 'P3101', owner: 9 } as any;
+    if (writeClaimRequestId) {
+        claims.set(8, {
+            requestId: writeClaimRequestId,
+            actor: 9,
+            capability: 'publish',
+            state: 'active',
+        });
+    }
+
+    const handlers = new Map<string, (...args: any[]) => Promise<void>>();
+    attachHooks({
+        on(event: string, handler: (...args: any[]) => Promise<void>) {
+            handlers.set(event, handler);
+        },
+    } as any);
+    const beforeDelete = handlers.get('problem/before-del');
+    expect(beforeDelete).to.be.a('function');
+
+    const cleanup = await model.cleanupManagedDraftCreation('system', 8, 9, {
+        requestId: `cleanup-after-${failureStage}`,
+        authorUid,
+        ...identity,
+        writeClaimRequestId,
+    });
+    await beforeDelete!('system', 8, undefined, {
+        kind: 'managed-draft-creation-cleanup',
+        creator: 9,
+        ...identity,
+        writeClaimRequestId: cleanup.writeClaimRequestId,
+    });
+    problemDocs.delete(8);
+    claims.delete(8);
+
+    expect(problemDocs.has(8)).to.equal(false);
+    expect(sourceRows.filter((row) => row.pid === 8)).to.deep.equal([]);
+    expect(rows.filter((row) => row.pid === 8)).to.deep.equal([]);
+    expect(fenceRows.filter((row) => row.pid === 8)).to.deep.equal([]);
+    expect(mirrors.get(8) || []).to.deep.equal([]);
+    expect(claims.has(8)).to.equal(false);
+    expect(calls.clearForProblem[0][4]).to.equal(writeClaimRequestId);
+    expect(calls.clearForProblem).to.have.lengthOf(1);
+    expect(calls.bootstrapStates).to.deep.equal([
+        { pid: 8, expected: identity },
+        { pid: 8, expected: identity },
+    ]);
+}
 
 describe('legacy canonical model compatibility', () => {
     it('lists legacy direct/contest verifier/maintainer rows and normalizes active in memory', async () => {
@@ -306,10 +415,49 @@ describe('legacy canonical model compatibility', () => {
         expect(calls.revokePairs).to.have.lengthOf(1);
     });
 
+    it('binds administrator pre-created author bootstrap to an active publish claim', async () => {
+        const missing = await model.bootstrapManagedDraftAuthorForAdmin('system', 8, 77, 9, { requestId: 'admin-create' }).catch((error) => error);
+        expect(missing).to.be.instanceOf(Error);
+        expect(calls.grantDirect).to.have.lengthOf(0);
+
+        claims.set(8, { requestId: 'weak', actor: 9, capability: 'collaborators', state: 'active' });
+        const weak = await model
+            .bootstrapManagedDraftAuthorForAdmin('system', 8, 77, 9, {
+                requestId: 'admin-create',
+                writeClaimRequestId: 'weak',
+            })
+            .catch((error) => error);
+        expect(weak).to.be.instanceOf(Error);
+        expect(calls.grantDirect).to.have.lengthOf(0);
+
+        claims.set(8, { requestId: 'publish', actor: 9, capability: 'publish', state: 'active' });
+        const created = await model.bootstrapManagedDraftAuthorForAdmin('system', 8, 77, 9, {
+            requestId: 'admin-create',
+            writeClaimRequestId: 'publish',
+        });
+        expect(created).to.include({ pid: 8, uid: 77, role: 'author' });
+        expect(calls.grantDirect[0]).to.deep.include.members(['system', 8, 77, 'author', 9, 'admin-create', 'publish']);
+    });
+
+    it('lets the real delete hook finish exact managed cleanup after problem/add fails', () => verifyManagedCleanupWithRealHook('problem/add'));
+
+    it('lets the real delete hook finish exact managed cleanup after problem.create audit fails', () =>
+        verifyManagedCleanupWithRealHook('problem.create audit'));
+
+    it('keeps the admin publish claim active while cleaning a post-grant confirmation failure', () =>
+        verifyManagedCleanupWithRealHook('admin author confirmation', true));
+
+    it('keeps the admin publish claim active while cleaning a claim-clear failure', () =>
+        verifyManagedCleanupWithRealHook('admin claim clear', true));
+
+    it('cleans the candidate admin claim when begin persisted it but lost the response', () =>
+        verifyManagedCleanupWithRealHook('admin begin response loss', true));
+
     it('does not expose generic ACL mutation or repair methods on the Hydro runtime surface', () => {
         expect((model as any).publicPermitsModel).not.to.have.property('grant');
         expect((model as any).publicPermitsModel).not.to.have.property('revoke');
         expect((model as any).publicPermitsModel).not.to.have.property('repairLegacyMaintainerWithoutCanonical');
         expect((model as any).publicPermitsModel).to.have.property('prepareProblemWriteClaim');
+        expect((model as any).publicPermitsModel).to.have.property('bootstrapManagedDraftAuthorForAdmin');
     });
 });

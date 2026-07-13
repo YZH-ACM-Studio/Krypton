@@ -20,6 +20,11 @@ import { buildProjection } from '../utils';
 type DocID = ObjectId | string | number;
 type NormalArrayKeys<O, P = any> = Exclude<ArrayKeys<O, P>, symbol>;
 
+interface DocumentAddHooks {
+    /** Expose this insert's exact identity before any fallible hook or Mongo write. */
+    onPrepared?: (doc: { _id: ObjectId; domainId: string; docType: number; docId: DocID }) => void;
+}
+
 export const coll = db.collection('document');
 export const collStatus = db.collection('document.status');
 
@@ -62,6 +67,7 @@ export async function add<T extends keyof DocType, K extends DocType[T]['docId']
     parentType?: DocType[T]['parentType'],
     parentId?: DocType[T]['parentId'],
     args?: Partial<DocType[T]>,
+    hooks?: DocumentAddHooks,
 ): Promise<K>;
 export async function add<T extends keyof DocType>(
     domainId: string,
@@ -72,6 +78,7 @@ export async function add<T extends keyof DocType>(
     parentType?: DocType[T]['parentType'],
     parentId?: DocType[T]['parentId'],
     args?: Partial<DocType[T]>,
+    hooks?: DocumentAddHooks,
 ): Promise<ObjectId>;
 export async function add(
     domainId: string,
@@ -82,6 +89,7 @@ export async function add(
     parentType: number | null = null,
     parentId: DocID = null,
     args: any = {},
+    hooks: DocumentAddHooks = {},
 ) {
     const _id = new ObjectId();
     const doc: any = {
@@ -98,6 +106,7 @@ export async function add(
         doc.parentType = parentType;
         doc.parentId = parentId;
     }
+    hooks.onPrepared?.(doc);
     await bus.parallel('document/add', doc);
     const res = await coll.insertOne(doc);
     return docId || res.insertedId;

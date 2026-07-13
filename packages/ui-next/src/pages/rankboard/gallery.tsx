@@ -5,10 +5,11 @@
  * 再 POST operation=addImage 挂到该卡片的代表奖项上。
  */
 import { useState } from 'react';
-import { ArrowLeft, Award as AwardIcon, Camera, ImageOff, Trophy, Users } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Award as AwardIcon, Camera, ImageOff, Trophy, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { uploadUserFile } from '@/lib/upload';
@@ -41,13 +42,30 @@ interface YearBucket {
   icpc: GalleryCard[];
 }
 
+async function responseErrorMessage(response: Response, fallback: string) {
+  const raw = await response.text().catch(() => '');
+  if (raw) {
+    try {
+      const body = JSON.parse(raw);
+      const message = body?.error?.message || body?.message || body?.error;
+      if (typeof message === 'string' && message.trim()) return message;
+    } catch {
+      const text = raw.trim();
+      if (text && !text.startsWith('<!DOCTYPE') && !text.startsWith('<html')) return text.slice(0, 180);
+    }
+  }
+  return `${fallback}（HTTP ${response.status}）`;
+}
+
 function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; canUpload: boolean; uid: number; onLightbox: (url: string) => void }) {
   const [imageUrls, setImageUrls] = useState<string[]>(card.imageUrls);
   const [uploading, setUploading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const cover = imageUrls[card.coverIndex] || imageUrls[0] || null;
 
   const upload = async (file: File) => {
     setUploading(true);
+    setErrorMessage('');
     try {
       const url = await uploadUserFile(file, uid);
       const attach = await fetch('/rankboard/gallery', {
@@ -62,16 +80,18 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
           expectType: card.typeKey,
           url,
           setCover: imageUrls.length === 0,
+          replace: imageUrls.length > 0,
         }),
       });
       if (!attach.ok) {
-        alert(attach.status === 409 ? '页面数据已过期（奖项列表已被他人修改），请刷新后重试' : '照片关联失败');
-        return;
+        throw new Error(
+          await responseErrorMessage(attach, attach.status === 409 ? '页面数据已过期（奖项列表已被他人修改），请刷新后重试' : '照片关联失败'),
+        );
       }
       const data = await attach.json().catch(() => ({}));
       setImageUrls(data.imageUrls || [...imageUrls, url]);
     } catch (e: any) {
-      alert(e?.message || '图片上传失败');
+      setErrorMessage(e?.message || '图片上传失败');
     } finally {
       setUploading(false);
     }
@@ -142,6 +162,7 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
             ))}
           {canUpload ? (
             <label
+              title={imageUrls.length ? '替换照片' : '上传照片'}
               className={cn(
                 'flex size-10 cursor-pointer items-center justify-center rounded border border-dashed text-muted-foreground transition-colors hover:border-primary hover:text-primary',
                 uploading && 'pointer-events-none opacity-50',
@@ -163,6 +184,24 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
           ) : null}
         </div>
       </CardContent>
+      <Dialog open={!!errorMessage} onOpenChange={(open) => !open && setErrorMessage('')}>
+        <DialogContent className="w-full sm:w-[440px]" onClose={() => setErrorMessage('')}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="size-4 text-destructive" />
+              照片上传失败
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 px-6 py-5">
+            <p className="text-sm leading-6 text-muted-foreground">{errorMessage}</p>
+            <div className="flex justify-end">
+              <Button type="button" onClick={() => setErrorMessage('')}>
+                知道了
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

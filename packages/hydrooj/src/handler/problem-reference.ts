@@ -1,4 +1,7 @@
+import { Logger } from '@hydrooj/utils';
 import problem from '../model/problem';
+
+const logger = new Logger('problem-reference');
 
 /** Normalize container JSON problem references without probing the problem table. */
 export function normalizeProblemDocIds(values: unknown): number[] {
@@ -16,11 +19,20 @@ export function normalizeProblemDocIds(values: unknown): number[] {
  * hidden problems while making a fence or revocation effective immediately.
  */
 export async function getVisibleReferencedProblems(domainId: string, pids: number[], user: any) {
-    const visible: Record<number, any> = {};
-    for (const pid of pids) {
-        const pdoc = await problem.getViewableAuthorized(domainId, pid, user, problem.PROJECTION_PUBLIC);
-        if (!pdoc?.docId) continue;
-        visible[pdoc.docId] = pdoc;
+    const startedAt = Date.now();
+    // Training/course cards need summary statistics, not statements, config,
+    // or files. Avoid returning hundreds of full problem payloads.
+    const projection = [...problem.PROJECTION_LIST, 'origStat'] as any;
+    const visible = await problem.getListViewableAuthorized(domainId, pids, user, projection, false, true);
+    const elapsed = Date.now() - startedAt;
+    if (elapsed >= 500) {
+        logger.warn(
+            'Slow referenced-problem batch domain=%s requested=%d visible=%d elapsedMs=%d',
+            domainId,
+            pids.length,
+            Object.keys(visible).length,
+            elapsed,
+        );
     }
     return visible;
 }

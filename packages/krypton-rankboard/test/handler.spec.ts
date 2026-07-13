@@ -819,6 +819,7 @@ describe('rankboard gallery upload authoritative-domain contract', () => {
                 personId: String(personId),
                 awardIndex: '0',
                 url: '/file/42/award.jpg',
+                replace: 'true',
                 domainId: 'owned-course',
             },
             makeUser('import'),
@@ -827,6 +828,13 @@ describe('rankboard gallery upload authoritative-domain contract', () => {
         );
         expect(postResponse.status).to.equal(200);
         expect(calls.addAwardImage).to.have.lengthOf(1);
+        expect(calls.addAwardImage[0].at(-1)).to.equal(true);
+    });
+
+    it('uses a site dialog instead of native alert for upload failures', () => {
+        const source = fs.readFileSync(path.resolve(__dirname, '../../ui-next/src/pages/rankboard/gallery.tsx'), 'utf8');
+        expect(source).to.include('<Dialog open={!!errorMessage}');
+        expect(source).not.to.match(/\balert\s*\(/);
     });
 });
 

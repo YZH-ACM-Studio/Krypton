@@ -18,11 +18,20 @@ const cases: Array<{
   },
   {
     template: { id: 'pat_advanced', label: 'PAT 甲级', fields: ['year', 'season'] },
-    sourceMeta: { template: 'pat_advanced', year: 2025, season: 'autumn' },
+    sourceMeta: { template: 'pat_advanced', year: 2025, season: 'summer' },
     expected: [
       ['来源模板', 'PAT 甲级'],
       ['年份', '2025'],
-      ['季度', '秋季'],
+      ['季度', '夏季'],
+    ],
+  },
+  {
+    template: { id: 'pat_basic', label: 'PAT 乙级', fields: ['year', 'season'] },
+    sourceMeta: { template: 'pat_basic', year: 2024, season: 'winter' },
+    expected: [
+      ['来源模板', 'PAT 乙级'],
+      ['年份', '2024'],
+      ['季度', '冬季'],
     ],
   },
   ...(['gplt_national', 'gplt_provincial'] as const).map((id, index) => ({

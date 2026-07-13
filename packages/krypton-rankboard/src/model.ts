@@ -586,6 +586,7 @@ export async function addAwardImage(
     url: string,
     setCover = false,
     expectType?: string,
+    replace = false,
 ): Promise<string[] | null> {
     const scopedPerson = await requireScopedPerson(personId);
     const filter: Record<string, unknown> = {
@@ -593,24 +594,29 @@ export async function addAwardImage(
         studentDocId: scopedPerson.studentDocId,
     };
     if (expectType) filter[`awards.${awardIndex}.type`] = expectType;
-    const res = await peopleColl.updateOne(filter as any, {
-        $addToSet: { [`awards.${awardIndex}.imageUrls`]: url } as any,
-        $set: { updatedAt: new Date() },
-    });
+    const imageUrlsPath = `awards.${awardIndex}.imageUrls`;
+    const imageUrlsRef = `$${imageUrlsPath}`;
+    // v1 imported missing image arrays as null. `$addToSet` fails on null, so
+    // normalize in the same atomic update instead of requiring a data repair
+    // before the first upload. The pipeline also preserves concurrent appends.
+    const nextImageUrls = replace
+        ? [url]
+        : {
+              $setUnion: [{ $cond: [{ $isArray: imageUrlsRef }, imageUrlsRef, []] }, [url]],
+          };
+    const setFields: Record<string, unknown> = {
+        [imageUrlsPath]: nextImageUrls,
+        updatedAt: new Date(),
+    };
+    if (replace || setCover) {
+        setFields[`awards.${awardIndex}.coverIndex`] = replace ? 0 : { $indexOfArray: [nextImageUrls, url] };
+    }
+    const res = await peopleColl.updateOne(filter as any, [{ $set: setFields }] as any);
     if (!res.matchedCount) return null;
-    // 读回最新数组；setCover 时再把封面指到该 url（单独一次写，非关键路径）。
+    // Read the committed array so the client never has to guess Mongo's
+    // de-duplicated result.
     const person = await getScopedPersonOrNull(scopedPerson._id);
     const imageUrls = person?.awards?.[awardIndex]?.imageUrls || [];
-    if (setCover) {
-        const ci = imageUrls.indexOf(url);
-        if (ci >= 0) {
-            await requireScopedPerson(scopedPerson._id);
-            await peopleColl.updateOne(
-                { _id: scopedPerson._id, studentDocId: scopedPerson.studentDocId },
-                { $set: { [`awards.${awardIndex}.coverIndex`]: ci } as any },
-            );
-        }
-    }
     return imageUrls;
 }
 

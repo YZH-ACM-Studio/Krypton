@@ -234,7 +234,7 @@ declare module './model/problem' {
                 | 'hdu_summer'
                 | 'hdu_spring';
             year: number;
-            season?: 'spring' | 'autumn';
+            season?: 'spring' | 'summer' | 'autumn' | 'winter';
             level?: 'L1' | 'L2' | 'L3';
             round?: number;
         };

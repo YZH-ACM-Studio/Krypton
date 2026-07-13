@@ -148,7 +148,7 @@ async function migrateV1(_ctx: Context): Promise<boolean> {
                             schoolRank: a.schoolRank,
                             score: a.score,
                             teammates: a.teammates,
-                            imageUrls: a.imageUrls,
+                            imageUrls: Array.isArray(a.imageUrls) ? a.imageUrls : [],
                             coverIndex: 0,
                         })),
                         employmentStatus: old.employmentStatus,

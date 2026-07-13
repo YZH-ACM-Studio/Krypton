@@ -144,8 +144,9 @@ export function normalizeManagedSourceMeta(input: unknown): ManagedSourceMeta {
         year: parseInteger(input.year, 'year', 2000, 2100),
     };
     if (definition.fields.includes('season')) {
-        if (input.season !== 'spring' && input.season !== 'autumn') throw new ValidationError('season');
-        sourceMeta.season = input.season;
+        const season = input.season;
+        if (season !== 'spring' && season !== 'summer' && season !== 'autumn' && season !== 'winter') throw new ValidationError('season');
+        sourceMeta.season = season;
     }
     if (definition.fields.includes('level')) {
         if (input.level !== 'L1' && input.level !== 'L2' && input.level !== 'L3') throw new ValidationError('level');
@@ -160,7 +161,7 @@ export function deriveManagedSourceTags(sourceMetaInput: unknown): string[] {
     const sourceMeta = normalizeManagedSourceMeta(sourceMetaInput);
     const { template, year } = sourceMeta;
     if (template === 'pat_basic' || template === 'pat_advanced') {
-        const season = sourceMeta.season === 'spring' ? '春' : '秋';
+        const season = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' }[sourceMeta.season!];
         return [template === 'pat_basic' ? 'PAT乙级' : 'PAT甲级', `${year}${season}`];
     }
     if (template === 'gplt_national') return ['天梯赛全国总决赛', sourceMeta.level!, `${year}CCCC`];
@@ -310,20 +311,14 @@ function canonicalTrainingChapters(dag: unknown): TrainingNode[] {
     if (!Array.isArray(dag)) return [];
     return dag.filter(
         (node): node is TrainingNode =>
-            isPlainObject(node) &&
-            Number.isSafeInteger(node._id) &&
-            typeof node.title === 'string' &&
-            Array.isArray(node.pids),
+            isPlainObject(node) && Number.isSafeInteger(node._id) && typeof node.title === 'string' && Array.isArray(node.pids),
     );
 }
 
 /** Existing training membership determines which fixed source templates it accepts. */
 export async function listManagedTrainingOptions(domainId: string): Promise<ManagedTrainingOption[]> {
     const trainings = await document.coll
-        .find(
-            { domainId, docType: document.TYPE_TRAINING, kind: { $ne: 'course' } },
-            { projection: { docId: 1, title: 1, dag: 1 } },
-        )
+        .find({ domainId, docType: document.TYPE_TRAINING, kind: { $ne: 'course' } }, { projection: { docId: 1, title: 1, dag: 1 } })
         .sort({ title: 1, docId: 1 })
         .toArray();
     const pids = [
@@ -337,12 +332,7 @@ export async function listManagedTrainingOptions(domainId: string): Promise<Mana
         ),
     ];
     const problems = pids.length
-        ? await document.coll
-              .find(
-                  { domainId, docType: document.TYPE_PROBLEM, docId: { $in: pids } },
-                  { projection: { docId: 1, tag: 1 } },
-              )
-              .toArray()
+        ? await document.coll.find({ domainId, docType: document.TYPE_PROBLEM, docId: { $in: pids } }, { projection: { docId: 1, tag: 1 } }).toArray()
         : [];
     const tagsByPid = new Map(problems.map((pdoc) => [pdoc.docId, new Set(Array.isArray(pdoc.tag) ? pdoc.tag : [])]));
     const result: ManagedTrainingOption[] = [];
@@ -389,7 +379,14 @@ export async function validateManagedTrainingPlacement(
     const chapters = canonicalTrainingChapters(training?.dag);
     const chapter = chapters.find((candidate) => candidate._id === chapterId);
     if (!training || !chapter) throw new ManagedProblemMetadataConflictError('待挂训练或章节已删除');
-    const memberPids = [...new Set(chapters.flatMap((candidate) => candidate.pids).map(Number).filter(Number.isSafeInteger))];
+    const memberPids = [
+        ...new Set(
+            chapters
+                .flatMap((candidate) => candidate.pids)
+                .map(Number)
+                .filter(Number.isSafeInteger),
+        ),
+    ];
     const anchor = TEMPLATE_ANCHOR_TAG[template];
     const supportingProblem = memberPids.length
         ? await document.coll.findOne(
@@ -401,21 +398,14 @@ export async function validateManagedTrainingPlacement(
     return { trainingId, chapterId };
 }
 
-export async function prepareManagedProblemDraft(
-    domainId: string,
-    input: ManagedProblemDraftInput,
-): Promise<PreparedManagedProblemDraft> {
+export async function prepareManagedProblemDraft(domainId: string, input: ManagedProblemDraftInput): Promise<PreparedManagedProblemDraft> {
     const workingTitle = typeof input.workingTitle === 'string' ? input.workingTitle.trim() : '';
     if (!workingTitle) throw new ValidationError('title');
     if (typeof input.content !== 'string') throw new ValidationError('content');
     const difficulty = parseInteger(input.difficulty, 'difficulty', 1, 10);
     const sourceMeta = normalizeManagedSourceMeta(input.sourceMeta);
     const mindmap = await materializeManagedMindmapTags(input.mindmapNodeIds);
-    const pendingTrainingPlacement = await validateManagedTrainingPlacement(
-        domainId,
-        sourceMeta.template,
-        input.pendingTrainingPlacement,
-    );
+    const pendingTrainingPlacement = await validateManagedTrainingPlacement(domainId, sourceMeta.template, input.pendingTrainingPlacement);
     const sourceTags = deriveManagedSourceTags(sourceMeta);
     const authorUid = input.authorUid === undefined ? undefined : parseInteger(input.authorUid, 'authorUid', 1, Number.MAX_SAFE_INTEGER);
     return {
@@ -486,10 +476,7 @@ export async function prepareManagedProblemPublication(
 
 export async function ensureManagedProblemAuthoringIndexes(): Promise<void> {
     try {
-        await managedPidCountersColl.createIndex(
-            { domainId: 1, namespace: 1 },
-            { name: 'problem_pid_counter_namespace_uq', unique: true },
-        );
+        await managedPidCountersColl.createIndex({ domainId: 1, namespace: 1 }, { name: 'problem_pid_counter_namespace_uq', unique: true });
         await document.coll.createIndex(MANAGED_PROBLEM_PID_INDEX.key, MANAGED_PROBLEM_PID_INDEX.options);
         const actual = (await document.coll.listIndexes().toArray()).find((index) => index.name === MANAGED_PROBLEM_PID_INDEX.options.name);
         if (

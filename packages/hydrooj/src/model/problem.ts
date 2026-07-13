@@ -68,6 +68,7 @@ import {
     readStableEditableProblem,
     readStableMaintainableProblem,
     readStableViewableProblem,
+    readStableViewableProblems,
     refreshProblemAcl as refreshProblemAclAccess,
 } from './problem-access';
 import {
@@ -1354,11 +1355,34 @@ export class ProblemModel {
         indexByDocIdOnly = false,
     ): Promise<ProblemDict> {
         if (!pids?.length) return {};
+        const requestedFields = new Set<string>(projection as string[]);
+        const authorizationFields = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode'] as Field[];
+        const readProjection = Array.from(
+            new Set([...(projection as Field[]), ...authorizationFields, ...(Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[])]),
+        ) as Projection<ProblemDoc>;
+        const read = async (filter: Filter<ProblemDoc>) => {
+            const docs = await document
+                .getMulti(domainId, document.TYPE_PROBLEM, filter)
+                .project<ProblemDoc>(buildProjection(readProjection))
+                .toArray();
+            if (!rawConfig && readProjection.includes('config')) {
+                for (const pdoc of docs) {
+                    try {
+                        pdoc.config = await parseConfig(pdoc.config as string | ProblemConfigFile, pdoc.data?.map((item) => item.name) || []);
+                    } catch (e) {
+                        pdoc.config = `Cannot parse: ${e.message}`;
+                    }
+                }
+            }
+            return docs;
+        };
+        const pdocs = await readStableViewableProblems(domainId, user, pids, read);
         const byDocId: Record<number, ProblemDoc> = {};
         const byPublicId: Record<string, ProblemDoc> = {};
-        for (const pid of Array.from(new Set(pids))) {
-            const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, user, projection, rawConfig);
-            if (!pdoc) continue;
+        for (const pdoc of pdocs) {
+            for (const field of authorizationFields) {
+                if (!requestedFields.has(field)) delete (pdoc as any)[field];
+            }
             byDocId[pdoc.docId] = pdoc;
             if (pdoc.pid) byPublicId[pdoc.pid] = pdoc;
         }

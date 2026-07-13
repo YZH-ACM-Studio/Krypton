@@ -484,7 +484,8 @@ class RankBoardGalleryHandler extends Handler {
     @param('url', Types.String)
     @param('expectType', Types.String, true)
     @param('setCover', Types.Boolean, true)
-    async postAddImage(_ctx: any, personId: ObjectId, awardIndex: number, url: string, expectType?: string, setCover?: boolean) {
+    @param('replace', Types.Boolean, true)
+    async postAddImage(_ctx: any, personId: ObjectId, awardIndex: number, url: string, expectType?: string, setCover?: boolean, replace?: boolean) {
         if (!this.canUpload()) throw new PermissionError(PERM.PERM_RANKBOARD_IMPORT);
         // 只收站内 /file URL 或 http(s) 外链；`/(?![/\\])` 同时挡协议相对
         // 外链 `//evil.com` 和反斜杠变体 `/\evil.com`（浏览器按 // 解析），
@@ -494,7 +495,7 @@ class RankBoardGalleryHandler extends Handler {
         }
         // TOCTOU 防护（审查 #6/G8）：expectType 作为原子写条件传入，
         // 页面快照里的 awardIndex 因他人回滚/编辑而错位时 matched=0 → null。
-        const imageUrls = await addAwardImage(personId, awardIndex, url, !!setCover, expectType);
+        const imageUrls = await addAwardImage(personId, awardIndex, url, !!setCover, expectType, !!replace);
         if (imageUrls === null) {
             this.response.status = 409;
             this.response.body = { error: 'stale', message: '奖项列表已被修改，请刷新页面后重试' };

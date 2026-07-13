@@ -165,6 +165,7 @@ const {
     readStableEditableProblem,
     readStableMaintainableProblem,
     readStableViewableProblem,
+    readStableViewableProblems,
     refreshProblemAcl,
 } = access;
 
@@ -909,6 +910,56 @@ describe('P2.11 stable direct-problem reads', () => {
         expect(result).not.to.have.property('aclWriteClaim');
     });
 
+    it('batch-reads referenced problems with one ACL load and two collection reads', async () => {
+        const docs = [
+            { ...pdoc(100), docType: TYPE_PROBLEM, title: 'hidden', aclMutationRevision: 2, aclMutationLocks: [] },
+            { ...pdoc(101, 7, false), docType: TYPE_PROBLEM, title: 'public', aclMutationRevision: 0, aclMutationLocks: [] },
+        ];
+        let loads = 0;
+        let reads = 0;
+        (global as any).Hydro.model.permits.loadAclForUser = async () => {
+            loads++;
+            return permitSnapshot(100);
+        };
+        const read = async (filter: any) => {
+            reads++;
+            const selected = filter.docId?.$in
+                ? docs.filter((doc) => filter.docId.$in.includes(doc.docId))
+                : docs.filter((doc) => filter.$or.some((term: any) => matchesGuardedFilter(doc, term)));
+            return structuredClone(selected);
+        };
+
+        const result = await readStableViewableProblems('system', makeUser('student'), [100, 101, 100], read);
+
+        expect(result.map((doc) => doc.docId)).to.deep.equal([100, 101]);
+        expect(result.every((doc) => !('aclMutationRevision' in doc) && !('aclMutationLocks' in doc))).to.equal(true);
+        expect(loads).to.equal(1);
+        expect(reads).to.equal(2);
+    });
+
+    it('batch retry fails closed for a problem revoked before the final read', async () => {
+        const docs = [
+            { ...pdoc(100), docType: TYPE_PROBLEM, aclMutationRevision: 0, aclMutationLocks: [] },
+            { ...pdoc(101, 7, false), docType: TYPE_PROBLEM, aclMutationRevision: 0, aclMutationLocks: [] },
+        ];
+        let loads = 0;
+        let finalReads = 0;
+        (global as any).Hydro.model.permits.loadAclForUser = async () => {
+            loads++;
+            return loads === 1 ? permitSnapshot(100) : permitSnapshot();
+        };
+        const read = async (filter: any) => {
+            if (filter.docId?.$in) return structuredClone(docs.filter((doc) => filter.docId.$in.includes(doc.docId)));
+            if (finalReads++ === 0) docs[0].aclMutationRevision = 1;
+            return structuredClone(docs.filter((doc) => filter.$or.some((term: any) => matchesGuardedFilter(doc, term))));
+        };
+
+        const result = await readStableViewableProblems('system', makeUser('student'), [100, 101], read);
+
+        expect(result.map((doc) => doc.docId)).to.deep.equal([101]);
+        expect(loads).to.equal(2);
+    });
+
     it('denies when revocation starts after the initial read but before ACL loading', async () => {
         liveProblem = {
             ...pdoc(100),
@@ -1263,7 +1314,7 @@ describe('P2.11 stable direct-read entry contracts', () => {
         expect(recordSource).not.to.include('problem.canViewBy(');
         expect(recordSource).to.include('problem.getListViewableAuthorized(');
         expect(recordSource).to.include('problem.getViewableAuthorized(');
-        expect(referenceSource).to.include('problem.getViewableAuthorized(');
+        expect(referenceSource).to.include('problem.getListViewableAuthorized(');
         expect(referenceSource).not.to.include('problem.canViewBy(');
         expect(homeSource).to.include('ProblemModel.getViewableAuthorized(');
         expect(userSource).to.include('problem.getListViewableAuthorized(');

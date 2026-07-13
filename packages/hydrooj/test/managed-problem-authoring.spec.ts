@@ -220,23 +220,15 @@ describe('P2.14 managed generic patch guard', () => {
 describe('P2.14 managed problem source templates', () => {
     const cases: Array<[unknown, string[], string, number]> = [
         [{ template: 'pat_basic', year: 2026, season: 'spring' }, ['PAT乙级', '2026春'], 'P3101', 3101],
+        [{ template: 'pat_basic', year: 2026, season: 'summer' }, ['PAT乙级', '2026夏'], 'P3102', 3102],
         [{ template: 'pat_advanced', year: 2026, season: 'autumn' }, ['PAT甲级', '2026秋'], 'P4052', 4052],
+        [{ template: 'pat_advanced', year: 2026, season: 'winter' }, ['PAT甲级', '2026冬'], 'P4053', 4053],
         [{ template: 'gplt_national', year: 2026, level: 'L2' }, ['天梯赛全国总决赛', 'L2', '2026CCCC'], 'GPLT2026N001', 1],
         [{ template: 'gplt_provincial', year: 2026, level: 'L3' }, ['天梯赛省级赛', 'L3', '2026CCCC-省'], 'GPLT2026P002', 2],
         [{ template: 'cauc', year: 2026 }, ['CAUC校赛', '2026校赛'], 'CCCCCAUC20260003', 3],
         [{ template: 'self', year: 2026 }, ['自命题', '2026自命题'], 'P5035', 5035],
-        [
-            { template: 'nowcoder_summer', year: 2026, round: 4 },
-            ['MultiSchool', '牛客暑期多校', '2026牛客暑期多校'],
-            'NK1064',
-            1064,
-        ],
-        [
-            { template: 'hdu_summer', year: 2026, round: 5 },
-            ['MultiSchool', '杭电暑期多校', '2026杭电暑期多校'],
-            'HDU1176',
-            1176,
-        ],
+        [{ template: 'nowcoder_summer', year: 2026, round: 4 }, ['MultiSchool', '牛客暑期多校', '2026牛客暑期多校'], 'NK1064', 1064],
+        [{ template: 'hdu_summer', year: 2026, round: 5 }, ['MultiSchool', '杭电暑期多校', '2026杭电暑期多校'], 'HDU1176', 1176],
         [{ template: 'hdu_spring', year: 2026, round: 2 }, ['杭电春季赛', '2026HDU-S'], 'HDU1177', 1177],
     ];
 
@@ -254,9 +246,8 @@ describe('P2.14 managed problem source templates', () => {
             TestValidationError,
         );
         expect(() => authoring.normalizeManagedSourceMeta({ template: 'other', year: 2026 })).to.throw(TestValidationError);
-        expect(() => authoring.normalizeManagedSourceMeta({ template: 'gplt_national', year: 2026, level: 'L4' })).to.throw(
-            TestValidationError,
-        );
+        expect(() => authoring.normalizeManagedSourceMeta({ template: 'pat_basic', year: 2026, season: 'rainy' })).to.throw(TestValidationError);
+        expect(() => authoring.normalizeManagedSourceMeta({ template: 'gplt_national', year: 2026, level: 'L4' })).to.throw(TestValidationError);
     });
 
     it('shares one HDU counter namespace across spring and summer', () => {
@@ -311,7 +302,9 @@ describe('P2.14 managed problem source templates', () => {
         expect(listProjection).not.to.include("'sourceMeta'");
         expect(publicProjection).not.to.include("'managedAuthoring'");
         expect(publicProjection).not.to.include("'sourceMeta'");
-        expect(source).to.include("static PROJECTION_MANAGED_EDITOR: Field[] = [...ProblemModel.PROJECTION_PUBLIC, 'sourceMeta', 'managedAuthoring']");
+        expect(source).to.include(
+            "static PROJECTION_MANAGED_EDITOR: Field[] = [...ProblemModel.PROJECTION_PUBLIC, 'sourceMeta', 'managedAuthoring']",
+        );
     });
 });
 

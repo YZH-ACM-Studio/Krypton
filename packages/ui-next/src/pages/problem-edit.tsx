@@ -927,7 +927,9 @@ export function ProblemEditPage() {
                               onValueChange={setSourceSeason}
                               options={[
                                 { value: 'spring', label: '春季' },
+                                { value: 'summer', label: '夏季' },
                                 { value: 'autumn', label: '秋季' },
+                                { value: 'winter', label: '冬季' },
                               ]}
                             />
                           </div>

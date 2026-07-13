@@ -59,6 +59,7 @@ const calls = {
     containerGets: [] as any[],
     get: [] as any[],
     getList: [] as any[],
+    getListViewableAuthorized: [] as any[],
     getViewableAuthorized: [] as any[],
     selections: [] as any[],
     storageDeletes: [] as any[],
@@ -77,6 +78,7 @@ function problemDict(docs: any[]) {
 }
 
 const problemStub = {
+    PROJECTION_LIST: ['domainId', 'docId', 'pid', 'title', 'hidden', 'owner'],
     PROJECTION_PUBLIC: ['domainId', 'docId', 'pid', 'title', 'hidden', 'owner'],
     assertProblemAclDomain(user: any, domainId: string) {
         if (!user._problemAclLoaded || user._problemAclDomainId !== domainId) throw new TestPermissionError();
@@ -105,6 +107,10 @@ const problemStub = {
         calls.getViewableAuthorized.push({ domainId, rawPid });
         const pdoc = problemDocs.get(Number(rawPid)) || null;
         return pdoc && this.canViewBy(pdoc, user) ? pdoc : null;
+    },
+    async getListViewableAuthorized(domainId: string, pids: number[], user: any, projection: string[]) {
+        calls.getListViewableAuthorized.push({ domainId, pids: [...pids], projection: [...projection] });
+        return problemDict(pids.map((pid) => problemDocs.get(pid)).filter((pdoc) => pdoc && this.canViewBy(pdoc, user)));
     },
 };
 
@@ -335,6 +341,7 @@ beforeEach(() => {
     calls.containerGets.length = 0;
     calls.get.length = 0;
     calls.getList.length = 0;
+    calls.getListViewableAuthorized.length = 0;
     calls.getViewableAuthorized.length = 0;
     calls.selections.length = 0;
     calls.storageDeletes.length = 0;
@@ -700,7 +707,7 @@ function registerReferencedProblemVisibilitySuite(label: 'training' | 'course', 
             const handler = makeHandler(routeMap[routeName], makeUser());
             await handler.get('forged-domain', 'container');
             expect(calls.containerGets.at(-1)?.domainId).to.equal('system');
-            expect(calls.getViewableAuthorized.at(-1)?.domainId).to.equal('system');
+            expect(calls.getListViewableAuthorized.at(-1)?.domainId).to.equal('system');
         });
     });
 }

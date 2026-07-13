@@ -172,6 +172,7 @@ export async function refreshProblemAcl(user: ProblemAclUser, authoritativeDomai
 }
 
 export type StableProblemRead = (filter?: Filter<ProblemDoc>) => Promise<ProblemDoc | null>;
+export type StableProblemBatchRead = (filter: Filter<ProblemDoc>) => Promise<ProblemDoc[]>;
 
 /** Remove every persistent ACL coordination field from a detached ProblemDoc. */
 export function stripProblemAclInternalFields(pdoc: ProblemDoc): ProblemDoc {
@@ -333,11 +334,7 @@ export async function commitProblemWriteClaimUpdate(
     if (!current) return null;
     if (current.authoringMode === 'managed') {
         const guard = managedProblemPatchCapability(current, $set, $unset);
-        if (
-            guard.immutableFields.length ||
-            guard.publishes ||
-            !problemWriteCapabilityAllows(claim.capability, guard.capability)
-        ) {
+        if (guard.immutableFields.length || guard.publishes || !problemWriteCapabilityAllows(claim.capability, guard.capability)) {
             logger.warn(
                 'Managed claim commit rejected domain=%s pid=%d actor=%d requestId=%s claimCapability=%s requiredCapability=%s fields=%o publishes=%s result=denied',
                 claim.domainId,
@@ -404,9 +401,7 @@ export async function clearProblemWriteClaim(claim: ProblemWriteClaim): Promise<
             });
         }
         const exactClaimRemains =
-            remaining?.requestId === claim.requestId &&
-            remaining.actor === claim.actor &&
-            remaining.capability === claim.capability;
+            remaining?.requestId === claim.requestId && remaining.actor === claim.actor && remaining.capability === claim.capability;
         if (exactClaimRemains) {
             logger.error(
                 'Problem write claim clear failed and exact claim remains domain=%s pid=%d actor=%d capability=%s requestId=%s state=%s clearError=%o',
@@ -581,6 +576,67 @@ export async function readStableViewableProblem(
         return stripProblemAclInternalFields(stable);
     }
     return null;
+}
+
+/**
+ * Batch form of `readStableViewableProblem` for containers that reference
+ * hundreds of problems. One ACL snapshot and two Mongo reads replace the
+ * previous three reads per problem while preserving the same revision/lock
+ * linearization point. Only documents invalidated by a concurrent ACL change
+ * are retried once.
+ */
+export async function readStableViewableProblems(
+    authoritativeDomainId: string,
+    user: ProblemAclUser,
+    pids: number[],
+    read: StableProblemBatchRead,
+    attempts = 2,
+): Promise<ProblemDoc[]> {
+    if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > 2) {
+        throw new TypeError('stable problem reads support one or two attempts');
+    }
+    const requested = Array.from(new Set(pids));
+    if (!requested.every((pid) => Number.isSafeInteger(pid) && pid > 0)) throw new TypeError('problem ids must be positive integers');
+
+    const pending = new Set(requested);
+    const visible = new Map<number, ProblemDoc>();
+    for (let attempt = 0; attempt < attempts && pending.size; attempt++) {
+        const wanted = Array.from(pending);
+        const initialDocs = await read({ docId: { $in: wanted } });
+        const initialById = new Map(initialDocs.map((pdoc) => [pdoc.docId, pdoc]));
+        // A missing or cross-domain identity is final, just like the singular
+        // helper's initial read; only a failed revision-guarded final read is
+        // eligible for the bounded retry.
+        for (const pid of wanted) {
+            const pdoc = initialById.get(pid);
+            if (!pdoc || pdoc.domainId !== authoritativeDomainId) pending.delete(pid);
+        }
+        if (!initialById.size) continue;
+
+        await refreshProblemAcl(user, authoritativeDomainId);
+        const authorized: ProblemDoc[] = [];
+        for (const pdoc of initialDocs) {
+            if (!pending.has(pdoc.docId)) continue;
+            if (!canViewProblem(user, pdoc)) {
+                pending.delete(pdoc.docId);
+                continue;
+            }
+            authorized.push(pdoc);
+        }
+        if (!authorized.length) continue;
+
+        const stableDocs = await read({
+            $or: authorized.map((pdoc) => problemAclRevisionFilter(authoritativeDomainId, user, pdoc)),
+        });
+        const stableById = new Map(stableDocs.map((pdoc) => [pdoc.docId, pdoc]));
+        for (const initial of authorized) {
+            const stable = stableById.get(initial.docId);
+            if (!stable) continue;
+            pending.delete(initial.docId);
+            if (canViewProblem(user, stable)) visible.set(stable.docId, stripProblemAclInternalFields(stable));
+        }
+    }
+    return requested.map((pid) => visible.get(pid)).filter((pdoc): pdoc is ProblemDoc => !!pdoc);
 }
 
 /**

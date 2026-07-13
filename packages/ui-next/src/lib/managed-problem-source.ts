@@ -7,7 +7,7 @@ export interface ManagedSourceTemplateOption {
 export interface ManagedSourceMetaView {
   template?: string;
   year?: number;
-  season?: 'spring' | 'autumn';
+  season?: 'spring' | 'summer' | 'autumn' | 'winter';
   level?: 'L1' | 'L2' | 'L3';
   round?: number;
 }
@@ -20,7 +20,9 @@ export interface ManagedSourceFieldView {
 export function managedSourceTagPreview(template: string, year: string, season: string, level: string): string[] {
   if (!/^\d{4}$/.test(year)) return [];
   if (template === 'pat_basic' || template === 'pat_advanced') {
-    return [template === 'pat_basic' ? 'PAT乙级' : 'PAT甲级', `${year}${season === 'autumn' ? '秋' : '春'}`];
+    const seasonLabel: Record<string, string> = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' };
+    if (!seasonLabel[season]) return [];
+    return [template === 'pat_basic' ? 'PAT乙级' : 'PAT甲级', `${year}${seasonLabel[season]}`];
   }
   if (template === 'gplt_national') return ['天梯赛全国总决赛', level, `${year}CCCC`].filter(Boolean);
   if (template === 'gplt_provincial') return ['天梯赛省级赛', level, `${year}CCCC-省`].filter(Boolean);
@@ -45,7 +47,8 @@ export function managedSourceFieldViews(
   for (const field of template?.fields || []) {
     if (field === 'year') continue;
     if (field === 'season') {
-      fields.push({ label: '季度', value: sourceMeta.season === 'autumn' ? '秋季' : sourceMeta.season === 'spring' ? '春季' : '—' });
+      const seasonLabel = { spring: '春季', summer: '夏季', autumn: '秋季', winter: '冬季' } as const;
+      fields.push({ label: '季度', value: sourceMeta.season ? seasonLabel[sourceMeta.season] : '—' });
     }
     if (field === 'level') fields.push({ label: '题目等级', value: sourceMeta.level || '—' });
     if (field === 'round') fields.push({ label: '场次', value: sourceMeta.round ? `第 ${sourceMeta.round} 场` : '—' });

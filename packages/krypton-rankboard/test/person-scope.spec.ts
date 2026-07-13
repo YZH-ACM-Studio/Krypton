@@ -293,6 +293,20 @@ describe('historical rankboard person scope', () => {
         expect(peopleUpdates.length).to.be.greaterThanOrEqual(5);
     });
 
+    it('normalizes legacy null image arrays atomically and supports replacement', async () => {
+        await model.addAwardImage(systemPersonId, 0, '/file/42/new.jpg', false, 'ladder_team_gold');
+        const append = peopleUpdates.at(-1)?.update;
+        expect(append).to.be.an('array');
+        expect(append[0].$set['awards.0.imageUrls'].$setUnion[0].$cond[0]).to.deep.equal({
+            $isArray: '$awards.0.imageUrls',
+        });
+
+        await model.addAwardImage(systemPersonId, 0, '/file/42/replacement.jpg', false, 'ladder_team_gold', true);
+        const replacement = peopleUpdates.at(-1)?.update;
+        expect(replacement[0].$set['awards.0.imageUrls']).to.deep.equal(['/file/42/replacement.jpg']);
+        expect(replacement[0].$set['awards.0.coverIndex']).to.equal(0);
+    });
+
     it('limits batch rollback updateMany to scoped system people', async () => {
         for (const person of people) person.awards[0].importBatchId = batchId;
 

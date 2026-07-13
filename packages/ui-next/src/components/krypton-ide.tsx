@@ -46,6 +46,7 @@ import { json } from '@codemirror/lang-json';
 import { oneDark } from '@codemirror/theme-one-dark';
 
 import { cn } from '@/lib/cn';
+import { distributePretestRecord, pretestActualOutput, selfTestVerdict, type PretestResult } from '@/lib/pretest-results';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -467,23 +468,6 @@ function SettingsDialog({
 /*  Pretest result dialog (kept for reference, unused)                 */
 /* ================================================================== */
 
-interface PretestResult {
-  status?: number;
-  time?: number;
-  memory?: number;
-  compilerTexts?: string[];
-  judgeTexts?: string[];
-  testCases?: Array<{
-    status: number;
-    time: number;
-    memory: number;
-    message?: string;
-  }>;
-  stdout?: string;
-  stderr?: string;
-  error?: string;
-}
-
 export interface RecordEntry {
   rid: string;
   url: string;
@@ -518,14 +502,6 @@ function diffLines(actual: string, expected: string): { type: 'same' | 'add' | '
 }
 
 /**
- * Extract the program's stdout from a pretest record (same precedence the
- *  output/diff panes use).
- */
-function pretestActualOutput(result: Pick<PretestResult, 'testCases' | 'stdout' | 'judgeTexts'> | null | undefined): string {
-  return result?.testCases?.[0]?.message || result?.stdout || result?.judgeTexts?.join('\n') || '';
-}
-
-/**
  * Display verdict for a self-test run.
  *
  * The judge backend returns `STATUS_ACCEPTED` (1) for ANY program that merely
@@ -541,18 +517,6 @@ function pretestActualOutput(result: Pick<PretestResult, 'testCases' | 'stdout' 
  *   - 'pending' still judging / queued (>=20 or 0)
  *   - 'none'    no result yet
  */
-type SelfTestVerdict = 'ac' | 'wa' | 'ran' | 'fail' | 'pending' | 'none';
-function selfTestVerdict(
-  result: Pick<PretestResult, 'status' | 'testCases' | 'stdout' | 'judgeTexts'> | null | undefined,
-  expectedOutput: string,
-): SelfTestVerdict {
-  const status = result?.status;
-  if (status == null) return 'none';
-  if (status !== 1) return status >= 2 && status < 20 ? 'fail' : 'pending';
-  if (expectedOutput.trim().length === 0) return 'ran';
-  return pretestActualOutput(result).trim() === expectedOutput.trim() ? 'ac' : 'wa';
-}
-
 function PretestResultInline({
   result,
   expectedOutput,
@@ -579,7 +543,7 @@ function PretestResultInline({
           : status;
   const time = result.time != null ? `${result.time} ms` : '—';
   const memory = result.memory != null ? (result.memory >= 1024 ? `${(result.memory / 1024).toFixed(1)} MB` : `${result.memory} KB`) : '—';
-  const actualOutput = result.testCases?.[0]?.message || result.stdout || result.judgeTexts?.join('\n') || '';
+  const actualOutput = pretestActualOutput(result);
   const compilerOutput = result.compilerTexts?.join('\n') || '';
   const stderr = result.stderr || '';
   const hasExpected = expectedOutput.trim().length > 0;
@@ -793,7 +757,8 @@ export function KryptonIDE({
   const [showPretest, setShowPretest] = useState(false);
   const [pretestHeight, setPretestHeight] = useState(200);
   // Per-tab loading + result state. A single pretest run owns a set of
-  // tabIds (1 tab for "运行此自测" / F9, all non-empty tabs for "运行全部自测")
+  // tabIds (1 tab for "运行此自测" / F9, all sample tabs plus populated
+  // custom tabs for "运行全部自测")
   // and writes per-tab results back into the map. Aborting a run clears
   // its own tabIds from `pretestRunning` only.
   const [pretestRunning, setPretestRunning] = useState<Set<string>>(new Set());
@@ -1146,10 +1111,10 @@ export function KryptonIDE({
 
   /* ── Pretest handler ──
    *  Runs one or more tabs in a single backend pretest request. The judge
-   *  treats `input: string[]` as N test cases sharing one record; the
-   *  response rdoc's `testCases[i]` maps back to the i-th tab. We fan
-   *  results out into `pretestResults` so the per-tab panel + tab badges
-   *  light up independently.
+   *  treats `input: string[]` as N test cases sharing one record. Cases may
+   *  finish out of order, so the response's one-based `case.id` is the only
+   *  binding key; array position is merely completion order. We fan results
+   *  out into `pretestResults` so each tab stays independent.
    *
    *  Why a single request instead of N sequential POSTs:
    *   - one rate-limiter consumption (limit.pretest defaults to 60/min)
@@ -1157,9 +1122,11 @@ export function KryptonIDE({
    *   - results stream in together — easier to render partial progress
    */
   const runPretestForTabs = useCallback(
-    async (tabIds: string[]) => {
+    async (tabIds: string[], includeEmpty = false) => {
       if (!submitUrl || !canPretest) return;
-      const tabs = tabIds.map((id) => pretestTabs.find((t) => t.id === id)).filter((t): t is PretestTab => !!t && t.input.length > 0);
+      const tabs = tabIds
+        .map((id) => pretestTabs.find((t) => t.id === id))
+        .filter((t): t is PretestTab => !!t && (includeEmpty || t.id.startsWith('sample-') || t.input.length > 0 || t.expectedOutput.length > 0));
       if (tabs.length === 0) return;
 
       // Any in-flight pretest gets aborted — only one run owns the controller.
@@ -1176,32 +1143,10 @@ export function KryptonIDE({
       });
 
       const distributeFromRdoc = (rdoc: any) => {
+        const distributed = distributePretestRecord(rdoc, runningIds);
         setPretestResults((prev) => {
           const m = new Map(prev);
-          const cases = Array.isArray(rdoc.testCases) ? rdoc.testCases : [];
-          runningIds.forEach((tabId, i) => {
-            const tc = cases[i];
-            // testCases settle one at a time. If this tab's case hasn't
-            // landed yet, show the record-level status (pending / compile
-            // error / etc.) so the tab badge isn't blank.
-            m.set(
-              tabId,
-              tc
-                ? {
-                    status: tc.status,
-                    time: tc.time,
-                    memory: tc.memory,
-                    testCases: [tc],
-                    compilerTexts: rdoc.compilerTexts,
-                    judgeTexts: rdoc.judgeTexts,
-                  }
-                : {
-                    status: rdoc.status ?? 0,
-                    compilerTexts: rdoc.compilerTexts,
-                    judgeTexts: rdoc.judgeTexts,
-                  },
-            );
-          });
+          for (const [tabId, result] of distributed) m.set(tabId, result);
           return m;
         });
       };
@@ -1275,7 +1220,7 @@ export function KryptonIDE({
     [submitUrl, canPretest, pretestTabs, selectedLang, getCode, resolvePretestRecordUrl],
   );
 
-  /** Toolbar "运行全部自测" — run every non-empty pretest tab in one request. */
+  /** Toolbar "运行全部自测" — run all samples and populated custom tabs in one request. */
   const handleRunAll = useCallback(() => {
     if (!showPretest) {
       setShowPretest(true);
@@ -1290,7 +1235,7 @@ export function KryptonIDE({
       setShowPretest(true);
       return;
     }
-    runPretestForTabs([activeTab.id]);
+    runPretestForTabs([activeTab.id], true);
   }, [showPretest, activeTab.id, runPretestForTabs]);
 
   /* ── Ref bridge so keymap closures always call latest handlers ── */
@@ -1529,7 +1474,7 @@ export function KryptonIDE({
                 className="h-7 gap-1 text-xs"
                 disabled={pretestLoading || pretestCooldown > 0}
                 onClick={handleRunAll}
-                title="一次评测所有非空自测 tab"
+                title="一次评测所有样例和已填写的自定义 tab"
               >
                 {pretestLoading ? (
                   <Loader2 className="size-3 animate-spin" />
@@ -1723,7 +1668,7 @@ export function KryptonIDE({
             {/* Per-tab run button — runs only the active tab; F9 shortcut */}
             <button
               type="button"
-              disabled={pretestLoading || pretestCooldown > 0 || !activeTab.input.trim()}
+              disabled={pretestLoading || pretestCooldown > 0}
               onClick={handleRunActive}
               className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 shrink-0"
               title="运行当前自测 (F9)"
@@ -1851,7 +1796,7 @@ export function KryptonIDE({
                 return (
                   <div className="flex flex-1 flex-col items-center justify-center gap-1 text-xs text-muted-foreground">
                     <div>按 F9 或点击"运行此自测"测试当前 tab</div>
-                    <div className="text-[10px]">"运行全部自测" 一次评测所有非空 tab</div>
+                    <div className="text-[10px]">"运行全部自测" 一次评测所有样例和已填写的自定义 tab</div>
                   </div>
                 );
               })()}

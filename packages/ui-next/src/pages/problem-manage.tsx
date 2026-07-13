@@ -19,10 +19,11 @@ import {
   Upload,
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { AdminPage } from '@/components/admin/admin-page';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { ProblemEditorWorkspace } from '@/components/problem-editor-workspace';
+import { ProblemTestdataFileDialog } from '@/components/problem-testdata-file-dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -35,8 +36,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { FileUploader } from '@/components/uploader';
 import { type GenericUserDoc, useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
+import { downloadProblemFiles } from '@/lib/problem-package';
 
 type R = Record<string, any>;
+type ProblemFileType = 'testdata' | 'additional_file';
 
 function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | undefined) {
   return uid != null ? (udict[String(uid)] ?? null) : null;
@@ -73,7 +76,10 @@ export function ProblemFilesPage() {
   const [renamingFiles, setRenamingFiles] = useState<Record<string, string>>({});
   const [renamingType, setRenamingType] = useState<'testdata' | 'additional_file'>('testdata');
   const [showGenerate, setShowGenerate] = useState(false);
-  const [uploadTarget, setUploadTarget] = useState<'testdata' | 'additional_file' | null>(null);
+  const [uploadTarget, setUploadTarget] = useState<ProblemFileType | null>(null);
+  const [previewingTestdataFile, setPreviewingTestdataFile] = useState<R | null>(null);
+  const [downloadingType, setDownloadingType] = useState<ProblemFileType | null>(null);
+  const [downloadError, setDownloadError] = useState('');
   const generatorCandidates = testdata.filter(
     (file) => !file.name.endsWith('.in') && !file.name.endsWith('.out') && !file.name.endsWith('.ans') && file.name !== 'config.yaml',
   );
@@ -97,6 +103,22 @@ export function ProblemFilesPage() {
     setRenamingFiles(mapping);
   };
 
+  const handleDownloadSelected = useCallback(
+    async (selected: Set<string>, type: ProblemFileType) => {
+      setDownloadError('');
+      setDownloadingType(type);
+      try {
+        await downloadProblemFiles({ pdoc, problemUrl, files: Array.from(selected), type });
+      } catch (error) {
+        console.error('Problem files download failed', { type, files: Array.from(selected), error });
+        setDownloadError(error instanceof Error ? error.message : '下载失败');
+      } finally {
+        setDownloadingType(null);
+      }
+    },
+    [pdoc, problemUrl],
+  );
+
   const FileSection = ({
     title,
     files,
@@ -106,7 +128,7 @@ export function ProblemFilesPage() {
   }: {
     title: string;
     files: R[];
-    type: string;
+    type: ProblemFileType;
     selected: Set<string>;
     setSelected: (s: Set<string>) => void;
   }) => (
@@ -123,7 +145,7 @@ export function ProblemFilesPage() {
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => setUploadTarget((current) => (current === type ? null : (type as 'testdata' | 'additional_file')))}
+              onClick={() => setUploadTarget((current) => (current === type ? null : type))}
               aria-expanded={uploadTarget === type}
             >
               <Upload className="mr-1 size-3" />
@@ -133,20 +155,19 @@ export function ProblemFilesPage() {
           {selected.size > 0 && (
             <>
               {/* Download */}
-              <form method="post">
-                <input type="hidden" name="operation" value="get_links" />
-                <input type="hidden" name="type" value={type} />
-                {Array.from(selected).map((f) => (
-                  <input key={f} type="hidden" name="files" value={f} />
-                ))}
-                <Button type="submit" size="sm" variant="outline">
-                  <Download className="mr-1 size-3" />
-                  下载 ({selected.size})
-                </Button>
-              </form>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={downloadingType !== null}
+                onClick={() => void handleDownloadSelected(selected, type)}
+              >
+                <Download className="mr-1 size-3" />
+                {downloadingType === type ? '准备下载…' : `下载 (${selected.size})`}
+              </Button>
               {/* Rename */}
               {!reference && (
-                <Button size="sm" variant="outline" onClick={() => startRename(selected, type as 'testdata' | 'additional_file')}>
+                <Button size="sm" variant="outline" onClick={() => startRename(selected, type)}>
                   <Pencil className="mr-1 size-3" />
                   重命名
                 </Button>
@@ -169,6 +190,11 @@ export function ProblemFilesPage() {
           )}
         </div>
       </CardHeader>
+      {downloadError ? (
+        <p role="alert" className="mx-4 mb-4 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          下载失败：{downloadError}
+        </p>
+      ) : null}
       {uploadTarget === type ? (
         <div className="border-t border-border/60 p-4">
           <FileUploader
@@ -203,9 +229,23 @@ export function ProblemFilesPage() {
                     <Checkbox checked={selected.has(f.name)} onChange={() => toggleFile(selected, setSelected, f.name)} />
                   </TableCell>
                   <TableCell>
-                    <a href={`${problemUrl}/file/${f.name}?type=${type}`} className="font-mono text-sm text-primary hover:underline">
-                      {f.name}
-                    </a>
+                    {type === 'testdata' ? (
+                      <button
+                        type="button"
+                        onClick={() => setPreviewingTestdataFile(f)}
+                        className="font-mono text-sm text-primary hover:underline"
+                        title="查看或编辑文件"
+                      >
+                        {f.name}
+                      </button>
+                    ) : (
+                      <a
+                        href={`${problemUrl}/file/${encodeURIComponent(f.name)}?type=${type}`}
+                        className="font-mono text-sm text-primary hover:underline"
+                      >
+                        {f.name}
+                      </a>
+                    )}
                   </TableCell>
                   <TableCell className="text-right text-sm text-muted-foreground">{formatSize(f.size || 0)}</TableCell>
                   <TableCell className="text-right text-sm text-muted-foreground">
@@ -352,6 +392,9 @@ export function ProblemFilesPage() {
           </section>
         ) : null}
       </div>
+      {previewingTestdataFile ? (
+        <ProblemTestdataFileDialog file={previewingTestdataFile} problemUrl={problemUrl} onClose={() => setPreviewingTestdataFile(null)} />
+      ) : null}
     </ProblemEditorWorkspace>
   );
 }

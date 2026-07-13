@@ -118,9 +118,11 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(config).to.include(`fetch(\`${problemUrlExpression}/files\``);
     expect(files).to.include(`endpoint={\`${problemUrlExpression}/files\`}`);
     expect(files).to.include('meta={{ type }}');
-    for (const operation of ['get_links', 'rename_files', 'delete_files', 'generate_testdata']) {
+    for (const operation of ['rename_files', 'delete_files', 'generate_testdata']) {
       expect(files).to.include(`value="${operation}"`);
     }
+    expect(files).not.to.include('value="get_links"');
+    expect(files).to.include('await downloadProblemFiles({');
   });
 
   it('serializes both checkbox states explicitly so administrators can clear them', () => {

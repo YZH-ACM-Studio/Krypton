@@ -11,6 +11,13 @@ interface ProblemPackageOptions {
   content?: string | R;
 }
 
+interface ProblemFilesDownloadOptions {
+  pdoc: R;
+  problemUrl: string;
+  files: string[];
+  type: 'testdata' | 'additional_file';
+}
+
 function cleanDownloadName(value: string) {
   return (
     value
@@ -96,6 +103,17 @@ async function getFileLinks(problemUrl: string, files: string[], type: 'testdata
   if (!res.ok) throw new Error(await responseMessage(res));
   const data = await res.json().catch(() => ({}));
   return (data?.links || {}) as Record<string, string>;
+}
+
+export async function downloadProblemFiles({ pdoc, problemUrl, files, type }: ProblemFilesDownloadOptions) {
+  if (!files.length) throw new Error('请至少选择一个文件');
+  const links = await getFileLinks(problemUrl, files, type);
+  const missing = files.filter((file) => !links[file]);
+  if (missing.length) throw new Error(`服务器未返回下载链接：${missing.join(', ')}`);
+  const targets = files.map((file) => ({ name: file, url: links[file] }));
+  const folder = problemFolder(pdoc);
+  const filename = cleanDownloadName(`${folder} ${pdoc.title || pdoc.pid || 'problem'} ${type}.zip`);
+  await downloadZip(filename, targets);
 }
 
 export async function downloadProblemPackage({ pdoc, problemUrl, testdata = [], additionalFiles = [], content }: ProblemPackageOptions) {

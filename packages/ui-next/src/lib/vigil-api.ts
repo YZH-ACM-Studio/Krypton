@@ -334,6 +334,49 @@ export function recordingBelongsToStudent(recording: VigilRecording, student: Vi
   return recording.examSessionId === student.examSessionId;
 }
 
+export interface RecordingDownloadScope {
+  recordingId?: string;
+  ojUserId?: number;
+  examSessionId?: string;
+}
+
+interface RecordingDownloadToken {
+  dl: string;
+  expiresAt: string;
+  href: string;
+  count: number;
+  totalBytes: number;
+}
+
+export async function requestRecordingDownload(
+  cid: string,
+  scope: RecordingDownloadScope,
+  actor: { uid: number; displayName: string },
+): Promise<string> {
+  const token = await vigilFetch<RecordingDownloadToken>(
+    `/api/admin/vigil/proctor/contests/${encodeURIComponent(cid)}/download-token`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ ...scope, actor }),
+    },
+  );
+  const dashboard = await getToken();
+  return `${dashboard.vigilBaseUrl}/api/admin/vigil/proctor${token.href}?dl=${encodeURIComponent(token.dl)}`;
+}
+
+export function prepareBrowserDownload(): Window {
+  const target = window.open('about:blank', '_blank');
+  if (!target) throw new Error('浏览器阻止了下载窗口，请允许此站点打开新窗口后重试。');
+  target.opener = null;
+  target.document.title = '录像下载';
+  target.document.body.textContent = '正在准备录像下载；若服务端拒绝请求，错误详情会显示在此页。';
+  return target;
+}
+
+export function startBrowserDownload(url: string, target: Window): void {
+  target.location.replace(url);
+}
+
 export interface RecordingDeleteScope {
   cid: string;
   ojUserId?: number;

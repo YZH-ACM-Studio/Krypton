@@ -18,7 +18,7 @@
  *   └─────────────────────────────────────┘
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Camera, FileText, Film, Lock, MessageSquare, Monitor, ChevronRight } from 'lucide-react';
+import { Camera, ChevronRight, Download, FileText, Film, Lock, MessageSquare, Monitor } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -28,7 +28,16 @@ import { Badge } from '@/components/ui/badge';
 // so heartbeat + event log timestamps render in the proctor's local zone.
 import { VigilDateTime as DateTime } from '@/pages/vigil/timestamp';
 import { translateEventType } from '@/pages/vigil/i18n';
-import { listStudentEvents, VigilOfflineError, type VigilStudentCard, type VigilStudentEvent } from '@/lib/vigil-api';
+import {
+  listStudentEvents,
+  prepareBrowserDownload,
+  requestRecordingDownload,
+  startBrowserDownload,
+  VigilOfflineError,
+  type VigilStudentCard,
+  type VigilStudentEvent,
+} from '@/lib/vigil-api';
+import { useBootstrap } from '@/lib/bootstrap';
 import { useProctorCommands } from '@/hooks/use-proctor-commands';
 import { StatusPill, statusLabel } from '@/pages/vigil/student-card';
 import { ConfirmActionDialog } from '@/pages/vigil/confirm-action-dialog';
@@ -50,6 +59,7 @@ interface StudentDetailSheetProps {
 }
 
 export function StudentDetailSheet({ open, onOpenChange, contestId, student, recordEnabled, newEventVersion }: StudentDetailSheetProps) {
+  const bs = useBootstrap();
   const { sendCommand } = useProctorCommands({ contestId });
   const [events, setEvents] = useState<VigilStudentEvent[]>([]);
   const [eventsErr, setEventsErr] = useState<string | null>(null);
@@ -61,6 +71,8 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
   const [liveOpen, setLiveOpen] = useState(false);
   const [recordingOpen, setRecordingOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<VigilStudentEvent | null>(null);
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   // Reload events whenever the sheet opens for a new student or when a WS
   // `event_added` matching this machineId arrives (newEventVersion bump).
@@ -69,6 +81,7 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
     let cancelled = false;
     setEventsLoading(true);
     setEventsErr(null);
+    setDownloadError(null);
     listStudentEvents(contestId, student.machineId, { limit: 100 })
       .then((rows) => {
         if (cancelled) return;
@@ -123,6 +136,35 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
     },
     [sendCommand, student],
   );
+
+  const handleDownloadAll = useCallback(async () => {
+    if (!student) return;
+    let downloadTarget: Window;
+    try {
+      downloadTarget = prepareBrowserDownload();
+    } catch (reason) {
+      setDownloadError(reason instanceof Error ? reason.message : '无法打开下载窗口');
+      return;
+    }
+    setDownloadBusy(true);
+    setDownloadError(null);
+    try {
+      const scope = student.uid != null
+        ? { ojUserId: student.uid }
+        : { examSessionId: student.examSessionId };
+      const url = await requestRecordingDownload(
+        contestId,
+        scope,
+        { uid: bs.user.id, displayName: bs.user.name },
+      );
+      startBrowserDownload(url, downloadTarget);
+    } catch (reason) {
+      downloadTarget.close();
+      setDownloadError(reason instanceof Error ? reason.message : '申请录像打包下载失败');
+    } finally {
+      setDownloadBusy(false);
+    }
+  }, [bs.user.id, bs.user.name, contestId, student]);
 
   if (!student) {
     return (
@@ -196,7 +238,19 @@ export function StudentDetailSheet({ open, onOpenChange, contestId, student, rec
                 />
                 <ActionButton icon={FileText} label="导出日志" onClick={() => setConfirmFlush(true)} />
                 <ActionButton icon={Film} label="录屏回放" onClick={() => setRecordingOpen(true)} disabled={!recordEnabled} />
+                <ActionButton
+                  icon={Download}
+                  label={downloadBusy ? '正在申请下载…' : '打包下载录像'}
+                  onClick={() => void handleDownloadAll()}
+                  disabled={!recordEnabled || downloadBusy}
+                />
               </div>
+
+              {downloadError ? (
+                <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                  {downloadError}
+                </p>
+              ) : null}
 
               {/* Event log */}
               <div>

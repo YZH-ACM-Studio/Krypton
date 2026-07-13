@@ -12,17 +12,21 @@
  * SRS at segment close).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Film, Pause, Play, Trash2, X } from 'lucide-react';
+import { AlertCircle, Download, Film, Pause, Play, Trash2, X } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import {
   buildRecordingUrl,
   listContestRecordings,
+  prepareBrowserDownload,
   recordingBelongsToStudent,
+  requestRecordingDownload,
+  startBrowserDownload,
   type VigilRecording,
   type VigilStudentCard,
   VigilOfflineError,
 } from '@/lib/vigil-api';
+import { useBootstrap } from '@/lib/bootstrap';
 import { RecordingDeleteDialog } from '@/pages/vigil/recording-delete-dialog';
 
 interface RecordingPlaybackDialogProps {
@@ -35,18 +39,22 @@ interface RecordingPlaybackDialogProps {
 type StreamType = 'screen' | 'camera';
 
 export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student }: RecordingPlaybackDialogProps) {
+  const bs = useBootstrap();
   const [streamType, setStreamType] = useState<StreamType>('screen');
   const [items, setItems] = useState<VigilRecording[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [deleteRecording, setDeleteRecording] = useState<VigilRecording | null>(null);
   const [reloadVersion, setReloadVersion] = useState(0);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return undefined;
     let cancelled = false;
     setLoading(true);
     setErr(null);
+    setDownloadError(null);
     listContestRecordings(contestId)
       .then((rows) => {
         if (cancelled) return;
@@ -78,6 +86,31 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
   );
 
   const totalBytes = useMemo(() => candidates.reduce((s, c) => s + (c.size || 0), 0), [candidates]);
+
+  const downloadRecording = useCallback(async (recording: VigilRecording) => {
+    let downloadTarget: Window;
+    try {
+      downloadTarget = prepareBrowserDownload();
+    } catch (reason) {
+      setDownloadError(reason instanceof Error ? reason.message : '无法打开下载窗口');
+      return;
+    }
+    setDownloadingId(recording.recordingId);
+    setDownloadError(null);
+    try {
+      const url = await requestRecordingDownload(
+        contestId,
+        { recordingId: recording.recordingId },
+        { uid: bs.user.id, displayName: bs.user.name },
+      );
+      startBrowserDownload(url, downloadTarget);
+    } catch (reason) {
+      downloadTarget.close();
+      setDownloadError(reason instanceof Error ? reason.message : '申请录像下载失败');
+    } finally {
+      setDownloadingId(null);
+    }
+  }, [bs.user.id, bs.user.name, contestId]);
 
   return (
     <>
@@ -122,6 +155,7 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
               {candidates.length} 段 · 连续时间轴 · {formatBytes(totalBytes)}
             </p>
           )}
+          {downloadError ? <p className="w-full text-xs text-destructive">{downloadError}</p> : null}
         </div>
 
         <div className="relative flex-1 bg-black">
@@ -138,7 +172,12 @@ export function RecordingPlaybackDialog({ open, onOpenChange, contestId, student
               <p>此学生在当前比赛暂无 {streamType === 'screen' ? '屏幕' : '摄像头'} 录屏。</p>
             </div>
           ) : (
-            <UnifiedTimelinePlayer chunks={candidates} onDelete={setDeleteRecording} />
+            <UnifiedTimelinePlayer
+              chunks={candidates}
+              downloadingId={downloadingId}
+              onDelete={setDeleteRecording}
+              onDownload={(recording) => void downloadRecording(recording)}
+            />
           )}
         </div>
       </DialogContent>
@@ -187,7 +226,17 @@ function probeDuration(url: string): Promise<number> {
  * durationMs = 0). The single <video> + faststart mp4 (now produced by the AV1
  * transcode) gives a working, seekable scrubber.
  */
-function UnifiedTimelinePlayer({ chunks, onDelete }: { chunks: VigilRecording[]; onDelete: (chunk: VigilRecording) => void }) {
+function UnifiedTimelinePlayer({
+  chunks,
+  downloadingId,
+  onDelete,
+  onDownload,
+}: {
+  chunks: VigilRecording[];
+  downloadingId: string | null;
+  onDelete: (chunk: VigilRecording) => void;
+  onDownload: (chunk: VigilRecording) => void;
+}) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pendingSeekRef = useRef<number | null>(null);
   const [durations, setDurations] = useState<Record<string, number>>({});
@@ -334,6 +383,22 @@ function UnifiedTimelinePlayer({ chunks, onDelete }: { chunks: VigilRecording[];
         <button type="button" onClick={() => onDelete(activeChunk)} className="text-white/70 hover:text-red-400" title="删除当前录像分段">
           <Trash2 className="size-4" />
         </button>
+      </div>
+      <div className="flex items-center gap-2 overflow-x-auto border-t border-white/10 bg-black/70 px-4 py-2">
+        <span className="shrink-0 text-[11px] text-white/50">分段下载</span>
+        {chunks.map((chunk, index) => (
+          <button
+            key={chunk.recordingId}
+            type="button"
+            disabled={downloadingId === chunk.recordingId}
+            onClick={() => onDownload(chunk)}
+            className="inline-flex shrink-0 items-center gap-1 rounded border border-white/15 px-2 py-1 text-[11px] text-white/70 hover:border-white/30 hover:text-white disabled:opacity-40"
+            title={`下载第 ${index + 1} 段录像`}
+          >
+            <Download className="size-3" />
+            第 {index + 1} 段
+          </button>
+        ))}
       </div>
     </div>
   );

@@ -201,7 +201,7 @@ export function ProblemsPage() {
   });
 
   return (
-    <main className="mx-auto min-w-0 max-w-[1440px] space-y-6 overflow-x-clip pb-12">
+    <main className="w-full min-w-0 space-y-6 overflow-x-clip pb-12">
       <header className="flex flex-col gap-4 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-1">
           <p className="text-xs font-medium tracking-wide text-muted-foreground">统一题库</p>
@@ -302,9 +302,7 @@ export function ProblemsPage() {
                         </a>
                         <span className="font-mono text-xs text-muted-foreground">{displayPid}</span>
                         {canReviewManaged ? (
-                          <Badge variant="outline">
-                            {pdoc.managedAuthoring?.metadataStatus === 'draft' ? '元数据待确认' : '等待重新公开'}
-                          </Badge>
+                          <Badge variant="outline">{pdoc.managedAuthoring?.metadataStatus === 'draft' ? '元数据待确认' : '等待重新公开'}</Badge>
                         ) : null}
                       </div>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

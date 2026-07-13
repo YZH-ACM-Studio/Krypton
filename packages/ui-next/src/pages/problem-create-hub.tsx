@@ -76,7 +76,7 @@ export function ProblemCreateHubPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-4xl space-y-7 pb-12">
+    <main className="w-full min-w-0 space-y-7 pb-12">
       <header className="space-y-4 border-b border-border/70 pb-6">
         <Button asChild variant="ghost" size="sm" className="-ml-2 w-fit">
           <a href="/p">

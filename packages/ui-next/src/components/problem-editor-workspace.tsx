@@ -122,7 +122,7 @@ export function ProblemEditorWorkspace({
   };
 
   return (
-    <section className="mx-auto min-w-0 max-w-[1440px] space-y-5 overflow-x-clip pb-10">
+    <section className="w-full min-w-0 space-y-5 overflow-x-clip pb-10">
       <header className="border-b border-border/70 pb-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0 space-y-1">

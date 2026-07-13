@@ -102,7 +102,7 @@ function ObjectiveEditorShell({
   };
 
   return (
-    <main className="mx-auto w-full max-w-5xl space-y-5 pb-10">
+    <main className="w-full min-w-0 space-y-5 pb-10">
       <header className="flex flex-wrap items-center gap-3 border-b border-border/70 pb-4">
         <Button asChild variant="ghost" size="icon" className="size-11">
           <a href={isCreate ? '/problem/create' : `/p/${pid}`} aria-label="返回">

@@ -1411,7 +1411,13 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     @param('sidebar', Types.Boolean)
     async get({}, d = ['testdata', 'additional_file'], sidebar = false) {
         if (this.tdoc) throw new ContestNotEndedError();
-        this.pdoc = await requireStableEditableProblem(this.user, this.pdoc);
+        this.pdoc = await requireStableEditableProblem(this.user, this.pdoc, problem.PROJECTION_MANAGED_EDITOR);
+        // The files page shares the editor workspace but does not inherit
+        // ProblemManageHandler. Publish the same server-computed capability
+        // contract so managed authors, maintainers and administrators do not
+        // get different navigation merely because they changed routes.
+        this.response.body.pdoc = this.pdoc;
+        this.response.body.problemAuthoringCapabilities = problemAuthoringCapabilities(this.user, this.pdoc);
         this.response.body.testdata = sortFiles(this.pdoc.data || []);
         this.response.body.additional_file = sortFiles(this.pdoc.additional_file || []);
         this.response.body.reference = this.pdoc.reference;

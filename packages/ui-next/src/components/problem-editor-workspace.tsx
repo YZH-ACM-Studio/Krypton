@@ -1,8 +1,9 @@
-import { ArrowLeft, FileArchive, FileText, FolderInput, Settings2, ShieldCheck, SlidersHorizontal } from 'lucide-react';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, FileArchive, FileText, FolderInput, Settings2, ShieldCheck } from 'lucide-react';
+import { type ReactNode, useMemo } from 'react';
 import { cn } from '@/lib/cn';
 
-export type ProblemEditorWorkspacePage = 'edit' | 'config' | 'files';
+export type ProblemEditorWorkspacePage = 'edit' | 'collaboration' | 'config' | 'files';
+export type ProblemEditorFileSection = 'testdata' | 'additional';
 
 interface WorkspaceItem {
   key: string;
@@ -11,6 +12,7 @@ interface WorkspaceItem {
   href: string;
   icon: typeof FileText;
   disabled?: boolean;
+  disabledReason?: string;
 }
 
 export function ProblemEditorWorkspace({
@@ -19,6 +21,8 @@ export function ProblemEditorWorkspace({
   title,
   pid,
   isCreate = false,
+  fileSection = 'testdata',
+  collaborationEnabled = true,
   status,
   actions,
   children,
@@ -28,23 +32,17 @@ export function ProblemEditorWorkspace({
   title: string;
   pid: string;
   isCreate?: boolean;
+  fileSection?: ProblemEditorFileSection;
+  collaborationEnabled?: boolean;
   status?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
 }) {
-  const [hash, setHash] = useState(() => (typeof window === 'undefined' ? '' : window.location.hash.slice(1)));
-
-  useEffect(() => {
-    const update = () => setHash(window.location.hash.slice(1));
-    window.addEventListener('hashchange', update);
-    return () => window.removeEventListener('hashchange', update);
-  }, []);
-
   const items = useMemo<WorkspaceItem[]>(() => {
-    const editUrl = isCreate ? (typeof window === 'undefined' ? '/problem/create' : window.location.pathname) : `${problemUrl}/edit`;
+    const editUrl = isCreate ? (typeof window === 'undefined' ? '/problem/create/programming' : window.location.pathname) : `${problemUrl}/edit`;
+    const createDisabledReason = '创建题目后可用';
     return [
-      { key: 'basic', label: '基本信息', description: '标题、题号、标签与可见性', href: `${editUrl}#basic`, icon: SlidersHorizontal },
-      { key: 'statement', label: '题面', description: 'Markdown 题目说明与附件引用', href: `${editUrl}#statement`, icon: FileText },
+      { key: 'edit', label: '题目内容', description: '标题、题号、标签、来源与题面', href: editUrl, icon: FileText },
       {
         key: 'config',
         label: '评测配置',
@@ -52,43 +50,39 @@ export function ProblemEditorWorkspace({
         href: `${problemUrl}/config`,
         icon: Settings2,
         disabled: isCreate,
+        disabledReason: createDisabledReason,
       },
       {
         key: 'testdata',
         label: '测试数据',
         description: '输入、输出、生成器与标程',
-        href: `${problemUrl}/files#testdata`,
+        href: `${problemUrl}/files?section=testdata`,
         icon: FolderInput,
         disabled: isCreate,
+        disabledReason: createDisabledReason,
       },
       {
         key: 'additional',
         label: '附加文件',
         description: '题面图片与选手可下载文件',
-        href: `${problemUrl}/files#additional-files`,
+        href: `${problemUrl}/files?section=additional`,
         icon: FileArchive,
         disabled: isCreate,
+        disabledReason: createDisabledReason,
       },
       {
-        key: 'permissions',
-        label: '权限与维护者',
-        description: '隐藏状态、验题人与危险操作',
-        href: `${editUrl}#permissions`,
+        key: 'collaboration',
+        label: '权限与协作',
+        description: '出题人、验题人、维护者与审核发布',
+        href: `${editUrl}?section=collaboration`,
         icon: ShieldCheck,
+        disabled: isCreate || !collaborationEnabled,
+        disabledReason: isCreate ? createDisabledReason : '当前角色无协作管理权限',
       },
     ];
-  }, [isCreate, problemUrl]);
+  }, [collaborationEnabled, isCreate, problemUrl]);
 
-  const activeKey =
-    page === 'config'
-      ? 'config'
-      : page === 'files'
-        ? hash === 'additional-files'
-          ? 'additional'
-          : 'testdata'
-        : ['statement', 'permissions'].includes(hash)
-          ? hash
-          : 'basic';
+  const activeKey = page === 'config' ? 'config' : page === 'files' ? fileSection : page;
 
   const renderItem = (item: WorkspaceItem, compact: boolean) => {
     const active = item.key === activeKey;
@@ -111,7 +105,13 @@ export function ProblemEditorWorkspace({
       </>
     );
     return item.disabled ? (
-      <span key={item.key} aria-disabled="true" className={className}>
+      <span
+        key={item.key}
+        aria-disabled="true"
+        aria-label={`${item.label}，${item.disabledReason}`}
+        title={item.disabledReason}
+        className={className}
+      >
         {content}
       </span>
     ) : (
@@ -122,13 +122,8 @@ export function ProblemEditorWorkspace({
   };
 
   return (
-    <section className="mx-auto min-w-0 max-w-[1440px] space-y-5 overflow-x-clip">
-      <header
-        className={cn(
-          'sticky top-12 z-20 -mx-1 border-b border-border/70 bg-background/95 px-1 pb-4 pt-1 backdrop-blur-xl',
-          'supports-[backdrop-filter]:bg-background/85',
-        )}
-      >
+    <section className="mx-auto min-w-0 max-w-[1440px] space-y-5 overflow-x-clip pb-10">
+      <header className="border-b border-border/70 pb-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0 space-y-1">
             {isCreate ? (
@@ -139,7 +134,7 @@ export function ProblemEditorWorkspace({
             ) : null}
             <p className="text-xs font-medium tracking-wide text-muted-foreground">编程题工作区 · {pid || '新题'}</p>
             <h1 className="truncate text-2xl font-semibold tracking-tight text-balance">{title || '新建编程题'}</h1>
-            <p className="max-w-[65ch] text-sm leading-6 text-muted-foreground">按出题顺序完成题面、评测与文件配置；题型固定为编程题。</p>
+            <p className="max-w-[65ch] text-sm leading-6 text-muted-foreground">题目内容、评测、文件与协作分别使用现有功能页面；题型固定为编程题。</p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {status}
@@ -152,13 +147,21 @@ export function ProblemEditorWorkspace({
         <div className="inline-flex min-w-max items-center gap-1 rounded-2xl bg-muted/70 p-1">{items.map((item) => renderItem(item, true))}</div>
       </nav>
 
+      {isCreate ? (
+        <p role="status" className="rounded-xl bg-muted/55 px-4 py-3 text-sm text-muted-foreground">
+          先创建题目；取得真实题号后，评测配置、文件与协作功能会在完整工作区开放。
+        </p>
+      ) : null}
+
       <div className="grid min-w-0 gap-6 lg:grid-cols-[15rem_minmax(0,1fr)]">
         <aside className="hidden lg:block">
-          <nav aria-label="编程题编辑步骤" className="sticky top-44 space-y-1 rounded-2xl bg-muted/55 p-2">
+          <nav aria-label="编程题编辑步骤" className="sticky top-20 space-y-1 rounded-2xl bg-muted/55 p-2">
             {items.map((item) => renderItem(item, false))}
           </nav>
         </aside>
-        <main className="min-w-0">{children}</main>
+        <main id="problem-editor-content" className="min-w-0">
+          {children}
+        </main>
       </div>
     </section>
   );

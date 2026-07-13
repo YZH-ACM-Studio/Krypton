@@ -58,11 +58,15 @@ export function ProblemFilesPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
   const pdoc: R = data.pdoc || {};
+  const capabilities: R = data.problemAuthoringCapabilities || {};
   const testdata: R[] = data.testdata || [];
   const additionalFile: R[] = data.additional_file || [];
   const reference: R | null = data.reference || null;
   const pid = pdoc.pid || pdoc.docId || '';
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
+  const fileSection =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('section') === 'additional' ? 'additional' : 'testdata';
+  const collaborationEnabled = pdoc.authoringMode !== 'managed' || capabilities.canManageCollaborators === true || capabilities.canPublish === true;
 
   const [selectedTestdata, setSelectedTestdata] = useState<Set<string>>(new Set());
   const [selectedAdditional, setSelectedAdditional] = useState<Set<string>>(new Set());
@@ -227,6 +231,8 @@ export function ProblemFilesPage() {
       problemUrl={problemUrl}
       title={pdoc.title || String(pid)}
       pid={String(pid)}
+      fileSection={fileSection}
+      collaborationEnabled={collaborationEnabled}
       actions={
         <Button asChild variant="outline" size="sm">
           <a href={problemUrl}>
@@ -276,16 +282,19 @@ export function ProblemFilesPage() {
           </p>
         ) : null}
 
-        <FileSection title="测试数据" files={testdata} type="testdata" selected={selectedTestdata} setSelected={setSelectedTestdata} />
-        <FileSection
-          title="附加文件"
-          files={additionalFile}
-          type="additional_file"
-          selected={selectedAdditional}
-          setSelected={setSelectedAdditional}
-        />
+        {fileSection === 'testdata' ? (
+          <FileSection title="测试数据" files={testdata} type="testdata" selected={selectedTestdata} setSelected={setSelectedTestdata} />
+        ) : (
+          <FileSection
+            title="附加文件"
+            files={additionalFile}
+            type="additional_file"
+            selected={selectedAdditional}
+            setSelected={setSelectedAdditional}
+          />
+        )}
 
-        {!reference && testdata.length > 0 ? (
+        {fileSection === 'testdata' && !reference && testdata.length > 0 ? (
           <section className="rounded-2xl border border-border/70 bg-card/30">
             <header className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div>

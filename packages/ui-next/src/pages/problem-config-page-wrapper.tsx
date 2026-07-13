@@ -11,13 +11,20 @@ export function ProblemConfigPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
   const pdoc: R = data.pdoc || {};
+  const capabilities: R = data.problemAuthoringCapabilities || {};
   const testdata: R[] = Array.isArray(data.testdata) ? data.testdata : [];
   const config: string = data.config || '';
   const pid = pdoc.pid || pdoc.docId || '';
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
 
   return (
-    <ProblemEditorWorkspace page="config" problemUrl={problemUrl} title={pdoc.title || String(pid)} pid={String(pid)}>
+    <ProblemEditorWorkspace
+      page="config"
+      problemUrl={problemUrl}
+      title={pdoc.title || String(pid)}
+      pid={String(pid)}
+      collaborationEnabled={pdoc.authoringMode !== 'managed' || capabilities.canManageCollaborators === true || capabilities.canPublish === true}
+    >
       <ProblemConfigEditor problemUrl={problemUrl} pdoc={pdoc} files={testdata} initialYaml={config} embedded />
     </ProblemEditorWorkspace>
   );

@@ -141,15 +141,15 @@ const problemStub = {
     },
     canEditProblemContent(user: any, pdoc: any) {
         calls.maintain.push({ user, pdoc, capability: 'content' });
-        return maintainResult;
+        return user.canEditContent ?? maintainResult;
     },
-    canEditProblemMetadata: () => maintainResult,
-    canManageProblemCollaborators: () => maintainResult,
-    canManageProblemMaintainers: () => maintainResult,
-    canPublishProblem: () => maintainResult,
-    canArchiveProblem: () => maintainResult,
-    canDeleteProblem: () => maintainResult,
-    canCloneProblem: () => maintainResult,
+    canEditProblemMetadata: (user: any) => user.canEditMetadata ?? maintainResult,
+    canManageProblemCollaborators: (user: any) => user.canManageCollaborators ?? maintainResult,
+    canManageProblemMaintainers: (user: any) => user.canManageMaintainers ?? maintainResult,
+    canPublishProblem: (user: any) => user.canPublish ?? maintainResult,
+    canArchiveProblem: (user: any) => user.canArchive ?? maintainResult,
+    canDeleteProblem: (user: any) => user.canDelete ?? maintainResult,
+    canCloneProblem: (user: any) => user.canClone ?? maintainResult,
     count: async (domainId: string, query: unknown) => {
         calls.count.push({ domainId, query });
         return countResult;
@@ -638,7 +638,9 @@ describe('P2.11 enumeration entry gates', () => {
     });
 
     it('shows the managed metadata review scope only to administrators', async () => {
-        getMultiResults = [[{ domainId: 'system', docId: 7, owner: 42, authoringMode: 'managed', hidden: true, managedAuthoring: { metadataStatus: 'draft' } }]];
+        getMultiResults = [
+            [{ domainId: 'system', docId: 7, owner: 42, authoringMode: 'managed', hidden: true, managedAuthoring: { metadataStatus: 'draft' } }],
+        ];
         countResult = 1;
         const admin = makeHandler(ProblemMainHandler, { canBrowse: true, admin: true, hasPriv: () => false });
         await admin.get('system', 1, '', 20, false, false, 'default', '', '', 0, 'all', 'active', 'pending');
@@ -652,9 +654,7 @@ describe('P2.11 enumeration entry gates', () => {
 
         calls.getMulti.length = 0;
         const author = makeHandler(ProblemMainHandler, { canBrowse: true, admin: false, hasPriv: () => false });
-        const error = await captureFailure(() =>
-            author.get('system', 1, '', 20, false, false, 'default', '', '', 0, 'all', 'active', 'pending'),
-        );
+        const error = await captureFailure(() => author.get('system', 1, '', 20, false, false, 'default', '', '', 0, 'all', 'active', 'pending'));
         expect(error).to.be.instanceOf(TestPermissionError);
         expect(calls.getMulti).to.deep.equal([]);
     });
@@ -1029,6 +1029,80 @@ describe('P2.13 managed programming edit boundary', () => {
         expect(calls.renameFile).to.have.lengthOf(0);
         expect(calls.oplog.at(-1)?.[1]).to.equal('problem.managed.write.denied');
         expect(calls.oplog.at(-1)?.[2]?.fields).to.deep.equal(['hidden']);
+    });
+});
+
+describe('P3.15 files workspace capability contract', () => {
+    it('publishes the canonical managed capabilities for authors, maintainers, and administrators', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P3101',
+            title: 'Managed problem',
+            authoringMode: 'managed',
+            managedAuthoring: { workingTitle: 'Draft title', metadataStatus: 'confirmed' },
+            data: [],
+            additional_file: [],
+        };
+        const scenarios = [
+            {
+                role: 'author',
+                user: {
+                    canEditContent: true,
+                    canEditMetadata: false,
+                    canManageCollaborators: false,
+                    canManageMaintainers: false,
+                    canPublish: false,
+                    canArchive: false,
+                    canDelete: false,
+                    canClone: false,
+                },
+                expected: { canEditContent: true, canManageCollaborators: false, canPublish: false },
+            },
+            {
+                role: 'maintainer',
+                user: {
+                    canEditContent: true,
+                    canEditMetadata: true,
+                    canManageCollaborators: true,
+                    canManageMaintainers: false,
+                    canPublish: false,
+                    canArchive: false,
+                    canDelete: false,
+                    canClone: false,
+                },
+                expected: { canEditContent: true, canManageCollaborators: true, canPublish: false },
+            },
+            {
+                role: 'administrator',
+                user: {
+                    canEditContent: true,
+                    canEditMetadata: true,
+                    canManageCollaborators: true,
+                    canManageMaintainers: true,
+                    canPublish: true,
+                    canArchive: true,
+                    canDelete: true,
+                    canClone: true,
+                },
+                expected: { canEditContent: true, canManageCollaborators: true, canPublish: true },
+            },
+        ];
+
+        for (const scenario of scenarios) {
+            const handler = makeHandler(ProblemFilesHandler, scenario.user);
+            handler.pdoc = pdoc;
+            maintainableResults = [{ ...pdoc }];
+
+            await handler.get({}, undefined, false);
+
+            expect(handler.response.body.problemAuthoringCapabilities, scenario.role).to.deep.include({
+                managed: true,
+                ...scenario.expected,
+            });
+            expect(handler.response.body.pdoc.managedAuthoring?.metadataStatus, scenario.role).to.equal('confirmed');
+            expect(calls.getEditableAuthorized.at(-1)?.[3], scenario.role).to.equal(problemStub.PROJECTION_MANAGED_EDITOR);
+        }
     });
 });
 

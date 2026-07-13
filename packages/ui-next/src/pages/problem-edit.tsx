@@ -3,13 +3,12 @@
  * difficulty, visibility, PID, with sidebar navigation and delete.
  */
 
-import { AlertCircle, CheckCircle2, Download, Eye, EyeOff, FileText, Loader2, Lock, Save, Tag, Trash2 } from 'lucide-react';
+import { AlertCircle, ArrowRight, CheckCircle2, Download, Eye, EyeOff, FileText, Loader2, Lock, Save, ShieldCheck, Tag, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { ProblemEditorWorkspace } from '@/components/problem-editor-workspace';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -21,6 +20,21 @@ import { downloadProblemPackage } from '@/lib/problem-package';
 import { managedSourceFieldViews, managedSourceTagPreview, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
 
 type R = Record<string, any>;
+
+async function responseErrorMessage(response: Response, fallback: string) {
+  const raw = await response.text().catch(() => '');
+  if (raw) {
+    try {
+      const body = JSON.parse(raw);
+      const message = body?.error?.message || body?.message || body?.error;
+      if (typeof message === 'string' && message.trim()) return message;
+    } catch {
+      const text = raw.trim();
+      if (text && !text.startsWith('<!DOCTYPE') && !text.startsWith('<html')) return text.slice(0, 180);
+    }
+  }
+  return `${fallback}：HTTP ${response.status}`;
+}
 
 interface ManagedMindmapOption {
   id: string;
@@ -94,9 +108,10 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
 
   const refresh = useCallback(async () => {
     setLoadError('');
+    setLoaded(false);
     try {
       const r = await fetch(`/p/${apiPid}/permits`, { credentials: 'include', headers: { Accept: 'application/json' } });
-      if (!r.ok) throw new Error(`权限列表加载失败：HTTP ${r.status}`);
+      if (!r.ok) throw new Error(await responseErrorMessage(r, '权限列表加载失败'));
       const j = await r.json();
       if (!Array.isArray(j?.permits)) throw new Error('权限列表响应格式错误');
       setPermits(j.permits || []);
@@ -122,36 +137,57 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
     async (query: string): Promise<UserOption[]> => {
       const q = query.trim();
       if (!q) return [];
-      const domainId = encodeURIComponent(bs.domain?.id || 'system');
-      const r = await fetch(`/d/${domainId}/api/users`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          args: { search: q, limit: 10, exact: false },
-          projection: ['_id', 'uname', 'mail', 'avatarUrl'],
-        }),
-      });
-      if (!r.ok) return [];
-      const users = await r.json();
-      return Array.isArray(users) ? users : [];
+      setInviteError('');
+      try {
+        const domainId = encodeURIComponent(bs.domain?.id || 'system');
+        const r = await fetch(`/d/${domainId}/api/users`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            args: { search: q, limit: 10, exact: false },
+            projection: ['_id', 'uname', 'mail', 'avatarUrl'],
+          }),
+        });
+        if (!r.ok) {
+          setInviteError(await responseErrorMessage(r, '用户搜索失败'));
+          return [];
+        }
+        const users = await r.json();
+        if (!Array.isArray(users)) throw new Error('用户搜索响应格式错误');
+        return users;
+      } catch (error) {
+        console.error('Failed to search problem collaborators', error);
+        setInviteError(error instanceof Error ? error.message : '用户搜索失败');
+        return [];
+      }
     },
     [bs.domain?.id],
   );
 
   async function revoke(permitId: string) {
     if (!confirm('确定撤销该权限？')) return;
+    setLoadError('');
     const fd = new FormData();
     fd.set('permitId', permitId);
-    const r = await fetch(`/p/${apiPid}/permits/revoke`, { method: 'POST', body: fd, credentials: 'include' });
-    if (!r.ok) {
-      setLoadError(`撤销权限失败：HTTP ${r.status}`);
-      return;
+    try {
+      const r = await fetch(`/p/${apiPid}/permits/revoke`, {
+        method: 'POST',
+        body: fd,
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!r.ok) {
+        setLoadError(await responseErrorMessage(r, '撤销权限失败'));
+        return;
+      }
+      await refresh();
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : '撤销权限失败');
     }
-    refresh();
   }
 
   async function submitInvite(e: FormEvent<HTMLFormElement>) {
@@ -172,30 +208,33 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
         headers: { Accept: 'application/json' },
       });
       if (!r.ok) {
-        let message = '发送邀请失败';
-        try {
-          const j = await r.json();
-          message = j.error || j.message || message;
-        } catch {
-          const text = await r.text().catch(() => '');
-          if (text) message = text.slice(0, 160);
-        }
-        setInviteError(message);
+        setInviteError(await responseErrorMessage(r, '发送邀请失败'));
         return;
       }
       setSelectedUsers([]);
       setOpen(false);
       await refresh();
+    } catch (error) {
+      setInviteError(error instanceof Error ? error.message : '发送邀请失败');
     } finally {
       setInviteBusy(false);
     }
   }
 
   return (
-    <Card className="mt-4">
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center justify-between text-sm">
-          <span>出题协作</span>
+    <section aria-labelledby="collaboration-heading" className="rounded-2xl border border-border/70 bg-card/30">
+      <header className="flex flex-col gap-3 border-b border-border/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 id="collaboration-heading" className="flex items-center gap-2 text-base font-semibold tracking-tight">
+            <ShieldCheck className="size-4 text-muted-foreground" aria-hidden="true" />
+            出题协作
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">管理出题人、验题人与维护者；所有变更仍由服务端能力校验。</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild type="button" size="sm" variant="ghost">
+            <a href="/permits/inbox">我的验题任务</a>
+          </Button>
           <Button
             type="button"
             size="sm"
@@ -205,12 +244,13 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
           >
             添加协作者
           </Button>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
+        </div>
+      </header>
+      <div className="space-y-2 p-5">
         {!hidden && !managed ? (
           <p className="text-xs text-muted-foreground">题目当前不是隐藏状态，无需邀请验题人。把题目设为「隐藏」并保存后即可邀请。</p>
-        ) : loadError ? (
+        ) : null}
+        {loadError ? (
           <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {loadError}
           </p>
@@ -248,7 +288,7 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
             ))}
           </ul>
         )}
-      </CardContent>
+      </div>
 
       <Dialog
         open={open}
@@ -313,7 +353,9 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
               <Input id="permit-note" name="note" placeholder="例：帮我测一下边界数据" />
             </div>
             {inviteError ? (
-              <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">{inviteError}</p>
+              <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {inviteError}
+              </p>
             ) : null}
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={inviteBusy}>
@@ -326,7 +368,134 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
           </form>
         </DialogContent>
       </Dialog>
-    </Card>
+    </section>
+  );
+}
+
+function ManagedReviewPanel({
+  pdoc,
+  sourceTemplates,
+  trainingOptions,
+  problemsUrl,
+}: {
+  pdoc: R;
+  sourceTemplates: ManagedSourceTemplateOption[];
+  trainingOptions: ManagedTrainingOption[];
+  problemsUrl: string;
+}) {
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+  const template = sourceTemplates.find((item) => item.id === pdoc.sourceMeta?.template);
+  const sourceFields = managedSourceFieldViews(pdoc.sourceMeta, template);
+  const pendingPlacement = pdoc.managedAuthoring?.pendingTrainingPlacement;
+  const pendingTraining = trainingOptions.find((training) => training.id === String(pendingPlacement?.trainingId || ''));
+  const pendingChapter = pendingTraining?.chapters.find((chapter) => chapter.id === pendingPlacement?.chapterId);
+  const metadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft';
+
+  const submitReview = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setReviewError('');
+    setReviewing(true);
+    try {
+      const response = await fetch(problemsUrl, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+        body: new URLSearchParams(new FormData(event.currentTarget) as any),
+      });
+      if (!response.ok) throw new Error(await responseErrorMessage(response, '审核发布失败'));
+      const body = await response.json();
+      if (typeof body?.url !== 'string' || !body.url) throw new Error('审核发布响应缺少跳转地址');
+      window.location.assign(body.url);
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : '审核发布失败');
+      setReviewing(false);
+    }
+  };
+
+  return (
+    <section aria-labelledby="managed-review-heading" className="rounded-2xl border border-primary/25 bg-primary/[0.025]">
+      <header className="border-b border-primary/15 px-5 py-4">
+        <h2 id="managed-review-heading" className="text-base font-semibold tracking-tight">
+          管理员审核与发布
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">确认正式标题、来源、标签和待挂训练后，通过既有统一发布服务公开题目。</p>
+      </header>
+      <div className="space-y-5 p-5">
+        <dl className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
+          <div>
+            <dt className="text-xs text-muted-foreground">工作标题</dt>
+            <dd className="mt-1 font-medium">{pdoc.managedAuthoring?.workingTitle || '—'}</dd>
+          </div>
+          {sourceFields.map((field) => (
+            <div key={field.label}>
+              <dt className="text-xs text-muted-foreground">{field.label}</dt>
+              <dd className="mt-1 font-medium">{field.value}</dd>
+            </div>
+          ))}
+          <div>
+            <dt className="text-xs text-muted-foreground">待挂训练</dt>
+            <dd className="mt-1 font-medium">
+              {pendingPlacement
+                ? `${pendingTraining?.title || '训练已失效'} / ${pendingChapter?.title || `章节 ${pendingPlacement.chapterId}`}`
+                : '不挂入训练'}
+            </dd>
+          </div>
+        </dl>
+
+        <div>
+          <p className="text-xs text-muted-foreground">最终标签</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {(pdoc.tag || []).map((tag: string) => (
+              <Badge key={tag} variant="secondary">
+                {tag}
+              </Badge>
+            ))}
+          </div>
+        </div>
+
+        {pdoc.hidden ? (
+          <form
+            method="post"
+            action={problemsUrl}
+            className="grid gap-4 border-t border-primary/15 pt-5 sm:grid-cols-[minmax(0,1fr)_12rem_auto] sm:items-end"
+            onSubmit={submitReview}
+          >
+            <input type="hidden" name="operation" value="managedPublish" />
+            <input type="hidden" name="pid" value={String(pdoc.docId)} />
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium">正式标题</span>
+              <Input
+                name="formalTitle"
+                defaultValue={metadataDraft ? pdoc.managedAuthoring?.workingTitle || '' : pdoc.title || pdoc.managedAuthoring?.workingTitle || ''}
+                required
+              />
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium">难度</span>
+              <SimpleSelect
+                name="difficulty"
+                defaultValue={String(pdoc.difficulty ?? 0)}
+                options={DIFFICULTY_OPTIONS.map((option) => ({ value: String(option.value || 0), label: option.label }))}
+              />
+            </label>
+            <Button type="submit" className="min-h-11" disabled={reviewing}>
+              {reviewing ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : null}
+              {metadataDraft ? '确认并发布' : '重新公开'}
+            </Button>
+            {reviewError ? (
+              <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive sm:col-span-3">
+                {reviewError}
+              </p>
+            ) : null}
+          </form>
+        ) : (
+          <p role="status" className="border-t border-primary/15 pt-4 text-sm text-muted-foreground">
+            此题已经发布；如因生命周期操作重新隐藏，仍需从本区走统一重新公开流程。
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -351,6 +520,10 @@ export function ProblemEditPage() {
   const canPublish = !managed;
   const canDelete = !managed || capabilities.canDelete === true;
   const canManageCollaborators = !managed || capabilities.canManageCollaborators === true;
+  const canReviewManaged = managed && !isCreate && capabilities.canPublish === true;
+  const collaborationEnabled = !isCreate && (canManageCollaborators || canReviewManaged);
+  const requestedSection = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('section');
+  const showCollaboration = requestedSection === 'collaboration' && collaborationEnabled;
   const managedMetadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft';
   const canSubmitManagedWorkingTitle = isCreate || (managedMetadataDraft && canEditDraftMetadata);
   const filesBase = pdoc.docId ? `${problemUrl}/files` : '';
@@ -457,7 +630,7 @@ export function ProblemEditPage() {
 
   const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
     const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
-    if (isCreate || submitter?.value === 'delete') {
+    if (submitter?.value === 'delete') {
       allowNavigation.current = true;
       setSaveState('saving');
       return;
@@ -472,19 +645,20 @@ export function ProblemEditPage() {
       const editRes = await fetch(form.action || window.location.pathname, {
         method: 'POST',
         body: new URLSearchParams(fd as any),
+        credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       });
       if (!editRes.ok) {
-        let message = editRes.status === 409 ? '题目已被其他操作修改或锁定，请刷新后重试。' : `保存失败：HTTP ${editRes.status}`;
-        try {
-          const body = await editRes.json();
-          const serverMessage = body?.error?.message || body?.message || body?.error;
-          if (typeof serverMessage === 'string') message = serverMessage;
-        } catch {
-          const body = await editRes.text().catch(() => '');
-          if (body) message = body.slice(0, 180);
-        }
-        throw new Error(message);
+        throw new Error(await responseErrorMessage(editRes, editRes.status === 409 ? '题目已被其他操作修改或锁定，请刷新后重试' : '保存失败'));
+      }
+      if (isCreate) {
+        const body = await editRes.json();
+        if (body?.pid === undefined || body?.pid === null || body.pid === '') throw new Error('创建响应缺少真实题号');
+        const createdProblemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(body.pid) });
+        allowNavigation.current = true;
+        setSaveState('saved');
+        window.location.assign(`${createdProblemUrl}/edit`);
+        return;
       }
       if (editVersion.current === savedVersion) {
         allowNavigation.current = true;
@@ -547,451 +721,463 @@ export function ProblemEditPage() {
 
   return (
     <ProblemEditorWorkspace
-      page="edit"
+      page={showCollaboration ? 'collaboration' : 'edit'}
       problemUrl={problemUrl}
-      title={pdoc.title || '新建编程题'}
+      title={(managed && pdoc.managedAuthoring?.workingTitle) || pdoc.title || '新建编程题'}
       pid={String(pid)}
       isCreate={isCreate}
-      status={status}
-      actions={actions}
+      collaborationEnabled={collaborationEnabled}
+      status={showCollaboration ? undefined : status}
+      actions={showCollaboration ? undefined : actions}
     >
-      <div className="space-y-6">
-        {downloadError ? (
-          <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-            打包下载失败：{downloadError}
-          </p>
-        ) : null}
-        {saveError ? (
-          <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-            {saveError}
-          </p>
-        ) : null}
-
-        <form id="programming-problem-form" ref={formRef} method="post" onSubmit={handleSave} onChange={markDirty} className="space-y-6">
-          {!isCreate && pdoc.problemKind && pdoc.structureRevision ? (
-            <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision)} />
+      {showCollaboration ? (
+        <div className="space-y-6">
+          {canManageCollaborators ? <PermitsPanel pid={String(pid)} pdocId={pdoc.docId} hidden={!!pdoc.hidden} managed={managed} /> : null}
+          {canReviewManaged ? (
+            <ManagedReviewPanel pdoc={pdoc} sourceTemplates={sourceTemplates} trainingOptions={trainingOptions} problemsUrl={bs.urls.problems} />
           ) : null}
-          {isCreate && managed ? <input type="hidden" name="managed" value="true" /> : null}
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {downloadError ? (
+            <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+              打包下载失败：{downloadError}
+            </p>
+          ) : null}
+          {saveError ? (
+            <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+              {saveError}
+            </p>
+          ) : null}
 
-          {canChooseManagedCreate ? (
-            <section className="rounded-2xl border border-border/70 bg-card/30 p-5">
-              <label className="flex cursor-pointer items-start gap-3">
-                <Checkbox checked={managedCreateMode} onCheckedChange={setManagedCreateMode} aria-label="创建托管题" />
-                <span>
-                  <span className="block text-sm font-semibold">创建托管题并指定出题人</span>
-                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                    PID、来源标签和算法标签由服务端生成；关闭后保留管理员原有的完整创建方式。
+          <form id="programming-problem-form" ref={formRef} method="post" onSubmit={handleSave} onChange={markDirty} className="space-y-6">
+            {!isCreate && pdoc.problemKind && pdoc.structureRevision ? (
+              <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision)} />
+            ) : null}
+            {isCreate && managed ? <input type="hidden" name="managed" value="true" /> : null}
+
+            {canChooseManagedCreate ? (
+              <section className="rounded-2xl border border-border/70 bg-card/30 p-5">
+                <label className="flex cursor-pointer items-start gap-3">
+                  <Checkbox checked={managedCreateMode} onCheckedChange={setManagedCreateMode} aria-label="创建托管题" />
+                  <span>
+                    <span className="block text-sm font-semibold">创建托管题并指定出题人</span>
+                    <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                      PID、来源标签和算法标签由服务端生成；关闭后保留管理员原有的完整创建方式。
+                    </span>
                   </span>
-                </span>
-              </label>
-            </section>
-          ) : null}
+                </label>
+              </section>
+            ) : null}
 
-          <section id="basic" aria-labelledby="basic-heading" className="scroll-mt-44 rounded-2xl border border-border/70 bg-card/30">
-            <header className="border-b border-border/60 px-5 py-4">
-              <h2 id="basic-heading" className="text-base font-semibold tracking-tight">
-                基本信息
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">设置题目在题库中的识别信息，不影响评测数据。</p>
-            </header>
-            <div className="space-y-5 p-5">
-              <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_13rem]">
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium" htmlFor="edit-title">
-                    {managed ? (isCreate || managedMetadataDraft ? '工作标题' : '正式标题') : '标题'}
-                  </label>
-                  <Input
-                    id="edit-title"
-                    name={!managed || canSubmitManagedWorkingTitle ? 'title' : undefined}
-                    defaultValue={
-                      managed && !isCreate
-                        ? managedMetadataDraft
-                          ? pdoc.managedAuthoring?.workingTitle || ''
+            <section aria-labelledby="problem-content-heading" className="overflow-hidden rounded-2xl border border-border/70 bg-card/30">
+              <header className="border-b border-border/60 px-5 py-4">
+                <h2 id="problem-content-heading" className="flex items-center gap-2 text-base font-semibold tracking-tight">
+                  <FileText className="size-4 text-muted-foreground" aria-hidden="true" />
+                  题目内容
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">标题、题号、标签、来源、可见性与题面由同一表单一次保存。</p>
+              </header>
+              <div className="space-y-5 p-5">
+                <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_13rem]">
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium" htmlFor="edit-title">
+                      {managed ? (isCreate || managedMetadataDraft ? '工作标题' : '正式标题') : '标题'}
+                    </label>
+                    <Input
+                      id="edit-title"
+                      name={!managed || canSubmitManagedWorkingTitle ? 'title' : undefined}
+                      defaultValue={
+                        managed && !isCreate
+                          ? managedMetadataDraft
+                            ? pdoc.managedAuthoring?.workingTitle || ''
+                            : pdoc.title || ''
                           : pdoc.title || ''
-                        : pdoc.title || ''
-                    }
-                    placeholder={managed ? '用于审核协作，不会直接作为正式标题发布' : '题目标题'}
-                    readOnly={managed ? !canSubmitManagedWorkingTitle : !isCreate && !canEditDraftMetadata}
-                    required
-                  />
+                      }
+                      placeholder={managed ? '用于审核协作，不会直接作为正式标题发布' : '题目标题'}
+                      readOnly={managed ? !canSubmitManagedWorkingTitle : !isCreate && !canEditDraftMetadata}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium" htmlFor="edit-pid">
+                      题目编号
+                    </label>
+                    <Input
+                      id="edit-pid"
+                      name={managed ? undefined : 'pid'}
+                      defaultValue={typeof pid === 'string' ? pid : ''}
+                      placeholder={managed ? '由服务端分配' : '如 P1001'}
+                      pattern="^(?:[a-z0-9]{1,10}-)?[a-zA-Z][a-zA-Z0-9]*$"
+                      readOnly={managed}
+                    />
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium" htmlFor="edit-pid">
-                    题目编号
-                  </label>
-                  <Input
-                    id="edit-pid"
-                    name={managed ? undefined : 'pid'}
-                    defaultValue={typeof pid === 'string' ? pid : ''}
-                    placeholder={managed ? '由服务端分配' : '如 P1001'}
-                    pattern="^(?:[a-z0-9]{1,10}-)?[a-zA-Z][a-zA-Z0-9]*$"
-                    readOnly={managed}
-                  />
+
+                <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_13rem]">
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium" htmlFor="edit-tag">
+                      <Tag className="mr-1 inline-block size-3.5" />
+                      标签
+                    </label>
+                    <Input
+                      id="edit-tag"
+                      name={managed ? undefined : 'tag'}
+                      value={managed ? managedTags.join(', ') : tagInput}
+                      onChange={(event) => {
+                        if (canEditCanonicalMetadata) setTagInput(event.target.value);
+                      }}
+                      placeholder={managed ? '托管题标签由审核流程确定' : '用逗号分隔，如：模拟, 数学, 贪心'}
+                      readOnly={managed}
+                    />
+                    {(managed ? managedTags.length : tagInput) ? (
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {(managed
+                          ? managedTags
+                          : tagInput
+                              .split(',')
+                              .map((tag) => tag.trim())
+                              .filter(Boolean)
+                        ).map((tag) => (
+                          <Badge key={tag} variant="secondary" className="text-[10px]">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium" htmlFor="edit-difficulty">
+                      难度
+                    </label>
+                    {managed && !isCreate && !canEditDraftMetadata ? (
+                      <Input
+                        id="edit-difficulty"
+                        value={DIFFICULTY_OPTIONS.find((option) => Number(option.value) === Number(pdoc.difficulty || 0))?.label || '未评定'}
+                        readOnly
+                      />
+                    ) : (
+                      <SimpleSelect
+                        id="edit-difficulty"
+                        name="difficulty"
+                        defaultValue={String(pdoc.difficulty || '')}
+                        options={DIFFICULTY_OPTIONS.filter((option) => !managed || option.value !== '').map((option) => ({
+                          value: String(option.value),
+                          label: option.label,
+                        }))}
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_13rem]">
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium" htmlFor="edit-tag">
-                    <Tag className="mr-1 inline-block size-3.5" />
-                    标签
-                  </label>
-                  <Input
-                    id="edit-tag"
-                    name={managed ? undefined : 'tag'}
-                    value={managed ? managedTags.join(', ') : tagInput}
-                    onChange={(event) => {
-                      if (canEditCanonicalMetadata) setTagInput(event.target.value);
-                    }}
-                    placeholder={managed ? '托管题标签由审核流程确定' : '用逗号分隔，如：模拟, 数学, 贪心'}
-                    readOnly={managed}
-                  />
-                  {(managed ? managedTags.length : tagInput) ? (
-                    <div className="flex flex-wrap gap-1 pt-1">
-                      {(managed
-                        ? managedTags
-                        : tagInput
-                            .split(',')
-                            .map((tag) => tag.trim())
-                            .filter(Boolean)
-                      ).map((tag) => (
-                        <Badge key={tag} variant="secondary" className="text-[10px]">
-                          {tag}
-                        </Badge>
-                      ))}
+              {managed ? (
+                <div className="border-t border-border/60">
+                  <header className="px-5 py-4">
+                    <h3 className="text-sm font-semibold tracking-tight">来源与归档</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {isCreate
+                        ? '选择固定来源和知识导图节点；PID 与标签仅由服务端计算。训练选择只记录待审核位置。'
+                        : '来源、PID 与系统标签已锁定；最终发布由管理员审核。'}
+                    </p>
+                  </header>
+                  {isCreate ? (
+                    <div className="space-y-5 p-5">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium" htmlFor="managed-template">
+                            来源模板
+                          </label>
+                          <SimpleSelect
+                            id="managed-template"
+                            name="template"
+                            value={sourceTemplate}
+                            onValueChange={(value) => {
+                              setSourceTemplate(value);
+                              setSelectedTrainingId('');
+                              setSelectedChapterId('');
+                            }}
+                            options={sourceTemplates.map((template) => ({ value: template.id, label: template.label }))}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium" htmlFor="managed-year">
+                            年份
+                          </label>
+                          <Input
+                            id="managed-year"
+                            name="year"
+                            type="number"
+                            min={2000}
+                            max={2100}
+                            value={sourceYear}
+                            onChange={(event) => setSourceYear(event.target.value)}
+                            required
+                          />
+                        </div>
+                        {selectedTemplateDefinition?.fields.includes('season') ? (
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium" htmlFor="managed-season">
+                              季度
+                            </label>
+                            <SimpleSelect
+                              id="managed-season"
+                              name="season"
+                              value={sourceSeason}
+                              onValueChange={setSourceSeason}
+                              options={[
+                                { value: 'spring', label: '春季' },
+                                { value: 'autumn', label: '秋季' },
+                              ]}
+                            />
+                          </div>
+                        ) : null}
+                        {selectedTemplateDefinition?.fields.includes('level') ? (
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium" htmlFor="managed-level">
+                              题目等级
+                            </label>
+                            <SimpleSelect
+                              id="managed-level"
+                              name="level"
+                              value={sourceLevel}
+                              onValueChange={setSourceLevel}
+                              options={['L1', 'L2', 'L3'].map((value) => ({ value, label: value }))}
+                            />
+                          </div>
+                        ) : null}
+                        {selectedTemplateDefinition?.fields.includes('round') ? (
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium" htmlFor="managed-round">
+                              场次
+                            </label>
+                            <Input
+                              id="managed-round"
+                              name="round"
+                              type="number"
+                              min={1}
+                              max={99}
+                              value={sourceRound}
+                              onChange={(event) => setSourceRound(event.target.value)}
+                              required
+                            />
+                            <p className="text-xs text-muted-foreground">场次只进入来源元数据和训练章节，不生成标签。</p>
+                          </div>
+                        ) : null}
+                        {canChooseManagedCreate ? (
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium" htmlFor="managed-author-uid">
+                              出题人 UID
+                            </label>
+                            <Input id="managed-author-uid" name="authorUid" type="number" min={1} required />
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium">算法知识点</label>
+                        <MultiSelect
+                          options={mindmapOptions}
+                          value={selectedMindmapNodes}
+                          onChange={setSelectedMindmapNodes}
+                          getKey={(node) => node.id}
+                          getLabel={(node) => node.label}
+                          getDescription={(node) => node.tags.join(' / ')}
+                          name="mindmapNodeIds"
+                          placeholder="从知识导图选择，可多选"
+                          emptyText="没有可选的带标签节点"
+                        />
+                        <p className="text-xs text-muted-foreground">服务端会同时物化每个节点路径上所有带标签的祖先。</p>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium" htmlFor="managed-training">
+                            待挂训练（可选）
+                          </label>
+                          <SimpleSelect
+                            id="managed-training"
+                            name="trainingId"
+                            value={selectedTrainingId}
+                            onValueChange={(value) => {
+                              setSelectedTrainingId(value);
+                              setSelectedChapterId('');
+                            }}
+                            options={[
+                              { value: '', label: '暂不加入训练' },
+                              ...eligibleTrainings.map((training) => ({ value: training.id, label: training.title })),
+                            ]}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium" htmlFor="managed-chapter">
+                            现有章节
+                          </label>
+                          <SimpleSelect
+                            id="managed-chapter"
+                            name={selectedTrainingId ? 'chapterId' : undefined}
+                            value={selectedChapterId}
+                            onValueChange={setSelectedChapterId}
+                            disabled={!selectedTraining}
+                            options={[
+                              { value: '', label: selectedTraining ? '请选择章节' : '先选择训练' },
+                              ...(selectedTraining?.chapters || []).map((chapter) => ({ value: String(chapter.id), label: chapter.title })),
+                            ]}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl bg-muted/45 px-4 py-3">
+                        <p className="text-xs font-medium text-muted-foreground">服务端将生成的来源标签</p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {sourcePreviewTags.map((tag) => (
+                            <Badge key={tag} variant="secondary">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                  ) : null}
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium" htmlFor="edit-difficulty">
-                    难度
-                  </label>
-                  {managed && !isCreate && !canEditDraftMetadata ? (
-                    <Input
-                      id="edit-difficulty"
-                      value={DIFFICULTY_OPTIONS.find((option) => Number(option.value) === Number(pdoc.difficulty || 0))?.label || '未评定'}
-                      readOnly
-                    />
                   ) : (
-                    <SimpleSelect
-                      id="edit-difficulty"
-                      name="difficulty"
-                      defaultValue={String(pdoc.difficulty || '')}
-                      options={DIFFICULTY_OPTIONS.filter((option) => !managed || option.value !== '').map((option) => ({
-                        value: String(option.value),
-                        label: option.label,
-                      }))}
-                    />
+                    <div className="grid gap-4 p-5 md:grid-cols-2">
+                      <div className="grid gap-3 rounded-xl bg-muted/45 px-4 py-3 sm:grid-cols-2">
+                        {persistedSourceFields.map((field) => (
+                          <div key={field.label}>
+                            <p className="text-xs text-muted-foreground">{field.label}</p>
+                            <p className="mt-1 text-sm font-medium">{field.value}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="rounded-xl bg-muted/45 px-4 py-3">
+                        <p className="text-xs text-muted-foreground">待挂训练</p>
+                        <p className="mt-1 text-sm font-medium">
+                          {pdoc.managedAuthoring?.pendingTrainingPlacement
+                            ? `${trainingOptions.find((training) => training.id === String(pdoc.managedAuthoring.pendingTrainingPlacement.trainingId))?.title || '训练'} / ${
+                                trainingOptions
+                                  .flatMap((training) => training.chapters)
+                                  .find((chapter) => chapter.id === pdoc.managedAuthoring.pendingTrainingPlacement.chapterId)?.title ||
+                                `章节 ${pdoc.managedAuthoring.pendingTrainingPlacement.chapterId}`
+                              }`
+                            : '未选择'}
+                        </p>
+                      </div>
+                    </div>
                   )}
                 </div>
-              </div>
-            </div>
-          </section>
+              ) : null}
 
-          {managed ? (
-            <section id="managed-source" aria-labelledby="managed-source-heading" className="rounded-2xl border border-border/70 bg-card/30">
-              <header className="border-b border-border/60 px-5 py-4">
-                <h2 id="managed-source-heading" className="text-base font-semibold tracking-tight">
-                  来源与归档
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {isCreate
-                    ? '选择固定来源和知识导图节点；PID 与标签仅由服务端计算。训练选择只记录待审核位置。'
-                    : '来源、PID 与系统标签已锁定；最终发布由管理员审核。'}
-                </p>
-              </header>
-              {isCreate ? (
-                <div className="space-y-5 p-5">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <label className="text-sm font-medium" htmlFor="managed-template">
-                        来源模板
-                      </label>
-                      <SimpleSelect
-                        id="managed-template"
-                        name="template"
-                        value={sourceTemplate}
-                        onValueChange={(value) => {
-                          setSourceTemplate(value);
-                          setSelectedTrainingId('');
-                          setSelectedChapterId('');
-                        }}
-                        options={sourceTemplates.map((template) => ({ value: template.id, label: template.label }))}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-sm font-medium" htmlFor="managed-year">
-                        年份
-                      </label>
-                      <Input
-                        id="managed-year"
-                        name="year"
-                        type="number"
-                        min={2000}
-                        max={2100}
-                        value={sourceYear}
-                        onChange={(event) => setSourceYear(event.target.value)}
-                        required
-                      />
-                    </div>
-                    {selectedTemplateDefinition?.fields.includes('season') ? (
-                      <div className="space-y-1.5">
-                        <label className="text-sm font-medium" htmlFor="managed-season">
-                          季度
-                        </label>
-                        <SimpleSelect
-                          id="managed-season"
-                          name="season"
-                          value={sourceSeason}
-                          onValueChange={setSourceSeason}
-                          options={[
-                            { value: 'spring', label: '春季' },
-                            { value: 'autumn', label: '秋季' },
-                          ]}
-                        />
-                      </div>
-                    ) : null}
-                    {selectedTemplateDefinition?.fields.includes('level') ? (
-                      <div className="space-y-1.5">
-                        <label className="text-sm font-medium" htmlFor="managed-level">
-                          题目等级
-                        </label>
-                        <SimpleSelect
-                          id="managed-level"
-                          name="level"
-                          value={sourceLevel}
-                          onValueChange={setSourceLevel}
-                          options={['L1', 'L2', 'L3'].map((value) => ({ value, label: value }))}
-                        />
-                      </div>
-                    ) : null}
-                    {selectedTemplateDefinition?.fields.includes('round') ? (
-                      <div className="space-y-1.5">
-                        <label className="text-sm font-medium" htmlFor="managed-round">
-                          场次
-                        </label>
-                        <Input
-                          id="managed-round"
-                          name="round"
-                          type="number"
-                          min={1}
-                          max={99}
-                          value={sourceRound}
-                          onChange={(event) => setSourceRound(event.target.value)}
-                          required
-                        />
-                        <p className="text-xs text-muted-foreground">场次只进入来源元数据和训练章节，不生成标签。</p>
-                      </div>
-                    ) : null}
-                    {canChooseManagedCreate ? (
-                      <div className="space-y-1.5">
-                        <label className="text-sm font-medium" htmlFor="managed-author-uid">
-                          出题人 UID
-                        </label>
-                        <Input id="managed-author-uid" name="authorUid" type="number" min={1} required />
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium">算法知识点</label>
-                    <MultiSelect
-                      options={mindmapOptions}
-                      value={selectedMindmapNodes}
-                      onChange={setSelectedMindmapNodes}
-                      getKey={(node) => node.id}
-                      getLabel={(node) => node.label}
-                      getDescription={(node) => node.tags.join(' / ')}
-                      name="mindmapNodeIds"
-                      placeholder="从知识导图选择，可多选"
-                      emptyText="没有可选的带标签节点"
-                    />
-                    <p className="text-xs text-muted-foreground">服务端会同时物化每个节点路径上所有带标签的祖先。</p>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <label className="text-sm font-medium" htmlFor="managed-training">
-                        待挂训练（可选）
-                      </label>
-                      <SimpleSelect
-                        id="managed-training"
-                        name="trainingId"
-                        value={selectedTrainingId}
-                        onValueChange={(value) => {
-                          setSelectedTrainingId(value);
-                          setSelectedChapterId('');
-                        }}
-                        options={[
-                          { value: '', label: '暂不加入训练' },
-                          ...eligibleTrainings.map((training) => ({ value: training.id, label: training.title })),
-                        ]}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className="text-sm font-medium" htmlFor="managed-chapter">
-                        现有章节
-                      </label>
-                      <SimpleSelect
-                        id="managed-chapter"
-                        name={selectedTrainingId ? 'chapterId' : undefined}
-                        value={selectedChapterId}
-                        onValueChange={setSelectedChapterId}
-                        disabled={!selectedTraining}
-                        options={[
-                          { value: '', label: selectedTraining ? '请选择章节' : '先选择训练' },
-                          ...(selectedTraining?.chapters || []).map((chapter) => ({ value: String(chapter.id), label: chapter.title })),
-                        ]}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-muted/45 px-4 py-3">
-                    <p className="text-xs font-medium text-muted-foreground">服务端将生成的来源标签</p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {sourcePreviewTags.map((tag) => (
-                        <Badge key={tag} variant="secondary">
-                          {tag}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
+              <div className="border-t border-border/60">
+                <header className="px-5 py-4">
+                  <h3 className="text-sm font-semibold tracking-tight">题面正文</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">Markdown 内容；粘贴图片继续使用现有附加文件 API。</p>
+                </header>
+                <div className="p-5">
+                  <MarkdownEditor
+                    name="content"
+                    value={draftContent}
+                    onChange={(value) => {
+                      setDraftContent(value);
+                      markDirty();
+                    }}
+                    minHeight={440}
+                    pasteUpload={
+                      filesBase
+                        ? {
+                            endpoint: filesBase,
+                            meta: { type: 'additional_file' },
+                            makeUrl: (filename) => `file://${filename}`,
+                          }
+                        : undefined
+                    }
+                    previewFileUrl={(filename, original) => {
+                      const queryIndex = original.indexOf('?');
+                      const query = queryIndex >= 0 ? original.slice(queryIndex) : '';
+                      return `${problemUrl}/file/${encodeURIComponent(filename)}${query}`;
+                    }}
+                  />
                 </div>
-              ) : (
-                <div className="grid gap-4 p-5 md:grid-cols-2">
-                  <div className="grid gap-3 rounded-xl bg-muted/45 px-4 py-3 sm:grid-cols-2">
-                    {persistedSourceFields.map((field) => (
-                      <div key={field.label}>
-                        <p className="text-xs text-muted-foreground">{field.label}</p>
-                        <p className="mt-1 text-sm font-medium">{field.value}</p>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="rounded-xl bg-muted/45 px-4 py-3">
-                    <p className="text-xs text-muted-foreground">待挂训练</p>
-                    <p className="mt-1 text-sm font-medium">
-                      {pdoc.managedAuthoring?.pendingTrainingPlacement
-                        ? `${trainingOptions.find((training) => training.id === String(pdoc.managedAuthoring.pendingTrainingPlacement.trainingId))?.title || '训练'} / ${
-                            trainingOptions
-                              .flatMap((training) => training.chapters)
-                              .find((chapter) => chapter.id === pdoc.managedAuthoring.pendingTrainingPlacement.chapterId)?.title ||
-                            `章节 ${pdoc.managedAuthoring.pendingTrainingPlacement.chapterId}`
-                          }`
-                        : '未选择'}
+              </div>
+
+              {!isCreate ? (
+                <div className="border-t border-border/60">
+                  <header className="px-5 py-4">
+                    <h3 className="text-sm font-semibold tracking-tight">可见性</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {managed ? '托管草稿保持隐藏；管理员从权限与协作页确认元数据并发布。' : '发布与维护权限沿用现有模型。'}
                     </p>
+                  </header>
+                  <div className="grid gap-4 p-5 sm:grid-cols-2">
+                    {!isCreate && canPublish ? <input type="hidden" name="hidden" value={hiddenValue ? 'true' : 'false'} /> : null}
+                    {!isCreate && canPublish ? <input type="hidden" name="lockHidden" value={lockHiddenValue ? 'true' : 'false'} /> : null}
+                    <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-muted/45 px-3">
+                      <Checkbox checked={hiddenValue} disabled={!canPublish} onCheckedChange={setHiddenValue} aria-label="隐藏题目" />
+                      <span className="flex items-center gap-1.5 text-sm">
+                        {hiddenValue ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                        隐藏题目
+                      </span>
+                    </label>
+                    <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-muted/45 px-3">
+                      <Checkbox
+                        checked={lockHiddenValue}
+                        disabled={managed && !canPublish}
+                        onCheckedChange={setLockHiddenValue}
+                        aria-label="锁定隐藏"
+                      />
+                      <span className="flex items-center gap-1.5 text-sm">
+                        <Lock className="size-3.5" />
+                        锁定隐藏（比赛结束后不自动公开）
+                      </span>
+                    </label>
                   </div>
                 </div>
-              )}
+              ) : null}
             </section>
-          ) : null}
 
-          <section id="statement" aria-labelledby="statement-heading" className="scroll-mt-44 rounded-2xl border border-border/70 bg-card/30">
-            <header className="flex items-start gap-3 border-b border-border/60 px-5 py-4">
-              <FileText className="mt-0.5 size-4 text-muted-foreground" aria-hidden="true" />
-              <div>
-                <h2 id="statement-heading" className="text-base font-semibold tracking-tight">
-                  题面
-                </h2>
-                <p className="mt-1 text-sm text-muted-foreground">Markdown 内容；粘贴图片继续使用现有附加文件 API。</p>
-              </div>
-            </header>
-            <div className="p-5">
-              <MarkdownEditor
-                name="content"
-                value={draftContent}
-                onChange={(value) => {
-                  setDraftContent(value);
-                  markDirty();
-                }}
-                minHeight={440}
-                pasteUpload={
-                  filesBase
-                    ? {
-                        endpoint: filesBase,
-                        meta: { type: 'additional_file' },
-                        makeUrl: (filename) => `file://${filename}`,
-                      }
-                    : undefined
-                }
-                previewFileUrl={(filename, original) => {
-                  const queryIndex = original.indexOf('?');
-                  const query = queryIndex >= 0 ? original.slice(queryIndex) : '';
-                  return `${problemUrl}/file/${encodeURIComponent(filename)}${query}`;
-                }}
-              />
-            </div>
-          </section>
-
-          <section id="permissions" aria-labelledby="permissions-heading" className="scroll-mt-44 rounded-2xl border border-border/70 bg-card/30">
-            <header className="border-b border-border/60 px-5 py-4">
-              <h2 id="permissions-heading" className="text-base font-semibold tracking-tight">
-                权限与可见性
-              </h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {managed ? '托管草稿保持隐藏；管理员从统一题库确认元数据并发布。' : '新题固定以隐藏状态创建；发布与维护权限沿用现有模型。'}
-              </p>
-            </header>
-            <div className="grid gap-4 p-5 sm:grid-cols-2">
-              {!isCreate && canPublish ? <input type="hidden" name="hidden" value={hiddenValue ? 'true' : 'false'} /> : null}
-              {!isCreate && canPublish ? <input type="hidden" name="lockHidden" value={lockHiddenValue ? 'true' : 'false'} /> : null}
-              <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-muted/45 px-3">
-                <Checkbox checked={hiddenValue} disabled={isCreate || !canPublish} onCheckedChange={setHiddenValue} aria-label="隐藏题目" />
-                <span className="flex items-center gap-1.5 text-sm">
-                  {hiddenValue ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                  {isCreate ? '创建后保持隐藏' : '隐藏题目'}
-                </span>
-              </label>
-              <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-muted/45 px-3">
-                <Checkbox
-                  checked={lockHiddenValue}
-                  disabled={isCreate || (managed && !canPublish)}
-                  onCheckedChange={setLockHiddenValue}
-                  aria-label="锁定隐藏"
-                />
-                <span className="flex items-center gap-1.5 text-sm">
-                  <Lock className="size-3.5" />
-                  锁定隐藏（比赛结束后不自动公开）
-                </span>
-              </label>
-            </div>
-          </section>
-
-          {!isCreate && canDelete ? (
-            <section aria-labelledby="danger-heading" className="rounded-2xl border border-destructive/25 bg-destructive/[0.025] p-5">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 id="danger-heading" className="text-sm font-semibold text-destructive">
-                    危险操作
-                  </h2>
-                  <p className="mt-1 text-xs text-muted-foreground">删除将同时移除题目文件、提交记录和讨论。</p>
+            {!isCreate && canDelete ? (
+              <section aria-labelledby="danger-heading" className="rounded-2xl border border-destructive/25 bg-destructive/[0.025] p-5">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 id="danger-heading" className="text-sm font-semibold text-destructive">
+                      危险操作
+                    </h2>
+                    <p className="mt-1 text-xs text-muted-foreground">删除将同时移除题目文件、提交记录和讨论。</p>
+                  </div>
+                  {!showDeleteConfirm ? (
+                    <Button type="button" variant="destructive" size="sm" onClick={() => setShowDeleteConfirm(true)}>
+                      <Trash2 className="mr-1 size-3.5" />
+                      删除题目
+                    </Button>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-medium text-destructive">确认永久删除？</span>
+                      <Button type="submit" name="operation" value="delete" variant="destructive" size="sm">
+                        确认删除
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setShowDeleteConfirm(false)}>
+                        取消
+                      </Button>
+                    </div>
+                  )}
                 </div>
-                {!showDeleteConfirm ? (
-                  <Button type="button" variant="destructive" size="sm" onClick={() => setShowDeleteConfirm(true)}>
-                    <Trash2 className="mr-1 size-3.5" />
-                    删除题目
-                  </Button>
+              </section>
+            ) : null}
+
+            <footer className="flex flex-col gap-3 border-t border-border/70 pt-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">{saveError ? <p className="text-sm text-destructive">{saveError}</p> : status}</div>
+              <Button type="submit" className="min-h-11 gap-1.5 sm:min-w-36" disabled={saveState === 'saving'}>
+                {saveState === 'saving' ? (
+                  <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                ) : isCreate ? (
+                  <ArrowRight className="size-4" />
                 ) : (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-medium text-destructive">确认永久删除？</span>
-                    <Button type="submit" name="operation" value="delete" variant="destructive" size="sm">
-                      确认删除
-                    </Button>
-                    <Button type="button" variant="outline" size="sm" onClick={() => setShowDeleteConfirm(false)}>
-                      取消
-                    </Button>
-                  </div>
+                  <Save className="size-4" />
                 )}
-              </div>
-            </section>
-          ) : null}
-        </form>
-
-        {!isCreate && canManageCollaborators ? (
-          <div id="maintainers" className="scroll-mt-44">
-            <PermitsPanel pid={String(pid)} pdocId={pdoc.docId} hidden={!!pdoc.hidden} managed={managed} />
-          </div>
-        ) : null}
-      </div>
+                {isCreate ? '创建并进入工作区' : '保存修改'}
+              </Button>
+            </footer>
+          </form>
+        </div>
+      )}
     </ProblemEditorWorkspace>
   );
 }

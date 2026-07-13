@@ -48,6 +48,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { DateTime } from '@/components/ui/datetime';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -1189,6 +1190,9 @@ export function AdminTasksStatsPage() {
     studentByUid: Record<string, StudentLite>;
     audit: AuditEntry[];
     presets: PresetSummary[];
+    canExportUserGroup: boolean;
+    exportUserGroupDefaultName: string;
+    exportUserGroupMemberCount: number;
   };
   const taskNodes = (data.task.graph?.nodes || []).filter((n) => n.type === 'task');
   const total = data.assignments.length;
@@ -1196,6 +1200,7 @@ export function AdminTasksStatsPage() {
   const qualified = data.assignments.filter((a) => a.status === 'qualified').length;
   const admitted = data.assignments.filter((a) => a.status === 'admitted').length;
   const [drillIn, setDrillIn] = useState<AssignmentEntry | null>(null);
+  const [groupExportOpen, setGroupExportOpen] = useState(false);
   const [statsTab, setStatsTab] = useState<'progress' | 'audit'>('progress');
   const presetMap = useMemo(() => Object.fromEntries(data.presets.map((p) => [p.id, p])), [data.presets]);
   const drillUser = drillIn ? data.udict[drillIn.userId] : null;
@@ -1233,6 +1238,12 @@ export function AdminTasksStatsPage() {
               导出 CSV
             </a>
           </Button>
+          {data.canExportUserGroup && (
+            <Button type="button" variant="outline" onClick={() => setGroupExportOpen(true)}>
+              <Users className="mr-1 size-4" />
+              导出为用户组
+            </Button>
+          )}
           <Button asChild variant="outline">
             <a href="/admin/tasks">
               <ArrowLeft className="mr-1 size-4" />
@@ -1408,6 +1419,34 @@ export function AdminTasksStatsPage() {
           )}
         </SheetContent>
       </Sheet>
+
+      {data.canExportUserGroup && (
+        <Dialog open={groupExportOpen} onOpenChange={setGroupExportOpen}>
+          <DialogContent className="w-full sm:w-[480px]" onClose={() => setGroupExportOpen(false)}>
+            <DialogHeader>
+              <DialogTitle>导出任务成员为用户组</DialogTitle>
+            </DialogHeader>
+            <form method="post" action={`/admin/tasks/${data.task._id}/stats`} className="space-y-4">
+              <input type="hidden" name="operation" value="export_group" />
+              <FormField label="用户组名称" required>
+                <Input name="name" defaultValue={data.exportUserGroupDefaultName} required autoFocus />
+              </FormField>
+              <p className="text-sm leading-6 text-muted-foreground">
+                将任务的全部非取消成员（去重后 {data.exportUserGroupMemberCount} 人）创建为一个同校用户组。存在未绑定或跨校成员时不会写入任何数据。
+              </p>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setGroupExportOpen(false)}>
+                  取消
+                </Button>
+                <Button type="submit" disabled={data.exportUserGroupMemberCount === 0}>
+                  创建用户组
+                </Button>
+              </div>
+              {data.exportUserGroupMemberCount === 0 && <p className="text-sm text-destructive">任务没有可导出的非取消成员。</p>}
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
     </AdminPage>
   );
 }

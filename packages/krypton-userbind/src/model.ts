@@ -8,6 +8,12 @@
 import type { Filter } from 'mongodb';
 import { db, ObjectId, UserModel, ValidationError } from 'hydrooj';
 import { bindTokensColl, ensureIndexes, schoolsColl, studentsColl, userGroupsColl } from './db';
+import {
+    createGroupFromBoundUsersWithDependencies,
+    type BoundUserGroupContext,
+    type BoundUserGroupTarget,
+    type CreateGroupFromBoundUsersResult,
+} from './group-export';
 import type { ListStudentsFilter } from './student-filter';
 import { escapeRegexLiteral, listStudentsFromCollection } from './student-filter';
 import type {
@@ -284,13 +290,19 @@ export async function deleteSchool(domainId: string, id: ObjectId): Promise<void
 
 // ─── UserGroups ───────────────────────────────────────────────────────────
 
-export async function createUserGroup(domainId: string, schoolId: ObjectId, name: string, createdBy: number): Promise<UserGroup> {
+export async function createUserGroup(
+    domainId: string,
+    schoolId: ObjectId,
+    name: string,
+    createdBy: number,
+    groupId = new ObjectId(),
+): Promise<UserGroup> {
     name = name.trim();
     if (!name) throw new ValidationError('name');
     const school = await schoolsColl.findOne({ domainId, _id: schoolId });
     if (!school) throw new ValidationError('schoolId', null, 'School not found');
     const doc: UserGroup = {
-        _id: new ObjectId(),
+        _id: groupId,
         domainId,
         schoolId,
         name,
@@ -304,6 +316,55 @@ export async function createUserGroup(domainId: string, schoolId: ObjectId, name
         throw e;
     }
     return doc;
+}
+
+export async function createGroupFromBoundUsers(
+    domainId: string,
+    name: string,
+    createdBy: number,
+    targets: BoundUserGroupTarget[],
+    context: BoundUserGroupContext,
+    recordSuccess: (result: CreateGroupFromBoundUsersResult) => Promise<void>,
+): Promise<CreateGroupFromBoundUsersResult> {
+    return createGroupFromBoundUsersWithDependencies(domainId, name, createdBy, targets, context, {
+        findStudents: async (targetDomainId, userIds) => studentsColl.find({ domainId: targetDomainId, boundUserId: { $in: userIds } }).toArray(),
+        findExistingUserIds: async (userIds) => {
+            const users = await UserModel.coll.find({ _id: { $in: userIds } } as any, { projection: { _id: 1 } }).toArray();
+            return users.map((user) => user._id);
+        },
+        createGroup: createUserGroup,
+        addStudentMembership: async (targetDomainId, schoolId, recordIds, userIds, groupId) => {
+            const result = await studentsColl.updateMany(
+                {
+                    domainId: targetDomainId,
+                    schoolId,
+                    _id: { $in: recordIds },
+                    boundUserId: { $in: userIds },
+                },
+                { $addToSet: { groupIds: groupId } as any },
+            );
+            return result.matchedCount;
+        },
+        addUserMembership: async (userIds, groupId) => {
+            const result = await UserModel.coll.updateMany({ _id: { $in: userIds } } as any, { $addToSet: { parentUserGroupId: groupId as any } });
+            return result.matchedCount;
+        },
+        countStudentMembership: (targetDomainId, recordIds, groupId) =>
+            studentsColl.countDocuments({ domainId: targetDomainId, _id: { $in: recordIds }, groupIds: groupId }),
+        countUserMembership: (userIds, groupId) => UserModel.coll.countDocuments({ _id: { $in: userIds }, parentUserGroupId: groupId } as any),
+        recordSuccess,
+        removeStudentMembership: async (targetDomainId, recordIds, groupId) => {
+            await studentsColl.updateMany({ domainId: targetDomainId, _id: { $in: recordIds } }, { $pull: { groupIds: groupId } as any });
+        },
+        removeUserMembership: async (userIds, groupId) => {
+            await UserModel.coll.updateMany({ _id: { $in: userIds } } as any, { $pull: { parentUserGroupId: groupId as any } } as any);
+        },
+        deleteGroup: async (targetDomainId, groupId) => {
+            const result = await userGroupsColl.deleteOne({ domainId: targetDomainId, _id: groupId });
+            return result.deletedCount === 1;
+        },
+        logError: (message, logContext) => console.error(message, logContext),
+    });
 }
 
 export async function listUserGroups(domainId: string, schoolId?: ObjectId): Promise<UserGroup[]> {
@@ -909,6 +970,7 @@ export const userBindModel = {
 
     // Groups
     createUserGroup,
+    createGroupFromBoundUsers,
     listUserGroups,
     getUserGroup,
     updateUserGroup,

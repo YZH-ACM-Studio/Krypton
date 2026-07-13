@@ -50,6 +50,7 @@ import { canCreateTask, canManageAllTasks, canModifyTask } from './auth';
 import { cspScoreColl, gpltScoreColl, patScoreColl } from './db';
 import { taskModel } from './model';
 import { presetSummaries } from './presets';
+import { buildTaskStatsCsv, defaultTaskGroupName } from './stats-export';
 import type { AdmissionMode, GpltLevel, PatLevel, PatSeason, TaskAccess, TaskDoc, TaskGraph, TaskGraphEdge, TaskGraphNode } from './types';
 import { emptyTaskGraph } from './types';
 
@@ -812,7 +813,7 @@ class AdminTasksOverrideHandler extends Handler {
     }
 }
 
-class AdminTasksStatsHandler extends Handler {
+export class AdminTasksStatsHandler extends Handler {
     async prepare() {
         if (!canCreateTask(this.user as any) && !canManageAllTasks(this.user as any)) {
             this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
@@ -847,28 +848,27 @@ class AdminTasksStatsHandler extends Handler {
         const [udict, studentByUid] = await Promise.all([UserModel.getList(domainId, uids), userBindModel.findStudentsByUserIds(domainId, uids)]);
         const taskNodes = task.graph.nodes.filter((n) => n.type === 'task');
         if (format === 'csv') {
-            const lines: string[] = ['uid,uname,studentId,realName,status,completedNodes,totalNodes,completedAt,note'];
-            for (const a of fresh) {
-                const completedNodes = taskNodes.filter((n) => a.progress?.[n.id]?.completed).length;
-                const u = udict[a.userId];
-                const student = studentByUid[String(a.userId)];
-                lines.push(
-                    [
-                        a.userId,
-                        JSON.stringify(u?.uname || ''),
-                        JSON.stringify(student?.studentId || ''),
-                        JSON.stringify(student?.realName || ''),
-                        a.status,
+            const csv = buildTaskStatsCsv(
+                fresh.map((a) => {
+                    const completedNodes = taskNodes.filter((n) => a.progress?.[n.id]?.completed).length;
+                    const u = udict[a.userId];
+                    const student = studentByUid[String(a.userId)];
+                    return {
+                        userId: a.userId,
+                        username: u?.uname || '',
+                        studentId: student?.studentId || '',
+                        realName: student?.realName || '',
+                        status: a.status,
                         completedNodes,
-                        taskNodes.length,
-                        a.completedAt ? a.completedAt.toISOString() : '',
-                        JSON.stringify(a.note || ''),
-                    ].join(','),
-                );
-            }
+                        totalNodes: taskNodes.length,
+                        completedAt: a.completedAt ? a.completedAt.toISOString() : '',
+                        note: a.note || '',
+                    };
+                }),
+            );
             this.response.type = 'text/csv; charset=utf-8';
             this.response.disposition = `attachment; filename="task-${tid}-stats.csv"`;
-            this.response.body = lines.join('\n');
+            this.response.body = csv;
             return;
         }
         const audit = await taskModel.listAuditForTask(domainId, tid, 50);
@@ -880,7 +880,37 @@ class AdminTasksStatsHandler extends Handler {
             studentByUid,
             audit,
             presets: presetSummaries(),
+            canExportUserGroup: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+            exportUserGroupDefaultName: defaultTaskGroupName(task.title),
+            exportUserGroupMemberCount: new Set(fresh.map((assignment) => assignment.userId)).size,
         };
+    }
+
+    @param('tid', Types.ObjectId)
+    @param('name', Types.String)
+    async postExportGroup({ domainId }: { domainId: string }, tid: ObjectId, name: string) {
+        this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
+        const task = await taskModel.getTask(domainId, tid);
+        if (!task) throw new NotFoundError('任务不存在');
+        const assignments = await taskModel.getTaskAssignments(domainId, tid, { status: { $ne: 'cancelled' } });
+        const userIds = Array.from(new Set(assignments.map((assignment) => assignment.userId)));
+        const users = await UserModel.getList(domainId, userIds);
+        const result = await userBindModel.createGroupFromBoundUsers(
+            domainId,
+            name,
+            this.user._id,
+            userIds.map((userId) => ({ userId, username: users[userId]?.uname || `uid:${userId}` })),
+            { taskId: tid.toHexString() },
+            async (created) => {
+                await OplogModel.log(this, 'tasks.export_user_group', {
+                    taskId: tid.toHexString(),
+                    groupId: created.group._id.toHexString(),
+                    schoolId: created.group.schoolId.toHexString(),
+                    memberCount: created.memberCount,
+                });
+            },
+        );
+        this.response.redirect = this.url('admin_userbind_group_detail', { groupId: result.group._id });
     }
 
     // Force-recheck EVERY non-cancelled assignment of this task. Unlike the

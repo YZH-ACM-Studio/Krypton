@@ -98,7 +98,7 @@ export function CourseDetailPage() {
   };
 
   return (
-    <main className="mx-auto w-full max-w-7xl space-y-6 pb-8">
+    <main className="w-full min-w-0 space-y-6 pb-8">
       <header className="flex flex-wrap items-center gap-3 border-b border-border/70 pb-5">
         <Button asChild variant="ghost" size="icon" className="size-11">
           <a href="/course" aria-label="返回课程列表">

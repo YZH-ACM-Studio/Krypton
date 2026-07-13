@@ -198,7 +198,7 @@ export function CourseEditPage() {
   };
 
   return (
-    <main className="mx-auto w-full max-w-[90rem] space-y-5 pb-8">
+    <main className="w-full min-w-0 space-y-5 pb-8">
       <header className="flex flex-wrap items-center gap-3 border-b border-border/70 pb-4">
         <Button asChild variant="ghost" size="icon" className="size-11">
           <a href={isEdit ? `/course/${tid}` : '/course'} aria-label="返回">

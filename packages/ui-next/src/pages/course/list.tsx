@@ -112,7 +112,7 @@ export function CoursePage() {
   const paginationBase = q ? `/course?q=${encodeURIComponent(q)}` : '/course';
 
   return (
-    <main className="mx-auto w-full max-w-6xl space-y-8 pb-8">
+    <main className="w-full min-w-0 space-y-8 pb-8">
       <header className="flex flex-col gap-4 border-b border-border/70 pb-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-medium tracking-wide text-muted-foreground">学习空间</p>

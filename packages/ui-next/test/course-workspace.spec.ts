@@ -31,8 +31,10 @@ describe('P3.8 course workspace', () => {
     const list = readFileSync(resolve(root, 'src/pages/course/list.tsx'), 'utf8');
     const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
     expect(handler).to.include('const [tdocs, tpcount, tcount]');
-    expect(handler).to.include('canCreate, managedIds');
-    expect(handler).to.include('canManage, tsdoc');
+    expect(handler).to.include('canCreate,');
+    expect(handler).to.include('managedIds,');
+    expect(handler).to.include('canManage,');
+    expect(handler).to.include('tsdoc,');
     expect(list).to.include('Number(data.tcount)');
     expect(detail).to.include('const activeChapter = chapters.find');
     expect(detail).to.not.include('chapters.map((ch');

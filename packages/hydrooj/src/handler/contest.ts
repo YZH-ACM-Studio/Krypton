@@ -5,7 +5,7 @@ import { readFile } from 'fs-extra';
 import { escapeRegExp, pick } from 'lodash';
 import moment from 'moment-timezone';
 import { ObjectId } from 'mongodb';
-import { Counter, diffArray, getAlphabeticId, randomstring, sortFiles, Time, yaml } from '@hydrooj/utils/lib/utils';
+import { Counter, diffArray, getAlphabeticId, Logger, randomstring, sortFiles, Time, yaml } from '@hydrooj/utils/lib/utils';
 import { Context, Service } from '../context';
 import {
     BadRequestError,
@@ -41,6 +41,8 @@ import storage from '../model/storage';
 import user from '../model/user';
 import { Handler, param, post, Type, Types } from '../service/server';
 
+const logger = new Logger('contest-handler');
+
 function parseProblemDocIds(input: string) {
     const tokens = input
         .replace(/，/g, ',')
@@ -52,18 +54,18 @@ function parseProblemDocIds(input: string) {
     return pids;
 }
 
-async function assertCanMaintainAutoHiddenProblems(domainId: string, pids: number[], actor: any) {
+async function assertCanPublishAutoHiddenProblems(domainId: string, pids: number[], actor: any) {
     const uniquePids = Array.from(new Set(pids));
     const pdict = await problem.getList(domainId, uniquePids, true, false, problem.PROJECTION_PUBLIC, true);
     const pdocs = uniquePids.map((pid) => pdict[pid]).filter(Boolean);
     // Evaluate every existing target before deciding, so Promise.all below can
     // never begin a partially authorized hide batch. Missing and unauthorized
     // references intentionally collapse to the same capability error.
-    let allMaintainable = pdocs.length === uniquePids.length;
+    let allPublishable = pdocs.length === uniquePids.length;
     for (const pdoc of pdocs) {
-        if (!problem.canMaintainProblem(actor, pdoc)) allMaintainable = false;
+        if (!problem.canPublishProblem(actor, pdoc)) allPublishable = false;
     }
-    if (!allMaintainable) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+    if (!allPublishable) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
 }
 
 function parseStringList(value: any): string[] {
@@ -738,7 +740,7 @@ export class ContestEditHandler extends Handler {
         const lockAt = lock ? moment(endAt).add(-lock, 'minutes').toDate() : null;
         if (lockAt && contestDuration) throw new ValidationError('lockAt', 'duration');
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, this.tdoc?.pids);
-        if (autoHide) await assertCanMaintainAutoHiddenProblems(authoritativeDomainId, pids, this.user);
+        if (autoHide) await assertCanPublishAutoHiddenProblems(authoritativeDomainId, pids, this.user);
         if (tid) {
             await contest.edit(authoritativeDomainId, tid, {
                 title,
@@ -1467,6 +1469,15 @@ export async function apply(ctx: Context) {
                             const pdoc = await problem.get(doc.domainId, pid);
                             if (!pdoc) return;
                             if ((pdoc as any).lockHidden) return;
+                            if (pdoc.authoringMode === 'managed') {
+                                logger.warn(
+                                    'Contest auto-publish skipped managed problem domain=%s contest=%s pid=%d action=manual-admin-publish-required',
+                                    doc.domainId,
+                                    doc.tid,
+                                    pid,
+                                );
+                                return;
+                            }
                             await problem.edit(doc.domainId, pid, { hidden: false });
                         })(),
                     );

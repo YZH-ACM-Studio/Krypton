@@ -17,6 +17,10 @@ const calls = {
     permitList: [] as any[],
     problemGet: [] as any[],
     maintain: [] as any[],
+    manageCollaborators: [] as any[],
+    manageMaintainers: [] as any[],
+    oplog: [] as any[],
+    grant: [] as any[],
     revoke: [] as any[],
     writeClaim: [] as any[],
     userGet: [] as any[],
@@ -28,12 +32,39 @@ const contestId = new ObjectId();
 const pdoc = { domainId: 'system', docId: 42, pid: 42, owner: 1, title: 'P42' };
 let stableProblemResults: any[] = [];
 let maintainResults: boolean[] = [];
+let manageCollaboratorResults: boolean[] = [];
+let manageMaintainerResults: boolean[] = [];
+let permitRow: any = null;
+let permitFindOneResults: any[] = [];
+let rawProblemResults: any[] = [];
+let permitSourceRows: any[] = [];
 let rosterProvider: () => Promise<any[]> = async () => [];
+
+function rowsMatchingTargets(rows: any[], filter: any) {
+    const targetUids = filter.uid?.$in;
+    return rows.filter(
+        (row) => row.domainId === filter.domainId && row.pid === filter.pid && (!targetUids || targetUids.includes(row.uid)) && row.active !== false,
+    );
+}
 
 const permitsColl = {
     async findOne(filter: any) {
         calls.permitFind.push(filter);
-        return {
+        if (permitFindOneResults.length) return permitFindOneResults.shift();
+        return (
+            permitRow || {
+                _id: permitId,
+                domainId: 'system',
+                pid: 42,
+                uid: 8,
+                active: true,
+                role: 'verifier',
+            }
+        );
+    },
+    find(filter: any) {
+        calls.permitFind.push(filter);
+        const defaultRow = {
             _id: permitId,
             domainId: 'system',
             pid: 42,
@@ -41,12 +72,38 @@ const permitsColl = {
             active: true,
             role: 'verifier',
         };
+        const rows = rowsMatchingTargets([permitRow || defaultRow], filter);
+        return {
+            project() {
+                return {
+                    async toArray() {
+                        return rows;
+                    },
+                };
+            },
+        };
+    },
+};
+
+const permitSourcesColl = {
+    find(filter: any) {
+        const rows = rowsMatchingTargets(permitSourceRows, filter);
+        return {
+            project() {
+                return {
+                    async toArray() {
+                        return rows;
+                    },
+                };
+            },
+        };
     },
 };
 
 const permitsModel = {
-    async grant() {
-        throw new Error('unexpected grant');
+    async grant(...args: any[]) {
+        calls.grant.push(args);
+        return { active: true };
     },
     async grantBulkViaContest() {
         throw new Error('unexpected contest grant');
@@ -92,6 +149,11 @@ const hydroojStub = {
     Handler: framework.Handler,
     NotFoundError: Error,
     ObjectId,
+    OplogModel: {
+        async log(...args: any[]) {
+            calls.oplog.push(args);
+        },
+    },
     param: framework.param,
     PERM: {
         PERM_EDIT_CONTEST: 1n,
@@ -105,7 +167,7 @@ const hydroojStub = {
         PROJECTION_LIST: {},
         async get(...args: any[]) {
             calls.problemGet.push(args);
-            return pdoc;
+            return rawProblemResults.length ? rawProblemResults.shift() : pdoc;
         },
         async getList() {
             return {};
@@ -114,11 +176,30 @@ const hydroojStub = {
             calls.problemGet.push(args);
             return stableProblemResults.length ? stableProblemResults.shift() : pdoc;
         },
+        canMaintainProblem(...args: any[]) {
+            calls.maintain.push(args);
+            return maintainResults.length ? maintainResults.shift() : true;
+        },
+        canManageProblemCollaborators(...args: any[]) {
+            calls.manageCollaborators.push(args);
+            return manageCollaboratorResults.length ? manageCollaboratorResults.shift() : true;
+        },
+        canManageProblemMaintainers(...args: any[]) {
+            calls.manageMaintainers.push(args);
+            return manageMaintainerResults.length ? manageMaintainerResults.shift() : true;
+        },
         async withAuthorizedWriteClaim(...args: any[]) {
             calls.writeClaim.push(args.slice(0, 4).concat(args[5]));
             const work = args[4];
             const requestId = args[5]?.requestId || 'generated-claim';
-            return work({ domainId: args[0], pid: args[1], actor: 1, requestId, state: 'active' });
+            return work({
+                domainId: args[0],
+                pid: args[1],
+                actor: 1,
+                requestId,
+                capability: args[5]?.capability || 'maintain',
+                state: 'active',
+            });
         },
     },
     Types: framework.Types,
@@ -129,7 +210,7 @@ const hydroojStub = {
         },
         async getList(...args: any[]) {
             calls.userList.push(args);
-            return {};
+            return Object.fromEntries((args[1] || []).map((uid: number) => [uid, { _id: uid, uname: `u${uid}` }]));
         },
     },
     ValidationError: Error,
@@ -145,7 +226,7 @@ require.cache[dbPath] = {
     id: dbPath,
     filename: dbPath,
     loaded: true,
-    exports: { permitsColl },
+    exports: { permitsColl, permitSourcesColl },
 } as NodeModule;
 require.cache[modelPath] = {
     id: modelPath,
@@ -159,6 +240,8 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
         return {
             Logger: class {
                 error() {}
+                info() {}
+                warn() {}
             },
         };
     }
@@ -208,6 +291,7 @@ function makeHandler(route: string) {
     Object.assign(handler, {
         domain: { _id: 'system' },
         response: { body: undefined },
+        request: { body: {} },
         user: {
             _id: 1,
             uname: 'root',
@@ -243,6 +327,12 @@ beforeEach(() => {
     for (const entries of Object.values(calls)) entries.length = 0;
     stableProblemResults = [];
     maintainResults = [];
+    manageCollaboratorResults = [];
+    manageMaintainerResults = [];
+    permitRow = null;
+    permitFindOneResults = [];
+    rawProblemResults = [];
+    permitSourceRows = [];
     rosterProvider = async () => [];
 });
 
@@ -271,10 +361,19 @@ describe('permit handler authoritative domain boundary', () => {
         const handler = makeHandler('problem_permit_revoke');
         await handler.post({ domainId: 'system' }, 42, permitId, 'retry-1');
 
-        expect(calls.problemGet).to.deep.equal([['system', 42, handler.user]]);
+        expect(calls.problemGet).to.deep.equal([
+            ['system', 42, handler.user],
+            ['system', 42],
+        ]);
         expect(calls.permitFind[0]).to.include({ domainId: 'system', pid: 42 });
         expect(calls.revoke[0][0]).to.equal('system');
-        expect(calls.writeClaim[0]).to.deep.equal(['system', 42, handler.user, 'permit-revoke', { requestId: 'retry-1', selfRevokeUid: undefined }]);
+        expect(calls.writeClaim[0]).to.deep.equal([
+            'system',
+            42,
+            handler.user,
+            'permit-revoke',
+            { requestId: 'retry-1', selfRevokeUid: undefined, capability: 'collaborators' },
+        ]);
         expect(calls.revoke[0][2]).to.include({
             requestId: 'retry-1',
             actor: 1,
@@ -324,5 +423,173 @@ describe('permit handler authoritative domain boundary', () => {
         expect(error?.name).to.equal('PermissionError');
         expect(handler.response.body).to.equal(undefined);
         expect(calls.maintain).to.have.lengthOf(2);
+    });
+
+    it('lets a managed maintainer grant author but not maintainer', async () => {
+        const managed = { ...pdoc, authoringMode: 'managed' };
+        const handler = makeHandler('problem_permit_grant');
+        stableProblemResults = [managed];
+        rawProblemResults = [managed];
+        manageMaintainerResults = [false];
+        manageCollaboratorResults = [true];
+
+        await handler.post({ domainId: 'system' }, 42, 8, undefined, 'author', '', 'grant-author');
+
+        expect(calls.grant[0].slice(0, 5)).to.deep.equal(['system', 42, 8, 'author', 1]);
+        expect(calls.writeClaim[0][4]).to.include({ capability: 'collaborators' });
+        expect(calls.oplog[0][1]).to.equal('problem.permit.grant');
+
+        stableProblemResults = [managed];
+        manageMaintainerResults = [false];
+        manageCollaboratorResults = [true];
+        const error = await capture(() => handler.post({ domainId: 'system' }, 42, 8, undefined, 'maintainer', '', 'grant-maintainer'));
+
+        expect(error?.name).to.equal('PermissionError');
+        expect(calls.grant).to.have.lengthOf(1);
+        expect(calls.oplog.at(-1)?.[1]).to.equal('problem.permit.denied');
+    });
+
+    it('lets only the managed administrator grant or revoke maintainer', async () => {
+        const managed = { ...pdoc, authoringMode: 'managed' };
+        const grantHandler = makeHandler('problem_permit_grant');
+        stableProblemResults = [managed];
+        rawProblemResults = [managed];
+        manageMaintainerResults = [true];
+
+        await grantHandler.post({ domainId: 'system' }, 42, 8, undefined, 'maintainer', '', 'admin-maintainer');
+
+        expect(calls.grant[0][3]).to.equal('maintainer');
+        expect(calls.writeClaim[0][4]).to.include({ capability: 'publish' });
+
+        const revokeHandler = makeHandler('problem_permit_revoke');
+        permitRow = { _id: permitId, domainId: 'system', pid: 42, uid: 8, active: true, role: 'maintainer' };
+        stableProblemResults = [managed];
+        manageMaintainerResults = [false];
+        const error = await capture(() => revokeHandler.post({ domainId: 'system' }, 42, permitId, 'deny-revoke'));
+
+        expect(error?.name).to.equal('PermissionError');
+        expect(calls.revoke).to.have.lengthOf(0);
+        expect(calls.oplog.at(-1)?.[1]).to.equal('problem.permit.denied');
+
+        permitRow = { _id: permitId, domainId: 'system', pid: 42, uid: 1, active: true, role: 'maintainer' };
+        stableProblemResults = [managed];
+        manageMaintainerResults = [false];
+        const selfError = await capture(() => revokeHandler.post({ domainId: 'system' }, 42, permitId, 'deny-self-revoke'));
+        expect(selfError?.name).to.equal('PermissionError');
+        expect(calls.revoke).to.have.lengthOf(0);
+
+        permitRow = { _id: permitId, domainId: 'system', pid: 42, uid: 8, active: true, role: 'maintainer' };
+        stableProblemResults = [managed];
+        rawProblemResults = [managed];
+        manageMaintainerResults = [true];
+        await revokeHandler.post({ domainId: 'system' }, 42, permitId, 'admin-revoke');
+        expect(calls.revoke).to.have.lengthOf(1);
+        expect(calls.writeClaim.at(-1)?.[4]).to.include({ capability: 'publish' });
+        expect(calls.oplog.at(-1)?.[1]).to.equal('problem.permit.revoke');
+    });
+
+    it('rejects managed multi-user grants before acquiring a claim or changing any role', async () => {
+        const managed = { ...pdoc, authoringMode: 'managed' };
+        const handler = makeHandler('problem_permit_grant');
+        stableProblemResults = [managed];
+
+        const error = await capture(() => handler.post({ domainId: 'system' }, 42, 8, ['9'], 'author', '', 'managed-batch'));
+
+        expect(error).to.be.instanceOf(Error);
+        expect(calls.writeClaim).to.have.lengthOf(0);
+        expect(calls.grant).to.have.lengthOf(0);
+        expect(calls.oplog.at(-1)?.[1]).to.equal('problem.permit.denied');
+    });
+
+    it('lets a managed maintainer revoke author without maintainer-management authority', async () => {
+        const managed = { ...pdoc, authoringMode: 'managed' };
+        const handler = makeHandler('problem_permit_revoke');
+        permitRow = { _id: permitId, domainId: 'system', pid: 42, uid: 8, active: true, role: 'author' };
+        stableProblemResults = [managed];
+        rawProblemResults = [managed];
+        manageCollaboratorResults = [true];
+
+        await handler.post({ domainId: 'system' }, 42, permitId, 'revoke-author');
+
+        expect(calls.revoke).to.have.lengthOf(1);
+        expect(calls.writeClaim[0][4]).to.include({ capability: 'collaborators' });
+    });
+
+    it('rejects attempts to overwrite any direct or sourced managed maintainer role', async () => {
+        const managed = { ...pdoc, authoringMode: 'managed' };
+        const handler = makeHandler('problem_permit_grant');
+        stableProblemResults = [managed];
+        rawProblemResults = [managed];
+        permitRow = { _id: permitId, domainId: 'system', pid: 42, uid: 8, active: true, role: 'maintainer' };
+        manageMaintainerResults = [false, false, false];
+        manageCollaboratorResults = [true, true];
+
+        const directError = await capture(() => handler.post({ domainId: 'system' }, 42, 8, undefined, 'author', '', 'overwrite-direct'));
+        expect(directError?.name).to.equal('PermissionError');
+        expect(calls.grant).to.have.lengthOf(0);
+
+        for (const entries of Object.values(calls)) entries.length = 0;
+        stableProblemResults = [managed];
+        rawProblemResults = [managed];
+        permitRow = { _id: permitId, domainId: 'system', pid: 42, uid: 8, active: true, role: 'verifier' };
+        permitSourceRows = [{ domainId: 'system', pid: 42, uid: 8, active: true, role: 'maintainer' }];
+        manageMaintainerResults = [false, false, false];
+        manageCollaboratorResults = [true, true];
+
+        const sourceError = await capture(() => handler.post({ domainId: 'system' }, 42, 8, undefined, 'author', '', 'overwrite-source'));
+        expect(sourceError?.name).to.equal('PermissionError');
+        expect(calls.grant).to.have.lengthOf(0);
+    });
+
+    it('rechecks a revoke row and all sources inside the claim before removing a role', async () => {
+        const managed = { ...pdoc, authoringMode: 'managed' };
+        const handler = makeHandler('problem_permit_revoke');
+        const author = { _id: permitId, domainId: 'system', pid: 42, uid: 8, active: true, role: 'author' };
+        const maintainer = { ...author, role: 'maintainer' };
+        stableProblemResults = [managed];
+        rawProblemResults = [managed];
+        permitFindOneResults = [author, maintainer];
+        permitSourceRows = [{ domainId: 'system', pid: 42, uid: 8, active: true, role: 'maintainer' }];
+        manageCollaboratorResults = [true];
+        manageMaintainerResults = [false];
+
+        const error = await capture(() => handler.post({ domainId: 'system' }, 42, permitId, 'stale-revoke'));
+        expect(error?.name).to.equal('PermissionError');
+        expect(calls.revoke).to.have.lengthOf(0);
+    });
+
+    it('does not let self-revoke remove a hidden managed maintainer source', async () => {
+        const managed = { ...pdoc, authoringMode: 'managed' };
+        const handler = makeHandler('problem_permit_revoke');
+        permitRow = { _id: permitId, domainId: 'system', pid: 42, uid: 1, active: true, role: 'author' };
+        stableProblemResults = [managed];
+        permitSourceRows = [{ domainId: 'system', pid: 42, uid: 1, active: true, role: 'maintainer' }];
+        manageMaintainerResults = [false];
+
+        const error = await capture(() => handler.post({ domainId: 'system' }, 42, permitId, 'self-with-maintainer-source'));
+
+        expect(error?.name).to.equal('PermissionError');
+        expect(calls.writeClaim).to.have.lengthOf(0);
+        expect(calls.revoke).to.have.lengthOf(0);
+        expect(calls.oplog.at(-1)?.[1]).to.equal('problem.permit.denied');
+    });
+
+    it('rejects mixed managed permit bodies before any role mutation', async () => {
+        const managed = { ...pdoc, authoringMode: 'managed' };
+        const grantHandler = makeHandler('problem_permit_grant');
+        grantHandler.request.body = { uid: '8', role: 'author', tag: 'forged' };
+        stableProblemResults = [managed];
+
+        const grantError = await capture(() => grantHandler.post({ domainId: 'system' }, 42, 8, undefined, 'author', '', 'mixed-grant'));
+        expect(grantError).to.be.instanceOf(Error);
+        expect(calls.writeClaim).to.have.lengthOf(0);
+        expect(calls.grant).to.have.lengthOf(0);
+
+        const revokeHandler = makeHandler('problem_permit_revoke');
+        revokeHandler.request.body = { permitId: permitId.toHexString(), role: 'author' };
+        stableProblemResults = [managed];
+        const revokeError = await capture(() => revokeHandler.post({ domainId: 'system' }, 42, permitId, 'mixed-revoke'));
+        expect(revokeError).to.be.instanceOf(Error);
+        expect(calls.revoke).to.have.lengthOf(0);
     });
 });

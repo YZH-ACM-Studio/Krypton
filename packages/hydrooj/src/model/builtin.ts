@@ -95,6 +95,7 @@ export const PERMS = [
     Permission('perm_userbind', PERM.PERM_USERBIND_MANAGE_STUDENTS, 'Manage student records and groups'),
     Permission('perm_course', PERM.PERM_CREATE_COURSE, 'Create courses'),
     Permission('perm_course', PERM.PERM_EDIT_COURSE, 'Edit any courses'),
+    Permission('perm_problem', PERM.PERM_CREATE_PROGRAMMING_DRAFT, 'Create managed programming drafts'),
 ];
 
 export const PERMS_BY_FAMILY = {};

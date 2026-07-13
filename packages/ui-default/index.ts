@@ -102,10 +102,9 @@ class RichMediaHandler extends Handler {
 
   async renderProblem(domainId, payload) {
     const cur = payload.domainId ? await UserModel.getById(payload.domainId, this.user._id) : this.user;
-    let pdoc = cur.hasPerm(PERM.PERM_VIEW | PERM.PERM_VIEW_PROBLEM)
-      ? (await ProblemModel.get(payload.domainId || domainId, payload.id)) || ProblemModel.default
+    const pdoc = cur.hasPerm(PERM.PERM_VIEW | PERM.PERM_VIEW_PROBLEM)
+      ? (await ProblemModel.getViewableAuthorized(payload.domainId || domainId, payload.id, cur)) || ProblemModel.default
       : ProblemModel.default;
-    if (pdoc.hidden && !cur.own(pdoc) && !cur.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN)) pdoc = ProblemModel.default;
     return await this.renderHTML('partials/problem.html', { pdoc });
   }
 

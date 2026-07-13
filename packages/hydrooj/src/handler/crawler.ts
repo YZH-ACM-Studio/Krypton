@@ -49,6 +49,7 @@ function normMemory(s: string): string {
 function denyProblemAcl(user: any) {
     Object.assign(user, {
         _permitPids: new Set<number>(),
+        _authoredPids: new Set<number>(),
         _maintainedPids: new Set<number>(),
         _aclFencedPids: new Set<number>(),
         _problemAclDomainId: undefined,
@@ -62,11 +63,17 @@ async function loadCrawlerProblemAcl(user: any, domainId: string): Promise<void>
         const permits = (global.Hydro?.model as any)?.permits;
         if (typeof permits?.loadAclForUser !== 'function') throw new Error('permits.loadAclForUser is unavailable');
         const loaded = await permits.loadAclForUser(domainId, Number(user?._id) || 0);
-        if (!(loaded?.permitPids instanceof Set) || !(loaded?.maintainedPids instanceof Set) || !(loaded?.fencedPids instanceof Set)) {
+        if (
+            !(loaded?.permitPids instanceof Set) ||
+            !(loaded?.authoredPids instanceof Set) ||
+            !(loaded?.maintainedPids instanceof Set) ||
+            !(loaded?.fencedPids instanceof Set)
+        ) {
             throw new TypeError('permits.loadAclForUser returned an invalid ACL snapshot');
         }
         Object.assign(user, {
             _permitPids: loaded.permitPids,
+            _authoredPids: loaded.authoredPids,
             _maintainedPids: loaded.maintainedPids,
             _aclFencedPids: loaded.fencedPids,
             _problemAclDomainId: domainId,
@@ -265,7 +272,22 @@ class CrawlerTestdataHandler extends CrawlerApiHandler {
                 continue;
             }
             try {
-                await requireMaintainedProblem(domainId, rec.docId, this.user);
+                const target = await requireMaintainedProblem(domainId, rec.docId, this.user);
+                if (target.authoringMode === 'managed') {
+                    logger.warn(
+                        'Managed crawler testdata write denied domain=%s pid=%d actor=%d operation=crawler-testdata-replace result=denied',
+                        domainId,
+                        rec.docId,
+                        this.user._id,
+                    );
+                    await OplogModel.log(this as any, 'problem.managed.write.denied', {
+                        problemId: rec.docId,
+                        operation: 'crawler-testdata-replace',
+                        fields: ['data', 'config', 'hidden'],
+                        result: 'denied',
+                    });
+                    throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
+                }
                 const yamlCases: { input: string; output: string }[] = [];
 
                 await problem.withAuthorizedStructuralWriteClaim(domainId, rec.docId, this.user, 'crawler-testdata-replace', async (claim) => {

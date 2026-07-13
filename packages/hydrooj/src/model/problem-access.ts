@@ -9,19 +9,22 @@ import type { ProblemDoc } from './problem';
 /**
  * Request-local problem ACL state populated by krypton-permits.
  *
- * `_permitPids` contains active verifier and maintainer grants, while
- * `_maintainedPids` contains maintainer grants only. `_aclFencedPids`
+ * `_permitPids` contains every active role, `_authoredPids` contains managed
+ * authors, and `_maintainedPids` contains maintainers. `_aclFencedPids`
  * contains pairs currently undergoing an ACL role mutation for this user and
  * domain. Non-admin callers must never infer an empty ACL from absent state;
  * only `_problemAclLoaded === true` makes permit-derived access authoritative.
  */
 export type ProblemAclUser = Pick<User, '_id' | 'hasPerm' | 'hasPriv'> & {
     _permitPids?: Set<number>;
+    _authoredPids?: Set<number>;
     _maintainedPids?: Set<number>;
     _aclFencedPids?: Set<number>;
     _problemAclDomainId?: string;
     _problemAclLoaded?: boolean;
 };
+
+export type ProblemWriteCapability = 'maintain' | 'content' | 'metadata' | 'collaborators' | 'publish' | 'archive' | 'hard-delete' | 'clone';
 
 export interface ProblemWriteClaim {
     domainId: string;
@@ -29,6 +32,7 @@ export interface ProblemWriteClaim {
     requestId: string;
     actor: number;
     operation: string;
+    capability: ProblemWriteCapability;
     state: 'active' | 'error';
     lastError: string | null;
     createdAt: Date;
@@ -80,7 +84,13 @@ export function isProblemBankAdmin(user: ProblemAclUser): boolean {
 /** Whether this request may enumerate the problem bank. */
 export function canBrowseProblemBank(user: ProblemAclUser): boolean {
     if (user._problemAclLoaded !== true) return false;
-    return isProblemBankAdmin(user) || user.hasPerm(PERM.PERM_CREATE_PROBLEM);
+    return (
+        isProblemBankAdmin(user) ||
+        user.hasPerm(PERM.PERM_CREATE_PROBLEM) ||
+        user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT) ||
+        (user._authoredPids?.size || 0) > 0 ||
+        (user._maintainedPids?.size || 0) > 0
+    );
 }
 
 /**
@@ -100,21 +110,30 @@ export function buildProblemBankScope(user: ProblemAclUser): Filter<ProblemDoc> 
     if (!canBrowseProblemBank(user)) return { ...DENY_ALL_PROBLEMS };
 
     const maintained = sorted(new Set(sorted(user._maintainedPids).filter((pid) => !user._aclFencedPids?.has(pid))));
-    const authorScope: Filter<ProblemDoc> = maintained.length
-        ? {
-              $or: [
-                  { owner: user._id },
-                  {
-                      $and: [{ docId: { $in: maintained } }, { maintainer: user._id }],
-                  },
-              ],
-          }
-        : { owner: user._id };
+    const authored = sorted(new Set(sorted(user._authoredPids).filter((pid) => !user._aclFencedPids?.has(pid))));
+    const authorScopes: Filter<ProblemDoc>[] = [];
+    if (user.hasPerm(PERM.PERM_CREATE_PROBLEM)) {
+        authorScopes.push({ $and: [{ owner: user._id }, { authoringMode: { $ne: 'managed' } }] });
+    }
+    if (maintained.length) {
+        const maintainedScope: Filter<ProblemDoc>[] = [{ docId: { $in: maintained } }, { maintainer: user._id }];
+        // A managed maintainer may enter the bank without the broad create
+        // permission. That role must not accidentally make legacy problems
+        // enumerable to a user who could only reach them by direct URL before.
+        if (!user.hasPerm(PERM.PERM_CREATE_PROBLEM)) maintainedScope.push({ authoringMode: 'managed' });
+        authorScopes.push({ $and: maintainedScope });
+    }
+    if (authored.length) {
+        authorScopes.push({ $and: [{ docId: { $in: authored } }, { authoringMode: 'managed' }] });
+    }
+    if (!authorScopes.length) return { ...DENY_ALL_PROBLEMS };
+    const authorScope: Filter<ProblemDoc> = authorScopes.length === 1 ? authorScopes[0] : { $or: authorScopes };
     return fenced.length ? { $and: [authorScope, { docId: { $nin: fenced } }, liveLockExclusion] } : { $and: [authorScope, liveLockExclusion] };
 }
 
 function denyProblemAcl(user: ProblemAclUser): void {
     user._permitPids = new Set<number>();
+    user._authoredPids = new Set<number>();
     user._maintainedPids = new Set<number>();
     user._aclFencedPids = new Set<number>();
     user._problemAclDomainId = undefined;
@@ -130,10 +149,16 @@ export async function refreshProblemAcl(user: ProblemAclUser, authoritativeDomai
             throw new TypeError('permits.loadAclForUser is unavailable');
         }
         const loaded = await permits.loadAclForUser(authoritativeDomainId, user._id);
-        if (!(loaded?.permitPids instanceof Set) || !(loaded?.maintainedPids instanceof Set) || !(loaded?.fencedPids instanceof Set)) {
+        if (
+            !(loaded?.permitPids instanceof Set) ||
+            !(loaded?.authoredPids instanceof Set) ||
+            !(loaded?.maintainedPids instanceof Set) ||
+            !(loaded?.fencedPids instanceof Set)
+        ) {
             throw new TypeError('permits.loadAclForUser returned an invalid ACL snapshot');
         }
         user._permitPids = loaded.permitPids;
+        user._authoredPids = loaded.authoredPids;
         user._maintainedPids = loaded.maintainedPids;
         user._aclFencedPids = loaded.fencedPids;
         user._problemAclDomainId = authoritativeDomainId;
@@ -167,12 +192,14 @@ function problemAclRevisionFilter(authoritativeDomainId: string, user: ProblemAc
 }
 
 function claimFilter(claim: ProblemWriteClaim): Record<string, unknown> {
+    if (!claim.capability) throw new TypeError('problem write claim capability is required');
     return {
         domainId: claim.domainId,
         docType: document.TYPE_PROBLEM,
         docId: claim.pid,
         'aclWriteClaim.requestId': claim.requestId,
         'aclWriteClaim.actor': claim.actor,
+        'aclWriteClaim.capability': claim.capability,
         'aclWriteClaim.state': 'active',
     };
 }
@@ -222,7 +249,7 @@ export async function acquireProblemWriteClaim(
     authorizedPdoc: ProblemDoc,
     requestId: string,
     operation: string,
-    options: { selfRevokeUid?: number; now?: Date } = {},
+    options: { selfRevokeUid?: number; now?: Date; capability?: ProblemWriteCapability } = {},
 ): Promise<ProblemWriteClaim | null> {
     if (!requestId?.trim()) throw new TypeError('problem write claim requestId is required');
     if (!operation?.trim()) throw new TypeError('problem write claim operation is required');
@@ -233,13 +260,15 @@ export async function acquireProblemWriteClaim(
     }
     // Declared below with the rest of the public capability helpers.
 
-    if (!selfRevoke && !canMaintainProblem(user, authorizedPdoc)) return null;
+    const capability = options.capability || 'maintain';
+    if (!selfRevoke && !canUseProblemWriteCapability(user, authorizedPdoc, capability)) return null;
 
     const timestamp = options.now || new Date();
     const stored = {
         requestId: requestId.trim(),
         actor: user._id,
         operation: operation.trim(),
+        capability,
         state: 'active' as const,
         lastError: null,
         createdAt: timestamp,
@@ -253,7 +282,7 @@ export async function acquireProblemWriteClaim(
     };
     delete filter['aclMutationLocks.uid'];
     if (!selfRevoke && !isProblemBankAdmin(user)) {
-        filter.$or = [{ owner: user._id }, { maintainer: user._id }];
+        applyCapabilityIdentityFilter(filter, user, authorizedPdoc, capability);
     }
     const result = await document.coll.findOneAndUpdate(
         filter,
@@ -273,9 +302,13 @@ export async function commitProblemWriteClaimUpdate(
     claim: ProblemWriteClaim,
     $set: Partial<ProblemDoc>,
     $unset: Record<string, unknown> = {},
+    requiredCapability: ProblemWriteCapability = claim.capability,
 ): Promise<ProblemDoc | null> {
     if ([...Object.keys($set || {}), ...Object.keys($unset || {})].some((key) => PROBLEM_ACL_INTERNAL_FIELDS.has(key))) {
         throw new TypeError('ACL mutation fields cannot be written through a problem write claim');
+    }
+    if (!problemWriteCapabilityAllows(claim.capability, requiredCapability)) {
+        throw new TypeError(`problem write claim capability ${claim.capability} cannot perform ${requiredCapability}`);
     }
     const update: any = {};
     if (Object.keys($set || {}).length) update.$set = $set;
@@ -321,7 +354,92 @@ export function canMaintainProblem(user: ProblemAclUser, pdoc: ProblemDoc): bool
     if (!hasLoadedAclForProblem(user, pdoc)) return false;
     if (isAclFenced(user, pdoc.docId)) return false;
     if (isProblemBankAdmin(user)) return true;
+    if (pdoc.authoringMode === 'managed') return user._maintainedPids?.has(pdoc.docId) === true;
     return pdoc.owner === user._id || user._maintainedPids?.has(pdoc.docId) === true;
+}
+
+/** Active managed author; legacy problems deliberately have no author role. */
+export function canAuthorProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    if (!hasLoadedAclForProblem(user, pdoc) || isAclFenced(user, pdoc.docId) || pdoc.authoringMode !== 'managed') return false;
+    if (isProblemBankAdmin(user)) return true;
+    return user._authoredPids?.has(pdoc.docId) === true;
+}
+
+export function canEditProblemContent(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    if (pdoc.authoringMode !== 'managed') return canMaintainProblem(user, pdoc);
+    return canMaintainProblem(user, pdoc) || canAuthorProblem(user, pdoc);
+}
+
+export function canEditProblemMetadata(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    if (pdoc.authoringMode !== 'managed') return canMaintainProblem(user, pdoc);
+    if (!canMaintainProblem(user, pdoc)) return false;
+    if (isProblemBankAdmin(user)) return true;
+    return pdoc.managedAuthoring?.metadataStatus !== 'confirmed';
+}
+
+export function canManageProblemCollaborators(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    if (pdoc.authoringMode !== 'managed') return canMaintainProblem(user, pdoc);
+    return canMaintainProblem(user, pdoc);
+}
+
+export function canManageProblemMaintainers(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    if (pdoc.authoringMode !== 'managed') return canMaintainProblem(user, pdoc);
+    return hasLoadedAclForProblem(user, pdoc) && !isAclFenced(user, pdoc.docId) && isProblemBankAdmin(user);
+}
+
+export function canPublishProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    if (pdoc.authoringMode !== 'managed') return canMaintainProblem(user, pdoc);
+    return hasLoadedAclForProblem(user, pdoc) && !isAclFenced(user, pdoc.docId) && isProblemBankAdmin(user);
+}
+
+export function canArchiveProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    return pdoc.authoringMode === 'managed' ? canPublishProblem(user, pdoc) : canMaintainProblem(user, pdoc);
+}
+
+export function canDeleteProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    return pdoc.authoringMode === 'managed' ? canPublishProblem(user, pdoc) : canMaintainProblem(user, pdoc);
+}
+
+export function canCloneProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    return pdoc.authoringMode === 'managed' ? canPublishProblem(user, pdoc) : canMaintainProblem(user, pdoc);
+}
+
+export function canUseProblemWriteCapability(user: ProblemAclUser, pdoc: ProblemDoc, capability: ProblemWriteCapability): boolean {
+    if (capability === 'content') return canEditProblemContent(user, pdoc);
+    if (capability === 'metadata') return canEditProblemMetadata(user, pdoc);
+    if (capability === 'collaborators') return canManageProblemCollaborators(user, pdoc);
+    if (capability === 'publish') return canPublishProblem(user, pdoc);
+    if (capability === 'archive') return canArchiveProblem(user, pdoc);
+    if (capability === 'hard-delete') return canDeleteProblem(user, pdoc);
+    if (capability === 'clone') return canCloneProblem(user, pdoc);
+    return canMaintainProblem(user, pdoc);
+}
+
+/**
+ * Capabilities are bound into the durable claim and checked again at the
+ * final mutation. Only the small, explicit implication graph needed by the
+ * current managed-authoring workflow is allowed.
+ */
+export function problemWriteCapabilityAllows(granted: ProblemWriteCapability, required: ProblemWriteCapability): boolean {
+    if (granted === required) return true;
+    if (granted === 'maintain') return ['content', 'metadata', 'collaborators'].includes(required);
+    if (granted === 'metadata') return required === 'content';
+    if (granted === 'publish') return ['content', 'metadata'].includes(required);
+    return false;
+}
+
+function applyCapabilityIdentityFilter(
+    filter: Record<string, unknown>,
+    user: ProblemAclUser,
+    pdoc: ProblemDoc,
+    capability: ProblemWriteCapability,
+): void {
+    if (pdoc.authoringMode !== 'managed') {
+        filter.$or = [{ owner: user._id }, { maintainer: user._id }];
+        return;
+    }
+    if (capability === 'content' && user._authoredPids?.has(pdoc.docId) && !user._maintainedPids?.has(pdoc.docId)) return;
+    filter.maintainer = user._id;
 }
 
 /** Canonical direct-problem view check used by ProblemModel.canViewBy. */
@@ -330,6 +448,8 @@ export function canViewProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean 
     if (!user.hasPerm(PERM.PERM_VIEW_PROBLEM)) return false;
     if (isAclFenced(user, pdoc.docId)) return false;
     if (!pdoc.hidden) return true;
+    if (isProblemBankAdmin(user)) return true;
+    if (pdoc.authoringMode === 'managed') return user._permitPids?.has(pdoc.docId) === true;
     if (pdoc.owner === user._id) return true;
     if (user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN)) return true;
     return user._permitPids?.has(pdoc.docId) === true;
@@ -404,6 +524,34 @@ export async function readStableMaintainableProblem(
         const stable = await read(filter);
         if (!stable) continue;
         if (!canMaintainProblem(user, stable)) return null;
+        return stripProblemAclInternalFields(stable);
+    }
+    return null;
+}
+
+/** Stable sensitive read for managed authors plus legacy owner/maintainer. */
+export async function readStableEditableProblem(
+    authoritativeDomainId: string,
+    user: ProblemAclUser,
+    read: StableProblemRead,
+    attempts = 2,
+): Promise<ProblemDoc | null> {
+    if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > 2) {
+        throw new TypeError('stable problem reads support one or two attempts');
+    }
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        const initial = await read();
+        if (!initial || initial.domainId !== authoritativeDomainId) return null;
+
+        await refreshProblemAcl(user, authoritativeDomainId);
+        if (!canEditProblemContent(user, initial)) return null;
+
+        const filter: any = problemAclRevisionFilter(authoritativeDomainId, user, initial);
+        if (!isProblemBankAdmin(user)) applyCapabilityIdentityFilter(filter, user, initial, 'content');
+
+        const stable = await read(filter);
+        if (!stable) continue;
+        if (!canEditProblemContent(user, stable)) return null;
         return stripProblemAclInternalFields(stable);
     }
     return null;

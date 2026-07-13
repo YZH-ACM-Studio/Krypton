@@ -13,6 +13,7 @@ class MemoryServiceRepository implements AclServiceRepository {
     problemLocks = new Map<string, any>();
     problemWriteClaims = new Map<string, any>();
     missingProblems = new Set<string>();
+    managedProblems = new Set<string>();
     mutationCalls = 0;
     failOnceAt: string | null = null;
     failNextClaimRecoveryCas = false;
@@ -167,6 +168,11 @@ class MemoryServiceRepository implements AclServiceRepository {
         return !this.missingProblems.has(`${domainId}:${pid}`);
     }
 
+    async isManagedProblem(domainId: string, pid: number) {
+        if (this.missingProblems.has(`${domainId}:${pid}`)) throw new Error(`problem ${domainId}/${pid} does not exist`);
+        return this.managedProblems.has(`${domainId}:${pid}`);
+    }
+
     async getProblemWriteClaim(domainId: string, pid: number) {
         return this.problemWriteClaims.get(`${domainId}:${pid}`) || null;
     }
@@ -316,8 +322,9 @@ describe('ACL service', () => {
         );
     }
 
-    it('publishing clears every verifier source while preserving direct and contest maintainers', async () => {
+    it('publishing clears every verifier source while preserving authors and maintainers', async () => {
         await service.grantDirect('system', 1, 10, 'maintainer', 1, 'd-m');
+        await service.grantDirect('system', 1, 11, 'author', 1, 'd-a');
         await service.grantContest('system', 1, 20, 'maintainer', 1, 'c1', 'c-m');
         await service.grantContest('system', 1, 30, 'verifier', 1, 'c1', 'c-v');
         await service.grantContest('system', 1, 40, 'maintainer', 1, 'c2', 'c2-m');
@@ -338,12 +345,48 @@ describe('ACL service', () => {
 
         expect(removed).to.equal(2);
         expect((await repo.getCanonical({ domainId: 'system', pid: 1, uid: 10 }))?.role).to.equal('maintainer');
+        expect((await repo.getCanonical({ domainId: 'system', pid: 1, uid: 11 }))?.role).to.equal('author');
+        expect(await repo.mirrorHas({ domainId: 'system', pid: 1, uid: 11 })).to.equal(false);
         expect((await repo.getCanonical({ domainId: 'system', pid: 1, uid: 20 }))?.role).to.equal('maintainer');
         expect(await repo.getCanonical({ domainId: 'system', pid: 1, uid: 30 })).to.equal(null);
         expect(await repo.getCanonical(staleVerifier)).to.equal(null);
         expect(await repo.mirrorHas(staleVerifier)).to.equal(false);
         expect((await repo.getCanonical({ domainId: 'system', pid: 1, uid: 40 }))?.role).to.equal('maintainer');
         expect(await repo.mirrorHas({ domainId: 'system', pid: 1, uid: 40 })).to.equal(true);
+    });
+
+    it('keeps author direct-only and preloads it separately without a maintainer mirror', async () => {
+        await service.grantDirect('system', 9, 90, 'author', 1, 'author-direct');
+
+        const loaded = await service.loadUserAcl('system', 90);
+        expect([...loaded.permitPids]).to.deep.equal([9]);
+        expect([...loaded.authoredPids]).to.deep.equal([9]);
+        expect([...loaded.maintainedPids]).to.deep.equal([]);
+        expect(await repo.mirrorHas({ domainId: 'system', pid: 9, uid: 90 })).to.equal(false);
+
+        const error = await service.grantContest('system', 9, 91, 'author', 1, 'contest', 'author-contest').catch((caught) => caught);
+        expect(error).to.be.instanceOf(Error);
+        expect((error as Error).message).to.equal('author role is direct-problem only');
+        expect(await repo.getCanonical({ domainId: 'system', pid: 9, uid: 91 })).to.equal(null);
+    });
+
+    it('never creates or preserves a contest maintainer source on a managed problem', async () => {
+        repo.managedProblems.add('system:10');
+        const directError = await service
+            .grantContest('system', 10, 100, 'maintainer', 1, 'managed-contest', 'managed-maintainer')
+            .catch((caught) => caught);
+        expect(directError).to.be.instanceOf(Error);
+        expect((directError as Error).message).to.equal('managed problem maintainer must be granted directly by a system administrator');
+        expect(await repo.getCanonical({ domainId: 'system', pid: 10, uid: 100 })).to.equal(null);
+
+        await service.grantContest('system', 11, 101, 'maintainer', 1, 'managed-contest', 'legacy-before-managed');
+        repo.managedProblems.add('system:11');
+        await service.syncContestPids('system', 'managed-contest', [11], [11], [{ uid: 101, role: 'maintainer' }], 1, 'repair-managed-contest-role');
+
+        const sources = await repo.listSourcesForContest('system', 'managed-contest');
+        expect(sources.map((source) => `${source.pid}:${source.uid}:${source.role}`)).to.deep.equal(['11:101:verifier']);
+        expect((await repo.getCanonical({ domainId: 'system', pid: 11, uid: 101 }))?.role).to.equal('verifier');
+        expect(await repo.mirrorHas({ domainId: 'system', pid: 11, uid: 101 })).to.equal(false);
     });
 
     it('removing one contest source never removes another contest or direct grant', async () => {
@@ -460,6 +503,7 @@ describe('ACL service', () => {
         const loaded = await service.loadUserAcl('system', 70);
 
         expect([...loaded.permitPids]).to.deep.equal([7]);
+        expect([...loaded.authoredPids]).to.deep.equal([]);
         expect([...loaded.maintainedPids]).to.deep.equal([]);
         expect([...loaded.fencedPids]).to.deep.equal([6]);
     });
@@ -488,6 +532,7 @@ describe('ACL service', () => {
         const loaded = await service.loadUserAcl('system', 80);
 
         expect([...loaded.permitPids]).to.deep.equal([]);
+        expect([...loaded.authoredPids]).to.deep.equal([]);
         expect([...loaded.maintainedPids]).to.deep.equal([]);
         expect([...loaded.fencedPids]).to.deep.equal([8]);
     });

@@ -393,17 +393,16 @@ class UserDetailHandler extends Handler {
         if (!udoc) throw new UserNotFoundError(uid);
         const pdocs: ProblemDoc[] = [];
         const acInfo: Record<string, number> = {};
-        const canViewHidden = this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN) || this.user._id;
         if (this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) {
             const psdocs = await problem.getMultiStatus(domainId, { uid, status: STATUS.STATUS_ACCEPTED }).toArray();
             pdocs.push(
                 ...Object.values(
-                    await problem.getList(
+                    await problem.getListViewableAuthorized(
                         domainId,
                         psdocs.map((i) => i.docId),
-                        canViewHidden,
-                        false,
+                        this.user,
                         problem.PROJECTION_LIST,
+                        false,
                         true,
                     ),
                 ),
@@ -476,11 +475,10 @@ class UserDetailHandler extends Handler {
             const psdocs = await SolutionModel.getByUser(domainId, uid).limit(10).toArray();
             this.response.body.psdocs = psdocs;
             if (this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) {
-                this.response.body.pdict = await problem.getList(
+                this.response.body.pdict = await problem.getListViewableAuthorized(
                     domainId,
                     psdocs.map((i) => i.parentId),
-                    canViewHidden,
-                    false,
+                    this.user,
                     problem.PROJECTION_LIST,
                 );
             }

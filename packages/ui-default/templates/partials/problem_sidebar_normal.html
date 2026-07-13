@@ -88,7 +88,7 @@
       <li class="menu__item"><a class="menu__link{% if page_name == 'problem_statistics' %} active{% endif %}" href="{{ url('problem_statistics', pid=pdoc.pid|default(pdoc.docId)) }}">
         <span class="icon icon-statistics"></span> {{ _('Statistics') }}
       </a></li>
-    {% if handler.user.own(pdoc, perm.PERM_EDIT_PROBLEM_SELF) or handler.user.hasPerm(perm.PERM_EDIT_PROBLEM) %}
+    {% if canEditProblem %}
       <li class="menu__seperator"></li>
       <li class="menu__item"><a class="menu__link{% if page_name == 'problem_edit' %} active{% endif %}" href="{{ url('problem_edit', pid=pdoc.pid|default(pdoc.docId)) }}">
         <span class="icon icon-edit"></span> {{ _('Edit') }}
@@ -101,7 +101,7 @@
     {% endif %}
     {% if page_name == 'problem_detail' %}
       <li class="menu__seperator nojs--hide"></li>
-      {% if handler.user.own(pdoc) or handler.user.hasPriv(PRIV.PRIV_READ_PROBLEM_DATA) or handler.user.hasPerm(perm.PERM_READ_PROBLEM_DATA) %}
+      {% if canEditProblem or handler.user.hasPriv(PRIV.PRIV_READ_PROBLEM_DATA) or handler.user.hasPerm(perm.PERM_READ_PROBLEM_DATA) %}
         <li class="menu__item nojs--hide"><a class="menu__link" href="javascript:;" name="problem-sidebar__download">
           <span class="icon icon-download"></span> {{ _('Download') }}
         </a></li>

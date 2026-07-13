@@ -109,6 +109,10 @@ export const PERM = {
     PERM_CREATE_COURSE: 1n << 78n,
     PERM_EDIT_COURSE: 1n << 79n,
 
+    // Krypton: create a hidden, managed programming draft only. This does
+    // not grant problem-bank enumeration or any other problem kind.
+    PERM_CREATE_PROGRAMMING_DRAFT: 1n << 80n,
+
     // Placeholder
     PERM_ALL: -1n,
     PERM_BASIC: 0n,

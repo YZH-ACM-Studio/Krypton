@@ -41,7 +41,7 @@ interface PermitRow {
   _id: string;
   pid: number;
   uid: number;
-  role: 'verifier' | 'maintainer';
+  role: 'verifier' | 'author' | 'maintainer';
   grantedBy: number;
   grantedAt: string;
   viaContest: string | null;
@@ -55,7 +55,15 @@ interface UserOption {
   avatarUrl?: string;
 }
 
-function PermitsPanel({ pid, pdocId, hidden }: { pid: string; pdocId: number; hidden: boolean }) {
+type PermitRole = PermitRow['role'];
+
+const PERMIT_ROLE_LABELS: Record<PermitRole, string> = {
+  verifier: '验题人',
+  author: '出题人',
+  maintainer: '维护者',
+};
+
+function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: number; hidden: boolean; managed: boolean }) {
   const bs = useBootstrap();
   const [permits, setPermits] = useState<PermitRow[]>([]);
   const [udict, setUdict] = useState<Record<string, { _id: number; uname: string }>>({});
@@ -65,6 +73,9 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string; pdocId: number; hi
   const [selectedUsers, setSelectedUsers] = useState<UserOption[]>([]);
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteError, setInviteError] = useState('');
+  const [grantableRoles, setGrantableRoles] = useState<PermitRole[]>([]);
+  const [canManageMaintainers, setCanManageMaintainers] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<PermitRole>('verifier');
   const apiPid = String(pdocId || pid);
 
   const refresh = useCallback(async () => {
@@ -76,6 +87,12 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string; pdocId: number; hi
       if (!Array.isArray(j?.permits)) throw new Error('权限列表响应格式错误');
       setPermits(j.permits || []);
       setUdict(j.udict || {});
+      const roles: PermitRole[] = Array.isArray(j.grantableRoles)
+        ? j.grantableRoles.filter((role: unknown): role is PermitRole => typeof role === 'string' && role in PERMIT_ROLE_LABELS)
+        : [];
+      setGrantableRoles(roles);
+      setCanManageMaintainers(j.canManageMaintainers === true);
+      setSelectedRole((current) => (roles.includes(current) ? current : roles[0] || 'verifier'));
       setLoaded(true);
     } catch (error) {
       console.error('Failed to load problem permits', error);
@@ -116,7 +133,11 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string; pdocId: number; hi
     const fd = new FormData();
     fd.set('permitId', permitId);
     const r = await fetch(`/p/${apiPid}/permits/revoke`, { method: 'POST', body: fd, credentials: 'include' });
-    if (r.ok) refresh();
+    if (!r.ok) {
+      setLoadError(`撤销权限失败：HTTP ${r.status}`);
+      return;
+    }
+    refresh();
   }
 
   async function submitInvite(e: FormEvent<HTMLFormElement>) {
@@ -160,14 +181,20 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string; pdocId: number; hi
     <Card className="mt-4">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between text-sm">
-          <span>验题人 / 维护者</span>
-          <Button type="button" size="sm" variant="outline" onClick={() => setOpen(true)} disabled={!hidden}>
-            邀请
+          <span>出题协作</span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setOpen(true)}
+            disabled={!loaded || !grantableRoles.length || (!hidden && !managed)}
+          >
+            添加协作者
           </Button>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        {!hidden ? (
+        {!hidden && !managed ? (
           <p className="text-xs text-muted-foreground">题目当前不是隐藏状态，无需邀请验题人。把题目设为「隐藏」并保存后即可邀请。</p>
         ) : loadError ? (
           <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
@@ -176,7 +203,7 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string; pdocId: number; hi
         ) : !loaded ? (
           <p className="text-xs text-muted-foreground">加载中…</p>
         ) : permits.length === 0 ? (
-          <p className="text-xs text-muted-foreground">还没有被邀请的验题人</p>
+          <p className="text-xs text-muted-foreground">还没有协作者</p>
         ) : (
           <ul className="divide-y">
             {permits.map((p) => (
@@ -185,7 +212,7 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string; pdocId: number; hi
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{udict[p.uid]?.uname || `uid:${p.uid}`}</span>
                     <Badge variant={p.role === 'maintainer' ? 'default' : 'secondary'} className="text-[10px]">
-                      {p.role === 'maintainer' ? '维护者' : '验题人'}
+                      {PERMIT_ROLE_LABELS[p.role]}
                     </Badge>
                     {p.viaContest ? (
                       <Badge variant="outline" className="text-[10px]">
@@ -198,9 +225,11 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string; pdocId: number; hi
                     {p.note ? ` · ${p.note}` : ''}
                   </p>
                 </div>
-                <Button type="button" size="sm" variant="ghost" onClick={() => revoke(p._id)}>
-                  撤销
-                </Button>
+                {p.role !== 'maintainer' || canManageMaintainers ? (
+                  <Button type="button" size="sm" variant="ghost" onClick={() => revoke(p._id)}>
+                    撤销
+                  </Button>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -216,7 +245,7 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string; pdocId: number; hi
       >
         <DialogContent className="w-full overflow-visible sm:w-[560px]" onClose={() => setOpen(false)}>
           <DialogHeader>
-            <DialogTitle>邀请验题人</DialogTitle>
+            <DialogTitle>添加题目协作者</DialogTitle>
           </DialogHeader>
           <form method="post" action={`/p/${apiPid}/permits`} className="space-y-4 p-5" onSubmit={submitInvite}>
             <div className="space-y-1.5">
@@ -251,11 +280,18 @@ function PermitsPanel({ pid, pdocId, hidden }: { pid: string; pdocId: number; hi
                 minHeight={44}
               />
             </div>
-            {/* Role is fixed to "verifier" — only read access is granted.
-                The data model keeps a `role` field for future extension
-                to a real edit role, but the workflow today is read-only:
-                verifier finds issues, DMs author, author edits. */}
-            <input type="hidden" name="role" value="verifier" />
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground" htmlFor="permit-role">
+                角色
+              </label>
+              <SimpleSelect
+                id="permit-role"
+                name="role"
+                value={selectedRole}
+                onValueChange={(value) => setSelectedRole(value as PermitRole)}
+                options={grantableRoles.map((role) => ({ value: role, label: PERMIT_ROLE_LABELS[role] }))}
+              />
+            </div>
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground" htmlFor="permit-note">
                 附言（可选，会附在通知里）
@@ -286,12 +322,19 @@ export function ProblemEditPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
   const pdoc: R = data.pdoc || {};
+  const capabilities: R = data.problemAuthoringCapabilities || {};
+  const managed = pdoc.authoringMode === 'managed' || capabilities.managed === true;
 
   const pid = pdoc.pid || pdoc.docId || '';
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const additionalFiles: R[] = data.additional_file || [];
   const testdataFiles: R[] = data.testdata || pdoc.data || [];
   const isCreate = !pdoc.docId;
+  const canEditDraftMetadata = !managed || capabilities.canEditDraftMetadata === true;
+  const canEditCanonicalMetadata = !managed || capabilities.canPublish === true;
+  const canPublish = !managed || capabilities.canPublish === true;
+  const canDelete = !managed || capabilities.canDelete === true;
+  const canManageCollaborators = !managed || capabilities.canManageCollaborators === true;
   const filesBase = pdoc.docId ? `${problemUrl}/files` : '';
 
   const rawContent = pdoc.content || '';
@@ -310,6 +353,8 @@ export function ProblemEditPage() {
 
   const tags: string[] = pdoc.tag || [];
   const [tagInput, setTagInput] = useState(tags.join(', '));
+  const [hiddenValue, setHiddenValue] = useState(isCreate || !!pdoc.hidden);
+  const [lockHiddenValue, setLockHiddenValue] = useState(!!pdoc.lockHidden);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   useEffect(() => {
@@ -339,10 +384,12 @@ export function ProblemEditPage() {
             ...pdoc,
             pid: String(fd.get('pid') || pdoc.pid || ''),
             title: String(fd.get('title') || pdoc.title || ''),
-            tag: String(fd.get('tag') || '')
-              .split(',')
-              .map((tag) => tag.trim())
-              .filter(Boolean),
+            tag: fd.has('tag')
+              ? String(fd.get('tag') || '')
+                  .split(',')
+                  .map((tag) => tag.trim())
+                  .filter(Boolean)
+              : pdoc.tag || [],
             difficulty: Number(fd.get('difficulty') || pdoc.difficulty || 0),
           }
         : pdoc;
@@ -488,9 +535,16 @@ export function ProblemEditPage() {
               <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_13rem]">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium" htmlFor="edit-title">
-                    标题
+                    {managed && isCreate ? '工作标题' : '标题'}
                   </label>
-                  <Input id="edit-title" name="title" defaultValue={pdoc.title || ''} placeholder="题目标题" required />
+                  <Input
+                    id="edit-title"
+                    name={!managed || isCreate || canEditDraftMetadata ? 'title' : undefined}
+                    defaultValue={pdoc.title || ''}
+                    placeholder={managed ? '用于审核协作，不会直接作为正式标题发布' : '题目标题'}
+                    readOnly={!isCreate && !canEditDraftMetadata}
+                    required
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium" htmlFor="edit-pid">
@@ -498,10 +552,11 @@ export function ProblemEditPage() {
                   </label>
                   <Input
                     id="edit-pid"
-                    name="pid"
+                    name={managed ? undefined : 'pid'}
                     defaultValue={typeof pid === 'string' ? pid : ''}
-                    placeholder="如 P1001"
+                    placeholder={managed ? '由服务端分配' : '如 P1001'}
                     pattern="^(?:[a-z0-9]{1,10}-)?[a-zA-Z][a-zA-Z0-9]*$"
+                    readOnly={managed}
                   />
                 </div>
               </div>
@@ -514,10 +569,13 @@ export function ProblemEditPage() {
                   </label>
                   <Input
                     id="edit-tag"
-                    name="tag"
+                    name={managed ? undefined : 'tag'}
                     value={tagInput}
-                    onChange={(event) => setTagInput(event.target.value)}
-                    placeholder="用逗号分隔，如：模拟, 数学, 贪心"
+                    onChange={(event) => {
+                      if (canEditCanonicalMetadata) setTagInput(event.target.value);
+                    }}
+                    placeholder={managed ? '托管题标签由审核流程确定' : '用逗号分隔，如：模拟, 数学, 贪心'}
+                    readOnly={managed}
                   />
                   {tagInput ? (
                     <div className="flex flex-wrap gap-1 pt-1">
@@ -537,12 +595,20 @@ export function ProblemEditPage() {
                   <label className="text-sm font-medium" htmlFor="edit-difficulty">
                     难度
                   </label>
-                  <SimpleSelect
-                    id="edit-difficulty"
-                    name="difficulty"
-                    defaultValue={String(pdoc.difficulty || '')}
-                    options={DIFFICULTY_OPTIONS.map((option) => ({ value: String(option.value), label: option.label }))}
-                  />
+                  {managed && (isCreate || !canEditDraftMetadata) ? (
+                    <Input
+                      id="edit-difficulty"
+                      value={DIFFICULTY_OPTIONS.find((option) => Number(option.value) === Number(pdoc.difficulty || 0))?.label || '未评定'}
+                      readOnly
+                    />
+                  ) : (
+                    <SimpleSelect
+                      id="edit-difficulty"
+                      name="difficulty"
+                      defaultValue={String(pdoc.difficulty || '')}
+                      options={DIFFICULTY_OPTIONS.map((option) => ({ value: String(option.value), label: option.label }))}
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -590,18 +656,27 @@ export function ProblemEditPage() {
               <h2 id="permissions-heading" className="text-base font-semibold tracking-tight">
                 权限与可见性
               </h2>
-              <p className="mt-1 text-sm text-muted-foreground">新题固定以隐藏状态创建；发布与维护权限沿用现有模型。</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {managed ? '托管题仅管理员可以调整可见性与锁定状态。' : '新题固定以隐藏状态创建；发布与维护权限沿用现有模型。'}
+              </p>
             </header>
             <div className="grid gap-4 p-5 sm:grid-cols-2">
+              {!isCreate && canPublish ? <input type="hidden" name="hidden" value={hiddenValue ? 'true' : 'false'} /> : null}
+              {!isCreate && canPublish ? <input type="hidden" name="lockHidden" value={lockHiddenValue ? 'true' : 'false'} /> : null}
               <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-muted/45 px-3">
-                <Checkbox name="hidden" defaultChecked={isCreate || !!pdoc.hidden} disabled={isCreate} />
+                <Checkbox checked={hiddenValue} disabled={isCreate || !canPublish} onCheckedChange={setHiddenValue} aria-label="隐藏题目" />
                 <span className="flex items-center gap-1.5 text-sm">
-                  {isCreate || pdoc.hidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                  {hiddenValue ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
                   {isCreate ? '创建后保持隐藏' : '隐藏题目'}
                 </span>
               </label>
               <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-muted/45 px-3">
-                <Checkbox name="lockHidden" defaultChecked={!!pdoc.lockHidden} />
+                <Checkbox
+                  checked={lockHiddenValue}
+                  disabled={isCreate || (managed && !canPublish)}
+                  onCheckedChange={setLockHiddenValue}
+                  aria-label="锁定隐藏"
+                />
                 <span className="flex items-center gap-1.5 text-sm">
                   <Lock className="size-3.5" />
                   锁定隐藏（比赛结束后不自动公开）
@@ -610,7 +685,7 @@ export function ProblemEditPage() {
             </div>
           </section>
 
-          {!isCreate ? (
+          {!isCreate && canDelete ? (
             <section aria-labelledby="danger-heading" className="rounded-2xl border border-destructive/25 bg-destructive/[0.025] p-5">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -640,9 +715,9 @@ export function ProblemEditPage() {
           ) : null}
         </form>
 
-        {!isCreate ? (
+        {!isCreate && canManageCollaborators ? (
           <div id="maintainers" className="scroll-mt-44">
-            <PermitsPanel pid={String(pid)} pdocId={pdoc.docId} hidden={!!pdoc.hidden} />
+            <PermitsPanel pid={String(pid)} pdocId={pdoc.docId} hidden={!!pdoc.hidden} managed={managed} />
           </div>
         ) : null}
       </div>

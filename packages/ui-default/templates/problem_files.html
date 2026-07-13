@@ -7,7 +7,7 @@
       <div class="section__header">
         <h1 class="section__title">{{ _('Testdata') }}</h1>
         <div class="section__tools">
-          {% if not reference and (handler.user.own(pdoc, perm.PERM_EDIT_PROBLEM_SELF) or handler.user.hasPerm(perm.PERM_EDIT_PROBLEM)) %}
+          {% if not reference and canEditProblem %}
             <a href="{{ url('problem_config', pid=pdoc.docId) }}" class="primary rounded button">{{ _('Config') }}</a>
             <button class="primary rounded button" name="create_testdata">{{ _('Create') }}</button>
             <button class="primary rounded button" name="upload_file">{{ _('Upload') }}</button>
@@ -18,19 +18,19 @@
       </div>
       {{ noscript_note.render() }}
       {% set filetype = "testdata" %}
-      {% set can_edit = (handler.user.own(pdoc, perm.PERM_EDIT_PROBLEM_SELF) or handler.user.hasPerm(perm.PERM_EDIT_PROBLEM)) and not reference %}
+      {% set can_edit = canEditProblem and not reference %}
       {% include "partials/problem_files.html" %}
-      {% if not reference and (handler.user.own(pdoc) or handler.user.hasPerm(perm.PERM_READ_PROBLEM_DATA) or handler.user.hasPriv(PRIV.PRIV_READ_PROBLEM_DATA)) %}
+      {% if not reference and (canEditProblem or handler.user.hasPerm(perm.PERM_READ_PROBLEM_DATA) or handler.user.hasPriv(PRIV.PRIV_READ_PROBLEM_DATA)) %}
         <div class="section__body">
           <button class="rounded button" name="download_selected">{{ _('Download Selected') }}</button>
-          {% if handler.user.own(pdoc, perm.PERM_EDIT_PROBLEM_SELF) or handler.user.hasPerm(perm.PERM_EDIT_PROBLEM) %}
+          {% if canEditProblem %}
             <button class="rounded button" name="remove_selected">{{ _('Remove Selected') }}</button>
             <button class="rounded button" name="rename_selected">{{ _('Rename Selected') }}</button>
           {% endif %}
         </div>
       {% endif %}
     </div>
-    {% if not reference and (handler.user.own(pdoc, perm.PERM_EDIT_PROBLEM_SELF) or handler.user.hasPerm(perm.PERM_EDIT_PROBLEM)) %}
+    {% if not reference and canEditProblem %}
     {{ set(UiContext, {
       pdoc: pdoc
     }) }}
@@ -66,18 +66,18 @@
       <div class="section__header">
         <h1 class="section__title">{{ _('Additional Files') }}</h1>
         <div class="section__tools">
-          {% if (handler.user.own(pdoc, perm.PERM_EDIT_PROBLEM_SELF) or handler.user.hasPerm(perm.PERM_EDIT_PROBLEM)) and not reference %}
+          {% if canEditProblem and not reference %}
             <button class="primary rounded button" name="create_file">{{ _('Create') }}</button>
             <button class="primary rounded button" name="upload_file">{{ _('Upload') }}</button>
           {% endif %}
         </div>
       </div>
       {% set filetype = "additional_file" %}
-      {% set can_edit = (handler.user.own(pdoc, perm.PERM_EDIT_PROBLEM_SELF) or handler.user.hasPerm(perm.PERM_EDIT_PROBLEM)) and not reference %}
+      {% set can_edit = canEditProblem and not reference %}
       {% include "partials/problem_files.html" %}
       <div class="section__body">
         <button class="rounded button" name="download_selected">{{ _('Download Selected') }}</button>
-        {% if (handler.user.own(pdoc, perm.PERM_EDIT_PROBLEM_SELF) or handler.user.hasPerm(perm.PERM_EDIT_PROBLEM)) and not reference %}
+        {% if canEditProblem and not reference %}
           <button class="rounded button" name="remove_selected">{{ _('Remove Selected') }}</button>
           <button class="rounded button" name="rename_selected">{{ _('Rename Selected') }}</button>
         {% endif %}

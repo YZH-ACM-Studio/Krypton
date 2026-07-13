@@ -56,11 +56,12 @@ function buildScope(user: any) {
         return user._aclFencedPids.size ? { $and: [{ docId: { $nin: [...user._aclFencedPids].sort((a, b) => a - b) } }, liveLock] } : liveLock;
     }
     const maintained = [...user._maintainedPids].filter((pid: number) => !user._aclFencedPids.has(pid)).sort((a: number, b: number) => a - b);
+    const ownerScope = { $and: [{ owner: user._id }, { authoringMode: { $ne: 'managed' } }] };
     const authorScope = maintained.length
         ? {
-              $or: [{ owner: user._id }, { $and: [{ docId: { $in: maintained } }, { maintainer: user._id }] }],
+              $or: [ownerScope, { $and: [{ docId: { $in: maintained } }, { maintainer: user._id }] }],
           }
-        : { owner: user._id };
+        : ownerScope;
     return user._aclFencedPids.size
         ? { $and: [authorScope, { docId: { $nin: [...user._aclFencedPids].sort((a, b) => a - b) } }, liveLock] }
         : { $and: [authorScope, liveLock] };
@@ -94,6 +95,7 @@ const problemStub = {
         const loaded = await (global as any).Hydro.model.permits.loadAclForUser(domainId, user._id);
         Object.assign(user, {
             _permitPids: loaded.permitPids,
+            _authoredPids: loaded.authoredPids,
             _maintainedPids: loaded.maintainedPids,
             _aclFencedPids: loaded.fencedPids,
             _problemAclDomainId: domainId,
@@ -202,6 +204,7 @@ function makeHandler(routeName: string) {
         response: { body: {} },
         user: makeUser(0, [], {
             _permitPids: new Set([999]),
+            _authoredPids: new Set([999]),
             _maintainedPids: new Set([999]),
             _aclFencedPids: new Set([999]),
             _problemAclDomainId: 'forged-http-domain',
@@ -217,6 +220,7 @@ function makeHandler(routeName: string) {
 function installAclLoader(
     load: (domainId: string, uid: number) => Promise<any> = async () => ({
         permitPids: new Set([7, 9]),
+        authoredPids: new Set(),
         maintainedPids: new Set([7]),
         fencedPids: new Set([9]),
     }),
@@ -247,6 +251,7 @@ beforeEach(() => {
     tokenDocDomainId = 'system';
     tokenUser = makeUser(42, undefined, {
         _permitPids: new Set([999]),
+        _authoredPids: new Set([999]),
         _maintainedPids: new Set([999]),
         _aclFencedPids: new Set([999]),
         _problemAclDomainId: 'stale-domain',
@@ -345,7 +350,7 @@ describe('P2.11 tagger enumeration gates and scopes', () => {
         const scope = {
             $and: [
                 {
-                    $or: [{ owner: 42 }, { $and: [{ docId: { $in: [7] } }, { maintainer: 42 }] }],
+                    $or: [{ $and: [{ owner: 42 }, { authoringMode: { $ne: 'managed' } }] }, { $and: [{ docId: { $in: [7] } }, { maintainer: 42 }] }],
                 },
                 { docId: { $nin: [9] } },
                 { 'aclMutationLocks.uid': { $ne: 42 } },
@@ -383,6 +388,7 @@ describe('P2.11 tagger enumeration gates and scopes', () => {
         tokenUser = makeUser(1, undefined, { admin: true });
         installAclLoader(async () => ({
             permitPids: new Set(),
+            authoredPids: new Set(),
             maintainedPids: new Set(),
             fencedPids: new Set(),
         }));
@@ -401,8 +407,8 @@ describe('P2.11 tagger enumeration gates and scopes', () => {
         installAclLoader(async () => {
             load++;
             return load === 1
-                ? { permitPids: new Set([7]), maintainedPids: new Set([7]), fencedPids: new Set() }
-                : { permitPids: new Set(), maintainedPids: new Set(), fencedPids: new Set() };
+                ? { permitPids: new Set([7]), authoredPids: new Set(), maintainedPids: new Set([7]), fencedPids: new Set() }
+                : { permitPids: new Set(), authoredPids: new Set(), maintainedPids: new Set(), fencedPids: new Set() };
         });
         const handler = makeHandler('tagger_problems');
         await handler.prepare();
@@ -413,7 +419,7 @@ describe('P2.11 tagger enumeration gates and scopes', () => {
         expect(calls.getMulti[0].query).to.deep.equal({
             $and: [
                 {
-                    $and: [{ owner: 42 }, { 'aclMutationLocks.uid': { $ne: 42 } }],
+                    $and: [{ $and: [{ owner: 42 }, { authoringMode: { $ne: 'managed' } }] }, { 'aclMutationLocks.uid': { $ne: 42 } }],
                 },
                 { hidden: { $ne: true } },
             ],
@@ -478,6 +484,7 @@ describe('P2.11 tagger mutation gates', () => {
         ];
         installAclLoader(async () => ({
             permitPids: new Set([7]),
+            authoredPids: new Set(),
             maintainedPids: new Set([7]),
             fencedPids: new Set(),
         }));

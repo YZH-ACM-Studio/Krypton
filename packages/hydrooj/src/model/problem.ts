@@ -37,20 +37,34 @@ import { PERM, STATUS } from './builtin';
 import * as document from './document';
 import DomainModel from './domain';
 import * as OplogModel from './oplog';
-import type { ProblemAclUser, ProblemWriteClaim } from './problem-access';
 import {
     acquireProblemWriteClaim,
     assertProblemAclDomain as assertProblemAclDomainAccess,
     assertProblemBankSelection as assertProblemBankSelectionAccess,
     buildProblemBankScope as buildProblemBankScopeAccess,
+    canArchiveProblem as canArchiveProblemAccess,
+    canAuthorProblem as canAuthorProblemAccess,
     canBrowseProblemBank as canBrowseProblemBankAccess,
+    canCloneProblem as canCloneProblemAccess,
+    canDeleteProblem as canDeleteProblemAccess,
+    canEditProblemContent as canEditProblemContentAccess,
+    canEditProblemMetadata as canEditProblemMetadataAccess,
+    canManageProblemCollaborators as canManageProblemCollaboratorsAccess,
+    canManageProblemMaintainers as canManageProblemMaintainersAccess,
     canMaintainProblem as canMaintainProblemAccess,
+    canPublishProblem as canPublishProblemAccess,
+    canUseProblemWriteCapability,
     canViewProblem,
     clearProblemWriteClaim,
     commitProblemWriteClaimUpdate,
     isProblemBankAdmin as isProblemBankAdminAccess,
     markProblemWriteClaimError,
+    problemWriteCapabilityAllows,
     PROBLEM_ACL_INTERNAL_FIELDS,
+    type ProblemAclUser,
+    type ProblemWriteCapability,
+    type ProblemWriteClaim,
+    readStableEditableProblem,
     readStableMaintainableProblem,
     readStableViewableProblem,
     refreshProblemAcl as refreshProblemAclAccess,
@@ -87,6 +101,70 @@ function isStructuralPatch($set: Record<string, unknown>, $unset: Record<string,
     return [...Object.keys($set), ...Object.keys($unset)].some((field) => PROBLEM_STRUCTURAL_FIELDS.has(field));
 }
 
+const MANAGED_CONTENT_FIELDS = new Set(['content', 'config', 'data', 'additional_file', 'html']);
+const MANAGED_DRAFT_METADATA_FIELDS = new Set(['title', 'difficulty']);
+const MANAGED_ARCHIVE_FIELDS = new Set(['archivedAt', 'archivedBy', 'archiveReason']);
+
+function managedPatchCapability(
+    current: ProblemDoc,
+    $set: Partial<ProblemDoc>,
+    $unset: Record<string, unknown>,
+): { capability: ProblemWriteCapability; requestedFields: string[]; changedFields: string[]; immutableFields: string[]; publishes: boolean } {
+    const requestedFields = [...new Set([...Object.keys($set), ...Object.keys($unset)])];
+    const changedFields = [
+        ...Object.entries($set)
+            .filter(([field, value]) => !isEqual((current as any)[field], value))
+            .map(([field]) => field),
+        ...Object.keys($unset).filter((field) => (current as any)[field] !== undefined),
+    ];
+    const immutableFields = requestedFields.filter((field) => field === 'authoringMode');
+    const publishes = current.hidden === true && $set.hidden === false;
+    if (!requestedFields.length || requestedFields.every((field) => MANAGED_CONTENT_FIELDS.has(field))) {
+        return { capability: 'content', requestedFields, changedFields, immutableFields, publishes };
+    }
+    if (requestedFields.every((field) => MANAGED_CONTENT_FIELDS.has(field) || MANAGED_DRAFT_METADATA_FIELDS.has(field))) {
+        return { capability: 'metadata', requestedFields, changedFields, immutableFields, publishes };
+    }
+    if (requestedFields.every((field) => MANAGED_CONTENT_FIELDS.has(field) || field === 'hidden' || MANAGED_ARCHIVE_FIELDS.has(field))) {
+        const hasArchiveField = requestedFields.some((field) => MANAGED_ARCHIVE_FIELDS.has(field));
+        return { capability: hasArchiveField ? 'archive' : 'publish', requestedFields, changedFields, immutableFields, publishes };
+    }
+    // PID, tags, source/system metadata, lockHidden, collaborators and every
+    // unknown top-level field are administrator-only on managed problems.
+    return { capability: 'publish', requestedFields, changedFields, immutableFields, publishes };
+}
+
+async function auditManagedClaimPatchDenied(
+    claim: ProblemWriteClaim,
+    guard: ReturnType<typeof managedPatchCapability>,
+    phase: 'request' | 'after-hook',
+): Promise<void> {
+    logger.warn(
+        'Managed claim patch rejected domain=%s pid=%d actor=%d operation=%s phase=%s claimCapability=%s requiredCapability=%s fields=%o result=denied',
+        claim.domainId,
+        claim.pid,
+        claim.actor,
+        claim.operation,
+        phase,
+        claim.capability,
+        guard.capability,
+        guard.requestedFields,
+    );
+    await OplogModel.add({
+        type: 'problem.managed.write.denied',
+        domainId: claim.domainId,
+        operator: claim.actor,
+        problemId: claim.pid,
+        operation: claim.operation,
+        phase,
+        capability: claim.capability,
+        requiredCapability: guard.capability,
+        changedFields: guard.requestedFields,
+        result: 'denied',
+        time: new Date(),
+    } as any);
+}
+
 function assertPublishableFillFunction(input: {
     domainId: string;
     pid: number;
@@ -114,6 +192,66 @@ function assertPublishableFillFunction(input: {
     }
 }
 
+async function prepareManagedPublish(claim: ProblemWriteClaim): Promise<void> {
+    const permits = (global.Hydro?.model as any)?.permits;
+    if (typeof permits?.listForProblem !== 'function' || typeof permits?.clearVerifiersForProblem !== 'function') {
+        throw new TypeError('managed publish permit services are unavailable');
+    }
+    await OplogModel.add({
+        type: 'problem.managed.publish',
+        domainId: claim.domainId,
+        operator: claim.actor,
+        problemId: claim.pid,
+        action: 'publish',
+        result: 'attempt',
+        requestId: claim.requestId,
+        time: new Date(),
+    } as any);
+    const rows = await permits.listForProblem(claim.domainId, claim.pid);
+    const verifierUids = [...new Set<number>(rows.filter((row: any) => row.role === 'verifier').map((row: any) => row.uid))].sort((a, b) => a - b);
+    for (const targetUid of verifierUids) {
+        await OplogModel.add({
+            type: 'problem.permit.revoke',
+            domainId: claim.domainId,
+            operator: claim.actor,
+            problemId: claim.pid,
+            targetUid,
+            role: 'verifier',
+            action: 'publish-clear',
+            result: 'attempt',
+            requestId: claim.requestId,
+            time: new Date(),
+        } as any);
+    }
+    const removed = await permits.clearVerifiersForProblem(claim.domainId, claim.pid, {
+        requestId: `${claim.requestId}:clear-verifiers`,
+        actor: claim.actor,
+        writeClaimRequestId: claim.requestId,
+    });
+    for (const targetUid of verifierUids) {
+        await OplogModel.add({
+            type: 'problem.permit.revoke',
+            domainId: claim.domainId,
+            operator: claim.actor,
+            problemId: claim.pid,
+            targetUid,
+            role: 'verifier',
+            action: 'publish-clear',
+            result: 'success',
+            requestId: claim.requestId,
+            time: new Date(),
+        } as any);
+    }
+    logger.info(
+        'Managed publish verifier cleanup domain=%s pid=%d actor=%d role=verifier action=publish-clear targets=%o removed=%d result=success',
+        claim.domainId,
+        claim.pid,
+        claim.actor,
+        verifierUids,
+        removed,
+    );
+}
+
 function revisionClaimFilter(claim: ProblemWriteClaim, expectedStructureRevision: number) {
     return {
         domainId: claim.domainId,
@@ -121,6 +259,7 @@ function revisionClaimFilter(claim: ProblemWriteClaim, expectedStructureRevision
         docId: claim.pid,
         'aclWriteClaim.requestId': claim.requestId,
         'aclWriteClaim.actor': claim.actor,
+        'aclWriteClaim.capability': claim.capability,
         'aclWriteClaim.state': 'active',
         structureRevision: expectedStructureRevision,
         structureLockedAt: { $exists: false },
@@ -160,6 +299,8 @@ interface ProblemCreateOptions {
     reference?: { domainId: string; pid: number };
     problemKind: ProblemKind;
     structuredConfig?: unknown;
+    authoringMode?: 'managed';
+    managedAuthoring?: ProblemDoc['managedAuthoring'];
 }
 
 const PROJECTION_BASE: Field[] = ['_id', 'domainId', 'docType', 'docId', 'pid', 'owner', 'title'];
@@ -182,6 +323,8 @@ export class ProblemModel {
         'archivedAt',
         'archivedBy',
         'archiveReason',
+        'authoringMode',
+        'managedAuthoring',
     ];
 
     static PROJECTION_CONTEST_DETAIL: Field[] = [
@@ -233,6 +376,42 @@ export class ProblemModel {
 
     static canMaintainProblem(user: ProblemAclUser, pdoc: ProblemDoc) {
         return canMaintainProblemAccess(user, pdoc);
+    }
+
+    static canAuthorProblem(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canAuthorProblemAccess(user, pdoc);
+    }
+
+    static canEditProblemContent(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canEditProblemContentAccess(user, pdoc);
+    }
+
+    static canEditProblemMetadata(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canEditProblemMetadataAccess(user, pdoc);
+    }
+
+    static canManageProblemCollaborators(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canManageProblemCollaboratorsAccess(user, pdoc);
+    }
+
+    static canManageProblemMaintainers(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canManageProblemMaintainersAccess(user, pdoc);
+    }
+
+    static canPublishProblem(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canPublishProblemAccess(user, pdoc);
+    }
+
+    static canArchiveProblem(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canArchiveProblemAccess(user, pdoc);
+    }
+
+    static canDeleteProblem(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canDeleteProblemAccess(user, pdoc);
+    }
+
+    static canCloneProblem(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canCloneProblemAccess(user, pdoc);
     }
 
     static assertProblemBankSelection(domainId: string, pids: number[], user: ProblemAclUser, grandfatheredPids: number[] = []) {
@@ -327,6 +506,8 @@ export class ProblemModel {
         if (pid) args.pid = pid;
         if (meta.difficulty) args.difficulty = meta.difficulty;
         if (meta.reference) args.reference = meta.reference;
+        if (meta.authoringMode) args.authoringMode = meta.authoringMode;
+        if (meta.managedAuthoring) args.managedAuthoring = meta.managedAuthoring;
         if (problemKind !== 'programming') {
             try {
                 args.config = normalizeStructuredProblemConfig(problemKind, meta.structuredConfig) as any;
@@ -357,6 +538,74 @@ export class ProblemModel {
             time: new Date(),
         } as any);
         return result;
+    }
+
+    /**
+     * Create one hidden managed programming draft and grant its creator the
+     * canonical direct author role. The draft is removed synchronously if the
+     * ACL grant cannot be completed; callers never receive an unowned draft.
+     */
+    static async createManagedProgrammingDraft(domainId: string, workingTitle: string, content: string, creator: number): Promise<number> {
+        const normalizedTitle = workingTitle.trim();
+        if (!normalizedTitle) throw new ValidationError('title');
+        let docId: number | null = null;
+        try {
+            docId = await ProblemModel.createProblemByKind('programming', domainId, '', `待审核 · ${normalizedTitle}`, content, creator, [], {
+                authoringMode: 'managed',
+                managedAuthoring: {
+                    workingTitle: normalizedTitle,
+                    metadataStatus: 'draft',
+                },
+            });
+            const bootstrapManagedDraftAuthor = (global.Hydro?.model as any)?.permits?.bootstrapManagedDraftAuthor;
+            if (typeof bootstrapManagedDraftAuthor !== 'function') {
+                throw new TypeError('permits.bootstrapManagedDraftAuthor is unavailable');
+            }
+            await OplogModel.add({
+                type: 'problem.permit.grant',
+                domainId,
+                operator: creator,
+                problemId: docId,
+                targetUids: [creator],
+                role: 'author',
+                action: 'grant',
+                source: 'managed-draft-create',
+                result: 'attempt',
+                time: new Date(),
+            } as any);
+            await bootstrapManagedDraftAuthor(domainId, docId, creator, {
+                requestId: `managed-draft-create:${domainId}:${docId}:${creator}`,
+                note: 'managed draft creator',
+            });
+            logger.info('Managed draft created domain=%s pid=%d actor=%d role=author action=grant result=success', domainId, docId, creator);
+            return docId;
+        } catch (error) {
+            logger.error('Managed draft create failed domain=%s pid=%s actor=%d error=%o', domainId, docId, creator, error);
+            if (docId !== null) {
+                try {
+                    const cleanupManagedDraftCreation = (global.Hydro?.model as any)?.permits?.cleanupManagedDraftCreation;
+                    if (typeof cleanupManagedDraftCreation === 'function') {
+                        await cleanupManagedDraftCreation(domainId, docId, creator, {
+                            requestId: `managed-draft-create-cleanup:${domainId}:${docId}:${creator}`,
+                        });
+                    }
+                    await ProblemModel.deleteProblemDocumentUnchecked(domainId, docId);
+                } catch (cleanupError) {
+                    logger.error(
+                        'Managed draft cleanup failed domain=%s pid=%d actor=%d createError=%o cleanupError=%o',
+                        domainId,
+                        docId,
+                        creator,
+                        error,
+                        cleanupError,
+                    );
+                    throw new Error(`managed draft creation failed and cleanup failed: ${domainId}/${docId}`, {
+                        cause: cleanupError,
+                    });
+                }
+            }
+            throw error;
+        }
     }
 
     static createProblemByKind(
@@ -461,6 +710,7 @@ export class ProblemModel {
                     docId: input.pid,
                     'aclWriteClaim.requestId': claim.requestId,
                     'aclWriteClaim.actor': claim.actor,
+                    'aclWriteClaim.capability': claim.capability,
                     'aclWriteClaim.state': 'active',
                 },
                 { projection },
@@ -672,7 +922,7 @@ export class ProblemModel {
         rawConfig = false,
     ): Promise<ProblemDoc | null> {
         const requestedFields = new Set<string>(projection as string[]);
-        const authorizationFields = ['domainId', 'docId', 'owner', 'hidden'] as Field[];
+        const authorizationFields = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode'] as Field[];
         const readProjection = Array.from(
             new Set([...(projection as Field[]), ...authorizationFields, ...(Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[])]),
         ) as Projection<ProblemDoc>;
@@ -704,6 +954,32 @@ export class ProblemModel {
     }
 
     /**
+     * Small direct-read batch helper for non-container surfaces such as the
+     * record list and user profile. Each problem still crosses the canonical
+     * stable ACL read; unauthorized rows are omitted rather than replaced by
+     * a document that could leak hidden metadata.
+     */
+    static async getListViewableAuthorized(
+        domainId: string,
+        pids: number[],
+        user: User & ProblemAclUser,
+        projection: Projection<ProblemDoc> = ProblemModel.PROJECTION_PUBLIC,
+        rawConfig = false,
+        indexByDocIdOnly = false,
+    ): Promise<ProblemDict> {
+        if (!pids?.length) return {};
+        const byDocId: Record<number, ProblemDoc> = {};
+        const byPublicId: Record<string, ProblemDoc> = {};
+        for (const pid of Array.from(new Set(pids))) {
+            const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, user, projection, rawConfig);
+            if (!pdoc) continue;
+            byDocId[pdoc.docId] = pdoc;
+            if (pdoc.pid) byPublicId[pdoc.pid] = pdoc;
+        }
+        return indexByDocIdOnly ? byDocId : Object.assign(byDocId, byPublicId);
+    }
+
+    /**
      * Maintainer-only read linearized against the current persistent ACL.
      * Raw config is loaded only by the final revision-guarded read, never
      * trusted from request preload or from a container-authorized statement.
@@ -716,7 +992,7 @@ export class ProblemModel {
         rawConfig = false,
     ): Promise<ProblemDoc | null> {
         const requestedFields = new Set<string>(projection as string[]);
-        const authorizationFields = ['domainId', 'docId', 'owner'] as Field[];
+        const authorizationFields = ['domainId', 'docId', 'owner', 'maintainer', 'authoringMode', 'managedAuthoring'] as Field[];
         const identityProjection = Array.from(
             new Set([...authorizationFields, ...(Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[])]),
         ) as Projection<ProblemDoc>;
@@ -743,6 +1019,47 @@ export class ProblemModel {
         };
 
         const pdoc = await readStableMaintainableProblem(domainId, user, read);
+        if (!pdoc) return null;
+        for (const field of authorizationFields) {
+            if (!requestedFields.has(field)) delete (pdoc as any)[field];
+        }
+        return pdoc;
+    }
+
+    /** Sensitive editor read for managed authors and legacy maintainers. */
+    static async getEditableAuthorized(
+        domainId: string,
+        pid: string | number,
+        user: User & ProblemAclUser,
+        projection: Projection<ProblemDoc> = ProblemModel.PROJECTION_PUBLIC,
+        rawConfig = false,
+    ): Promise<ProblemDoc | null> {
+        const requestedFields = new Set<string>(projection as string[]);
+        const authorizationFields = ['domainId', 'docId', 'owner', 'maintainer', 'authoringMode', 'managedAuthoring'] as Field[];
+        const identityProjection = Array.from(
+            new Set([...authorizationFields, ...(Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[])]),
+        ) as Projection<ProblemDoc>;
+        const readProjection = Array.from(new Set([...(projection as Field[]), ...identityProjection])) as Projection<ProblemDoc>;
+
+        const read = async (filter?: Filter<ProblemDoc>) => {
+            if (!filter) return ProblemModel.get(domainId, pid, identityProjection, true);
+            const [res] = await document
+                .getMulti(domainId, document.TYPE_PROBLEM, filter)
+                .project<ProblemDoc>(buildProjection(readProjection))
+                .limit(1)
+                .toArray();
+            if (!res) return null;
+            try {
+                if (!rawConfig && readProjection.includes('config')) {
+                    res.config = await parseConfig(res.config as string | ProblemConfigFile, res.data?.map((i) => i.name) || []);
+                }
+            } catch (e) {
+                res.config = `Cannot parse: ${e.message}`;
+            }
+            return res;
+        };
+
+        const pdoc = await readStableEditableProblem(domainId, user, read);
         if (!pdoc) return null;
         for (const field of authorizationFields) {
             if (!requestedFields.has(field)) delete (pdoc as any)[field];
@@ -788,7 +1105,6 @@ export class ProblemModel {
         } else if ($set.pid) {
             $set.sort = sortable($set.pid, ddoc.namespaces);
         }
-        await bus.parallel('problem/before-edit', $set, $unset);
         const current = await document.coll.findOne(
             {
                 domainId,
@@ -804,10 +1120,19 @@ export class ProblemModel {
                     structureRevision: 1,
                     structureLockedAt: 1,
                     archivedAt: 1,
+                    authoringMode: 1,
                 },
             },
         );
         if (!current) throw new ProblemNotFoundError(domainId, _id);
+        if (current.authoringMode === 'managed') {
+            logger.error('Raw managed problem edit rejected domain=%s pid=%d fields=%o', domainId, _id, [
+                ...Object.keys($set),
+                ...Object.keys($unset),
+            ]);
+            throw new ValidationError('authoringMode', null, '托管题必须使用授权写入口');
+        }
+        await bus.parallel('problem/before-edit', $set, $unset);
         if (current.archivedAt && $set.hidden === false) throw new ValidationError('hidden');
         if ($set.hidden === false) {
             assertPublishableFillFunction({
@@ -859,7 +1184,7 @@ export class ProblemModel {
         _id: number,
         user: ProblemAclUser,
         operation: string,
-        options: { requestId?: string; selfRevokeUid?: number } = {},
+        options: { requestId?: string; selfRevokeUid?: number; capability?: ProblemWriteCapability } = {},
     ): Promise<ProblemWriteClaim> {
         try {
             const prepareProblemWriteClaim = (global.Hydro?.model as any)?.permits?.prepareProblemWriteClaim;
@@ -887,6 +1212,8 @@ export class ProblemModel {
             'docId',
             'owner',
             'maintainer',
+            'authoringMode',
+            'managedAuthoring',
             'aclMutationRevision',
             'aclMutationLocks',
             'aclWriteClaim',
@@ -895,8 +1222,29 @@ export class ProblemModel {
         const requestId = options.requestId?.trim() || `problem-write:${operation}:${domainId}:${_id}:${new ObjectId().toHexString()}`;
         const claim = await acquireProblemWriteClaim(user, authorizedPdoc, requestId, operation, {
             selfRevokeUid: options.selfRevokeUid,
+            capability: options.capability,
         });
         if (!claim) {
+            if (authorizedPdoc.authoringMode === 'managed') {
+                logger.warn(
+                    'Managed write denied domain=%s pid=%d actor=%d operation=%s capability=%s result=denied',
+                    domainId,
+                    _id,
+                    user._id,
+                    operation,
+                    options.capability || 'maintain',
+                );
+                await OplogModel.add({
+                    type: 'problem.managed.write.denied',
+                    domainId,
+                    operator: user._id,
+                    problemId: _id,
+                    operation,
+                    capability: options.capability || 'maintain',
+                    result: 'denied',
+                    time: new Date(),
+                } as any);
+            }
             throw new PermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
         }
         return claim;
@@ -908,7 +1256,7 @@ export class ProblemModel {
         user: ProblemAclUser,
         operation: string,
         work: (claim: ProblemWriteClaim) => Promise<T>,
-        options: { requestId?: string; selfRevokeUid?: number } = {},
+        options: { requestId?: string; selfRevokeUid?: number; capability?: ProblemWriteCapability } = {},
     ): Promise<T> {
         const claim = await ProblemModel.beginAuthorizedWriteClaim(domainId, _id, user, operation, options);
         try {
@@ -963,32 +1311,41 @@ export class ProblemModel {
         user: ProblemAclUser,
         operation: string,
         work: (claim: ProblemWriteClaim) => Promise<T>,
+        options: { requestId?: string; capability?: ProblemWriteCapability } = {},
     ): Promise<T> {
-        return ProblemModel.withAuthorizedWriteClaim(domainId, pid, user, operation, async (claim) => {
-            const current = await document.coll.findOne(
-                {
-                    domainId,
-                    docType: document.TYPE_PROBLEM,
-                    docId: pid,
-                    'aclWriteClaim.requestId': claim.requestId,
-                    'aclWriteClaim.actor': claim.actor,
-                    'aclWriteClaim.state': 'active',
-                },
-                { projection: { problemKind: 1, structureRevision: 1, structureLockedAt: 1, archivedAt: 1 } },
-            );
-            if (!current) throw new Error(`problem write claim ownership lost before ${operation}: ${claim.requestId}`);
-            if (current.problemKind === undefined) return work(claim);
-            const expectedRevision = current.structureRevision;
-            assertStructureRevision(expectedRevision);
-            parseProblemKind(current.problemKind);
-            if (current.archivedAt || current.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, pid))) {
-                throw new ProblemStructureConflictError(pid);
-            }
-            const result = await work(claim);
-            const bumped = await document.coll.updateOne(revisionClaimFilter(claim, expectedRevision), { $inc: { structureRevision: 1 } });
-            if (bumped.matchedCount !== 1) throw new ProblemStructureConflictError(pid);
-            return result;
-        });
+        return ProblemModel.withAuthorizedWriteClaim(
+            domainId,
+            pid,
+            user,
+            operation,
+            async (claim) => {
+                const current = await document.coll.findOne(
+                    {
+                        domainId,
+                        docType: document.TYPE_PROBLEM,
+                        docId: pid,
+                        'aclWriteClaim.requestId': claim.requestId,
+                        'aclWriteClaim.actor': claim.actor,
+                        'aclWriteClaim.capability': claim.capability,
+                        'aclWriteClaim.state': 'active',
+                    },
+                    { projection: { problemKind: 1, structureRevision: 1, structureLockedAt: 1, archivedAt: 1 } },
+                );
+                if (!current) throw new Error(`problem write claim ownership lost before ${operation}: ${claim.requestId}`);
+                if (current.problemKind === undefined) return work(claim);
+                const expectedRevision = current.structureRevision;
+                assertStructureRevision(expectedRevision);
+                parseProblemKind(current.problemKind);
+                if (current.archivedAt || current.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, pid))) {
+                    throw new ProblemStructureConflictError(pid);
+                }
+                const result = await work(claim);
+                const bumped = await document.coll.updateOne(revisionClaimFilter(claim, expectedRevision), { $inc: { structureRevision: 1 } });
+                if (bumped.matchedCount !== 1) throw new ProblemStructureConflictError(pid);
+                return result;
+            },
+            options,
+        );
     }
 
     private static async assertDirectStructureWritable(
@@ -1003,9 +1360,13 @@ export class ProblemModel {
                 docType: document.TYPE_PROBLEM,
                 docId: pid,
             },
-            { projection: { problemKind: 1, config: 1, structureLockedAt: 1, archivedAt: 1 } },
+            { projection: { problemKind: 1, config: 1, structureLockedAt: 1, archivedAt: 1, authoringMode: 1 } },
         );
         if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
+        if (pdoc.authoringMode === 'managed') {
+            logger.error('Raw managed problem file write rejected domain=%s pid=%d names=%o', domainId, pid, testdataNames);
+            throw new ValidationError('authoringMode', null, '托管题文件必须使用授权写入口');
+        }
         if (pdoc.problemKind === undefined) return false;
         const problemKind = parseProblemKind(pdoc.problemKind);
         if (testdata && problemKind !== 'programming' && !structuredProblemUsesTestdata(problemKind, pdoc.config)) {
@@ -1056,7 +1417,7 @@ export class ProblemModel {
         } else if ($set.pid) {
             $set.sort = sortable($set.pid, ddoc.namespaces);
         }
-        await bus.parallel('problem/before-edit', $set, $unset);
+        const requestedFields = [...new Set([...Object.keys($set), ...Object.keys($unset)])];
         const current = await document.coll.findOne(
             {
                 domainId,
@@ -1064,10 +1425,12 @@ export class ProblemModel {
                 docId: _id,
                 'aclWriteClaim.requestId': claim.requestId,
                 'aclWriteClaim.actor': claim.actor,
+                'aclWriteClaim.capability': claim.capability,
                 'aclWriteClaim.state': 'active',
             },
             {
                 projection: {
+                    ...Object.fromEntries(requestedFields.map((field) => [field, 1])),
                     content: 1,
                     config: 1,
                     data: 1,
@@ -1075,10 +1438,29 @@ export class ProblemModel {
                     structureRevision: 1,
                     structureLockedAt: 1,
                     archivedAt: 1,
+                    authoringMode: 1,
+                    managedAuthoring: 1,
                 },
             },
         );
         if (!current) throw new Error(`problem write claim ownership lost before edit: ${claim.requestId}`);
+        let managedGuard: ReturnType<typeof managedPatchCapability> | null = null;
+        if (current.authoringMode === 'managed') {
+            managedGuard = managedPatchCapability(current, $set, $unset);
+            if (managedGuard.immutableFields.length || !problemWriteCapabilityAllows(claim.capability, managedGuard.capability)) {
+                await auditManagedClaimPatchDenied(claim, managedGuard, 'request');
+                throw new ValidationError('fields', null, '写入字段超出当前托管题写入凭据');
+            }
+        }
+        await bus.parallel('problem/before-edit', $set, $unset);
+        if (current.authoringMode === 'managed') {
+            const finalGuard = managedPatchCapability(current, $set, $unset);
+            if (finalGuard.immutableFields.length || !problemWriteCapabilityAllows(claim.capability, finalGuard.capability)) {
+                await auditManagedClaimPatchDenied(claim, finalGuard, 'after-hook');
+                throw new ValidationError('fields', null, '写入钩子产生了超出托管题凭据的字段');
+            }
+            managedGuard = finalGuard;
+        }
         if (current.archivedAt && $set.hidden === false) throw new ValidationError('hidden');
         if ($set.hidden === false) {
             assertPublishableFillFunction({
@@ -1115,7 +1497,7 @@ export class ProblemModel {
                 { returnDocument: 'after' },
             );
         } else {
-            result = await commitProblemWriteClaimUpdate(claim, $set, $unset);
+            result = await commitProblemWriteClaimUpdate(claim, $set, $unset, managedGuard?.capability || claim.capability);
         }
         if (!result) throw new Error(`problem write claim ownership lost during edit: ${claim.requestId}`);
         await bus.emit('problem/edit', result, claim.requestId);
@@ -1131,11 +1513,109 @@ export class ProblemModel {
         requestedUnset: Record<string, unknown> = {},
         options: { expectedStructureRevision?: number } = {},
     ): Promise<ProblemDoc> {
-        return ProblemModel.withAuthorizedWriteClaim(domainId, _id, user, 'metadata-edit', (claim) =>
-            ProblemModel.editWithClaim(claim, $set, requestedUnset, {
-                ...options,
-                requireExpectedStructureRevision: true,
-            }),
+        const preliminary = await document.coll.findOne({ domainId, docType: document.TYPE_PROBLEM, docId: _id });
+        if (!preliminary) throw new ProblemNotFoundError(domainId, _id);
+        if (
+            ($set.authoringMode !== undefined && $set.authoringMode !== preliminary.authoringMode) ||
+            (requestedUnset.authoringMode !== undefined && preliminary.authoringMode !== undefined)
+        ) {
+            if (preliminary.authoringMode === 'managed') {
+                logger.warn(
+                    'Managed write denied domain=%s pid=%d actor=%d operation=metadata-edit fields=authoringMode result=denied',
+                    domainId,
+                    _id,
+                    user._id,
+                );
+                await OplogModel.add({
+                    type: 'problem.managed.write.denied',
+                    domainId,
+                    operator: user._id,
+                    problemId: _id,
+                    operation: 'metadata-edit',
+                    changedFields: ['authoringMode'],
+                    result: 'denied',
+                    time: new Date(),
+                } as any);
+            }
+            throw new ValidationError('authoringMode', null, '题目授权模式创建后不可修改');
+        }
+        const initialGuard =
+            preliminary.authoringMode === 'managed' ? managedPatchCapability(preliminary, $set, requestedUnset) : { capability: 'maintain' as const };
+        return ProblemModel.withAuthorizedWriteClaim(
+            domainId,
+            _id,
+            user,
+            'metadata-edit',
+            async (claim) => {
+                const before = await document.coll.findOne({
+                    domainId,
+                    docType: document.TYPE_PROBLEM,
+                    docId: _id,
+                    'aclWriteClaim.requestId': claim.requestId,
+                    'aclWriteClaim.actor': claim.actor,
+                    'aclWriteClaim.capability': claim.capability,
+                    'aclWriteClaim.state': 'active',
+                });
+                if (!before) throw new Error(`problem write claim ownership lost before managed guard: ${claim.requestId}`);
+                let guard: ReturnType<typeof managedPatchCapability> | null = null;
+                if (before.authoringMode === 'managed') {
+                    guard = managedPatchCapability(before, $set, requestedUnset);
+                    if (guard.immutableFields.length || !canUseProblemWriteCapability(user, before, guard.capability)) {
+                        logger.warn(
+                            'Managed write denied domain=%s pid=%d actor=%d operation=metadata-edit capability=%s fields=%o result=denied',
+                            domainId,
+                            _id,
+                            user._id,
+                            guard.capability,
+                            guard.changedFields,
+                        );
+                        await OplogModel.add({
+                            type: 'problem.managed.write.denied',
+                            domainId,
+                            operator: user._id,
+                            problemId: _id,
+                            operation: 'metadata-edit',
+                            capability: guard.capability,
+                            changedFields: guard.changedFields,
+                            result: 'denied',
+                            time: new Date(),
+                        } as any);
+                        const message = guard.immutableFields.length
+                            ? `字段创建后不可修改：${guard.immutableFields.join(', ')}`
+                            : '请求包含当前角色不可修改的托管题字段';
+                        throw new ValidationError('fields', null, message);
+                    }
+                }
+                if (guard?.publishes) await prepareManagedPublish(claim);
+                const result = await ProblemModel.editWithClaim(claim, $set, requestedUnset, {
+                    ...options,
+                    requireExpectedStructureRevision: true,
+                });
+                if (guard) {
+                    const type = guard.publishes ? 'problem.managed.publish' : 'problem.managed.write';
+                    await OplogModel.add({
+                        type,
+                        domainId,
+                        operator: user._id,
+                        problemId: _id,
+                        operation: 'metadata-edit',
+                        capability: guard.capability,
+                        changedFields: guard.changedFields,
+                        result: 'success',
+                        time: new Date(),
+                    } as any);
+                    logger.info(
+                        'Managed write succeeded domain=%s pid=%d actor=%d operation=metadata-edit capability=%s fields=%o result=success',
+                        domainId,
+                        _id,
+                        user._id,
+                        guard.capability,
+                        guard.changedFields,
+                    );
+                }
+                return result;
+            },
+            { capability: initialGuard.capability },
         );
     }
 
@@ -1146,10 +1626,27 @@ export class ProblemModel {
         pid?: string,
         _hidden?: boolean,
         structuredLanguage?: string,
-        attribution: { owner?: number; actor?: number } = {},
+        attribution: { owner?: number; actor?: number; claim?: ProblemWriteClaim } = {},
     ) {
         const original = await ProblemModel.get(domainId, _id, ProblemModel.PROJECTION_PUBLIC, true);
         if (!original) throw new ProblemNotFoundError(domainId, _id);
+        if (original.authoringMode === 'managed') {
+            const claim = attribution.claim;
+            if (!claim || claim.domainId !== domainId || claim.pid !== _id || !problemWriteCapabilityAllows(claim.capability, 'clone')) {
+                logger.error('Raw managed problem clone rejected domain=%s pid=%d actor=%s', domainId, _id, attribution.actor ?? '-');
+                throw new ValidationError('authoringMode', null, '托管题复制必须使用授权写入口');
+            }
+            const activeClaim = await document.coll.findOne({
+                domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: _id,
+                'aclWriteClaim.requestId': claim.requestId,
+                'aclWriteClaim.actor': claim.actor,
+                'aclWriteClaim.capability': claim.capability,
+                'aclWriteClaim.state': 'active',
+            });
+            if (!activeClaim) throw new Error(`problem write claim ownership lost before clone: ${claim.requestId}`);
+        }
         if (original.reference) throw new ValidationError('reference');
         if (pid && (/^[0-9]+$/.test(pid) || (await ProblemModel.get(target, pid)))) pid = '';
         if (!pid && original.pid && !(await ProblemModel.get(target, original.pid))) pid = original.pid;
@@ -1237,10 +1734,7 @@ export class ProblemModel {
         return document.count(domainId, document.TYPE_PROBLEM, query);
     }
 
-    static async del(domainId: string, docId: number) {
-        const pdoc = await ProblemModel.get(domainId, docId, ['docId', 'pid'] as any, true);
-        if (!pdoc) return false;
-        await ProblemModel.assertNoProblemReferences(domainId, docId, pdoc.pid);
+    private static async deleteProblemDocumentUnchecked(domainId: string, docId: number): Promise<boolean> {
         await bus.parallel('problem/before-del', domainId, docId);
         const res = await Promise.all([
             document.deleteOne(domainId, document.TYPE_PROBLEM, docId),
@@ -1253,12 +1747,26 @@ export class ProblemModel {
         return !!res[0][0].deletedCount;
     }
 
+    static async del(domainId: string, docId: number) {
+        const pdoc = await ProblemModel.get(domainId, docId, ['docId', 'pid', 'authoringMode'] as any, true);
+        if (!pdoc) return false;
+        if (pdoc.authoringMode === 'managed') {
+            logger.error('Raw managed problem delete rejected domain=%s pid=%d', domainId, docId);
+            throw new ValidationError('authoringMode', null, '托管题删除必须使用授权写入口');
+        }
+        await ProblemModel.assertNoProblemReferences(domainId, docId, pdoc.pid);
+        return ProblemModel.deleteProblemDocumentUnchecked(domainId, docId);
+    }
+
     /** HTTP hard-delete entrypoint. The ProblemDoc delete itself owns the claim token. */
     static async delAuthorized(domainId: string, docId: number, user: ProblemAclUser, options: { requestId?: string } = {}) {
-        const pdoc = await ProblemModel.get(domainId, docId, ['docId', 'pid'] as any, true);
+        const pdoc = await ProblemModel.get(domainId, docId, ['docId', 'pid', 'authoringMode'] as any, true);
         if (!pdoc) throw new ProblemNotFoundError(domainId, docId);
         await ProblemModel.assertNoProblemReferences(domainId, docId, pdoc.pid);
-        const claim = await ProblemModel.beginAuthorizedWriteClaim(domainId, docId, user, 'hard-delete', options);
+        const claim = await ProblemModel.beginAuthorizedWriteClaim(domainId, docId, user, 'hard-delete', {
+            ...options,
+            capability: 'hard-delete',
+        });
         try {
             await bus.parallel('problem/before-del', domainId, docId, claim.requestId);
             await Promise.all([
@@ -1274,6 +1782,7 @@ export class ProblemModel {
                 docId,
                 'aclWriteClaim.requestId': claim.requestId,
                 'aclWriteClaim.actor': claim.actor,
+                'aclWriteClaim.capability': claim.capability,
                 'aclWriteClaim.state': 'active',
             });
             if (result.deletedCount !== 1) {
@@ -1417,11 +1926,15 @@ export class ProblemModel {
                 docId: claim.pid,
                 'aclWriteClaim.requestId': claim.requestId,
                 'aclWriteClaim.actor': claim.actor,
+                'aclWriteClaim.capability': claim.capability,
                 'aclWriteClaim.state': 'active',
             },
-            { projection: { [key]: 1, problemKind: 1, config: 1 } },
+            { projection: { [key]: 1, problemKind: 1, config: 1, authoringMode: 1 } },
         );
         if (!doc) throw new Error(`problem write claim ownership lost before file operation: ${claim.requestId}`);
+        if (doc.authoringMode === 'managed' && !problemWriteCapabilityAllows(claim.capability, 'content')) {
+            throw new ValidationError('fields', null, `写入凭据 ${claim.capability} 不允许修改托管题文件`);
+        }
         if (key === 'data' && doc.problemKind !== undefined) {
             const kind = parseProblemKind(doc.problemKind);
             if (kind !== 'programming' && !structuredProblemUsesTestdata(kind, doc.config)) {
@@ -1446,7 +1959,7 @@ export class ProblemModel {
         payload.lastModified ||= new Date();
         const next = current.filter((item) => item.name !== name);
         next.push({ _id: name, ...payload });
-        if (!(await commitProblemWriteClaimUpdate(claim, { data: next } as any))) {
+        if (!(await commitProblemWriteClaimUpdate(claim, { data: next } as any, {}, 'content'))) {
             throw new Error(`problem write claim ownership lost after testdata upload: ${claim.requestId}`);
         }
         await bus.emit('problem/addTestdata', claim.domainId, claim.pid, name, payload, claim);
@@ -1470,7 +1983,7 @@ export class ProblemModel {
         const next = current
             .filter((item) => item.name !== newName)
             .map((item) => (item.name === file ? { ...item, _id: newName, name: newName, lastModified: new Date() } : item));
-        if (!(await commitProblemWriteClaimUpdate(claim, { data: next } as any))) {
+        if (!(await commitProblemWriteClaimUpdate(claim, { data: next } as any, {}, 'content'))) {
             throw new Error(`problem write claim ownership lost after testdata rename: ${claim.requestId}`);
         }
         await bus.emit('problem/renameTestdata', claim.domainId, claim.pid, file, newName, claim);
@@ -1483,7 +1996,7 @@ export class ProblemModel {
             names.map((item) => `problem/${claim.domainId}/${claim.pid}/testdata/${item}`),
             operator,
         );
-        if (!(await commitProblemWriteClaimUpdate(claim, { data: current.filter((item) => !names.includes(item.name)) } as any))) {
+        if (!(await commitProblemWriteClaimUpdate(claim, { data: current.filter((item) => !names.includes(item.name)) } as any, {}, 'content'))) {
             throw new Error(`problem write claim ownership lost after testdata delete: ${claim.requestId}`);
         }
         await bus.emit('problem/delTestdata', claim.domainId, claim.pid, names, claim);
@@ -1499,7 +2012,7 @@ export class ProblemModel {
         const payload = { name, ...pick(meta, ['size', 'lastModified', 'etag']) } as any;
         const next = current.filter((item) => item.name !== name);
         next.push({ _id: name, ...payload });
-        if (!(await commitProblemWriteClaimUpdate(claim, { additional_file: next } as any))) {
+        if (!(await commitProblemWriteClaimUpdate(claim, { additional_file: next } as any, {}, 'content'))) {
             throw new Error(`problem write claim ownership lost after additional-file upload: ${claim.requestId}`);
         }
         await bus.emit('problem/addAdditionalFile', claim.domainId, claim.pid, name, payload, claim);
@@ -1519,7 +2032,7 @@ export class ProblemModel {
         const next = current
             .filter((item) => item.name !== newName)
             .map((item) => (item.name === file ? { ...item, _id: newName, name: newName, lastModified: new Date() } : item));
-        if (!(await commitProblemWriteClaimUpdate(claim, { additional_file: next } as any))) {
+        if (!(await commitProblemWriteClaimUpdate(claim, { additional_file: next } as any, {}, 'content'))) {
             throw new Error(`problem write claim ownership lost after additional-file rename: ${claim.requestId}`);
         }
         await bus.emit('problem/renameAdditionalFile', claim.domainId, claim.pid, file, newName, claim);
@@ -1532,7 +2045,14 @@ export class ProblemModel {
             names.map((item) => `problem/${claim.domainId}/${claim.pid}/additional_file/${item}`),
             operator,
         );
-        if (!(await commitProblemWriteClaimUpdate(claim, { additional_file: current.filter((item) => !names.includes(item.name)) } as any))) {
+        if (
+            !(await commitProblemWriteClaimUpdate(
+                claim,
+                { additional_file: current.filter((item) => !names.includes(item.name)) } as any,
+                {},
+                'content',
+            ))
+        ) {
             throw new Error(`problem write claim ownership lost after additional-file delete: ${claim.requestId}`);
         }
         await bus.emit('problem/delAdditionalFile', claim.domainId, claim.pid, names, claim);

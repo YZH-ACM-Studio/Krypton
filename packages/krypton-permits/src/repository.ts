@@ -90,6 +90,7 @@ function problemWriteClaimFromDoc(domainId: string, pid: number, claim: any): Pr
         requestId: claim.requestId,
         actor: claim.actor,
         operation: claim.operation,
+        capability: claim.capability,
         state: claim.state,
         lastError: claim.lastError ?? null,
         createdAt: claim.createdAt,
@@ -385,6 +386,45 @@ export class MongoAclRepository implements AclServiceRepository {
 
     async problemExists(domainId: string, pid: number): Promise<boolean> {
         return !!(await documentColl.findOne({ domainId, docType: TYPE_PROBLEM, docId: pid }, { ...this.options(), projection: { _id: 1 } }));
+    }
+
+    async isManagedProblem(domainId: string, pid: number): Promise<boolean> {
+        const doc = await documentColl.findOne(
+            { domainId, docType: TYPE_PROBLEM, docId: pid },
+            { ...this.options(), projection: { authoringMode: 1 } },
+        );
+        if (!doc) throw new Error(`problem ${domainId}/${pid} does not exist`);
+        return doc.authoringMode === 'managed';
+    }
+
+    async getManagedDraftBootstrapState(
+        domainId: string,
+        pid: number,
+    ): Promise<{
+        owner: number;
+        hidden: boolean;
+        authoringMode?: string;
+        metadataStatus?: string;
+    } | null> {
+        const doc = await documentColl.findOne(
+            { domainId, docType: TYPE_PROBLEM, docId: pid },
+            {
+                ...this.options(),
+                projection: {
+                    owner: 1,
+                    hidden: 1,
+                    authoringMode: 1,
+                    'managedAuthoring.metadataStatus': 1,
+                },
+            },
+        );
+        if (!doc) return null;
+        return {
+            owner: doc.owner,
+            hidden: doc.hidden === true,
+            authoringMode: doc.authoringMode,
+            metadataStatus: doc.managedAuthoring?.metadataStatus,
+        };
     }
 
     async getProblemWriteClaim(domainId: string, pid: number): Promise<ProblemWriteClaim | null> {

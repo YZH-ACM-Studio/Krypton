@@ -88,6 +88,7 @@ describe('legacy canonical repository compatibility', () => {
             const loaded = await service.loadUserAcl('system', 9);
 
             expect([...loaded.permitPids]).to.deep.equal([1, 2, 3, 4]);
+            expect([...loaded.authoredPids]).to.deep.equal([]);
             expect([...loaded.maintainedPids]).to.deep.equal([2, 4]);
             expect(writes).to.deep.equal([]);
         } finally {

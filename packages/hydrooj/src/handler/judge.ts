@@ -256,31 +256,38 @@ export async function processJudgeFileCallback(rid: ObjectId, filename: string, 
     const udoc = await user.getById(rdoc.domainId, rdoc.uid);
     if (!udoc) throw new ForbiddenError();
     let preflightError: unknown;
-    await problem.withAuthorizedStructuralWriteClaim(rdoc.domainId, rdoc.pid, udoc, 'generate-testdata-callback', async (claim) => {
-        try {
-            const pdoc = await problem.get(rdoc.domainId, rdoc.pid);
-            if (!pdoc) throw new ForbiddenError();
-            if (pdoc.reference) throw new ProblemIsReferencedError('edit files');
-            const stat = await fs.stat(filePath);
-            if ((pdoc.data?.length || 0) + (pdoc.additional_file?.length || 0) >= system.get('limit.problem_files_max')) {
-                throw new FileLimitExceededError('count');
+    await problem.withAuthorizedStructuralWriteClaim(
+        rdoc.domainId,
+        rdoc.pid,
+        udoc,
+        'generate-testdata-callback',
+        async (claim) => {
+            try {
+                const pdoc = await problem.get(rdoc.domainId, rdoc.pid);
+                if (!pdoc) throw new ForbiddenError();
+                if (pdoc.reference) throw new ProblemIsReferencedError('edit files');
+                const stat = await fs.stat(filePath);
+                if ((pdoc.data?.length || 0) + (pdoc.additional_file?.length || 0) >= system.get('limit.problem_files_max')) {
+                    throw new FileLimitExceededError('count');
+                }
+                const size = Math.sum(
+                    (pdoc.data || []).map((i) => i.size),
+                    (pdoc.additional_file || []).map((i) => i.size),
+                    stat.size,
+                );
+                if (size >= system.get('limit.problem_files_max_size')) {
+                    throw new FileLimitExceededError('size');
+                }
+            } catch (error) {
+                // Preflight is read-only. Release the claim cleanly and throw
+                // after the critical section; write failures still retain ERROR.
+                preflightError = error;
+                return;
             }
-            const size = Math.sum(
-                (pdoc.data || []).map((i) => i.size),
-                (pdoc.additional_file || []).map((i) => i.size),
-                stat.size,
-            );
-            if (size >= system.get('limit.problem_files_max_size')) {
-                throw new FileLimitExceededError('size');
-            }
-        } catch (error) {
-            // Preflight is read-only. Release the claim cleanly and throw
-            // after the critical section; write failures still retain ERROR.
-            preflightError = error;
-            return;
-        }
-        await problem.addTestdataWithClaim(claim, sanitize(filename), fs.createReadStream(filePath), udoc._id);
-    });
+            await problem.addTestdataWithClaim(claim, sanitize(filename), fs.createReadStream(filePath), udoc._id);
+        },
+        { capability: 'content' },
+    );
     if (preflightError) throw preflightError;
 }
 

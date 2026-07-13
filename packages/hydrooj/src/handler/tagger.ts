@@ -42,6 +42,7 @@ function taggerDomain(): string {
 function denyProblemAcl(user: any) {
     Object.assign(user, {
         _permitPids: new Set<number>(),
+        _authoredPids: new Set<number>(),
         _maintainedPids: new Set<number>(),
         _aclFencedPids: new Set<number>(),
         _problemAclDomainId: undefined,
@@ -55,11 +56,17 @@ async function loadTaggerProblemAcl(user: any, domainId: string): Promise<void> 
         const permits = (global.Hydro?.model as any)?.permits;
         if (typeof permits?.loadAclForUser !== 'function') throw new Error('permits.loadAclForUser is unavailable');
         const loaded = await permits.loadAclForUser(domainId, Number(user?._id) || 0);
-        if (!(loaded?.permitPids instanceof Set) || !(loaded?.maintainedPids instanceof Set) || !(loaded?.fencedPids instanceof Set)) {
+        if (
+            !(loaded?.permitPids instanceof Set) ||
+            !(loaded?.authoredPids instanceof Set) ||
+            !(loaded?.maintainedPids instanceof Set) ||
+            !(loaded?.fencedPids instanceof Set)
+        ) {
             throw new TypeError('permits.loadAclForUser returned an invalid ACL snapshot');
         }
         Object.assign(user, {
             _permitPids: loaded.permitPids,
+            _authoredPids: loaded.authoredPids,
             _maintainedPids: loaded.maintainedPids,
             _aclFencedPids: loaded.fencedPids,
             _problemAclDomainId: domainId,

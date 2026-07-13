@@ -118,7 +118,7 @@ export class HomeHandler extends Handler {
     async getDiscussion(domainId: string, limit = 20) {
         if (!this.user.hasPerm(PERM.PERM_VIEW_DISCUSSION)) return [[], {}];
         const ddocs = await discussion.getMulti(domainId).limit(limit).toArray();
-        const vndict = await discussion.getListVnodes(domainId, ddocs, this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN), this.user.group);
+        const vndict = await discussion.getListVnodes(domainId, ddocs, this.user);
         this.collectUser(ddocs.map((ddoc) => ddoc.owner));
         return [ddocs, vndict];
     }

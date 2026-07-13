@@ -9,9 +9,10 @@
  *   - Preserve direct and multiple contest grants independently, then derive
  *     one active canonical role per user/problem pair.
  *
- * Two roles:
+ * Three roles:
  *   - `verifier`  : read-only view of the problem (statement, data, records)
- *   - `maintainer`: author-scope read + edit/publish/delete capability
+ *   - `author`    : managed-problem content/config/file editing only
+ *   - `maintainer`: managed content plus draft metadata/collaborator management
  *
  * `problem.permits.active` is the ACL authority when present. Production
  * legacy rows that predate the field remain active unless it is explicitly
@@ -28,6 +29,8 @@ export interface ProblemWriteClaimMarker {
     requestId: string;
     actor: number;
     operation: string;
+    /** Missing only on pre-P2.13 repair markers; every new claim persists it. */
+    capability?: 'maintain' | 'content' | 'metadata' | 'collaborators' | 'publish' | 'archive' | 'hard-delete' | 'clone';
     state: 'active' | 'error';
     lastError: string | null;
     createdAt: Date;
@@ -35,17 +38,19 @@ export interface ProblemWriteClaimMarker {
 }
 
 /**
- * Two roles defined in the data model:
+ * Three roles defined in the data model:
  *
  *   - `verifier`   : read-only access to a hidden problem.
- *   - `maintainer` : read plus problem maintenance capability and inclusion
- *                    in the author's problem-bank scope.
+ *   - `author`     : managed-problem content/config/file editing capability.
+ *   - `maintainer` : broader maintenance capability and inclusion in the
+ *                    author's problem-bank scope.
  *
  * Direct sources outrank contest maintainers, which outrank contest
  * verifiers. A direct verifier therefore intentionally overrides a contest
  * maintainer until that direct source is removed.
  */
-export type PermitRole = 'verifier' | 'maintainer';
+export type PermitRole = 'verifier' | 'author' | 'maintainer';
+export type ContestPermitRole = Exclude<PermitRole, 'author'>;
 
 export interface PermitDoc {
     _id: ObjectId;

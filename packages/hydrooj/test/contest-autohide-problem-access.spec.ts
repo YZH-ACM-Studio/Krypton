@@ -27,6 +27,7 @@ const calls = {
     events: [] as string[],
     getLists: [] as any[],
     maintains: [] as any[],
+    publishes: [] as any[],
     modelDomains: [] as Array<{ model: string; domainId: string }>,
     problemEdits: [] as any[],
     selections: [] as any[],
@@ -87,6 +88,12 @@ const problemStub = {
         calls.events.push(`maintain:${pdoc.docId}`);
         calls.maintains.push({ user, pdoc });
         return pdoc.allowed === true && !user._aclFencedPids.has(pdoc.docId);
+    },
+    canPublishProblem(user: any, pdoc: any) {
+        calls.events.push(`publish:${pdoc.docId}`);
+        calls.publishes.push({ user, pdoc });
+        if (user._aclFencedPids.has(pdoc.docId)) return false;
+        return pdoc.authoringMode === 'managed' ? pdoc.publishAllowed === true : pdoc.allowed === true;
     },
     async edit(...args: any[]) {
         calls.events.push(`problem.edit:${args[1]}`);
@@ -272,7 +279,7 @@ describe('contest autoHide canonical maintenance', () => {
         expect(error?.name).to.equal('PermissionError');
         expect(calls.selections[0].existingPids).to.deep.equal([11, 22]);
         expect(calls.getLists).to.deep.equal([{ domainId: 'system', pids: [11, 22] }]);
-        expect(calls.events).to.deep.equal(['maintain:11', 'maintain:22']);
+        expect(calls.events).to.deep.equal(['publish:11', 'publish:22']);
         expect(calls.contestEdits).to.deep.equal([]);
         expect(calls.problemEdits).to.deep.equal([]);
     });
@@ -289,6 +296,25 @@ describe('contest autoHide canonical maintenance', () => {
         const unauthorized = await run({ domainId: 'system', docId: 22, owner: 7, allowed: false });
         expect(missing?.name).to.equal('PermissionError');
         expect(unauthorized?.name).to.equal('PermissionError');
+        expect(calls.contestEdits).to.deep.equal([]);
+        expect(calls.problemEdits).to.deep.equal([]);
+    });
+
+    it('rejects managed maintainer autoHide before the contest is persisted', async () => {
+        problemDocs.set(11, {
+            domainId: 'system',
+            docId: 11,
+            owner: 7,
+            allowed: true,
+            authoringMode: 'managed',
+            publishAllowed: false,
+        });
+        problemDocs.set(22, { domainId: 'system', docId: 22, owner: 42, allowed: true });
+
+        const error = await captureFailure(() => update(makeHandler()));
+
+        expect(error?.name).to.equal('PermissionError');
+        expect(calls.events).to.deep.equal(['publish:11', 'publish:22']);
         expect(calls.contestEdits).to.deep.equal([]);
         expect(calls.problemEdits).to.deep.equal([]);
     });

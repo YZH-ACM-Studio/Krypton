@@ -91,6 +91,7 @@ const problemStub = {
         const loaded = await (global as any).Hydro.model.permits.loadAclForUser(domainId, user._id);
         Object.assign(user, {
             _permitPids: loaded.permitPids,
+            _authoredPids: loaded.authoredPids,
             _maintainedPids: loaded.maintainedPids,
             _aclFencedPids: loaded.fencedPids,
             _problemAclDomainId: domainId,
@@ -159,6 +160,10 @@ class TestLogger {
     error() {
         return undefined;
     }
+
+    warn() {
+        return undefined;
+    }
 }
 
 const routes: Record<string, any> = {};
@@ -198,6 +203,7 @@ function makeUser(uid = 42, overrides: Record<string, unknown> = {}) {
         _problemAclLoaded: false,
         _problemAclDomainId: undefined,
         _permitPids: new Set<number>(),
+        _authoredPids: new Set<number>(),
         _maintainedPids: new Set<number>(),
         _aclFencedPids: new Set<number>(),
         hasPerm: (perm: bigint) => perm === PERM.PERM_CREATE_PROBLEM,
@@ -235,7 +241,12 @@ beforeEach(() => {
     insertError = null;
     problemDocs.clear();
     tokenUser = makeUser();
-    loadedAcl = { permitPids: new Set<number>(), maintainedPids: new Set<number>(), fencedPids: new Set<number>() };
+    loadedAcl = {
+        permitPids: new Set<number>(),
+        authoredPids: new Set<number>(),
+        maintainedPids: new Set<number>(),
+        fencedPids: new Set<number>(),
+    };
     loadedAclSequence = [];
     (global as any).Hydro.model.permits = {
         async loadAclForUser(domainId: string, uid: number) {
@@ -247,7 +258,12 @@ beforeEach(() => {
 
 describe('crawler problem ACL', () => {
     it('reloads fail-closed ACL state for the token-bound user and token domain', async () => {
-        loadedAcl = { permitPids: new Set([12]), maintainedPids: new Set([12]), fencedPids: new Set([13]) };
+        loadedAcl = {
+            permitPids: new Set([12]),
+            authoredPids: new Set<number>(),
+            maintainedPids: new Set([12]),
+            fencedPids: new Set([13]),
+        };
         const handler = makeHandler('crawler_problem');
         await handler.prepare();
         expect(calls.loads).to.deep.equal([{ domainId: 'token-domain', uid: 42 }]);
@@ -263,6 +279,7 @@ describe('crawler problem ACL', () => {
             _problemAclLoaded: true,
             _problemAclDomainId: 'stale-domain',
             _permitPids: new Set([99]),
+            _authoredPids: new Set([99]),
             _maintainedPids: new Set([99]),
             _aclFencedPids: new Set<number>(),
         });
@@ -309,6 +326,30 @@ describe('crawler problem ACL', () => {
         expect(calls.edits).to.deep.equal([]);
     });
 
+    it('rejects managed crawler testdata before acquiring a claim or changing storage', async () => {
+        loadedAcl.maintainedPids.add(30);
+        keyRecord = { domainId: 'token-domain', cid: 1, problemId: 'A', docId: 30, timeLimit: '1s', memoryLimit: '256m' };
+        problemDocs.set(30, {
+            domainId: 'token-domain',
+            docId: 30,
+            owner: 7,
+            hidden: true,
+            authoringMode: 'managed',
+            data: [{ name: 'old.in' }],
+        });
+        const handler = makeHandler('crawler_testdata');
+        await handler.prepare();
+
+        await handler.post({}, [{ cid: 1, problemId: 'A', cases: [{ input: '1', output: '2' }] }]);
+
+        expect(handler.response.body.results).to.deep.equal([{ cid: 1, problemId: 'A', ok: false, error: 'not_found' }]);
+        expect(calls.events).not.to.include('claim:crawler-testdata-replace:30');
+        expect(calls.delTestdata).to.deep.equal([]);
+        expect(calls.addTestdata).to.deep.equal([]);
+        expect(calls.edits).to.deep.equal([]);
+        expect(calls.oplogs.some((call) => call[1] === 'problem.managed.write.denied')).to.equal(true);
+    });
+
     it('acquires one canonical write claim before testdata and retains it through publish', async () => {
         loadedAcl.maintainedPids.add(30);
         keyRecord = { domainId: 'token-domain', cid: 1, problemId: 'A', docId: 30, timeLimit: '1s', memoryLimit: '256m' };
@@ -337,11 +378,13 @@ describe('crawler problem ACL', () => {
     it('loses the write-claim race to a newly fenced target before any storage mutation', async () => {
         const maintained = {
             permitPids: new Set([30]),
+            authoredPids: new Set<number>(),
             maintainedPids: new Set([30]),
             fencedPids: new Set<number>(),
         };
         const fenced = {
             permitPids: new Set([30]),
+            authoredPids: new Set<number>(),
             maintainedPids: new Set([30]),
             fencedPids: new Set([30]),
         };

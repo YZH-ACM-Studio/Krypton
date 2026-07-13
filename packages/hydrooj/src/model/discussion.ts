@@ -314,9 +314,11 @@ export function flushNodes(domainId: string) {
     return document.deleteMulti(domainId, document.TYPE_DISCUSSION_NODE);
 }
 
-export async function getVnode(domainId: string, type: number, id: string, uid?: number) {
+export async function getVnode(domainId: string, type: number, id: string, userOrUid?: User | number) {
     if (type === document.TYPE_PROBLEM) {
-        const pdoc = await problem.get(domainId, Number.isSafeInteger(+id) ? +id : id, problem.PROJECTION_LIST);
+        if (typeof userOrUid !== 'object') throw new TypeError('problem discussion vnode reads require the current user');
+        const problemId = Number.isSafeInteger(+id) ? +id : id;
+        const pdoc = await problem.getViewableAuthorized(domainId, problemId, userOrUid, problem.PROJECTION_LIST);
         if (!pdoc) throw new DiscussionNodeNotFoundError(domainId, `problem/${id}`);
         return { ...pdoc, type, id: pdoc.docId };
     }
@@ -327,6 +329,7 @@ export async function getVnode(domainId: string, type: number, id: string, uid?:
         const _id = new ObjectId(id);
         const tdoc = await model.get(domainId, _id);
         if (!tdoc) throw new DiscussionNodeNotFoundError(domainId, `${typeName}/${id}`);
+        const uid = typeof userOrUid === 'number' ? userOrUid : userOrUid?._id;
         if (uid) {
             const tsdoc = await model.getStatus(domainId, _id, uid);
             tdoc.attend = tsdoc?.attend || tsdoc?.enroll;
@@ -351,13 +354,19 @@ export function getNodes(domainId: string) {
     return document.getMulti(domainId, document.TYPE_DISCUSSION_NODE).toArray();
 }
 
-export async function getListVnodes(domainId: string, ddocs: any, getHidden = false, assign: string[] = []) {
+export async function getListVnodes(domainId: string, ddocs: any, user: User) {
     const res = {};
     async function task(ddoc: DiscussionDoc) {
-        const vnode = await getVnode(domainId, ddoc.parentType, ddoc.parentId.toString());
+        let vnode;
+        try {
+            vnode = await getVnode(domainId, ddoc.parentType, ddoc.parentId.toString(), user);
+        } catch (error) {
+            if (error instanceof DiscussionNodeNotFoundError) return;
+            throw error;
+        }
         res[ddoc.parentType] ||= {};
-        if (!getHidden && vnode.hidden) return;
-        if (vnode.assign?.length && new Set(vnode.assign).intersection(new Set(assign)).size) return;
+        if (ddoc.parentType !== document.TYPE_PROBLEM && !user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN) && vnode.hidden) return;
+        if (vnode.assign?.length && new Set(vnode.assign).intersection(new Set(user.group || [])).size) return;
         res[ddoc.parentType][ddoc.parentId] = vnode;
     }
     await Promise.all(ddocs.map((ddoc) => task(ddoc)));
@@ -366,7 +375,7 @@ export async function getListVnodes(domainId: string, ddocs: any, getHidden = fa
 
 export function checkVNodeVisibility(type: number, vnode: any, user: User) {
     if (type === document.TYPE_PROBLEM) {
-        if (vnode.hidden && !user.own(vnode) && !user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN)) return false;
+        if (!problem.canViewBy(vnode, user)) return false;
     }
     if ([document.TYPE_CONTEST, document.TYPE_TRAINING].includes(type as any)) {
         if (!user.own(vnode) && vnode.assign?.length && !new Set(vnode.assign).intersection(new Set(user.group)).size) return false;

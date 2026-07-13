@@ -16,6 +16,8 @@ const ids = {
     contestVerifier: new FakeObjectId('contest-verifier'),
     contestMaintainer: new FakeObjectId('contest-maintainer'),
     inactive: new FakeObjectId('inactive'),
+    managedAuthor: new FakeObjectId('managed-author'),
+    managedMaintainer: new FakeObjectId('managed-maintainer'),
 };
 
 const rows = [
@@ -24,7 +26,13 @@ const rows = [
     { _id: ids.contestVerifier, domainId: 'system', pid: 3, uid: 9, role: 'verifier', viaContest: new FakeObjectId('c1') },
     { _id: ids.contestMaintainer, domainId: 'system', pid: 4, uid: 9, role: 'maintainer', viaContest: new FakeObjectId('c2') },
     { _id: ids.inactive, domainId: 'system', pid: 5, uid: 9, role: 'maintainer', active: false, viaContest: null },
+    { _id: ids.managedAuthor, domainId: 'system', pid: 6, uid: 9, role: 'author', active: true, viaContest: null },
+    { _id: ids.managedMaintainer, domainId: 'system', pid: 7, uid: 9, role: 'maintainer', active: true, viaContest: null },
 ];
+
+const managedPids = new Set([6, 7, 8]);
+const claims = new Map<number, any>();
+let sourceRows: any[] = [];
 
 function sameValue(actual: any, expected: any): boolean {
     if (expected && typeof expected === 'object' && '$ne' in expected) return actual !== expected.$ne;
@@ -37,6 +45,7 @@ function matches(doc: any, filter: Record<string, any>): boolean {
 }
 
 const calls = {
+    grantDirect: [] as any[],
     resumeMarkers: [] as any[],
     revokePairs: [] as any[],
     revokeSource: [] as any[],
@@ -59,9 +68,14 @@ const permitsColl = {
     },
 };
 const aclService = {
+    async grantDirect(...args: any[]) {
+        calls.grantDirect.push(args);
+        return { active: true };
+    },
     async loadUserAcl() {
         return {
             permitPids: new Set([1, 2, 3, 4, 5]),
+            authoredPids: new Set<number>(),
             maintainedPids: new Set([2, 4]),
             fencedPids: new Set<number>(),
         };
@@ -103,8 +117,34 @@ require.cache[repositoryPath] = {
     loaded: true,
     exports: {
         mongoAclRepository: {
-            async getSources() {
-                return [];
+            async getSources(filter: any) {
+                return sourceRows.filter(
+                    (row) => row.domainId === filter.domainId && row.pid === filter.pid && (filter.uid === undefined || row.uid === filter.uid),
+                );
+            },
+            async getCanonical(filter: any) {
+                return (
+                    rows.find(
+                        (row) => row.domainId === filter.domainId && row.pid === filter.pid && row.uid === filter.uid && row.active !== false,
+                    ) || null
+                );
+            },
+            async isManagedProblem(_domainId: string, pid: number) {
+                return managedPids.has(pid);
+            },
+            async getProblemWriteClaim(_domainId: string, pid: number) {
+                return claims.get(pid) || null;
+            },
+            async listSourcesForProblem(domainId: string, pid: number) {
+                return sourceRows.filter((row) => row.domainId === domainId && row.pid === pid);
+            },
+            async listCanonicalForProblem(domainId: string, pid: number) {
+                return rows.filter((row) => row.domainId === domainId && row.pid === pid && row.active !== false);
+            },
+            async getManagedDraftBootstrapState(_domainId: string, pid: number) {
+                return managedPids.has(pid)
+                    ? { owner: 9, hidden: true, authoringMode: 'managed', metadataStatus: 'draft' }
+                    : { owner: 9, hidden: true };
             },
         },
     },
@@ -132,10 +172,13 @@ try {
 }
 
 beforeEach(() => {
+    calls.grantDirect.length = 0;
     calls.revokePairs.length = 0;
     calls.revokeSource.length = 0;
     calls.resumeMarkers.length = 0;
     calls.writes.length = 0;
+    claims.clear();
+    sourceRows = [];
 });
 
 describe('legacy canonical model compatibility', () => {
@@ -193,5 +236,80 @@ describe('legacy canonical model compatibility', () => {
 
         expect(result).to.deep.equal({ role: 'maintainer' });
         expect(calls.resumeMarkers).to.deep.equal([[{ domainId: 'system', pid: 9, uid: 99 }, 'orphan-request']]);
+    });
+
+    it('requires an actor-bound managed claim for public grants and maintainer changes', async () => {
+        const missingClaim = await model.grant('system', 6, 9, 'author', 8, { requestId: 'no-claim' }).catch((error) => error);
+        expect(missingClaim).to.be.instanceOf(Error);
+        expect(calls.grantDirect).to.have.lengthOf(0);
+
+        claims.set(6, { requestId: 'author-claim', actor: 8, capability: 'collaborators', state: 'active' });
+        await model.grant('system', 6, 9, 'author', 8, {
+            requestId: 'author-grant',
+            writeClaimRequestId: 'author-claim',
+        });
+        expect(calls.grantDirect).to.have.lengthOf(1);
+
+        const wrongActor = await model
+            .grant('system', 6, 9, 'author', 10, {
+                requestId: 'wrong-actor',
+                writeClaimRequestId: 'author-claim',
+            })
+            .catch((error) => error);
+        expect(wrongActor).to.be.instanceOf(Error);
+        expect(calls.grantDirect).to.have.lengthOf(1);
+
+        claims.set(7, { requestId: 'collaborator-claim', actor: 8, capability: 'collaborators', state: 'active' });
+        const maintainerEscalation = await model
+            .grant('system', 7, 9, 'author', 8, {
+                requestId: 'overwrite-maintainer',
+                writeClaimRequestId: 'collaborator-claim',
+            })
+            .catch((error) => error);
+        expect(maintainerEscalation).to.be.instanceOf(Error);
+        expect(calls.grantDirect).to.have.lengthOf(1);
+
+        claims.set(7, { requestId: 'admin-claim', actor: 8, capability: 'publish', state: 'active' });
+        await model.grant('system', 7, 9, 'author', 8, {
+            requestId: 'admin-overwrite',
+            writeClaimRequestId: 'admin-claim',
+        });
+        expect(calls.grantDirect).to.have.lengthOf(2);
+    });
+
+    it('requires an administrator-only claim before revoking a managed maintainer', async () => {
+        const missingClaim = await model
+            .revoke('system', ids.managedMaintainer as any, { requestId: 'managed-revoke', actor: 8 })
+            .catch((error) => error);
+        expect(missingClaim).to.be.instanceOf(Error);
+        expect(calls.revokePairs).to.have.lengthOf(0);
+
+        claims.set(7, { requestId: 'collaborator-claim', actor: 8, capability: 'collaborators', state: 'active' });
+        const weakClaim = await model
+            .revoke('system', ids.managedMaintainer as any, {
+                requestId: 'managed-revoke',
+                actor: 8,
+                writeClaimRequestId: 'collaborator-claim',
+            })
+            .catch((error) => error);
+        expect(weakClaim).to.be.instanceOf(Error);
+        expect(calls.revokePairs).to.have.lengthOf(0);
+
+        claims.set(7, { requestId: 'admin-claim', actor: 8, capability: 'publish', state: 'active' });
+        expect(
+            await model.revoke('system', ids.managedMaintainer as any, {
+                requestId: 'managed-revoke',
+                actor: 8,
+                writeClaimRequestId: 'admin-claim',
+            }),
+        ).to.equal(true);
+        expect(calls.revokePairs).to.have.lengthOf(1);
+    });
+
+    it('does not expose generic ACL mutation or repair methods on the Hydro runtime surface', () => {
+        expect((model as any).publicPermitsModel).not.to.have.property('grant');
+        expect((model as any).publicPermitsModel).not.to.have.property('revoke');
+        expect((model as any).publicPermitsModel).not.to.have.property('repairLegacyMaintainerWithoutCanonical');
+        expect((model as any).publicPermitsModel).to.have.property('prepareProblemWriteClaim');
     });
 });

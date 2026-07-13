@@ -9,9 +9,43 @@ import { permitsColl, permitSourcesColl } from './db';
 import { canonicalActiveFilter, normalizeActiveCanonicalDoc } from './legacy-canonical';
 import { mongoAclRepository } from './repository';
 import { createAclService } from './service';
-import type { PermitDoc, PermitRole } from './types';
+import type { ContestPermitRole, PermitDoc, PermitRole } from './types';
 
 const aclService = createAclService(mongoAclRepository);
+
+type BoundWriteCapability = 'collaborators' | 'publish' | 'maintain' | 'hard-delete';
+
+async function assertBoundWriteClaimCapability(
+    domainId: string,
+    pid: number,
+    requestId: string | undefined,
+    required: BoundWriteCapability[],
+    actor?: number,
+    managed = false,
+): Promise<void> {
+    if (!requestId) {
+        if (managed) throw new Error(`managed problem mutation requires a bound write claim for ${domainId}/${pid}`);
+        return;
+    }
+    const claim = await mongoAclRepository.getProblemWriteClaim(domainId, pid);
+    if (
+        !claim ||
+        claim.requestId !== requestId ||
+        claim.state !== 'active' ||
+        (actor !== undefined && claim.actor !== actor) ||
+        !required.includes(claim.capability as BoundWriteCapability)
+    ) {
+        throw new Error(`problem write claim ${requestId} lacks ${required.join('/')} capability for ${domainId}/${pid}`);
+    }
+}
+
+async function pairHasMaintainerRole(domainId: string, pid: number, uid: number): Promise<boolean> {
+    const [canonical, sources] = await Promise.all([
+        mongoAclRepository.getCanonical({ domainId, pid, uid }),
+        mongoAclRepository.getSources({ domainId, pid, uid }),
+    ]);
+    return canonical?.role === 'maintainer' || sources.some((source) => source.active === true && source.role === 'maintainer');
+}
 
 function newRequestId(prefix: string, supplied?: string): string {
     return supplied?.trim() || `${prefix}:${new ObjectId().toHexString()}`;
@@ -30,6 +64,16 @@ export async function grant(
         writeClaimRequestId?: string;
     } = {},
 ): Promise<PermitDoc> {
+    const managed = await mongoAclRepository.isManagedProblem(domainId, pid);
+    const maintainerInvolved = managed && (role === 'maintainer' || (await pairHasMaintainerRole(domainId, pid, uid)));
+    await assertBoundWriteClaimCapability(
+        domainId,
+        pid,
+        opts.writeClaimRequestId,
+        maintainerInvolved ? ['publish'] : ['collaborators'],
+        grantedBy,
+        managed,
+    );
     const requestId = newRequestId('grant', opts.requestId);
     if (opts.viaContest) {
         await aclService.grantContest(
@@ -73,18 +117,28 @@ export async function revoke(
         active: canonicalActiveFilter(),
     });
     if (!canonical) return false;
+    const sources = (
+        await mongoAclRepository.getSources({
+            domainId,
+            pid: canonical.pid,
+            uid: canonical.uid,
+        })
+    ).filter((source) => source.active === true);
+    const managed = await mongoAclRepository.isManagedProblem(domainId, canonical.pid);
+    const maintainerInvolved = managed && (canonical.role === 'maintainer' || sources.some((source) => source.role === 'maintainer'));
+    await assertBoundWriteClaimCapability(
+        domainId,
+        canonical.pid,
+        opts.writeClaimRequestId,
+        maintainerInvolved ? ['publish'] : ['collaborators'],
+        opts.actor,
+        managed,
+    );
     const requestId = newRequestId('revoke', opts.requestId);
     if (opts.requireOwner) {
         if (opts.requireOwner === 'viaContest' && !opts.viaContest) {
             throw new Error('viaContest is required for contest-owned revoke');
         }
-        const sources = (
-            await mongoAclRepository.getSources({
-                domainId,
-                pid: canonical.pid,
-                uid: canonical.uid,
-            })
-        ).filter((source) => source.active === true);
         if (sources.length) {
             const sourceType = opts.requireOwner === 'direct' ? 'direct' : 'contest';
             const sourceId = opts.requireOwner === 'direct' ? 'direct' : opts.viaContest!.toHexString();
@@ -124,6 +178,17 @@ export async function revokeByPair(
     const sources = await mongoAclRepository.getSources({ domainId, pid, uid });
     const canonical = await mongoAclRepository.getCanonical({ domainId, pid, uid });
     if (!sources.length && !canonical) return false;
+    const managed = await mongoAclRepository.isManagedProblem(domainId, pid);
+    const maintainerInvolved =
+        managed && (canonical?.role === 'maintainer' || sources.some((source) => source.active && source.role === 'maintainer'));
+    await assertBoundWriteClaimCapability(
+        domainId,
+        pid,
+        opts.writeClaimRequestId,
+        maintainerInvolved ? ['publish'] : ['collaborators'],
+        opts.actor,
+        managed,
+    );
     await aclService.revokePairs(domainId, [{ pid, uid }], newRequestId('revoke-pair', opts.requestId), opts.actor || 0, opts.writeClaimRequestId);
     return true;
 }
@@ -133,14 +198,88 @@ export async function revokePairs(
     pairs: Array<{ pid: number; uid: number }>,
     opts: { requestId?: string; actor?: number; writeClaimRequestId?: string } = {},
 ): Promise<number> {
-    return aclService.revokePairs(domainId, pairs, newRequestId('revoke-pairs', opts.requestId), opts.actor || 0, opts.writeClaimRequestId);
+    const uniquePairs = [...new Map(pairs.map((pair) => [`${pair.pid}:${pair.uid}`, pair])).values()];
+    const managedPairs: typeof uniquePairs = [];
+    for (const pair of uniquePairs) {
+        const managed = await mongoAclRepository.isManagedProblem(domainId, pair.pid);
+        if (!managed) {
+            await assertBoundWriteClaimCapability(domainId, pair.pid, opts.writeClaimRequestId, ['collaborators'], opts.actor, false);
+            continue;
+        }
+        managedPairs.push(pair);
+        const maintainerInvolved = await pairHasMaintainerRole(domainId, pair.pid, pair.uid);
+        await assertBoundWriteClaimCapability(
+            domainId,
+            pair.pid,
+            opts.writeClaimRequestId,
+            maintainerInvolved ? ['publish'] : ['collaborators'],
+            opts.actor,
+            true,
+        );
+    }
+    if (managedPairs.length > 1) throw new Error('managed problem ACL mutations accept exactly one user per request');
+    return aclService.revokePairs(domainId, uniquePairs, newRequestId('revoke-pairs', opts.requestId), opts.actor || 0, opts.writeClaimRequestId);
+}
+
+/** Single-use bootstrap used only while creating a brand-new managed draft. */
+export async function bootstrapManagedDraftAuthor(
+    domainId: string,
+    pid: number,
+    creator: number,
+    opts: { requestId?: string; note?: string } = {},
+): Promise<PermitDoc> {
+    const [state, sources, canonical] = await Promise.all([
+        mongoAclRepository.getManagedDraftBootstrapState(domainId, pid),
+        mongoAclRepository.listSourcesForProblem(domainId, pid),
+        mongoAclRepository.listCanonicalForProblem(domainId, pid),
+    ]);
+    if (
+        !state ||
+        state.authoringMode !== 'managed' ||
+        state.owner !== creator ||
+        state.hidden !== true ||
+        state.metadataStatus !== 'draft' ||
+        sources.length ||
+        canonical.length
+    ) {
+        throw new Error(`managed draft author bootstrap is not available for ${domainId}/${pid}`);
+    }
+    const requestId = newRequestId('managed-draft-author-bootstrap', opts.requestId);
+    await aclService.grantDirect(domainId, pid, creator, 'author', creator, requestId, opts.note || 'managed draft creator');
+    const created = await permitsColl.findOne({ domainId, pid, uid: creator, active: canonicalActiveFilter() });
+    if (!created || created.role !== 'author') {
+        throw new Error(`managed draft author bootstrap did not create canonical author for ${domainId}/${pid}`);
+    }
+    return created;
+}
+
+/** Narrow cleanup companion for a failed managed-draft bootstrap. */
+export async function cleanupManagedDraftCreation(
+    domainId: string,
+    pid: number,
+    creator: number,
+    opts: { requestId?: string } = {},
+): Promise<number> {
+    const [state, sources, canonical] = await Promise.all([
+        mongoAclRepository.getManagedDraftBootstrapState(domainId, pid),
+        mongoAclRepository.listSourcesForProblem(domainId, pid),
+        mongoAclRepository.listCanonicalForProblem(domainId, pid),
+    ]);
+    if (!state || state.authoringMode !== 'managed' || state.owner !== creator || state.hidden !== true || state.metadataStatus !== 'draft') {
+        throw new Error(`managed draft cleanup is not available for ${domainId}/${pid}`);
+    }
+    const rows = [...sources, ...canonical];
+    if (rows.some((row) => row.uid !== creator || row.role !== 'author')) {
+        throw new Error(`managed draft cleanup refused unexpected ACL rows for ${domainId}/${pid}`);
+    }
+    return aclService.clearForProblem(domainId, pid, newRequestId('managed-draft-cleanup', opts.requestId), creator);
 }
 
 export async function grantBulkViaContest(
     domainId: string,
     pids: number[],
     uid: number,
-    role: PermitRole,
+    role: ContestPermitRole,
     grantedBy: number,
     viaContest: ObjectIdType,
     opts: { requestId?: string; note?: string } = {},
@@ -183,7 +322,7 @@ export async function syncContestPids(
     oldPids: number[],
     newPids: number[],
     verifiers: number[],
-    role: PermitRole,
+    role: ContestPermitRole,
     grantedBy: number,
     opts: { requestId?: string } = {},
 ): Promise<{ added: number; removed: number }> {
@@ -256,6 +395,7 @@ export async function loadAclForUser(domainId: string, uid: number) {
     if (!uid) {
         return {
             permitPids: new Set<number>(),
+            authoredPids: new Set<number>(),
             maintainedPids: new Set<number>(),
             fencedPids: new Set<number>(),
         };
@@ -271,6 +411,10 @@ export async function loadMaintainedPidsFor(domainId: string, uid: number): Prom
     return (await loadAclForUser(domainId, uid)).maintainedPids;
 }
 
+export async function loadAuthoredPidsFor(domainId: string, uid: number): Promise<Set<number>> {
+    return (await loadAclForUser(domainId, uid)).authoredPids;
+}
+
 export async function loadFencedPidsFor(domainId: string, uid: number): Promise<Set<number>> {
     return (await loadAclForUser(domainId, uid)).fencedPids;
 }
@@ -280,6 +424,8 @@ export async function clearVerifiersForProblem(
     pid: number,
     opts: { requestId?: string; actor?: number; writeClaimRequestId?: string } = {},
 ): Promise<number> {
+    const managed = await mongoAclRepository.isManagedProblem(domainId, pid);
+    await assertBoundWriteClaimCapability(domainId, pid, opts.writeClaimRequestId, ['publish', 'maintain'], opts.actor, managed);
     return aclService.clearVerifiersForProblem(
         domainId,
         pid,
@@ -294,6 +440,8 @@ export async function clearForProblem(
     pid: number,
     opts: { requestId?: string; actor?: number; writeClaimRequestId?: string } = {},
 ): Promise<number> {
+    const managed = await mongoAclRepository.isManagedProblem(domainId, pid);
+    await assertBoundWriteClaimCapability(domainId, pid, opts.writeClaimRequestId, ['hard-delete'], opts.actor, managed);
     return aclService.clearForProblem(
         domainId,
         pid,
@@ -400,6 +548,7 @@ export const permitsModel = {
     listForUser,
     loadAclForUser,
     loadPermittedPidsFor,
+    loadAuthoredPidsFor,
     loadMaintainedPidsFor,
     loadFencedPidsFor,
     clearVerifiersForProblem,
@@ -417,5 +566,26 @@ export const permitsModel = {
     recoverActiveProblemWriteClaim,
     repairAclMutation,
     resumeFence,
+    prepareProblemWriteClaim,
+};
+
+/**
+ * Runtime surface exposed to Hydro core. Generic ACL mutations stay private
+ * to this package's authenticated handlers; core receives only claim-bound
+ * lifecycle operations and the narrowly validated draft bootstrap pair.
+ */
+export const publicPermitsModel = {
+    listForProblem,
+    listForUser,
+    loadAclForUser,
+    loadPermittedPidsFor,
+    loadAuthoredPidsFor,
+    loadMaintainedPidsFor,
+    loadFencedPidsFor,
+    clearVerifiersForProblem,
+    clearForProblem,
+    bootstrapManagedDraftAuthor,
+    cleanupManagedDraftCreation,
+    countByContest,
     prepareProblemWriteClaim,
 };

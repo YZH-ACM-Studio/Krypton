@@ -8,8 +8,9 @@
  *   GET   /tasks/verify                      "my verify inbox"
  *
  * Permission model:
- *   - Author of the problem can grant/revoke on that problem.
- *   - `PERM_EDIT_PROBLEM` holder can grant/revoke on any problem.
+ *   - Legacy owners/maintainers retain their existing grant/revoke behavior.
+ *   - Managed maintainers can manage author/verifier; only a system
+ *     administrator can grant or revoke managed maintainer.
  *   - Contest owner / `PERM_EDIT_CONTEST` holder can manage contest verifiers.
  *   - Anyone can view their own inbox (`PRIV_USER_PROFILE`).
  *   - Verifier-targeted users can revoke their own permit ("退出验题").
@@ -21,6 +22,7 @@ import {
     Handler,
     NotFoundError,
     ObjectId,
+    OplogModel,
     param,
     PERM,
     PermissionError,
@@ -32,18 +34,79 @@ import {
     ValidationError,
 } from 'hydrooj';
 import MessageModel from 'hydrooj/src/model/message';
-import { canMaintainProblem } from 'hydrooj/src/model/problem-access';
-import { permitsColl } from './db';
+import { permitsColl, permitSourcesColl } from './db';
 import { canonicalActiveFilter } from './legacy-canonical';
 import { permitsModel } from './model';
 import { deriveAclRequestId } from './request-id';
-import type { PermitRole } from './types';
+import type { ContestPermitRole, PermitRole } from './types';
 
-const VALID_ROLES: PermitRole[] = ['verifier', 'maintainer'];
+const PROBLEM_ROLES: PermitRole[] = ['verifier', 'author', 'maintainer'];
+const CONTEST_ROLES: ContestPermitRole[] = ['verifier', 'maintainer'];
 const logger = new Logger('krypton-permits.handler');
 
-function canManageProblemPermits(user: any, pdoc: any): boolean {
-    return canMaintainProblem(user, pdoc);
+function grantableProblemRoles(user: any, pdoc: any): PermitRole[] {
+    if (pdoc.authoringMode !== 'managed') return ProblemModel.canMaintainProblem(user, pdoc) ? ['verifier', 'maintainer'] : [];
+    if (ProblemModel.canManageProblemMaintainers(user, pdoc)) return [...PROBLEM_ROLES];
+    if (ProblemModel.canManageProblemCollaborators(user, pdoc)) return ['verifier', 'author'];
+    return [];
+}
+
+function canRevokeProblemRole(user: any, pdoc: any, role: PermitRole): boolean {
+    if (pdoc.authoringMode !== 'managed') return ProblemModel.canMaintainProblem(user, pdoc);
+    if (role === 'maintainer') return ProblemModel.canManageProblemMaintainers(user, pdoc);
+    return ProblemModel.canManageProblemCollaborators(user, pdoc);
+}
+
+async function logManagedPermitDenied(handler: Handler, pdoc: any, action: 'grant' | 'revoke', role: PermitRole) {
+    logger.warn(
+        'Managed permit denied domain=%s pid=%d actor=%d role=%s action=%s result=denied',
+        pdoc.domainId,
+        pdoc.docId,
+        handler.user._id,
+        role,
+        action,
+    );
+    await OplogModel.log(handler as any, 'problem.permit.denied', {
+        problemId: pdoc.docId,
+        role,
+        action,
+        result: 'denied',
+    });
+}
+
+async function assertManagedPermitBody(handler: Handler, pdoc: any, allowed: string[], action: 'grant' | 'revoke') {
+    if (pdoc.authoringMode !== 'managed') return;
+    const unknownFields = Object.keys((handler as any).request?.body || {}).filter((field) => !allowed.includes(field));
+    if (!unknownFields.length) return;
+    logger.warn(
+        'Managed permit denied domain=%s pid=%d actor=%d action=%s fields=%o result=denied',
+        pdoc.domainId,
+        pdoc.docId,
+        handler.user._id,
+        action,
+        unknownFields,
+    );
+    await OplogModel.log(handler as any, 'problem.permit.denied', {
+        problemId: pdoc.docId,
+        action,
+        fields: unknownFields,
+        result: 'denied',
+    });
+    throw new ValidationError('fields', null, `托管题权限接口不接受字段：${unknownFields.join(', ')}`);
+}
+
+async function targetHasMaintainerSource(domainId: string, pid: number, targetUids: number[]): Promise<boolean> {
+    const [canonical, sources] = await Promise.all([
+        permitsColl
+            .find({ domainId, pid, uid: { $in: targetUids }, active: canonicalActiveFilter() })
+            .project({ uid: 1, role: 1 })
+            .toArray(),
+        permitSourcesColl
+            .find({ domainId, pid, uid: { $in: targetUids }, active: true })
+            .project({ uid: 1, role: 1 })
+            .toArray(),
+    ]);
+    return [...canonical, ...sources].some((row) => row.role === 'maintainer');
 }
 
 function canManageContestVerifiers(user: any, tdoc: any): boolean {
@@ -66,17 +129,24 @@ class ProblemPermitGrantHandler extends Handler {
         const domainId = authoritativeDomainId(this, args);
         const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
         if (!pdoc) throw new NotFoundError('题目不存在');
-        if (!canManageProblemPermits(this.user, pdoc)) {
+        const grantableRoles = grantableProblemRoles(this.user, pdoc);
+        if (!grantableRoles.length) {
             throw new PermissionError('无权查看此题目的权限列表');
         }
         const permits = await permitsModel.listForProblem(domainId, pdoc.docId);
         const uids = Array.from(new Set([...permits.map((p) => p.uid), ...permits.map((p) => p.grantedBy)]));
         const udict = await UserModel.getList(domainId, uids);
         const confirmedPdoc = await ProblemModel.getViewableAuthorized(domainId, pdoc.docId, this.user);
-        if (!confirmedPdoc || confirmedPdoc.docId !== pdoc.docId || !canManageProblemPermits(this.user, confirmedPdoc)) {
+        const confirmedGrantableRoles = confirmedPdoc ? grantableProblemRoles(this.user, confirmedPdoc) : [];
+        if (!confirmedPdoc || confirmedPdoc.docId !== pdoc.docId || !confirmedGrantableRoles.length) {
             throw new PermissionError('无权查看此题目的权限列表');
         }
-        this.response.body = { permits, udict };
+        this.response.body = {
+            permits,
+            udict,
+            grantableRoles: confirmedGrantableRoles,
+            canManageMaintainers: ProblemModel.canManageProblemMaintainers(this.user, confirmedPdoc),
+        };
     }
 
     @param('pid', Types.UnsignedInt)
@@ -95,8 +165,8 @@ class ProblemPermitGrantHandler extends Handler {
         requestId: string | undefined,
     ) {
         const domainId = authoritativeDomainId(this, args);
-        if (!VALID_ROLES.includes(role as PermitRole)) {
-            throw new ValidationError('role', null, 'role 必须是 verifier 或 maintainer');
+        if (!PROBLEM_ROLES.includes(role as PermitRole)) {
+            throw new ValidationError('role', null, 'role 必须是 verifier、author 或 maintainer');
         }
         const targetUids = Array.from(
             new Set([...(uid ? [uid] : []), ...(uids || []).map((i) => +i)].filter((i) => Number.isSafeInteger(i) && i > 0)),
@@ -106,18 +176,31 @@ class ProblemPermitGrantHandler extends Handler {
         }
         const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
         if (!pdoc) throw new NotFoundError('题目不存在');
-        if (!canManageProblemPermits(this.user, pdoc)) {
-            throw new PermissionError('无权管理此题目的验题人');
+        await assertManagedPermitBody(this, pdoc, ['uid', 'uids', 'role', 'note', 'requestId'], 'grant');
+        if (pdoc.authoringMode === 'managed' && targetUids.length !== 1) {
+            await logManagedPermitDenied(this, pdoc, 'grant', role as PermitRole);
+            throw new ValidationError('uids', null, '托管题每次只能变更一个用户的角色');
+        }
+        const allowedRoles = grantableProblemRoles(this.user, pdoc);
+        if (!allowedRoles.includes(role as PermitRole)) {
+            if (pdoc.authoringMode === 'managed') await logManagedPermitDenied(this, pdoc, 'grant', role as PermitRole);
+            throw new PermissionError('无权授予该题目角色');
         }
         const targets = await UserModel.getList(domainId, targetUids);
         for (const targetUid of targetUids) {
             if (!targets[targetUid]) throw new ValidationError('uid', null, `目标用户 ${targetUid} 不存在`);
-            if (targetUid === pdoc.owner) {
+            if (pdoc.authoringMode !== 'managed' && targetUid === pdoc.owner) {
                 throw new ValidationError('uid', null, '不能给作者自己授权');
             }
         }
+        const initialMaintainerInvolved =
+            pdoc.authoringMode === 'managed' && (role === 'maintainer' || (await targetHasMaintainerSource(domainId, pdoc.docId, targetUids)));
+        if (initialMaintainerInvolved && !ProblemModel.canManageProblemMaintainers(this.user, pdoc)) {
+            await logManagedPermitDenied(this, pdoc, 'grant', role as PermitRole);
+            throw new PermissionError('无权授予或覆盖该题目角色');
+        }
         const link = `/p/${pdoc.pid || pdoc.docId}`;
-        const roleZh = role === 'maintainer' ? '题目维护者' : '验题人';
+        const roleZh = role === 'maintainer' ? '题目维护者' : role === 'author' ? '出题人' : '验题人';
         const mutationId = deriveAclRequestId(
             requestId,
             'problem-permit-grant',
@@ -129,12 +212,36 @@ class ProblemPermitGrantHandler extends Handler {
                 .sort((a, b) => a - b)
                 .join(','),
         );
+        let deniedInsideClaim = false;
         await ProblemModel.withAuthorizedWriteClaim(
             domainId,
             pdoc.docId,
             this.user,
             'permit-grant',
             async (claim) => {
+                const currentPdoc = await ProblemModel.get(domainId, pdoc.docId);
+                if (!currentPdoc) throw new Error(`problem ${domainId}/${pdoc.docId} disappeared during permit grant`);
+                const currentAllowed = grantableProblemRoles(this.user, currentPdoc);
+                const maintainerInvolved = role === 'maintainer' || (await targetHasMaintainerSource(domainId, currentPdoc.docId, targetUids));
+                if (
+                    !currentAllowed.includes(role as PermitRole) ||
+                    (currentPdoc.authoringMode === 'managed' &&
+                        maintainerInvolved &&
+                        !ProblemModel.canManageProblemMaintainers(this.user, currentPdoc))
+                ) {
+                    deniedInsideClaim = true;
+                    return;
+                }
+                // Persist the audit intent before the ACL mutation. A failed
+                // Oplog write must never leave a newly active role behind.
+                await OplogModel.log(this as any, 'problem.permit.grant', {
+                    problemId: pdoc.docId,
+                    targetUids,
+                    role,
+                    action: 'grant',
+                    result: 'attempt',
+                    requestId: mutationId,
+                });
                 await Promise.all(
                     targetUids.map((targetUid) =>
                         permitsModel.grant(domainId, pdoc.docId, targetUid, role as PermitRole, this.user._id, {
@@ -144,9 +251,21 @@ class ProblemPermitGrantHandler extends Handler {
                         }),
                     ),
                 );
+                logger.info(
+                    'Problem permit changed domain=%s pid=%d actor=%d role=%s action=grant targets=%o result=success',
+                    domainId,
+                    pdoc.docId,
+                    this.user._id,
+                    role,
+                    targetUids,
+                );
             },
-            { requestId: mutationId },
+            { requestId: mutationId, capability: initialMaintainerInvolved ? 'publish' : 'collaborators' },
         );
+        if (deniedInsideClaim) {
+            await logManagedPermitDenied(this, pdoc, 'grant', role as PermitRole);
+            throw new PermissionError('无权授予或覆盖该题目角色');
+        }
         await Promise.all(
             targetUids.map(async (targetUid) => {
                 const pairRequestId = `${mutationId}:${targetUid}`;
@@ -177,6 +296,7 @@ class ProblemPermitRevokeHandler extends Handler {
         const domainId = authoritativeDomainId(this, args);
         const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
         if (!pdoc) throw new NotFoundError('题目不存在');
+        await assertManagedPermitBody(this, pdoc, ['permitId', 'requestId'], 'revoke');
         const row = await permitsColl.findOne({
             domainId,
             _id: permitId,
@@ -185,23 +305,84 @@ class ProblemPermitRevokeHandler extends Handler {
         });
         if (!row) throw new NotFoundError('权限记录不存在');
         const isSelf = row.uid === this.user._id;
-        if (!isSelf && !canManageProblemPermits(this.user, pdoc)) {
+        const canSelfRevoke = isSelf && (pdoc.authoringMode !== 'managed' || row.role !== 'maintainer');
+        const initialMaintainerInvolved = pdoc.authoringMode === 'managed' && (await targetHasMaintainerSource(domainId, pdoc.docId, [row.uid]));
+        const canManageInitialRole = initialMaintainerInvolved
+            ? ProblemModel.canManageProblemMaintainers(this.user, pdoc)
+            : canSelfRevoke || canRevokeProblemRole(this.user, pdoc, row.role);
+        if (!canManageInitialRole) {
+            if (pdoc.authoringMode === 'managed') await logManagedPermitDenied(this, pdoc, 'revoke', row.role);
             throw new PermissionError('无权撤销该权限');
         }
         const mutationId = deriveAclRequestId(requestId, 'problem-permit-revoke', domainId, pdoc.docId, row.uid);
+        let deniedInsideClaim: PermitRole | null = null;
+        let missingInsideClaim = false;
         await ProblemModel.withAuthorizedWriteClaim(
             domainId,
             pdoc.docId,
             this.user,
             'permit-revoke',
-            (claim) =>
-                permitsModel.revoke(domainId, permitId, {
+            async (claim) => {
+                const [currentPdoc, currentRow] = await Promise.all([
+                    ProblemModel.get(domainId, pdoc.docId),
+                    permitsColl.findOne({
+                        domainId,
+                        _id: permitId,
+                        pid: pdoc.docId,
+                        active: canonicalActiveFilter(),
+                    }),
+                ]);
+                if (!currentPdoc) throw new Error(`problem ${domainId}/${pdoc.docId} disappeared during permit revoke`);
+                if (!currentRow) {
+                    missingInsideClaim = true;
+                    return;
+                }
+                const currentIsSelf = currentRow.uid === this.user._id;
+                const currentCanSelfRevoke = currentIsSelf && (currentPdoc.authoringMode !== 'managed' || currentRow.role !== 'maintainer');
+                const maintainerInvolved = await targetHasMaintainerSource(domainId, currentPdoc.docId, [currentRow.uid]);
+                const allowed =
+                    currentPdoc.authoringMode === 'managed' && maintainerInvolved
+                        ? ProblemModel.canManageProblemMaintainers(this.user, currentPdoc)
+                        : currentCanSelfRevoke || canRevokeProblemRole(this.user, currentPdoc, currentRow.role);
+                if (!allowed) {
+                    deniedInsideClaim = currentRow.role;
+                    return;
+                }
+                // See grant: audit persistence is part of the precondition,
+                // not a fallible step after the canonical ACL has changed.
+                await OplogModel.log(this as any, 'problem.permit.revoke', {
+                    problemId: pdoc.docId,
+                    targetUid: currentRow.uid,
+                    role: currentRow.role,
+                    action: 'revoke',
+                    result: 'attempt',
+                    requestId: mutationId,
+                });
+                await permitsModel.revoke(domainId, permitId, {
                     requestId: mutationId,
                     actor: this.user._id,
                     writeClaimRequestId: claim.requestId,
-                }),
-            { requestId: mutationId, selfRevokeUid: isSelf ? row.uid : undefined },
+                });
+                logger.info(
+                    'Problem permit changed domain=%s pid=%d actor=%d role=%s action=revoke target=%d result=success',
+                    domainId,
+                    pdoc.docId,
+                    this.user._id,
+                    currentRow.role,
+                    currentRow.uid,
+                );
+            },
+            {
+                requestId: mutationId,
+                selfRevokeUid: canSelfRevoke && !initialMaintainerInvolved ? row.uid : undefined,
+                capability: initialMaintainerInvolved ? 'publish' : 'collaborators',
+            },
         );
+        if (missingInsideClaim) throw new NotFoundError('权限记录不存在');
+        if (deniedInsideClaim) {
+            await logManagedPermitDenied(this, pdoc, 'revoke', deniedInsideClaim);
+            throw new PermissionError('无权撤销该题目角色');
+        }
         this.response.body = { success: true, requestId: mutationId };
     }
 }
@@ -214,8 +395,8 @@ class ContestVerifierAddHandler extends Handler {
     @param('requestId', Types.String, true)
     async post(args: { domainId?: unknown }, tid: ObjectId, uid: number, role: string, note: string, requestId: string | undefined) {
         const domainId = authoritativeDomainId(this, args);
-        const r = (role || 'verifier') as PermitRole;
-        if (!VALID_ROLES.includes(r)) {
+        const r = (role || 'verifier') as ContestPermitRole;
+        if (!CONTEST_ROLES.includes(r)) {
             throw new ValidationError('role', null, 'role 必须是 verifier 或 maintainer');
         }
         const tdoc = await ContestModel.get(domainId, tid);
@@ -227,6 +408,14 @@ class ContestVerifierAddHandler extends Handler {
         if (!target) throw new ValidationError('uid', null, '目标用户不存在');
         if (uid === tdoc.owner) {
             throw new ValidationError('uid', null, '不能给比赛作者自己授权');
+        }
+        if (r === 'maintainer') {
+            for (const pid of tdoc.pids || []) {
+                const pdoc = await ProblemModel.get(domainId, pid);
+                if (pdoc?.authoringMode === 'managed') {
+                    throw new ValidationError('role', null, '托管题维护者必须由系统管理员逐题直接授予');
+                }
+            }
         }
         const verifiers = tdoc.verifiers || [];
         if (!verifiers.includes(uid)) {

@@ -30,7 +30,7 @@ function matchesGuardedFilter(doc: any, filter: any): boolean {
     if (lockedUid !== undefined && doc.aclMutationLocks?.some((lock: any) => lock.uid === lockedUid)) return false;
     if (filter['aclMutationLocks.0']?.$exists === false && doc.aclMutationLocks?.length) return false;
     if (filter.aclWriteClaim?.$exists === false && doc.aclWriteClaim !== undefined) return false;
-    for (const key of ['aclWriteClaim.requestId', 'aclWriteClaim.actor', 'aclWriteClaim.state']) {
+    for (const key of ['aclWriteClaim.requestId', 'aclWriteClaim.actor', 'aclWriteClaim.capability', 'aclWriteClaim.state']) {
         if (filter[key] !== undefined && doc.aclWriteClaim?.[key.split('.')[1]] !== filter[key]) return false;
     }
     if (filter.maintainer !== undefined && !doc.maintainer?.includes(filter.maintainer)) return false;
@@ -131,10 +131,19 @@ const {
     assertProblemAclDomain,
     assertProblemBankSelection,
     buildProblemBankScope,
+    canArchiveProblem,
+    canAuthorProblem,
     canBrowseProblemBank,
+    canDeleteProblem,
+    canEditProblemContent,
+    canEditProblemMetadata,
+    canManageProblemCollaborators,
+    canManageProblemMaintainers,
     canMaintainProblem,
+    canPublishProblem,
     canViewProblem,
     isProblemBankAdmin,
+    readStableEditableProblem,
     readStableMaintainableProblem,
     readStableViewableProblem,
     refreshProblemAcl,
@@ -142,11 +151,12 @@ const {
 
 const { PERM, PRIV } = require('../src/model/builtin.ts');
 
-type UserKind = 'student' | 'creator' | 'hidden-viewer' | 'admin';
+type UserKind = 'student' | 'creator' | 'draft-creator' | 'hidden-viewer' | 'admin';
 
 function makeUser(kind: UserKind, overrides: Record<string, unknown> = {}) {
     const perms = new Set<bigint>();
     if (kind === 'creator') perms.add(PERM.PERM_CREATE_PROBLEM);
+    if (kind === 'draft-creator') perms.add(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
     if (kind === 'hidden-viewer') perms.add(PERM.PERM_VIEW_PROBLEM_HIDDEN);
     if (kind !== 'student') perms.add(PERM.PERM_VIEW_PROBLEM);
     if (kind === 'student') perms.add(PERM.PERM_VIEW_PROBLEM);
@@ -154,6 +164,7 @@ function makeUser(kind: UserKind, overrides: Record<string, unknown> = {}) {
         _id: 42,
         role: kind === 'admin' ? 'default' : 'root',
         _permitPids: new Set<number>(),
+        _authoredPids: new Set<number>(),
         _maintainedPids: new Set<number>(),
         _aclFencedPids: new Set<number>(),
         _problemAclDomainId: 'system',
@@ -166,6 +177,14 @@ function makeUser(kind: UserKind, overrides: Record<string, unknown> = {}) {
 
 function pdoc(docId: number, owner = 7, hidden = true, maintainer: number[] = [], domainId = 'system') {
     return { domainId, docId, owner, hidden, maintainer } as any;
+}
+
+function managedPdoc(docId: number, owner = 7, hidden = true, maintainer: number[] = [], domainId = 'system') {
+    return {
+        ...pdoc(docId, owner, hidden, maintainer, domainId),
+        authoringMode: 'managed',
+        managedAuthoring: { workingTitle: 'working', metadataStatus: 'draft' },
+    } as any;
 }
 
 async function captureFailure(run: () => Promise<unknown>) {
@@ -188,6 +207,7 @@ beforeEach(() => {
         async loadAclForUser() {
             return {
                 permitPids: new Set<number>(),
+                authoredPids: new Set<number>(),
                 maintainedPids: new Set<number>(),
                 fencedPids: new Set<number>(),
             };
@@ -221,7 +241,10 @@ describe('P2.11 problem-bank capability matrix', () => {
         expect(scope).to.deep.equal({
             $and: [
                 {
-                    $or: [{ owner: 42 }, { $and: [{ docId: { $in: [102] } }, { maintainer: 42 }] }],
+                    $or: [
+                        { $and: [{ owner: 42 }, { authoringMode: { $ne: 'managed' } }] },
+                        { $and: [{ docId: { $in: [102] } }, { maintainer: 42 }] },
+                    ],
                 },
                 { docId: { $nin: [103, 104] } },
                 { 'aclMutationLocks.uid': { $ne: 42 } },
@@ -281,6 +304,129 @@ describe('P2.11 problem-bank capability matrix', () => {
         ).to.equal(false);
         expect(canMaintainProblem(makeUser('creator'), otherDomain)).to.equal(false);
         expect(canMaintainProblem(makeUser('admin'), otherDomain)).to.equal(false);
+    });
+});
+
+describe('P2.13 managed programming authoring matrix', () => {
+    it('enumerates only explicitly assigned managed drafts for restricted creators and authors', () => {
+        const unassigned = makeUser('draft-creator');
+        expect(canBrowseProblemBank(unassigned)).to.equal(true);
+        expect(buildProblemBankScope(unassigned)).to.deep.equal({ docId: { $in: [] } });
+
+        const assigned = makeUser('student', {
+            _permitPids: new Set([100, 101]),
+            _authoredPids: new Set([100, 101]),
+            _aclFencedPids: new Set([101]),
+        });
+        expect(canBrowseProblemBank(assigned)).to.equal(true);
+        expect(buildProblemBankScope(assigned)).to.deep.equal({
+            $and: [
+                { $and: [{ docId: { $in: [100] } }, { authoringMode: 'managed' }] },
+                { docId: { $nin: [101] } },
+                { 'aclMutationLocks.uid': { $ne: 42 } },
+            ],
+        });
+
+        const restrictedMaintainer = makeUser('student', {
+            _permitPids: new Set([120]),
+            _maintainedPids: new Set([120]),
+        });
+        expect(buildProblemBankScope(restrictedMaintainer)).to.deep.equal({
+            $and: [
+                {
+                    $and: [{ docId: { $in: [120] } }, { maintainer: 42 }, { authoringMode: 'managed' }],
+                },
+                { 'aclMutationLocks.uid': { $ne: 42 } },
+            ],
+        });
+
+        const legacyCreator = makeUser('creator');
+        expect(buildProblemBankScope(legacyCreator)).to.deep.equal({
+            $and: [{ $and: [{ owner: 42 }, { authoringMode: { $ne: 'managed' } }] }, { 'aclMutationLocks.uid': { $ne: 42 } }],
+        });
+    });
+
+    it('enforces the seven-identity capability matrix without granting managed owners implicit maintenance', () => {
+        const draft = managedPdoc(100, 42, true, [77]);
+        const ordinary = makeUser('student');
+        const author = makeUser('student', { _permitPids: new Set([100]), _authoredPids: new Set([100]) });
+        const trustedCreator = makeUser('draft-creator');
+        const verifier = makeUser('student', { _permitPids: new Set([100]) });
+        const maintainer = makeUser('student', { _permitPids: new Set([100]), _maintainedPids: new Set([100]), _id: 77 });
+        const legacyOwner = makeUser('creator');
+        const admin = makeUser('admin');
+
+        expect(canMaintainProblem(ordinary, draft)).to.equal(false);
+        expect(canMaintainProblem(makeUser('student'), draft)).to.equal(false);
+        expect(canEditProblemContent(ordinary, draft)).to.equal(false);
+        expect(canViewProblem(ordinary, draft)).to.equal(false);
+        expect(canViewProblem(makeUser('hidden-viewer'), draft)).to.equal(false);
+
+        expect(canAuthorProblem(author, draft)).to.equal(true);
+        expect(canViewProblem(author, draft)).to.equal(true);
+        expect(canEditProblemContent(author, draft)).to.equal(true);
+        expect(canEditProblemMetadata(author, draft)).to.equal(false);
+        expect(canManageProblemCollaborators(author, draft)).to.equal(false);
+        expect(canPublishProblem(author, draft)).to.equal(false);
+        expect(canArchiveProblem(author, draft)).to.equal(false);
+        expect(canDeleteProblem(author, draft)).to.equal(false);
+
+        expect(canEditProblemContent(trustedCreator, draft)).to.equal(false);
+        expect(canEditProblemContent(verifier, draft)).to.equal(false);
+        expect(canViewProblem(verifier, draft)).to.equal(true);
+
+        expect(canMaintainProblem(maintainer, draft)).to.equal(true);
+        expect(canEditProblemContent(maintainer, draft)).to.equal(true);
+        expect(canEditProblemMetadata(maintainer, draft)).to.equal(true);
+        expect(canManageProblemCollaborators(maintainer, draft)).to.equal(true);
+        expect(canManageProblemMaintainers(maintainer, draft)).to.equal(false);
+        expect(canPublishProblem(maintainer, draft)).to.equal(false);
+        expect(canArchiveProblem(maintainer, draft)).to.equal(false);
+        expect(canDeleteProblem(maintainer, draft)).to.equal(false);
+
+        const confirmed = { ...draft, managedAuthoring: { ...draft.managedAuthoring, metadataStatus: 'confirmed' } };
+        expect(canEditProblemMetadata(maintainer, confirmed)).to.equal(false);
+
+        const legacy = pdoc(200, legacyOwner._id);
+        expect(canEditProblemContent(legacyOwner, legacy)).to.equal(true);
+        expect(canEditProblemMetadata(legacyOwner, legacy)).to.equal(true);
+        expect(canManageProblemMaintainers(legacyOwner, legacy)).to.equal(true);
+        expect(canPublishProblem(legacyOwner, legacy)).to.equal(true);
+        expect(canArchiveProblem(legacyOwner, legacy)).to.equal(true);
+        expect(canDeleteProblem(legacyOwner, legacy)).to.equal(true);
+
+        expect(canEditProblemContent(admin, draft)).to.equal(true);
+        expect(canEditProblemMetadata(admin, draft)).to.equal(true);
+        expect(canManageProblemMaintainers(admin, draft)).to.equal(true);
+        expect(canPublishProblem(admin, draft)).to.equal(true);
+        expect(canArchiveProblem(admin, draft)).to.equal(true);
+        expect(canDeleteProblem(admin, draft)).to.equal(true);
+    });
+
+    it('lets an active author acquire only a content write claim without a maintainer mirror', async () => {
+        const acquire = (access as any).acquireProblemWriteClaim;
+        const clear = (access as any).clearProblemWriteClaim;
+        const author = makeUser('student', { _permitPids: new Set([100]), _authoredPids: new Set([100]) });
+        liveProblem = {
+            ...managedPdoc(100),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 2,
+            aclMutationLocks: [],
+            maintainer: [],
+        };
+        const contentClaim = await acquire(author, structuredClone(liveProblem), 'author-content', 'metadata-edit', { capability: 'content' });
+        expect(contentClaim?.actor).to.equal(42);
+        expect(contentClaim?.capability).to.equal('content');
+        expect(liveProblem.aclWriteClaim.capability).to.equal('content');
+        expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('maintainer');
+        expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('$or');
+        const escalation = await captureFailure(() => (access as any).commitProblemWriteClaimUpdate(contentClaim, { hidden: false }, {}, 'publish'));
+        expect(escalation).to.be.instanceOf(TypeError);
+        expect(liveProblem.hidden).to.equal(true);
+        expect(await clear(contentClaim)).to.equal(true);
+
+        const metadataClaim = await acquire(author, structuredClone(liveProblem), 'author-metadata', 'metadata-edit', { capability: 'metadata' });
+        expect(metadataClaim).to.equal(null);
     });
 });
 
@@ -503,6 +649,14 @@ describe('P2.11 concrete-problem viewing', () => {
         expect(canViewProblem(makeUser('hidden-viewer'), pdoc(100))).to.equal(true);
     });
 
+    it('does not let managed owner or global hidden permission bypass direct ACL assignment', () => {
+        const managed = managedPdoc(100, 42, true);
+        expect(canViewProblem(makeUser('student'), managed)).to.equal(false);
+        expect(canViewProblem(makeUser('hidden-viewer'), managed)).to.equal(false);
+        expect(canViewProblem(makeUser('student', { _permitPids: new Set([100]) }), managed)).to.equal(true);
+        expect(canViewProblem(makeUser('admin'), managed)).to.equal(true);
+    });
+
     it('fails closed for public, owner, and administrator access when ACL preload fails', () => {
         const failedPreload = { _problemAclLoaded: false };
         expect(canViewProblem(makeUser('student', failedPreload), pdoc(100, 7, false))).to.equal(false);
@@ -590,6 +744,7 @@ describe('P2.11 stable direct-problem reads', () => {
     function permitSnapshot(...pids: number[]) {
         return {
             permitPids: new Set(pids),
+            authoredPids: new Set<number>(),
             maintainedPids: new Set<number>(),
             fencedPids: new Set<number>(),
         };
@@ -598,7 +753,17 @@ describe('P2.11 stable direct-problem reads', () => {
     function maintainerSnapshot(...pids: number[]) {
         return {
             permitPids: new Set(pids),
+            authoredPids: new Set<number>(),
             maintainedPids: new Set(pids),
+            fencedPids: new Set<number>(),
+        };
+    }
+
+    function authorSnapshot(...pids: number[]) {
+        return {
+            permitPids: new Set(pids),
+            authoredPids: new Set(pids),
+            maintainedPids: new Set<number>(),
             fencedPids: new Set<number>(),
         };
     }
@@ -752,6 +917,33 @@ describe('P2.11 stable direct-problem reads', () => {
         expect(loads).to.equal(2);
     });
 
+    it('fails closed when an author revoke completes before the final editor read', async () => {
+        liveProblem = {
+            ...managedPdoc(100),
+            docType: TYPE_PROBLEM,
+            config: 'secret: true',
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+        };
+        let loads = 0;
+        let finals = 0;
+        (global as any).Hydro.model.permits.loadAclForUser = async () => {
+            loads++;
+            return loads === 1 ? authorSnapshot(100) : authorSnapshot();
+        };
+
+        const result = await readStableEditableProblem(
+            'system',
+            makeUser('student'),
+            readLiveProblem(() => {
+                if (finals++ === 0) liveProblem.aclMutationRevision = 1;
+            }),
+        );
+
+        expect(result).to.equal(null);
+        expect(loads).to.equal(2);
+    });
+
     it('requires a stable owner-or-maintainer mirror for maintainer-only reads', async () => {
         liveProblem = {
             ...pdoc(100, 7, true, []),
@@ -803,6 +995,7 @@ describe('P2.11 ACL reload observability', () => {
         const raw = new Error('database unavailable');
         const user = makeUser('creator', {
             _permitPids: new Set([901]),
+            _authoredPids: new Set([900]),
             _maintainedPids: new Set([902]),
             _aclFencedPids: new Set([903]),
             _problemAclDomainId: 'system',
@@ -820,6 +1013,7 @@ describe('P2.11 ACL reload observability', () => {
         expect(Object.prototype.propertyIsEnumerable.call(denied, 'cause')).to.equal(false);
         expect(Object.keys(denied)).not.to.include('cause');
         expect([...user._permitPids]).to.deep.equal([]);
+        expect([...user._authoredPids]).to.deep.equal([]);
         expect([...user._maintainedPids]).to.deep.equal([]);
         expect([...user._aclFencedPids]).to.deep.equal([]);
         expect(user._problemAclDomainId).to.equal(undefined);
@@ -828,6 +1022,7 @@ describe('P2.11 ACL reload observability', () => {
 
         (global as any).Hydro.model.permits.loadAclForUser = async () => ({
             permitPids: [],
+            authoredPids: new Set(),
             maintainedPids: new Set(),
             fencedPids: new Set(),
         });
@@ -936,14 +1131,23 @@ describe('P2.11 stable direct-read entry contracts', () => {
     const recordSource = readSource('packages/hydrooj/src/handler/record.ts');
     const referenceSource = readSource('packages/hydrooj/src/handler/problem-reference.ts');
     const homeSource = readSource('packages/hydrooj/src/handler/home.ts');
+    const userSource = readSource('packages/hydrooj/src/handler/user.ts');
+    const discussionSource = readSource('packages/hydrooj/src/model/discussion.ts');
+    const mediaSource = readSource('packages/ui-default/index.ts');
+    const recordTemplate = readSource('packages/ui-default/templates/record_main_tr.html');
     const permitsSource = readSource('packages/krypton-permits/src/handler.ts');
 
     it('routes record, referenced-problem, starred, and permit-inbox reads through the stable helper', () => {
         expect(recordSource).not.to.include('problem.canViewBy(');
+        expect(recordSource).to.include('problem.getListViewableAuthorized(');
         expect(recordSource).to.include('problem.getViewableAuthorized(');
         expect(referenceSource).to.include('problem.getViewableAuthorized(');
         expect(referenceSource).not.to.include('problem.canViewBy(');
         expect(homeSource).to.include('ProblemModel.getViewableAuthorized(');
+        expect(userSource).to.include('problem.getListViewableAuthorized(');
+        expect(discussionSource).to.include('problem.getViewableAuthorized(');
+        expect(mediaSource).to.include('ProblemModel.getViewableAuthorized(');
+        expect(recordTemplate).not.to.include('handler.user.own(pdoc)');
         expect(permitsSource).to.include('ProblemModel.getViewableAuthorized(');
     });
 });
@@ -960,8 +1164,8 @@ describe('P2.11 startup contracts', () => {
     });
 
     it('keeps problem.hideBank default-on only as a deprecated compatibility setting', () => {
-        expect(settingSource).to.include("Setting('setting_basic', 'problem.hideBank', true");
-        expect(settingSource).to.match(/problem\.hideBank[\s\S]{0,500}@deprecated/);
-        expect(settingSource).to.match(/problem\.hideBank[\s\S]{0,700}not an authorization/i);
+        expect(settingSource).to.match(/Setting\(\s*'setting_basic',\s*'problem\.hideBank',\s*true/);
+        expect(settingSource).to.match(/@deprecated[\s\S]{0,500}problem\.hideBank/);
+        expect(settingSource).to.match(/not an authorization[\s\S]{0,700}problem\.hideBank/i);
     });
 });

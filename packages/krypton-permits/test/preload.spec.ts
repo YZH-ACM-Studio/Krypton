@@ -13,6 +13,7 @@ describe('problem ACL preload', () => {
                 calls++;
                 return {
                     permitPids: new Set([1, 2]),
+                    authoredPids: new Set([1]),
                     maintainedPids: new Set([2]),
                     fencedPids: new Set([1]),
                 };
@@ -32,6 +33,7 @@ describe('problem ACL preload', () => {
         const user: any = {
             _id: 7,
             _permitPids: new Set([999]),
+            _authoredPids: new Set([999]),
             _maintainedPids: new Set([999]),
             _aclFencedPids: new Set(),
             _problemAclLoaded: true,
@@ -50,6 +52,7 @@ describe('problem ACL preload', () => {
         expect(user._problemAclLoaded).to.equal(false);
         expect(user._problemAclDomainId).to.equal(undefined);
         expect([...user._permitPids]).to.deep.equal([]);
+        expect([...user._authoredPids]).to.deep.equal([]);
         expect([...user._maintainedPids]).to.deep.equal([]);
         expect([...user._aclFencedPids]).to.deep.equal([]);
         expect((errors[0] as Error).message).to.equal('database unavailable');

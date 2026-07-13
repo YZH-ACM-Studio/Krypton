@@ -21,6 +21,7 @@ export function ProblemMinePage() {
     pcount: number;
     ppcount: number;
     canCreate: boolean;
+    canCreateProgrammingDraft: boolean;
   };
   const pdocs = data.pdocs || [];
   const page = data.page || 1;
@@ -31,9 +32,9 @@ export function ProblemMinePage() {
         <BookOpen className="size-5 text-primary" />
         <h1 className="text-xl font-semibold">我的题目</h1>
         <span className="ml-2 text-xs text-muted-foreground">共 {data.pcount ?? pdocs.length} 题</span>
-        {data.canCreate ? (
+        {data.canCreate || data.canCreateProgrammingDraft ? (
           <Button asChild size="sm" className="ml-auto gap-1">
-            <a href="/problem/create">
+            <a href={data.canCreate ? '/problem/create' : '/problem/create/programming'}>
               <Plus className="size-3.5" />
               新建题目
             </a>
@@ -57,7 +58,7 @@ export function ProblemMinePage() {
               {pdocs.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="py-12 text-center text-sm text-muted-foreground">
-                    你还没有出过题目。{data.canCreate ? '点击右上角「新建题目」开始。' : ''}
+                    你还没有参与出题。{data.canCreate || data.canCreateProgrammingDraft ? '点击右上角「新建题目」开始。' : ''}
                   </TableCell>
                 </TableRow>
               ) : (

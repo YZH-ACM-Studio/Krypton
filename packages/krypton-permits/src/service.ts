@@ -41,6 +41,7 @@ export interface AclServiceRepository extends AclRepository {
     listProblemAclMutationLocksForProblem(domainId: string, pid: number): Promise<ProblemAclMutationLock[]>;
     listProblemWriteClaimsForDomain(domainId: string): Promise<ProblemWriteClaim[]>;
     problemExists(domainId: string, pid: number): Promise<boolean>;
+    isManagedProblem(domainId: string, pid: number): Promise<boolean>;
     getProblemWriteClaim(domainId: string, pid: number): Promise<ProblemWriteClaim | null>;
     reactivateErroredProblemWriteClaim(domainId: string, pid: number, requestId: string): Promise<boolean>;
     markProblemWriteClaimRepairError(domainId: string, pid: number, requestId: string, error: unknown): Promise<boolean>;
@@ -152,6 +153,10 @@ export function createAclService(repo: AclServiceRepository, options: { now?: ()
         writeClaimRequestId?: string,
     ) {
         if (!contestId) throw new Error('contest sourceId is required');
+        if (role === 'author') throw new Error('author role is direct-problem only');
+        if (role === 'maintainer' && (await repo.isManagedProblem(domainId, pid))) {
+            throw new Error('managed problem maintainer must be granted directly by a system administrator');
+        }
         return coordinator.mutate({
             domainId,
             pid,
@@ -576,8 +581,12 @@ export function createAclService(repo: AclServiceRepository, options: { now?: ()
         const existing = await repo.listSourcesForContest(domainId, contestId);
         const desired = new Map<string, { pid: number; uid: number; role: PermitRole }>();
         for (const pid of [...new Set(newPids)].sort((a, b) => a - b)) {
+            const managed = await repo.isManagedProblem(domainId, pid);
             for (const user of users.slice().sort((a, b) => a.uid - b.uid)) {
-                desired.set(`${pid}:${user.uid}`, { pid, uid: user.uid, role: user.role });
+                // Contest roles may grant verification access to managed
+                // drafts, but must never create or propagate maintainer.
+                const role = managed && user.role === 'maintainer' ? 'verifier' : user.role;
+                desired.set(`${pid}:${user.uid}`, { pid, uid: user.uid, role });
             }
         }
         const toRemove = existing.filter((source) => !desired.has(`${source.pid}:${source.uid}`));
@@ -613,6 +622,7 @@ export function createAclService(repo: AclServiceRepository, options: { now?: ()
         const active = canonical.filter((permit) => permit.active === true && !fencedPids.has(permit.pid));
         return {
             permitPids: new Set(active.map((permit) => permit.pid)),
+            authoredPids: new Set(active.filter((permit) => permit.role === 'author').map((permit) => permit.pid)),
             maintainedPids: new Set(active.filter((permit) => permit.role === 'maintainer').map((permit) => permit.pid)),
             fencedPids,
         };

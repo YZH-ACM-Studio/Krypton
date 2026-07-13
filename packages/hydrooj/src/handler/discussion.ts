@@ -49,7 +49,7 @@ class DiscussionHandler extends Handler {
         }
         // TODO(twd2): exclude problem/contest discussions?
         // TODO(iceboy): continuation based pagination.
-        this.vnode = await discussion.getVnode(domainId, typeMapper[type], name, this.user._id);
+        this.vnode = await discussion.getVnode(domainId, typeMapper[type], name, this.user);
         if (!discussion.checkVNodeVisibility(typeMapper[type], this.vnode, this.user)) {
             throw new DiscussionNodeNotFoundError(domainId, this.vnode.id);
         }
@@ -76,10 +76,7 @@ class DiscussionMainHandler extends Handler {
             domainId,
             ddocs.map((ddoc) => ddoc.owner),
         );
-        const [vndict, vnodes] = await Promise.all([
-            discussion.getListVnodes(domainId, ddocs, this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN), this.user.group),
-            discussion.getNodes(domainId),
-        ]);
+        const [vndict, vnodes] = await Promise.all([discussion.getListVnodes(domainId, ddocs, this.user), discussion.getNodes(domainId)]);
         this.response.template = 'discussion_main_or_node.html';
         this.response.body = {
             ddocs,

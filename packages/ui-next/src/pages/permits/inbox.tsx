@@ -1,14 +1,16 @@
 /**
- * /tasks/verify — "我的验题任务" inbox.
+ * /permits/inbox — per-problem collaboration inbox.
  *
  * Backed by krypton-permits `MyVerifyInboxHandler` (returns the user's
  * permit rows plus joined problem/granter/contest dicts). Two sections:
  * direct invitations (granted on a single problem) and contest-cascade
  * invitations (granted via a contest's verifier list, tagged with
- * `viaContest`). Each row supports "退出验题" (revoke own permit).
+ * `viaContest`). Direct author/verifier roles may be self-revoked; a managed
+ * maintainer role remains administrator-controlled.
  */
 import { ChevronRight, EyeOff, Lock, Mail, Trophy } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,7 +20,7 @@ interface PermitRow {
   _id: string;
   pid: number;
   uid: number;
-  role: 'verifier' | 'maintainer';
+  role: 'verifier' | 'author' | 'maintainer';
   grantedBy: number;
   grantedAt: string;
   viaContest: string | null;
@@ -35,6 +37,7 @@ interface ProblemMini {
   title: string;
   hidden?: boolean;
   lockHidden?: boolean;
+  authoringMode?: 'managed';
 }
 interface ContestMini {
   _id: string;
@@ -50,6 +53,7 @@ export function MyVerifyInboxPage() {
     tdict: Record<string, ContestMini>;
   };
   const direct = (data.permits || []).filter((p) => !p.viaContest);
+  const [revokeError, setRevokeError] = useState('');
   // Group contest permits by tid
   const byContest = new Map<string, PermitRow[]>();
   for (const p of data.permits || []) {
@@ -59,11 +63,23 @@ export function MyVerifyInboxPage() {
   }
 
   async function revoke(pid: number, permitId: string) {
-    if (!confirm('退出验题？')) return;
+    if (!confirm('退出该题目的协作角色？')) return;
+    setRevokeError('');
     const fd = new FormData();
     fd.set('permitId', permitId);
     const r = await fetch(`/p/${pid}/permits/revoke`, { method: 'POST', body: fd, credentials: 'include' });
-    if (r.ok) window.location.reload();
+    if (!r.ok) {
+      let message = `退出协作失败：HTTP ${r.status}`;
+      try {
+        const body = await r.json();
+        message = body?.error?.message || body?.message || body?.error || message;
+      } catch {
+        // The HTTP status remains the explicit error when the response is not JSON.
+      }
+      setRevokeError(message);
+      return;
+    }
+    window.location.reload();
   }
 
   return (
@@ -72,15 +88,21 @@ export function MyVerifyInboxPage() {
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold">
             <Mail className="size-6 text-primary" />
-            我的验题任务
+            我的出题协作
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">被邀请验题的所有题目都会出现在这里。直接邀请和通过比赛邀请分开列出。</p>
+          <p className="mt-1 text-sm text-muted-foreground">逐题分配的出题、验题与维护角色都会出现在这里。</p>
         </div>
       </div>
 
+      {revokeError ? (
+        <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {revokeError}
+        </p>
+      ) : null}
+
       {direct.length === 0 && byContest.size === 0 ? (
         <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">还没有任何验题邀请</CardContent>
+          <CardContent className="py-10 text-center text-sm text-muted-foreground">还没有任何题目协作邀请</CardContent>
         </Card>
       ) : null}
 
@@ -167,14 +189,18 @@ function PermitRowItem({
           </Badge>
         ) : null}
         <Badge variant={permit.role === 'maintainer' ? 'default' : 'secondary'} className="text-[10px]">
-          {permit.role === 'maintainer' ? '维护者' : '验题人'}
+          {permit.role === 'maintainer' ? '维护者' : permit.role === 'author' ? '出题人' : '验题人'}
         </Badge>
       </div>
       <div className="flex items-center gap-3 shrink-0">
         <span className="text-xs text-muted-foreground">{granter ? `${granter.uname} 邀请` : `uid:${permit.grantedBy}`}</span>
-        <Button type="button" size="sm" variant="ghost" onClick={onRevoke}>
-          退出
-        </Button>
+        {permit.role === 'maintainer' && p.authoringMode === 'managed' ? (
+          <span className="text-xs text-muted-foreground">需管理员撤销</span>
+        ) : (
+          <Button type="button" size="sm" variant="ghost" onClick={onRevoke}>
+            退出
+          </Button>
+        )}
       </div>
     </li>
   );

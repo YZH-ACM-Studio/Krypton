@@ -147,19 +147,72 @@ function buildProblemTextFilter(q: string): Filter<ProblemDoc> {
     return { $or: alternatives };
 }
 
-function assertCanMaintainProblem(udoc: User, pdoc: ProblemDoc) {
-    if (!problem.canMaintainProblem(udoc, pdoc)) {
-        throw new PermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
-    }
+async function auditManagedWriteDenied(handler: Handler, pdoc: ProblemDoc, operation: string, capability: string, fields: string[] = []) {
+    if (pdoc.authoringMode !== 'managed') return;
+    logger.warn(
+        'Managed write rejected domain=%s pid=%d actor=%d operation=%s capability=%s fields=%o result=denied',
+        pdoc.domainId,
+        pdoc.docId,
+        handler.user._id,
+        operation,
+        capability,
+        fields,
+    );
+    await oplog.log(handler, 'problem.managed.write.denied', {
+        pid: pdoc.docId,
+        action: operation,
+        capability,
+        fields,
+        result: 'denied',
+    });
 }
 
-async function requireStableMaintainableProblem(
+async function assertProblemWriteCapability(handler: Handler, pdoc: ProblemDoc, allowed: boolean, operation: string, capability: string) {
+    if (allowed) return;
+    await auditManagedWriteDenied(handler, pdoc, operation, capability);
+    throw new PermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
+}
+
+const MANAGED_FILE_WRITE_FIELDS: Record<string, string[]> = {
+    upload_file: ['operation', 'filename', 'type'],
+    rename_files: ['operation', 'files', 'newNames', 'type'],
+    delete_files: ['operation', 'files', 'type'],
+    generate_testdata: ['operation', 'std', 'gen'],
+};
+
+async function assertManagedFileWriteBody(handler: Handler, pdoc: ProblemDoc) {
+    if (pdoc.authoringMode !== 'managed') return;
+    const body = handler.request.body || {};
+    const operation = String((handler.args as any).operation || body.operation || '');
+    const allowed = MANAGED_FILE_WRITE_FIELDS[operation];
+    if (!allowed) return;
+    const unknownFields = Object.keys(body).filter((field) => !allowed.includes(field));
+    if (!unknownFields.length) return;
+    await auditManagedWriteDenied(handler, pdoc, operation, 'content', unknownFields);
+    throw new ValidationError('fields', null, `托管题文件操作不接受字段：${unknownFields.join(', ')}`);
+}
+
+function problemAuthoringCapabilities(udoc: User, pdoc: ProblemDoc) {
+    return {
+        managed: pdoc.authoringMode === 'managed',
+        canEditContent: problem.canEditProblemContent(udoc, pdoc),
+        canEditDraftMetadata: problem.canEditProblemMetadata(udoc, pdoc),
+        canManageCollaborators: problem.canManageProblemCollaborators(udoc, pdoc),
+        canManageMaintainers: problem.canManageProblemMaintainers(udoc, pdoc),
+        canPublish: problem.canPublishProblem(udoc, pdoc),
+        canArchive: problem.canArchiveProblem(udoc, pdoc),
+        canDelete: problem.canDeleteProblem(udoc, pdoc),
+        canClone: problem.canCloneProblem(udoc, pdoc),
+    };
+}
+
+async function requireStableEditableProblem(
     udoc: User,
     pdoc: ProblemDoc,
     projection: any = problem.PROJECTION_PUBLIC,
     rawConfig = false,
 ): Promise<ProblemDoc> {
-    const stable = await problem.getMaintainableAuthorized(pdoc.domainId, pdoc.docId, udoc, projection, rawConfig);
+    const stable = await problem.getEditableAuthorized(pdoc.domainId, pdoc.docId, udoc, projection, rawConfig);
     if (!stable) throw new PermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
     return stable;
 }
@@ -312,7 +365,7 @@ export class ProblemMainHandler extends Handler {
         const ownerIds = quick ? [] : Array.from(new Set(pdocs.map((pdoc) => pdoc.owner)));
         const ownerDict = ownerIds.length ? await user.getList(domainId, ownerIds) : {};
         const ownerNames = Object.fromEntries(pdocs.map((pdoc) => [pdoc.owner, ownerDict[pdoc.owner]?.uname || `UID ${pdoc.owner}`]));
-        const canManageByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canMaintainProblem(this.user, pdoc)]));
+        const canManageByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canEditProblemContent(this.user, pdoc)]));
         if (pjax) {
             this.response.body = {
                 title: this.renderTitle(this.translate('problem_main')),
@@ -383,10 +436,14 @@ export class ProblemMainHandler extends Handler {
             }
         }
         await problem.assertProblemBankSelection(domainId, pids, this.user);
-        const pdict = await problem.getList(domainId, pids, true, true, ['domainId', 'docId', 'reference'], true);
+        const pdict = await problem.getList(domainId, pids, true, true, ['domainId', 'docId', 'reference', 'authoringMode'], true);
         const ids = [];
         for (const pid of pids) {
             let pdoc = pdict[pid];
+            if (pdoc.authoringMode === 'managed') {
+                await problem.refreshProblemAcl(this.user, pdoc.domainId);
+                await assertProblemWriteCapability(this, pdoc, problem.canCloneProblem(this.user, pdoc), 'copy', 'clone');
+            }
             if (pdoc.reference) {
                 const [sourcePdoc, sourceDdoc] = await Promise.all([
                     problem.get(pdoc.reference.domainId, pdoc.reference.pid),
@@ -397,8 +454,26 @@ export class ProblemMainHandler extends Handler {
                 t = `,${sourceDdoc.share || ''},`;
                 if (t !== ',*,' && !t.includes(`,${target},`)) throw new ProblemNotAllowCopyError(sourceDdoc._id, target);
             }
-
-            ids.push(await problem.copy(pdoc.domainId, pdoc.docId, target, undefined, hidden, cloneLang, { actor: this.user._id }));
+            if (pdoc.authoringMode === 'managed') {
+                await problem.refreshProblemAcl(this.user, pdoc.domainId);
+                await assertProblemWriteCapability(this, pdoc, problem.canCloneProblem(this.user, pdoc), 'copy', 'clone');
+                ids.push(
+                    await problem.withAuthorizedWriteClaim(
+                        pdoc.domainId,
+                        pdoc.docId,
+                        this.user,
+                        'copy',
+                        (claim) =>
+                            problem.copy(pdoc.domainId, pdoc.docId, target, undefined, hidden, cloneLang, {
+                                actor: this.user._id,
+                                claim,
+                            }),
+                        { capability: 'clone' },
+                    ),
+                );
+            } else {
+                ids.push(await problem.copy(pdoc.domainId, pdoc.docId, target, undefined, hidden, cloneLang, { actor: this.user._id }));
+            }
         }
         if (redirect) this.response.redirect = this.url('problem_detail', { domainId: target, pid: ids[0] });
         else this.response.body = ids;
@@ -413,7 +488,7 @@ export class ProblemMainHandler extends Handler {
         for (const pid of pids) {
             const pdoc = await problem.get(domainId, pid);
             if (!pdoc) continue;
-            assertCanMaintainProblem(this.user, pdoc);
+            await assertProblemWriteCapability(this, pdoc, problem.canDeleteProblem(this.user, pdoc), 'hard-delete', 'hard-delete');
 
             await problem.delAuthorized(domainId, pid, this.user);
             i++;
@@ -430,7 +505,7 @@ export class ProblemMainHandler extends Handler {
         for (const pid of pids) {
             const pdoc = await problem.get(domainId, pid);
             if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
-            assertCanMaintainProblem(this.user, pdoc);
+            await assertProblemWriteCapability(this, pdoc, problem.canPublishProblem(this.user, pdoc), 'hide', 'publish');
 
             await problem.editAuthorized(domainId, pid, { hidden: true }, this.user);
         }
@@ -445,7 +520,7 @@ export class ProblemMainHandler extends Handler {
         for (const pid of pids) {
             const pdoc = await problem.get(domainId, pid);
             if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
-            assertCanMaintainProblem(this.user, pdoc);
+            await assertProblemWriteCapability(this, pdoc, problem.canPublishProblem(this.user, pdoc), 'publish', 'publish');
 
             await problem.editAuthorized(domainId, pid, { hidden: false }, this.user);
         }
@@ -459,9 +534,19 @@ export class ProblemMainHandler extends Handler {
         problem.assertProblemAclDomain(this.user, domainId);
         const pdoc = await problem.get(domainId, pid);
         if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
-        assertCanMaintainProblem(this.user, pdoc);
-        const cloneId = await problem.withAuthorizedWriteClaim(domainId, pid, this.user, 'clone-revision', () =>
-            problem.copy(domainId, pid, domainId, undefined, true, undefined, { owner: this.user._id, actor: this.user._id }),
+        await assertProblemWriteCapability(this, pdoc, problem.canCloneProblem(this.user, pdoc), 'clone', 'clone');
+        const cloneId = await problem.withAuthorizedWriteClaim(
+            domainId,
+            pid,
+            this.user,
+            'clone-revision',
+            (claim) =>
+                problem.copy(domainId, pid, domainId, undefined, true, undefined, {
+                    owner: this.user._id,
+                    actor: this.user._id,
+                    claim,
+                }),
+            { capability: 'clone' },
         );
         this.response.redirect = this.url('problem_edit', { pid: cloneId });
     }
@@ -474,7 +559,7 @@ export class ProblemMainHandler extends Handler {
         problem.assertProblemAclDomain(this.user, domainId);
         const pdoc = await problem.get(domainId, pid);
         if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
-        assertCanMaintainProblem(this.user, pdoc);
+        await assertProblemWriteCapability(this, pdoc, problem.canArchiveProblem(this.user, pdoc), 'archive', 'archive');
         await problem.archiveProblem(domainId, pid, this.user._id, reason, this.user);
         this.back();
     }
@@ -617,6 +702,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                       ? 'correction'
                       : 'none',
             canPreviewSubjective: effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND && problem.canMaintainProblem(this.user, this.pdoc),
+            canEditProblem: !tid && problem.canEditProblemContent(this.user, this.pdoc),
         };
         if (this.tdoc && this.tsdoc) {
             const fields = ['attend', 'startAt'];
@@ -724,7 +810,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
     }
 
     async postDelete() {
-        assertCanMaintainProblem(this.user, this.pdoc);
+        await assertProblemWriteCapability(this, this.pdoc, problem.canDeleteProblem(this.user, this.pdoc), 'hard-delete', 'hard-delete');
         const tdocs = await contest.getRelated(this.pdoc.domainId, this.pdoc.docId);
         if (tdocs.length) throw new ProblemAlreadyUsedByContestError(this.pdoc.docId, tdocs[0]._id);
         await problem.delAuthorized(this.pdoc.domainId, this.pdoc.docId, this.user);
@@ -969,10 +1055,15 @@ export class ProblemHackHandler extends ProblemDetailHandler {
 
 export class ProblemManageHandler extends ProblemDetailHandler {
     async prepare() {
-        this.pdoc = await requireStableMaintainableProblem(this.user, this.pdoc);
+        this.pdoc = await requireStableEditableProblem(this.user, this.pdoc);
         // `_prepare` may have loaded the statement through a contest `tid`.
-        // That container access never upgrades the response to maintainer data.
-        if (this.response.body) this.response.body.pdoc = this.pdoc;
+        // That container access never upgrades the response to editor data.
+        if (this.response.body) {
+            this.response.body.pdoc = this.pdoc;
+            this.response.body.problemAuthoringCapabilities = problemAuthoringCapabilities(this.user, this.pdoc);
+            this.response.body.canEditProblem = problem.canEditProblemContent(this.user, this.pdoc);
+            this.response.body.canDeleteProblem = problem.canDeleteProblem(this.user, this.pdoc);
+        }
     }
 }
 
@@ -985,7 +1076,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
         // 编辑器直接从页面数据初始化。此前前端 fetch 文件下载路由读取——
         // 该路由对缺失文件不返回 404（照签跳转链接），新题/无 config 题的
         // 类型编辑永远初始化失败（Rev.12 bug 修复）。
-        const rawPdoc = await requireStableMaintainableProblem(this.user, this.pdoc, ['config'] as any, true);
+        const rawPdoc = await requireStableEditableProblem(this.user, this.pdoc, ['config'] as any, true);
         const problemKind = effectiveProblemKind(this.pdoc);
         if (isDedicatedStructuredEditorKind(problemKind)) {
             const config = parseProblemConfigObject(rawPdoc);
@@ -1003,7 +1094,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
     }
 
     @route('pid', Types.ProblemId)
-    @post('title', Types.Title)
+    @post('title', Types.Title, true)
     @post('content', Types.Content, true)
     @post('pid', Types.ProblemId, true, (i) => /^(?:[a-z0-9]{1,10}-)?[a-z][a-z0-9]*$/i.test(i))
     @post('hidden', Types.Boolean)
@@ -1017,7 +1108,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
     async post(
         _domainId: string,
         pid: string | number,
-        title: string,
+        title: string | undefined,
         content: string | undefined,
         newPid: string | number | undefined,
         hidden = false,
@@ -1031,6 +1122,40 @@ export class ProblemEditHandler extends ProblemManageHandler {
     ) {
         const domainId = this.pdoc.domainId;
         const problemKind = effectiveProblemKind(this.pdoc);
+        const managed = this.pdoc.authoringMode === 'managed';
+        const body = this.request.body || {};
+        if (!managed && title === undefined) throw new ValidationError('title');
+        if (managed) {
+            const allowed = new Set([
+                'title',
+                'content',
+                'pid',
+                'hidden',
+                'tag',
+                'difficulty',
+                'lockHidden',
+                'expectedStructureRevision',
+                'editorProblemKind',
+                'structuredConfig',
+                'metadataOnly',
+            ]);
+            const unknownFields = Object.keys(body).filter((field) => !allowed.has(field));
+            if (unknownFields.length) {
+                await auditManagedWriteDenied(this, this.pdoc, 'edit', 'unknown', unknownFields);
+                throw new ValidationError('fields', null, `托管题编辑不接受字段：${unknownFields.join(', ')}`);
+            }
+            const capabilities = problemAuthoringCapabilities(this.user, this.pdoc);
+            const metadataFields = ['title', 'difficulty'].filter((field) => Object.hasOwn(body, field));
+            const publishFields = ['pid', 'hidden', 'tag', 'lockHidden'].filter((field) => Object.hasOwn(body, field));
+            const forbiddenFields = [
+                ...(!capabilities.canEditDraftMetadata ? metadataFields : []),
+                ...(!capabilities.canPublish ? publishFields : []),
+            ];
+            if (forbiddenFields.length) {
+                await auditManagedWriteDenied(this, this.pdoc, 'edit', 'fields', forbiddenFields);
+                throw new ValidationError('fields', null, `当前角色不可修改字段：${forbiddenFields.join(', ')}`);
+            }
+        }
         if (metadataOnly) {
             if (
                 !isDedicatedStructuredEditorKind(problemKind) ||
@@ -1050,7 +1175,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 actor: this.user._id,
                 user: this.user,
                 problemKind,
-                metadata: { title, hidden, tag: tag ?? [] },
+                metadata: { title: title || this.pdoc.title, hidden, tag: tag ?? [] },
             });
             this.response.redirect = this.url('problem_detail', { pid: this.pdoc.pid || pdoc.docId });
             return;
@@ -1059,16 +1184,24 @@ export class ProblemEditHandler extends ProblemManageHandler {
         if (newPid === undefined) newPid = this.pdoc.pid || '';
         else if (typeof newPid !== 'string') newPid = `P${newPid}`;
         if (newPid !== this.pdoc.pid && (await problem.get(domainId, newPid))) throw new ProblemAlreadyExistError(newPid);
-        const $update: Partial<ProblemDoc> = {
-            title,
-            content,
-            pid: newPid,
-            hidden,
-            tag: tag ?? [],
-            difficulty: difficulty ?? 0,
-            html: false,
-            lockHidden: !!lockHidden,
-        };
+        const $update: Partial<ProblemDoc> = { content, html: false };
+        if (!managed) {
+            Object.assign($update, {
+                title,
+                pid: newPid,
+                hidden,
+                tag: tag ?? [],
+                difficulty: difficulty ?? 0,
+                lockHidden: !!lockHidden,
+            });
+        } else {
+            if (Object.hasOwn(body, 'title')) $update.title = title;
+            if (Object.hasOwn(body, 'pid')) $update.pid = newPid;
+            if (Object.hasOwn(body, 'hidden')) $update.hidden = hidden;
+            if (Object.hasOwn(body, 'tag')) $update.tag = tag ?? [];
+            if (Object.hasOwn(body, 'difficulty')) $update.difficulty = difficulty ?? 0;
+            if (Object.hasOwn(body, 'lockHidden')) $update.lockHidden = !!lockHidden;
+        }
         if (isDedicatedStructuredEditorKind(problemKind)) {
             if (editorProblemKind !== problemKind) throw new ValidationError('editorProblemKind');
             if (!structuredConfig) throw new ValidationError('structuredConfig');
@@ -1172,7 +1305,7 @@ export class ProblemCreateFunctionHandler extends DedicatedStructuredCreateHandl
 
 export class ProblemConfigHandler extends ProblemManageHandler {
     async get() {
-        this.pdoc = await requireStableMaintainableProblem(this.user, this.pdoc);
+        this.pdoc = await requireStableEditableProblem(this.user, this.pdoc);
         if (this.pdoc.reference) throw new ProblemIsReferencedError('edit config');
         this.response.body.testdata = sortFiles(this.pdoc.data || []);
         const configFile = (this.pdoc.data || []).filter((i) => i.name.toLowerCase() === 'config.yaml');
@@ -1182,8 +1315,15 @@ export class ProblemConfigHandler extends ProblemManageHandler {
                 this.response.body.config = (
                     await streamToBuffer(await storage.get(`problem/${this.pdoc.domainId}/${this.pdoc.docId}/testdata/${configFile[0].name}`))
                 ).toString();
-            } catch (e) {
-                /* ignore */
+            } catch (error) {
+                logger.error(
+                    'Problem config read failed domain=%s pid=%d file=%s error=%o',
+                    this.pdoc.domainId,
+                    this.pdoc.docId,
+                    configFile[0].name,
+                    error,
+                );
+                throw error;
             }
         }
         this.response.template = 'problem_config.html';
@@ -1197,7 +1337,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     @param('sidebar', Types.Boolean)
     async get({}, d = ['testdata', 'additional_file'], sidebar = false) {
         if (this.tdoc) throw new ContestNotEndedError();
-        this.pdoc = await requireStableMaintainableProblem(this.user, this.pdoc);
+        this.pdoc = await requireStableEditableProblem(this.user, this.pdoc);
         this.response.body.testdata = sortFiles(this.pdoc.data || []);
         this.response.body.additional_file = sortFiles(this.pdoc.additional_file || []);
         this.response.body.reference = this.pdoc.reference;
@@ -1208,8 +1348,9 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
 
     async post() {
         if (this.args.operation === 'get_links') return;
+        await assertManagedFileWriteBody(this, this.pdoc);
         if (this.pdoc.reference) throw new ProblemIsReferencedError('edit files');
-        assertCanMaintainProblem(this.user, this.pdoc);
+        await assertProblemWriteCapability(this, this.pdoc, problem.canEditProblemContent(this.user, this.pdoc), 'files', 'content');
     }
 
     @post('files', Types.Set)
@@ -1219,8 +1360,8 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
             throw new ProblemIsReferencedError('download testdata.');
         }
         if (type === 'testdata') {
-            const maintained = await problem.getMaintainableAuthorized(this.pdoc.domainId, this.pdoc.docId, this.user);
-            if (maintained) this.pdoc = maintained;
+            const editable = await problem.getEditableAuthorized(this.pdoc.domainId, this.pdoc.docId, this.user);
+            if (editable) this.pdoc = editable;
             else {
                 if (!this.user.hasPriv(PRIV.PRIV_READ_PROBLEM_DATA)) this.checkPerm(PERM.PERM_READ_PROBLEM_DATA);
                 if (this.tdoc && !contest.isDone(this.tdoc)) throw new ContestNotEndedError(this.tdoc.domainId, this.tdoc.docId);
@@ -1301,15 +1442,22 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
                 throw new FileLimitExceededError('size');
             }
         }
-        await problem.withAuthorizedStructuralWriteClaim(domainId, this.pdoc.docId, this.user, 'files-upload', async (claim) => {
-            for (const entry of files) {
-                if (entry.type === 'testdata') {
-                    await problem.addTestdataWithClaim(claim, entry.name, entry.data(), this.user._id);
-                } else {
-                    await problem.addAdditionalFileWithClaim(claim, entry.name, entry.data(), this.user._id);
+        await problem.withAuthorizedStructuralWriteClaim(
+            domainId,
+            this.pdoc.docId,
+            this.user,
+            'files-upload',
+            async (claim) => {
+                for (const entry of files) {
+                    if (entry.type === 'testdata') {
+                        await problem.addTestdataWithClaim(claim, entry.name, entry.data(), this.user._id);
+                    } else {
+                        await problem.addAdditionalFileWithClaim(claim, entry.name, entry.data(), this.user._id);
+                    }
                 }
-            }
-        });
+            },
+            { capability: 'content' },
+        );
         this.back();
     }
 
@@ -1330,17 +1478,24 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
             throw new ValidationError('newNames');
         }
         if (files.length !== newNames.length) throw new ValidationError('files', 'newNames');
-        await problem.withAuthorizedStructuralWriteClaim(domainId, this.pdoc.docId, this.user, 'files-rename', async (claim) => {
-            for (let index = 0; index < files.length; index++) {
-                const file = files[index];
-                const newName = newNames[index];
-                if (type === 'testdata') {
-                    await problem.renameTestdataWithClaim(claim, file, newName, this.user._id);
-                } else {
-                    await problem.renameAdditionalFileWithClaim(claim, file, newName, this.user._id);
+        await problem.withAuthorizedStructuralWriteClaim(
+            domainId,
+            this.pdoc.docId,
+            this.user,
+            'files-rename',
+            async (claim) => {
+                for (let index = 0; index < files.length; index++) {
+                    const file = files[index];
+                    const newName = newNames[index];
+                    if (type === 'testdata') {
+                        await problem.renameTestdataWithClaim(claim, file, newName, this.user._id);
+                    } else {
+                        await problem.renameAdditionalFileWithClaim(claim, file, newName, this.user._id);
+                    }
                 }
-            }
-        });
+            },
+            { capability: 'content' },
+        );
         this.back();
     }
 
@@ -1359,10 +1514,16 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
         ) {
             throw new ValidationError('files');
         }
-        await problem.withAuthorizedStructuralWriteClaim(domainId, this.pdoc.docId, this.user, 'files-delete', (claim) =>
-            type === 'testdata'
-                ? problem.delTestdataWithClaim(claim, files, this.user._id)
-                : problem.delAdditionalFileWithClaim(claim, files, this.user._id),
+        await problem.withAuthorizedStructuralWriteClaim(
+            domainId,
+            this.pdoc.docId,
+            this.user,
+            'files-delete',
+            (claim) =>
+                type === 'testdata'
+                    ? problem.delTestdataWithClaim(claim, files, this.user._id)
+                    : problem.delAdditionalFileWithClaim(claim, files, this.user._id),
+            { capability: 'content' },
         );
         this.back();
     }
@@ -1372,27 +1533,34 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     async postGenerateTestdata(_domainId: string, std: string, gen: string) {
         const domainId = this.pdoc.domainId;
         let enqueueError: unknown;
-        const rid = await problem.withAuthorizedWriteClaim(domainId, this.pdoc.docId, this.user, 'generate-testdata-request', async () => {
-            try {
-                // `this.pdoc` predates claim acquisition. A concurrent
-                // reference conversion or file rename/delete may have won
-                // first, so validate the current claimed state before
-                // enqueueing a generation Record.
-                const current = await problem.get(domainId, this.pdoc.docId);
-                if (!current) throw new ProblemNotFoundError(domainId, this.pdoc.docId);
-                if (current.reference) throw new ProblemIsReferencedError('edit files');
-                if (!current.data?.find((i) => i.name === std)) throw new BadRequestError();
-                if (!current.data?.find((i) => i.name === gen)) throw new BadRequestError();
-                return await record.add(domainId, this.pdoc.docId, this.user._id, '_', `${gen}\n${std}`, true, { type: 'generate' });
-            } catch (error) {
-                // No ProblemDoc/storage mutation has started. Release the
-                // claim cleanly, then propagate validation/read/queue
-                // failures below without converting them into a write
-                // repair marker.
-                enqueueError = error;
-                return null;
-            }
-        });
+        const rid = await problem.withAuthorizedWriteClaim(
+            domainId,
+            this.pdoc.docId,
+            this.user,
+            'generate-testdata-request',
+            async () => {
+                try {
+                    // `this.pdoc` predates claim acquisition. A concurrent
+                    // reference conversion or file rename/delete may have won
+                    // first, so validate the current claimed state before
+                    // enqueueing a generation Record.
+                    const current = await problem.get(domainId, this.pdoc.docId);
+                    if (!current) throw new ProblemNotFoundError(domainId, this.pdoc.docId);
+                    if (current.reference) throw new ProblemIsReferencedError('edit files');
+                    if (!current.data?.find((i) => i.name === std)) throw new BadRequestError();
+                    if (!current.data?.find((i) => i.name === gen)) throw new BadRequestError();
+                    return await record.add(domainId, this.pdoc.docId, this.user._id, '_', `${gen}\n${std}`, true, { type: 'generate' });
+                } catch (error) {
+                    // No ProblemDoc/storage mutation has started. Release the
+                    // claim cleanly, then propagate validation/read/queue
+                    // failures below without converting them into a write
+                    // repair marker.
+                    enqueueError = error;
+                    return null;
+                }
+            },
+            { capability: 'content' },
+        );
         if (enqueueError) throw enqueueError;
         this.response.redirect = this.url('record_detail', { rid });
     }
@@ -1411,8 +1579,8 @@ export class ProblemFileDownloadHandler extends ProblemDetailHandler {
             if (!this.pdoc) throw new ProblemNotFoundError();
         }
         if (type === 'testdata') {
-            const maintained = await problem.getMaintainableAuthorized(this.pdoc.domainId, this.pdoc.docId, this.user);
-            if (maintained) this.pdoc = maintained;
+            const editable = await problem.getEditableAuthorized(this.pdoc.domainId, this.pdoc.docId, this.user);
+            if (editable) this.pdoc = editable;
             else {
                 if (!this.user.hasPriv(PRIV.PRIV_READ_PROBLEM_DATA)) this.checkPerm(PERM.PERM_READ_PROBLEM_DATA);
                 if (this.tdoc && !contest.isDone(this.tdoc)) throw new ContestNotEndedError(this.tdoc.domainId, this.tdoc.docId);
@@ -1654,6 +1822,7 @@ export class ProblemMineHandler extends Handler {
             pcount,
             ppcount: Math.ceil(pcount / limit),
             canCreate: this.user.hasPerm(PERM.PERM_CREATE_PROBLEM),
+            canCreateProgrammingDraft: this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT),
         };
     }
 }
@@ -1672,12 +1841,38 @@ export class ProblemCreateHubHandler extends Handler {
 
 export class ProblemCreateProgrammingHandler extends Handler {
     async get() {
+        const legacyCreate = this.user.hasPerm(PERM.PERM_CREATE_PROBLEM);
+        const managedCreate = this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        if (!legacyCreate && !managedCreate) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        const restricted = !legacyCreate;
         this.response.template = 'problem_edit.html';
         this.response.body = {
             page_name: 'problem_create_programming',
             additional_file: [],
             statementLangs: this.ctx.i18n.langs(false),
-            pdoc: { hidden: true, problemKind: 'programming' },
+            pdoc: {
+                hidden: true,
+                problemKind: 'programming',
+                ...(restricted
+                    ? {
+                          authoringMode: 'managed',
+                          managedAuthoring: { workingTitle: '', metadataStatus: 'draft' },
+                      }
+                    : {}),
+            },
+            problemAuthoringCapabilities: restricted
+                ? {
+                      managed: true,
+                      canEditContent: true,
+                      canEditDraftMetadata: false,
+                      canManageCollaborators: false,
+                      canManageMaintainers: false,
+                      canPublish: false,
+                      canArchive: false,
+                      canDelete: false,
+                      canClone: false,
+                  }
+                : null,
         };
     }
 
@@ -1689,8 +1884,35 @@ export class ProblemCreateProgrammingHandler extends Handler {
     @post('tag', Types.Content, true, null, parseCategory)
     async post(_domainId: string, title: string, content: string, pid: string | number = '', _hidden = false, difficulty = 0, tag: string[] = []) {
         const domainId = String(this.domain?._id);
+        const legacyCreate = this.user.hasPerm(PERM.PERM_CREATE_PROBLEM);
+        const managedCreate = this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        if (!legacyCreate && !managedCreate) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
+        if (!legacyCreate) {
+            const allowed = new Set(['title', 'content']);
+            const unknownFields = Object.keys(this.request.body || {}).filter((field) => !allowed.has(field));
+            if (unknownFields.length) {
+                logger.warn('Managed draft create rejected domain=%s actor=%d fields=%o result=denied', domainId, this.user._id, unknownFields);
+                await oplog.log(this, 'problem.managed.write.denied', {
+                    action: 'create',
+                    fields: unknownFields,
+                    result: 'denied',
+                });
+                throw new ValidationError('fields', null, `托管草稿不接受字段：${unknownFields.join(', ')}`);
+            }
+            const docId = await problem.createManagedProgrammingDraft(domainId, title, content, this.user._id);
+            this.response.body = {
+                pid: docId,
+                docId,
+                hidden: true,
+                problemKind: 'programming',
+                authoringMode: 'managed',
+                structureRevision: 1,
+            };
+            this.response.redirect = this.url('problem_edit', { pid: docId });
+            return;
+        }
         if (typeof pid !== 'string') pid = `P${pid}`;
         if (pid && (await problem.get(domainId, pid))) throw new ProblemAlreadyExistError(pid);
         const docId = await problem.createProblemByKind('programming', domainId, pid, title, content, this.user._id, tag ?? [], { difficulty });
@@ -1799,7 +2021,7 @@ export async function apply(ctx: Context) {
         'problem_create_programming',
         `/problem/create/${problemKindToSlug('programming')}`,
         ProblemCreateProgrammingHandler,
-        PERM.PERM_CREATE_PROBLEM,
+        PRIV.PRIV_USER_PROFILE,
     );
     ctx.Route(
         'problem_create_single',

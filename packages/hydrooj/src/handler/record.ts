@@ -89,7 +89,9 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             if (typeof pid === 'string' && tdoc && /^[A-Z]$/.test(pid)) {
                 pid = tdoc.pids[Number.parseInt(pid, 36) - 10];
             }
-            const pdoc = await problem.get(domainId, pid);
+            const pdoc = tdoc
+                ? await problem.get(domainId, pid)
+                : await problem.getViewableAuthorized(domainId, pid, this.user, problem.PROJECTION_LIST);
             if (pdoc) q.pid = pdoc.docId;
             else invalid = true;
         }
@@ -114,7 +116,6 @@ export class RecordListHandler extends ContestDetailBaseHandler {
                   .skip((page - 1) * limit)
                   .limit(limit)
                   .toArray();
-        const canViewHiddenProblem = this.user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN) || this.user._id;
         const [udict, pdict] = full
             ? [{}, {}]
             : await Promise.all([
@@ -131,11 +132,10 @@ export class RecordListHandler extends ContestDetailBaseHandler {
                             problem.PROJECTION_CONTEST_LIST,
                         )
                       : this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)
-                        ? problem.getList(
+                        ? problem.getListViewableAuthorized(
                               domainId,
                               rdocs.map((rdoc) => rdoc.pid),
-                              canViewHiddenProblem,
-                              false,
+                              this.user,
                               problem.PROJECTION_LIST,
                           )
                         : Object.fromEntries(uniqBy(rdocs, 'pid').map((rdoc) => [rdoc.pid, { ...problem.default, pid: rdoc.pid }])),
@@ -432,7 +432,9 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         }
         if (this.uid !== this.user._id) this.checkPerm(PERM.PERM_VIEW_RECORD);
         if (pid) {
-            const pdoc = await problem.get(domainId, pid);
+            const pdoc = this.tdoc
+                ? await problem.get(domainId, pid)
+                : await problem.getViewableAuthorized(domainId, pid, this.user, problem.PROJECTION_LIST);
             if (pdoc) this.pid = pdoc.docId;
             else throw new ProblemNotFoundError(domainId, pid);
         }

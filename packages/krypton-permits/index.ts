@@ -26,7 +26,7 @@ import { ensureIndexes } from './src/db';
 import { applyHandlers } from './src/handler';
 import { attachHooks } from './src/hooks';
 import { migrationScripts } from './src/migration';
-import { permitsModel } from './src/model';
+import { permitsModel, publicPermitsModel } from './src/model';
 import { preloadProblemAcl } from './src/preload';
 
 export { aclMutationFencesColl, permitsColl, permitSourcesColl } from './src/db';
@@ -40,7 +40,7 @@ export async function apply(ctx: Context) {
     // partially functional plugin or let Cordis mark startup successful.
     await ensureIndexes();
 
-    if (global.Hydro?.model) (global.Hydro.model as any).permits = permitsModel;
+    if (global.Hydro?.model) (global.Hydro.model as any).permits = publicPermitsModel;
 
     applyHandlers(ctx);
     attachHooks(ctx);

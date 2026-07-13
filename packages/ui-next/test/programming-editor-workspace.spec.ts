@@ -41,16 +41,19 @@ describe('P3.12 programming editor workspace', () => {
     expect(handler).to.include("ctx.Route('problem_create', '/problem/create', ProblemCreateHubHandler");
     expect(handler).to.include("problemKindToSlug('programming')");
     expect(handler).to.include('ProblemCreateProgrammingHandler');
-    expect(handler).to.include("problem.createProblemByKind(\n            'programming'");
+    expect(handler).to.match(/problem\.createProblemByKind\(\s*'programming'/);
   });
 
   it('preserves existing form fields and file/config APIs', () => {
     const edit = read('packages/ui-next/src/pages/problem-edit.tsx');
     const config = read('packages/ui-next/src/pages/problem-config-editor.tsx');
     const files = read('packages/ui-next/src/pages/problem-manage.tsx');
-    for (const name of ['title', 'pid', 'tag', 'difficulty', 'content', 'hidden', 'lockHidden']) {
+    for (const name of ['difficulty', 'content', 'hidden', 'lockHidden']) {
       expect(edit).to.include(`name="${name}"`);
     }
+    expect(edit).to.include("name={!managed || isCreate || canEditDraftMetadata ? 'title' : undefined}");
+    expect(edit).to.include("name={managed ? undefined : 'pid'}");
+    expect(edit).to.include("name={managed ? undefined : 'tag'}");
     expect(config).to.include("formData.append('operation', 'upload_file')");
     expect(config).to.include("formData.append('type', 'testdata')");
     expect(config).to.include("formData.append('filename', 'config.yaml')");
@@ -61,6 +64,16 @@ describe('P3.12 programming editor workspace', () => {
     for (const operation of ['get_links', 'rename_files', 'delete_files', 'generate_testdata']) {
       expect(files).to.include(`value="${operation}"`);
     }
+  });
+
+  it('serializes both checkbox states explicitly so administrators can clear them', () => {
+    const edit = read('packages/ui-next/src/pages/problem-edit.tsx');
+    expect(edit).to.include("name=\"hidden\" value={hiddenValue ? 'true' : 'false'}");
+    expect(edit).to.include("name=\"lockHidden\" value={lockHiddenValue ? 'true' : 'false'}");
+    expect(edit).to.include('checked={hiddenValue}');
+    expect(edit).to.include('onCheckedChange={setHiddenValue}');
+    expect(edit).to.include('checked={lockHiddenValue}');
+    expect(edit).to.include('onCheckedChange={setLockHiddenValue}');
   });
 
   it('makes save errors, unsaved changes, and upload progress observable', () => {

@@ -14,6 +14,7 @@ const PERM = {
     PERM_EDIT_PROBLEM_SELF: 8n,
     PERM_EDIT_PROBLEM: 16n,
     PERM_READ_PROBLEM_DATA: 32n,
+    PERM_CREATE_PROGRAMMING_DRAFT: 64n,
 };
 const PRIV = {
     PRIV_EDIT_SYSTEM: 1,
@@ -50,12 +51,14 @@ const calls = {
     copy: [] as any[],
     edit: [] as any[],
     get: [] as any[],
+    getEditableAuthorized: [] as any[],
     getMaintainableAuthorized: [] as any[],
     getViewableAuthorized: [] as any[],
     getMulti: [] as any[],
     inc: [] as any[],
     maintain: [] as any[],
     manualStatus: [] as any[],
+    oplog: [] as any[],
     provider: [] as any[],
     random: [] as any[],
     refresh: [] as any[],
@@ -133,6 +136,17 @@ const problemStub = {
         calls.maintain.push({ user, pdoc });
         return maintainResult;
     },
+    canEditProblemContent(user: any, pdoc: any) {
+        calls.maintain.push({ user, pdoc, capability: 'content' });
+        return maintainResult;
+    },
+    canEditProblemMetadata: () => maintainResult,
+    canManageProblemCollaborators: () => maintainResult,
+    canManageProblemMaintainers: () => maintainResult,
+    canPublishProblem: () => maintainResult,
+    canArchiveProblem: () => maintainResult,
+    canDeleteProblem: () => maintainResult,
+    canCloneProblem: () => maintainResult,
     count: async (domainId: string, query: unknown) => {
         calls.count.push({ domainId, query });
         return countResult;
@@ -143,6 +157,11 @@ const problemStub = {
     },
     async createProblemByKind(_kind: string, ...args: any[]) {
         createKinds.push(_kind);
+        calls.add.push(args);
+        return 7;
+    },
+    async createManagedProgrammingDraft(...args: any[]) {
+        createKinds.push('managed-programming');
         calls.add.push(args);
         return 7;
     },
@@ -183,6 +202,10 @@ const problemStub = {
         calls.getMaintainableAuthorized.push(args);
         return maintainableResults.shift() || null;
     },
+    async getEditableAuthorized(...args: any[]) {
+        calls.getEditableAuthorized.push(args);
+        return maintainableResults.shift() || null;
+    },
     async getViewableAuthorized(...args: any[]) {
         calls.getViewableAuthorized.push(args);
         return getResults.shift() || null;
@@ -191,13 +214,27 @@ const problemStub = {
         calls.status.push(args);
         return null;
     },
-    async withAuthorizedWriteClaim(domainId: string, pid: number, user: any, operation: string, work: (claim: any) => Promise<any>) {
-        calls.claims.push({ domainId, pid, user, operation });
+    async withAuthorizedWriteClaim(
+        domainId: string,
+        pid: number,
+        user: any,
+        operation: string,
+        work: (claim: any) => Promise<any>,
+        options: any = {},
+    ) {
+        calls.claims.push({ domainId, pid, user, operation, options });
         if (!claimAllowed) throw new TestPermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
         return work({ domainId, pid, operation, requestId: 'test-claim' });
     },
-    async withAuthorizedStructuralWriteClaim(domainId: string, pid: number, user: any, operation: string, work: (claim: any) => Promise<any>) {
-        return problemStub.withAuthorizedWriteClaim(domainId, pid, user, operation, work);
+    async withAuthorizedStructuralWriteClaim(
+        domainId: string,
+        pid: number,
+        user: any,
+        operation: string,
+        work: (claim: any) => Promise<any>,
+        options: any = {},
+    ) {
+        return problemStub.withAuthorizedWriteClaim(domainId, pid, user, operation, work, options);
     },
     async inc(...args: any[]) {
         calls.inc.push(args);
@@ -306,7 +343,8 @@ const storageStub = {
     },
 };
 const oplogStub = {
-    async log() {
+    async log(...args: any[]) {
+        calls.oplog.push(args);
         return undefined;
     },
 };
@@ -567,7 +605,10 @@ describe('P2.11 enumeration entry gates', () => {
         const clone = makeHandler(ProblemMainHandler, { canBrowse: true });
         getResults = [{ domainId: 'system', docId: 7, owner: 42 }];
         await clone.postClone('forged', 7);
-        expect(calls.copy).to.deep.equal([['system', 7, 'system', undefined, true, undefined, { owner: 42, actor: 42 }]]);
+        expect(calls.copy).to.have.lengthOf(1);
+        expect(calls.copy[0].slice(0, 6)).to.deep.equal(['system', 7, 'system', undefined, true, undefined]);
+        expect(calls.copy[0][6]).to.deep.include({ owner: 42, actor: 42 });
+        expect(calls.copy[0][6].claim).to.deep.include({ domainId: 'system', pid: 7, operation: 'clone-revision' });
         expect(calls.claims[0]).to.deep.include({
             domainId: 'system',
             pid: 7,
@@ -626,9 +667,29 @@ describe('P2.11 authoritative problem route domain', () => {
     });
 
     it('creates a problem only in the authoritative handler domain', async () => {
-        const handler = makeHandler(ProblemCreateProgrammingHandler, {});
+        const handler = makeHandler(ProblemCreateProgrammingHandler, {
+            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM,
+        });
         await handler.post('forged', 'Title', 'Statement', '', false, 0, []);
         expect(calls.add[0][0]).to.equal('system');
+    });
+
+    it('creates a field-restricted managed draft and assigns the trusted creator path', async () => {
+        const handler = makeHandler(ProblemCreateProgrammingHandler, {
+            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROGRAMMING_DRAFT,
+        });
+        handler.request.body = { title: 'Working title', content: 'Statement' };
+
+        await handler.post('forged', 'Working title', 'Statement', '', false, 0, []);
+
+        expect(createKinds).to.deep.equal(['managed-programming']);
+        expect(calls.add[0]).to.deep.equal(['system', 'Working title', 'Statement', 42]);
+        expect(handler.response.body).to.include({ docId: 7, authoringMode: 'managed', hidden: true });
+
+        handler.request.body = { title: 'Working title', content: 'Statement', pid: 'P9999' };
+        const forged = await captureFailure(() => handler.post('forged', 'Working title', 'Statement', 'P9999', false, 0, []));
+        expect(forged).to.be.instanceOf(GenericError);
+        expect(calls.add).to.have.lengthOf(1);
     });
 
     it('submits and hacks against the loaded problem domain', async () => {
@@ -660,6 +721,73 @@ describe('P2.11 authoritative problem route domain', () => {
         };
         await files.postUploadFile('forged', 'config.yaml', 'testdata');
         expect(calls.renameFile[0][0]).to.equal('system');
+    });
+});
+
+describe('P2.13 managed programming edit boundary', () => {
+    function managedHandler() {
+        const handler = makeHandler(ProblemEditHandler, {});
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            title: 'Formal title',
+            content: 'Old statement',
+            hidden: true,
+            tag: ['system-tag'],
+            difficulty: 3,
+            lockHidden: true,
+            problemKind: 'programming',
+            structureRevision: 2,
+            authoringMode: 'managed',
+            managedAuthoring: { workingTitle: 'Working title', metadataStatus: 'draft' },
+        };
+        return handler;
+    }
+
+    it('sends only content fields to the model for a managed author save', async () => {
+        const handler = managedHandler();
+        handler.request.body = { content: 'New statement', expectedStructureRevision: '2' };
+
+        await handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, undefined, 2);
+
+        expect(calls.edit).to.have.lengthOf(1);
+        expect(calls.edit[0][2]).to.deep.equal({ content: 'New statement', html: false });
+    });
+
+    it('rejects forbidden managed fields as one audited request even when the value is unchanged', async () => {
+        const handler = managedHandler();
+        handler.request.body = { content: 'New statement', title: 'Formal title', pid: 'P7' };
+
+        const error = await captureFailure(() =>
+            handler.post('forged', 'P7', 'Formal title', 'New statement', 'P7', false, [], undefined, undefined, 2),
+        );
+
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.oplog.at(-1)?.[1]).to.equal('problem.managed.write.denied');
+        expect(calls.oplog.at(-1)?.[2]?.fields).to.deep.equal(['title', 'pid']);
+    });
+
+    it('rejects a mixed managed file request before acquiring a storage write claim', async () => {
+        const handler = makeHandler(ProblemFilesHandler, {});
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            authoringMode: 'managed',
+            data: [],
+            additional_file: [],
+        };
+        handler.args = { operation: 'delete_files' };
+        handler.request.body = { operation: 'delete_files', files: ['input.txt'], hidden: 'false' };
+
+        const error = await captureFailure(() => handler.post());
+
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.claims).to.have.lengthOf(0);
+        expect(calls.renameFile).to.have.lengthOf(0);
+        expect(calls.oplog.at(-1)?.[1]).to.equal('problem.managed.write.denied');
+        expect(calls.oplog.at(-1)?.[2]?.fields).to.deep.equal(['hidden']);
     });
 });
 
@@ -1164,7 +1292,7 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
         maintainableResults = [null];
         const manageError = await captureFailure(() => manage.prepare());
         expect(manageError).to.be.instanceOf(TestPermissionError);
-        expect(calls.getMaintainableAuthorized[0].slice(0, 2)).to.deep.equal(['system', 7]);
+        expect(calls.getEditableAuthorized[0].slice(0, 2)).to.deep.equal(['system', 7]);
 
         const files = makeHandler(ProblemFilesHandler, { _id: 42 });
         files.pdoc = pdoc;
@@ -1180,8 +1308,8 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
         expect(source).not.to.match(/\.own\((?:this\.)?pdoc\b/);
         expect(source).not.to.match(/\.own\(this\.pdoc\b/);
         expect(source).not.to.match(/checkPerm\(PERM\.PERM_EDIT_PROBLEM\)/);
-        expect(source).to.include('problem.getMaintainableAuthorized(');
-        expect(source).to.include('assertCanMaintainProblem(this.user, this.pdoc)');
+        expect(source).to.include('problem.getEditableAuthorized(');
+        expect(source).to.include('problem.canEditProblemContent(udoc, pdoc)');
     });
 
     it('never resolves referenced-problem testdata links through wrapper-domain maintenance', async () => {
@@ -1209,8 +1337,8 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
         const error = await captureFailure(() => handler.prepare());
 
         expect(error).to.be.instanceOf(TestPermissionError);
-        expect(calls.getMaintainableAuthorized).to.have.length(1);
-        expect(calls.getMaintainableAuthorized[0].slice(0, 2)).to.deep.equal(['system', 7]);
+        expect(calls.getEditableAuthorized).to.have.length(1);
+        expect(calls.getEditableAuthorized[0].slice(0, 2)).to.deep.equal(['system', 7]);
     });
 
     it('loads editor raw config only through the stable maintainer read', async () => {
@@ -1231,10 +1359,10 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
 
         expect(handler.response.body.configRaw).to.equal('type: default\n');
         expect(calls.get).to.deep.equal([]);
-        expect(calls.getMaintainableAuthorized[0][0]).to.equal('system');
-        expect(calls.getMaintainableAuthorized[0][1]).to.equal(7);
-        expect(calls.getMaintainableAuthorized[0][3]).to.deep.equal(['config']);
-        expect(calls.getMaintainableAuthorized[0][4]).to.equal(true);
+        expect(calls.getEditableAuthorized[0][0]).to.equal('system');
+        expect(calls.getEditableAuthorized[0][1]).to.equal(7);
+        expect(calls.getEditableAuthorized[0][3]).to.deep.equal(['config']);
+        expect(calls.getEditableAuthorized[0][4]).to.equal(true);
     });
 
     it('performs no raw config storage read after the stable maintainer read rejects', async () => {

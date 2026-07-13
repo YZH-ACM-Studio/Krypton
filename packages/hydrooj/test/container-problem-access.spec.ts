@@ -282,6 +282,7 @@ function makeUser(overrides: Record<string, unknown> = {}) {
         _problemAclLoaded: true,
         _problemAclDomainId: 'system',
         _permitPids: new Set<number>(),
+        _authoredPids: new Set<number>(),
         _maintainedPids: new Set<number>(),
         _aclFencedPids: new Set<number>(),
         timeZone: 'Asia/Shanghai',

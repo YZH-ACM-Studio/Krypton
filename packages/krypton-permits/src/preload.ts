@@ -1,5 +1,6 @@
 export interface LoadedProblemAcl {
     permitPids: Set<number>;
+    authoredPids: Set<number>;
     maintainedPids: Set<number>;
     fencedPids: Set<number>;
 }
@@ -12,6 +13,7 @@ export async function preloadProblemAcl(
     onError: (error: unknown) => void,
 ): Promise<void> {
     user._permitPids = new Set<number>();
+    user._authoredPids = new Set<number>();
     user._maintainedPids = new Set<number>();
     user._aclFencedPids = new Set<number>();
     user._problemAclLoaded = false;
@@ -29,6 +31,7 @@ export async function preloadProblemAcl(
     try {
         const loaded = await load(domainId, uid);
         user._permitPids = loaded.permitPids;
+        user._authoredPids = loaded.authoredPids;
         user._maintainedPids = loaded.maintainedPids;
         user._aclFencedPids = loaded.fencedPids;
         user._problemAclDomainId = domainId;

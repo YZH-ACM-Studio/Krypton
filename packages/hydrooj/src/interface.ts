@@ -219,6 +219,13 @@ declare module './model/problem' {
 
         /** Missing only on legacy problems, where it means programming. */
         problemKind?: import('@hydrooj/common').ProblemKind;
+        /** Missing means the legacy owner/maintainer authorization model. */
+        authoringMode?: 'managed';
+        /** Managed draft metadata; P2.14 extends this canonical object. */
+        managedAuthoring?: {
+            workingTitle: string;
+            metadataStatus: 'draft' | 'confirmed';
+        };
         structureRevision?: number;
         structureLockedAt?: Date;
         structureLockReason?: 'first_submission' | 'container_started';

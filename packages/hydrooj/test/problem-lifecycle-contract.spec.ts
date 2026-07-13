@@ -43,6 +43,23 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(source).to.include('structureRevision: 1');
     });
 
+    it('offers an explicit observer-waiting path for audited one-time metadata migrations', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        expect(source).to.include('waitForObservers?: boolean');
+        expect(source).to.include("if (options.waitForObservers) await bus.parallel('problem/edit', result");
+        expect(source).to.include("else bus.emit('problem/edit', result");
+        expect(source).to.include('{ hidden: current.hidden }');
+    });
+
+    it('propagates cli execute failures to the process-level non-zero exit handler', () => {
+        const source = readFileSync(resolve(root, 'src/entry/cli.ts'), 'utf8');
+        const executeStart = source.indexOf("if (modelName === 'execute')");
+        const executeEnd = source.indexOf("if (modelName === 'script')", executeStart);
+        const execute = source.slice(executeStart, executeEnd);
+        expect(execute).to.include('return console.log(await res())');
+        expect(execute).not.to.include('catch');
+    });
+
     it('retains and confirms the exact managed draft identity before insert responses or post-create events can fail', () => {
         const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
         const createStart = source.indexOf('static async createManagedProgrammingDraft');
@@ -103,9 +120,7 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(create).to.include('prepared = await prepareManagedProblemDraft(domainId, input)');
         expect(create).to.include('domain=%s actor=%d template=%o training=%o chapter=%o stage=create-validate error=%o');
         expect(publish).to.include('prepared = await prepareManagedProblemPublication(input.domainId, pdoc)');
-        expect(publish).to.include(
-            'domain=%s pid=%d publicPid=%s actor=%d template=%o training=%o chapter=%o stage=publish-validate error=%o',
-        );
+        expect(publish).to.include('domain=%s pid=%d publicPid=%s actor=%d template=%o training=%o chapter=%o stage=publish-validate error=%o');
     });
 
     it('keeps archived problems hidden and preserves HTML when cloning', () => {
@@ -276,7 +291,7 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const structural = edit.slice(structuralStart, structuralEnd);
 
         expect(structural).to.include('result = await commitProblemWriteClaimUpdate(');
-        expect(structural).to.include('{ expectedStructureRevision: expectedRevision }');
+        expect(structural).to.match(/commitProblemWriteClaimUpdate\([\s\S]*expectedStructureRevision: expectedRevision[\s\S]*\);/);
         expect(structural).not.to.include('document.coll.findOneAndUpdate(');
     });
 

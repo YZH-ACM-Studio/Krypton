@@ -33,13 +33,11 @@ async function runScript(name: string, arg: any) {
 async function cli() {
     const [, modelName, func, ...args] = argv.args as [string, string, string, ...any[]];
     if (modelName === 'execute') {
-        try {
-            // eslint-disable-next-line no-eval
-            const res = eval(`(async () => { with (require('${require.resolve('../plugin-api')}')) { ${func} } })`);
-            return console.log(await res());
-        } catch (e) {
-            console.error(`Execution fail: ${e.message}`);
-        }
+        // Let failures reach loadCli's top-level rejection handler so shell
+        // deployments receive a non-zero exit code instead of a false success.
+        // eslint-disable-next-line no-eval
+        const res = eval(`(async () => { with (require('${require.resolve('../plugin-api')}')) { ${func} } })`);
+        return console.log(await res());
     }
     if (modelName === 'script') {
         let arg: any;

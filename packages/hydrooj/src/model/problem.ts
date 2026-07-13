@@ -1480,7 +1480,7 @@ export class ProblemModel {
         domainId: string,
         _id: number,
         $set: Partial<ProblemDoc>,
-        options: { expectedStructureRevision?: number; skipStructureGuard?: boolean } = {},
+        options: { expectedStructureRevision?: number; skipStructureGuard?: boolean; waitForObservers?: boolean } = {},
     ): Promise<ProblemDoc> {
         const delpid = $set.pid === '';
         const ddoc = await DomainModel.get(domainId);
@@ -1506,6 +1506,7 @@ export class ProblemModel {
                     structureRevision: 1,
                     structureLockedAt: 1,
                     archivedAt: 1,
+                    hidden: 1,
                     authoringMode: 1,
                 },
             },
@@ -1561,7 +1562,8 @@ export class ProblemModel {
         } else {
             result = await document.set(domainId, document.TYPE_PROBLEM, _id, $set, $unset);
         }
-        await bus.emit('problem/edit', result);
+        if (options.waitForObservers) await bus.parallel('problem/edit', result, undefined, { hidden: current.hidden });
+        else bus.emit('problem/edit', result, undefined, { hidden: current.hidden });
         return result;
     }
 
@@ -1829,6 +1831,7 @@ export class ProblemModel {
                     structureRevision: 1,
                     structureLockedAt: 1,
                     archivedAt: 1,
+                    hidden: 1,
                     authoringMode: 1,
                     managedAuthoring: 1,
                 },
@@ -1886,18 +1889,14 @@ export class ProblemModel {
             if (current.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, _id))) {
                 throw new ProblemStructureConflictError(_id);
             }
-            result = await commitProblemWriteClaimUpdate(
-                claim,
-                $set,
-                $unset,
-                managedGuard?.capability || claim.capability,
-                { expectedStructureRevision: expectedRevision },
-            );
+            result = await commitProblemWriteClaimUpdate(claim, $set, $unset, managedGuard?.capability || claim.capability, {
+                expectedStructureRevision: expectedRevision,
+            });
         } else {
             result = await commitProblemWriteClaimUpdate(claim, $set, $unset, managedGuard?.capability || claim.capability);
         }
         if (!result) throw new Error(`problem write claim ownership lost during edit: ${claim.requestId}`);
-        await bus.emit('problem/edit', result, claim.requestId);
+        bus.emit('problem/edit', result, claim.requestId, { hidden: current.hidden });
         return result;
     }
 

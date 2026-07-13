@@ -1,14 +1,14 @@
 /** Lifecycle hooks. Every write delegates to the fenced ACL model. */
 import type { Context } from 'hydrooj';
+import { isLegacyPublishTransition } from './hook-policy';
 import { permitsModel } from './model';
 
 export function attachHooks(ctx: Context) {
-    ctx.on('problem/edit', async (pdoc, writeClaimRequestId) => {
-        if (!pdoc?.domainId || pdoc.hidden) return;
+    ctx.on('problem/edit', async (pdoc, writeClaimRequestId, previous) => {
+        if (!pdoc?.domainId || !isLegacyPublishTransition(pdoc, previous)) return;
         // Managed publish clears verifiers before the visibility mutation so
         // audit persistence and ACL cleanup are fail-closed. This hook remains
         // only for unchanged legacy publish behavior.
-        if (pdoc.authoringMode === 'managed') return;
         await permitsModel.clearVerifiersForProblem(pdoc.domainId, pdoc.docId, {
             requestId: `problem-publish:${pdoc.domainId}:${pdoc.docId}`,
             actor: pdoc.owner || 0,

@@ -2,7 +2,6 @@ import { createReadStream } from 'fs';
 import { PassThrough, Readable, Writable } from 'stream';
 import { Entry, ZipReader } from '@zip.js/zip.js';
 import { readFile } from 'fs-extra';
-import yaml from 'js-yaml';
 import { escapeRegExp, flattenDeep, intersection, pick } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import { nanoid } from 'nanoid';
@@ -47,14 +46,9 @@ import {
     ValidationError,
 } from '../error';
 import { ProblemDoc, ProblemStatusDoc, RecordDoc, User } from '../interface';
-import {
-    isProblemConfigFilename,
-    parseProblemConfigObject,
-    parseStructuredRegionSubmission,
-    validateTextProgramFillSubmission,
-} from '../lib/problem-config';
+import { isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
 import { PERM, PRIV, STATUS } from '../model/builtin';
-import { isCodeEvaluationProblem, normalizeCodeEvaluationDraftCreationConfig } from '../model/code-evaluation-lifecycle';
+import { normalizeCodeEvaluationDraftCreationConfig } from '../model/code-evaluation-lifecycle';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
 import domain from '../model/domain';
@@ -118,7 +112,7 @@ function defaultBasicObjectiveConfig(kind: BasicObjectiveKind): Record<string, u
 
 function defaultDedicatedConfig(kind: DedicatedStructuredEditorKind): Record<string, unknown> {
     if (kind === SUBJECTIVE_KIND) return { main: { gradingInstructions: '' } };
-    if (kind === PROGRAM_FILL_KIND) return { main: { mode: 'text', answer: '' } };
+    if (kind === PROGRAM_FILL_KIND) return { main: { mode: 'text', lang: '', source: '', regions: [] } };
     if (kind === FUNCTION_KIND) return { main: { mode: 'function', lang: '' } };
     return defaultBasicObjectiveConfig(kind);
 }
@@ -137,6 +131,13 @@ function parseStructuredConfigInput(raw: string): unknown {
     } catch (error) {
         throw new ValidationError('structuredConfig', null, error.message);
     }
+}
+
+function createRequestUsesCodeEvaluationDraft(kind: DedicatedStructuredEditorKind, config: unknown): boolean {
+    if (kind === FUNCTION_KIND) return true;
+    if (kind !== PROGRAM_FILL_KIND || !config || typeof config !== 'object' || Array.isArray(config)) return false;
+    const main = (config as Record<string, unknown>).main;
+    return !!main && typeof main === 'object' && !Array.isArray(main) && (main as Record<string, unknown>).mode === 'compile';
 }
 
 function exactProblemFilter(id: string | number): Filter<ProblemDoc> {
@@ -938,10 +939,9 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             throw new ValidationError('rule', null, '主观题仅允许在 exam、homework 或 oi 容器中提交');
         }
         if (typeof config === 'string' || config === null) throw new ProblemConfigError();
-        if (['fill_function', 'function'].includes(config.type) && ['program_fill', 'function'].includes(problemKind)) {
-            lang = config.template?.lang || '';
-        }
-        if (['submit_answer', 'objective'].includes(config.type)) {
+        const structuredCode = ['program_fill', 'function'].includes(config.type) && ['program_fill', 'function'].includes(problemKind);
+        if (structuredCode) lang = config.type === 'program_fill' && config.mode === 'text' ? '_' : config.template?.lang || '';
+        if (['submit_answer', 'objective'].includes(config.type) || (config.type === 'program_fill' && config.mode === 'text')) {
             lang = '_';
         } else if ((config.langs && !config.langs.includes(lang)) || !setting.langs[lang] || setting.langs[lang].disabled) {
             throw new ProblemNotAllowLanguageError();
@@ -978,24 +978,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             if (!isSubjective) code = code.replace(/\r\n/g, '\n');
             if (code.length > lengthLimit) throw new ValidationError('code');
         }
-        if (problemKind === PROGRAM_FILL_KIND && config.type === 'objective' && config.subType === 'program_fill_text') {
-            try {
-                validateTextProgramFillSubmission(problemKind, config, yaml.load(code));
-            } catch (error: any) {
-                logger.error(
-                    'Text program-fill submission rejected domain=%s container=%s pid=%d kind=%s revision=%s uid=%d error=%o',
-                    domainId,
-                    tid || '-',
-                    this.pdoc.docId,
-                    problemKind,
-                    this.pdoc.structureRevision,
-                    this.user._id,
-                    error,
-                );
-                throw new ValidationError('code', null, error.message);
-            }
-        }
-        if (['fill_function', 'function'].includes(config.type) && ['program_fill', 'function'].includes(problemKind)) {
+        if (structuredCode) {
             try {
                 const structuredKind = problemKind === 'program_fill' ? 'program_fill' : 'function';
                 parseStructuredRegionSubmission(structuredKind, config.template, code);
@@ -1423,7 +1406,7 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
             throw new ValidationError('editorProblemKind');
         }
         const parsedConfig = parseStructuredConfigInput(structuredConfig);
-        const requiresCodeEvaluationDraft = isCodeEvaluationProblem(this.problemKind, parsedConfig);
+        const requiresCodeEvaluationDraft = createRequestUsesCodeEvaluationDraft(this.problemKind, parsedConfig);
         if (requiresCodeEvaluationDraft !== codeEvaluationDraft) {
             throw new ValidationError(
                 'codeEvaluationDraft',

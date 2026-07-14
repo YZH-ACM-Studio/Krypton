@@ -17,16 +17,16 @@ export type QuestionKind =
   | 'multi'
   | 'blank'
   | 'fill_program'
+  | 'program_fill_text'
   | 'program_fill_compile'
   | 'subjective'
   | 'function'
-  | 'fill_function'
   | 'default'
   | 'submit_answer';
 
 export interface PaperCell {
   pid: number;
-  /** null for problem-level cells (default / fill_function). */
+  /** null for problem-level cells (default / program_fill / function). */
   questionKey: string | null;
   kind: QuestionKind;
   score: number;
@@ -40,9 +40,9 @@ export const KIND_LABELS: Record<QuestionKind, string> = {
   multi: '多选',
   blank: '填空',
   fill_program: '程序填空',
+  program_fill_text: '程序填空（文本）',
   program_fill_compile: '程序填空（编译）',
   subjective: '主观题',
-  fill_function: '函数题',
   function: '函数题',
   default: '编程',
   submit_answer: '提交答案',
@@ -53,9 +53,9 @@ const KIND_SHORT: Record<QuestionKind, string> = {
   multi: '多',
   blank: '填',
   fill_program: '程',
+  program_fill_text: '文',
   program_fill_compile: '编',
   subjective: '主',
-  fill_function: '函',
   function: '函',
   default: '编',
   submit_answer: '答',
@@ -76,10 +76,10 @@ const KIND_ORDER: QuestionKind[] = [
   'multi',
   'blank',
   'fill_program',
+  'program_fill_text',
   'program_fill_compile',
   'subjective',
   'function',
-  'fill_function',
   'default',
   'submit_answer',
 ];

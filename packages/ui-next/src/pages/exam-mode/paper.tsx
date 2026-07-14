@@ -43,11 +43,13 @@ interface PdocLike {
   content: string;
   config: {
     type?: string;
+    mode?: 'text' | 'compile';
     subType?: string;
     answers?: Record<string, any>;
     template?: {
-      lang: string;
+      lang?: string;
       regions: Array<{ id: string; signature?: string; description?: string; prompt?: string }>;
+      skeleton?: Array<{ code: string } | { regionId: string }>;
     };
     langs?: string[];
     options?: Record<string, string[]>;
@@ -87,10 +89,10 @@ const EMPTY_DRAFT: DraftState = {
 };
 
 const SUBSIDEBAR_KEY = 'krypton:exam-subsidebar-collapsed';
-const COMPILED_REGION_KINDS: QuestionKind[] = ['program_fill_compile', 'function', 'fill_function'];
+const STRUCTURED_REGION_KINDS: QuestionKind[] = ['program_fill_text', 'program_fill_compile', 'function'];
 
 function parseSavedRegionContents(pdoc: PdocLike | undefined, rawCode: unknown): Record<string, string> | undefined {
-  if (!pdoc || !['fill_function', 'function'].includes(pdoc.config.type || '')) return undefined;
+  if (!pdoc || !['program_fill', 'function'].includes(pdoc.config.type || '')) return undefined;
   if (typeof rawCode !== 'string') throw new Error(`题目 ${pdoc.docId} 的 region 草稿缺少 code`);
   const parsed = JSON.parse(rawCode);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -287,7 +289,7 @@ function ProblemsSection({
         const filled = v && (Array.isArray(v) ? v.length > 0 : String(v).length > 0);
         return filled ? 'answered' : 'unanswered';
       }
-      if (!c.questionKey && COMPILED_REGION_KINDS.includes(c.kind)) {
+      if (!c.questionKey && STRUCTURED_REGION_KINDS.includes(c.kind)) {
         return Object.keys(draft.regionContents || {}).length > 0 ? 'answered' : 'unanswered';
       }
       return draft.code ? 'answered' : 'unanswered';
@@ -330,9 +332,10 @@ function ProblemsSection({
     const type = pdoc.config?.type || 'default';
     if (type === 'objective') {
       body.answers = JSON.stringify(draft.answers);
-    } else if (['fill_function', 'function'].includes(type)) {
-      body.code = JSON.stringify(draft.regionContents || {});
-      body.lang = draft.lang || pdoc.config?.template?.lang || 'cpp';
+    } else if (['program_fill', 'function'].includes(type)) {
+      const regions = pdoc.config.template?.regions || [];
+      body.code = JSON.stringify(Object.fromEntries(regions.map((region) => [region.id, draft.regionContents?.[region.id] || ''])));
+      body.lang = type === 'program_fill' && pdoc.config.mode === 'text' ? '_' : draft.lang || pdoc.config?.template?.lang || 'cpp';
     } else if (type === 'default' || type === 'submit_answer') {
       body.code = draft.code || '';
       if (draft.lang) body.lang = draft.lang;
@@ -543,7 +546,7 @@ function ProblemsSection({
                       regionContents: { ...(draft.regionContents || {}), [regionId]: content },
                     });
                   }}
-                  onSubmitProgramming={['default', ...COMPILED_REGION_KINDS].includes(cell.kind) ? () => submitProgramming(cell.pid) : undefined}
+                  onSubmitProgramming={['default', ...STRUCTURED_REGION_KINDS].includes(cell.kind) ? () => submitProgramming(cell.pid) : undefined}
                 />
               </div>
             ))}
@@ -632,16 +635,17 @@ function CellEditor({
           <p className="text-[11px] text-muted-foreground">本题为主观题，交卷后由老师人工评分。</p>
         </div>
       )}
-      {!cell.questionKey && COMPILED_REGION_KINDS.includes(cell.kind) && pdoc.config.template && (
+      {!cell.questionKey && STRUCTURED_REGION_KINDS.includes(cell.kind) && pdoc.config.template && (
         <StructuredRegionInputs
           regions={pdoc.config.template.regions}
           values={draft.regionContents || {}}
           onChange={onRegionChange}
           readOnly={isLocked}
-          singleLine={cell.kind === 'program_fill_compile'}
+          singleLine={cell.kind === 'program_fill_text' || cell.kind === 'program_fill_compile'}
+          skeleton={pdoc.config.type === 'program_fill' ? pdoc.config.template.skeleton : undefined}
         />
       )}
-      {!cell.questionKey && COMPILED_REGION_KINDS.includes(cell.kind) && !pdoc.config.template && (
+      {!cell.questionKey && STRUCTURED_REGION_KINDS.includes(cell.kind) && !pdoc.config.template && (
         <p className="text-sm text-destructive">题目模板缺失。</p>
       )}
       {(cell.kind === 'default' || cell.kind === 'submit_answer') && (

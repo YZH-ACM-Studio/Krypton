@@ -35,7 +35,8 @@ export function ProblemSubmitPage() {
   const tid = tdoc?.docId ? String(tdoc.docId) : null;
   const contestQS = tid ? `?tid=${tid}` : '';
   const submitUrl = `${problemUrl}/submit${contestQS}`;
-  const isStructuredCompile = ['fill_function', 'function'].includes(config.type) && ['program_fill', 'function'].includes(String(pdoc.problemKind));
+  const isStructuredAnswer = ['program_fill', 'function'].includes(config.type) && ['program_fill', 'function'].includes(String(pdoc.problemKind));
+  const textProgramFill = config.type === 'program_fill' && config.mode === 'text';
   const regions = Array.isArray(config.template?.regions) ? config.template.regions : [];
   const singleLineRegion = pdoc.problemKind === 'program_fill';
 
@@ -50,7 +51,7 @@ export function ProblemSubmitPage() {
   const langKey = `krypton:submit-lang:${pid}${tid ? `:${tid}` : ''}`;
   const availableLangs = useMemo(() => Object.keys(langRange), [langRange]);
   const [lang, setLang] = useState<string>(() => {
-    if (isStructuredCompile) return config.template?.lang || availableLangs[0] || '';
+    if (isStructuredAnswer) return textProgramFill ? '_' : config.template?.lang || availableLangs[0] || '';
     try {
       const saved = localStorage.getItem(langKey);
       if (saved && (availableLangs.length === 0 || availableLangs.includes(saved))) return saved;
@@ -66,17 +67,17 @@ export function ProblemSubmitPage() {
     } catch {
       /* */
     }
-    return isStructuredCompile ? JSON.stringify(Object.fromEntries(regions.map((region: R) => [region.id, '']))) : '';
+    return isStructuredAnswer ? JSON.stringify(Object.fromEntries(regions.map((region: R) => [region.id, '']))) : '';
   });
   const regionValues = useMemo(() => {
-    if (!isStructuredCompile) return {};
+    if (!isStructuredAnswer) return {};
     try {
       const parsed = JSON.parse(code);
       return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
     } catch {
       return {};
     }
-  }, [code, isStructuredCompile]);
+  }, [code, isStructuredAnswer]);
   const updateRegion = (id: string, value: string) => {
     setCode(JSON.stringify({ ...regionValues, [id]: value }));
   };
@@ -107,7 +108,7 @@ export function ProblemSubmitPage() {
 
   const handleSubmit = useCallback(async () => {
     if (submitting) return;
-    if (!code.trim() || (isStructuredCompile && regions.some((region: R) => !(regionValues[region.id] || '').trim()))) {
+    if (!code.trim()) {
       setSubmitError('作答内容不能为空');
       return;
     }
@@ -153,7 +154,7 @@ export function ProblemSubmitPage() {
       setSubmitError(e?.message || '提交失败');
       setSubmitting(false);
     }
-  }, [code, lang, tid, submitUrl, submitting, bs.urls.recordDetail, isStructuredCompile, regionValues, regions]);
+  }, [code, lang, tid, submitUrl, submitting, bs.urls.recordDetail]);
 
   return (
     <motion.div className="space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
@@ -188,7 +189,7 @@ export function ProblemSubmitPage() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">{isStructuredCompile ? '提交作答' : '提交代码'}</h1>
+          <h1 className="text-xl font-semibold">{isStructuredAnswer ? '提交作答' : '提交代码'}</h1>
           <p className="text-sm text-muted-foreground">{title}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -204,8 +205,8 @@ export function ProblemSubmitPage() {
         {/* Language picker + meta */}
         <div className="flex flex-wrap items-center gap-2">
           <label className="text-xs text-muted-foreground">语言</label>
-          {isStructuredCompile ? (
-            <Badge variant="outline">{lang}</Badge>
+          {isStructuredAnswer ? (
+            <Badge variant="outline">{textProgramFill ? '文本比对' : lang}</Badge>
           ) : (
             <SimpleSelect
               value={lang}
@@ -231,9 +232,15 @@ export function ProblemSubmitPage() {
         </div>
 
         {/* Editor in simple mode */}
-        {isStructuredCompile ? (
+        {isStructuredAnswer ? (
           <div className="border-y border-border/70 py-5">
-            <StructuredRegionInputs regions={regions} values={regionValues} onChange={updateRegion} singleLine={singleLineRegion} />
+            <StructuredRegionInputs
+              regions={regions}
+              values={regionValues}
+              onChange={updateRegion}
+              singleLine={singleLineRegion}
+              skeleton={singleLineRegion ? config.template?.skeleton : undefined}
+            />
           </div>
         ) : (
           <div className="rounded-md border overflow-hidden" style={{ height: 'calc(100vh - 220px)', minHeight: 480 }}>

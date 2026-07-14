@@ -1,9 +1,9 @@
 import type { ProblemKind } from '@hydrooj/common';
 import { parseProblemKind } from '@hydrooj/common';
 import { ValidationError } from '../error';
-import { parseProblemConfigObject, validateCompiledStructuredConfig } from '../lib/problem-config';
+import { parseProblemConfigObject, validateCompiledStructuredConfig, validateStructuredCodeJudgeConfig } from '../lib/problem-config';
 import db from '../service/db';
-import { normalizeCodeEvaluationDraftConfig } from './code-evaluation-lifecycle';
+import { normalizeStructuredCodeConfig } from './code-evaluation-lifecycle';
 import * as document from './document';
 
 const recordColl = db.collection('record');
@@ -102,10 +102,11 @@ function assertNoSecondaryStatement(value: unknown, path = 'config'): void {
     }
 }
 
-function normalizeCompilableStructured(kind: 'program_fill' | 'function', main: Record<string, unknown>, currentConfig?: unknown) {
-    const config = normalizeCodeEvaluationDraftConfig(kind, { main }, currentConfig);
+function normalizeAuthorStructuredCode(kind: 'program_fill' | 'function', main: Record<string, unknown>, currentConfig?: unknown) {
+    const config = normalizeStructuredCodeConfig(kind, { main }, currentConfig);
     try {
-        validateCompiledStructuredConfig(kind, config);
+        if (kind === 'program_fill' && config.mode === 'text') validateStructuredCodeJudgeConfig(config, 'program_fill');
+        else validateCompiledStructuredConfig(kind, config);
     } catch (error: any) {
         throw new ValidationError('config', null, error.message);
     }
@@ -247,47 +248,35 @@ export function normalizeStructuredProblemConfig(kind: ProblemKind, config: unkn
     }
     if (kind === 'program_fill') {
         if (!isPlainObject(config.main)) throw new ValidationError('config', null, 'main 必须是对象');
-        if (config.main.mode === 'text') {
-            if (typeof config.main.answer !== 'string' || !config.main.answer.trim() || /[\r\n]/.test(config.main.answer)) {
-                throw new ValidationError('config', null, '文本程序填空答案必须是非空单行文本');
-            }
-            return {
-                type: 'objective',
-                subType: 'program_fill_text',
-                score: 100,
-                main: { mode: 'text', answer: config.main.answer },
-                answers: { main: [config.main.answer, 100, { kind: 'fill_program' }] },
-            };
-        }
-        if (config.main.mode !== 'compile') throw new ValidationError('config', null, '程序填空模式必须是 text 或 compile');
-        return normalizeCompilableStructured('program_fill', config.main, currentConfig);
+        return normalizeAuthorStructuredCode('program_fill', config.main, currentConfig);
     }
     if (kind === 'function') {
         if (!isPlainObject(config.main)) throw new ValidationError('config', null, 'main 必须是对象');
-        return normalizeCompilableStructured('function', config.main, currentConfig);
+        return normalizeAuthorStructuredCode('function', config.main, currentConfig);
     }
     return { ...config, score: 100 };
 }
 
 export function structuredProblemUsesTestdata(kind: ProblemKind, config: any): boolean {
-    return kind === 'function' || (kind === 'program_fill' && (config?.main?.mode === 'compile' || config?.subType === 'program_fill_compile'));
+    return kind === 'function' || (kind === 'program_fill' && config?.type === 'program_fill' && config?.mode === 'compile');
 }
 
 export function structuredProblemConfigForEditor(kind: ProblemKind, configInput: unknown): Record<string, unknown> {
     const config = parseProblemConfigObject({ config: configInput });
     if (!config) throw new ValidationError('config', null, '结构化题配置无法解析');
-    if (kind === 'function' || (kind === 'program_fill' && config.subType === 'program_fill_compile')) {
+    if (kind === 'function' || (kind === 'program_fill' && config.type === 'program_fill')) {
         const template = config.template || {};
         return {
             main: {
-                mode: kind === 'function' ? 'function' : 'compile',
+                mode: kind === 'function' ? 'function' : config.mode,
                 lang: template.lang || config.langs?.[0] || '',
                 source: template.source || '',
                 regions: Array.isArray(template.regions) ? [...template.regions].sort((a, b) => Number(a.order) - Number(b.order)) : [],
-                cases: Array.isArray(config.cases) ? config.cases : [],
+                ...(kind === 'function' || config.mode === 'compile' ? { cases: Array.isArray(config.cases) ? config.cases : [] } : {}),
             },
         };
     }
+    if (kind === 'program_fill') throw new ValidationError('config', null, '程序填空配置不是 canonical program_fill');
     return { main: config.main };
 }
 

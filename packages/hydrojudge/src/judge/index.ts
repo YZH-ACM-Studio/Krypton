@@ -18,6 +18,6 @@ export = {
     submit_answer,
     objective,
     hack,
-    fill_function,
+    program_fill: fill_function,
     function: fill_function,
 } as Record<string, { judge(ctx: Context): Promise<void> }>;

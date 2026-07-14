@@ -30,21 +30,6 @@ export function isProblemConfigFilename(name: string): boolean {
     return /^config\.ya?ml$/i.test(name);
 }
 
-export function validateTextProgramFillSubmission(problemKind: unknown, config: any, submitted: unknown): boolean {
-    if (problemKind !== 'program_fill' || config?.type !== 'objective' || config?.subType !== 'program_fill_text') return false;
-    if (!submitted || typeof submitted !== 'object' || Array.isArray(submitted)) {
-        throw new Error('program_fill: text submission must be an object');
-    }
-    const keys = Object.keys(submitted as Record<string, unknown>);
-    if (keys.length !== 1 || keys[0] !== 'main') {
-        throw new Error('program_fill: text submission must contain only main');
-    }
-    const answer = (submitted as Record<string, unknown>).main;
-    if (typeof answer !== 'string') throw new Error('program_fill: text submission main must be a string');
-    if (/[\r\n]/.test(answer)) throw new Error('program_fill: text submission must be one line');
-    return true;
-}
-
 /** Pull `(stdAns, score, meta?)` out of an AnswerEntry regardless of arity. */
 export function unpackAnswerEntry(entry: AnswerEntry): {
     stdAns: string | string[];
@@ -180,12 +165,11 @@ export function clientProblemConfig(config: any): any {
         for (const q of out.questions) if (q.choices) options[q.key] = q.choices;
         if (Object.keys(options).length) out.options = options;
     }
-    if (['fill_function', 'function'].includes(config.type) && config.template) {
-        const regions = Array.isArray(config.template.regions)
-            ? [...config.template.regions].sort((a, b) => Number(a.order) - Number(b.order))
-            : [];
+    if (['program_fill', 'function'].includes(config.type) && config.template) {
+        if (config.type === 'program_fill') validateStructuredCodeJudgeConfig(config, 'program_fill');
+        const regions = Array.isArray(config.template.regions) ? [...config.template.regions].sort((a, b) => Number(a.order) - Number(b.order)) : [];
         out.template = {
-            lang: config.template.lang,
+            ...(config.template.lang ? { lang: config.template.lang } : {}),
             regions: regions.map((region) => ({
                 id: region.id,
                 ...(config.type === 'function'
@@ -197,7 +181,9 @@ export function clientProblemConfig(config: any): any {
                       ? { prompt: region.prompt }
                       : {}),
             })),
+            ...(config.type === 'program_fill' ? { skeleton: clientProgramFillSkeleton(config.template) } : {}),
         };
+        if (config.type === 'program_fill') out.mode = config.mode;
     }
     if (config.subType) out.subType = config.subType;
     return out;
@@ -212,6 +198,18 @@ export function templateSourceHash(source: string): string {
 
 export const STRUCTURED_CODE_REGION_ID = /^r_[A-Za-z0-9_-]{12,32}$/;
 
+export type ClientProgramFillSkeletonLine = { code: string } | { regionId: string };
+
+/** Build a public source skeleton without ever copying a selected answer line. */
+export function clientProgramFillSkeleton(template: StructuredCodeTemplate): ClientProgramFillSkeletonLine[] {
+    validateStructuredCodeTemplate(template, 'program_fill');
+    const regionByLine = new Map(template.regions.map((region) => [region.startLine, region.id]));
+    return template.source.split('\n').map((code, line) => {
+        const regionId = regionByLine.get(line);
+        return regionId ? { regionId } : { code };
+    });
+}
+
 export function validateStructuredCodeTemplate(
     template: StructuredCodeTemplate,
     kind: 'program_fill' | 'function',
@@ -221,7 +219,12 @@ export function validateStructuredCodeTemplate(
     if (typeof template.source !== 'string') throw new Error(`${kind}: template source must be text`);
     if (template.source.includes('\r')) throw new Error(`${kind}: template source must use LF line endings`);
     if (!options.allowEmpty && !template.source.length) throw new Error(`${kind}: template source is required`);
-    if (!template.lang || typeof template.lang !== 'string') throw new Error(`${kind}: template language is required`);
+    if (kind === 'function' && (!template.lang || typeof template.lang !== 'string')) {
+        throw new Error('function: template language is required');
+    }
+    if (template.lang !== undefined && (typeof template.lang !== 'string' || !template.lang)) {
+        throw new Error(`${kind}: template language must be non-empty text when provided`);
+    }
     if (template.sourceHash !== templateSourceHash(template.source)) throw new Error(`${kind}: template source hash mismatch`);
     if (!Array.isArray(template.regions)) throw new Error(`${kind}: template regions must be an array`);
     if (!options.allowEmpty && !template.regions.length) throw new Error(`${kind}: at least one region is required`);
@@ -292,37 +295,40 @@ export function spliceStructuredCodeTemplate(
 }
 
 export function validateCompiledStructuredConfig(kind: string, config: any): void {
-    if (kind === 'program_fill' && config?.main?.mode === 'text') return;
     if (!['program_fill', 'function'].includes(kind)) return;
-    const expectedType = kind === 'function' ? 'function' : 'fill_function';
-    if (config?.type !== expectedType || (kind === 'program_fill' && config?.subType !== 'program_fill_compile')) {
-        throw new Error(`${kind}: invalid compile configuration`);
-    }
+    const expectedType = kind === 'function' ? 'function' : 'program_fill';
+    if (config?.type !== expectedType) throw new Error(`${kind}: invalid structured configuration`);
     validateStructuredCodeJudgeConfig(config, kind as 'program_fill' | 'function');
+    if (kind === 'program_fill' && config.mode === 'text') return;
     const template = config.template as StructuredCodeTemplate;
+    if (!template.lang) throw new Error(`${kind}: template language is required`);
     if (!Array.isArray(config.langs) || config.langs.length !== 1 || config.langs[0] !== template.lang) {
         throw new Error(`${kind}: language mismatch`);
-    }
-    if (kind === 'program_fill') {
-        if (template.regions.length !== 1) throw new Error('program_fill: compile mode currently requires exactly one region');
     }
 }
 
 /** Validate the private configuration required before a structured-code record is created. */
 export function validateStructuredCodeJudgeConfig(config: any, kindInput?: 'program_fill' | 'function'): void {
     const kind = kindInput || (config?.type === 'function' ? 'function' : 'program_fill');
-    const expectedType = kind === 'function' ? 'function' : 'fill_function';
+    const expectedType = kind === 'function' ? 'function' : 'program_fill';
     if (config?.type !== expectedType) throw new Error(`${kind}: invalid problem type`);
+    if (kind === 'program_fill' && !['text', 'compile'].includes(config.mode)) {
+        throw new Error('program_fill: mode must be text or compile');
+    }
     validateStructuredCodeTemplate(config.template as StructuredCodeTemplate, kind);
+    if (kind === 'program_fill' && config.mode === 'text') {
+        if (config.cases !== undefined) throw new Error('program_fill: text mode cannot contain testdata cases');
+        return;
+    }
+    if (!config.template.lang) throw new Error(`${kind}: template language is required`);
     if (!Array.isArray(config.cases) || !config.cases.length) throw new Error(`${kind}: testdata cases are required`);
 }
 
-export function validateStructuredCodeTestdataFiles(
-    config: any,
-    files: Array<{ name: string }>,
-    kindInput?: 'program_fill' | 'function',
-): void {
+export function validateStructuredCodeTestdataFiles(config: any, files: Array<{ name: string }>, kindInput?: 'program_fill' | 'function'): void {
     validateStructuredCodeJudgeConfig(config, kindInput);
+    if ((kindInput === 'program_fill' || config.type === 'program_fill') && config.mode !== 'compile') {
+        throw new Error('program_fill: text mode does not use testdata files');
+    }
     const available = new Set((files || []).map((item) => item.name));
     const missing = (config.cases || []).flatMap((item) => [item.input, item.output]).find((name) => !available.has(name));
     if (missing) throw new Error(`${kindInput || config.type}: missing testdata file ${missing}`);
@@ -330,11 +336,11 @@ export function validateStructuredCodeTestdataFiles(
 
 /** Parse and validate a student region payload before inserting a Record. */
 export function parseStructuredRegionSubmission(
-    kind: 'program_fill' | 'function' | 'fill_function',
-    template: { lang: string; regions: Array<{ id: string }> } | null | undefined,
+    kind: 'program_fill' | 'function',
+    template: { lang?: string; regions: Array<{ id: string }> } | null | undefined,
     rawCode: string,
 ): Record<string, string> {
-    if (!template?.lang || !Array.isArray(template.regions) || !template.regions.length) {
+    if (!template || !Array.isArray(template.regions) || !template.regions.length) {
         throw new Error(`${kind}: missing template region description`);
     }
     let regions: unknown;
@@ -363,6 +369,31 @@ export function parseStructuredRegionSubmission(
         throw new Error('program_fill: every submitted region must be one line');
     }
     return result as Record<string, string>;
+}
+
+export interface ProgramFillTextGrade {
+    correctCount: number;
+    score: number;
+    regions: Array<{ id: string; order: number; correct: boolean; score: number }>;
+}
+
+/** Grade canonical text program-fill answers without materializing a second answer source. */
+export function gradeProgramFillTextSubmission(config: any, rawCode: string): ProgramFillTextGrade {
+    validateStructuredCodeJudgeConfig(config, 'program_fill');
+    if (config.mode !== 'text') throw new Error('program_fill: text grader requires text mode');
+    const submitted = parseStructuredRegionSubmission('program_fill', config.template, rawCode);
+    const lines = config.template.source.split('\n');
+    const regions = [...config.template.regions]
+        .sort((a, b) => a.order - b.order)
+        .map((region) => {
+            const expected = lines.slice(region.startLine, region.endLine).join('\n').replace(/\r\n?/g, '\n').trim();
+            const actual = submitted[region.id].replace(/\r\n?/g, '\n').trim();
+            return { id: region.id, order: region.order, correct: actual === expected, score: 0 };
+        });
+    const correctCount = regions.filter((region) => region.correct).length;
+    const score = (100 * correctCount) / regions.length;
+    for (const region of regions) region.score = region.correct ? 100 / regions.length : 0;
+    return { correctCount, score, regions };
 }
 
 /**

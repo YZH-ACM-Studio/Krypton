@@ -34,7 +34,6 @@ import {
     UserModel,
     validateCompiledStructuredConfig,
     validateStructuredCodeJudgeConfig,
-    validateTextProgramFillSubmission,
     ValidationError,
 } from 'hydrooj';
 import { ContestClientFinishedError } from '../error';
@@ -93,7 +92,7 @@ function absolutizeProblemFileUrls(handler: Handler, content: string, pdoc: any,
 /**
  * pdoc.config 统一解析（见 lib/problem-config.ts parseProblemConfigObject）。
  * 此前 `typeof pdoc.config === 'object'` 的判断对字符串永远为 false，
- * objective/fill_function 的 cells 构建与 finalize 分流在生产从未生效
+ * objective/structured-code 的 cells 构建与 finalize 分流在生产从未生效
  * （PLAN P3.2 修复）。完整对象含标准答案，**只许服务端用**；发给
  * 客户端一律经 clientProblemConfig 净化。
  */
@@ -107,9 +106,10 @@ function validatePaperRegionSubmission(
     context: { domainId: string; tid: ObjectId; uid: number; stage: string },
 ) {
     const effectiveKind = effectiveProblemKind(pdoc);
-    const kind = effectiveKind === 'program_fill' || effectiveKind === 'function' ? effectiveKind : 'fill_function';
+    if (!['program_fill', 'function'].includes(effectiveKind)) throw new ValidationError('problemKind');
+    const kind = effectiveKind as 'program_fill' | 'function';
     try {
-        validateStructuredCodeJudgeConfig(config, effectiveKind === 'function' ? 'function' : 'program_fill');
+        validateStructuredCodeJudgeConfig(config, kind);
         validateCompiledStructuredConfig(effectiveKind, config);
         if (typeof rawCode !== 'string') throw new Error(`${kind}: region payload is required`);
         parseStructuredRegionSubmission(kind, config.template, rawCode);
@@ -127,47 +127,7 @@ function validatePaperRegionSubmission(
         );
         throw new ValidationError('code', null, error.message);
     }
-    return { code: rawCode, lang: config.template.lang as string };
-}
-
-function validatePaperTextProgramFillSubmission(
-    pdoc: any,
-    config: any,
-    answers: unknown,
-    context: { domainId: string; tid: ObjectId; uid: number; stage: string },
-) {
-    try {
-        validateTextProgramFillSubmission(effectiveProblemKind(pdoc), config, answers);
-    } catch (error: any) {
-        logger.error(
-            'Paper text program-fill rejected stage=%s domain=%s tid=%s pid=%d kind=%s revision=%s uid=%d error=%o',
-            context.stage,
-            context.domainId,
-            context.tid,
-            pdoc.docId,
-            effectiveProblemKind(pdoc),
-            pdoc.structureRevision,
-            context.uid,
-            error,
-        );
-        throw new ValidationError('answers', null, error.message);
-    }
-}
-
-function preflightPaperTextProgramFillDrafts(
-    drafts: Array<{ pid: number; answers?: unknown }>,
-    pdict: Record<number, any>,
-    context: { domainId: string; tid: ObjectId; uid: number },
-) {
-    for (const draft of drafts) {
-        const pdoc = pdict[draft.pid];
-        if (!pdoc) continue;
-        const config = parsedProblemConfig(pdoc);
-        validatePaperTextProgramFillSubmission(pdoc, config, draft.answers, {
-            ...context,
-            stage: 'finalize-preflight',
-        });
-    }
+    return { code: rawCode, lang: kind === 'program_fill' && config.mode === 'text' ? '_' : (config.template.lang as string) };
 }
 
 class PaperBaseHandler extends Handler {
@@ -448,12 +408,12 @@ class PaperLayoutHandler extends PaperBaseHandler {
                         prompt: meta?.prompt,
                     });
                 }
-            } else if (['fill_function', 'function'].includes(type)) {
+            } else if (['program_fill', 'function'].includes(type)) {
                 const kind = effectiveProblemKind(pdoc);
                 cells.push({
                     pid,
                     questionKey: null,
-                    kind: kind === 'program_fill' ? 'program_fill_compile' : kind === 'function' ? 'function' : 'fill_function',
+                    kind: kind === 'program_fill' ? (config.mode === 'compile' ? 'program_fill_compile' : 'program_fill_text') : 'function',
                     score: pdoc.score || 100,
                 });
             } else {
@@ -593,13 +553,7 @@ class PaperDraftUpsertHandler extends PaperBaseHandler {
         }
 
         const config = parsedProblemConfig(pdoc);
-        validatePaperTextProgramFillSubmission(pdoc, config, parsedAnswers, {
-            domainId,
-            tid: this.tid,
-            uid: this.user._id,
-            stage: 'draft-save',
-        });
-        if (['fill_function', 'function'].includes(config?.type)) {
+        if (['program_fill', 'function'].includes(config?.type)) {
             const validated = validatePaperRegionSubmission(pdoc, config, code, {
                 domainId,
                 tid: this.tid,
@@ -633,21 +587,6 @@ class PaperLockKindHandler extends PaperBaseHandler {
             throw new ValidationError('allowSubmitByKind', null, 'This contest does not allow per-kind submission. Use finalize to submit.');
         }
         const pdict = await this.getProblemDict();
-        if (kind === 'fill_program') {
-            for (const pid of this.tdoc.pids as number[]) {
-                const pdoc = pdict[pid];
-                if (!pdoc) continue;
-
-                const draft = await PaperDraftModel.getDraft(domainId, this.tid, pid, this.user._id);
-                if (!draft) continue;
-                validatePaperTextProgramFillSubmission(pdoc, pdoc.config, draft.answers, {
-                    domainId,
-                    tid: this.tid,
-                    uid: this.user._id,
-                    stage: 'lock-kind',
-                });
-            }
-        }
         await PaperDraftModel.lockKindForUser(domainId, this.tid, this.user._id, kind as any);
 
         // Immediate grading for that kind across all objective problems.
@@ -675,7 +614,7 @@ class PaperSubmitCodeHandler extends PaperBaseHandler {
         if (!pdoc) throw new NotFoundError('Problem');
         const config = parsedProblemConfig(pdoc);
         const type = config?.type || 'default';
-        if (!['default', 'fill_function', 'function'].includes(type)) {
+        if (!['default', 'program_fill', 'function'].includes(type)) {
             throw new ValidationError('type', null, 'Only default and structured-code problems support immediate submit');
         }
 
@@ -683,15 +622,14 @@ class PaperSubmitCodeHandler extends PaperBaseHandler {
         if (!draft || !draft.code) {
             throw new ValidationError('draft', null, 'No code saved yet — call save first');
         }
-        const validated =
-            ['fill_function', 'function'].includes(type)
-                ? validatePaperRegionSubmission(pdoc, config, draft.code, {
-                      domainId,
-                      tid: this.tid,
-                      uid: this.user._id,
-                      stage: 'immediate-submit',
-                  })
-                : null;
+        const validated = ['program_fill', 'function'].includes(type)
+            ? validatePaperRegionSubmission(pdoc, config, draft.code, {
+                  domainId,
+                  tid: this.tid,
+                  uid: this.user._id,
+                  stage: 'immediate-submit',
+              })
+            : null;
         const lang = validated?.lang || draft.lang || config?.langs?.[0] || 'cpp';
         const finalCode = validated?.code || draft.code;
 
@@ -721,8 +659,6 @@ export async function finalizePaperForUser(
             if (pdoc) pdict[pid] = pdoc;
         }),
     );
-    preflightPaperTextProgramFillDrafts(drafts, pdict, { domainId, tid, uid });
-
     const rids: ObjectId[] = [];
     const manualRids = new Set<string>();
     const recordMeta = options.meta ? { meta: options.meta } : {};
@@ -751,9 +687,8 @@ export async function finalizePaperForUser(
                 await markManualPending({ domainId, tid, pid: draft.pid, uid, rid });
             }
             rids.push(rid);
-        } else if (['fill_function', 'function'].includes(type)) {
-            const codeBody = draft.code || JSON.stringify(draft.answers || {});
-            const validated = validatePaperRegionSubmission(pdoc, config, codeBody, {
+        } else if (['program_fill', 'function'].includes(type)) {
+            const validated = validatePaperRegionSubmission(pdoc, config, draft.code, {
                 domainId,
                 tid,
                 uid,

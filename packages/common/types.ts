@@ -12,7 +12,7 @@ export enum ProblemType {
     Communication = 'communication',
     Objective = 'objective',
     Remote = 'remote_judge',
-    FillFunction = 'fill_function',
+    ProgramFill = 'program_fill',
     Function = 'function',
 }
 
@@ -91,7 +91,8 @@ export interface ObjectiveBlankMain {
  * the normal `default` judge.
  */
 export interface StructuredCodeTemplate {
-    lang: string;
+    /** Required for function and compile program-fill; optional text syntax hint otherwise. */
+    lang?: string;
     source: string;
     regions: StructuredCodeRegion[];
     /** SHA-256 of `source` at save time. Used for draft staleness detection. */
@@ -159,6 +160,7 @@ export type DetailType = 'full' | 'case' | 'none';
 
 export interface ProblemConfigFile {
     type?: ProblemType;
+    mode?: 'text' | 'compile';
     subType?: string;
     target?: string;
     score?: number;

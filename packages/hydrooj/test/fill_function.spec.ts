@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { ProblemType } from '@hydrooj/common';
 import {
     clientProblemConfig,
+    gradeProgramFillTextSubmission,
     inferQuestionKind,
     isProblemConfigFilename,
     parseStructuredRegionSubmission,
@@ -14,12 +15,12 @@ import {
     validateStructuredCodeJudgeConfig,
     validateStructuredCodeTemplate,
     validateStructuredCodeTestdataFiles,
-    validateTextProgramFillSubmission,
 } from '../src/lib/problem-config';
 import { parseConfig } from '../src/lib/testdataConfig';
 
 const FIRST_ID = 'r_abcdefghijkl';
 const SECOND_ID = 'r_mnopqrstuvwx';
+const THIRD_ID = 'r_yzABCDEFGHIJ';
 
 function functionTemplate() {
     const source = ['int first() {', '    return 0;', '}', 'int second() {', '    return 0;', '}'].join('\n');
@@ -111,14 +112,57 @@ describe('problem config filename', () => {
     });
 });
 
-describe('legacy text program-fill submission', () => {
-    const config = { type: 'objective', subType: 'program_fill_text' };
+describe('canonical text program-fill', () => {
+    const source = ['for (int i = 0; i < n; i++) {', '    total += i;', '}', 'std::cout << total;', 'return 0;'].join('\n');
+    const config = {
+        type: 'program_fill',
+        mode: 'text',
+        score: 100,
+        template: {
+            source,
+            sourceHash: templateSourceHash(source),
+            regions: [
+                { id: FIRST_ID, startLine: 1, endLine: 2, order: 2, prompt: '累加' },
+                { id: SECOND_ID, startLine: 3, endLine: 4, order: 0 },
+                { id: THIRD_ID, startLine: 4, endLine: 5, order: 1 },
+            ],
+        },
+    };
 
-    it('accepts only one string-valued main line', () => {
-        expect(validateTextProgramFillSubmission('program_fill', config, { main: 'i++' })).to.equal(true);
-        expect(() => validateTextProgramFillSubmission('program_fill', config, { main: 'i++\nj++' })).to.throw(/one line/);
-        expect(() => validateTextProgramFillSubmission('program_fill', config, { main: 'i++', extra: '' })).to.throw(/only main/);
-        expect(() => validateTextProgramFillSubmission('program_fill', config, { main: ['i++'] })).to.throw(/must be a string/);
+    it('grades any number of single-line regions independently without rounding', () => {
+        const grade = gradeProgramFillTextSubmission(
+            config,
+            JSON.stringify({ [FIRST_ID]: ' total += i; ', [SECOND_ID]: 'std::cout << total;', [THIRD_ID]: 'RETURN 0;' }),
+        );
+        expect(grade.correctCount).to.equal(2);
+        expect(grade.score).to.equal((100 * 2) / 3);
+        expect(grade.regions.map((region) => region.correct)).to.deep.equal([true, false, true]);
+
+        const none = gradeProgramFillTextSubmission(
+            config,
+            JSON.stringify({ [FIRST_ID]: 'TOTAL += I;', [SECOND_ID]: 'STD::COUT << TOTAL;', [THIRD_ID]: 'RETURN 1;' }),
+        );
+        expect(none).to.include({ correctCount: 0, score: 0 });
+
+        const all = gradeProgramFillTextSubmission(
+            config,
+            JSON.stringify({ [FIRST_ID]: '\t total += i;\t', [SECOND_ID]: 'std::cout << total;', [THIRD_ID]: 'return 0;' }),
+        );
+        expect(all).to.include({ correctCount: 3, score: 100 });
+    });
+
+    it('serializes a public inline skeleton without answer lines or coordinates', () => {
+        const client = clientProblemConfig(config);
+        expect(client).to.have.nested.property('template.skeleton');
+        expect(client.template.skeleton.filter((line: any) => line.regionId).map((line: any) => line.regionId)).to.deep.equal([
+            FIRST_ID,
+            SECOND_ID,
+            THIRD_ID,
+        ]);
+        const payload = JSON.stringify(client);
+        for (const secret of ['total += i', 'std::cout << total', 'return 0', 'sourceHash', 'startLine', 'endLine']) {
+            expect(payload).not.to.include(secret);
+        }
     });
 });
 
@@ -133,10 +177,7 @@ describe('whole-line structured templates', () => {
             ),
         ).to.throw(/duplicate region order/);
         expect(() =>
-            validateStructuredCodeTemplate(
-                { ...functionTemplate(), regions: [{ ...functionTemplate().regions[0], signature: '' }] },
-                'function',
-            ),
+            validateStructuredCodeTemplate({ ...functionTemplate(), regions: [{ ...functionTemplate().regions[0], signature: '' }] }, 'function'),
         ).to.throw(/signature is required/);
     });
 
@@ -144,13 +185,25 @@ describe('whole-line structured templates', () => {
         const base = functionTemplate();
         expect(() =>
             validateStructuredCodeTemplate(
-                { ...base, regions: [{ ...base.regions[0], endLine: 5, order: 0 }, { ...base.regions[1], order: 1 }] },
+                {
+                    ...base,
+                    regions: [
+                        { ...base.regions[0], endLine: 5, order: 0 },
+                        { ...base.regions[1], order: 1 },
+                    ],
+                },
                 'function',
             ),
         ).to.throw(/overlap/);
         expect(() =>
             validateStructuredCodeTemplate(
-                { ...base, regions: [{ ...base.regions[0], order: 0 }, { ...base.regions[1], id: FIRST_ID, order: 1 }] },
+                {
+                    ...base,
+                    regions: [
+                        { ...base.regions[0], order: 0 },
+                        { ...base.regions[1], id: FIRST_ID, order: 1 },
+                    ],
+                },
                 'function',
             ),
         ).to.throw(/duplicate region id/);
@@ -169,9 +222,9 @@ describe('whole-line structured templates', () => {
         expect(output).to.include('int value = 2;');
         expect(output).not.to.include('return 0;');
         expect(() => spliceStructuredCodeTemplate(functionTemplate(), { [FIRST_ID]: 'x' }, 'function')).to.throw(/missing region/);
-        expect(() =>
-            spliceStructuredCodeTemplate(functionTemplate(), { [FIRST_ID]: 'x', [SECOND_ID]: 'y', extra: 'z' }, 'function'),
-        ).to.throw(/unknown region/);
+        expect(() => spliceStructuredCodeTemplate(functionTemplate(), { [FIRST_ID]: 'x', [SECOND_ID]: 'y', extra: 'z' }, 'function')).to.throw(
+            /unknown region/,
+        );
     });
 });
 
@@ -191,21 +244,25 @@ describe('structured judge config', () => {
         expect(() => validateStructuredCodeTestdataFiles(functionConfig, [{ name: '1.in' }, { name: '1.out' }], 'function')).not.to.throw();
     });
 
-    it('temporarily accepts one whole-line compile program-fill region', () => {
-        const source = 'i++;';
+    it('accepts multiple whole-line compile program-fill regions', () => {
+        const source = 'i++;\nj++;';
         const config = {
-            type: 'fill_function',
-            subType: 'program_fill_compile',
+            type: 'program_fill',
+            mode: 'compile',
             langs: ['cc.cc17'],
             template: {
                 lang: 'cc.cc17',
                 source,
                 sourceHash: templateSourceHash(source),
-                regions: [{ id: FIRST_ID, startLine: 0, endLine: 1, order: 0 }],
+                regions: [
+                    { id: FIRST_ID, startLine: 0, endLine: 1, order: 1 },
+                    { id: SECOND_ID, startLine: 1, endLine: 2, order: 0 },
+                ],
             },
             cases: [{ input: '1.in', output: '1.out' }],
         };
         expect(() => validateCompiledStructuredConfig('program_fill', config)).not.to.throw();
+        expect(() => validateStructuredCodeTestdataFiles(config, [{ name: '1.in' }], 'program_fill')).to.throw(/1\.out/);
         expect(() => validateCompiledStructuredConfig('program_fill', { ...config, langs: ['py.py3'] })).to.throw(/language mismatch/);
         expect(() =>
             validateCompiledStructuredConfig('program_fill', {
@@ -225,15 +282,19 @@ describe('structured region submission', () => {
     const template = { lang: 'cc.cc17', regions: [{ id: FIRST_ID }, { id: SECOND_ID }] };
 
     it('accepts only the exact string-valued region map', () => {
-        expect(
-            parseStructuredRegionSubmission('function', template, JSON.stringify({ [FIRST_ID]: 'a', [SECOND_ID]: 'b\nc' })),
-        ).to.deep.equal({ [FIRST_ID]: 'a', [SECOND_ID]: 'b\nc' });
-        expect(() =>
-            parseStructuredRegionSubmission('function', template, JSON.stringify({ [FIRST_ID]: 'a', extra: 'b' })),
-        ).to.throw(/keys do not match/);
-        expect(() =>
-            parseStructuredRegionSubmission('function', template, JSON.stringify({ [FIRST_ID]: 'a', [SECOND_ID]: 2 })),
-        ).to.throw(/must be a string/);
+        expect(parseStructuredRegionSubmission('function', template, JSON.stringify({ [FIRST_ID]: 'a', [SECOND_ID]: 'b\nc' }))).to.deep.equal({
+            [FIRST_ID]: 'a',
+            [SECOND_ID]: 'b\nc',
+        });
+        expect(() => parseStructuredRegionSubmission('function', template, JSON.stringify({ [FIRST_ID]: 'a', extra: 'b' }))).to.throw(
+            /keys do not match/,
+        );
+        expect(() => parseStructuredRegionSubmission('function', template, JSON.stringify({ [FIRST_ID]: 'a', [SECOND_ID]: 2 }))).to.throw(
+            /must be a string/,
+        );
+        expect(() => parseStructuredRegionSubmission('function', template, `{"${FIRST_ID}":"a","${SECOND_ID}":"b","__proto__":"forged"}`)).to.throw(
+            /keys do not match/,
+        );
     });
 
     it('rejects newlines in every compile program-fill region value', () => {

@@ -21,7 +21,9 @@ const historyInserts: any[] = [];
 const REGION_ID = 'r_abcdefghijkl';
 
 function assertReady(pdoc: any) {
-    const codeEvaluation = pdoc.problemKind === 'function' || (pdoc.problemKind === 'program_fill' && pdoc.config?.main?.mode === 'compile');
+    const codeEvaluation =
+        pdoc.problemKind === 'function' ||
+        (pdoc.problemKind === 'program_fill' && pdoc.config?.type === 'program_fill' && pdoc.config?.mode === 'compile');
     if (codeEvaluation && pdoc.codeEvaluationStatus !== 'ready') throw new Error('code evaluation draft is not ready');
 }
 
@@ -45,8 +47,7 @@ const recordCollectionStub = {
         return (
             storedRecords.find(
                 (record) =>
-                    ids.some((id: ObjectId) => id.equals(record._id)) &&
-                    (record.manualPending === true || Object.hasOwn(record, 'manualGrade')),
+                    ids.some((id: ObjectId) => id.equals(record._id)) && (record.manualPending === true || Object.hasOwn(record, 'manualGrade')),
             ) || null
         );
     },
@@ -259,6 +260,55 @@ describe('record judge problem config', () => {
         expect(queuedTasks[0].data).to.deep.equal(['1.in', '1.out']);
     });
 
+    it('inserts and queues an exact multi-region text program-fill payload with the internal text language', async () => {
+        problemKind = 'program_fill';
+        const secondRegionId = 'r_mnopqrstuvwx';
+        const source = ['int total = 0;', 'total += value;', 'std::cout << total;'].join('\n');
+        problemConfig = {
+            type: 'program_fill',
+            mode: 'text',
+            template: {
+                source,
+                sourceHash: templateSourceHash(source),
+                regions: [
+                    { id: REGION_ID, startLine: 1, endLine: 2, order: 1 },
+                    { id: secondRegionId, startLine: 2, endLine: 3, order: 0 },
+                ],
+            },
+        };
+        const code = JSON.stringify({ [REGION_ID]: 'total += value;', [secondRegionId]: 'std::cout << total;' });
+
+        await recordModel.add('system', 7, 42, '_', code, true, { type: 'judge' });
+
+        expect(insertedRecords).to.have.length(1);
+        expect(insertedRecords[0]).to.include({ lang: '_', code });
+        expect(queuedTasks).to.have.length(1);
+        expect(queuedTasks[0]).to.have.nested.property('config.mode', 'text');
+        expect(queuedTasks[0]).to.have.nested.property('config.template.source', source);
+    });
+
+    it('rejects a text program-fill newline before inserting a record', async () => {
+        problemKind = 'program_fill';
+        const source = 'total += value;';
+        problemConfig = {
+            type: 'program_fill',
+            mode: 'text',
+            template: {
+                source,
+                sourceHash: templateSourceHash(source),
+                regions: [{ id: REGION_ID, startLine: 0, endLine: 1, order: 0 }],
+            },
+        };
+
+        const error = await recordModel
+            .add('system', 7, 42, '_', JSON.stringify({ [REGION_ID]: 'total += value;\nreturn;' }), false, { type: 'judge' })
+            .catch((caught) => caught);
+
+        expect(error).to.be.instanceOf(Error);
+        expect(error.message).to.include('must be one line');
+        expect(insertedRecords).to.deep.equal([]);
+    });
+
     it('rejects a function submission whose language differs from the immutable template', async () => {
         problemKind = 'function';
         codeEvaluationStatus = 'ready';
@@ -419,7 +469,7 @@ describe('record judge problem config', () => {
     it('rejects testdata generation for a draft before inserting its record', async () => {
         problemKind = 'program_fill';
         codeEvaluationStatus = 'draft';
-        problemConfig = { main: { mode: 'compile', lang: 'cc.cc17' } };
+        problemConfig = { type: 'program_fill', mode: 'compile' };
 
         const error = await recordModel.add('system', 7, 42, '_', 'gen.cpp\nstd.cpp', true, { type: 'generate' }).catch((caught) => caught);
 

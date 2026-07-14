@@ -197,7 +197,9 @@ export class JudgeTask {
                 trusted: this.request.trusted && this.session.config.trusted,
                 lang: this.lang,
                 langConfig:
-                    this.request.type === 'generate' || ['objective', 'submit_answer'].includes(this.request.config.type)
+                    this.request.type === 'generate' ||
+                    ['objective', 'submit_answer'].includes(this.request.config.type) ||
+                    (this.request.config.type === 'program_fill' && this.request.config.mode === 'text')
                         ? null
                         : this.session.getLang(this.lang),
             },

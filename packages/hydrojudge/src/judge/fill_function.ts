@@ -5,8 +5,13 @@
  *
  * See PRD §1.7 for the visual editor + splicing algorithm.
  */
-import { STATUS } from '@hydrooj/common';
-import { parseStructuredRegionSubmission, spliceStructuredCodeTemplate, validateStructuredCodeJudgeConfig } from 'hydrooj';
+import { STATUS, SubtaskType } from '@hydrooj/common';
+import {
+    gradeProgramFillTextSubmission,
+    parseStructuredRegionSubmission,
+    spliceStructuredCodeTemplate,
+    validateStructuredCodeJudgeConfig,
+} from 'hydrooj';
 import { judge as defaultJudge } from './default';
 import { Context } from './interface';
 
@@ -29,11 +34,13 @@ export const judge = async (ctx: Context) => {
         });
         return;
     }
-    if (ctx.lang !== template.lang) {
+    const textMode = kind === 'program_fill' && (ctx.config as any).mode === 'text';
+    const expectedLang = textMode ? '_' : template.lang;
+    if (ctx.lang !== expectedLang) {
         ctx.end({
             status: STATUS.STATUS_FORMAT_ERROR,
             score: 0,
-            message: `${kind}: language mismatch (${ctx.lang} != ${template.lang})`,
+            message: `${kind}: language mismatch (${ctx.lang} != ${expectedLang})`,
             time: 0,
             memory: 0,
         });
@@ -55,6 +62,35 @@ export const judge = async (ctx: Context) => {
             message: `${kind}: failed to parse submission: ${e.message}`,
             time: 0,
             memory: 0,
+        });
+        return;
+    }
+
+    if (textMode) {
+        const grade = gradeProgramFillTextSubmission(ctx.config, rawCode ?? '');
+        ctx.next({ status: STATUS.STATUS_JUDGING, progress: 0 });
+        const subtasks: Record<number, { type: SubtaskType; score: number; status: STATUS }> = {};
+        for (const [index, region] of grade.regions.entries()) {
+            const status = region.correct ? STATUS.STATUS_ACCEPTED : STATUS.STATUS_WRONG_ANSWER;
+            subtasks[index + 1] = { type: SubtaskType.sum, score: region.score, status };
+            ctx.next({
+                case: {
+                    subtaskId: index + 1,
+                    id: 1,
+                    time: 0,
+                    memory: 0,
+                    status,
+                    score: region.score,
+                    message: region.correct ? 'Correct' : 'Incorrect',
+                },
+            });
+        }
+        ctx.end({
+            status: grade.correctCount === grade.regions.length ? STATUS.STATUS_ACCEPTED : STATUS.STATUS_WRONG_ANSWER,
+            score: grade.score,
+            time: 0,
+            memory: 0,
+            subtasks,
         });
         return;
     }

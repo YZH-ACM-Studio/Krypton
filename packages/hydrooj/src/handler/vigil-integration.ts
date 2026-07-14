@@ -740,10 +740,6 @@ class VigilForceFinalizeHandler extends VigilApiHandler {
     @param('ojContestId', Types.String)
     async post(_args: any, sessionId: string, ojUserId: number, ojContestId: string) {
         const tid = new ObjectId(ojContestId);
-        const PaperDraftModel = (global as any).Hydro?.model?.paper_draft || (await import('../model/paper-draft')).default;
-        const contestModule = await import('../model/contest');
-        const { default: recordModel } = await import('../model/record');
-        const yaml = await import('js-yaml');
 
         // We don't know which OJ domain — pull it from the contest doc.
         const tdoc: any = await db.collection('document').findOne({ docId: tid, docType: 30 /* TYPE_CONTEST */ });
@@ -753,64 +749,11 @@ class VigilForceFinalizeHandler extends VigilApiHandler {
             return;
         }
         const domainId = tdoc.domainId;
-
-        const drafts = await PaperDraftModel.getDraftsForUser(domainId, tid, ojUserId);
-        const pdocs: Record<number, any> = {};
-        await Promise.all(
-            (tdoc.pids || []).map(async (pid: number) => {
-                const pdoc = await (await import('../model/problem')).default.get(domainId, pid);
-                if (pdoc) pdocs[pid] = pdoc;
-            }),
-        );
-
-        const rids: ObjectId[] = [];
-        for (const draft of drafts) {
-            const pdoc = pdocs[draft.pid];
-            if (!pdoc) continue;
-            const config = typeof pdoc.config === 'object' ? pdoc.config : null;
-            const type = config?.type || 'default';
-            if (type === 'objective') {
-                const yamlBody = yaml.default.dump(draft.answers || {});
-                rids.push(
-                    await recordModel.add(domainId, draft.pid, ojUserId, '_', yamlBody, true, {
-                        contest: tid,
-                        type: 'judge',
-                        meta: { proctorForced: true, sessionId },
-                    } as any),
-                );
-            } else if (['fill_function', 'function'].includes(type)) {
-                const codeBody = draft.code || JSON.stringify(draft.answers || {});
-                const lang = draft.lang || config?.template?.lang || 'cpp';
-                rids.push(
-                    await recordModel.add(domainId, draft.pid, ojUserId, lang, codeBody, true, {
-                        contest: tid,
-                        type: 'judge',
-                        meta: { proctorForced: true, sessionId },
-                    } as any),
-                );
-            } else if (type === 'default' && draft.code) {
-                const lang = draft.lang || config?.langs?.[0] || 'cpp';
-                rids.push(
-                    await recordModel.add(domainId, draft.pid, ojUserId, lang, draft.code, true, {
-                        contest: tid,
-                        type: 'judge',
-                        meta: { proctorForced: true, sessionId },
-                    } as any),
-                );
-            } else if (type === 'submit_answer') {
-                rids.push(
-                    await recordModel.add(domainId, draft.pid, ojUserId, '_', draft.code || '', true, {
-                        contest: tid,
-                        type: 'judge',
-                        meta: { proctorForced: true, sessionId },
-                    } as any),
-                );
-            }
-        }
-
-        for (const rid of rids) {
-            await contestModule.updateStatus(domainId, tid, ojUserId, rid, 0);
-        }
+        const { finalizePaperForUser } = await import('./paper');
+        const rids = await finalizePaperForUser(domainId, tid, ojUserId, {
+            tdoc,
+            meta: { proctorForced: true, sessionId },
+        });
 
         // Close the session via the outbound bridge.
         const { closeSessionOnVigil } = require('../service/vigil-bridge');
@@ -940,11 +883,7 @@ class VigilRecordingDeletePreviewHandler extends Handler {
         const scope = recordingDeleteScope(cid, ojUserId, examSessionId, recordingId);
         const preview = await previewRecordingDelete(scope, { uid: this.user._id, uname: this.user.uname });
         if (preview.contestTitle !== contest.title) {
-            throw new ValidationError(
-                'cid',
-                null,
-                'OJ and Vigil contest titles differ; synchronize before deleting recordings',
-            );
+            throw new ValidationError('cid', null, 'OJ and Vigil contest titles differ; synchronize before deleting recordings');
         }
         this.response.body = preview;
     }
@@ -977,12 +916,7 @@ class VigilRecordingDeleteHandler extends Handler {
             throw new ValidationError('confirmTitle', null, 'Contest title confirmation mismatch');
         }
         try {
-            const result = await executeRecordingDelete(
-                scope,
-                { uid: this.user._id, uname: this.user.uname },
-                intent,
-                confirmTitle,
-            );
+            const result = await executeRecordingDelete(scope, { uid: this.user._id, uname: this.user.uname }, intent, confirmTitle);
             await OplogModel.log(this as any, 'vigil.recordings.delete', { ...scope, ...result });
             this.response.body = result;
         } catch (error: any) {
@@ -1131,7 +1065,12 @@ class VigilCheckHlsAccessHandler extends Handler {
 export async function apply(ctx: Context) {
     ctx.Route('admin_vigil_overview', '/admin/vigil', VigilAdminOverviewHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('admin_vigil_contests', '/api/admin/vigil/contests', VigilAdminContestsHandler, PRIV.PRIV_EDIT_SYSTEM);
-    ctx.Route('admin_vigil_recordings_delete_preview', '/api/admin/vigil/recordings/delete-preview', VigilRecordingDeletePreviewHandler, PRIV.PRIV_EDIT_SYSTEM);
+    ctx.Route(
+        'admin_vigil_recordings_delete_preview',
+        '/api/admin/vigil/recordings/delete-preview',
+        VigilRecordingDeletePreviewHandler,
+        PRIV.PRIV_EDIT_SYSTEM,
+    );
     ctx.Route('admin_vigil_recordings_delete', '/api/admin/vigil/recordings/delete', VigilRecordingDeleteHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('admin_vigil_exam_detail', '/admin/vigil/exams/:examId', VigilAdminExamDetailHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('admin_vigil_resolve_contests', '/api/admin/vigil/resolve-contests', VigilResolveContestsHandler, PRIV.PRIV_EDIT_SYSTEM);

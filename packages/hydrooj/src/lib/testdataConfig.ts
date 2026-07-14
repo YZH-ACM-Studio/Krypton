@@ -44,9 +44,10 @@ export async function parseConfig(config: string | ProblemConfigFile = {}, files
         const options: Record<string, string[]> = {};
         for (const q of result.questions) if (q.choices) options[q.key] = q.choices;
         if (Object.keys(options).length) result.options = options;
-    } else if (['fill_function', 'function'].includes(result.type)) {
+    } else if (['program_fill', 'function'].includes(result.type)) {
         const client = clientProblemConfig(cfg);
         result.template = client.template;
+        if (result.type === 'program_fill') result.mode = client.mode;
     }
     result.count ||= Math.sum(readSubtasksFromFiles(files, cfg).map((i) => i.cases.length));
     if (cfg.subtasks?.length) {

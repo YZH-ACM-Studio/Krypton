@@ -28,9 +28,9 @@ export interface PaperDraft {
     tid: ObjectId;
     pid: number;
     uid: number;
-    /** For objective: questionKey -> studentAnswer. For fill_function: regionId -> source. */
+    /** For objective: questionKey -> studentAnswer. Structured-code answers live in code. */
     answers: Record<string, string | string[]>;
-    /** For default / fill_function only — the staged code. */
+    /** For default / program_fill / function — the staged code or exact region map JSON. */
     code?: string;
     lang?: string;
     /** Question kinds the student has clicked "submit this kind" on. */

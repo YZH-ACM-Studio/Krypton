@@ -1321,7 +1321,7 @@ export class ProblemModel {
                 if (input.expectedProblemKind === 'program_fill' && existingEditor.mode !== nextEditor.mode) {
                     throw new ValidationError('mode', null, '程序填空模式创建后不可修改');
                 }
-                if (existingEditor.lang && existingEditor.lang !== nextEditor.lang) {
+                if (existingEditor.mode !== 'text' && existingEditor.lang && existingEditor.lang !== nextEditor.lang) {
                     throw new ValidationError('lang', null, '评测语言创建后不可修改');
                 }
             }

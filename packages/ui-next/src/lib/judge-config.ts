@@ -15,7 +15,7 @@ import * as YAML from 'yaml';
 /*  Types                                                             */
 /* ────────────────────────────────────────────────────────────────── */
 
-export type ProblemType = 'default' | 'objective' | 'submit_answer' | 'interactive' | 'communication' | 'fill_function';
+export type ProblemType = 'default' | 'objective' | 'submit_answer' | 'interactive' | 'communication' | 'program_fill' | 'function';
 
 export type CheckerType = 'default' | 'strict' | 'float' | 'lemon' | 'syzoj' | 'testlib' | 'custom';
 

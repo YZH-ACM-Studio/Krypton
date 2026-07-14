@@ -111,6 +111,17 @@ describe('P3.17 code evaluation lifecycle', () => {
             },
             cases: [],
         });
+
+        const creationTransport = codeEvaluation.normalizeCodeEvaluationDraftCreationConfig('program_fill', {
+            main: { mode: 'compile', lang: 'cc.cc17' },
+        });
+        const persistedDraft = codeEvaluation.normalizeCodeEvaluationDraftConfig('program_fill', creationTransport);
+        expect(persistedDraft).to.deep.include({ type: 'program_fill', mode: 'compile', score: 100, langs: ['cc.cc17'] });
+        expect(persistedDraft).not.to.have.property('main');
+        expect(codeEvaluation.isCodeEvaluationProblem('program_fill', persistedDraft)).to.equal(true);
+        expect(lifecycle.structuredProblemConfigForEditor('program_fill', persistedDraft)).to.deep.equal({
+            main: { mode: 'compile', lang: 'cc.cc17', source: '', regions: [], cases: [] },
+        });
     });
 
     it('generates stable opaque ids and rejects author-forged or silently moved regions', () => {
@@ -225,8 +236,10 @@ describe('P3.17 code evaluation lifecycle', () => {
 
     it('binds lifecycle status only to function and compile program-fill problems', () => {
         expect(() => codeEvaluation.assertCodeEvaluationStatusInvariant('function', { main: { mode: 'function' } }, 'draft')).not.to.throw();
-        expect(() => codeEvaluation.assertCodeEvaluationStatusInvariant('program_fill', { main: { mode: 'compile' } }, 'ready')).not.to.throw();
-        expect(() => codeEvaluation.assertCodeEvaluationStatusInvariant('program_fill', { main: { mode: 'text' } }, 'draft')).to.throw(
+        expect(() =>
+            codeEvaluation.assertCodeEvaluationStatusInvariant('program_fill', { type: 'program_fill', mode: 'compile' }, 'ready'),
+        ).not.to.throw();
+        expect(() => codeEvaluation.assertCodeEvaluationStatusInvariant('program_fill', { type: 'program_fill', mode: 'text' }, 'draft')).to.throw(
             TestValidationError,
         );
         expect(() => codeEvaluation.assertCodeEvaluationStatusInvariant('function', { main: { mode: 'function' } }, undefined)).to.throw(
@@ -279,16 +292,14 @@ describe('P3.17 code evaluation lifecycle', () => {
             domainId: 'system',
             docId: 9,
             problemKind: 'program_fill' as const,
-            config: { main: { mode: 'compile', lang: 'cc.cc17' } },
+            config: { type: 'program_fill', mode: 'compile' },
             codeEvaluationStatus: 'ready' as const,
             data: [{ name: '1.in' }, { name: '1.out' }],
         };
         expect(() =>
-            codeEvaluation.assertCodeEvaluationLifecyclePatch(current, { config: { main: { mode: 'text', answer: 'i++' } } }, {}, 'raw-edit'),
+            codeEvaluation.assertCodeEvaluationLifecyclePatch(current, { config: { type: 'program_fill', mode: 'text' } }, {}, 'raw-edit'),
         ).to.throw(TestValidationError);
-        expect(() => codeEvaluation.assertCodeEvaluationLifecyclePatch(current, { 'config.main.mode': 'text' }, {}, 'raw-edit')).to.throw(
-            /必须整体写入/,
-        );
+        expect(() => codeEvaluation.assertCodeEvaluationLifecyclePatch(current, { 'config.mode': 'text' }, {}, 'raw-edit')).to.throw(/必须整体写入/);
         expect(() => codeEvaluation.assertCodeEvaluationLifecyclePatch(current, {}, { config: '' }, 'raw-edit')).to.throw(TestValidationError);
     });
 

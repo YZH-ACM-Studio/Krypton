@@ -1,10 +1,7 @@
 import { ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, Copy, FileCode2, GripVertical, Plus, Save, Trash2 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
-import {
-  StructuredRegionAuthorEditor,
-  type AuthorLineSelection,
-} from '@/components/structured-region-author-editor';
+import { StructuredRegionAuthorEditor, type AuthorLineSelection } from '@/components/structured-region-author-editor';
 import { StructuredRegionInputs } from '@/components/structured-region-inputs';
 import { StructuredProblemMetadataPanel, type KnowledgeMindmapOption } from '@/components/structured-problem-metadata-panel';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
@@ -128,7 +125,6 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const pid = String(pdoc.pid || pdoc.docId || '');
   const codeEvaluationDraft = pdoc.codeEvaluationStatus === 'draft';
   const [mode, setMode] = useState<'text' | 'compile'>(initial.mode === 'compile' ? 'compile' : 'text');
-  const [answer, setAnswer] = useState(String(initial.answer || ''));
   const [lang, setLang] = useState(String(initial.lang || ''));
   const [source, setSource] = useState(String(initial.source || ''));
   const [regions, setRegions] = useState<RegionMeta[]>(() => {
@@ -172,35 +168,41 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const langOptions = Object.entries(data.langRange || {}).map(([value, label]) => ({ value, label: String(label) }));
   const cloneLangOptions = langOptions.filter((option) => option.value !== lang);
   const [cloneLang, setCloneLang] = useState('');
-  const completionBlocked =
-    compileMode && (regions.length === 0 || regions.some((region) => region.invalid || (kind === 'function' && !region.signature.trim())));
+  const structureBlocked = regions.length === 0 || regions.some((region) => region.invalid || (kind === 'function' && !region.signature.trim()));
+  const completionBlocked = compileMode && structureBlocked;
 
   const structuredConfig = useMemo(
     () => ({
       main: draftCreation
         ? { mode: kind === 'program_fill' ? 'compile' : 'function', lang }
-        : kind === 'program_fill' && !compileMode
-          ? { mode: 'text', answer }
-          : {
-              mode: kind === 'program_fill' ? 'compile' : 'function',
-              lang,
-              source,
-              regions: regions.map((region) => ({
-                id: region.id,
-                startLine: region.startLine,
-                endLine: region.endLine,
-                order: region.order,
-                ...(kind === 'function'
-                  ? { signature: region.signature, ...(region.description ? { description: region.description } : {}) }
-                  : region.prompt
-                    ? { prompt: region.prompt }
-                    : {}),
-              })),
-              cases,
-            },
+        : {
+            mode: kind === 'program_fill' ? mode : 'function',
+            lang,
+            source,
+            regions: regions.map((region) => ({
+              id: region.id,
+              startLine: region.startLine,
+              endLine: region.endLine,
+              order: region.order,
+              ...(kind === 'function'
+                ? { signature: region.signature, ...(region.description ? { description: region.description } : {}) }
+                : region.prompt
+                  ? { prompt: region.prompt }
+                  : {}),
+            })),
+            ...(compileMode ? { cases } : {}),
+          },
     }),
-    [answer, cases, compileMode, draftCreation, kind, lang, regions, source],
+    [cases, compileMode, draftCreation, kind, lang, mode, regions, source],
   );
+  const previewSkeleton = useMemo(() => {
+    if (kind !== 'program_fill' || regions.some((region) => region.invalid)) return undefined;
+    const regionByLine = new Map(regions.map((region) => [region.startLine, region.id || region.key]));
+    return source.split('\n').map((code, line) => {
+      const regionId = regionByLine.get(line);
+      return regionId ? { regionId } : { code };
+    });
+  }, [kind, regions, source]);
   const dirtyState = useFormDirtyState(formRef, JSON.stringify(structuredConfig));
   const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saving || cloning);
   const localRegionCounter = useRef(0);
@@ -222,10 +224,6 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
     }
     if (kind === 'program_fill' && selection.endLine !== selection.startLine + 1) {
       setError('程序填空区域只能选择一整行。');
-      return;
-    }
-    if (kind === 'program_fill' && regions.length) {
-      setError('当前阶段的编译型程序填空只能设置一个区域。');
       return;
     }
     if (regions.some((region) => region.startLine < selection.endLine && selection.startLine < region.endLine)) {
@@ -379,14 +377,23 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
               form="structured-code-form"
               disabled={saving || completionBlocked}
               className="min-h-11 gap-1.5"
-              title={completionBlocked ? '请先修复失效区域并填写所有函数签名' : undefined}
+              title={
+                completionBlocked ? (kind === 'function' ? '请先修复失效区域并填写所有函数签名' : '请先设置至少一个有效的单行填空区') : undefined
+              }
             >
               <CheckCircle2 className="size-4" />
               {saving && saveAction === 'complete' ? '校验中…' : '完成配置'}
             </Button>
           </div>
         ) : (
-          <Button type="submit" value="save" form="structured-code-form" disabled={saving} className="min-h-11 gap-1.5">
+          <Button
+            type="submit"
+            value="save"
+            form="structured-code-form"
+            disabled={saving || (!locked && !draftCreation && structureBlocked)}
+            className="min-h-11 gap-1.5"
+            title={!locked && !draftCreation && structureBlocked ? '请先设置并修复所有作答区域' : undefined}
+          >
             <Save className="size-4" />
             {saving ? '保存中…' : draftCreation ? '创建草稿' : '保存'}
           </Button>
@@ -461,25 +468,28 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
               </div>
               <SimpleSelect value={lang} onValueChange={setLang} options={langOptions.length ? langOptions : [{ value: '', label: '请选择语言' }]} />
             </section>
-          ) : !compileMode ? (
-            <section className="space-y-2 border-t border-border/70 pt-5">
-              <h2 className="text-sm font-semibold">标准答案（单行）</h2>
-              <Input value={answer} onChange={(event) => setAnswer(event.target.value.replace(/[\r\n]/g, ''))} className="font-mono" />
-            </section>
           ) : (
             <>
               <section className="space-y-3 border-t border-border/70 pt-5">
                 <div>
-                  <h2 className="text-sm font-semibold">语言与完整模板</h2>
+                  <h2 className="text-sm font-semibold">{compileMode ? '语言与完整模板' : '完整模板'}</h2>
                   <p className="text-xs text-muted-foreground">
-                    语言创建后不可修改。直接框选完整源码中的一行或多行，再设为{kind === 'function' ? '函数区' : '填空区'}；源码只在作者与评测链中可见。
+                    {compileMode ? '评测语言创建后不可修改。' : '语言仅用于代码高亮，可以留空或之后调整。'}直接框选完整源码中的
+                    {kind === 'function' ? '一行或多行' : '一整行'}，再设为{kind === 'function' ? '函数区' : '填空区'}
+                    ；所选标准内容只在作者与评测链中可见。
                   </p>
                 </div>
                 <SimpleSelect
                   value={lang}
                   onValueChange={setLang}
-                  disabled={!isCreate}
-                  options={langOptions.length ? langOptions : [{ value: lang, label: lang || '请选择语言' }]}
+                  disabled={compileMode && !isCreate}
+                  options={
+                    !compileMode
+                      ? [{ value: '', label: '不指定高亮语言' }, ...langOptions]
+                      : langOptions.length
+                        ? langOptions
+                        : [{ value: lang, label: lang || '请选择语言' }]
+                  }
                 />
                 <StructuredRegionAuthorEditor
                   lang={lang}
@@ -497,8 +507,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                   <div className="text-xs text-muted-foreground">
                     {selection ? (
                       <>
-                        将使用第 {selection.startLine + 1}–{selection.endLine} 行
-                        {selection.expanded ? '（已自动扩展到完整行）' : ''}
+                        将使用第 {selection.startLine + 1}–{selection.endLine} 行{selection.expanded ? '（已自动扩展到完整行）' : ''}
                       </>
                     ) : (
                       '请先拖动选择至少一行源码'
@@ -607,47 +616,52 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                     values={{}}
                     onChange={() => {}}
                     singleLine={kind === 'program_fill'}
+                    skeleton={kind === 'program_fill' ? previewSkeleton : undefined}
                     readOnly
                   />
                 </div>
               </section>
-              <section className="space-y-3 border-t border-border/70 pt-5">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="flex items-center gap-1.5 text-sm font-semibold">
-                      <FileCode2 className="size-4" />
-                      真实测试数据
-                    </h2>
-                    <p className="text-xs text-muted-foreground">可一次选择多个文件；上传直接写入当前题，失败不会创建空文件或默认映射。</p>
-                  </div>
-                  <span className="text-xs text-muted-foreground">结构版本 {structureRevision}</span>
-                </div>
-                <FileUploader
-                  endpoint={`/p/${encodeURIComponent(pid)}/files`}
-                  fieldName="file"
-                  meta={{ type: 'testdata' }}
-                  maxFileSize={null}
-                  maxFiles={null}
-                  uploadConcurrency={1}
-                  retryOnFailure={false}
-                  onUploaded={acceptUploadedFile}
-                />
-                {testdataFiles.length ? (
-                  <div className="flex flex-wrap gap-1.5" aria-label="已上传测试数据">
-                    {testdataFiles.map((file) => (
-                      <span key={file.name} className="rounded-md border border-border/70 px-2 py-1 font-mono text-xs">
-                        {file.name}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">尚未上传测试数据文件。</p>
-                )}
-                <Button asChild variant="ghost" size="sm">
-                  <a href={`/p/${encodeURIComponent(pid)}/files?section=testdata`}>打开完整文件管理</a>
-                </Button>
-              </section>
-              <CasesEditor cases={cases} files={testdataFiles} onChange={setCases} />
+              {compileMode ? (
+                <>
+                  <section className="space-y-3 border-t border-border/70 pt-5">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h2 className="flex items-center gap-1.5 text-sm font-semibold">
+                          <FileCode2 className="size-4" />
+                          真实测试数据
+                        </h2>
+                        <p className="text-xs text-muted-foreground">可一次选择多个文件；上传直接写入当前题，失败不会创建空文件或默认映射。</p>
+                      </div>
+                      <span className="text-xs text-muted-foreground">结构版本 {structureRevision}</span>
+                    </div>
+                    <FileUploader
+                      endpoint={`/p/${encodeURIComponent(pid)}/files`}
+                      fieldName="file"
+                      meta={{ type: 'testdata' }}
+                      maxFileSize={null}
+                      maxFiles={null}
+                      uploadConcurrency={1}
+                      retryOnFailure={false}
+                      onUploaded={acceptUploadedFile}
+                    />
+                    {testdataFiles.length ? (
+                      <div className="flex flex-wrap gap-1.5" aria-label="已上传测试数据">
+                        {testdataFiles.map((file) => (
+                          <span key={file.name} className="rounded-md border border-border/70 px-2 py-1 font-mono text-xs">
+                            {file.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">尚未上传测试数据文件。</p>
+                    )}
+                    <Button asChild variant="ghost" size="sm">
+                      <a href={`/p/${encodeURIComponent(pid)}/files?section=testdata`}>打开完整文件管理</a>
+                    </Button>
+                  </section>
+                  <CasesEditor cases={cases} files={testdataFiles} onChange={setCases} />
+                </>
+              ) : null}
             </>
           )}
         </fieldset>

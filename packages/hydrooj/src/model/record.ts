@@ -140,18 +140,19 @@ export default class RecordModel {
             if (!judgeConfig) throw new Error(`Cannot parse problem config: ${pdoc.domainId}/${pdoc.docId}`);
             const problemKind = effectiveProblemKind(pdoc);
             try {
-                if (['fill_function', 'function'].includes(judgeConfig.type)) {
+                if (['program_fill', 'function'].includes(judgeConfig.type)) {
                     validateStructuredCodeJudgeConfig(judgeConfig, problemKind as 'program_fill' | 'function');
                 }
                 validateCompiledStructuredConfig(problemKind, judgeConfig);
                 if (
                     meta?.type !== 'generate' &&
-                    ['fill_function', 'function'].includes(judgeConfig.type) &&
+                    ['program_fill', 'function'].includes(judgeConfig.type) &&
                     ['program_fill', 'function'].includes(problemKind)
                 ) {
                     for (const rdoc of group) {
                         parseStructuredRegionSubmission(problemKind as 'program_fill' | 'function', judgeConfig.template, rdoc.code);
-                        if (rdoc.lang !== judgeConfig.template?.lang) throw new Error(`${problemKind}: submission language mismatch`);
+                        const expectedLang = problemKind === 'program_fill' && judgeConfig.mode === 'text' ? '_' : judgeConfig.template?.lang;
+                        if (rdoc.lang !== expectedLang) throw new Error(`${problemKind}: submission language mismatch`);
                     }
                 }
             } catch (error) {
@@ -194,25 +195,25 @@ export default class RecordModel {
             const ddoc = await DomainModel.get(pdoc.domainId);
             const inserted = await task.addMany(
                 group.map((rdoc) => {
-                let type = 'judge';
-                if (judgeConfig.type === 'remote_judge' && rdoc.contest?.toHexString() !== '0'.repeat(24)) type = 'remotejudge';
-                else if (taskMeta?.type === 'generate') type = 'generate';
-                return {
-                    ...rdoc,
-                    ...judgeConfig, // TODO deprecate this
-                    priority,
-                    type,
-                    rid: rdoc._id,
-                    domainId,
-                    config: {
-                        ...judgeConfig,
-                        ...config,
-                    },
-                    data: pdoc.data,
-                    source,
-                    trusted: ddoc.isTrusted,
-                    meta: taskMeta,
-                } as any;
+                    let type = 'judge';
+                    if (judgeConfig.type === 'remote_judge' && rdoc.contest?.toHexString() !== '0'.repeat(24)) type = 'remotejudge';
+                    else if (taskMeta?.type === 'generate') type = 'generate';
+                    return {
+                        ...rdoc,
+                        ...judgeConfig, // TODO deprecate this
+                        priority,
+                        type,
+                        rid: rdoc._id,
+                        domainId,
+                        config: {
+                            ...judgeConfig,
+                            ...config,
+                        },
+                        data: pdoc.data,
+                        source,
+                        trusted: ddoc.isTrusted,
+                        meta: taskMeta,
+                    } as any;
                 }),
             );
             for (const id of Object.values(inserted)) insertedIds[insertedIndex++] = id;
@@ -280,7 +281,7 @@ export default class RecordModel {
         const currentKind = effectiveProblemKind(currentProblem);
         if (
             args.type !== 'generate' &&
-            ['fill_function', 'function'].includes(currentConfig?.type) &&
+            ['program_fill', 'function'].includes(currentConfig?.type) &&
             ['program_fill', 'function'].includes(currentKind)
         ) {
             try {
@@ -289,7 +290,8 @@ export default class RecordModel {
                 validateStructuredCodeJudgeConfig(currentConfig, currentKind as 'program_fill' | 'function');
                 validateCompiledStructuredConfig(currentKind, currentConfig);
                 parseStructuredRegionSubmission(currentKind as 'program_fill' | 'function', currentConfig.template, code);
-                if (lang !== currentConfig.template.lang) throw new Error(`${currentKind}: submission language mismatch`);
+                const expectedLang = currentKind === 'program_fill' && currentConfig.mode === 'text' ? '_' : currentConfig.template.lang;
+                if (lang !== expectedLang) throw new Error(`${currentKind}: submission language mismatch`);
             } catch (error) {
                 logger.error(
                     'Structured record creation rejected domain=%s pid=%d source=%s/%d kind=%s revision=%s uid=%d stage=before-insert error=%o',

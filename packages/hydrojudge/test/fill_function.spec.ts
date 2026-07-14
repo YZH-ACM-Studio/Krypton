@@ -27,6 +27,7 @@ require.cache[hydroojPath] = {
     filename: hydroojPath,
     loaded: true,
     exports: {
+        gradeProgramFillTextSubmission: problemConfig.gradeProgramFillTextSubmission,
         parseStructuredRegionSubmission: problemConfig.parseStructuredRegionSubmission,
         spliceStructuredCodeTemplate: problemConfig.spliceStructuredCodeTemplate,
         validateStructuredCodeJudgeConfig: problemConfig.validateStructuredCodeJudgeConfig,
@@ -42,6 +43,7 @@ before(() => {
 
 function context(overrides: Record<string, unknown> = {}) {
     const ended: any[] = [];
+    const events: any[] = [];
     return {
         ctx: {
             config: {
@@ -64,14 +66,35 @@ function context(overrides: Record<string, unknown> = {}) {
             },
             lang: 'cc.cc17',
             code: { content: JSON.stringify({ [REGION_ID]: 'return 1;' }) },
-            next() {},
+            next(payload: any) {
+                events.push(payload);
+            },
             end(payload: any) {
                 ended.push(payload);
             },
             ...overrides,
         } as any,
         ended,
+        events,
     };
+}
+
+function textContext(answers: Record<string, string>) {
+    const source = ['int total = 0;', 'total += value;', 'total *= 2;', 'std::cout << total;'].join('\n');
+    const ids = ['r_abcdefghijkl', 'r_mnopqrstuvwx', 'r_yzABCDEFGHIJ'];
+    return context({
+        config: {
+            type: 'program_fill',
+            mode: 'text',
+            template: {
+                source,
+                sourceHash: problemConfig.templateSourceHash(source),
+                regions: ids.map((id, index) => ({ id, startLine: index + 1, endLine: index + 2, order: index })),
+            },
+        },
+        lang: '_',
+        code: { content: JSON.stringify(answers) },
+    });
 }
 
 describe('fill-function judge integration', () => {
@@ -100,6 +123,49 @@ describe('fill-function judge integration', () => {
         expect(delegated).to.equal(null);
         expect(ended[0]).to.deep.include({ status: STATUS.STATUS_FORMAT_ERROR, score: 0 });
         expect(ended[0].message).to.include('keys do not match');
+    });
+});
+
+describe('program-fill text judge integration', () => {
+    const ids = ['r_abcdefghijkl', 'r_mnopqrstuvwx', 'r_yzABCDEFGHIJ'];
+
+    it('grades three regions independently with exact fractional scores and outer-whitespace normalization', async () => {
+        delegated = null;
+        const full = textContext({
+            [ids[0]]: '  total += value;  ',
+            [ids[1]]: 'total *= 2;',
+            [ids[2]]: 'std::cout << total;',
+        });
+        await judge(full.ctx);
+        expect(delegated).to.equal(null);
+        expect(full.ended[0]).to.deep.include({ status: STATUS.STATUS_ACCEPTED, score: 100 });
+
+        const partial = textContext({
+            [ids[0]]: 'total += value;',
+            [ids[1]]: 'TOTAL *= 2;',
+            [ids[2]]: 'std::cout << total;',
+        });
+        await judge(partial.ctx);
+        expect(partial.ended[0]).to.deep.include({ status: STATUS.STATUS_WRONG_ANSWER, score: 200 / 3 });
+        expect(partial.events.filter((event) => event.case).map((event) => event.case.status)).to.deep.equal([
+            STATUS.STATUS_ACCEPTED,
+            STATUS.STATUS_WRONG_ANSWER,
+            STATUS.STATUS_ACCEPTED,
+        ]);
+    });
+
+    it('rejects missing, extra, and multi-line answers before grading', async () => {
+        for (const answers of [
+            { [ids[0]]: 'total += value;', [ids[1]]: 'total *= 2;' },
+            { [ids[0]]: 'total += value;', [ids[1]]: 'total *= 2;', [ids[2]]: 'std::cout << total;', extra: 'x' },
+            { [ids[0]]: 'total += value;\nreturn;', [ids[1]]: 'total *= 2;', [ids[2]]: 'std::cout << total;' },
+        ]) {
+            delegated = null;
+            const current = textContext(answers);
+            await judge(current.ctx);
+            expect(delegated).to.equal(null);
+            expect(current.ended[0]).to.deep.include({ status: STATUS.STATUS_FORMAT_ERROR, score: 0 });
+        }
     });
 });
 

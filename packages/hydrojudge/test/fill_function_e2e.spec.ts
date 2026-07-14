@@ -24,8 +24,6 @@ const previous = new Map<string, NodeModule | undefined>([
 ]);
 const outputs = new Map<string, string>();
 let outputId = 0;
-const REGION_ID = 'r_abcdefghijkl';
-
 async function fileContent(file: any): Promise<string> {
     if (file?.fileId) return outputs.get(file.fileId) || '';
     if (file?.src) return readFile(file.src, 'utf8');
@@ -95,6 +93,7 @@ require.cache[hydroojPath] = {
     filename: hydroojPath,
     loaded: true,
     exports: {
+        gradeProgramFillTextSubmission: problemConfig.gradeProgramFillTextSubmission,
         parseStructuredRegionSubmission: problemConfig.parseStructuredRegionSubmission,
         spliceStructuredCodeTemplate: problemConfig.spliceStructuredCodeTemplate,
         validateStructuredCodeJudgeConfig: problemConfig.validateStructuredCodeJudgeConfig,
@@ -107,38 +106,60 @@ const { judge } = require(fillFunctionPath) as typeof import('../src/judge/fill_
 
 class LocalCompileError extends Error {}
 
-async function runSubmission(regionCode: string) {
+async function runSubmission(regionCode: Record<string, string>) {
     const folder = await mkdtemp(join(tmpdir(), 'krypton-fill-function-'));
-    const input = join(folder, '1.in');
-    const output = join(folder, '1.out');
-    await Promise.all([writeFile(input, '1\n'), writeFile(output, '2\n')]);
+    const firstInput = join(folder, '1.in');
+    const firstOutput = join(folder, '1.out');
+    const secondInput = join(folder, '2.in');
+    const secondOutput = join(folder, '2.out');
+    await Promise.all([writeFile(firstInput, '1\n'), writeFile(firstOutput, '2\n'), writeFile(secondInput, '2\n'), writeFile(secondOutput, '4\n')]);
     let result: any;
-    const source = ['#include <iostream>', 'int main() {', 'int value = 0;', 'std::cin >> value;', 'std::cout << value;', '}'].join('\n');
+    const source = [
+        '#include <iostream>',
+        'int main() {',
+        'int value = 0;',
+        'std::cin >> value;',
+        'int doubled = value * 2;',
+        'int answer = doubled;',
+        'std::cout << answer;',
+        '}',
+    ].join('\n');
+    const regionIds = ['r_abcdefghijkl', 'r_mnopqrstuvwx', 'r_yzABCDEFGHIJ'];
     const config = {
-        type: 'function',
+        type: 'program_fill',
+        mode: 'compile',
         template: {
             lang: 'cc.cc17',
             source,
             sourceHash: problemConfig.templateSourceHash(source),
-            regions: [{ id: REGION_ID, startLine: 4, endLine: 5, order: 0, signature: 'int main() output' }],
+            regions: regionIds.map((id, index) => ({ id, startLine: index + 4, endLine: index + 5, order: index })),
         },
-        cases: [{ input: '1.in', output: '1.out' }],
-        count: 1,
+        cases: [
+            { input: '1.in', output: '1.out' },
+            { input: '2.in', output: '2.out' },
+        ],
+        count: 2,
         checker_type: 'default',
         detail: 'full',
         subtasks: [
             {
                 id: 1,
                 type: 'min',
-                score: 100,
-                cases: [{ id: 1, input, output, time: 1000, memory: 256, score: 100 }],
+                score: 50,
+                cases: [{ id: 1, input: firstInput, output: firstOutput, time: 1000, memory: 256, score: 50 }],
+            },
+            {
+                id: 2,
+                type: 'min',
+                score: 50,
+                cases: [{ id: 2, input: secondInput, output: secondOutput, time: 1000, memory: 256, score: 50 }],
             },
         ],
     };
     const context: any = {
         config,
         lang: 'cc.cc17',
-        code: { content: JSON.stringify({ [REGION_ID]: regionCode }) },
+        code: { content: JSON.stringify(regionCode) },
         request: { rejudged: false },
         meta: {},
         env: {},
@@ -180,11 +201,31 @@ async function runSubmission(regionCode: string) {
     return result;
 }
 
-describe('fill-function real compiler and testdata integration', () => {
-    it('maps a spliced answer to AC, CE, and WA through the real default judge flow', async () => {
-        expect(await runSubmission('std::cout << value + 1;')).to.deep.include({ status: STATUS.STATUS_ACCEPTED, score: 100 });
-        expect(await runSubmission('std::cout << ;')).to.deep.include({ status: STATUS.STATUS_COMPILE_ERROR, score: 0 });
-        expect(await runSubmission('std::cout << value + 2;')).to.deep.include({ status: STATUS.STATUS_WRONG_ANSWER, score: 0 });
+describe('program-fill compile-mode real compiler and testdata integration', () => {
+    const ids = ['r_abcdefghijkl', 'r_mnopqrstuvwx', 'r_yzABCDEFGHIJ'];
+
+    it('splices three regions once and maps AC, CE, and partial testdata scores through the default judge', async () => {
+        expect(
+            await runSubmission({
+                [ids[0]]: 'int doubled = value * 2;',
+                [ids[1]]: 'int answer = doubled;',
+                [ids[2]]: 'std::cout << answer;',
+            }),
+        ).to.deep.include({ status: STATUS.STATUS_ACCEPTED, score: 100 });
+        expect(
+            await runSubmission({
+                [ids[0]]: 'int doubled = ;',
+                [ids[1]]: 'int answer = doubled;',
+                [ids[2]]: 'std::cout << answer;',
+            }),
+        ).to.deep.include({ status: STATUS.STATUS_COMPILE_ERROR, score: 0 });
+        expect(
+            await runSubmission({
+                [ids[0]]: 'int doubled = value * 2;',
+                [ids[1]]: 'int answer = doubled + (value == 2);',
+                [ids[2]]: 'std::cout << answer;',
+            }),
+        ).to.deep.include({ status: STATUS.STATUS_WRONG_ANSWER, score: 50 });
     });
 });
 

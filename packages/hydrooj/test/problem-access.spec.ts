@@ -554,21 +554,16 @@ describe('P2.11 linearizable problem metadata writes', () => {
             problemKind: 'program_fill',
             codeEvaluationStatus: 'ready',
             structureRevision: 3,
-            config: { main: { mode: 'compile', lang: 'cc.cc17' } },
+            config: { type: 'program_fill', mode: 'compile' },
             data: [{ name: '1.in' }, { name: '1.out' }],
         };
 
         const error = await captureFailure(() =>
-            (access as any).commitProblemAclGuardedUpdate(
-                user,
-                structuredClone(liveProblem),
-                { config: { main: { mode: 'text', answer: 'i++' } } },
-                {},
-            ),
+            (access as any).commitProblemAclGuardedUpdate(user, structuredClone(liveProblem), { config: { type: 'program_fill', mode: 'text' } }, {}),
         );
 
         expect(error?.name).to.equal('ValidationError');
-        expect(liveProblem.config).to.deep.equal({ main: { mode: 'compile', lang: 'cc.cc17' } });
+        expect(liveProblem.config).to.deep.equal({ type: 'program_fill', mode: 'compile' });
         expect(guardedUpdateCalls).to.deep.equal([]);
         expect(loggerWarnCalls[0]?.slice(0, 8)).to.deep.equal([
             'Code evaluation lifecycle patch rejected domain=%s pid=%s docId=%d problemKind=%s actor=%d stage=%s structureRevision=%s result=denied fields=%o error=%o',

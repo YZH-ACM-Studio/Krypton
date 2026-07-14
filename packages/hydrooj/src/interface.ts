@@ -153,6 +153,7 @@ export interface ProblemConfig {
     time_limit_rate?: Record<string, number>;
     memory_limit_rate?: Record<string, number>;
     type: string;
+    mode?: 'text' | 'compile';
     subType?: string;
     target?: string;
     hackable?: boolean;
@@ -166,8 +167,9 @@ export interface ProblemConfig {
     options?: Record<string, string[]>;
     /** 编译型程序填空/函数题的学生端安全描述，不含私有完整模板。 */
     template?: {
-        lang: string;
+        lang?: string;
         regions: Array<{ id: string; signature?: string; description?: string; prompt?: string }>;
+        skeleton?: Array<{ code: string } | { regionId: string }>;
     };
 }
 

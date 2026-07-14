@@ -210,20 +210,30 @@ describe('P2.12 minimal problem lifecycle', () => {
     });
 
     it('normalizes text and compile program-fill modes without sharing schemas', () => {
-        expect(
-            lifecycle.normalizeStructuredProblemConfig('program_fill', {
-                main: { mode: 'text', answer: ' i++ ' },
-            }),
-        ).to.deep.equal({
-            type: 'objective',
-            subType: 'program_fill_text',
-            score: 100,
-            main: { mode: 'text', answer: ' i++ ' },
-            answers: { main: [' i++ ', 100, { kind: 'fill_program' }] },
+        const text = lifecycle.normalizeStructuredProblemConfig('program_fill', {
+            main: {
+                mode: 'text',
+                lang: '',
+                source: ['for (;;) {', 'i++;', 'j++;', '}'].join('\n'),
+                regions: [
+                    { id: '', startLine: 1, endLine: 2, order: 1 },
+                    { id: '', startLine: 2, endLine: 3, order: 0, prompt: '第二空' },
+                ],
+            },
         });
+        expect(text).to.include({ type: 'program_fill', mode: 'text', score: 100 });
+        expect(text).not.to.have.property('main');
+        expect(text).not.to.have.property('answers');
+        expect(text).not.to.have.property('cases');
+        expect(text).to.have.nested.property('template.regions').with.length(2);
         expect(() =>
             lifecycle.normalizeStructuredProblemConfig('program_fill', {
-                main: { mode: 'text', answer: 'i++\nj++' },
+                main: {
+                    mode: 'text',
+                    lang: '',
+                    source: 'i++;\nj++;',
+                    regions: [{ id: '', startLine: 0, endLine: 2, order: 0 }],
+                },
             }),
         ).to.throw(TestValidationError);
 
@@ -232,26 +242,33 @@ describe('P2.12 minimal problem lifecycle', () => {
                 mode: 'compile',
                 lang: 'cc.cc17',
                 source: ['int main() {', 'i++;', '}'].join('\n'),
-                regions: [{ id: '', startLine: 1, endLine: 2, order: 0, prompt: '填写一行' }],
+                regions: [
+                    { id: '', startLine: 1, endLine: 2, order: 1, prompt: '填写一行' },
+                    { id: '', startLine: 2, endLine: 3, order: 0 },
+                ],
                 cases: [{ input: '1.in', output: '1.out' }],
             },
         });
         expect(compiled).to.include({
-            type: 'fill_function',
-            subType: 'program_fill_compile',
+            type: 'program_fill',
+            mode: 'compile',
             score: 100,
         });
         expect(compiled).to.have.nested.property('template.lang', 'cc.cc17');
-        expect(compiled).to.have.nested.property('template.regions[0].id').that.matches(/^r_[A-Za-z0-9_-]{12,32}$/);
+        expect(compiled)
+            .to.have.nested.property('template.regions[0].id')
+            .that.matches(/^r_[A-Za-z0-9_-]{12,32}$/);
         expect(lifecycle.structuredProblemUsesTestdata('program_fill', compiled)).to.equal(true);
         expect(
             lifecycle.structuredProblemUsesTestdata('program_fill', {
-                main: { mode: 'text' },
+                type: 'program_fill',
+                mode: 'text',
             }),
         ).to.equal(false);
         expect(
             lifecycle.structuredProblemUsesTestdata('program_fill', {
-                subType: 'program_fill_compile',
+                type: 'program_fill',
+                mode: 'compile',
             }),
         ).to.equal(true);
     });

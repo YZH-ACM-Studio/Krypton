@@ -87,6 +87,11 @@ function normalizeLanguage(value: unknown): string {
     return lang;
 }
 
+function normalizeOptionalLanguage(value: unknown): string | undefined {
+    if (value === undefined || value === '') return undefined;
+    return normalizeLanguage(value);
+}
+
 function expectedMode(kind: ProblemKind): 'compile' | 'function' {
     if (kind === 'program_fill') return 'compile';
     if (kind === 'function') return 'function';
@@ -124,19 +129,16 @@ function nextRegionId(existing: Set<string>): string {
     return id;
 }
 
-export function normalizeCodeEvaluationDraftConfig(
-    kindInput: ProblemKind,
-    value: unknown,
-    currentConfigInput?: unknown,
-): Record<string, unknown> {
+export function normalizeStructuredCodeConfig(kindInput: ProblemKind, value: unknown, currentConfigInput?: unknown): Record<string, unknown> {
     const kind = parseProblemKind(kindInput);
     if (!isPlainObject(value)) throw new ValidationError('structuredConfig');
     assertExactKeys(value, ['main'], 'structuredConfig');
     if (!isPlainObject(value.main)) throw new ValidationError('structuredConfig', null, 'main 必须是对象');
     assertExactKeys(value.main, ['mode', 'lang', 'source', 'regions', 'cases'], 'structuredConfig.main');
-    const mode = expectedMode(kind);
-    if (value.main.mode !== mode) throw new ValidationError('mode', null, `评测方式必须是 ${mode}`);
-    const lang = normalizeLanguage(value.main.lang);
+    const mode = kind === 'function' ? 'function' : value.main.mode === 'text' || value.main.mode === 'compile' ? value.main.mode : undefined;
+    if (!mode) throw new ValidationError('mode', null, '程序填空模式必须是 text 或 compile');
+    if (kind === 'function' && value.main.mode !== 'function') throw new ValidationError('mode', null, '评测方式必须是 function');
+    const lang = mode === 'text' ? normalizeOptionalLanguage(value.main.lang) : normalizeLanguage(value.main.lang);
     const sourceInput = value.main.source === undefined ? '' : value.main.source;
     if (typeof sourceInput !== 'string') throw new ValidationError('source', null, '私有模板必须是文本');
     const source = sourceInput.replace(/\r\n?/g, '\n');
@@ -199,9 +201,12 @@ export function normalizeCodeEvaluationDraftConfig(
         return { id, startLine, endLine, order, ...(prompt ? { prompt } : {}) };
     });
     if (new Set(regions.map((region) => region.id)).size !== regions.length) throw new ValidationError('regions', null, '区域 ID 不能重复');
-    const cases = normalizeCodeEvaluationCases(value.main.cases ?? [], true);
+    if (mode === 'text' && Object.hasOwn(value.main, 'cases')) {
+        throw new ValidationError('cases', null, '文本程序填空不使用测试数据映射');
+    }
+    const cases = mode === 'text' ? [] : normalizeCodeEvaluationCases(value.main.cases ?? [], true);
     const template = {
-        lang,
+        ...(lang ? { lang } : {}),
         source,
         sourceHash: templateSourceHash(source),
         regions: [...regions].sort((a, b) => a.order - b.order),
@@ -212,13 +217,22 @@ export function normalizeCodeEvaluationDraftConfig(
         throw new ValidationError('regions', null, error.message);
     }
     return {
-        type: kind === 'function' ? 'function' : 'fill_function',
-        ...(kind === 'program_fill' ? { subType: 'program_fill_compile' } : {}),
+        type: kind === 'function' ? 'function' : 'program_fill',
+        ...(kind === 'program_fill' ? { mode } : {}),
         score: 100,
-        langs: [lang],
+        ...(lang ? { langs: [lang] } : {}),
         template,
-        cases,
+        ...(mode === 'text' ? {} : { cases }),
     };
+}
+
+export function normalizeCodeEvaluationDraftConfig(kindInput: ProblemKind, value: unknown, currentConfigInput?: unknown): Record<string, unknown> {
+    const kind = parseProblemKind(kindInput);
+    const config = normalizeStructuredCodeConfig(kind, value, currentConfigInput);
+    if (!isCodeEvaluationProblem(kind, config)) {
+        throw new ValidationError('mode', null, '只有编译型程序填空和函数题使用代码评测草稿');
+    }
+    return config;
 }
 
 export function isCodeEvaluationProblem(kindInput: unknown, configInput: unknown): boolean {
@@ -226,7 +240,7 @@ export function isCodeEvaluationProblem(kindInput: unknown, configInput: unknown
     if (kind === 'function') return true;
     if (kind !== 'program_fill') return false;
     const config = parseProblemConfigObject({ config: configInput });
-    return config?.main?.mode === 'compile' || config?.subType === 'program_fill_compile' || config?.type === 'fill_function';
+    return config?.type === 'program_fill' && config?.mode === 'compile';
 }
 
 export function assertCodeEvaluationStatusInvariant(
@@ -245,7 +259,7 @@ export function assertCodeEvaluationStatusInvariant(
 
 function mappedCases(configInput: unknown, allowEmpty: boolean): CodeEvaluationCase[] {
     const config = parseProblemConfigObject({ config: configInput });
-    const value = config?.cases ?? config?.main?.cases ?? [];
+    const value = config?.cases ?? [];
     return normalizeCodeEvaluationCases(value, allowEmpty);
 }
 
@@ -392,5 +406,9 @@ export function assertCodeEvaluationLifecyclePatch(
 
 /** Mongo predicate for every document that must pass the full code-evaluation ready gate. */
 export const CODE_EVALUATION_CANDIDATE_FILTER = {
-    $or: [{ problemKind: 'function' }, { problemKind: 'program_fill', 'config.main.mode': 'compile' }, { codeEvaluationStatus: { $exists: true } }],
+    $or: [
+        { problemKind: 'function' },
+        { problemKind: 'program_fill', 'config.type': 'program_fill', 'config.mode': 'compile' },
+        { codeEvaluationStatus: { $exists: true } },
+    ],
 };

@@ -407,14 +407,6 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                 return parsed;
             },
             validateCompiledStructuredConfig: () => undefined,
-            validateTextProgramFillSubmission: (kind: string, config: any, submitted: any) => {
-                if (kind !== 'program_fill' || config?.subType !== 'program_fill_text') return false;
-                if (!submitted || typeof submitted !== 'object' || Array.isArray(submitted)) throw new Error('invalid text');
-                if (Object.keys(submitted).join('') !== 'main' || typeof submitted.main !== 'string' || /[\r\n]/.test(submitted.main)) {
-                    throw new Error('invalid text');
-                }
-                return true;
-            },
         };
     }
     if (request === '../model/builtin') return builtinStub;
@@ -422,19 +414,19 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../model/problem-lifecycle') {
         return {
             structuredProblemConfigForEditor: (kind: string, config: any) =>
-                kind === 'function'
+                kind === 'function' || config?.type === 'program_fill'
                     ? {
                           main: {
-                              mode: 'function',
+                              mode: kind === 'function' ? 'function' : config.mode,
                               lang: config.template.lang,
                               source: config.template.source,
                               regions: config.template.regions,
-                              cases: config.cases,
+                              ...(config.mode === 'compile' || kind === 'function' ? { cases: config.cases } : {}),
                           },
                       }
                     : { main: config.main },
             structuredProblemUsesTestdata: (kind: string, config: any) =>
-                kind === 'function' || (kind === 'program_fill' && (config?.main?.mode === 'compile' || config?.subType === 'program_fill_compile')),
+                kind === 'function' || (kind === 'program_fill' && config?.type === 'program_fill' && config?.mode === 'compile'),
         };
     }
     if (request === '../model/system') return systemStub;
@@ -1580,7 +1572,7 @@ describe('P3.10 subjective problem HTTP boundaries', () => {
     });
 });
 
-describe('P3.11 program-fill and function HTTP boundaries', () => {
+describe('P3.19 program-fill and function HTTP boundaries', () => {
     it('creates each kind through a fixed dedicated route', async () => {
         const programFill = makeHandler(ProblemCreateProgramFillHandler, {});
         programFill.request.body = {
@@ -1589,7 +1581,9 @@ describe('P3.11 program-fill and function HTTP boundaries', () => {
             difficulty: '0',
             knowledgeNodeIds: '',
             editorProblemKind: 'program_fill',
-            structuredConfig: JSON.stringify({ main: { mode: 'text', answer: 'i++' } }),
+            structuredConfig: JSON.stringify({
+                main: { mode: 'text', lang: '', source: 'i++;\nj++;', regions: [{ id: '', startLine: 0, endLine: 1, order: 0 }] },
+            }),
         };
         await programFill.post(
             'forged',
@@ -1599,7 +1593,9 @@ describe('P3.11 program-fill and function HTTP boundaries', () => {
             0,
             [],
             'program_fill',
-            JSON.stringify({ main: { mode: 'text', answer: 'i++' } }),
+            JSON.stringify({
+                main: { mode: 'text', lang: '', source: 'i++;\nj++;', regions: [{ id: '', startLine: 0, endLine: 1, order: 0 }] },
+            }),
         );
         const fn = makeHandler(ProblemCreateFunctionHandler, {});
         fn.request.body = {
@@ -1652,14 +1648,7 @@ describe('P3.11 program-fill and function HTTP boundaries', () => {
                 template: { lang: 'cpp', regions: [{ id: 'r_abcdefghijkl' }, { id: 'r_mnopqrstuvwx' }] },
             },
         };
-        await handler.post(
-            'forged',
-            'forged-lang',
-            JSON.stringify({ r_abcdefghijkl: 'body', r_mnopqrstuvwx: 'body' }),
-            false,
-            [],
-            undefined,
-        );
+        await handler.post('forged', 'forged-lang', JSON.stringify({ r_abcdefghijkl: 'body', r_mnopqrstuvwx: 'body' }), false, [], undefined);
         expect(calls.recordAdd.at(-1)[3]).to.equal('cpp');
 
         const error = await captureFailure(() =>
@@ -1676,14 +1665,13 @@ describe('P3.11 program-fill and function HTTP boundaries', () => {
             docId: 7,
             problemKind: 'program_fill',
             config: {
-                type: 'fill_function',
+                type: 'program_fill',
+                mode: 'compile',
                 langs: ['cpp'],
                 template: { lang: 'cpp', regions: [{ id: 'r_abcdefghijkl' }] },
             },
         };
-        const error = await captureFailure(() =>
-            handler.post('forged', 'cpp', JSON.stringify({ r_abcdefghijkl: 'i++\nj++' }), false, [], undefined),
-        );
+        const error = await captureFailure(() => handler.post('forged', 'cpp', JSON.stringify({ r_abcdefghijkl: 'i++\nj++' }), false, [], undefined));
         expect(error).to.be.instanceOf(GenericError);
         expect(calls.recordAdd).to.deep.equal([]);
     });
@@ -1694,16 +1682,24 @@ describe('P3.11 program-fill and function HTTP boundaries', () => {
             domainId: 'system',
             docId: 7,
             problemKind: 'program_fill',
-            config: { type: 'objective', subType: 'program_fill_text', langs: ['_'] },
+            config: {
+                type: 'program_fill',
+                mode: 'text',
+                template: { regions: [{ id: 'r_abcdefghijkl' }, { id: 'r_mnopqrstuvwx' }] },
+            },
         };
-        for (const code of ['main: |\n  i++\n  j++\n', 'main: i++\nextra: hidden\n']) {
+        for (const code of [
+            JSON.stringify({ r_abcdefghijkl: 'i++\nj++', r_mnopqrstuvwx: 'j++' }),
+            JSON.stringify({ r_abcdefghijkl: 'i++', extra: 'hidden' }),
+        ]) {
             const error = await captureFailure(() => handler.post('forged', '_', code, false, [], undefined));
             expect(error).to.be.instanceOf(GenericError);
         }
         expect(calls.recordAdd).to.deep.equal([]);
 
-        await handler.post('forged', '_', 'main: i++\n', false, [], undefined);
+        await handler.post('forged', 'forged-lang', JSON.stringify({ r_abcdefghijkl: 'i++', r_mnopqrstuvwx: 'j++' }), false, [], undefined);
         expect(calls.recordAdd).to.have.length(1);
+        expect(calls.recordAdd[0][3]).to.equal('_');
     });
 });
 

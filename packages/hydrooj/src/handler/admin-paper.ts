@@ -73,7 +73,7 @@ class ForceSubmitHandler extends AdminPaperHandler {
         if (!tdoc) throw new NotFoundError('Contest');
         // 复用 finalize 主路径（PLAN P3.2）：此前这里是它的复制品，且
         // config 用 `typeof === 'object'` 老判断（对字符串 config 恒 false，
-        // objective/fill_function 分流失效）。finalizePaperForUser 已统一
+        // objective/structured-code 分流失效）。finalizePaperForUser 已统一
         // raw+parse、附带 objective draft 判分与 contest.updateStatus。
         const rids = await finalizePaperForUser(domainId, tid, uid, {
             tdoc,

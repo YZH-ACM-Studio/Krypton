@@ -30,7 +30,9 @@ describe('P3.9 dedicated basic objective editors', () => {
     }
     expect(source).to.include('partialCreditPercent');
     expect(source).to.include('answerIndexes');
-    expect(source).to.include('true-false-answer');
+    expect(source).to.include('setAnswer(option.value)');
+    expect(source).not.to.include('name="true-false-answer"');
+    expect(source).not.to.include('name="correct-option"');
     expect(source).to.include('大小写敏感');
     expect(source).to.include('name="expectedStructureRevision"');
     expect(source).to.include('name="metadataOnly"');

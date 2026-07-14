@@ -302,8 +302,9 @@ describe('P2.14 managed problem source templates', () => {
         expect(listProjection).not.to.include("'sourceMeta'");
         expect(publicProjection).not.to.include("'managedAuthoring'");
         expect(publicProjection).not.to.include("'sourceMeta'");
+        expect(publicProjection).not.to.include("'knowledgeNodeIds'");
         expect(source).to.include(
-            "static PROJECTION_MANAGED_EDITOR: Field[] = [...ProblemModel.PROJECTION_PUBLIC, 'sourceMeta', 'managedAuthoring']",
+            "static PROJECTION_MANAGED_EDITOR: Field[] = [...ProblemModel.PROJECTION_PUBLIC, 'sourceMeta', 'managedAuthoring', 'knowledgeNodeIds']",
         );
     });
 });
@@ -336,6 +337,13 @@ describe('P2.14 managed problem mindmap tags', () => {
         await expectReject(authoring.materializeManagedMindmapTags([new ObjectId().toHexString()]), TestMetadataConflictError);
         mindmapDocs = mindmapDocs.filter((node) => !node._id.equals(parent));
         await expectReject(authoring.materializeManagedMindmapTags([leaf.toHexString()]), TestMetadataConflictError);
+    });
+
+    it('allows an empty structured selection without weakening the managed requirement', async () => {
+        expect(await authoring.materializeKnowledgeMindmapTags([])).to.deep.equal({ nodeIds: [], tags: [] });
+        expect(await authoring.materializeKnowledgeMindmapTags([''])).to.deep.equal({ nodeIds: [], tags: [] });
+        await expectReject(authoring.materializeKnowledgeMindmapTags(['not-an-object-id']), 'knowledgeNodeIds');
+        await expectReject(authoring.materializeManagedMindmapTags(['']), 'mindmapNodeIds');
     });
 });
 

@@ -19,11 +19,13 @@ export interface ManagedSourceTemplateDefinition {
     fields: TemplateField[];
 }
 
-export interface ManagedMindmapOption {
+export interface KnowledgeMindmapOption {
     id: string;
     label: string;
     tags: string[];
 }
+
+export type ManagedMindmapOption = KnowledgeMindmapOption;
 
 export interface ManagedTrainingOption {
     id: string;
@@ -244,10 +246,16 @@ export async function reserveManagedProblemPid(domainId: string, sourceMetaInput
     }
 }
 
-function normalizeNodeIds(nodeIds: unknown): string[] {
-    if (!Array.isArray(nodeIds) || !nodeIds.length) throw new ValidationError('mindmapNodeIds');
-    const normalized = nodeIds.map((value) => (value instanceof ObjectId ? value.toHexString() : typeof value === 'string' ? value.trim() : ''));
-    if (normalized.some((value) => !ObjectId.isValid(value))) throw new ValidationError('mindmapNodeIds');
+function normalizeNodeIds(nodeIds: unknown, required: boolean, field: 'knowledgeNodeIds' | 'mindmapNodeIds'): string[] {
+    if (!Array.isArray(nodeIds)) throw new ValidationError(field);
+    const normalized = nodeIds
+        .map((value) => (value instanceof ObjectId ? value.toHexString() : typeof value === 'string' ? value.trim() : ''))
+        .filter(Boolean);
+    if (!normalized.length) {
+        if (required) throw new ValidationError(field);
+        return [];
+    }
+    if (normalized.some((value) => !ObjectId.isValid(value))) throw new ValidationError(field);
     return [...new Set(normalized)].sort();
 }
 
@@ -271,7 +279,7 @@ function buildNodePath(node: MindmapNodeRecord, byId: Map<string, MindmapNodeRec
     return path.reverse();
 }
 
-export async function listManagedMindmapOptions(): Promise<ManagedMindmapOption[]> {
+export async function listKnowledgeMindmapOptions(): Promise<KnowledgeMindmapOption[]> {
     const nodes = await loadMindmapNodes();
     const byId = new Map(nodes.map((node) => [node._id.toHexString(), node]));
     return nodes
@@ -286,9 +294,15 @@ export async function listManagedMindmapOptions(): Promise<ManagedMindmapOption[
         .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
 }
 
+export const listManagedMindmapOptions = listKnowledgeMindmapOptions;
+
 /** Re-read the live tree and materialize every tagged ancestor of each selection. */
-export async function materializeManagedMindmapTags(nodeIdsInput: unknown): Promise<{ nodeIds: ObjectId[]; tags: string[] }> {
-    const nodeIds = normalizeNodeIds(nodeIdsInput);
+export async function materializeKnowledgeMindmapTags(
+    nodeIdsInput: unknown,
+    options: { required?: boolean; field?: 'knowledgeNodeIds' | 'mindmapNodeIds' } = {},
+): Promise<{ nodeIds: ObjectId[]; tags: string[] }> {
+    const nodeIds = normalizeNodeIds(nodeIdsInput, options.required === true, options.field || 'knowledgeNodeIds');
+    if (!nodeIds.length) return { nodeIds: [], tags: [] };
     const nodes = await loadMindmapNodes();
     const byId = new Map(nodes.map((node) => [node._id.toHexString(), node]));
     const tags: string[] = [];
@@ -305,6 +319,10 @@ export async function materializeManagedMindmapTags(nodeIdsInput: unknown): Prom
         }
     }
     return { nodeIds: nodeIds.map((id) => new ObjectId(id)), tags };
+}
+
+export function materializeManagedMindmapTags(nodeIdsInput: unknown): Promise<{ nodeIds: ObjectId[]; tags: string[] }> {
+    return materializeKnowledgeMindmapTags(nodeIdsInput, { required: true, field: 'mindmapNodeIds' });
 }
 
 function canonicalTrainingChapters(dag: unknown): TrainingNode[] {

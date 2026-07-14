@@ -6,6 +6,7 @@ import { PERM, PRIV } from './builtin';
 import * as document from './document';
 import { managedProblemPatchCapability, managedProblemPatchStateFilter } from './managed-problem-patch';
 import type { ProblemDoc } from './problem';
+import { canonicalizeStructuredKnowledgePatch, touchesCanonicalProblemFields } from './structured-problem-metadata';
 
 /**
  * Request-local problem ACL state populated by krypton-permits.
@@ -236,6 +237,17 @@ export async function commitProblemAclGuardedUpdate(
     if (authorizedPdoc.owner !== user._id && !isProblemBankAdmin(user)) {
         filter.maintainer = user._id;
     }
+    if (touchesCanonicalProblemFields($set as Record<string, unknown>, $unset)) {
+        const current = await document.coll.findOne(filter, { projection: { problemKind: 1 } });
+        if (!current) return null;
+        await canonicalizeStructuredKnowledgePatch(
+            current,
+            $set,
+            $unset,
+            { domainId: authorizedPdoc.domainId, pid: authorizedPdoc.docId, actor: user._id, operation: 'acl-guarded-update' },
+            'commit',
+        );
+    }
     const update: any = {};
     if ($set && Object.keys($set).length) update.$set = $set;
     if ($unset && Object.keys($unset).length) update.$unset = $unset;
@@ -305,7 +317,7 @@ export async function commitProblemWriteClaimUpdate(
     $set: Partial<ProblemDoc>,
     $unset: Record<string, unknown> = {},
     requiredCapability: ProblemWriteCapability = claim.capability,
-    options: { expectedStructureRevision?: number } = {},
+    options: { expectedStructureRevision?: number; expectedTag?: string[] } = {},
 ): Promise<ProblemDoc | null> {
     const requestedFields = [...Object.keys($set || {}), ...Object.keys($unset || {})];
     if (requestedFields.some((key) => PROBLEM_ACL_INTERNAL_FIELDS.has(key.split('.')[0]))) {
@@ -322,10 +334,12 @@ export async function commitProblemWriteClaimUpdate(
                   structureRevision: options.expectedStructureRevision,
                   structureLockedAt: { $exists: false },
               }),
+        ...(options.expectedTag === undefined ? {} : { tag: options.expectedTag }),
     };
     const current = await document.coll.findOne(filter, {
         projection: {
             ...Object.fromEntries(requestedFields.map((field) => [field, 1])),
+            problemKind: 1,
             authoringMode: 1,
             hidden: 1,
             managedAuthoring: 1,
@@ -350,6 +364,7 @@ export async function commitProblemWriteClaimUpdate(
         }
         filter = { ...filter, ...managedProblemPatchStateFilter(current) };
     }
+    await canonicalizeStructuredKnowledgePatch(current, $set, $unset, claim, 'claim-commit');
     const update: any = {};
     if (Object.keys($set || {}).length) update.$set = $set;
     if (Object.keys($unset || {}).length) update.$unset = $unset;

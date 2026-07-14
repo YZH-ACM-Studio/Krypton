@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import { beforeEach, describe, it } from 'node:test';
+import { ProblemTagConflictError } from '../src/error';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {} };
@@ -32,6 +33,7 @@ const calls = {
     getMulti: [] as any[],
     loads: [] as any[],
     maintain: [] as any[],
+    mindmapFinds: [] as any[],
     oplogs: [] as any[],
     refresh: [] as any[],
 };
@@ -39,6 +41,7 @@ let aggregateRows: any[] = [];
 let editError: Error | null = null;
 let getDocs = new Map<number, any>();
 let listDocs: any[] = [];
+let mindmapDocs: any[] = [];
 let tokenUser: any;
 let tokenDocDomainId = 'system';
 
@@ -84,8 +87,8 @@ const problemStub = {
         calls.events.push(`raw-edit:${docId}`);
         throw new Error('raw problem.edit is forbidden for tagger writes');
     },
-    async editAuthorized(domainId: string, docId: number, patch: unknown, actor: any) {
-        calls.edits.push({ domainId, docId, patch });
+    async editAuthorized(domainId: string, docId: number, patch: unknown, actor: any, requestedUnset: unknown = {}, options: unknown = {}) {
+        calls.edits.push({ domainId, docId, patch, requestedUnset, options });
         calls.events.push(`editAuthorized:${docId}`);
         if (editError) throw editError;
         return { domainId, docId, ...(patch as any), actor };
@@ -134,6 +137,17 @@ class TestLogger {
 }
 
 const hydroojStub = {
+    db: {
+        collection(name: string) {
+            if (name !== 'mindmap.nodes') throw new Error(`unexpected collection: ${name}`);
+            return {
+                find(query: unknown, options: unknown) {
+                    calls.mindmapFinds.push({ query: structuredClone(query), options: structuredClone(options) });
+                    return cursor(mindmapDocs);
+                },
+            };
+        },
+    },
     Handler: HandlerStub,
     OplogModel: {
         async log(...args: unknown[]) {
@@ -248,6 +262,7 @@ beforeEach(() => {
     editError = null;
     getDocs = new Map();
     listDocs = [];
+    mindmapDocs = [];
     tokenDocDomainId = 'system';
     tokenUser = makeUser(42, undefined, {
         _permitPids: new Set([999]),
@@ -332,7 +347,7 @@ describe('P2.11 tagger token-user ACL preload', () => {
 describe('P2.11 tagger enumeration gates and scopes', () => {
     it('returns 403 before problems, vocab, audit, or retag can query when CREATE is absent', async () => {
         tokenUser = makeUser(42, [PERM.PERM_EDIT_PROBLEM, PERM.PERM_VIEW_PROBLEM, PERM.PERM_VIEW_PROBLEM_HIDDEN]);
-        for (const routeName of ['tagger_problems', 'tagger_vocab', 'tagger_audit', 'tagger_retag']) {
+        for (const routeName of ['tagger_problems', 'tagger_vocab', 'tagger_audit', 'tagger_mindmap', 'tagger_problem_context', 'tagger_retag']) {
             const handler = makeHandler(routeName);
 
             await handler.prepare();
@@ -427,6 +442,69 @@ describe('P2.11 tagger enumeration gates and scopes', () => {
     });
 });
 
+describe('auto tagger read context', () => {
+    it('returns the live mindmap hierarchy through the same tagger permission boundary', async () => {
+        mindmapDocs = [
+            { _id: { toString: () => 'root' }, parentId: null, topic: '算法', tags: [], order: 0 },
+            { _id: { toString: () => 'math' }, parentId: { toString: () => 'root' }, topic: '数学', tags: ['数学'], order: 1 },
+        ];
+        const handler = makeHandler('tagger_mindmap');
+        await handler.prepare();
+
+        await handler.get();
+
+        expect(handler.response.body).to.deep.equal({
+            domainId: 'system',
+            nodes: [
+                { id: 'root', parentId: null, topic: '算法', tags: [] },
+                { id: 'math', parentId: 'root', topic: '数学', tags: ['数学'] },
+            ],
+        });
+        expect(calls.mindmapFinds).to.have.lengthOf(1);
+    });
+
+    it('fails fast when a live mindmap node has malformed tag data', async () => {
+        mindmapDocs = [{ _id: { toString: () => 'math' }, parentId: null, topic: '数学', tags: ['数学', 42] }];
+        const handler = makeHandler('tagger_mindmap');
+        await handler.prepare();
+
+        const error = await captureFailure(() => handler.get());
+
+        expect(error).to.be.instanceOf(TypeError);
+        expect(error.message).to.match(/mindmap node math tags/i);
+    });
+
+    it('loads one problem statement inside the token user problem-bank scope, including hidden authored problems', async () => {
+        listDocs = [{ docId: 7, pid: 'P7', title: '快速幂', tag: ['PAT甲级'], content: '计算 a^b。' }];
+        const handler = makeHandler('tagger_problem_context');
+        await handler.prepare();
+
+        await handler.get({}, 7);
+
+        expect(calls.getMulti[0].query).to.deep.equal({
+            $and: [
+                {
+                    $and: [
+                        {
+                            $or: [
+                                { $and: [{ owner: 42 }, { authoringMode: { $ne: 'managed' } }] },
+                                { $and: [{ docId: { $in: [7] } }, { maintainer: 42 }] },
+                            ],
+                        },
+                        { docId: { $nin: [9] } },
+                        { 'aclMutationLocks.uid': { $ne: 42 } },
+                    ],
+                },
+                { docId: 7, tag: { $in: ['L2', 'PAT甲级'] } },
+            ],
+        });
+        expect(handler.response.body).to.deep.equal({
+            domainId: 'system',
+            problem: { docId: 7, pid: 'P7', title: '快速幂', tag: ['PAT甲级'], content: '计算 a^b。' },
+        });
+    });
+});
+
 describe('P2.11 tagger mutation gates', () => {
     it('makes missing and unauthorized apply items indistinguishable and performs zero writes', async () => {
         getDocs.set(8, {
@@ -472,9 +550,113 @@ describe('P2.11 tagger mutation gates', () => {
                 domainId: 'system',
                 docId: 7,
                 patch: { title: 'new' },
+                requestedUnset: {},
+                options: {},
             },
         ]);
         expect(calls.events).to.deep.equal(['maintain:7', 'editAuthorized:7']);
+    });
+
+    it('rejects a malformed expected-tag snapshot before any batch write', async () => {
+        getDocs.set(7, {
+            domainId: 'system',
+            docId: 7,
+            owner: 42,
+            pid: 'P7',
+            title: 'old',
+            tag: ['L2'],
+        });
+        const handler = makeHandler('tagger_apply');
+        await handler.prepare();
+
+        await handler.post({}, [{ docId: 7, expectedTag: {}, tag: ['L2', '数学'] }]);
+
+        expect(handler.response.status).to.equal(400);
+        expect(handler.response.body).to.deep.equal({ error: 'bad_expectedTag', index: 0 });
+        expect(calls.edits).to.deep.equal([]);
+    });
+
+    it('rejects a malformed mindmap-only final tag array without normalizing it', async () => {
+        const handler = makeHandler('tagger_apply');
+        await handler.prepare();
+
+        await handler.post({}, [{ docId: 7, expectedTag: ['L2'], tag: 'L2,数学', mindmapOnly: true }]);
+
+        expect(handler.response.status).to.equal(400);
+        expect(handler.response.body).to.deep.equal({ error: 'bad_mindmapTag', index: 0 });
+        expect(calls.edits).to.deep.equal([]);
+    });
+
+    it('refuses a mindmap-only write that adds a tag outside the live mindmap', async () => {
+        mindmapDocs = [
+            { _id: { toString: () => 'root' }, parentId: null, topic: '算法', tags: [] },
+            { _id: { toString: () => 'math' }, parentId: { toString: () => 'root' }, topic: '数学', tags: ['数学'] },
+        ];
+        getDocs.set(7, {
+            domainId: 'system',
+            docId: 7,
+            owner: 42,
+            pid: 'P7',
+            title: 'old',
+            tag: ['L2'],
+        });
+        const handler = makeHandler('tagger_apply');
+        await handler.prepare();
+
+        await handler.post({}, [{ docId: 7, expectedTag: ['L2'], tag: ['L2', '伪造标签'], mindmapOnly: true }]);
+
+        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: false, error: 'tag_not_in_mindmap' }]);
+        expect(calls.edits).to.deep.equal([]);
+    });
+
+    it('refuses a mindmap-only child tag when its live parent tag is absent', async () => {
+        mindmapDocs = [
+            { _id: { toString: () => 'root' }, parentId: null, topic: '算法', tags: [] },
+            { _id: { toString: () => 'math' }, parentId: { toString: () => 'root' }, topic: '数学', tags: ['数学'] },
+            { _id: { toString: () => 'number' }, parentId: { toString: () => 'math' }, topic: '数论', tags: ['数论'] },
+        ];
+        getDocs.set(7, {
+            domainId: 'system',
+            docId: 7,
+            owner: 42,
+            pid: 'P7',
+            title: 'old',
+            tag: ['L2'],
+        });
+        const handler = makeHandler('tagger_apply');
+        await handler.prepare();
+
+        await handler.post({}, [{ docId: 7, expectedTag: ['L2'], tag: ['L2', '数论'], mindmapOnly: true }]);
+
+        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: false, error: 'mindmap_parent_missing' }]);
+        expect(calls.edits).to.deep.equal([]);
+    });
+
+    it('passes the analyzed tags into the atomic authorized write and reports its conflict', async () => {
+        getDocs.set(7, {
+            domainId: 'system',
+            docId: 7,
+            owner: 42,
+            pid: 'P7',
+            title: 'old',
+            tag: ['L2'],
+        });
+        editError = new ProblemTagConflictError(7);
+        const handler = makeHandler('tagger_apply');
+        await handler.prepare();
+
+        await handler.post({}, [{ docId: 7, expectedTag: ['L2'], tag: ['L2', '数学'] }]);
+
+        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: false, error: 'tag_conflict' }]);
+        expect(calls.edits).to.deep.equal([
+            {
+                domainId: 'system',
+                docId: 7,
+                patch: { tag: ['L2', '数学'] },
+                requestedUnset: {},
+                options: { expectedTag: ['L2'] },
+            },
+        ]);
     });
 
     it('uses the atomic authorized edit entrypoint for every retag write', async () => {

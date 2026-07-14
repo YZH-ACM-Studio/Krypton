@@ -7,6 +7,7 @@ import { AlertCircle, ArrowRight, CheckCircle2, Download, Eye, EyeOff, FileText,
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { ProblemEditorWorkspace } from '@/components/problem-editor-workspace';
+import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -18,6 +19,7 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { downloadProblemPackage } from '@/lib/problem-package';
 import { managedSourceFieldViews, managedSourceTagPreview, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
+import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 
 type R = Record<string, any>;
 
@@ -550,7 +552,6 @@ export function ProblemEditPage() {
   const [saveError, setSaveError] = useState('');
   const formRef = useRef<HTMLFormElement>(null);
   const editVersion = useRef(0);
-  const allowNavigation = useRef(false);
 
   const tags: string[] = pdoc.tag || [];
   const [tagInput, setTagInput] = useState(tags.join(', '));
@@ -583,6 +584,25 @@ export function ProblemEditPage() {
   const managedTags = [
     ...new Set([...(isCreate ? sourcePreviewTags : pdoc.tag || []), ...(isCreate ? selectedMindmapNodes.flatMap((node) => node.tags) : [])]),
   ];
+  const editorRevisionKey = JSON.stringify({
+    draftContent,
+    managedCreateMode,
+    tagInput,
+    hiddenValue,
+    lockHiddenValue,
+    sourceTemplate,
+    sourceYear,
+    sourceSeason,
+    sourceLevel,
+    sourceRound,
+    managedAuthors: selectedManagedAuthors.map((author) => author._id),
+    mindmapNodes: selectedMindmapNodes.map((node) => node.id),
+    selectedTrainingId,
+    selectedChapterId,
+  });
+  const previousRevisionKey = useRef(editorRevisionKey);
+  const dirtyState = useFormDirtyState(formRef, editorRevisionKey);
+  const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saveState === 'saving');
 
   const searchManagedAuthors = useCallback(
     async (query: string): Promise<UserOption[]> => {
@@ -605,20 +625,25 @@ export function ProblemEditPage() {
   }, [eligibleTrainings, selectedTrainingId]);
 
   useEffect(() => {
-    const warnBeforeLeave = (event: BeforeUnloadEvent) => {
-      if (allowNavigation.current || !['dirty', 'saving', 'error'].includes(saveState)) return;
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    window.addEventListener('beforeunload', warnBeforeLeave);
-    return () => window.removeEventListener('beforeunload', warnBeforeLeave);
-  }, [saveState]);
+    if (previousRevisionKey.current === editorRevisionKey) return;
+    previousRevisionKey.current = editorRevisionKey;
+    editVersion.current += 1;
+  }, [editorRevisionKey]);
+
+  useEffect(() => {
+    setSaveState((current) => {
+      if (current === 'saving' || current === 'error') return current;
+      if (dirtyState.dirty) return 'dirty';
+      return current === 'dirty' ? 'idle' : current;
+    });
+  }, [dirtyState.dirty]);
 
   const markDirty = useCallback(() => {
     editVersion.current += 1;
     setSaveError('');
     setSaveState((current) => (current === 'saving' ? current : 'dirty'));
-  }, []);
+    dirtyState.recompute();
+  }, [dirtyState.recompute]);
 
   const handleDownloadPackage = useCallback(async () => {
     if (isCreate || !problemUrl) return;
@@ -657,7 +682,7 @@ export function ProblemEditPage() {
   const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
     const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     if (submitter?.value === 'delete') {
-      allowNavigation.current = true;
+      navigationGuard.allowNavigation();
       setSaveState('saving');
       return;
     }
@@ -684,19 +709,28 @@ export function ProblemEditPage() {
       if (!editRes.ok) {
         throw new Error(await responseErrorMessage(editRes, editRes.status === 409 ? '题目已被其他操作修改或锁定，请刷新后重试' : '保存失败'));
       }
+      const saved = await readProblemSaveSuccess(editRes, 'programming');
       if (isCreate) {
-        const body = await editRes.json();
-        if (body?.pid === undefined || body?.pid === null || body.pid === '') throw new Error('创建响应缺少真实题号');
-        const createdProblemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(body.pid) });
-        allowNavigation.current = true;
+        if (editVersion.current !== savedVersion) {
+          console.warn('Programming problem created, but local form changed during request; navigation withheld', {
+            destination: saved.destination,
+          });
+          setSaveError('服务器已创建提交时的版本，但保存过程中检测到新的本地修改；为避免丢失，未自动跳转。');
+          setSaveState('dirty');
+          dirtyState.recompute();
+          return;
+        }
+        dirtyState.markClean();
+        navigationGuard.allowNavigation();
         setSaveState('saved');
-        window.location.assign(`${createdProblemUrl}/edit`);
+        window.location.assign(saved.destination);
         return;
       }
       if (editVersion.current === savedVersion) {
-        allowNavigation.current = true;
+        dirtyState.markClean();
+        navigationGuard.allowNavigation();
         setSaveState('saved');
-        window.location.assign(problemUrl);
+        window.location.assign(saved.destination);
       } else {
         setSaveState('dirty');
       }
@@ -783,7 +817,16 @@ export function ProblemEditPage() {
             </p>
           ) : null}
 
-          <form id="programming-problem-form" ref={formRef} method="post" onSubmit={handleSave} onChange={markDirty} className="space-y-6">
+          <form
+            id="programming-problem-form"
+            ref={formRef}
+            method="post"
+            onSubmit={handleSave}
+            onChange={markDirty}
+            inert={saveState === 'saving'}
+            aria-busy={saveState === 'saving'}
+            className="space-y-6"
+          >
             {!isCreate && pdoc.problemKind && pdoc.structureRevision ? (
               <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision)} />
             ) : null}
@@ -894,6 +937,7 @@ export function ProblemEditPage() {
                         id="edit-difficulty"
                         name="difficulty"
                         defaultValue={String(pdoc.difficulty || '')}
+                        onValueChange={markDirty}
                         options={DIFFICULTY_OPTIONS.filter((option) => !managed || option.value !== '').map((option) => ({
                           value: String(option.value),
                           label: option.label,
@@ -1241,6 +1285,7 @@ export function ProblemEditPage() {
           </form>
         </div>
       )}
+      {navigationGuard.guardDialog}
     </ProblemEditorWorkspace>
   );
 }

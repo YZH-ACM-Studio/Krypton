@@ -1,13 +1,15 @@
 import { ArrowDown, ArrowLeft, ArrowUp, Copy, Plus, Save, Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { StructuredRegionInputs } from '@/components/structured-region-inputs';
+import { StructuredProblemMetadataPanel, type KnowledgeMindmapOption } from '@/components/structured-problem-metadata-panel';
+import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 
 type R = Record<string, any>;
 interface RegionMeta {
@@ -90,19 +92,11 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const [saving, setSaving] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [error, setError] = useState('');
-  const dirtyRef = useRef(false);
+  const formRef = useRef<HTMLFormElement>(null);
   const compileMode = kind === 'function' || mode === 'compile';
   const langOptions = Object.entries(data.langRange || {}).map(([value, label]) => ({ value, label: String(label) }));
   const cloneLangOptions = langOptions.filter((option) => option.value !== lang);
   const [cloneLang, setCloneLang] = useState('');
-
-  useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => {
-      if (dirtyRef.current) event.preventDefault();
-    };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, []);
 
   const structuredConfig = useMemo(
     () => ({
@@ -113,25 +107,38 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
     }),
     [answer, cases, compileMode, kind, lang, markerSource, regions],
   );
+  const dirtyState = useFormDirtyState(formRef, JSON.stringify(structuredConfig));
+  const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saving || cloning);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const form = event.currentTarget;
+    const submittedSnapshot = dirtyState.snapshot();
+    if (submittedSnapshot === null) {
+      setError('无法读取当前表单，未发送保存请求。');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
-      const response = await fetch(event.currentTarget.action || window.location.pathname, {
+      const response = await fetch(form.action || window.location.pathname, {
         method: 'POST',
-        body: new URLSearchParams(new FormData(event.currentTarget) as any),
+        body: new URLSearchParams(new FormData(form) as any),
         credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
       });
       if (!response.ok) throw new Error(await responseMessage(response));
-      dirtyRef.current = false;
-      if (response.redirected) window.location.assign(response.url);
-      else {
-        const body = await response.json();
-        if (!body?.pid) throw new Error('保存响应缺少 pid');
-        window.location.assign(`/p/${body.pid}/edit`);
+      const { destination } = await readProblemSaveSuccess(response, kind);
+      if (dirtyState.snapshot() !== submittedSnapshot) {
+        console.warn('Structured code problem saved, but local form changed during request; navigation withheld', { destination });
+        setError('服务器已保存提交时的版本，但保存过程中检测到新的本地修改；为避免丢失，未自动跳转。');
+        setSaving(false);
+        dirtyState.recompute();
+        return;
       }
+      dirtyState.markClean();
+      navigationGuard.allowNavigation();
+      window.location.assign(destination);
     } catch (caught: any) {
       setError(caught?.message || '保存失败');
       setSaving(false);
@@ -161,6 +168,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       if (!response.ok) throw new Error(await responseMessage(response));
       const ids = await response.json();
       if (!Array.isArray(ids) || !ids[0]) throw new Error('克隆响应缺少新题 ID');
+      navigationGuard.allowNavigation();
       window.location.assign(`/p/${ids[0]}/edit`);
     } catch (caught: any) {
       setError(caught?.message || '克隆失败');
@@ -198,12 +206,13 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       ) : null}
 
       <form
+        ref={formRef}
         id="structured-code-form"
         method="post"
         onSubmit={submit}
-        onChange={() => {
-          dirtyRef.current = true;
-        }}
+        onChange={dirtyState.recompute}
+        inert={saving || cloning}
+        aria-busy={saving || cloning}
         className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_19rem]"
       >
         {locked ? (
@@ -328,31 +337,14 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           )}
         </fieldset>
 
-        <aside className="space-y-5 lg:border-l lg:border-border/70 lg:pl-5">
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium">标题</span>
-            <Input name="title" defaultValue={pdoc.title || ''} required />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium">题目编号</span>
-            <Input name="pid" defaultValue={typeof pdoc.pid === 'string' ? pdoc.pid : ''} placeholder="留空自动分配" disabled={locked} />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium">标签</span>
-            <Input name="tag" defaultValue={(pdoc.tag || []).join(', ')} />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium">难度 1–10</span>
-            <Input name="difficulty" type="number" min={1} max={10} defaultValue={pdoc.difficulty || ''} disabled={locked} />
-          </label>
-          {isCreate ? (
-            <p className="border-y py-3 text-xs text-muted-foreground">新题首次保存固定为隐藏。</p>
-          ) : (
-            <label className="flex min-h-11 items-center gap-2 border-y py-2 text-sm">
-              <Checkbox name="hidden" defaultChecked={!!pdoc.hidden} />
-              <span>隐藏题目</span>
-            </label>
-          )}
+        <StructuredProblemMetadataPanel
+          pdoc={pdoc}
+          isCreate={isCreate}
+          locked={locked}
+          mindmapOptions={(data.knowledgeMindmapOptions || []) as KnowledgeMindmapOption[]}
+          canUseCustomPid={data.canUseCustomPid === true}
+          onMetadataChange={dirtyState.recompute}
+        >
           {compileMode && !isCreate ? (
             <div className="space-y-2 border-y py-3 text-xs text-muted-foreground">
               <p>测试数据文件：{(data.testdata || []).length} 个</p>
@@ -372,8 +364,9 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
               </Button>
             </div>
           ) : null}
-        </aside>
+        </StructuredProblemMetadataPanel>
       </form>
+      {navigationGuard.guardDialog}
     </main>
   );
 }

@@ -1,9 +1,9 @@
 /**
  * Problem Tagger — service-token-gated batch tag/title editor (OJ side).
  *
- * Powers the external Rust + Iced desktop tool (ecosystems/KryptonTagger) used
- * by a small team to clean up problem tags and titles. Auth is a per-worker
- * service token on channel `tagger` (NOT a Hydro login).
+ * Powers the Rust + Iced desktop cleanup tool (ecosystems/KryptonTagger) and
+ * the TypeScript DeepSeek auto-tagger (ecosystems/KryptonAutoTaggerAgent).
+ * Auth is a per-worker service token on channel `tagger` (NOT a Hydro login).
  * See docs/PLAN-2026-06-08-problem-tagger.md.
  *
  * Blast radius is bounded BY CONSTRUCTION: every write goes through
@@ -14,13 +14,16 @@
  * Endpoints (all require X-Service-Token, channel `tagger`, fixed domain):
  *   GET  /api/tagger/problems  → { domainId, problems: [{docId, pid, title, tag[]}] }  (excludes hidden)
  *   GET  /api/tagger/vocab     → { domainId, categories: {cat:[sub...]}, tagCounts: {tag:n} }
- *   POST /api/tagger/apply     { items:[{docId, tag?, title?}] }     → { results:[{docId, ok, error?}] }
+ *   GET  /api/tagger/mindmap   → live mindmap node/tag hierarchy
+ *   GET  /api/tagger/problem-context?docId=N → one in-scope problem statement
+ *   POST /api/tagger/apply     { items:[{docId, tag?, title?, expectedTag?, mindmapOnly?}] } → per-item results
  *   POST /api/tagger/retag     { from:[...], to:string|null, dryRun? } → { from, to, count, affectedDocIds }
  */
 import yaml from 'js-yaml';
-import { Context, Handler, OplogModel, param, PERM, PermissionError, Types } from 'hydrooj';
+import { Context, db, Handler, OplogModel, param, PERM, PermissionError, Types } from 'hydrooj';
 import { requireAuthToken } from '../lib/auth-token';
 import { Logger } from '../logger';
+import { ProblemTagConflictError } from '../error';
 import * as document from '../model/document';
 import problem from '../model/problem';
 import system from '../model/system';
@@ -32,6 +35,92 @@ const logger = new Logger('tagger');
 // we embed in a single oplog document so it can never approach mongo's 16MB
 // limit. The full affectedDocIds list (compact) is always logged.
 const OPLOG_CHANGE_CAP = 500;
+interface MindmapNodeDocument {
+    _id: unknown;
+    parentId: unknown | null;
+    topic: unknown;
+    tags: unknown;
+}
+
+interface SerializedMindmapNode {
+    id: string;
+    parentId: string | null;
+    topic: string;
+    tags: string[];
+}
+
+const mindmapNodes = db.collection<MindmapNodeDocument>('mindmap.nodes');
+
+function serializeMindmapNode(node: MindmapNodeDocument): SerializedMindmapNode {
+    if (node._id === null || node._id === undefined) throw new TypeError('mindmap node id must be present');
+    const id = String(node._id);
+    if (!id.trim()) throw new TypeError('mindmap node id must be non-empty');
+    if (typeof node.topic !== 'string' || !node.topic.trim() || node.topic !== node.topic.trim()) {
+        throw new TypeError(`mindmap node ${id} topic must be a trimmed non-empty string`);
+    }
+    if (!Array.isArray(node.tags) || node.tags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag !== tag.trim())) {
+        throw new TypeError(`mindmap node ${id} tags must be an array of trimmed non-empty strings`);
+    }
+    if (new Set(node.tags).size !== node.tags.length) throw new TypeError(`mindmap node ${id} tags must be unique`);
+    if (node.parentId === undefined) throw new TypeError(`mindmap node ${id} parentId must be present`);
+    let parentId: string | null = null;
+    if (node.parentId !== null) {
+        parentId = String(node.parentId);
+        if (!parentId.trim()) throw new TypeError(`mindmap node ${id} parentId must be null or non-empty`);
+    }
+    return { id, parentId, topic: node.topic, tags: node.tags as string[] };
+}
+
+async function loadMindmapNodes() {
+    const nodes = await mindmapNodes.find({}, { projection: { _id: 1, parentId: 1, topic: 1, tags: 1 } }).toArray();
+    return nodes.map(serializeMindmapNode);
+}
+
+function buildMindmapTagPolicy(nodes: SerializedMindmapNode[]) {
+    const byId = new Map<string, SerializedMindmapNode>();
+    const nodeIdsByTag = new Map<string, string[]>();
+    for (const node of nodes) {
+        if (byId.has(node.id)) throw new TypeError(`duplicate mindmap node id: ${node.id}`);
+        byId.set(node.id, node);
+        for (const tag of node.tags) nodeIdsByTag.set(tag, [...(nodeIdsByTag.get(tag) || []), node.id]);
+    }
+    const roots = nodes.filter((node) => node.parentId === null);
+    if (roots.length !== 1) throw new TypeError(`mindmap must contain exactly one root, found ${roots.length}`);
+
+    const ancestorTagsById = new Map<string, string[]>();
+    const ancestorTags = (nodeId: string): string[] => {
+        const cached = ancestorTagsById.get(nodeId);
+        if (cached) return cached;
+        const node = byId.get(nodeId);
+        if (!node) throw new TypeError(`unknown mindmap node: ${nodeId}`);
+        const path: SerializedMindmapNode[] = [];
+        const seen = new Set([nodeId]);
+        let parentId = node.parentId;
+        while (parentId !== null) {
+            if (seen.has(parentId)) throw new TypeError(`mindmap contains a cycle at ${parentId}`);
+            seen.add(parentId);
+            const parent = byId.get(parentId);
+            if (!parent) throw new TypeError(`mindmap node ${nodeId} has unknown parent ${parentId}`);
+            path.unshift(parent);
+            parentId = parent.parentId;
+        }
+        const tags = [...new Set(path.flatMap((parent) => parent.tags))];
+        ancestorTagsById.set(nodeId, tags);
+        return tags;
+    };
+    for (const node of nodes) ancestorTags(node.id);
+
+    return {
+        allowedTags: new Set(nodeIdsByTag.keys()),
+        isHierarchyClosed(tags: string[]) {
+            const current = new Set(tags);
+            return [...current].every((tag) => {
+                const nodeIds = nodeIdsByTag.get(tag);
+                return !nodeIds || nodeIds.some((nodeId) => ancestorTags(nodeId).every((parentTag) => current.has(parentTag)));
+            });
+        },
+    };
+}
 
 /** Domain the tool operates on. Client-supplied domains are ignored on purpose. */
 function taggerDomain(): string {
@@ -93,6 +182,15 @@ function normalizeTags(input: any): string[] {
         if (t && !out.includes(t)) out.push(t);
     }
     return out;
+}
+
+function validateExpectedTags(input: unknown): string[] {
+    if (!Array.isArray(input)) throw new TypeError('expectedTag must be a string array');
+    if (input.some((tag) => typeof tag !== 'string' || !tag || tag !== tag.trim())) {
+        throw new TypeError('expectedTag entries must be trimmed non-empty strings');
+    }
+    if (new Set(input).size !== input.length) throw new TypeError('expectedTag entries must be unique');
+    return [...input];
 }
 
 /** problem.categories is stored as a YAML string OR a plain object; handle both. */
@@ -277,6 +375,50 @@ class TaggerAuditHandler extends TaggerApiHandler {
     }
 }
 
+// ─── GET /api/tagger/mindmap ────────────────────────────────────────────────
+
+class TaggerMindmapHandler extends TaggerApiHandler {
+    async get() {
+        await this.problemBankScope();
+        this.checkPerm(PERM.PERM_VIEW_PROBLEM);
+        const domainId = taggerDomain();
+        this.response.body = {
+            domainId,
+            nodes: await loadMindmapNodes(),
+        };
+    }
+}
+
+// ─── GET /api/tagger/problem-context?docId=N ────────────────────────────────
+
+class TaggerProblemContextHandler extends TaggerApiHandler {
+    @param('docId', Types.UnsignedInt)
+    async get(_args: any, docId: number) {
+        const scope = await this.problemBankScope();
+        this.checkPerm(PERM.PERM_VIEW_PROBLEM);
+        const domainId = taggerDomain();
+        const docs = await problem
+            .getMulti(domainId, { $and: [scope, { docId, tag: { $in: ['L2', 'PAT甲级'] } }] }, ['docId', 'pid', 'title', 'tag', 'content'])
+            .toArray();
+        const pdoc = docs[0];
+        if (!pdoc) {
+            this.response.status = 404;
+            this.response.body = { error: 'problem_not_found' };
+            return;
+        }
+        this.response.body = {
+            domainId,
+            problem: {
+                docId: pdoc.docId,
+                pid: pdoc.pid || '',
+                title: pdoc.title || '',
+                tag: Array.isArray(pdoc.tag) ? pdoc.tag : [],
+                content: pdoc.content,
+            },
+        };
+    }
+}
+
 // ─── POST /api/tagger/apply (single edit + bulk-on-selection) ─────────────────
 
 class TaggerApplyHandler extends TaggerApiHandler {
@@ -293,10 +435,54 @@ class TaggerApplyHandler extends TaggerApiHandler {
             this.response.body = { error: 'too_many_items', max: MAX_APPLY_ITEMS };
             return;
         }
+        const expectedTags: Array<string[] | undefined> = [];
+        const mindmapOnly: boolean[] = [];
+        const mindmapFinalTags: Array<string[] | undefined> = [];
+        for (let index = 0; index < items.length; index++) {
+            const mindmapValue = items[index]?.mindmapOnly;
+            if (mindmapValue !== undefined && typeof mindmapValue !== 'boolean') {
+                this.response.status = 400;
+                this.response.body = { error: 'bad_mindmapOnly', index };
+                return;
+            }
+            mindmapOnly.push(mindmapValue === true);
+            if (mindmapValue === true) {
+                try {
+                    mindmapFinalTags.push(validateExpectedTags(items[index]?.tag));
+                } catch {
+                    this.response.status = 400;
+                    this.response.body = { error: 'bad_mindmapTag', index };
+                    return;
+                }
+            } else {
+                mindmapFinalTags.push(undefined);
+            }
+            const value = items[index]?.expectedTag;
+            if (value === undefined || value === null) {
+                expectedTags.push(undefined);
+                continue;
+            }
+            try {
+                expectedTags.push(validateExpectedTags(value));
+            } catch {
+                this.response.status = 400;
+                this.response.body = { error: 'bad_expectedTag', index };
+                return;
+            }
+        }
+        for (let index = 0; index < items.length; index++) {
+            if (mindmapOnly[index] && (expectedTags[index] === undefined || items[index]?.tag === undefined || items[index]?.tag === null)) {
+                this.response.status = 400;
+                this.response.body = { error: 'mindmapOnly_requires_tag_and_expectedTag', index };
+                return;
+            }
+        }
+        const mindmapPolicy = mindmapOnly.some(Boolean) ? buildMindmapTagPolicy(await loadMindmapNodes()) : undefined;
         const domainId = taggerDomain();
         const results: any[] = [];
         const changes: any[] = [];
-        for (const item of items) {
+        for (let index = 0; index < items.length; index++) {
+            const item = items[index];
             const docId = Number(item?.docId);
             if (!Number.isSafeInteger(docId)) {
                 results.push({ docId: item?.docId, ok: false, error: 'bad_docId' });
@@ -304,12 +490,13 @@ class TaggerApplyHandler extends TaggerApiHandler {
             }
             const hasTag = item.tag !== undefined && item.tag !== null;
             const hasTitle = typeof item.title === 'string';
+            const expectedTag = expectedTags[index];
             if (!hasTag && !hasTitle) {
                 results.push({ docId, ok: false, error: 'nothing_to_change' });
                 continue;
             }
             const patch: Record<string, any> = {};
-            if (hasTag) patch.tag = normalizeTags(item.tag);
+            if (hasTag) patch.tag = mindmapFinalTags[index] || normalizeTags(item.tag);
             if (hasTitle) {
                 const title = String(item.title).trim();
                 if (!title) {
@@ -318,14 +505,29 @@ class TaggerApplyHandler extends TaggerApiHandler {
                 }
                 patch.title = title;
             }
+            if (mindmapOnly[index]) {
+                const removedTags = expectedTag!.filter((tag) => !patch.tag.includes(tag));
+                if (removedTags.length) {
+                    results.push({ docId, ok: false, error: 'mindmap_only_cannot_remove_tags' });
+                    continue;
+                }
+                const addedTags = patch.tag.filter((tag: string) => !expectedTag!.includes(tag));
+                if (addedTags.some((tag: string) => !mindmapPolicy!.allowedTags.has(tag))) {
+                    results.push({ docId, ok: false, error: 'tag_not_in_mindmap' });
+                    continue;
+                }
+                if (!mindmapPolicy!.isHierarchyClosed(patch.tag)) {
+                    results.push({ docId, ok: false, error: 'mindmap_parent_missing' });
+                    continue;
+                }
+            }
             try {
                 const old = await problem.get(domainId, docId, ['domainId', 'docId', 'pid', 'owner', 'tag', 'title']);
                 if (!old || !problem.canMaintainProblem(this.user as any, old)) {
                     results.push({ docId, ok: false, error: 'not_found' });
                     continue;
                 }
-
-                await problem.editAuthorized(domainId, docId, patch, this.user as any);
+                await problem.editAuthorized(domainId, docId, patch, this.user as any, {}, expectedTag === undefined ? {} : { expectedTag });
                 changes.push({
                     docId,
                     pid: old.pid,
@@ -337,6 +539,10 @@ class TaggerApplyHandler extends TaggerApiHandler {
                 });
                 results.push({ docId, ok: true });
             } catch (e: any) {
+                if (e instanceof ProblemTagConflictError) {
+                    results.push({ docId, ok: false, error: 'tag_conflict' });
+                    continue;
+                }
                 results.push({ docId, ok: false, error: e?.message || 'edit_failed' });
             }
         }
@@ -420,6 +626,8 @@ export async function apply(ctx: Context) {
     ctx.Route('tagger_problems', '/api/tagger/problems', TaggerProblemsHandler);
     ctx.Route('tagger_vocab', '/api/tagger/vocab', TaggerVocabHandler);
     ctx.Route('tagger_audit', '/api/tagger/audit', TaggerAuditHandler);
+    ctx.Route('tagger_mindmap', '/api/tagger/mindmap', TaggerMindmapHandler);
+    ctx.Route('tagger_problem_context', '/api/tagger/problem-context', TaggerProblemContextHandler);
     ctx.Route('tagger_apply', '/api/tagger/apply', TaggerApplyHandler);
     ctx.Route('tagger_retag', '/api/tagger/retag', TaggerRetagHandler);
 }

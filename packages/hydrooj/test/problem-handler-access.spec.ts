@@ -56,6 +56,7 @@ const calls = {
     getViewableAuthorized: [] as any[],
     getMulti: [] as any[],
     inc: [] as any[],
+    knowledgeMaterializations: [] as any[],
     maintain: [] as any[],
     manualStatus: [] as any[],
     oplog: [] as any[],
@@ -374,8 +375,17 @@ const managedAuthoringStub = {
         { id: 'pat_basic', label: 'PAT 乙级', fields: ['year', 'season'] },
         { id: 'self', label: '自命题', fields: ['year'] },
     ],
+    listKnowledgeMindmapOptions: async () => [{ id: 'node-1', label: '数据结构 / 线段树', tags: ['线段树'] }],
     listManagedMindmapOptions: async () => [{ id: 'node-1', label: '数据结构 / 线段树', tags: ['线段树'] }],
     listManagedTrainingOptions: async () => [],
+    materializeKnowledgeMindmapTags: async (nodeIds: string[]) => {
+        calls.knowledgeMaterializations.push([...nodeIds]);
+        if (nodeIds.includes('stale-node')) throw new GenericError('stale knowledge node');
+        return {
+            nodeIds: [...nodeIds],
+            tags: nodeIds.map((nodeId) => `derived:${nodeId}`),
+        };
+    },
 };
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     if (request === '../error') return errors;
@@ -1109,13 +1119,21 @@ describe('P3.15 files workspace capability contract', () => {
 describe('P3.9 basic objective HTTP boundaries', () => {
     it('creates a hidden single problem in the authoritative domain with a fixed URL kind', async () => {
         const handler = makeHandler(ProblemCreateSingleHandler, {});
+        handler.request.body = {
+            title: 'Single',
+            content: 'Statement',
+            difficulty: '3',
+            knowledgeNodeIds: 'node-1',
+            editorProblemKind: 'single',
+            structuredConfig: JSON.stringify({ main: { options: ['A text', 'B text'], answerIndex: 1 } }),
+        };
         await handler.post(
             'forged',
             'Single',
             'Statement',
             '',
             3,
-            ['tag'],
+            ['node-1'],
             'single',
             JSON.stringify({ main: { options: ['A text', 'B text'], answerIndex: 1 } }),
         );
@@ -1124,16 +1142,106 @@ describe('P3.9 basic objective HTTP boundaries', () => {
         expect(calls.add[0][6].structuredConfig).to.deep.equal({
             main: { options: ['A text', 'B text'], answerIndex: 1 },
         });
+        expect(calls.add[0][5]).to.deep.equal(['derived:node-1']);
+        expect(calls.add[0][6].knowledgeNodeIds).to.deep.equal(['node-1']);
+        expect(handler.response.body.ok).to.equal(true);
         expect(handler.response.body.hidden).to.equal(true);
     });
 
     it('rejects a create-route kind mismatch before creating anything', async () => {
         const handler = makeHandler(ProblemCreateSingleHandler, {});
+        handler.request.body = {
+            title: 'Single',
+            content: 'Statement',
+            difficulty: '0',
+            knowledgeNodeIds: '',
+            editorProblemKind: 'multi',
+            structuredConfig: JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
+        };
         const error = await captureFailure(() =>
             handler.post('forged', 'Single', 'Statement', '', 0, [], 'multi', JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } })),
         );
         expect(error).to.be.instanceOf(GenericError);
         expect(calls.add).to.deep.equal([]);
+    });
+
+    it('rejects raw tags, non-admin custom PIDs, and stale knowledge nodes before creation', async () => {
+        for (const forged of [{ tag: 'free-text' }, { pid: 'FORGED1' }]) {
+            const handler = makeHandler(ProblemCreateSingleHandler, {});
+            handler.request.body = {
+                title: 'Single',
+                content: 'Statement',
+                difficulty: '1',
+                knowledgeNodeIds: 'node-1',
+                editorProblemKind: 'single',
+                structuredConfig: JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
+                ...forged,
+            };
+            const error = await captureFailure(() =>
+                handler.post(
+                    'forged',
+                    'Single',
+                    'Statement',
+                    forged.pid || '',
+                    1,
+                    ['node-1'],
+                    'single',
+                    JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
+                ),
+            );
+            expect(error).to.be.instanceOf(GenericError);
+        }
+
+        const stale = makeHandler(ProblemCreateSingleHandler, {});
+        stale.request.body = {
+            title: 'Single',
+            content: 'Statement',
+            difficulty: '1',
+            knowledgeNodeIds: 'stale-node',
+            editorProblemKind: 'single',
+            structuredConfig: JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
+        };
+        const staleError = await captureFailure(() =>
+            stale.post(
+                'forged',
+                'Single',
+                'Statement',
+                '',
+                1,
+                ['stale-node'],
+                'single',
+                JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
+            ),
+        );
+        expect(staleError).to.be.instanceOf(GenericError);
+        expect(calls.add).to.deep.equal([]);
+    });
+
+    it('allows only a site administrator to submit an explicit structured PID', async () => {
+        const handler = makeHandler(ProblemCreateSingleHandler, {
+            hasPriv: (privilege: number) => privilege === PRIV.PRIV_EDIT_SYSTEM,
+        });
+        handler.request.body = {
+            title: 'Admin PID',
+            content: 'Statement',
+            pid: 'CUSTOM1',
+            difficulty: '1',
+            knowledgeNodeIds: 'node-1',
+            editorProblemKind: 'single',
+            structuredConfig: JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
+        };
+        getResults = [null];
+        await handler.post(
+            'forged',
+            'Admin PID',
+            'Statement',
+            'CUSTOM1',
+            1,
+            ['node-1'],
+            'single',
+            JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
+        );
+        expect(calls.add[0][1]).to.equal('CUSTOM1');
     });
 
     it('saves metadata, content, and config through one revision-checked structured write', async () => {
@@ -1145,14 +1253,27 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             problemKind: 'multi',
             structureRevision: 4,
         };
+        handler.request.body = {
+            title: 'Multi',
+            content: 'Statement',
+            hidden: 'false',
+            difficulty: '2',
+            knowledgeNodeIds: 'node-1',
+            expectedStructureRevision: '4',
+            editorProblemKind: 'multi',
+            structuredConfig: JSON.stringify({
+                main: { options: ['A', 'B'], answerIndexes: [0], partialCreditPercent: 25 },
+            }),
+        };
         await handler.post(
             'forged',
             'P7',
             'Multi',
             'Statement',
-            'P7',
+            undefined,
             false,
-            ['tag'],
+            [],
+            ['node-1'],
             2,
             false,
             4,
@@ -1168,11 +1289,77 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             problemKind: 'multi',
             expectedStructureRevision: 4,
         });
-        expect(calls.structuredSaves[0].metadata).to.deep.include({ title: 'Multi', hidden: false });
+        expect(calls.structuredSaves[0].metadata).to.deep.include({
+            title: 'Multi',
+            hidden: false,
+            tag: ['derived:node-1'],
+            knowledgeNodeIds: ['node-1'],
+        });
+        expect(handler.response.body).to.deep.include({ ok: true, pid: 'P7', problemKind: 'multi' });
         expect(calls.edit).to.deep.equal([]);
     });
 
-    it('updates only title, tags, and visibility after an objective problem is structurally locked', async () => {
+    it('rejects forged raw tags, non-admin PID edits, and stale knowledge nodes before a structured save', async () => {
+        const config = JSON.stringify({
+            main: { options: ['A', 'B'], answerIndexes: [0], partialCreditPercent: 25 },
+        });
+        const baseBody = {
+            title: 'Multi',
+            content: 'Statement',
+            hidden: 'false',
+            difficulty: '2',
+            knowledgeNodeIds: 'node-1',
+            expectedStructureRevision: '4',
+            editorProblemKind: 'multi',
+            structuredConfig: config,
+        };
+        for (const forged of [{ tag: 'free-text' }, { pid: 'FORGED2' }]) {
+            const handler = makeHandler(ProblemEditHandler, {});
+            handler.pdoc = {
+                domainId: 'system',
+                docId: 7,
+                pid: 'P7',
+                problemKind: 'multi',
+                structureRevision: 4,
+            };
+            handler.request.body = { ...baseBody, ...forged };
+            const error = await captureFailure(() =>
+                handler.post(
+                    'forged',
+                    'P7',
+                    'Multi',
+                    'Statement',
+                    forged.pid,
+                    false,
+                    forged.tag ? [forged.tag] : [],
+                    ['node-1'],
+                    2,
+                    false,
+                    4,
+                    'multi',
+                    config,
+                ),
+            );
+            expect(error).to.be.instanceOf(GenericError);
+        }
+
+        const stale = makeHandler(ProblemEditHandler, {});
+        stale.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            problemKind: 'multi',
+            structureRevision: 4,
+        };
+        stale.request.body = { ...baseBody, knowledgeNodeIds: 'stale-node' };
+        const staleError = await captureFailure(() =>
+            stale.post('forged', 'P7', 'Multi', 'Statement', undefined, false, [], ['stale-node'], 2, false, 4, 'multi', config),
+        );
+        expect(staleError).to.be.instanceOf(GenericError);
+        expect(calls.structuredSaves).to.deep.equal([]);
+    });
+
+    it('updates only mutable metadata after an objective problem is structurally locked', async () => {
         const handler = makeHandler(ProblemEditHandler, {});
         handler.pdoc = {
             domainId: 'system',
@@ -1182,16 +1369,31 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             structureRevision: 5,
             structureLockedAt: new Date(),
             content: 'Original statement',
+            difficulty: 2,
         };
-        await handler.post('forged', 'P7', 'Renamed', undefined, undefined, true, ['new-tag'], undefined, undefined, undefined, '', '', true);
+        handler.request.body = {
+            title: 'Renamed',
+            hidden: 'true',
+            difficulty: '4',
+            knowledgeNodeIds: 'node-2',
+            metadataOnly: 'true',
+        };
+        await handler.post('forged', 'P7', 'Renamed', undefined, undefined, true, [], ['node-2'], 4, undefined, undefined, '', '', true);
         expect(calls.structuredMetadataSaves).to.have.length(1);
         expect(calls.structuredMetadataSaves[0]).to.deep.include({
             domainId: 'system',
             pid: 7,
             actor: 42,
             problemKind: 'multi',
-            metadata: { title: 'Renamed', hidden: true, tag: ['new-tag'] },
+            metadata: {
+                title: 'Renamed',
+                hidden: true,
+                tag: ['derived:node-2'],
+                difficulty: 4,
+                knowledgeNodeIds: ['node-2'],
+            },
         });
+        expect(handler.response.body).to.deep.include({ ok: true, pid: 'P7', problemKind: 'multi' });
         expect(calls.edit).to.deep.equal([]);
         expect(calls.structuredSaves).to.deep.equal([]);
     });
@@ -1207,8 +1409,30 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             structureLockedAt: new Date(),
             content: 'Original statement',
         };
+        handler.request.body = {
+            title: 'Renamed',
+            content: 'Changed statement',
+            hidden: 'true',
+            knowledgeNodeIds: 'node-1',
+            metadataOnly: 'true',
+        };
         const error = await captureFailure(() =>
-            handler.post('forged', 'P7', 'Renamed', 'Changed statement', undefined, true, ['new-tag'], undefined, undefined, undefined, '', '', true),
+            handler.post(
+                'forged',
+                'P7',
+                'Renamed',
+                'Changed statement',
+                undefined,
+                true,
+                [],
+                ['node-1'],
+                undefined,
+                undefined,
+                undefined,
+                '',
+                '',
+                true,
+            ),
         );
         expect(error).to.be.instanceOf(GenericError);
         expect(calls.edit).to.deep.equal([]);
@@ -1242,19 +1466,29 @@ describe('P3.9 basic objective HTTP boundaries', () => {
         expect(handler.response.template).to.equal('problem_edit_blank.html');
         expect(handler.response.body.structuredConfig).to.deep.equal({ main: { answer: 'Case' } });
         expect(handler.response.body.structuredConfig).not.to.have.property('answers');
+        expect(handler.response.body.knowledgeMindmapOptions).to.deep.equal([{ id: 'node-1', label: '数据结构 / 线段树', tags: ['线段树'] }]);
+        expect(handler.response.body.canUseCustomPid).to.equal(false);
     });
 });
 
 describe('P3.10 subjective problem HTTP boundaries', () => {
     it('creates a hidden subjective problem through its fixed-kind route', async () => {
         const handler = makeHandler(ProblemCreateSubjectiveHandler, {});
+        handler.request.body = {
+            title: 'Essay',
+            content: 'Explain why.',
+            difficulty: '0',
+            knowledgeNodeIds: 'node-1',
+            editorProblemKind: 'subjective',
+            structuredConfig: JSON.stringify({ main: { gradingInstructions: 'Look for invariants.' } }),
+        };
         await handler.post(
             'forged',
             'Essay',
             'Explain why.',
             '',
             0,
-            ['reasoning'],
+            ['node-1'],
             'subjective',
             JSON.stringify({ main: { gradingInstructions: 'Look for invariants.' } }),
         );
@@ -1299,6 +1533,14 @@ describe('P3.10 subjective problem HTTP boundaries', () => {
 describe('P3.11 program-fill and function HTTP boundaries', () => {
     it('creates each kind through a fixed dedicated route', async () => {
         const programFill = makeHandler(ProblemCreateProgramFillHandler, {});
+        programFill.request.body = {
+            title: 'Program fill',
+            content: 'Statement',
+            difficulty: '0',
+            knowledgeNodeIds: '',
+            editorProblemKind: 'program_fill',
+            structuredConfig: JSON.stringify({ main: { mode: 'text', answer: 'i++' } }),
+        };
         await programFill.post(
             'forged',
             'Program fill',
@@ -1310,6 +1552,22 @@ describe('P3.11 program-fill and function HTTP boundaries', () => {
             JSON.stringify({ main: { mode: 'text', answer: 'i++' } }),
         );
         const fn = makeHandler(ProblemCreateFunctionHandler, {});
+        fn.request.body = {
+            title: 'Function',
+            content: 'Statement',
+            difficulty: '0',
+            knowledgeNodeIds: '',
+            editorProblemKind: 'function',
+            structuredConfig: JSON.stringify({
+                main: {
+                    mode: 'function',
+                    lang: 'cpp',
+                    markerSource: 'source',
+                    regions: [{ id: 'solve' }],
+                    cases: [{ input: '1.in', output: '1.out' }],
+                },
+            }),
+        };
         await fn.post(
             'forged',
             'Function',

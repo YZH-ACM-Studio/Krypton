@@ -18,6 +18,7 @@ import {
     ProblemIsReferencedError,
     ProblemNotFoundError,
     ProblemStructureConflictError,
+    ProblemTagConflictError,
     ValidationError,
 } from '../error';
 import type { Document, ProblemDict, ProblemStatusDoc, User } from '../interface';
@@ -86,6 +87,7 @@ import {
 } from './problem-lifecycle';
 import {
     ensureManagedProblemAuthoringIndexes,
+    materializeKnowledgeMindmapTags,
     type ManagedProblemDraftInput,
     prepareManagedProblemDraft,
     prepareManagedProblemPublication,
@@ -96,6 +98,11 @@ import { commitManagedProblemPublication } from './managed-problem-publication';
 import RecordModel from './record';
 import SolutionModel from './solution';
 import storage from './storage';
+import {
+    assertNoCanonicalProblemPrimitiveMutation,
+    canonicalizeStructuredKnowledgePatch,
+    DEDICATED_STRUCTURED_PROBLEM_KINDS,
+} from './structured-problem-metadata';
 import SystemModel from './system';
 
 export interface ProblemDoc extends Document {}
@@ -318,6 +325,7 @@ interface ProblemCreateOptions {
     authoringMode?: 'managed';
     sourceMeta?: ProblemDoc['sourceMeta'];
     managedAuthoring?: ProblemDoc['managedAuthoring'];
+    knowledgeNodeIds?: ProblemDoc['knowledgeNodeIds'];
 }
 
 interface ProblemCreateHooks {
@@ -378,7 +386,7 @@ export class ProblemModel {
     ];
 
     /** Internal fields exposed only after the stable editor ACL read. */
-    static PROJECTION_MANAGED_EDITOR: Field[] = [...ProblemModel.PROJECTION_PUBLIC, 'sourceMeta', 'managedAuthoring'];
+    static PROJECTION_MANAGED_EDITOR: Field[] = [...ProblemModel.PROJECTION_PUBLIC, 'sourceMeta', 'managedAuthoring', 'knowledgeNodeIds'];
 
     /** Internal summary fields for the ACL-scoped problem bank and admin review. */
     static PROJECTION_MANAGED_BANK: Field[] = [...ProblemModel.PROJECTION_LIST, 'sourceMeta', 'managedAuthoring'];
@@ -541,14 +549,32 @@ export class ProblemModel {
         if (meta.sourceMeta) args.sourceMeta = meta.sourceMeta;
         if (meta.managedAuthoring) args.managedAuthoring = meta.managedAuthoring;
         if (problemKind !== 'programming') {
+            args.knowledgeNodeIds = meta.knowledgeNodeIds ?? [];
             try {
                 args.config = normalizeStructuredProblemConfig(problemKind, meta.structuredConfig) as any;
             } catch (error) {
                 logger.error('Structured problem create rejected domain=%s pid=%d kind=%s revision=1 error=%o', domainId, docId, problemKind, error);
                 throw error;
             }
+            await canonicalizeStructuredKnowledgePatch(
+                { problemKind },
+                args,
+                {},
+                { domainId, pid: docId, actor: owner, operation: 'create' },
+                'request',
+                { requireKnowledgePair: true },
+            );
         }
         await bus.parallel('problem/before-add', domainId, content, owner, docId, args);
+        if (args.problemKind !== problemKind) throw new ValidationError('problemKind');
+        await canonicalizeStructuredKnowledgePatch(
+            { problemKind },
+            args,
+            {},
+            { domainId, pid: docId, actor: owner, operation: 'create' },
+            'after-hook',
+            { requireKnowledgePair: problemKind !== 'programming' },
+        );
         const result = await document.add(domainId, content, owner, document.TYPE_PROBLEM, docId, null, null, args, {
             onPrepared: (prepared) => hooks.onAllocated?.(docId, prepared._id),
         });
@@ -577,6 +603,7 @@ export class ProblemModel {
                         authoringMode: args.authoringMode,
                         sourceMeta: args.sourceMeta,
                         managedAuthoring: args.managedAuthoring,
+                        knowledgeNodeIds: args.knowledgeNodeIds,
                     }),
                     time: new Date(),
                 } as any),
@@ -1154,7 +1181,7 @@ export class ProblemModel {
         problemKind: ProblemKind;
         content: string;
         config: unknown;
-        metadata?: Partial<Pick<ProblemDoc, 'title' | 'pid' | 'hidden' | 'tag' | 'difficulty' | 'lockHidden' | 'html'>>;
+        metadata?: Partial<Pick<ProblemDoc, 'title' | 'pid' | 'hidden' | 'tag' | 'difficulty' | 'lockHidden' | 'html' | 'knowledgeNodeIds'>>;
     }): Promise<ProblemDoc> {
         const problemKind = parseProblemKind(input.problemKind);
         let config: Record<string, unknown>;
@@ -1201,7 +1228,7 @@ export class ProblemModel {
         actor: number;
         user: ProblemAclUser;
         problemKind: ProblemKind;
-        metadata: Pick<ProblemDoc, 'title' | 'hidden' | 'tag'>;
+        metadata: Pick<ProblemDoc, 'title' | 'hidden' | 'tag' | 'difficulty' | 'knowledgeNodeIds'>;
     }): Promise<ProblemDoc> {
         const problemKind = parseProblemKind(input.problemKind);
         if (problemKind === 'programming') throw new ValidationError('problemKind');
@@ -1543,7 +1570,12 @@ export class ProblemModel {
             ]);
             throw new ValidationError('authoringMode', null, '托管题必须使用授权写入口');
         }
+        const rawEditContext = { domainId, pid: _id, operation: 'raw-edit' };
+        const knowledgePairRequired = await canonicalizeStructuredKnowledgePatch(current, $set, $unset, rawEditContext, 'request');
         await bus.parallel('problem/before-edit', $set, $unset);
+        await canonicalizeStructuredKnowledgePatch(current, $set, $unset, rawEditContext, 'after-hook', {
+            requireKnowledgePair: knowledgePairRequired,
+        });
         if (current.archivedAt && $set.hidden === false) throw new ValidationError('hidden');
         if ($set.hidden === false) {
             assertPublishableFillFunction({
@@ -1681,6 +1713,7 @@ export class ProblemModel {
             if (
                 error instanceof ValidationError ||
                 error instanceof ProblemStructureConflictError ||
+                error instanceof ProblemTagConflictError ||
                 error instanceof ProblemIsReferencedError ||
                 error instanceof ManagedProblemMetadataConflictError
             ) {
@@ -1818,6 +1851,7 @@ export class ProblemModel {
         requestedUnset: Record<string, unknown> = {},
         options: {
             expectedStructureRevision?: number;
+            expectedTag?: string[];
             requireExpectedStructureRevision?: boolean;
             skipStructureGuard?: boolean;
         } = {},
@@ -1874,6 +1908,7 @@ export class ProblemModel {
                 throw new ValidationError('hidden', null, '托管草稿必须从统一题库审核入口发布');
             }
         }
+        const knowledgePairRequired = await canonicalizeStructuredKnowledgePatch(current, $set, $unset, claim, 'request');
         await bus.parallel('problem/before-edit', $set, $unset);
         if (current.authoringMode === 'managed') {
             const finalGuard = managedProblemPatchCapability(current, $set, $unset);
@@ -1887,6 +1922,7 @@ export class ProblemModel {
             }
             managedGuard = finalGuard;
         }
+        await canonicalizeStructuredKnowledgePatch(current, $set, $unset, claim, 'after-hook', { requireKnowledgePair: knowledgePairRequired });
         if (current.archivedAt && $set.hidden === false) throw new ValidationError('hidden');
         if ($set.hidden === false) {
             assertPublishableFillFunction({
@@ -1915,9 +1951,27 @@ export class ProblemModel {
             }
             result = await commitProblemWriteClaimUpdate(claim, $set, $unset, managedGuard?.capability || claim.capability, {
                 expectedStructureRevision: expectedRevision,
+                expectedTag: options.expectedTag,
             });
         } else {
-            result = await commitProblemWriteClaimUpdate(claim, $set, $unset, managedGuard?.capability || claim.capability);
+            result = await commitProblemWriteClaimUpdate(claim, $set, $unset, managedGuard?.capability || claim.capability, {
+                expectedTag: options.expectedTag,
+            });
+        }
+        if (!result && options.expectedTag !== undefined) {
+            const live = await document.coll.findOne(
+                {
+                    domainId,
+                    docType: document.TYPE_PROBLEM,
+                    docId: _id,
+                    'aclWriteClaim.requestId': claim.requestId,
+                    'aclWriteClaim.actor': claim.actor,
+                    'aclWriteClaim.capability': claim.capability,
+                    'aclWriteClaim.state': 'active',
+                },
+                { projection: { tag: 1 } },
+            );
+            if (live && !isEqual(Array.isArray(live.tag) ? live.tag : [], options.expectedTag)) throw new ProblemTagConflictError(_id);
         }
         if (!result) throw new Error(`problem write claim ownership lost during edit: ${claim.requestId}`);
         bus.emit('problem/edit', result, claim.requestId, { hidden: current.hidden });
@@ -1931,7 +1985,7 @@ export class ProblemModel {
         $set: Partial<ProblemDoc>,
         user: ProblemAclUser,
         requestedUnset: Record<string, unknown> = {},
-        options: { expectedStructureRevision?: number } = {},
+        options: { expectedStructureRevision?: number; expectedTag?: string[] } = {},
     ): Promise<ProblemDoc> {
         const preliminary = await document.coll.findOne({ domainId, docType: document.TYPE_PROBLEM, docId: _id });
         if (!preliminary) throw new ProblemNotFoundError(domainId, _id);
@@ -2049,7 +2103,7 @@ export class ProblemModel {
         structuredLanguage?: string,
         attribution: { owner?: number; actor?: number; claim?: ProblemWriteClaim } = {},
     ) {
-        const original = await ProblemModel.get(domainId, _id, ProblemModel.PROJECTION_PUBLIC, true);
+        const original = await ProblemModel.get(domainId, _id, [...ProblemModel.PROJECTION_PUBLIC, 'knowledgeNodeIds'], true);
         if (!original) throw new ProblemNotFoundError(domainId, _id);
         if (original.authoringMode === 'managed') {
             const claim = attribution.claim;
@@ -2072,6 +2126,33 @@ export class ProblemModel {
         if (pid && (/^[0-9]+$/.test(pid) || (await ProblemModel.get(target, pid)))) pid = '';
         if (!pid && original.pid && !(await ProblemModel.get(target, original.pid))) pid = original.pid;
         const problemKind = original.problemKind === undefined ? 'programming' : parseProblemKind(original.problemKind);
+        let cloneKnowledge: Awaited<ReturnType<typeof materializeKnowledgeMindmapTags>> | null = null;
+        if (DEDICATED_STRUCTURED_PROBLEM_KINDS.has(problemKind)) {
+            try {
+                cloneKnowledge = await materializeKnowledgeMindmapTags(original.knowledgeNodeIds ?? []);
+                logger.info(
+                    'Structured clone knowledge canonicalized domain=%s pid=%d target=%s actor=%s kind=%s nodes=%d tags=%d stage=clone-materialize result=allowed',
+                    domainId,
+                    _id,
+                    target,
+                    attribution.actor ?? '-',
+                    problemKind,
+                    cloneKnowledge.nodeIds.length,
+                    cloneKnowledge.tags.length,
+                );
+            } catch (error) {
+                logger.warn(
+                    'Structured clone knowledge rejected domain=%s pid=%d target=%s actor=%s kind=%s stage=clone-materialize error=%o',
+                    domainId,
+                    _id,
+                    target,
+                    attribution.actor ?? '-',
+                    problemKind,
+                    error,
+                );
+                throw error;
+            }
+        }
         const cloneConfig = structuredLanguage
             ? cloneStructuredProblemForLanguage(problemKind, original.config, structuredLanguage)
             : original.config;
@@ -2084,8 +2165,8 @@ export class ProblemModel {
             original.title,
             original.content,
             cloneOwner,
-            original.tag,
-            { difficulty: original.difficulty, structuredConfig: cloneConfig },
+            cloneKnowledge?.tags ?? original.tag,
+            { difficulty: original.difficulty, structuredConfig: cloneConfig, knowledgeNodeIds: cloneKnowledge?.nodeIds },
         );
         const sourcePrefix = `problem/${domainId}/${_id}/`;
         const targetPrefix = `problem/${target}/${cloneId}/`;
@@ -2140,14 +2221,17 @@ export class ProblemModel {
     }
 
     static push<T extends ArrayKeys<ProblemDoc>>(domainId: string, _id: number, key: ArrayKeys<ProblemDoc>, value: ProblemDoc[T][0]) {
+        assertNoCanonicalProblemPrimitiveMutation(String(key), { domainId, pid: _id, operation: 'problem-array-write' }, 'push');
         return document.push(domainId, document.TYPE_PROBLEM, _id, key, value);
     }
 
     static pull<T extends ArrayKeys<ProblemDoc>>(domainId: string, pid: number, key: ArrayKeys<ProblemDoc>, values: ProblemDoc[T][0][]) {
+        assertNoCanonicalProblemPrimitiveMutation(String(key), { domainId, pid, operation: 'problem-array-write' }, 'pull');
         return document.deleteSub(domainId, document.TYPE_PROBLEM, pid, key, values);
     }
 
     static inc(domainId: string, _id: number, field: NumberKeys<ProblemDoc> | string, n: number): Promise<ProblemDoc> {
+        assertNoCanonicalProblemPrimitiveMutation(String(field), { domainId, pid: _id, operation: 'problem-numeric-write' }, 'inc');
         return document.inc(domainId, document.TYPE_PROBLEM, _id, field as any, n);
     }
 

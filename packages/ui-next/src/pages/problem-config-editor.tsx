@@ -58,7 +58,9 @@ import { MultiSelect } from '@/components/ui/multi-select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { ProblemTestdataFileDialog } from '@/components/problem-testdata-file-dialog';
+import { useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { COMMON_LANG_OPTIONS as PRESET_LANG_OPTIONS, type LangOption, resolveLangs } from '@/lib/multi-select-presets';
+import { readProblemConfigUploadSuccess } from '@/lib/problem-save-response';
 import '@/lib/bootstrap';
 import '@/lib/format';
 import {
@@ -124,15 +126,16 @@ export function ProblemConfigEditor({
   // --- state ---
   const [yamlText, setYamlText] = useState(initialYaml);
   const initialParse = useMemo(() => parseJudgeConfig(initialYaml), [initialYaml]);
+  const initialSubmittedYaml = initialParse.error ? initialYaml : serializeJudgeConfig(initialParse.config, { preserveSource: initialYaml });
   const [config, setConfig] = useState<JudgeConfig>(initialParse.config);
   const [yamlError, setYamlError] = useState<string | undefined>(initialParse.error);
   const [viewMode, setViewMode] = useState<'visual' | 'yaml'>('visual');
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [saveError, setSaveError] = useState('');
-  const [dirty, setDirty] = useState(false);
+  const [savedYaml, setSavedYaml] = useState(initialSubmittedYaml);
   const [draggedItem, setDraggedItem] = useState<DraggedItem | null>(null);
-  const lastSource = useRef<'form' | 'yaml'>('form');
+  const lastSource = useRef<'form' | 'yaml'>(initialParse.error ? 'yaml' : 'form');
   const editVersion = useRef(0);
   const [mobileTab, setMobileTab] = useState<'files' | 'cases' | 'subtasks'>('files');
   // File being edited in the modal — null = closed.
@@ -170,7 +173,6 @@ export function ProblemConfigEditor({
   const onYamlChange = useCallback((next: string) => {
     lastSource.current = 'yaml';
     editVersion.current += 1;
-    setDirty(true);
     setSaveError('');
     setSaveMsg(null);
     setYamlText(next);
@@ -186,21 +188,14 @@ export function ProblemConfigEditor({
   const updateConfig = useCallback((mut: (c: JudgeConfig) => JudgeConfig) => {
     lastSource.current = 'form';
     editVersion.current += 1;
-    setDirty(true);
     setSaveError('');
     setSaveMsg(null);
     setConfig((c) => mut(c));
   }, []);
 
-  useEffect(() => {
-    const warnBeforeLeave = (event: BeforeUnloadEvent) => {
-      if (!dirty) return;
-      event.preventDefault();
-      event.returnValue = '';
-    };
-    window.addEventListener('beforeunload', warnBeforeLeave);
-    return () => window.removeEventListener('beforeunload', warnBeforeLeave);
-  }, [dirty]);
+  const currentYaml = lastSource.current === 'form' ? serializeJudgeConfig(config, { preserveSource: yamlText }) : yamlText;
+  const dirty = currentYaml !== savedYaml;
+  const navigationGuard = useUnsavedChangesGuard(dirty || saving);
 
   // --- validation ---
   const issues = useMemo(() => validateConfig(config, fileSet), [config, fileSet]);
@@ -210,38 +205,38 @@ export function ProblemConfigEditor({
   // --- save ---
   const handleSave = useCallback(async () => {
     const savedVersion = editVersion.current;
+    const submittedYaml = currentYaml;
     setSaving(true);
     setSaveError('');
     setSaveMsg(null);
     try {
-      const currentYaml = lastSource.current === 'form' ? serializeJudgeConfig(config, { preserveSource: yamlText }) : yamlText;
-      if (currentYaml !== yamlText) setYamlText(currentYaml);
+      if (submittedYaml !== yamlText) setYamlText(submittedYaml);
       const formData = new FormData();
       formData.append('operation', 'upload_file');
       formData.append('type', 'testdata');
       formData.append('filename', 'config.yaml');
-      formData.append('file', new Blob([currentYaml], { type: 'text/yaml' }), 'config.yaml');
+      formData.append('file', new Blob([submittedYaml], { type: 'text/yaml' }), 'config.yaml');
       const res = await fetch(`${problemUrl}/files`, {
         method: 'POST',
         body: formData,
         headers: { Accept: 'application/json' },
       });
-      if (res.ok) {
-        if (editVersion.current === savedVersion) setDirty(false);
-        setSaveMsg('已保存');
-        setTimeout(() => setSaveMsg(null), 1800);
-      } else {
+      if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         const message = data?.error?.message || data?.message || data?.error;
-        setSaveError(typeof message === 'string' ? message : `保存失败：HTTP ${res.status}`);
+        throw new Error(typeof message === 'string' ? message : `保存失败：HTTP ${res.status}`);
       }
+      await readProblemConfigUploadSuccess(res);
+      setSavedYaml(submittedYaml);
+      setSaveMsg(editVersion.current === savedVersion ? '已保存' : '提交时版本已保存，当前修改尚未保存');
+      setTimeout(() => setSaveMsg(null), 1800);
     } catch (e: any) {
       console.error('Failed to save problem judge config', e);
       setSaveError(e?.message || '保存失败');
     } finally {
       setSaving(false);
     }
-  }, [config, yamlText, problemUrl]);
+  }, [currentYaml, problemUrl, yamlText]);
 
   // --- drag handlers ---
   // Activation distance was 4px — that's so small that even an accidental
@@ -570,6 +565,7 @@ export function ProblemConfigEditor({
 
       {/* File edit dialog */}
       {editingFile ? <ProblemTestdataFileDialog file={editingFile} problemUrl={problemUrl} onClose={() => setEditingFile(null)} /> : null}
+      {navigationGuard.guardDialog}
     </motion.div>
   );
 }

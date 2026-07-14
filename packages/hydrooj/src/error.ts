@@ -68,6 +68,7 @@ export const ProblemStructureConflictError = Err(
     'Problem {0} has changed or its structure is locked. Reload and try again.',
     409,
 );
+export const ProblemTagConflictError = Err('ProblemTagConflictError', UserFacingError, 'Problem {0} tags changed. Reload and try again.', 409);
 export const ManagedProblemMetadataConflictError = Err(
     'ManagedProblemMetadataConflictError',
     UserFacingError,

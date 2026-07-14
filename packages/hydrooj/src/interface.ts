@@ -250,6 +250,8 @@ declare module './model/problem' {
             approvedBy?: number;
             approvedAt?: Date;
         };
+        /** Canonical knowledge selections for dedicated structured problems; `tag` is server-derived from these nodes. */
+        knowledgeNodeIds?: ObjectId[];
         structureRevision?: number;
         structureLockedAt?: Date;
         structureLockReason?: 'first_submission' | 'container_started';

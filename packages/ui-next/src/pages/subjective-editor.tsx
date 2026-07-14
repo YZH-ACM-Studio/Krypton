@@ -1,12 +1,13 @@
 import { ArrowLeft, Save } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { PROBLEM_KIND_TO_SLUG } from '@hydrooj/common';
 import { MarkdownEditor } from '@/components/markdown-renderer';
+import { StructuredProblemMetadataPanel, type KnowledgeMindmapOption } from '@/components/structured-problem-metadata-panel';
+import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 
 type R = Record<string, any>;
 
@@ -25,34 +26,39 @@ export function SubjectiveProblemEditorPage() {
   const [instructions, setInstructions] = useState(String(data.structuredConfig?.main?.gradingInstructions || ''));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const dirtyRef = useRef(false);
-
-  useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => {
-      if (dirtyRef.current) event.preventDefault();
-    };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, []);
+  const formRef = useRef<HTMLFormElement>(null);
+  const dirtyState = useFormDirtyState(formRef, instructions);
+  const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saving);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const form = event.currentTarget;
+    const submittedSnapshot = dirtyState.snapshot();
+    if (submittedSnapshot === null) {
+      setError('无法读取当前表单，未发送保存请求。');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
-      const response = await fetch(event.currentTarget.action || window.location.pathname, {
+      const response = await fetch(form.action || window.location.pathname, {
         method: 'POST',
-        body: new URLSearchParams(new FormData(event.currentTarget) as any),
+        body: new URLSearchParams(new FormData(form) as any),
         credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
       });
       if (!response.ok) throw new Error(await errorMessage(response));
-      dirtyRef.current = false;
-      if (response.redirected) window.location.assign(response.url);
-      else {
-        const body = await response.json();
-        if (!body?.pid) throw new Error('保存响应缺少 pid');
-        window.location.assign(`/p/${body.pid}/edit`);
+      const { destination } = await readProblemSaveSuccess(response, PROBLEM_KIND_TO_SLUG.subjective);
+      if (dirtyState.snapshot() !== submittedSnapshot) {
+        console.warn('Subjective problem saved, but local form changed during request; navigation withheld', { destination });
+        setError('服务器已保存提交时的版本，但保存过程中检测到新的本地修改；为避免丢失，未自动跳转。');
+        setSaving(false);
+        dirtyState.recompute();
+        return;
       }
+      dirtyState.markClean();
+      navigationGuard.allowNavigation();
+      window.location.assign(destination);
     } catch (caught: any) {
       setError(caught?.message || '保存失败');
       setSaving(false);
@@ -89,12 +95,13 @@ export function SubjectiveProblemEditorPage() {
       ) : null}
 
       <form
+        ref={formRef}
         id="subjective-form"
         method="post"
         onSubmit={submit}
-        onChange={() => {
-          dirtyRef.current = true;
-        }}
+        onChange={dirtyState.recompute}
+        inert={saving}
+        aria-busy={saving}
         className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]"
       >
         {locked ? (
@@ -127,25 +134,16 @@ export function SubjectiveProblemEditorPage() {
           </section>
         </fieldset>
 
-        <aside className="space-y-5 lg:border-l lg:border-border/70 lg:pl-5">
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium">标题</span>
-            <Input name="title" defaultValue={pdoc.title || ''} required className="min-h-11" />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium">标签</span>
-            <Input name="tag" defaultValue={(pdoc.tag || []).join(', ')} placeholder="用逗号分隔" className="min-h-11" />
-          </label>
-          {isCreate ? (
-            <p className="border-y border-border/70 py-3 text-xs text-muted-foreground">新题首次保存固定为隐藏。</p>
-          ) : (
-            <label className="flex min-h-11 items-center gap-2 border-y border-border/70 py-2 text-sm">
-              <Checkbox name="hidden" defaultChecked={!!pdoc.hidden} />
-              <span>隐藏题目</span>
-            </label>
-          )}
-        </aside>
+        <StructuredProblemMetadataPanel
+          pdoc={pdoc}
+          isCreate={isCreate}
+          locked={locked}
+          mindmapOptions={(data.knowledgeMindmapOptions || []) as KnowledgeMindmapOption[]}
+          canUseCustomPid={data.canUseCustomPid === true}
+          onMetadataChange={dirtyState.recompute}
+        />
       </form>
+      {navigationGuard.guardDialog}
     </main>
   );
 }

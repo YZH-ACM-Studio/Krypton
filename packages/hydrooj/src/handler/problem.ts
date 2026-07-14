@@ -61,7 +61,13 @@ import domain from '../model/domain';
 import { markManualPending } from '../model/manual-grade';
 import * as oplog from '../model/oplog';
 import problem from '../model/problem';
-import { listManagedMindmapOptions, listManagedTrainingOptions, MANAGED_SOURCE_TEMPLATES } from '../model/managed-problem-authoring';
+import {
+    listKnowledgeMindmapOptions,
+    listManagedMindmapOptions,
+    listManagedTrainingOptions,
+    MANAGED_SOURCE_TEMPLATES,
+    materializeKnowledgeMindmapTags,
+} from '../model/managed-problem-authoring';
 import { structuredProblemUsesTestdata } from '../model/problem-lifecycle';
 import record from '../model/record';
 import * as setting from '../model/setting';
@@ -1143,6 +1149,8 @@ export class ProblemEditHandler extends ProblemManageHandler {
             if (!config?.main) throw new ValidationError('config', null, '结构化题缺少 main 配置');
             this.response.body.editorProblemKind = problemKind;
             this.response.body.structuredConfig = { main: config.main };
+            this.response.body.knowledgeMindmapOptions = await listKnowledgeMindmapOptions();
+            this.response.body.canUseCustomPid = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
             if ([PROGRAM_FILL_KIND, FUNCTION_KIND].includes(problemKind as any)) {
                 this.response.body.langRange = setting.SETTINGS_BY_KEY.codeLang.range;
             }
@@ -1159,7 +1167,8 @@ export class ProblemEditHandler extends ProblemManageHandler {
     @post('pid', Types.ProblemId, true, (i) => /^(?:[a-z0-9]{1,10}-)?[a-z][a-z0-9]*$/i.test(i))
     @post('hidden', Types.Boolean)
     @post('tag', Types.Content, true, null, parseCategory)
-    @post('difficulty', Types.PositiveInt, (i) => +i <= 10, true)
+    @post('knowledgeNodeIds', Types.CommaSeperatedArray, true)
+    @post('difficulty', Types.UnsignedInt, (i) => +i <= 10, true)
     @post('lockHidden', Types.Boolean, true)
     @post('expectedStructureRevision', Types.PositiveInt, true)
     @post('editorProblemKind', Types.String, true)
@@ -1173,6 +1182,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
         newPid: string | number | undefined,
         hidden = false,
         tag: string[] = [],
+        knowledgeNodeIds: string[] = [],
         difficulty?: number,
         lockHidden?: boolean,
         expectedStructureRevision?: number,
@@ -1184,6 +1194,8 @@ export class ProblemEditHandler extends ProblemManageHandler {
         const problemKind = effectiveProblemKind(this.pdoc);
         const managed = this.pdoc.authoringMode === 'managed';
         const body = this.request.body || {};
+        const dedicatedStructured = isDedicatedStructuredEditorKind(problemKind);
+        let structuredKnowledge: Awaited<ReturnType<typeof materializeKnowledgeMindmapTags>> | null = null;
         if (!managed && title === undefined) throw new ValidationError('title');
         if (managed) {
             const allowed = new Set([
@@ -1221,12 +1233,31 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 throw new ValidationError('fields', null, `当前角色不可修改字段：${forbiddenFields.join(', ')}`);
             }
         }
+        if (dedicatedStructured) {
+            if (Object.hasOwn(body, 'tag')) throw new ValidationError('tag', null, '结构化题标签只能从知识导图选择');
+            if (!Object.hasOwn(body, 'knowledgeNodeIds')) throw new ValidationError('knowledgeNodeIds');
+            if (Object.hasOwn(body, 'pid') && !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
+                throw new ValidationError('pid', null, '只有站点管理员可自定义结构化题编号');
+            }
+            try {
+                structuredKnowledge = await materializeKnowledgeMindmapTags(knowledgeNodeIds);
+            } catch (error) {
+                logger.warn(
+                    'Structured knowledge save rejected domain=%s pid=%d kind=%s actor=%d stage=knowledge-materialize error=%o',
+                    domainId,
+                    this.pdoc.docId,
+                    problemKind,
+                    this.user._id,
+                    error,
+                );
+                throw error;
+            }
+        }
         if (metadataOnly) {
             if (
                 !isDedicatedStructuredEditorKind(problemKind) ||
                 content !== undefined ||
                 newPid !== undefined ||
-                difficulty !== undefined ||
                 lockHidden !== undefined ||
                 expectedStructureRevision !== undefined ||
                 editorProblemKind ||
@@ -1240,9 +1271,17 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 actor: this.user._id,
                 user: this.user,
                 problemKind,
-                metadata: { title: title || this.pdoc.title, hidden, tag: tag ?? [] },
+                metadata: {
+                    title: title || this.pdoc.title,
+                    hidden,
+                    tag: structuredKnowledge!.tags,
+                    difficulty: difficulty ?? this.pdoc.difficulty ?? 0,
+                    knowledgeNodeIds: structuredKnowledge!.nodeIds,
+                },
             });
-            this.response.redirect = this.url('problem_detail', { pid: this.pdoc.pid || pdoc.docId });
+            const responsePid = this.pdoc.pid || pdoc.docId;
+            this.response.body = { ok: true, pid: responsePid, problemKind };
+            this.response.redirect = this.url('problem_detail', { pid: responsePid });
             return;
         }
         if (content === undefined) throw new ValidationError('content');
@@ -1255,7 +1294,8 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 title,
                 pid: newPid,
                 hidden,
-                tag: tag ?? [],
+                tag: structuredKnowledge ? structuredKnowledge.tags : (tag ?? []),
+                ...(structuredKnowledge ? { knowledgeNodeIds: structuredKnowledge.nodeIds } : {}),
                 difficulty: difficulty ?? 0,
                 lockHidden: !!lockHidden,
             });
@@ -1290,12 +1330,16 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 config: parseStructuredConfigInput(structuredConfig),
                 metadata: $update,
             });
-            this.response.redirect = this.url('problem_detail', { pid: newPid || pdoc.docId });
+            const responsePid = newPid || pdoc.docId;
+            this.response.body = { ok: true, pid: responsePid, problemKind };
+            this.response.redirect = this.url('problem_detail', { pid: responsePid });
             return;
         }
         if (editorProblemKind || structuredConfig) throw new ValidationError('problemKind');
         const pdoc = await problem.editAuthorized(domainId, this.pdoc.docId, $update, this.user, {}, { expectedStructureRevision });
-        this.response.redirect = this.url('problem_detail', { pid: newPid || pdoc.docId });
+        const responsePid = newPid || pdoc.docId;
+        this.response.body = { ok: true, pid: responsePid, problemKind };
+        this.response.redirect = this.url('problem_detail', { pid: responsePid });
     }
 }
 
@@ -1308,7 +1352,9 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
             page_name: `problem_create_${this.problemKind}`,
             editorProblemKind: this.problemKind,
             structuredConfig: defaultDedicatedConfig(this.problemKind),
-            pdoc: { hidden: true, problemKind: this.problemKind },
+            pdoc: { hidden: true, problemKind: this.problemKind, knowledgeNodeIds: [] },
+            knowledgeMindmapOptions: await listKnowledgeMindmapOptions(),
+            canUseCustomPid: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
         };
         if ([PROGRAM_FILL_KIND, FUNCTION_KIND].includes(this.problemKind as any)) {
             this.response.body.langRange = setting.SETTINGS_BY_KEY.codeLang.range;
@@ -1318,8 +1364,8 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
     @post('title', Types.Title)
     @post('content', Types.Content)
     @post('pid', Types.ProblemId, true, (i) => /^(?:[a-z0-9]{1,10}-)?[a-z][a-z0-9]*$/i.test(i))
-    @post('difficulty', Types.PositiveInt, (i) => +i <= 10, true)
-    @post('tag', Types.Content, true, null, parseCategory)
+    @post('difficulty', Types.UnsignedInt, (i) => +i <= 10, true)
+    @post('knowledgeNodeIds', Types.CommaSeperatedArray, true)
     @post('editorProblemKind', Types.String)
     @post('structuredConfig', Types.Content)
     async post(
@@ -1328,23 +1374,59 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
         content: string,
         pid: string | number = '',
         difficulty = 0,
-        tag: string[] = [],
+        knowledgeNodeIds: string[] = [],
         editorProblemKind = '',
         structuredConfig = '',
     ) {
         const domainId = String(this.domain?._id);
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
+        const canUseCustomPid = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        const allowedFields = new Set([
+            'title',
+            'content',
+            'difficulty',
+            'knowledgeNodeIds',
+            'editorProblemKind',
+            'structuredConfig',
+            ...(canUseCustomPid ? ['pid'] : []),
+        ]);
+        const unknownFields = Object.keys(this.request.body || {}).filter((field) => !allowedFields.has(field));
+        if (unknownFields.length) {
+            logger.warn(
+                'Structured problem create rejected domain=%s kind=%s actor=%d fields=%o stage=field-gate result=denied',
+                domainId,
+                this.problemKind,
+                this.user._id,
+                unknownFields,
+            );
+            throw new ValidationError('fields', null, `结构化题创建不接受字段：${unknownFields.join(', ')}`);
+        }
         if (editorProblemKind !== this.problemKind) {
             throw new ValidationError('editorProblemKind');
         }
         if (typeof pid !== 'string') pid = `P${pid}`;
         if (pid && (await problem.get(domainId, pid))) throw new ProblemAlreadyExistError(pid);
-        const docId = await problem.createProblemByKind(this.problemKind, domainId, pid, title, content, this.user._id, tag ?? [], {
+        let knowledge: Awaited<ReturnType<typeof materializeKnowledgeMindmapTags>>;
+        try {
+            knowledge = await materializeKnowledgeMindmapTags(knowledgeNodeIds);
+        } catch (error) {
+            logger.warn(
+                'Structured knowledge create rejected domain=%s kind=%s actor=%d stage=knowledge-materialize error=%o',
+                domainId,
+                this.problemKind,
+                this.user._id,
+                error,
+            );
+            throw error;
+        }
+        const docId = await problem.createProblemByKind(this.problemKind, domainId, pid, title, content, this.user._id, knowledge.tags, {
             difficulty,
             structuredConfig: parseStructuredConfigInput(structuredConfig),
+            knowledgeNodeIds: knowledge.nodeIds,
         });
         this.response.body = {
+            ok: true,
             pid: pid || docId,
             hidden: true,
             problemKind: this.problemKind,
@@ -1538,7 +1620,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
             },
             { capability: 'content' },
         );
-        this.back();
+        this.back({ ok: true, operation: 'upload_file', type, filename });
     }
 
     @post('files', Types.ArrayOf(Types.Filename))
@@ -2063,6 +2145,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
                 isBankAdmin ? this.user : undefined,
             );
             this.response.body = {
+                ok: true,
                 pid: created.pid,
                 docId: created.docId,
                 hidden: true,
@@ -2089,7 +2172,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
             }
         }
         await Promise.all(tasks);
-        this.response.body = { pid: pid || docId, hidden: true, problemKind: 'programming', structureRevision: 1 };
+        this.response.body = { ok: true, pid: pid || docId, hidden: true, problemKind: 'programming', structureRevision: 1 };
         this.response.redirect = this.url('problem_files', { pid: pid || docId });
     }
 }

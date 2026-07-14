@@ -21,6 +21,7 @@ export function problemCreateChangedFields(
         authoringMode?: unknown;
         sourceMeta?: unknown;
         managedAuthoring?: unknown;
+        knowledgeNodeIds?: unknown;
     },
 ): string[] {
     return [
@@ -40,6 +41,7 @@ export function problemCreateChangedFields(
         ...(created.authoringMode ? ['authoringMode'] : []),
         ...(created.sourceMeta ? ['sourceMeta'] : []),
         ...(created.managedAuthoring ? ['managedAuthoring'] : []),
+        ...(created.knowledgeNodeIds ? ['knowledgeNodeIds'] : []),
         ...(problemKind !== 'programming' ? ['config'] : []),
     ];
 }

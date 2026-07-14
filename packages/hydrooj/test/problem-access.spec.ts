@@ -41,6 +41,7 @@ function matchesGuardedFilter(doc: any, filter: any): boolean {
     if (filter.hidden !== undefined && doc.hidden !== filter.hidden) return false;
     if (filter.managedAuthoring !== undefined && !isDeepStrictEqual(doc.managedAuthoring, filter.managedAuthoring)) return false;
     if (filter.structureRevision !== undefined && doc.structureRevision !== filter.structureRevision) return false;
+    if (filter.tag !== undefined && !isDeepStrictEqual(doc.tag, filter.tag)) return false;
     if (filter.structureLockedAt?.$exists === false && doc.structureLockedAt !== undefined) return false;
     if (filter.maintainer !== undefined && !doc.maintainer?.includes(filter.maintainer)) return false;
     if (
@@ -126,6 +127,8 @@ try {
             return {
                 ...realUtils,
                 Logger: class TestLogger {
+                    info() {}
+
                     error(...args: any[]) {
                         loggerErrorCalls.push(args);
                     }
@@ -510,6 +513,25 @@ describe('P2.11 linearizable problem metadata writes', () => {
         }
     });
 
+    it('rejects a raw structured tag update at the ACL-guarded write primitive', async () => {
+        const user = makeUser('creator');
+        liveProblem = {
+            ...pdoc(100, 42),
+            docType: TYPE_PROBLEM,
+            problemKind: 'single',
+            tag: [],
+            knowledgeNodeIds: [],
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+        };
+
+        const error = await captureFailure(() => commit(user, structuredClone(liveProblem), { tag: ['forged'] }, {}));
+
+        expect(error).to.have.property('name', 'ValidationError');
+        expect(liveProblem.tag).to.deep.equal([]);
+        expect(liveProblem.knowledgeNodeIds).to.deep.equal([]);
+    });
+
     it('denies the guarded update while the same uid has a persistent ProblemDoc lock', async () => {
         const user = makeUser('admin');
         liveProblem = {
@@ -608,6 +630,48 @@ describe('P2.11 durable global problem write claim', () => {
         expect(await clear({ ...claim, requestId: 'forged' })).to.equal(false);
         expect(await clear(claim)).to.equal(true);
         expect(liveProblem.aclWriteClaim).to.equal(undefined);
+    });
+
+    it('makes the expected tag array part of the final atomic claim update', async () => {
+        const user = makeUser('creator');
+        liveProblem = {
+            ...pdoc(100, 42),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+            tag: ['L2'],
+        };
+        const claim = await acquire(user, structuredClone(liveProblem), 'tag-cas', 'metadata-edit');
+        beforeFindOneAndUpdate = () => {
+            liveProblem.tag = ['L2', 'manual-tag'];
+        };
+
+        const result = await commit(claim, { tag: ['L2', '数学'] }, {}, 'maintain', { expectedTag: ['L2'] });
+
+        expect(result).to.equal(null);
+        expect(liveProblem.tag).to.deep.equal(['L2', 'manual-tag']);
+        expect(guardedUpdateCalls.at(-1)?.filter).to.deep.include({ tag: ['L2'] });
+    });
+
+    it('rejects raw structured metadata at the lowest claim commit primitive', async () => {
+        const user = makeUser('creator');
+        liveProblem = {
+            ...pdoc(100, 42),
+            docType: TYPE_PROBLEM,
+            problemKind: 'single',
+            tag: [],
+            knowledgeNodeIds: [],
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+        };
+        const claim = await acquire(user, structuredClone(liveProblem), 'structured-tag', 'metadata-edit');
+
+        for (const patch of [{ tag: ['forged'] }, { knowledgeNodeIds: [] }, { 'tag.0': 'forged' }, { problemKind: 'multi' }]) {
+            const error = await captureFailure(() => commit(claim, patch as any, {}));
+            expect(error).to.have.property('name', 'ValidationError');
+        }
+        expect(await commit(claim, { tag: [], knowledgeNodeIds: [] }, {})).to.deep.include({ tag: [], knowledgeNodeIds: [] });
+        expect(liveProblem).to.deep.include({ problemKind: 'single', tag: [], knowledgeNodeIds: [] });
     });
 
     it('rejects direct managed publication and canonical bypasses at the lowest claim commit primitive', async () => {

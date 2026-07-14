@@ -6,7 +6,6 @@ import { describe, it } from 'node:test';
 const packageRoot = resolve(import.meta.dirname, '..');
 const workspaceRoot = resolve(packageRoot, '../..');
 const problemUrlExpression = ['$', '{problemUrl}'].join('');
-const createdProblemUrlExpression = ['$', '{createdProblemUrl}'].join('');
 
 function read(relative: string) {
   return readFileSync(resolve(workspaceRoot, relative), 'utf8');
@@ -57,9 +56,8 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(shell).to.include('disabled: isCreate || !collaborationEnabled');
     expect(shell).to.include('取得真实题号后，评测配置、文件与协作功能会在完整工作区开放');
     expect(edit).to.include('if (isCreate) {');
-    expect(edit).to.include("throw new Error('创建响应缺少真实题号')");
-    expect(edit).to.include('const createdProblemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(body.pid) })');
-    expect(edit).to.include(`window.location.assign(\`${createdProblemUrlExpression}/edit\`)`);
+    expect(edit).to.include("readProblemSaveSuccess(editRes, 'programming')");
+    expect(edit).to.include('window.location.assign(saved.destination)');
   });
 
   it('merges metadata, managed source, visibility, and statement into one content form without sticky overlay', () => {
@@ -140,22 +138,33 @@ describe('P3.15 programming editor workspace correction', () => {
     const config = read('packages/ui-next/src/pages/problem-config-editor.tsx');
     const files = read('packages/ui-next/src/pages/problem-manage.tsx');
     const uploader = read('packages/ui-next/src/components/uploader.tsx');
+    const guard = read('packages/ui-next/src/components/unsaved-changes-guard.tsx');
     expect(edit).to.include("'idle' | 'dirty' | 'saving' | 'saved' | 'error'");
-    expect(edit).to.include("window.addEventListener('beforeunload'");
+    expect(edit).to.include('useFormDirtyState(formRef, editorRevisionKey)');
+    expect(edit).to.include('useUnsavedChangesGuard(dirtyState.dirty');
     expect(edit).to.include('const editVersion = useRef(0)');
-    expect(edit).to.include('const allowNavigation = useRef(false)');
-    expect(edit).to.include("['dirty', 'saving', 'error'].includes(saveState)");
     expect(edit).to.include('if (editVersion.current === savedVersion)');
+    expect(edit).to.include('dirtyState.markClean()');
+    expect(edit).to.include('navigationGuard.allowNavigation()');
     expect(edit).to.include("current === 'saving' ? current : 'dirty'");
     expect(edit).to.include('body?.error?.message || body?.message || body?.error');
     expect(edit).to.include('role="alert"');
     expect(edit).not.to.include('alert(');
-    expect(config).to.include('const [dirty, setDirty] = useState(false)');
-    expect(config).to.include("window.addEventListener('beforeunload'");
+    expect(config).to.include('const [savedYaml, setSavedYaml] = useState(initialSubmittedYaml)');
+    expect(config).to.include('const dirty = currentYaml !== savedYaml');
+    expect(config).to.include('useUnsavedChangesGuard(dirty || saving)');
     expect(config).to.include('const editVersion = useRef(0)');
-    expect(config).to.include('if (editVersion.current === savedVersion) setDirty(false)');
+    expect(config).to.include('const submittedYaml = currentYaml');
+    expect(config).to.include('setSavedYaml(submittedYaml)');
+    expect(config).to.include("editVersion.current === savedVersion ? '已保存' : '提交时版本已保存，当前修改尚未保存'");
     expect(config).to.include('data?.error?.message || data?.message || data?.error');
     expect(config).to.include('role="alert"');
+    expect(guard).to.include("window.addEventListener('beforeunload'");
+    expect(guard).to.include("document.addEventListener('click', interceptLink, true)");
+    expect(guard).to.include("navigation.addEventListener('navigate', interceptTraversal)");
+    expect(guard).not.to.include('history.pushState');
+    expect(guard).to.include('<DialogTitle>放弃未保存的更改？</DialogTitle>');
+    expect(guard).not.to.include('window.confirm');
     expect(config).to.include('flex shrink-0 flex-col gap-3 sm:flex-row');
     expect(config).to.include('flex flex-wrap items-center gap-2 sm:ml-auto');
     expect(uploader).to.include('role="progressbar"');

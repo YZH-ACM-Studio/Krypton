@@ -19,4 +19,5 @@ export = {
     objective,
     hack,
     fill_function,
+    function: fill_function,
 } as Record<string, { judge(ctx: Context): Promise<void> }>;

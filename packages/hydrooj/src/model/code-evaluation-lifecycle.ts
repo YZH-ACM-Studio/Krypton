@@ -1,7 +1,15 @@
-import type { ProblemKind } from '@hydrooj/common';
+import type { ProblemKind, StructuredCodeRegion, StructuredCodeTemplate } from '@hydrooj/common';
 import { parseProblemKind } from '@hydrooj/common';
+import { nanoid } from 'nanoid';
 import { ValidationError } from '../error';
-import { parseProblemConfigObject, validateCompiledStructuredConfig, validateFillFunctionTestdataFiles } from '../lib/problem-config';
+import {
+    parseProblemConfigObject,
+    STRUCTURED_CODE_REGION_ID,
+    templateSourceHash,
+    validateCompiledStructuredConfig,
+    validateStructuredCodeTemplate,
+    validateStructuredCodeTestdataFiles,
+} from '../lib/problem-config';
 
 export type CodeEvaluationStatus = 'draft' | 'ready';
 
@@ -102,37 +110,114 @@ export function normalizeCodeEvaluationDraftCreationConfig(kindInput: ProblemKin
     return { main: { mode, lang: normalizeLanguage(value.main.lang) } };
 }
 
-export function normalizeCodeEvaluationDraftConfig(kindInput: ProblemKind, value: unknown): Record<string, unknown> {
+function sourceRegion(source: string, region: Pick<StructuredCodeRegion, 'startLine' | 'endLine'>): string | null {
+    const lines = source.split('\n');
+    if (region.startLine < 0 || region.endLine <= region.startLine || region.endLine > lines.length) return null;
+    return lines.slice(region.startLine, region.endLine).join('\n');
+}
+
+function nextRegionId(existing: Set<string>): string {
+    let id = '';
+    do id = `r_${nanoid(16)}`;
+    while (existing.has(id));
+    existing.add(id);
+    return id;
+}
+
+export function normalizeCodeEvaluationDraftConfig(
+    kindInput: ProblemKind,
+    value: unknown,
+    currentConfigInput?: unknown,
+): Record<string, unknown> {
     const kind = parseProblemKind(kindInput);
     if (!isPlainObject(value)) throw new ValidationError('structuredConfig');
     assertExactKeys(value, ['main'], 'structuredConfig');
     if (!isPlainObject(value.main)) throw new ValidationError('structuredConfig', null, 'main 必须是对象');
-    assertExactKeys(value.main, ['mode', 'lang', 'markerSource', 'regions', 'cases'], 'structuredConfig.main');
+    assertExactKeys(value.main, ['mode', 'lang', 'source', 'regions', 'cases'], 'structuredConfig.main');
     const mode = expectedMode(kind);
     if (value.main.mode !== mode) throw new ValidationError('mode', null, `评测方式必须是 ${mode}`);
     const lang = normalizeLanguage(value.main.lang);
-    const markerSource = value.main.markerSource === undefined ? '' : value.main.markerSource;
-    if (typeof markerSource !== 'string') throw new ValidationError('markerSource');
+    const sourceInput = value.main.source === undefined ? '' : value.main.source;
+    if (typeof sourceInput !== 'string') throw new ValidationError('source', null, '私有模板必须是文本');
+    const source = sourceInput.replace(/\r\n?/g, '\n');
     const rawRegions = value.main.regions === undefined ? [] : value.main.regions;
     if (!Array.isArray(rawRegions)) throw new ValidationError('regions');
+    const currentConfig = parseProblemConfigObject({ config: currentConfigInput });
+    const currentTemplate = currentConfig?.template as StructuredCodeTemplate | undefined;
+    const currentRegions = new Map<string, StructuredCodeRegion>(
+        Array.isArray(currentTemplate?.regions) ? currentTemplate.regions.map((region) => [region.id, region]) : [],
+    );
+    const allocatedIds = new Set(currentRegions.keys());
     const regions = rawRegions.map((item, index) => {
         if (!isPlainObject(item)) throw new ValidationError('regions', null, `区域 ${index + 1} 格式错误`);
-        assertExactKeys(item, ['id', 'prompt'], `regions[${index}]`);
-        const id = typeof item.id === 'string' ? item.id.trim() : '';
-        if (!/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(id)) throw new ValidationError('regions', null, `区域 ${index + 1} ID 非法`);
-        if (item.prompt !== undefined && typeof item.prompt !== 'string') {
-            throw new ValidationError('regions', null, `区域 ${index + 1} 说明必须是文本`);
+        assertExactKeys(
+            item,
+            kind === 'function'
+                ? ['id', 'startLine', 'endLine', 'order', 'signature', 'description']
+                : ['id', 'startLine', 'endLine', 'order', 'prompt'],
+            `regions[${index}]`,
+        );
+        const submittedId = item.id === undefined ? '' : item.id;
+        if (typeof submittedId !== 'string') throw new ValidationError('regions', null, `区域 ${index + 1} ID 格式错误`);
+        if (submittedId && !STRUCTURED_CODE_REGION_ID.test(submittedId)) {
+            throw new ValidationError('regions', null, `区域 ${index + 1} ID 不是有效的服务端 ID`);
         }
-        return { id, ...(item.prompt ? { prompt: item.prompt } : {}) };
+        const existing = submittedId ? currentRegions.get(submittedId) : undefined;
+        if (submittedId && !existing) throw new ValidationError('regions', null, `区域 ${index + 1} ID 不属于当前题目`);
+        if (!Number.isSafeInteger(item.startLine) || !Number.isSafeInteger(item.endLine) || !Number.isSafeInteger(item.order)) {
+            throw new ValidationError('regions', null, `区域 ${index + 1} 的行范围或顺序无效`);
+        }
+        const startLine = Number(item.startLine);
+        const endLine = Number(item.endLine);
+        const order = Number(item.order);
+        if (existing && (existing.startLine !== startLine || existing.endLine !== endLine)) {
+            throw new ValidationError('regions', null, `区域 ${index + 1} 坐标不可直接改写，请删除后重新框选`);
+        }
+        if (existing && currentTemplate && currentTemplate.source !== source) {
+            const before = sourceRegion(currentTemplate.source, existing);
+            const after = sourceRegion(source, { startLine, endLine });
+            if (before === null || after === null || before !== after) {
+                throw new ValidationError('regions', null, `区域 ${index + 1} 已因模板修改失效，请删除后重新框选`);
+            }
+        }
+        const id = existing?.id || nextRegionId(allocatedIds);
+        if (kind === 'function') {
+            if (item.signature !== undefined && typeof item.signature !== 'string') {
+                throw new ValidationError('regions', null, `区域 ${index + 1} 函数签名必须是文本`);
+            }
+            if (item.description !== undefined && typeof item.description !== 'string') {
+                throw new ValidationError('regions', null, `区域 ${index + 1} 说明必须是文本`);
+            }
+            const signature = typeof item.signature === 'string' ? item.signature.trim() : '';
+            const description = typeof item.description === 'string' ? item.description.trim() : '';
+            return { id, startLine, endLine, order, signature, ...(description ? { description } : {}) };
+        }
+        if (item.prompt !== undefined && typeof item.prompt !== 'string') {
+            throw new ValidationError('regions', null, `区域 ${index + 1} 提示必须是文本`);
+        }
+        const prompt = typeof item.prompt === 'string' ? item.prompt.trim() : '';
+        return { id, startLine, endLine, order, ...(prompt ? { prompt } : {}) };
     });
     if (new Set(regions.map((region) => region.id)).size !== regions.length) throw new ValidationError('regions', null, '区域 ID 不能重复');
     const cases = normalizeCodeEvaluationCases(value.main.cases ?? [], true);
+    const template = {
+        lang,
+        source,
+        sourceHash: templateSourceHash(source),
+        regions: [...regions].sort((a, b) => a.order - b.order),
+    } as StructuredCodeTemplate;
+    try {
+        validateStructuredCodeTemplate(template, kind as 'program_fill' | 'function', { allowEmpty: true, allowEmptySignature: true });
+    } catch (error: any) {
+        throw new ValidationError('regions', null, error.message);
+    }
     return {
-        type: 'fill_function',
-        subType: kind === 'program_fill' ? 'program_fill_compile' : 'function',
+        type: kind === 'function' ? 'function' : 'fill_function',
+        ...(kind === 'program_fill' ? { subType: 'program_fill_compile' } : {}),
         score: 100,
         langs: [lang],
-        main: { mode, lang, markerSource, regions, cases },
+        template,
+        cases,
     };
 }
 
@@ -141,7 +226,7 @@ export function isCodeEvaluationProblem(kindInput: unknown, configInput: unknown
     if (kind === 'function') return true;
     if (kind !== 'program_fill') return false;
     const config = parseProblemConfigObject({ config: configInput });
-    return config?.main?.mode === 'compile' || config?.subType === 'program_fill_compile';
+    return config?.main?.mode === 'compile' || config?.subType === 'program_fill_compile' || config?.type === 'fill_function';
 }
 
 export function assertCodeEvaluationStatusInvariant(
@@ -187,7 +272,7 @@ export function assertProblemReadyForUse(pdoc: CodeEvaluationProblemSnapshot, _c
     try {
         const config = parseProblemConfigObject(pdoc);
         validateCompiledStructuredConfig(String(pdoc.problemKind), config);
-        validateFillFunctionTestdataFiles(config, pdoc.data || []);
+        validateStructuredCodeTestdataFiles(config, pdoc.data || [], pdoc.problemKind as 'program_fill' | 'function');
     } catch (error: any) {
         throw new ValidationError('codeEvaluationStatus', null, error.message);
     }

@@ -400,7 +400,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                 if (
                     expected.join('\0') !== actual.join('\0') ||
                     actual.some((id) => typeof parsed[id] !== 'string') ||
-                    (kind === 'program_fill' && /[\r\n]/.test(parsed.main))
+                    (kind === 'program_fill' && actual.some((id) => /[\r\n]/.test(parsed[id])))
                 ) {
                     throw new Error('invalid regions');
                 }
@@ -421,8 +421,20 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../model/problem') return problemStub;
     if (request === '../model/problem-lifecycle') {
         return {
+            structuredProblemConfigForEditor: (kind: string, config: any) =>
+                kind === 'function'
+                    ? {
+                          main: {
+                              mode: 'function',
+                              lang: config.template.lang,
+                              source: config.template.source,
+                              regions: config.template.regions,
+                              cases: config.cases,
+                          },
+                      }
+                    : { main: config.main },
             structuredProblemUsesTestdata: (kind: string, config: any) =>
-                kind === 'function' || (kind === 'program_fill' && config?.main?.mode === 'compile'),
+                kind === 'function' || (kind === 'program_fill' && (config?.main?.mode === 'compile' || config?.subType === 'program_fill_compile')),
         };
     }
     if (request === '../model/system') return systemStub;
@@ -1469,6 +1481,44 @@ describe('P3.9 basic objective HTTP boundaries', () => {
         expect(handler.response.body.knowledgeMindmapOptions).to.deep.equal([{ id: 'node-1', label: '数据结构 / 线段树', tags: ['线段树'] }]);
         expect(handler.response.body.canUseCustomPid).to.equal(false);
     });
+
+    it('serves a canonical function config that has no legacy main field', async () => {
+        const handler = makeHandler(ProblemEditHandler, {});
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            owner: 42,
+            problemKind: 'function',
+            data: [],
+            additional_file: [],
+            tag: [],
+            content: '',
+        };
+        const region = { id: 'r_abcdefghijkl', startLine: 0, endLine: 1, order: 0, signature: 'int solve()' };
+        maintainableResults = [
+            {
+                config: {
+                    type: 'function',
+                    template: { lang: 'cc.cc17', source: 'int solve();', sourceHash: 'hash', regions: [region] },
+                    cases: [{ input: '1.in', output: '1.out' }],
+                },
+            },
+        ];
+
+        await handler.get();
+
+        expect(handler.response.template).to.equal('problem_edit_function.html');
+        expect(handler.response.body.structuredConfig).to.deep.equal({
+            main: {
+                mode: 'function',
+                lang: 'cc.cc17',
+                source: 'int solve();',
+                regions: [region],
+                cases: [{ input: '1.in', output: '1.out' }],
+            },
+        });
+    });
 });
 
 describe('P3.10 subjective problem HTTP boundaries', () => {
@@ -1597,16 +1647,23 @@ describe('P3.11 program-fill and function HTTP boundaries', () => {
             docId: 7,
             problemKind: 'function',
             config: {
-                type: 'fill_function',
+                type: 'function',
                 langs: ['cpp'],
-                template: { lang: 'cpp', regions: [{ id: 'solve' }, { id: 'format' }] },
+                template: { lang: 'cpp', regions: [{ id: 'r_abcdefghijkl' }, { id: 'r_mnopqrstuvwx' }] },
             },
         };
-        await handler.post('forged', 'forged-lang', JSON.stringify({ solve: 'body', format: 'body' }), false, [], undefined);
+        await handler.post(
+            'forged',
+            'forged-lang',
+            JSON.stringify({ r_abcdefghijkl: 'body', r_mnopqrstuvwx: 'body' }),
+            false,
+            [],
+            undefined,
+        );
         expect(calls.recordAdd.at(-1)[3]).to.equal('cpp');
 
         const error = await captureFailure(() =>
-            handler.post('forged', 'cpp', JSON.stringify({ solve: 'body', extra: 'body' }), false, [], undefined),
+            handler.post('forged', 'cpp', JSON.stringify({ r_abcdefghijkl: 'body', extra: 'body' }), false, [], undefined),
         );
         expect(error).to.be.instanceOf(GenericError);
         expect(calls.recordAdd).to.have.length(1);
@@ -1621,10 +1678,12 @@ describe('P3.11 program-fill and function HTTP boundaries', () => {
             config: {
                 type: 'fill_function',
                 langs: ['cpp'],
-                template: { lang: 'cpp', regions: [{ id: 'main' }] },
+                template: { lang: 'cpp', regions: [{ id: 'r_abcdefghijkl' }] },
             },
         };
-        const error = await captureFailure(() => handler.post('forged', 'cpp', JSON.stringify({ main: 'i++\nj++' }), false, [], undefined));
+        const error = await captureFailure(() =>
+            handler.post('forged', 'cpp', JSON.stringify({ r_abcdefghijkl: 'i++\nj++' }), false, [], undefined),
+        );
         expect(error).to.be.instanceOf(GenericError);
         expect(calls.recordAdd).to.deep.equal([]);
     });

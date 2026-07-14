@@ -1,19 +1,20 @@
 /**
- * fill_function judger — students fill in editable regions of a teacher-provided
+ * Structured-code judge adapter — students fill editable regions of a teacher-provided
  * template. The submitted `code` is JSON: `{ regionId -> content }`. We splice
  * the content into `config.template.source` and delegate to the `default` flow.
  *
  * See PRD §1.7 for the visual editor + splicing algorithm.
  */
 import { STATUS } from '@hydrooj/common';
-import { spliceFillFunction, validateFillFunctionJudgeConfig } from 'hydrooj';
+import { parseStructuredRegionSubmission, spliceStructuredCodeTemplate, validateStructuredCodeJudgeConfig } from 'hydrooj';
 import { judge as defaultJudge } from './default';
 import { Context } from './interface';
 
 export const judge = async (ctx: Context) => {
     const template = (ctx.config as any).template;
+    const kind = (ctx.config as any).type === 'function' ? 'function' : 'program_fill';
     try {
-        validateFillFunctionJudgeConfig(ctx.config);
+        validateStructuredCodeJudgeConfig(ctx.config, kind);
     } catch (error: any) {
         ctx.next({
             status: STATUS.STATUS_JUDGING,
@@ -32,7 +33,7 @@ export const judge = async (ctx: Context) => {
         ctx.end({
             status: STATUS.STATUS_FORMAT_ERROR,
             score: 0,
-            message: `fill_function: language mismatch (${ctx.lang} != ${template.lang})`,
+            message: `${kind}: language mismatch (${ctx.lang} != ${template.lang})`,
             time: 0,
             memory: 0,
         });
@@ -42,19 +43,16 @@ export const judge = async (ctx: Context) => {
     // The submitted code is JSON: { regionId -> content }
     const rawCode =
         'src' in (ctx.code as any)
-            ? null // file-mode submissions not supported for fill_function — students always type
+            ? null // File-mode submissions are unsupported; structured-code answers are always JSON text.
             : (ctx.code as any).content || '';
     let regionContents: Record<string, string>;
     try {
-        regionContents = JSON.parse(rawCode || '{}');
-        if (typeof regionContents !== 'object' || regionContents === null || Array.isArray(regionContents)) {
-            throw new Error('expected object of regionId -> content');
-        }
+        regionContents = parseStructuredRegionSubmission(kind, template, rawCode ?? '');
     } catch (e: any) {
         ctx.end({
             status: STATUS.STATUS_FORMAT_ERROR,
             score: 0,
-            message: `fill_function: failed to parse submission: ${e.message}`,
+            message: `${kind}: failed to parse submission: ${e.message}`,
             time: 0,
             memory: 0,
         });
@@ -63,12 +61,12 @@ export const judge = async (ctx: Context) => {
 
     let splicedSource: string;
     try {
-        splicedSource = spliceFillFunction(template, regionContents);
+        splicedSource = spliceStructuredCodeTemplate(template, regionContents, kind);
     } catch (e: any) {
         ctx.end({
             status: STATUS.STATUS_FORMAT_ERROR,
             score: 0,
-            message: `fill_function: ${e.message}`,
+            message: `${kind}: ${e.message}`,
             time: 0,
             memory: 0,
         });

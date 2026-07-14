@@ -35,7 +35,7 @@ export function ProblemSubmitPage() {
   const tid = tdoc?.docId ? String(tdoc.docId) : null;
   const contestQS = tid ? `?tid=${tid}` : '';
   const submitUrl = `${problemUrl}/submit${contestQS}`;
-  const isStructuredCompile = config.type === 'fill_function' && ['program_fill', 'function'].includes(String(pdoc.problemKind));
+  const isStructuredCompile = ['fill_function', 'function'].includes(config.type) && ['program_fill', 'function'].includes(String(pdoc.problemKind));
   const regions = Array.isArray(config.template?.regions) ? config.template.regions : [];
   const singleLineRegion = pdoc.problemKind === 'program_fill';
 

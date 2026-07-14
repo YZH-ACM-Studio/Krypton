@@ -24,6 +24,7 @@ const previous = new Map<string, NodeModule | undefined>([
 ]);
 const outputs = new Map<string, string>();
 let outputId = 0;
+const REGION_ID = 'r_abcdefghijkl';
 
 async function fileContent(file: any): Promise<string> {
     if (file?.fileId) return outputs.get(file.fileId) || '';
@@ -94,8 +95,9 @@ require.cache[hydroojPath] = {
     filename: hydroojPath,
     loaded: true,
     exports: {
-        spliceFillFunction: problemConfig.spliceFillFunction,
-        validateFillFunctionJudgeConfig: problemConfig.validateFillFunctionJudgeConfig,
+        parseStructuredRegionSubmission: problemConfig.parseStructuredRegionSubmission,
+        spliceStructuredCodeTemplate: problemConfig.spliceStructuredCodeTemplate,
+        validateStructuredCodeJudgeConfig: problemConfig.validateStructuredCodeJudgeConfig,
     },
 } as NodeModule;
 delete require.cache[checkerPath];
@@ -111,12 +113,14 @@ async function runSubmission(regionCode: string) {
     const output = join(folder, '1.out');
     await Promise.all([writeFile(input, '1\n'), writeFile(output, '2\n')]);
     let result: any;
+    const source = ['#include <iostream>', 'int main() {', 'int value = 0;', 'std::cin >> value;', 'std::cout << value;', '}'].join('\n');
     const config = {
-        type: 'fill_function',
+        type: 'function',
         template: {
             lang: 'cc.cc17',
-            source: ['#include <iostream>', 'int main() {', 'int value = 0;', 'std::cin >> value;', 'std::cout << value;', '}'].join('\n'),
-            regions: [{ id: 'main', start: { line: 4, col: 0 }, end: { line: 4, col: 19 } }],
+            source,
+            sourceHash: problemConfig.templateSourceHash(source),
+            regions: [{ id: REGION_ID, startLine: 4, endLine: 5, order: 0, signature: 'int main() output' }],
         },
         cases: [{ input: '1.in', output: '1.out' }],
         count: 1,
@@ -134,7 +138,7 @@ async function runSubmission(regionCode: string) {
     const context: any = {
         config,
         lang: 'cc.cc17',
-        code: { content: JSON.stringify({ main: regionCode }) },
+        code: { content: JSON.stringify({ [REGION_ID]: regionCode }) },
         request: { rejudged: false },
         meta: {},
         env: {},
@@ -147,11 +151,11 @@ async function runSubmission(regionCode: string) {
             return { setAttributes() {}, [Symbol.dispose]() {} };
         },
         async compile(_lang: string, code: { content: string }) {
-            const source = join(folder, 'main.cpp');
+            const sourcePath = join(folder, 'main.cpp');
             const binary = join(folder, 'main');
-            await writeFile(source, code.content);
+            await writeFile(sourcePath, code.content);
             try {
-                await execFileAsync('/usr/bin/g++', ['-std=c++17', source, '-o', binary]);
+                await execFileAsync('/usr/bin/g++', ['-std=c++17', sourcePath, '-o', binary]);
             } catch (error) {
                 throw new LocalCompileError('compile failed', { cause: error });
             }

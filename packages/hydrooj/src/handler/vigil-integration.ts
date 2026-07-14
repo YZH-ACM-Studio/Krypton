@@ -778,7 +778,7 @@ class VigilForceFinalizeHandler extends VigilApiHandler {
                         meta: { proctorForced: true, sessionId },
                     } as any),
                 );
-            } else if (type === 'fill_function') {
+            } else if (['fill_function', 'function'].includes(type)) {
                 const codeBody = draft.code || JSON.stringify(draft.answers || {});
                 const lang = draft.lang || config?.template?.lang || 'cpp';
                 rids.push(

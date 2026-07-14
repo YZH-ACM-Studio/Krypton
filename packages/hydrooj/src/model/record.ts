@@ -6,7 +6,12 @@ import { Logger } from '@hydrooj/utils';
 import { Context } from '../context';
 import { ProblemNotFoundError, ValidationError } from '../error';
 import { JudgeMeta, RecordDoc } from '../interface';
-import { parseProblemConfigObject, validateCompiledStructuredConfig, validateFillFunctionJudgeConfig } from '../lib/problem-config';
+import {
+    parseProblemConfigObject,
+    parseStructuredRegionSubmission,
+    validateCompiledStructuredConfig,
+    validateStructuredCodeJudgeConfig,
+} from '../lib/problem-config';
 import db from '../service/db';
 import { MaybeArray, NumberKeys } from '../typeutils';
 import { ArgMethod, buildProjection, Time } from '../utils';
@@ -108,6 +113,64 @@ export default class RecordModel {
         };
     }
 
+    private static async preflightJudgeRecords(domainId: string, rdocs: RecordDoc[], meta: Partial<JudgeMeta> = {}) {
+        if (rdocs.some((rdoc) => rdoc.manualPending || rdoc.manualGrade)) {
+            throw new ValidationError('rid', null, '人工阅卷记录不能进入自动评测队列');
+        }
+        const byProblem = new Map<number, RecordDoc[]>();
+        for (const rdoc of rdocs) {
+            if (rdoc.domainId !== domainId) throw new ValidationError('rid');
+            const group = byProblem.get(rdoc.pid) || [];
+            group.push(rdoc);
+            byProblem.set(rdoc.pid, group);
+        }
+        const contexts = [];
+        for (const group of byProblem.values()) {
+            let source = `${domainId}/${group[0].pid}`;
+            let pdoc = await problem.get(domainId, group[0].pid, undefined, true);
+            if (!pdoc) throw new ProblemNotFoundError(domainId, group[0].pid);
+            if (pdoc.reference) {
+                pdoc = await problem.get(pdoc.reference.domainId, pdoc.reference.pid, undefined, true);
+                if (!pdoc) throw new ProblemNotFoundError(domainId, group[0].pid);
+                source = `${pdoc.domainId}/${pdoc.docId}`;
+            }
+            problem.assertProblemReadyForUse(pdoc, { actor: group[0].uid, stage: 'judge-queue' });
+            const judgeConfig =
+                parseProblemConfigObject(pdoc) ?? (pdoc.config == null || (typeof pdoc.config === 'string' && !pdoc.config.trim()) ? {} : null);
+            if (!judgeConfig) throw new Error(`Cannot parse problem config: ${pdoc.domainId}/${pdoc.docId}`);
+            const problemKind = effectiveProblemKind(pdoc);
+            try {
+                if (['fill_function', 'function'].includes(judgeConfig.type)) {
+                    validateStructuredCodeJudgeConfig(judgeConfig, problemKind as 'program_fill' | 'function');
+                }
+                validateCompiledStructuredConfig(problemKind, judgeConfig);
+                if (
+                    meta?.type !== 'generate' &&
+                    ['fill_function', 'function'].includes(judgeConfig.type) &&
+                    ['program_fill', 'function'].includes(problemKind)
+                ) {
+                    for (const rdoc of group) {
+                        parseStructuredRegionSubmission(problemKind as 'program_fill' | 'function', judgeConfig.template, rdoc.code);
+                        if (rdoc.lang !== judgeConfig.template?.lang) throw new Error(`${problemKind}: submission language mismatch`);
+                    }
+                }
+            } catch (error) {
+                logger.error(
+                    'Structured judge preflight rejected domain=%s pid=%d kind=%s revision=%s rids=%s stage=before-task-delete error=%o',
+                    pdoc.domainId,
+                    pdoc.docId,
+                    problemKind,
+                    pdoc.structureRevision,
+                    group.map((rdoc) => rdoc._id).join(','),
+                    error,
+                );
+                throw error;
+            }
+            contexts.push({ rdocs: group, pdoc, source, judgeConfig });
+        }
+        return contexts;
+    }
+
     static async judge(
         domainId: string,
         rids: MaybeArray<ObjectId> | RecordDoc,
@@ -122,54 +185,18 @@ export default class RecordModel {
             rdocs = await RecordModel.getMulti(domainId, { _id: { $in: _rids } }, { readPreference: 'primary' }).toArray();
         } else rdocs = [rids];
         if (!rdocs.length) return null;
-        if (rdocs.some((rdoc) => rdoc.manualPending || rdoc.manualGrade)) {
-            throw new ValidationError('rid', null, '人工阅卷记录不能进入自动评测队列');
-        }
-        let source = `${domainId}/${rdocs[0].pid}`;
-        let pdoc = await problem.get(domainId, rdocs[0].pid, undefined, true);
-        if (!pdoc) throw new ProblemNotFoundError(domainId, rdocs[0].pid);
-        if (pdoc.reference) {
-            pdoc = await problem.get(pdoc.reference.domainId, pdoc.reference.pid, undefined, true);
-            if (!pdoc) throw new ProblemNotFoundError(domainId, rdocs[0].pid);
-            source = `${pdoc.domainId}/${pdoc.docId}`;
-        }
-        problem.assertProblemReadyForUse(pdoc, { actor: rdocs[0].uid, stage: 'judge-queue' });
-        await task.deleteMany({ rid: { $in: _rids } });
-        const judgeConfig =
-            parseProblemConfigObject(pdoc) ?? (pdoc.config == null || (typeof pdoc.config === 'string' && !pdoc.config.trim()) ? {} : null);
-        if (!judgeConfig) throw new Error(`Cannot parse problem config: ${pdoc.domainId}/${pdoc.docId}`);
-        const problemKind = effectiveProblemKind(pdoc);
-        try {
-            if (judgeConfig.type === 'fill_function') {
-                validateFillFunctionJudgeConfig(judgeConfig);
-            }
-            validateCompiledStructuredConfig(problemKind, judgeConfig);
-            if (
-                judgeConfig.type === 'fill_function' &&
-                ['program_fill', 'function'].includes(problemKind) &&
-                rdocs.some((rdoc) => rdoc.lang !== judgeConfig.template?.lang)
-            ) {
-                throw new Error(`${problemKind}: submission language mismatch`);
-            }
-        } catch (error) {
-            logger.error(
-                'Structured judge config rejected domain=%s pid=%d kind=%s revision=%s rids=%s error=%o',
-                pdoc.domainId,
-                pdoc.docId,
-                problemKind,
-                pdoc.structureRevision,
-                rdocs.map((rdoc) => rdoc._id).join(','),
-                error,
-            );
-            throw error;
-        }
-        meta = { ...meta, problemOwner: pdoc.owner };
-        const ddoc = await DomainModel.get(pdoc.domainId);
-        return await task.addMany(
-            rdocs.map((rdoc) => {
+        const contexts = await RecordModel.preflightJudgeRecords(domainId, rdocs, meta);
+        const insertedIds: Record<number, ObjectId> = {};
+        let insertedIndex = 0;
+        for (const { rdocs: group, pdoc, source, judgeConfig } of contexts) {
+            await task.deleteMany({ rid: { $in: group.map((rdoc) => rdoc._id) } });
+            const taskMeta = { ...meta, problemOwner: pdoc.owner };
+            const ddoc = await DomainModel.get(pdoc.domainId);
+            const inserted = await task.addMany(
+                group.map((rdoc) => {
                 let type = 'judge';
                 if (judgeConfig.type === 'remote_judge' && rdoc.contest?.toHexString() !== '0'.repeat(24)) type = 'remotejudge';
-                else if (meta?.type === 'generate') type = 'generate';
+                else if (taskMeta?.type === 'generate') type = 'generate';
                 return {
                     ...rdoc,
                     ...judgeConfig, // TODO deprecate this
@@ -184,10 +211,13 @@ export default class RecordModel {
                     data: pdoc.data,
                     source,
                     trusted: ddoc.isTrusted,
-                    meta,
+                    meta: taskMeta,
                 } as any;
-            }),
-        );
+                }),
+            );
+            for (const id of Object.values(inserted)) insertedIds[insertedIndex++] = id;
+        }
+        return insertedIds;
     }
 
     static async add(
@@ -245,7 +275,36 @@ export default class RecordModel {
         } else if (args.type === 'generate') {
             data.contest = RecordModel.RECORD_GENERATE;
         }
-        await problem.claimStructureLockForSubmission(domainId, pid, args.type !== 'generate', uid);
+        const currentProblem = await problem.claimStructureLockForSubmission(domainId, pid, args.type !== 'generate', uid);
+        const currentConfig = parseProblemConfigObject(currentProblem);
+        const currentKind = effectiveProblemKind(currentProblem);
+        if (
+            args.type !== 'generate' &&
+            ['fill_function', 'function'].includes(currentConfig?.type) &&
+            ['program_fill', 'function'].includes(currentKind)
+        ) {
+            try {
+                const lengthLimit = SystemModel.get('limit.codelength') || 128 * 1024;
+                if (code.length > lengthLimit) throw new ValidationError('code');
+                validateStructuredCodeJudgeConfig(currentConfig, currentKind as 'program_fill' | 'function');
+                validateCompiledStructuredConfig(currentKind, currentConfig);
+                parseStructuredRegionSubmission(currentKind as 'program_fill' | 'function', currentConfig.template, code);
+                if (lang !== currentConfig.template.lang) throw new Error(`${currentKind}: submission language mismatch`);
+            } catch (error) {
+                logger.error(
+                    'Structured record creation rejected domain=%s pid=%d source=%s/%d kind=%s revision=%s uid=%d stage=before-insert error=%o',
+                    domainId,
+                    pid,
+                    currentProblem.domainId,
+                    currentProblem.docId,
+                    currentKind,
+                    currentProblem.structureRevision,
+                    uid,
+                    error,
+                );
+                throw error;
+            }
+        }
         let res;
         try {
             res = await RecordModel.coll.insertOne(data);
@@ -320,6 +379,10 @@ export default class RecordModel {
 
     static async reset(domainId: string, rid: MaybeArray<ObjectId>, isRejudge: boolean) {
         const rids = Array.isArray(rid) ? rid : [rid];
+        if (isRejudge) {
+            const rdocs = await RecordModel.coll.find({ domainId, _id: { $in: rids } }, { readPreference: 'primary' }).toArray();
+            await RecordModel.preflightJudgeRecords(domainId, rdocs, { rejudge: true });
+        }
         const manual = await RecordModel.coll.findOne(
             {
                 _id: { $in: rids },

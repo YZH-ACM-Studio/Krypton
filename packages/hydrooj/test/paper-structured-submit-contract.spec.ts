@@ -13,7 +13,7 @@ describe('P3.11 paper structured submit contract', () => {
             expect(source).to.include(`stage: '${stage}'`);
         }
         expect(source).to.include('parseStructuredRegionSubmission(kind, config.template, rawCode)');
-        expect(source).to.include('validateFillFunctionJudgeConfig(config)');
+        expect(source).to.include('validateStructuredCodeJudgeConfig(config');
     });
 
     it('validates before every fill-function Record insertion', () => {
@@ -22,7 +22,9 @@ describe('P3.11 paper structured submit contract', () => {
         const immediate = source.slice(immediateStart, finalizeStart);
         const finalize = source.slice(finalizeStart, source.indexOf('class PaperFinalizeHandler'));
         expect(immediate.indexOf("stage: 'immediate-submit'")).to.be.lessThan(immediate.indexOf('record.add('));
-        expect(finalize.indexOf("stage: 'finalize'")).to.be.lessThan(finalize.indexOf('record.add(', finalize.indexOf("type === 'fill_function'")));
+        expect(finalize.indexOf("stage: 'finalize'")).to.be.lessThan(
+            finalize.indexOf('record.add(', finalize.indexOf("['fill_function', 'function'].includes(type)")),
+        );
     });
 
     it('separates objective text program-fill from compile program-fill cells', () => {

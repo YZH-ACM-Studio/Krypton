@@ -28,8 +28,8 @@ export async function normalizeProblemTestdataUpload(name: string, source: Reada
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new ValidationError('config', null, '配置 YAML 必须是对象');
     }
-    if (['objective', 'fill_function'].includes(parsed.type)) {
-        throw new ValidationError('config', null, '复合客观题与旧函数填空配置已下线，请从创建题目页选择独立题型');
+    if (['objective', 'fill_function', 'function'].includes(parsed.type)) {
+        throw new ValidationError('config', null, '复合客观题与结构化代码题配置不能通过 config.yaml 创建，请从创建题目页选择独立题型');
     }
     return content;
 }

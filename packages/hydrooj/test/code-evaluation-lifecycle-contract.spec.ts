@@ -124,6 +124,7 @@ describe('P3.17 code evaluation lifecycle wiring', () => {
         const copy = model.slice(start, end);
         expect(copy.indexOf("stage: 'clone-source'")).to.be.lessThan(copy.indexOf('createProblemByKind('));
         expect(copy).to.include("codeEvaluationStatus: 'draft' as const");
+        expect(copy).to.include('...(cloneIsCodeEvaluation ? {} : { config: cloneConfig as any })');
         const createStart = model.indexOf('static async addWithId(');
         const createEnd = model.indexOf('static async createManagedProgrammingDraft', createStart);
         expect(model.slice(createStart, createEnd)).to.include('hidden: true');

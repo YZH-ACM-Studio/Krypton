@@ -167,7 +167,7 @@ export interface ProblemConfig {
     /** 编译型程序填空/函数题的学生端安全描述，不含私有完整模板。 */
     template?: {
         lang: string;
-        regions: Array<{ id: string; prompt?: string }>;
+        regions: Array<{ id: string; signature?: string; description?: string; prompt?: string }>;
     };
 }
 

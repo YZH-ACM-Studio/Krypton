@@ -47,7 +47,7 @@ interface PdocLike {
     answers?: Record<string, any>;
     template?: {
       lang: string;
-      regions: Array<{ id: string; prompt?: string }>;
+      regions: Array<{ id: string; signature?: string; description?: string; prompt?: string }>;
     };
     langs?: string[];
     options?: Record<string, string[]>;
@@ -90,7 +90,7 @@ const SUBSIDEBAR_KEY = 'krypton:exam-subsidebar-collapsed';
 const COMPILED_REGION_KINDS: QuestionKind[] = ['program_fill_compile', 'function', 'fill_function'];
 
 function parseSavedRegionContents(pdoc: PdocLike | undefined, rawCode: unknown): Record<string, string> | undefined {
-  if (pdoc?.config.type !== 'fill_function') return undefined;
+  if (!pdoc || !['fill_function', 'function'].includes(pdoc.config.type || '')) return undefined;
   if (typeof rawCode !== 'string') throw new Error(`题目 ${pdoc.docId} 的 region 草稿缺少 code`);
   const parsed = JSON.parse(rawCode);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -330,7 +330,7 @@ function ProblemsSection({
     const type = pdoc.config?.type || 'default';
     if (type === 'objective') {
       body.answers = JSON.stringify(draft.answers);
-    } else if (type === 'fill_function') {
+    } else if (['fill_function', 'function'].includes(type)) {
       body.code = JSON.stringify(draft.regionContents || {});
       body.lang = draft.lang || pdoc.config?.template?.lang || 'cpp';
     } else if (type === 'default' || type === 'submit_answer') {

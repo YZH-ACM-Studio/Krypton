@@ -1,9 +1,9 @@
 import type { ProblemKind } from '@hydrooj/common';
 import { parseProblemKind } from '@hydrooj/common';
 import { ValidationError } from '../error';
-import { parseRegionMarkers, validateCompiledStructuredConfig } from '../lib/problem-config';
+import { parseProblemConfigObject, validateCompiledStructuredConfig } from '../lib/problem-config';
 import db from '../service/db';
-import { normalizeCodeEvaluationCases } from './code-evaluation-lifecycle';
+import { normalizeCodeEvaluationDraftConfig } from './code-evaluation-lifecycle';
 import * as document from './document';
 
 const recordColl = db.collection('record');
@@ -94,51 +94,21 @@ function assertNoSecondaryStatement(value: unknown, path = 'config'): void {
     }
     if (!isPlainObject(value)) return;
     for (const [key, child] of Object.entries(value)) {
-        const regionPrompt = key === 'prompt' && /\.regions\[\d+\]$/.test(path);
-        if (FORBIDDEN_STATEMENT_FIELDS.has(key) && !regionPrompt) {
+        const regionStudentText = ['prompt', 'description'].includes(key) && /\.regions\[\d+\]$/.test(path);
+        if (FORBIDDEN_STATEMENT_FIELDS.has(key) && !regionStudentText) {
             throw new ValidationError('config', null, `题面只能存放在 content，禁止字段 ${path}.${key}`);
         }
         assertNoSecondaryStatement(child, `${path}.${key}`);
     }
 }
 
-function normalizeCompilableStructured(kind: 'program_fill' | 'function', main: Record<string, unknown>) {
-    const lang = typeof main.lang === 'string' ? main.lang.trim() : '';
-    if (!lang || !/^[A-Za-z0-9_.+-]{1,64}$/.test(lang)) throw new ValidationError('config', null, '必须选择唯一评测语言');
-    const markerSource = typeof main.markerSource === 'string' ? main.markerSource : '';
-    const metadata = Array.isArray(main.regions)
-        ? main.regions.map((item) => ({
-              id: isPlainObject(item) && typeof item.id === 'string' ? item.id : '',
-              ...(isPlainObject(item) && item.prompt !== undefined ? { prompt: item.prompt as string } : {}),
-          }))
-        : [];
-    let template;
+function normalizeCompilableStructured(kind: 'program_fill' | 'function', main: Record<string, unknown>, currentConfig?: unknown) {
+    const config = normalizeCodeEvaluationDraftConfig(kind, { main }, currentConfig);
     try {
-        template = parseRegionMarkers(markerSource, metadata);
+        validateCompiledStructuredConfig(kind, config);
     } catch (error: any) {
         throw new ValidationError('config', null, error.message);
     }
-    template.lang = lang;
-    if (kind === 'program_fill') {
-        if (metadata.length !== 1 || metadata[0].id !== 'main') {
-            throw new ValidationError('config', null, '编译型程序填空必须且只能使用 main region');
-        }
-        const region = template.regions[0];
-        if (region.start.line !== region.end.line) {
-            throw new ValidationError('config', null, '程序填空占位内容必须只有一行');
-        }
-    }
-    const cases = normalizeCodeEvaluationCases(main.cases, false);
-    const config = {
-        type: 'fill_function',
-        subType: kind === 'program_fill' ? 'program_fill_compile' : 'function',
-        score: 100,
-        langs: [lang],
-        main: { mode: kind === 'program_fill' ? 'compile' : 'function', lang, markerSource, regions: metadata, cases },
-        template,
-        cases,
-    };
-    validateCompiledStructuredConfig(kind, config);
     return config;
 }
 
@@ -259,7 +229,7 @@ function normalizeBasicObjective(kind: ProblemKind, main: Record<string, unknown
     };
 }
 
-export function normalizeStructuredProblemConfig(kind: ProblemKind, config: unknown): Record<string, unknown> {
+export function normalizeStructuredProblemConfig(kind: ProblemKind, config: unknown, currentConfig?: unknown): Record<string, unknown> {
     parseProblemKind(kind);
     if (kind === 'programming') {
         throw new ValidationError('problemKind', null, '编程题继续使用现有 config.yaml/testdata 编辑链路');
@@ -290,11 +260,11 @@ export function normalizeStructuredProblemConfig(kind: ProblemKind, config: unkn
             };
         }
         if (config.main.mode !== 'compile') throw new ValidationError('config', null, '程序填空模式必须是 text 或 compile');
-        return normalizeCompilableStructured('program_fill', config.main);
+        return normalizeCompilableStructured('program_fill', config.main, currentConfig);
     }
     if (kind === 'function') {
         if (!isPlainObject(config.main)) throw new ValidationError('config', null, 'main 必须是对象');
-        return normalizeCompilableStructured('function', config.main);
+        return normalizeCompilableStructured('function', config.main, currentConfig);
     }
     return { ...config, score: 100 };
 }
@@ -303,13 +273,32 @@ export function structuredProblemUsesTestdata(kind: ProblemKind, config: any): b
     return kind === 'function' || (kind === 'program_fill' && (config?.main?.mode === 'compile' || config?.subType === 'program_fill_compile'));
 }
 
+export function structuredProblemConfigForEditor(kind: ProblemKind, configInput: unknown): Record<string, unknown> {
+    const config = parseProblemConfigObject({ config: configInput });
+    if (!config) throw new ValidationError('config', null, '结构化题配置无法解析');
+    if (kind === 'function' || (kind === 'program_fill' && config.subType === 'program_fill_compile')) {
+        const template = config.template || {};
+        return {
+            main: {
+                mode: kind === 'function' ? 'function' : 'compile',
+                lang: template.lang || config.langs?.[0] || '',
+                source: template.source || '',
+                regions: Array.isArray(template.regions) ? [...template.regions].sort((a, b) => Number(a.order) - Number(b.order)) : [],
+                cases: Array.isArray(config.cases) ? config.cases : [],
+            },
+        };
+    }
+    return { main: config.main };
+}
+
 export function cloneStructuredProblemForLanguage(kind: ProblemKind, config: unknown, language: string): Record<string, unknown> {
     if (!['program_fill', 'function'].includes(kind)) throw new ValidationError('cloneLang');
-    if (!isPlainObject(config) || !isPlainObject(config.main) || !structuredProblemUsesTestdata(kind, config)) throw new ValidationError('cloneLang');
-    if (config.main.lang === language) throw new ValidationError('cloneLang');
-    return normalizeStructuredProblemConfig(kind, {
-        main: { ...config.main, lang: language },
-    });
+    const parsed = parseProblemConfigObject({ config });
+    if (!parsed || !structuredProblemUsesTestdata(kind, parsed)) throw new ValidationError('cloneLang');
+    const editorConfig = structuredProblemConfigForEditor(kind, parsed);
+    if (!isPlainObject(editorConfig.main)) throw new ValidationError('cloneLang');
+    if (editorConfig.main.lang === language) throw new ValidationError('cloneLang');
+    return normalizeStructuredProblemConfig(kind, { main: { ...editorConfig.main, lang: language } }, parsed);
 }
 
 export function assertStructureRevision(value: unknown): asserts value is number {

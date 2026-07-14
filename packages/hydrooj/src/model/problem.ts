@@ -23,7 +23,7 @@ import {
 } from '../error';
 import type { Document, ProblemDict, ProblemStatusDoc, User } from '../interface';
 import { copyProblemStorageFiles } from '../lib/problem-clone';
-import { isProblemConfigFilename } from '../lib/problem-config';
+import { isProblemConfigFilename, parseProblemConfigObject } from '../lib/problem-config';
 import { normalizeProblemTestdataUpload } from '../lib/problem-testdata-upload';
 import { parseConfig } from '../lib/testdataConfig';
 import bus from '../service/bus';
@@ -90,6 +90,7 @@ import {
     problemCreateChangedFields,
     problemEditAuditedFields,
     problemReferenceCount,
+    structuredProblemConfigForEditor,
     structuredProblemUsesTestdata,
 } from './problem-lifecycle';
 import {
@@ -1193,7 +1194,7 @@ export class ProblemModel {
         return true;
     }
 
-    static async claimStructureLockForSubmission(domainId: string, pid: number, lockStructure = true, actor?: number): Promise<void> {
+    static async claimStructureLockForSubmission(domainId: string, pid: number, lockStructure = true, actor?: number): Promise<ProblemDoc> {
         const projection = {
             domainId: 1,
             docId: 1,
@@ -1216,49 +1217,54 @@ export class ProblemModel {
         );
         if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
         assertProblemReadyForUseWithTrace(pdoc as ProblemDoc, { actor, stage: 'record-create' });
+        let source: ProblemDoc | null = null;
         if (pdoc.reference) {
-            const source = await document.coll.findOne(
+            source = (await document.coll.findOne(
                 {
                     domainId: pdoc.reference.domainId,
                     docType: document.TYPE_PROBLEM,
                     docId: pdoc.reference.pid,
                 },
                 { projection },
-            );
+            )) as ProblemDoc | null;
             if (!source) throw new ProblemNotFoundError(pdoc.reference.domainId, pdoc.reference.pid);
-            assertProblemReadyForUseWithTrace(source as ProblemDoc, { actor, stage: 'record-create-reference' });
+            assertProblemReadyForUseWithTrace(source, { actor, stage: 'record-create-reference' });
         }
-        if (!lockStructure || pdoc.problemKind === undefined || pdoc.structureLockedAt) return;
-        parseProblemKind(pdoc.problemKind);
-        assertStructureRevision(pdoc.structureRevision);
-        const now = new Date();
-        const result = await document.coll.updateOne(
-            {
-                domainId,
-                docType: document.TYPE_PROBLEM,
-                docId: pid,
-                structureRevision: pdoc.structureRevision,
-                structureLockedAt: { $exists: false },
-                aclWriteClaim: { $exists: false },
-            },
-            {
-                $set: {
-                    structureLockedAt: now,
-                    structureLockReason: 'first_submission',
+        const claimLock = async (snapshot: ProblemDoc) => {
+            if (!lockStructure || snapshot.problemKind === undefined || snapshot.structureLockedAt) return;
+            parseProblemKind(snapshot.problemKind);
+            assertStructureRevision(snapshot.structureRevision);
+            const result = await document.coll.updateOne(
+                {
+                    domainId: snapshot.domainId,
+                    docType: document.TYPE_PROBLEM,
+                    docId: snapshot.docId,
+                    structureRevision: snapshot.structureRevision,
+                    structureLockedAt: { $exists: false },
+                    aclWriteClaim: { $exists: false },
                 },
-                $inc: { structureRevision: 1 },
-            },
-        );
-        if (result.matchedCount === 1) return;
-        const current = await document.coll.findOne(
-            {
-                domainId,
-                docType: document.TYPE_PROBLEM,
-                docId: pid,
-            },
-            { projection: { structureLockedAt: 1 } },
-        );
-        if (!current?.structureLockedAt) throw new ProblemStructureConflictError(pid);
+                {
+                    $set: {
+                        structureLockedAt: new Date(),
+                        structureLockReason: 'first_submission',
+                    },
+                    $inc: { structureRevision: 1 },
+                },
+            );
+            if (result.matchedCount === 1) return;
+            const current = await document.coll.findOne(
+                {
+                    domainId: snapshot.domainId,
+                    docType: document.TYPE_PROBLEM,
+                    docId: snapshot.docId,
+                },
+                { projection: { structureLockedAt: 1 } },
+            );
+            if (!current?.structureLockedAt) throw new ProblemStructureConflictError(snapshot.docId);
+        };
+        await claimLock(pdoc as ProblemDoc);
+        if (source) await claimLock(source);
+        return source || (pdoc as ProblemDoc);
     }
 
     private static async editAuthorizedWithSnapshot(input: {
@@ -1307,18 +1313,17 @@ export class ProblemModel {
                 throw new ValidationError('problemKind');
             }
             const hasConfigUpdate = input.$set.config !== undefined;
-            const existingConfig = before.config as any;
+            const existingConfig = parseProblemConfigObject(before) as any;
             const nextConfig = hasConfigUpdate ? (input.$set.config as any) : existingConfig;
-            const existingMain = existingConfig?.main;
-            const nextMain = nextConfig?.main;
-            if (hasConfigUpdate && input.expectedProblemKind === 'program_fill' && existingMain) {
-                if (existingMain.mode !== nextMain?.mode) throw new ValidationError('mode', null, '程序填空模式创建后不可修改');
-                if (existingMain.mode === 'compile' && existingMain.lang !== nextMain?.lang) {
+            if (hasConfigUpdate && ['program_fill', 'function'].includes(input.expectedProblemKind)) {
+                const existingEditor = structuredProblemConfigForEditor(input.expectedProblemKind, existingConfig).main as any;
+                const nextEditor = structuredProblemConfigForEditor(input.expectedProblemKind, nextConfig).main as any;
+                if (input.expectedProblemKind === 'program_fill' && existingEditor.mode !== nextEditor.mode) {
+                    throw new ValidationError('mode', null, '程序填空模式创建后不可修改');
+                }
+                if (existingEditor.lang && existingEditor.lang !== nextEditor.lang) {
                     throw new ValidationError('lang', null, '评测语言创建后不可修改');
                 }
-            }
-            if (hasConfigUpdate && input.expectedProblemKind === 'function' && existingMain && existingMain.lang !== nextMain?.lang) {
-                throw new ValidationError('lang', null, '评测语言创建后不可修改');
             }
             input.validateSnapshot?.(before, nextConfig);
             if (input.$set.hidden === false) {
@@ -1374,8 +1379,8 @@ export class ProblemModel {
         try {
             config =
                 codeEvaluation && lifecycle.codeEvaluationStatus === 'draft' && !input.completeCodeEvaluationDraft
-                    ? normalizeCodeEvaluationDraftConfig(problemKind, input.config)
-                    : normalizeStructuredProblemConfig(problemKind, input.config);
+                    ? normalizeCodeEvaluationDraftConfig(problemKind, input.config, lifecycle.config)
+                    : normalizeStructuredProblemConfig(problemKind, input.config, lifecycle.config);
         } catch (error) {
             logger.error(
                 'Structured problem save rejected domain=%s pid=%d kind=%s revision=%d stage=%s error=%o',
@@ -2458,6 +2463,17 @@ export class ProblemModel {
             ? cloneStructuredProblemForLanguage(problemKind, original.config, structuredLanguage)
             : original.config;
         const cloneIsCodeEvaluation = isCodeEvaluationProblem(problemKind, cloneConfig);
+        const cloneStructuredConfig = cloneIsCodeEvaluation
+            ? (() => {
+                  const editor = structuredProblemConfigForEditor(problemKind, cloneConfig) as any;
+                  return {
+                      main: {
+                          ...editor.main,
+                          regions: (editor.main.regions || []).map((region: any) => ({ ...region, id: '' })),
+                      },
+                  };
+              })()
+            : cloneConfig;
         const cloneOwner = attribution.owner ?? original.owner;
         const cloneActor = attribution.actor ?? cloneOwner;
         const cloneId = await ProblemModel.createProblemByKind(
@@ -2470,7 +2486,7 @@ export class ProblemModel {
             cloneKnowledge?.tags ?? original.tag,
             {
                 difficulty: original.difficulty,
-                structuredConfig: cloneIsCodeEvaluation ? { main: (cloneConfig as any).main } : cloneConfig,
+                structuredConfig: cloneStructuredConfig,
                 knowledgeNodeIds: cloneKnowledge?.nodeIds,
                 ...(cloneIsCodeEvaluation ? { codeEvaluationStatus: 'draft' as const } : {}),
             },
@@ -2503,7 +2519,7 @@ export class ProblemModel {
                 },
             });
             await document.set(target, document.TYPE_PROBLEM, cloneId, {
-                config: cloneConfig as any,
+                ...(cloneIsCodeEvaluation ? {} : { config: cloneConfig as any }),
                 data: original.data || [],
                 additional_file: original.additional_file || [],
                 html: !!original.html,

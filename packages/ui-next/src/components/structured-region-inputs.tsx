@@ -2,6 +2,8 @@ import { Input } from '@/components/ui/input';
 
 export interface StudentRegion {
   id: string;
+  signature?: string;
+  description?: string;
   prompt?: string;
 }
 
@@ -22,8 +24,8 @@ export function StructuredRegionInputs({
     <div className="space-y-4">
       {regions.map((region, index) => (
         <label key={region.id} className="block space-y-1.5">
-          <span className="text-sm font-medium">{region.prompt || (singleLine ? '填写挖空代码' : `函数区域 ${index + 1}`)}</span>
-          <span className="block font-mono text-[11px] text-muted-foreground">{region.id}</span>
+          <span className="text-sm font-medium">{region.signature || region.prompt || (singleLine ? '填写挖空代码' : `函数区域 ${index + 1}`)}</span>
+          {region.description ? <span className="block text-xs text-muted-foreground">{region.description}</span> : null}
           {singleLine ? (
             <Input
               value={values[region.id] || ''}

@@ -103,3 +103,47 @@ describe('P3.17 code evaluation draft workspace', () => {
     expect(uploader).to.include('onUploaded?.(file.name, response?.body');
   });
 });
+
+describe('P3.18 function authoring and student contract', () => {
+  it('uses a whole-line CodeMirror selector with explicit expansion and region highlighting', () => {
+    const editor = read('packages/ui-next/src/components/structured-region-author-editor.tsx');
+    const workspace = read('packages/ui-next/src/pages/structured-code-editors.tsx');
+    expect(editor).to.include('function selectedWholeLines(');
+    expect(editor).to.include('startLine: start.number - 1');
+    expect(editor).to.include('endLine: end.number');
+    expect(editor).to.include('krypton-region-line-invalid');
+    expect(workspace).to.include('已自动扩展到完整行');
+    expect(workspace).to.include("设为{kind === 'function' ? '函数区' : '填空区'}");
+  });
+
+  it('never lets authors type region ids and reorders answers without moving source', () => {
+    const workspace = read('packages/ui-next/src/pages/structured-code-editors.tsx');
+    expect(workspace).to.include("id: '',");
+    expect(workspace).to.include('保存后生成 ID');
+    expect(workspace).not.to.match(/<Input\s+value=\{region\.id\}/);
+    expect(workspace).to.include('draggable');
+    expect(workspace).to.include('reorderRegions(current, draggedRegion, index)');
+    expect(workspace).to.include('函数签名（必填）');
+    expect(workspace).to.include('局部要求（可选）');
+  });
+
+  it('marks edited source anchors invalid and blocks completion until reselected', () => {
+    const workspace = read('packages/ui-next/src/pages/structured-code-editors.tsx');
+    expect(workspace).to.include('currentSelection === null || currentSelection !== region.anchor');
+    expect(workspace).to.include('请删除后重新框选，系统不会猜测迁移');
+    expect(workspace).to.include('disabled={saving || completionBlocked}');
+  });
+
+  it('shares the same safe region inputs across direct, contest, homework, exam, training, and course references', () => {
+    const submit = read('packages/ui-next/src/pages/problem-submit.tsx');
+    const exam = read('packages/ui-next/src/pages/exam-mode/paper.tsx');
+    const inputs = read('packages/ui-next/src/components/structured-region-inputs.tsx');
+    expect(submit).to.include('<StructuredRegionInputs');
+    expect(submit).to.include('const tid = tdoc?.docId');
+    expect(exam).to.include('<StructuredRegionInputs');
+    expect(inputs).to.include('region.signature || region.prompt');
+    expect(inputs).to.include('region.description');
+    expect(submit).not.to.include('template.source');
+    expect(exam).not.to.include('template.source');
+  });
+});

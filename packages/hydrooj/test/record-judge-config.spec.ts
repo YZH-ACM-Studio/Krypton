@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { ObjectId } from 'mongodb';
 import { beforeEach, describe, it } from 'node:test';
+import { templateSourceHash } from '../src/lib/problem-config';
 
 const Module = require('module');
 const recordPath = require.resolve('../src/model/record.ts');
@@ -13,25 +14,67 @@ const queuedTasks: any[] = [];
 const insertedRecords: any[] = [];
 const deletedTaskQueries: any[] = [];
 const structureLockRequests: boolean[] = [];
+const storedRecords: any[] = [];
+const resetUpdates: any[] = [];
+const deletedStatQueries: any[] = [];
+const historyInserts: any[] = [];
+const REGION_ID = 'r_abcdefghijkl';
 
 function assertReady(pdoc: any) {
     const codeEvaluation = pdoc.problemKind === 'function' || (pdoc.problemKind === 'program_fill' && pdoc.config?.main?.mode === 'compile');
     if (codeEvaluation && pdoc.codeEvaluationStatus !== 'ready') throw new Error('code evaluation draft is not ready');
 }
 
-const collectionStub = {
+const recordCollectionStub = {
     countDocuments: async () => 0,
     distinct: async () => [],
     estimatedDocumentCount: async () => 0,
-    find: () => ({
+    find: (query: any) => ({
         project() {
             return this;
         },
-        toArray: async () => [],
+        toArray: async () => {
+            const ids = query?._id?.$in;
+            if (!Array.isArray(ids)) return [];
+            return storedRecords.filter((record) => ids.some((id: ObjectId) => id.equals(record._id)));
+        },
     }),
+    findOne: async (query: any) => {
+        const ids = query?._id?.$in;
+        if (!Array.isArray(ids)) return null;
+        return (
+            storedRecords.find(
+                (record) =>
+                    ids.some((id: ObjectId) => id.equals(record._id)) &&
+                    (record.manualPending === true || Object.hasOwn(record, 'manualGrade')),
+            ) || null
+        );
+    },
     insertOne: async (doc: any) => {
         insertedRecords.push(doc);
         return { insertedId: doc._id };
+    },
+    updateMany: async (query: any, update: any) => {
+        resetUpdates.push({ query, update });
+        return { modifiedCount: 0 };
+    },
+    findOneAndUpdate: async (query: any, update: any) => {
+        resetUpdates.push({ query, update });
+        return null;
+    },
+};
+
+const statCollectionStub = {
+    deleteMany: async (query: any) => {
+        deletedStatQueries.push(query);
+        return { deletedCount: 0 };
+    },
+};
+
+const historyCollectionStub = {
+    insertMany: async (docs: any[]) => {
+        historyInserts.push(...docs);
+        return { insertedCount: docs.length };
     },
 };
 
@@ -54,12 +97,18 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../lib/problem-config') {
         return originalLoad.call(this, request, parent, isMain);
     }
-    if (request === '../service/db') return { collection: () => collectionStub, ensureIndexes: async () => undefined };
+    if (request === '../service/db') {
+        return {
+            collection: (name: string) =>
+                name === 'record.stat' ? statCollectionStub : name === 'record.history' ? historyCollectionStub : recordCollectionStub,
+            ensureIndexes: async () => undefined,
+        };
+    }
     if (request === '../utils') {
         return {
             ArgMethod: (_target: unknown, _key: string, descriptor: PropertyDescriptor) => descriptor,
             buildProjection: () => ({}),
-            Time: {},
+            Time: { getObjectID: () => new ObjectId() },
         };
     }
     if (request === './builtin') return { STATUS: { STATUS_WAITING: 0 } };
@@ -70,6 +119,15 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             claimStructureLockForSubmission: async (_domainId: string, _pid: number, lockStructure = true) => {
                 structureLockRequests.push(lockStructure);
                 assertReady({ problemKind, config: problemConfig, codeEvaluationStatus });
+                return {
+                    domainId: 'system',
+                    docId: 7,
+                    structureRevision: 3,
+                    problemKind,
+                    config: problemConfig,
+                    codeEvaluationStatus,
+                    data: [{ name: '1.in' }, { name: '1.out' }],
+                };
             },
             assertProblemReadyForUse: assertReady,
             get: async () => ({
@@ -84,7 +142,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             }),
         };
     }
-    if (request === './system') return {};
+    if (request === './system') return { get: () => 128 * 1024 };
     if (request === './task') {
         return {
             deleteMany: async (query: any) => {
@@ -117,6 +175,10 @@ beforeEach(() => {
     insertedRecords.length = 0;
     deletedTaskQueries.length = 0;
     structureLockRequests.length = 0;
+    storedRecords.length = 0;
+    resetUpdates.length = 0;
+    deletedStatQueries.length = 0;
+    historyInserts.length = 0;
 });
 
 describe('record judge problem config', () => {
@@ -163,19 +225,19 @@ describe('record judge problem config', () => {
         problemKind = 'function';
         codeEvaluationStatus = 'ready';
         problemConfig = {
-            type: 'fill_function',
-            subType: 'function',
+            type: 'function',
             langs: ['cc.cc17'],
-            main: { mode: 'function', lang: 'cc.cc17' },
             template: {
                 lang: 'cc.cc17',
                 source: 'int solve() { return 1; }',
-                sourceHash: 'hash',
+                sourceHash: templateSourceHash('int solve() { return 1; }'),
                 regions: [
                     {
-                        id: 'solve',
-                        start: { line: 0, col: 0 },
-                        end: { line: 0, col: 25 },
+                        id: REGION_ID,
+                        startLine: 0,
+                        endLine: 1,
+                        order: 0,
+                        signature: 'int solve()',
                     },
                 ],
             },
@@ -187,7 +249,7 @@ describe('record judge problem config', () => {
             pid: 7,
             uid: 42,
             lang: 'cc.cc17',
-            code: JSON.stringify({ solve: 'int solve() { return 2; }' }),
+            code: JSON.stringify({ [REGION_ID]: 'int solve() { return 2; }' }),
         } as any;
 
         await recordModel.judge('system', record);
@@ -201,19 +263,19 @@ describe('record judge problem config', () => {
         problemKind = 'function';
         codeEvaluationStatus = 'ready';
         problemConfig = {
-            type: 'fill_function',
-            subType: 'function',
+            type: 'function',
             langs: ['cc.cc17'],
-            main: { mode: 'function', lang: 'cc.cc17' },
             template: {
                 lang: 'cc.cc17',
                 source: 'int solve() { return 1; }',
-                sourceHash: 'hash',
+                sourceHash: templateSourceHash('int solve() { return 1; }'),
                 regions: [
                     {
-                        id: 'solve',
-                        start: { line: 0, col: 0 },
-                        end: { line: 0, col: 25 },
+                        id: REGION_ID,
+                        startLine: 0,
+                        endLine: 1,
+                        order: 0,
+                        signature: 'int solve()',
                     },
                 ],
             },
@@ -225,7 +287,7 @@ describe('record judge problem config', () => {
             pid: 7,
             uid: 42,
             lang: 'py.py3',
-            code: JSON.stringify({ solve: 'def solve(): return 2' }),
+            code: JSON.stringify({ [REGION_ID]: 'def solve(): return 2' }),
         } as any;
 
         const error = await recordModel.judge('system', record).catch((caught) => caught);
@@ -234,13 +296,108 @@ describe('record judge problem config', () => {
         expect(queuedTasks).to.deep.equal([]);
     });
 
+    it('rejects malformed stored function payloads before deleting an old task during rejudge', async () => {
+        problemKind = 'function';
+        codeEvaluationStatus = 'ready';
+        const source = 'int solve() { return 1; }';
+        problemConfig = {
+            type: 'function',
+            langs: ['cc.cc17'],
+            template: {
+                lang: 'cc.cc17',
+                source,
+                sourceHash: templateSourceHash(source),
+                regions: [{ id: REGION_ID, startLine: 0, endLine: 1, order: 0, signature: 'int solve()' }],
+            },
+            cases: [{ input: '1.in', output: '1.out' }],
+        };
+        const record = {
+            _id: new ObjectId(),
+            domainId: 'system',
+            pid: 7,
+            uid: 42,
+            lang: 'cc.cc17',
+            code: JSON.stringify({ [REGION_ID]: 'int solve() { return 2; }', forged: 'extra' }),
+        } as any;
+
+        const error = await recordModel.judge('system', record, 0, {}, { rejudge: true }).catch((caught) => caught);
+
+        expect(error).to.be.instanceOf(Error);
+        expect(error.message).to.include('keys do not match');
+        expect(deletedTaskQueries).to.deep.equal([]);
+        expect(queuedTasks).to.deep.equal([]);
+    });
+
+    it('rejects malformed stored function payloads before reset mutates rejudge history or statistics', async () => {
+        problemKind = 'function';
+        codeEvaluationStatus = 'ready';
+        const source = 'int solve() { return 1; }';
+        problemConfig = {
+            type: 'function',
+            langs: ['cc.cc17'],
+            template: {
+                lang: 'cc.cc17',
+                source,
+                sourceHash: templateSourceHash(source),
+                regions: [{ id: REGION_ID, startLine: 0, endLine: 1, order: 0, signature: 'int solve()' }],
+            },
+            cases: [{ input: '1.in', output: '1.out' }],
+        };
+        const rid = new ObjectId();
+        storedRecords.push({
+            _id: rid,
+            domainId: 'system',
+            pid: 7,
+            uid: 42,
+            lang: 'cc.cc17',
+            code: JSON.stringify({ [REGION_ID]: 'int solve() { return 2; }', forged: 'extra' }),
+            score: 100,
+            status: 1,
+            time: 10,
+            memory: 1024,
+            judgeAt: new Date(),
+        });
+
+        const error = await recordModel.reset('system', rid, true).catch((caught) => caught);
+
+        expect(error).to.be.instanceOf(Error);
+        expect(error.message).to.include('keys do not match');
+        expect(deletedTaskQueries).to.deep.equal([]);
+        expect(deletedStatQueries).to.deep.equal([]);
+        expect(historyInserts).to.deep.equal([]);
+        expect(resetUpdates).to.deep.equal([]);
+    });
+
+    it('rejects stale or extra function-region keys before inserting the record', async () => {
+        problemKind = 'function';
+        codeEvaluationStatus = 'ready';
+        const source = 'int solve() { return 1; }';
+        problemConfig = {
+            type: 'function',
+            langs: ['cc.cc17'],
+            template: {
+                lang: 'cc.cc17',
+                source,
+                sourceHash: templateSourceHash(source),
+                regions: [{ id: REGION_ID, startLine: 0, endLine: 1, order: 0, signature: 'int solve()' }],
+            },
+            cases: [{ input: '1.in', output: '1.out' }],
+        };
+
+        const error = await recordModel
+            .add('system', 7, 42, 'cc.cc17', JSON.stringify({ [REGION_ID]: 'return 2;', extra: 'forged' }), false, { type: 'judge' })
+            .catch((caught) => caught);
+
+        expect(error).to.be.instanceOf(Error);
+        expect(error.message).to.include('keys do not match');
+        expect(insertedRecords).to.deep.equal([]);
+    });
+
     it('rejects a code evaluation draft before deleting or enqueueing judge tasks', async () => {
         problemKind = 'function';
         codeEvaluationStatus = 'draft';
         problemConfig = {
-            type: 'fill_function',
-            subType: 'function',
-            main: { mode: 'function', lang: 'cc.cc17' },
+            type: 'function',
         };
         const record = {
             _id: new ObjectId(),
@@ -271,6 +428,31 @@ describe('record judge problem config', () => {
         expect(structureLockRequests).to.deep.equal([false]);
         expect(insertedRecords).to.deep.equal([]);
         expect(queuedTasks).to.deep.equal([]);
+    });
+
+    it('queues testdata generation for a ready function problem without treating generator filenames as a region submission', async () => {
+        problemKind = 'function';
+        codeEvaluationStatus = 'ready';
+        const source = 'int solve() { return 1; }';
+        problemConfig = {
+            type: 'function',
+            langs: ['cc.cc17'],
+            template: {
+                lang: 'cc.cc17',
+                source,
+                sourceHash: templateSourceHash(source),
+                regions: [{ id: REGION_ID, startLine: 0, endLine: 1, order: 0, signature: 'int solve()' }],
+            },
+            cases: [{ input: '1.in', output: '1.out' }],
+        };
+
+        await recordModel.add('system', 7, 42, '_', 'gen.cpp\nstd.cpp', true, { type: 'generate' });
+
+        expect(structureLockRequests).to.deep.equal([false]);
+        expect(insertedRecords).to.have.length(1);
+        expect(insertedRecords[0].code).to.equal('gen.cpp\nstd.cpp');
+        expect(queuedTasks).to.have.length(1);
+        expect(queuedTasks[0].type).to.equal('generate');
     });
 
     it('inserts a manual submission as already-judged waiting without enqueueing a task', async () => {

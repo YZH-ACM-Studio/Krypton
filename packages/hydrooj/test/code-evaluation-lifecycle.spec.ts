@@ -53,15 +53,15 @@ delete require.cache[codeEvaluationPath];
 const lifecycle = require(lifecyclePath) as typeof import('../src/model/problem-lifecycle');
 const codeEvaluation = require(codeEvaluationPath) as typeof import('../src/model/code-evaluation-lifecycle');
 
-const functionSource = ['// @krypton-region solve', 'int solve() {', '  return 1;', '}', '// @krypton-endregion solve'].join('\n');
+const functionSource = ['int solve() {', '  return 1;', '}', 'int main() { return solve(); }'].join('\n');
 
 function readyFunctionConfig() {
     return lifecycle.normalizeStructuredProblemConfig('function', {
         main: {
             mode: 'function',
             lang: 'cc.cc17',
-            markerSource: functionSource,
-            regions: [{ id: 'solve', prompt: '实现 solve' }],
+            source: functionSource,
+            regions: [{ id: '', startLine: 0, endLine: 3, order: 0, signature: 'int solve()', description: '实现 solve' }],
             cases: [{ input: '1.in', output: '1.out' }],
         },
     });
@@ -100,12 +100,91 @@ describe('P3.17 code evaluation lifecycle', () => {
                 main: { mode: 'function', lang: 'cc.cc17' },
             }),
         ).to.deep.equal({
-            type: 'fill_function',
-            subType: 'function',
+            type: 'function',
             score: 100,
             langs: ['cc.cc17'],
-            main: { mode: 'function', lang: 'cc.cc17', markerSource: '', regions: [], cases: [] },
+            template: {
+                lang: 'cc.cc17',
+                source: '',
+                sourceHash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+                regions: [],
+            },
+            cases: [],
         });
+    });
+
+    it('generates stable opaque ids and rejects author-forged or silently moved regions', () => {
+        const first = codeEvaluation.normalizeCodeEvaluationDraftConfig('function', {
+            main: {
+                mode: 'function',
+                lang: 'cc.cc17',
+                source: functionSource,
+                regions: [{ id: '', startLine: 0, endLine: 3, order: 0, signature: 'int solve()' }],
+                cases: [],
+            },
+        }) as any;
+        const id = first.template.regions[0].id;
+        expect(id).to.match(/^r_[A-Za-z0-9_-]{12,32}$/);
+
+        const savedAgain = codeEvaluation.normalizeCodeEvaluationDraftConfig(
+            'function',
+            {
+                main: {
+                    mode: 'function',
+                    lang: 'cc.cc17',
+                    source: `${functionSource}\n// safe tail edit`,
+                    regions: [{ ...first.template.regions[0] }],
+                    cases: [],
+                },
+            },
+            first,
+        ) as any;
+        expect(savedAgain.template.regions[0].id).to.equal(id);
+        expect(() =>
+            codeEvaluation.normalizeCodeEvaluationDraftConfig(
+                'function',
+                {
+                    main: {
+                        mode: 'function',
+                        lang: 'cc.cc17',
+                        source: functionSource,
+                        regions: [{ ...first.template.regions[0], id: 'r_zzzzzzzzzzzz' }],
+                        cases: [],
+                    },
+                },
+                first,
+            ),
+        ).to.throw(/不属于当前题目/);
+        expect(() =>
+            codeEvaluation.normalizeCodeEvaluationDraftConfig(
+                'function',
+                {
+                    main: {
+                        mode: 'function',
+                        lang: 'cc.cc17',
+                        source: functionSource,
+                        regions: [{ ...first.template.regions[0], startLine: 1 }],
+                        cases: [],
+                    },
+                },
+                first,
+            ),
+        ).to.throw(/坐标不可直接改写/);
+        expect(() =>
+            codeEvaluation.normalizeCodeEvaluationDraftConfig(
+                'function',
+                {
+                    main: {
+                        mode: 'function',
+                        lang: 'cc.cc17',
+                        source: functionSource.replace('return 1', 'return 2'),
+                        regions: [{ ...first.template.regions[0] }],
+                        cases: [],
+                    },
+                },
+                first,
+            ),
+        ).to.throw(/模板修改失效/);
     });
 
     it('rejects forged, incomplete, or ambiguous case filenames', () => {

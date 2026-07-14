@@ -647,7 +647,7 @@ export function ProblemDetailPage() {
   // type=objective 下发无答案的 questions 描述符，走面板作答提交。
   const objectiveQuestions: ObjectiveClientQuestion[] = config.type === 'objective' && Array.isArray(config.questions) ? config.questions : [];
   const isObjective = objectiveQuestions.length > 0;
-  const isStructuredCompile = config.type === 'fill_function' && ['program_fill', 'function'].includes(String(pdoc.problemKind));
+  const isStructuredCompile = ['fill_function', 'function'].includes(config.type) && ['program_fill', 'function'].includes(String(pdoc.problemKind));
   const isSubjective = pdoc.problemKind === 'subjective';
   const canPreviewSubjective = !!data.canPreviewSubjective;
   const objectiveDraftKey = `objective-draft:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pdoc.docId || pid}${tid ? `@${tid}` : ''}`;

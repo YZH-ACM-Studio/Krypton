@@ -9,6 +9,8 @@ const previousDefault = require.cache[defaultPath];
 const previousFillFunction = require.cache[fillFunctionPath];
 const previousHydrooj = require.cache[hydroojPath];
 let delegated: any;
+const REGION_ID = 'r_abcdefghijkl';
+const problemConfig = require('../../hydrooj/src/lib/problem-config.ts');
 
 require.cache[defaultPath] = {
     id: defaultPath,
@@ -25,8 +27,9 @@ require.cache[hydroojPath] = {
     filename: hydroojPath,
     loaded: true,
     exports: {
-        spliceFillFunction: require('../../hydrooj/src/lib/problem-config.ts').spliceFillFunction,
-        validateFillFunctionJudgeConfig: require('../../hydrooj/src/lib/problem-config.ts').validateFillFunctionJudgeConfig,
+        parseStructuredRegionSubmission: problemConfig.parseStructuredRegionSubmission,
+        spliceStructuredCodeTemplate: problemConfig.spliceStructuredCodeTemplate,
+        validateStructuredCodeJudgeConfig: problemConfig.validateStructuredCodeJudgeConfig,
     },
 } as NodeModule;
 delete require.cache[fillFunctionPath];
@@ -42,22 +45,25 @@ function context(overrides: Record<string, unknown> = {}) {
     return {
         ctx: {
             config: {
-                type: 'fill_function',
+                type: 'function',
                 template: {
                     lang: 'cc.cc17',
                     source: 'int main() {\nreturn 0;\n}',
+                    sourceHash: problemConfig.templateSourceHash('int main() {\nreturn 0;\n}'),
                     regions: [
                         {
-                            id: 'main',
-                            start: { line: 1, col: 0 },
-                            end: { line: 1, col: 9 },
+                            id: REGION_ID,
+                            startLine: 1,
+                            endLine: 2,
+                            order: 0,
+                            signature: 'int main()',
                         },
                     ],
                 },
                 cases: [{ input: '1.in', output: '1.out' }],
             },
             lang: 'cc.cc17',
-            code: { content: JSON.stringify({ main: 'return 1;' }) },
+            code: { content: JSON.stringify({ [REGION_ID]: 'return 1;' }) },
             next() {},
             end(payload: any) {
                 ended.push(payload);
@@ -93,7 +99,7 @@ describe('fill-function judge integration', () => {
         await judge(ctx);
         expect(delegated).to.equal(null);
         expect(ended[0]).to.deep.include({ status: STATUS.STATUS_FORMAT_ERROR, score: 0 });
-        expect(ended[0].message).to.include('missing region');
+        expect(ended[0].message).to.include('keys do not match');
     });
 });
 

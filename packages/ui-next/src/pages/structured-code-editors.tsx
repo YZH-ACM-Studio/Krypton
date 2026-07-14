@@ -1,6 +1,10 @@
-import { ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, Copy, FileCode2, Plus, Save, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, Copy, FileCode2, GripVertical, Plus, Save, Trash2 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
+import {
+  StructuredRegionAuthorEditor,
+  type AuthorLineSelection,
+} from '@/components/structured-region-author-editor';
 import { StructuredRegionInputs } from '@/components/structured-region-inputs';
 import { StructuredProblemMetadataPanel, type KnowledgeMindmapOption } from '@/components/structured-problem-metadata-panel';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
@@ -14,8 +18,16 @@ import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 
 type R = Record<string, any>;
 interface RegionMeta {
+  key: string;
   id: string;
+  startLine: number;
+  endLine: number;
+  order: number;
+  signature: string;
+  description: string;
   prompt: string;
+  anchor: string;
+  invalid: boolean;
 }
 interface CaseMeta {
   input: string;
@@ -32,12 +44,18 @@ async function responseMessage(response: Response) {
   return body?.error?.message || body?.message || `保存失败（HTTP ${response.status}）`;
 }
 
-function move<T>(items: T[], index: number, delta: number) {
-  const target = index + delta;
-  if (target < 0 || target >= items.length) return items;
-  const next = [...items];
-  [next[index], next[target]] = [next[target], next[index]];
-  return next;
+function selectedSource(source: string, region: Pick<RegionMeta, 'startLine' | 'endLine'>) {
+  const lines = source.split('\n');
+  if (region.startLine < 0 || region.endLine <= region.startLine || region.endLine > lines.length) return null;
+  return lines.slice(region.startLine, region.endLine).join('\n');
+}
+
+function reorderRegions(regions: RegionMeta[], from: number, to: number) {
+  if (from === to || from < 0 || to < 0 || from >= regions.length || to >= regions.length) return regions;
+  const next = [...regions];
+  const [region] = next.splice(from, 1);
+  next.splice(to, 0, region);
+  return next.map((item, order) => ({ ...item, order }));
 }
 
 function caseFileOptions(files: TestdataFile[], current: string) {
@@ -112,10 +130,26 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const [mode, setMode] = useState<'text' | 'compile'>(initial.mode === 'compile' ? 'compile' : 'text');
   const [answer, setAnswer] = useState(String(initial.answer || ''));
   const [lang, setLang] = useState(String(initial.lang || ''));
-  const [markerSource, setMarkerSource] = useState(String(initial.markerSource || ''));
+  const [source, setSource] = useState(String(initial.source || ''));
   const [regions, setRegions] = useState<RegionMeta[]>(() => {
-    if (kind === 'program_fill') return [{ id: 'main', prompt: String(initial.regions?.[0]?.prompt || '') }];
-    return Array.isArray(initial.regions) ? initial.regions.map((item: R) => ({ id: String(item.id || ''), prompt: String(item.prompt || '') })) : [];
+    if (!Array.isArray(initial.regions)) return [];
+    return initial.regions.map((item: R, index: number) => {
+      const startLine = Number(item.startLine);
+      const endLine = Number(item.endLine);
+      const range = { startLine, endLine };
+      return {
+        key: String(item.id || `new-${index}`),
+        id: String(item.id || ''),
+        startLine,
+        endLine,
+        order: Number.isSafeInteger(item.order) ? Number(item.order) : index,
+        signature: String(item.signature || ''),
+        description: String(item.description || ''),
+        prompt: String(item.prompt || ''),
+        anchor: selectedSource(String(initial.source || ''), range) || '',
+        invalid: selectedSource(String(initial.source || ''), range) === null,
+      };
+    });
   });
   const [cases, setCases] = useState<CaseMeta[]>(() =>
     Array.isArray(initial.cases) ? initial.cases.map((item: R) => ({ input: String(item.input || ''), output: String(item.output || '') })) : [],
@@ -130,12 +164,16 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const [saveAction, setSaveAction] = useState<'save' | 'complete'>('save');
   const [cloning, setCloning] = useState(false);
   const [error, setError] = useState('');
+  const [selection, setSelection] = useState<AuthorLineSelection | null>(null);
+  const [draggedRegion, setDraggedRegion] = useState<number | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const compileMode = kind === 'function' || mode === 'compile';
   const draftCreation = isCreate && compileMode;
   const langOptions = Object.entries(data.langRange || {}).map(([value, label]) => ({ value, label: String(label) }));
   const cloneLangOptions = langOptions.filter((option) => option.value !== lang);
   const [cloneLang, setCloneLang] = useState('');
+  const completionBlocked =
+    compileMode && (regions.length === 0 || regions.some((region) => region.invalid || (kind === 'function' && !region.signature.trim())));
 
   const structuredConfig = useMemo(
     () => ({
@@ -143,12 +181,88 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
         ? { mode: kind === 'program_fill' ? 'compile' : 'function', lang }
         : kind === 'program_fill' && !compileMode
           ? { mode: 'text', answer }
-          : { mode: kind === 'program_fill' ? 'compile' : 'function', lang, markerSource, regions, cases },
+          : {
+              mode: kind === 'program_fill' ? 'compile' : 'function',
+              lang,
+              source,
+              regions: regions.map((region) => ({
+                id: region.id,
+                startLine: region.startLine,
+                endLine: region.endLine,
+                order: region.order,
+                ...(kind === 'function'
+                  ? { signature: region.signature, ...(region.description ? { description: region.description } : {}) }
+                  : region.prompt
+                    ? { prompt: region.prompt }
+                    : {}),
+              })),
+              cases,
+            },
     }),
-    [answer, cases, compileMode, draftCreation, kind, lang, markerSource, regions],
+    [answer, cases, compileMode, draftCreation, kind, lang, regions, source],
   );
   const dirtyState = useFormDirtyState(formRef, JSON.stringify(structuredConfig));
   const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saving || cloning);
+  const localRegionCounter = useRef(0);
+
+  const updateSource = (nextSource: string) => {
+    setSource(nextSource);
+    setRegions((current) =>
+      current.map((region) => {
+        const currentSelection = selectedSource(nextSource, region);
+        return { ...region, invalid: currentSelection === null || currentSelection !== region.anchor };
+      }),
+    );
+  };
+
+  const addSelectedRegion = () => {
+    if (!selection) {
+      setError('请先在完整模板中框选至少一行。');
+      return;
+    }
+    if (kind === 'program_fill' && selection.endLine !== selection.startLine + 1) {
+      setError('程序填空区域只能选择一整行。');
+      return;
+    }
+    if (kind === 'program_fill' && regions.length) {
+      setError('当前阶段的编译型程序填空只能设置一个区域。');
+      return;
+    }
+    if (regions.some((region) => region.startLine < selection.endLine && selection.startLine < region.endLine)) {
+      setError('所选完整行与已有区域重叠，请重新框选。');
+      return;
+    }
+    const anchor = selectedSource(source, selection);
+    if (anchor === null) {
+      setError('所选行已超出当前模板，请重新框选。');
+      return;
+    }
+    localRegionCounter.current += 1;
+    setRegions((current) => [
+      ...current,
+      {
+        key: `new-${localRegionCounter.current}`,
+        id: '',
+        startLine: selection.startLine,
+        endLine: selection.endLine,
+        order: current.length,
+        signature: '',
+        description: '',
+        prompt: '',
+        anchor,
+        invalid: false,
+      },
+    ]);
+    setError('');
+  };
+
+  const removeRegion = (index: number) => {
+    setRegions((current) => current.filter((_, regionIndex) => regionIndex !== index).map((region, order) => ({ ...region, order })));
+  };
+
+  const moveRegion = (index: number, delta: number) => {
+    setRegions((current) => reorderRegions(current, index, index + delta));
+  };
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -259,7 +373,14 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
               <Save className="size-4" />
               {saving && saveAction === 'save' ? '保存中…' : '保存草稿'}
             </Button>
-            <Button type="submit" value="complete" form="structured-code-form" disabled={saving} className="min-h-11 gap-1.5">
+            <Button
+              type="submit"
+              value="complete"
+              form="structured-code-form"
+              disabled={saving || completionBlocked}
+              className="min-h-11 gap-1.5"
+              title={completionBlocked ? '请先修复失效区域并填写所有函数签名' : undefined}
+            >
               <CheckCircle2 className="size-4" />
               {saving && saveAction === 'complete' ? '校验中…' : '完成配置'}
             </Button>
@@ -350,7 +471,9 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
               <section className="space-y-3 border-t border-border/70 pt-5">
                 <div>
                   <h2 className="text-sm font-semibold">语言与完整模板</h2>
-                  <p className="text-xs text-muted-foreground">语言创建后不可修改。用成对 marker 标记学生填写区域，marker 行不会进入编译源码。</p>
+                  <p className="text-xs text-muted-foreground">
+                    语言创建后不可修改。直接框选完整源码中的一行或多行，再设为{kind === 'function' ? '函数区' : '填空区'}；源码只在作者与评测链中可见。
+                  </p>
                 </div>
                 <SimpleSelect
                   value={lang}
@@ -358,71 +481,134 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                   disabled={!isCreate}
                   options={langOptions.length ? langOptions : [{ value: lang, label: lang || '请选择语言' }]}
                 />
-                <textarea
-                  value={markerSource}
-                  onChange={(event) => setMarkerSource(event.target.value)}
-                  rows={18}
-                  spellCheck={false}
-                  className="w-full rounded-md border bg-background p-3 font-mono text-xs"
-                  placeholder={'// @krypton-region main\ni++\n// @krypton-endregion main'}
+                <StructuredRegionAuthorEditor
+                  lang={lang}
+                  source={source}
+                  regions={regions.map((region) => ({
+                    key: region.key,
+                    startLine: region.startLine,
+                    endLine: region.endLine,
+                    invalid: region.invalid,
+                  }))}
+                  onSourceChange={updateSource}
+                  onSelectionChange={setSelection}
                 />
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2.5">
+                  <div className="text-xs text-muted-foreground">
+                    {selection ? (
+                      <>
+                        将使用第 {selection.startLine + 1}–{selection.endLine} 行
+                        {selection.expanded ? '（已自动扩展到完整行）' : ''}
+                      </>
+                    ) : (
+                      '请先拖动选择至少一行源码'
+                    )}
+                  </div>
+                  <Button type="button" variant="outline" size="sm" disabled={!selection} onClick={addSelectedRegion}>
+                    <Plus className="size-3.5" />
+                    设为{kind === 'function' ? '函数区' : '填空区'}
+                  </Button>
+                </div>
               </section>
 
               <section className="space-y-3 border-t border-border/70 pt-5">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-sm font-semibold">可填写 regions</h2>
-                    <p className="text-xs text-muted-foreground">ID 必须与模板 marker 一一对应；顺序决定学生答题顺序。</p>
-                  </div>
-                  {kind === 'function' ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setRegions([...regions, { id: `region${regions.length + 1}`, prompt: '' }])}
-                    >
-                      <Plus className="size-3.5" />
-                      添加
-                    </Button>
-                  ) : null}
+                <div>
+                  <h2 className="text-sm font-semibold">作答区域</h2>
+                  <p className="text-xs text-muted-foreground">区域 ID 由服务端生成；拖拽卡片只调整学生作答顺序，不会移动源码。</p>
                 </div>
                 {regions.map((region, index) => (
-                  <div key={`${region.id}-${index}`} className="grid gap-2 sm:grid-cols-[10rem_1fr_auto]">
-                    <Input
-                      value={region.id}
-                      disabled={kind === 'program_fill'}
-                      onChange={(event) => setRegions(regions.map((item, i) => (i === index ? { ...item, id: event.target.value } : item)))}
-                      className="font-mono"
-                    />
-                    <Input
-                      value={region.prompt}
-                      onChange={(event) => setRegions(regions.map((item, i) => (i === index ? { ...item, prompt: event.target.value } : item)))}
-                      placeholder="函数签名或填写说明"
-                    />
-                    {kind === 'function' ? (
-                      <div className="flex">
-                        <Button type="button" variant="ghost" size="icon" onClick={() => setRegions(move(regions, index, -1))} aria-label="上移">
+                  <div
+                    key={region.key}
+                    className={cn('space-y-3 rounded-lg border p-3', region.invalid && 'border-destructive bg-destructive/5')}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => {
+                      if (draggedRegion === null) return;
+                      setRegions((current) => reorderRegions(current, draggedRegion, index));
+                      setDraggedRegion(null);
+                    }}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        draggable
+                        onDragStart={() => setDraggedRegion(index)}
+                        onDragEnd={() => setDraggedRegion(null)}
+                        className="cursor-grab rounded p-1 text-muted-foreground active:cursor-grabbing"
+                        aria-label={`拖拽调整区域 ${index + 1} 顺序`}
+                      >
+                        <GripVertical className="size-4" />
+                      </button>
+                      <span className="text-sm font-medium">区域 {index + 1}</span>
+                      <span className="font-mono text-xs text-muted-foreground">
+                        第 {region.startLine + 1}–{region.endLine} 行 · {region.id ? region.id : '保存后生成 ID'}
+                      </span>
+                      <div className="ml-auto flex">
+                        <Button type="button" variant="ghost" size="icon" onClick={() => moveRegion(index, -1)} aria-label="上移">
                           <ArrowUp className="size-4" />
                         </Button>
-                        <Button type="button" variant="ghost" size="icon" onClick={() => setRegions(move(regions, index, 1))} aria-label="下移">
+                        <Button type="button" variant="ghost" size="icon" onClick={() => moveRegion(index, 1)} aria-label="下移">
                           <ArrowDown className="size-4" />
                         </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setRegions(regions.filter((_, i) => i !== index))}
-                          aria-label="删除"
-                        >
+                        <Button type="button" variant="ghost" size="icon" onClick={() => removeRegion(index)} aria-label="删除">
                           <Trash2 className="size-4" />
                         </Button>
                       </div>
+                    </div>
+                    {kind === 'function' ? (
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-medium">函数签名（必填）</span>
+                          <Input
+                            value={region.signature}
+                            onChange={(event) =>
+                              setRegions((current) => current.map((item, i) => (i === index ? { ...item, signature: event.target.value } : item)))
+                            }
+                            placeholder="例如 int solve(int n)"
+                            className="font-mono"
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="text-xs font-medium">局部要求（可选）</span>
+                          <Input
+                            value={region.description}
+                            onChange={(event) =>
+                              setRegions((current) => current.map((item, i) => (i === index ? { ...item, description: event.target.value } : item)))
+                            }
+                            placeholder="说明输入、输出或约束"
+                          />
+                        </label>
+                      </div>
+                    ) : (
+                      <Input
+                        value={region.prompt}
+                        onChange={(event) =>
+                          setRegions((current) => current.map((item, i) => (i === index ? { ...item, prompt: event.target.value } : item)))
+                        }
+                        placeholder="填写提示（可选）"
+                      />
+                    )}
+                    {region.invalid ? (
+                      <p role="alert" className="text-xs text-destructive">
+                        模板修改已使这个区域坐标失效；请删除后重新框选，系统不会猜测迁移。
+                      </p>
                     ) : null}
                   </div>
                 ))}
+                {!regions.length ? <p className="text-sm text-muted-foreground">尚未设置作答区域。</p> : null}
                 <div className="border-y border-border/70 py-4">
                   <p className="mb-3 text-xs font-medium text-muted-foreground">学生输入预览（不展示后台完整模板）</p>
-                  <StructuredRegionInputs regions={regions} values={{}} onChange={() => {}} singleLine={kind === 'program_fill'} readOnly />
+                  <StructuredRegionInputs
+                    regions={regions.map((region) => ({
+                      id: region.id || region.key,
+                      signature: region.signature,
+                      description: region.description,
+                      prompt: region.prompt,
+                    }))}
+                    values={{}}
+                    onChange={() => {}}
+                    singleLine={kind === 'program_fill'}
+                    readOnly
+                  />
                 </div>
               </section>
               <section className="space-y-3 border-t border-border/70 pt-5">

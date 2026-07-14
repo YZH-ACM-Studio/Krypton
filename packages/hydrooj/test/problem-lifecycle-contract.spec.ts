@@ -31,7 +31,7 @@ describe('P2.12 YAGNI lifecycle contract', () => {
 
     it('passes the private raw objective config to the judge without exposing it through page reads', () => {
         const source = readFileSync(resolve(root, 'src/model/record.ts'), 'utf8');
-        expect(source).to.include('problem.get(domainId, rdocs[0].pid, undefined, true)');
+        expect(source).to.include('problem.get(domainId, group[0].pid, undefined, true)');
         expect(source).to.match(/const judgeConfig\s*=\s*parseProblemConfigObject\(pdoc\)/);
         expect(source).to.include('...judgeConfig');
     });
@@ -190,7 +190,7 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(source).to.include('assertProblemReadyForUseWithTrace(');
         expect(lifecycle).to.include("pdoc.codeEvaluationStatus !== 'ready'");
         expect(lifecycle).to.include('validateCompiledStructuredConfig(String(pdoc.problemKind), config)');
-        expect(lifecycle).to.include('validateFillFunctionTestdataFiles(config, pdoc.data || [])');
+        expect(lifecycle).to.include('validateStructuredCodeTestdataFiles(config, pdoc.data || []');
     });
 
     it('blocks every config yaml alias at direct, claimed, and event-backed structured writes', () => {

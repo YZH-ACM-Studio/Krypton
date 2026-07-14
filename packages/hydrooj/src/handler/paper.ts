@@ -33,7 +33,7 @@ import {
     Types,
     UserModel,
     validateCompiledStructuredConfig,
-    validateFillFunctionJudgeConfig,
+    validateStructuredCodeJudgeConfig,
     validateTextProgramFillSubmission,
     ValidationError,
 } from 'hydrooj';
@@ -109,7 +109,7 @@ function validatePaperRegionSubmission(
     const effectiveKind = effectiveProblemKind(pdoc);
     const kind = effectiveKind === 'program_fill' || effectiveKind === 'function' ? effectiveKind : 'fill_function';
     try {
-        validateFillFunctionJudgeConfig(config);
+        validateStructuredCodeJudgeConfig(config, effectiveKind === 'function' ? 'function' : 'program_fill');
         validateCompiledStructuredConfig(effectiveKind, config);
         if (typeof rawCode !== 'string') throw new Error(`${kind}: region payload is required`);
         parseStructuredRegionSubmission(kind, config.template, rawCode);
@@ -448,7 +448,7 @@ class PaperLayoutHandler extends PaperBaseHandler {
                         prompt: meta?.prompt,
                     });
                 }
-            } else if (type === 'fill_function') {
+            } else if (['fill_function', 'function'].includes(type)) {
                 const kind = effectiveProblemKind(pdoc);
                 cells.push({
                     pid,
@@ -599,7 +599,7 @@ class PaperDraftUpsertHandler extends PaperBaseHandler {
             uid: this.user._id,
             stage: 'draft-save',
         });
-        if (config?.type === 'fill_function') {
+        if (['fill_function', 'function'].includes(config?.type)) {
             const validated = validatePaperRegionSubmission(pdoc, config, code, {
                 domainId,
                 tid: this.tid,
@@ -675,8 +675,8 @@ class PaperSubmitCodeHandler extends PaperBaseHandler {
         if (!pdoc) throw new NotFoundError('Problem');
         const config = parsedProblemConfig(pdoc);
         const type = config?.type || 'default';
-        if (!['default', 'fill_function'].includes(type)) {
-            throw new ValidationError('type', null, 'Only default and fill_function problems support immediate submit');
+        if (!['default', 'fill_function', 'function'].includes(type)) {
+            throw new ValidationError('type', null, 'Only default and structured-code problems support immediate submit');
         }
 
         const draft = await PaperDraftModel.getDraft(domainId, this.tid, pid, this.user._id);
@@ -684,7 +684,7 @@ class PaperSubmitCodeHandler extends PaperBaseHandler {
             throw new ValidationError('draft', null, 'No code saved yet — call save first');
         }
         const validated =
-            type === 'fill_function'
+            ['fill_function', 'function'].includes(type)
                 ? validatePaperRegionSubmission(pdoc, config, draft.code, {
                       domainId,
                       tid: this.tid,
@@ -751,7 +751,7 @@ export async function finalizePaperForUser(
                 await markManualPending({ domainId, tid, pid: draft.pid, uid, rid });
             }
             rids.push(rid);
-        } else if (type === 'fill_function') {
+        } else if (['fill_function', 'function'].includes(type)) {
             const codeBody = draft.code || JSON.stringify(draft.answers || {});
             const validated = validatePaperRegionSubmission(pdoc, config, codeBody, {
                 domainId,

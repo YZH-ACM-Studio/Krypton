@@ -5,7 +5,7 @@
  */
 import { createHash } from 'node:crypto';
 import yaml from 'js-yaml';
-import type { AnswerEntry, FillFunctionTemplate, FillRegion, QuestionKind } from '@hydrooj/common';
+import type { AnswerEntry, QuestionKind, StructuredCodeTemplate } from '@hydrooj/common';
 
 /**
  * pdoc.config 在库里是 YAML 字符串（与 testdata config.yaml 镜像）。
@@ -180,230 +180,152 @@ export function clientProblemConfig(config: any): any {
         for (const q of out.questions) if (q.choices) options[q.key] = q.choices;
         if (Object.keys(options).length) out.options = options;
     }
-    if (config.type === 'fill_function' && config.template) {
+    if (['fill_function', 'function'].includes(config.type) && config.template) {
+        const regions = Array.isArray(config.template.regions)
+            ? [...config.template.regions].sort((a, b) => Number(a.order) - Number(b.order))
+            : [];
         out.template = {
             lang: config.template.lang,
-            regions: Array.isArray(config.template.regions)
-                ? config.template.regions.map((region) => ({
-                      id: region.id,
-                      ...(region.prompt ? { prompt: region.prompt } : {}),
-                  }))
-                : [],
+            regions: regions.map((region) => ({
+                id: region.id,
+                ...(config.type === 'function'
+                    ? {
+                          signature: region.signature,
+                          ...(region.description ? { description: region.description } : {}),
+                      }
+                    : region.prompt
+                      ? { prompt: region.prompt }
+                      : {}),
+            })),
         };
     }
     if (config.subType) out.subType = config.subType;
     return out;
 }
 
-// ─── FillFunction region splicing ─────────────────────────────────────────
+// ─── Structured-code whole-line regions ───────────────────────────────────
 
 /** SHA-256 of the template source. Used for draft staleness detection. */
 export function templateSourceHash(source: string): string {
     return createHash('sha256').update(source).digest('hex');
 }
 
-/**
- * Splice student-provided region contents back into the template `source`.
- *
- * Algorithm (PRD §1.7): sort regions by start position descending, replace
- * each range with the student's content. Replacing from the end backwards
- * keeps earlier ranges' line/col anchors valid even when student content
- * has more or fewer newlines than the original.
- *
- * Throws on invalid input: unknown region id, missing region, out-of-bounds.
- */
-export function spliceFillFunction(template: FillFunctionTemplate, regionContents: Record<string, string>): string {
+export const STRUCTURED_CODE_REGION_ID = /^r_[A-Za-z0-9_-]{12,32}$/;
+
+export function validateStructuredCodeTemplate(
+    template: StructuredCodeTemplate,
+    kind: 'program_fill' | 'function',
+    options: { allowEmpty?: boolean; allowEmptySignature?: boolean } = {},
+): void {
+    if (!template || typeof template !== 'object') throw new Error(`${kind}: missing private template`);
+    if (typeof template.source !== 'string') throw new Error(`${kind}: template source must be text`);
+    if (template.source.includes('\r')) throw new Error(`${kind}: template source must use LF line endings`);
+    if (!options.allowEmpty && !template.source.length) throw new Error(`${kind}: template source is required`);
+    if (!template.lang || typeof template.lang !== 'string') throw new Error(`${kind}: template language is required`);
+    if (template.sourceHash !== templateSourceHash(template.source)) throw new Error(`${kind}: template source hash mismatch`);
+    if (!Array.isArray(template.regions)) throw new Error(`${kind}: template regions must be an array`);
+    if (!options.allowEmpty && !template.regions.length) throw new Error(`${kind}: at least one region is required`);
+
+    const lines = template.source.split('\n');
+    const ids = new Set<string>();
+    const orders = new Set<number>();
+    for (const [index, region] of template.regions.entries()) {
+        if (!region || typeof region !== 'object') throw new Error(`${kind}: region ${index + 1} is invalid`);
+        if (!STRUCTURED_CODE_REGION_ID.test(region.id)) throw new Error(`${kind}: region ${index + 1} has an invalid server id`);
+        if (ids.has(region.id)) throw new Error(`${kind}: duplicate region id "${region.id}"`);
+        ids.add(region.id);
+        if (!Number.isSafeInteger(region.order) || region.order < 0) throw new Error(`${kind}: region ${region.id} has an invalid order`);
+        if (orders.has(region.order)) throw new Error(`${kind}: duplicate region order ${region.order}`);
+        orders.add(region.order);
+        if (!Number.isSafeInteger(region.startLine) || !Number.isSafeInteger(region.endLine)) {
+            throw new TypeError(`${kind}: region ${region.id} has invalid line bounds`);
+        }
+        if (region.startLine < 0 || region.endLine <= region.startLine || region.endLine > lines.length) {
+            throw new Error(`${kind}: region ${region.id} is out of bounds`);
+        }
+        if (kind === 'program_fill' && region.endLine !== region.startLine + 1) {
+            throw new Error('program_fill: every editable region must be exactly one line');
+        }
+        if (kind === 'function') {
+            if (typeof region.signature !== 'string') throw new Error(`function: region ${region.id} signature must be text`);
+            if (!options.allowEmptySignature && !region.signature.trim()) {
+                throw new Error(`function: region ${region.id} signature is required`);
+            }
+            if (region.description !== undefined && typeof region.description !== 'string') {
+                throw new Error(`function: region ${region.id} description must be text`);
+            }
+        } else if (region.prompt !== undefined && typeof region.prompt !== 'string') {
+            throw new Error(`program_fill: region ${region.id} prompt must be text`);
+        }
+    }
+    if (orders.size && [...orders].sort((a, b) => a - b).some((order, index) => order !== index)) {
+        throw new Error(`${kind}: region order must be a contiguous zero-based sequence`);
+    }
+    const bySource = [...template.regions].sort((a, b) => a.startLine - b.startLine || a.endLine - b.endLine);
+    for (let index = 1; index < bySource.length; index++) {
+        if (bySource[index - 1].endLine > bySource[index].startLine) {
+            throw new Error(`${kind}: regions "${bySource[index - 1].id}" and "${bySource[index].id}" overlap`);
+        }
+    }
+}
+
+/** Replace whole-line regions from the end so earlier source coordinates stay stable. */
+export function spliceStructuredCodeTemplate(
+    template: StructuredCodeTemplate,
+    regionContents: Record<string, string>,
+    kind: 'program_fill' | 'function',
+): string {
+    validateStructuredCodeTemplate(template, kind);
     const expected = new Set(template.regions.map((region) => region.id));
     const unknown = Object.keys(regionContents).find((id) => !expected.has(id));
-    if (unknown) throw new Error(`fill_function: unknown region "${unknown}"`);
+    if (unknown) throw new Error(`${kind}: unknown region "${unknown}"`);
     const lines = template.source.split('\n');
-    const sortedRegions = [...template.regions].sort((a, b) => {
-        if (a.start.line !== b.start.line) return b.start.line - a.start.line;
-        return b.start.col - a.start.col;
-    });
+    const sortedRegions = [...template.regions].sort((a, b) => b.startLine - a.startLine);
 
     for (const region of sortedRegions) {
         const content = regionContents[region.id];
-        if (content === undefined) {
-            throw new Error(`fill_function: missing region "${region.id}"`);
-        }
-        validateRegionBounds(lines, region);
-        spliceOne(lines, region, content);
+        if (content === undefined) throw new Error(`${kind}: missing region "${region.id}"`);
+        const replacement = content.replace(/\r\n?/g, '\n').split('\n');
+        lines.splice(region.startLine, region.endLine - region.startLine, ...replacement);
     }
     return lines.join('\n');
-}
-
-function validateRegionBounds(lines: string[], region: FillRegion): void {
-    if (region.start.line < 0 || region.start.line >= lines.length) {
-        throw new Error(`fill_function: region "${region.id}" start.line out of bounds`);
-    }
-    if (region.end.line < region.start.line || region.end.line >= lines.length) {
-        throw new Error(`fill_function: region "${region.id}" end.line out of bounds`);
-    }
-    if (region.start.col < 0) {
-        throw new Error(`fill_function: region "${region.id}" start.col negative`);
-    }
-    if (region.start.col > lines[region.start.line].length) {
-        throw new Error(`fill_function: region "${region.id}" start.col out of bounds`);
-    }
-    if (region.end.col < 0 || region.end.col > lines[region.end.line].length) {
-        throw new Error(`fill_function: region "${region.id}" end.col out of bounds`);
-    }
-    if (region.start.line === region.end.line && region.end.col < region.start.col) {
-        throw new Error(`fill_function: region "${region.id}" end precedes start`);
-    }
-}
-
-function spliceOne(lines: string[], region: FillRegion, content: string): void {
-    const { start, end } = region;
-    const before = lines[start.line].slice(0, start.col);
-    const after = lines[end.line].slice(end.col);
-    const contentLines = content.split('\n');
-    if (contentLines.length === 1) {
-        lines.splice(start.line, end.line - start.line + 1, before + contentLines[0] + after);
-    } else {
-        const newLines = [before + contentLines[0], ...contentLines.slice(1, -1), contentLines[contentLines.length - 1] + after];
-        lines.splice(start.line, end.line - start.line + 1, ...newLines);
-    }
-}
-
-/**
- * Validate that regions don't overlap and have valid bounds. Called by the
- * problem-edit handler before persisting `config.template`.
- */
-export function validateRegions(template: Pick<FillFunctionTemplate, 'source' | 'regions'>): void {
-    const lines = template.source.split('\n');
-    const seen = new Set<string>();
-    for (const r of template.regions) {
-        if (seen.has(r.id)) throw new Error(`fill_function: duplicate region id "${r.id}"`);
-        seen.add(r.id);
-        validateRegionBounds(lines, r);
-    }
-    // Check non-overlap by sorting and comparing adjacent.
-    const sorted = [...template.regions].sort((a, b) => {
-        if (a.start.line !== b.start.line) return a.start.line - b.start.line;
-        return a.start.col - b.start.col;
-    });
-    for (let i = 1; i < sorted.length; i++) {
-        const prev = sorted[i - 1];
-        const cur = sorted[i];
-        if (prev.end.line > cur.start.line || (prev.end.line === cur.start.line && prev.end.col > cur.start.col)) {
-            throw new Error(`fill_function: regions "${prev.id}" and "${cur.id}" overlap`);
-        }
-    }
-}
-
-export interface RegionMarkerMetadata {
-    id: string;
-    prompt?: string;
-}
-
-const REGION_START = /^\s*\/\/\s*@krypton-region\s+([A-Za-z][A-Za-z0-9_-]{0,31})\s*$/;
-const REGION_END = /^\s*\/\/\s*@krypton-endregion\s+([A-Za-z][A-Za-z0-9_-]{0,31})\s*$/;
-
-export function parseRegionMarkers(markerSource: string, metadata: RegionMarkerMetadata[]): FillFunctionTemplate {
-    if (typeof markerSource !== 'string' || !markerSource.trim()) {
-        throw new Error('fill_function: template source is required');
-    }
-    if (!Array.isArray(metadata) || !metadata.length) {
-        throw new Error('fill_function: at least one region is required');
-    }
-    const metaById = new Map<string, RegionMarkerMetadata>();
-    for (const item of metadata) {
-        if (!item || typeof item.id !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(item.id)) {
-            throw new Error('fill_function: invalid region id');
-        }
-        if (metaById.has(item.id)) throw new Error(`fill_function: duplicate region id "${item.id}"`);
-        if (item.prompt !== undefined && typeof item.prompt !== 'string') {
-            throw new Error(`fill_function: invalid prompt for region "${item.id}"`);
-        }
-        metaById.set(item.id, { id: item.id, ...(item.prompt?.trim() ? { prompt: item.prompt.trim() } : {}) });
-    }
-    const output: string[] = [];
-    const parsed = new Map<string, FillRegion>();
-    let active: { id: string; startLine: number } | null = null;
-    for (const line of markerSource.replace(/\r\n/g, '\n').split('\n')) {
-        const start = line.match(REGION_START);
-        const end = line.match(REGION_END);
-        if (start) {
-            if (active) throw new Error(`fill_function: nested region "${start[1]}"`);
-            if (parsed.has(start[1])) throw new Error(`fill_function: duplicate marker "${start[1]}"`);
-            active = { id: start[1], startLine: output.length };
-            continue;
-        }
-        if (end) {
-            if (!active || active.id !== end[1]) {
-                throw new Error(`fill_function: unmatched end marker "${end[1]}"`);
-            }
-            if (output.length === active.startLine) {
-                throw new Error(`fill_function: region "${active.id}" needs a placeholder line`);
-            }
-            const endLine = output.length - 1;
-            parsed.set(active.id, {
-                id: active.id,
-                start: { line: active.startLine, col: 0 },
-                end: { line: endLine, col: output[endLine].length },
-            });
-            active = null;
-            continue;
-        }
-        if (line.includes('@krypton-region') || line.includes('@krypton-endregion')) {
-            throw new Error('fill_function: malformed region marker');
-        }
-        output.push(line);
-    }
-    if (active) throw new Error(`fill_function: missing end marker for "${active.id}"`);
-    if (parsed.size !== metaById.size) throw new Error('fill_function: marker and region metadata do not match');
-    const regions = metadata.map((item) => {
-        const region = parsed.get(item.id);
-        if (!region) throw new Error(`fill_function: missing marker for "${item.id}"`);
-        return { ...region, ...(metaById.get(item.id)?.prompt ? { prompt: metaById.get(item.id)!.prompt } : {}) };
-    });
-    const source = output.join('\n');
-    const template = { lang: '', source, regions, sourceHash: templateSourceHash(source) };
-    validateRegions(template);
-    return template;
 }
 
 export function validateCompiledStructuredConfig(kind: string, config: any): void {
     if (kind === 'program_fill' && config?.main?.mode === 'text') return;
     if (!['program_fill', 'function'].includes(kind)) return;
-    const expectedSubType = kind === 'program_fill' ? 'program_fill_compile' : 'function';
-    if (config?.type !== 'fill_function' || config?.subType !== expectedSubType) {
+    const expectedType = kind === 'function' ? 'function' : 'fill_function';
+    if (config?.type !== expectedType || (kind === 'program_fill' && config?.subType !== 'program_fill_compile')) {
         throw new Error(`${kind}: invalid compile configuration`);
     }
-    validateFillFunctionJudgeConfig(config);
-    const template = config.template as FillFunctionTemplate;
+    validateStructuredCodeJudgeConfig(config, kind as 'program_fill' | 'function');
+    const template = config.template as StructuredCodeTemplate;
     if (!Array.isArray(config.langs) || config.langs.length !== 1 || config.langs[0] !== template.lang) {
         throw new Error(`${kind}: language mismatch`);
     }
     if (kind === 'program_fill') {
-        if (template.regions.length !== 1 || template.regions[0].id !== 'main') {
-            throw new Error('program_fill: compile mode requires exactly one main region');
-        }
-        const region = template.regions[0];
-        if (region.start.line !== region.end.line) throw new Error('program_fill: editable region must be one line');
+        if (template.regions.length !== 1) throw new Error('program_fill: compile mode currently requires exactly one region');
     }
 }
 
-/** Validate the private configuration required before any fill-function record is created. */
-export function validateFillFunctionJudgeConfig(config: any): void {
-    if (config?.type !== 'fill_function') throw new Error('fill_function: invalid problem type');
-    const template = config.template as FillFunctionTemplate;
-    if (!template?.source || !template.lang || !Array.isArray(template.regions) || !template.regions.length) {
-        throw new Error('fill_function: missing template configuration');
-    }
-    validateRegions(template);
-    if (!Array.isArray(config.cases) || !config.cases.length) {
-        throw new Error('fill_function: testdata cases are required');
-    }
+/** Validate the private configuration required before a structured-code record is created. */
+export function validateStructuredCodeJudgeConfig(config: any, kindInput?: 'program_fill' | 'function'): void {
+    const kind = kindInput || (config?.type === 'function' ? 'function' : 'program_fill');
+    const expectedType = kind === 'function' ? 'function' : 'fill_function';
+    if (config?.type !== expectedType) throw new Error(`${kind}: invalid problem type`);
+    validateStructuredCodeTemplate(config.template as StructuredCodeTemplate, kind);
+    if (!Array.isArray(config.cases) || !config.cases.length) throw new Error(`${kind}: testdata cases are required`);
 }
 
-export function validateFillFunctionTestdataFiles(config: any, files: Array<{ name: string }>): void {
-    validateFillFunctionJudgeConfig(config);
+export function validateStructuredCodeTestdataFiles(
+    config: any,
+    files: Array<{ name: string }>,
+    kindInput?: 'program_fill' | 'function',
+): void {
+    validateStructuredCodeJudgeConfig(config, kindInput);
     const available = new Set((files || []).map((item) => item.name));
     const missing = (config.cases || []).flatMap((item) => [item.input, item.output]).find((name) => !available.has(name));
-    if (missing) throw new Error(`fill_function: missing testdata file ${missing}`);
+    if (missing) throw new Error(`${kindInput || config.type}: missing testdata file ${missing}`);
 }
 
 /** Parse and validate a student region payload before inserting a Record. */
@@ -425,7 +347,7 @@ export function parseStructuredRegionSubmission(
         throw new Error(`${kind}: region payload must be an object`);
     }
     const expected = template.regions.map((region) => region.id).sort();
-    if (expected.some((id) => typeof id !== 'string' || !/^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(id))) {
+    if (expected.some((id) => typeof id !== 'string' || !STRUCTURED_CODE_REGION_ID.test(id))) {
         throw new Error(`${kind}: invalid template region id`);
     }
     if (new Set(expected).size !== expected.length) throw new Error(`${kind}: duplicate template region id`);
@@ -437,8 +359,8 @@ export function parseStructuredRegionSubmission(
     if (actual.some((id) => typeof result[id] !== 'string')) {
         throw new Error(`${kind}: every region value must be a string`);
     }
-    if (kind === 'program_fill' && /[\r\n]/.test(result.main as string)) {
-        throw new Error('program_fill: compile submission must be one line');
+    if (kind === 'program_fill' && actual.some((id) => /[\r\n]/.test(result[id] as string))) {
+        throw new Error('program_fill: every submitted region must be one line');
     }
     return result as Record<string, string>;
 }

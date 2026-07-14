@@ -231,8 +231,8 @@ describe('P2.12 minimal problem lifecycle', () => {
             main: {
                 mode: 'compile',
                 lang: 'cc.cc17',
-                markerSource: ['int main() {', '// @krypton-region main', 'i++;', '// @krypton-endregion main', '}'].join('\n'),
-                regions: [{ id: 'main', prompt: '填写一行' }],
+                source: ['int main() {', 'i++;', '}'].join('\n'),
+                regions: [{ id: '', startLine: 1, endLine: 2, order: 0, prompt: '填写一行' }],
                 cases: [{ input: '1.in', output: '1.out' }],
             },
         });
@@ -242,7 +242,7 @@ describe('P2.12 minimal problem lifecycle', () => {
             score: 100,
         });
         expect(compiled).to.have.nested.property('template.lang', 'cc.cc17');
-        expect(compiled).to.have.nested.property('template.regions[0].id', 'main');
+        expect(compiled).to.have.nested.property('template.regions[0].id').that.matches(/^r_[A-Za-z0-9_-]{12,32}$/);
         expect(lifecycle.structuredProblemUsesTestdata('program_fill', compiled)).to.equal(true);
         expect(
             lifecycle.structuredProblemUsesTestdata('program_fill', {
@@ -261,25 +261,17 @@ describe('P2.12 minimal problem lifecycle', () => {
             main: {
                 mode: 'function',
                 lang: 'cc.cc17',
-                markerSource: [
-                    '// @krypton-region first',
-                    'int first() {',
-                    '  return 1;',
-                    '}',
-                    '// @krypton-endregion first',
-                    '// @krypton-region second',
-                    'int second() {',
-                    '  return 2;',
-                    '}',
-                    '// @krypton-endregion second',
-                ].join('\n'),
-                regions: [{ id: 'first' }, { id: 'second', prompt: '第二个函数' }],
+                source: ['int first() {', '  return 1;', '}', 'int second() {', '  return 2;', '}'].join('\n'),
+                regions: [
+                    { id: '', startLine: 0, endLine: 3, order: 1, signature: 'int first()' },
+                    { id: '', startLine: 3, endLine: 6, order: 0, signature: 'int second()', description: '第二个函数' },
+                ],
                 cases: [{ input: '1.in', output: '1.out' }],
             },
         });
-        expect(compiled).to.include({ type: 'fill_function', subType: 'function', score: 100 });
+        expect(compiled).to.include({ type: 'function', score: 100 });
         expect(compiled).to.have.nested.property('template.regions').with.length(2);
-        expect(compiled).to.have.nested.property('template.regions[1].prompt', '第二个函数');
+        expect(compiled).to.have.nested.property('template.regions[0].description', '第二个函数');
         expect(lifecycle.structuredProblemUsesTestdata('function', compiled)).to.equal(true);
     });
 
@@ -288,13 +280,12 @@ describe('P2.12 minimal problem lifecycle', () => {
             main: {
                 mode: 'function',
                 lang: 'cc.cc17',
-                markerSource: ['// @krypton-region solve', 'int solve() { return 1; }', '// @krypton-endregion solve'].join('\n'),
-                regions: [{ id: 'solve' }],
+                source: 'int solve() { return 1; }',
+                regions: [{ id: '', startLine: 0, endLine: 1, order: 0, signature: 'int solve()' }],
                 cases: [{ input: '1.in', output: '1.out' }],
             },
         });
         const clone = lifecycle.cloneStructuredProblemForLanguage('function', source, 'py.py3');
-        expect(clone).to.have.nested.property('main.lang', 'py.py3');
         expect(clone).to.have.nested.property('template.lang', 'py.py3');
         expect(clone).to.have.nested.property('langs[0]', 'py.py3');
         expect(clone).to.have.nested.property('template.source', (source as any).template.source);

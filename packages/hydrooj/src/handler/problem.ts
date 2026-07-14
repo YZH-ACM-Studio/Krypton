@@ -68,7 +68,7 @@ import {
     MANAGED_SOURCE_TEMPLATES,
     materializeKnowledgeMindmapTags,
 } from '../model/managed-problem-authoring';
-import { structuredProblemUsesTestdata } from '../model/problem-lifecycle';
+import { structuredProblemConfigForEditor, structuredProblemUsesTestdata } from '../model/problem-lifecycle';
 import record from '../model/record';
 import * as setting from '../model/setting';
 import solution from '../model/solution';
@@ -938,7 +938,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             throw new ValidationError('rule', null, '主观题仅允许在 exam、homework 或 oi 容器中提交');
         }
         if (typeof config === 'string' || config === null) throw new ProblemConfigError();
-        if (config.type === 'fill_function' && ['program_fill', 'function'].includes(problemKind)) {
+        if (['fill_function', 'function'].includes(config.type) && ['program_fill', 'function'].includes(problemKind)) {
             lang = config.template?.lang || '';
         }
         if (['submit_answer', 'objective'].includes(config.type)) {
@@ -995,7 +995,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
                 throw new ValidationError('code', null, error.message);
             }
         }
-        if (config.type === 'fill_function' && ['program_fill', 'function'].includes(problemKind)) {
+        if (['fill_function', 'function'].includes(config.type) && ['program_fill', 'function'].includes(problemKind)) {
             try {
                 const structuredKind = problemKind === 'program_fill' ? 'program_fill' : 'function';
                 parseStructuredRegionSubmission(structuredKind, config.template, code);
@@ -1147,9 +1147,12 @@ export class ProblemEditHandler extends ProblemManageHandler {
         const problemKind = effectiveProblemKind(this.pdoc);
         if (isDedicatedStructuredEditorKind(problemKind)) {
             const config = parseProblemConfigObject(rawPdoc);
-            if (!config?.main) throw new ValidationError('config', null, '结构化题缺少 main 配置');
+            const editorConfig = structuredProblemConfigForEditor(problemKind, config);
+            if (!editorConfig.main || typeof editorConfig.main !== 'object') {
+                throw new ValidationError('config', null, '结构化题缺少 main 配置');
+            }
             this.response.body.editorProblemKind = problemKind;
-            this.response.body.structuredConfig = { main: config.main };
+            this.response.body.structuredConfig = editorConfig;
             this.response.body.knowledgeMindmapOptions = await listKnowledgeMindmapOptions();
             this.response.body.canUseCustomPid = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
             if ([PROGRAM_FILL_KIND, FUNCTION_KIND].includes(problemKind as any)) {

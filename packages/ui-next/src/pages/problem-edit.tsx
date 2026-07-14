@@ -83,6 +83,45 @@ interface UserOption {
   avatarUrl?: string;
 }
 
+async function loadDomainUsers(domainId: string, query: string): Promise<UserOption[]> {
+  const search = query.trim();
+  if (!search) return [];
+  const response = await fetch(`/d/${encodeURIComponent(domainId)}/api/users`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      args: { search, limit: 10, exact: false },
+      projection: ['_id', 'uname', 'mail', 'avatarUrl'],
+    }),
+  });
+  if (!response.ok) throw new Error(await responseErrorMessage(response, '用户搜索失败'));
+  const users = await response.json();
+  if (!Array.isArray(users) || users.some((item) => !Number.isSafeInteger(item?._id) || item._id <= 0)) {
+    throw new Error('用户搜索响应格式错误');
+  }
+  return users;
+}
+
+function userSearchLabel(user: UserOption) {
+  return `${user.uname || `uid:${user._id}`} ${user._id} ${user.mail || ''}`;
+}
+
+function UserSearchOption({ user }: { user: UserOption }) {
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span className="truncate text-sm font-medium">
+        {user.uname || `uid:${user._id}`}
+        <span className="ml-2 font-mono text-[11px] text-muted-foreground">UID {user._id}</span>
+      </span>
+      {user.mail ? <span className="truncate text-[11px] text-muted-foreground">{user.mail}</span> : null}
+    </span>
+  );
+}
+
 type PermitRole = PermitRow['role'];
 
 const PERMIT_ROLE_LABELS: Record<PermitRole, string> = {
@@ -135,34 +174,13 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
 
   const searchUsers = useCallback(
     async (query: string): Promise<UserOption[]> => {
-      const q = query.trim();
-      if (!q) return [];
       setInviteError('');
       try {
-        const domainId = encodeURIComponent(bs.domain?.id || 'system');
-        const r = await fetch(`/d/${domainId}/api/users`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            args: { search: q, limit: 10, exact: false },
-            projection: ['_id', 'uname', 'mail', 'avatarUrl'],
-          }),
-        });
-        if (!r.ok) {
-          setInviteError(await responseErrorMessage(r, '用户搜索失败'));
-          return [];
-        }
-        const users = await r.json();
-        if (!Array.isArray(users)) throw new Error('用户搜索响应格式错误');
-        return users;
+        return await loadDomainUsers(bs.domain?.id || 'system', query);
       } catch (error) {
         console.error('Failed to search problem collaborators', error);
         setInviteError(error instanceof Error ? error.message : '用户搜索失败');
-        return [];
+        throw error;
       }
     },
     [bs.domain?.id],
@@ -312,22 +330,14 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
                 }}
                 loadOptions={searchUsers}
                 getKey={(u) => String(u._id)}
-                getLabel={(u) => `${u.uname || `uid:${u._id}`} ${u._id} ${u.mail || ''}`}
+                getLabel={userSearchLabel}
                 renderChip={(u) => (
                   <span className="inline-flex items-center gap-1">
                     <span className="font-medium">{u.uname || `uid:${u._id}`}</span>
                     <span className="font-mono text-[10px] text-muted-foreground">#{u._id}</span>
                   </span>
                 )}
-                renderOption={(u) => (
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate text-sm font-medium">
-                      {u.uname || `uid:${u._id}`}
-                      <span className="ml-2 font-mono text-[11px] text-muted-foreground">UID {u._id}</span>
-                    </span>
-                    {u.mail ? <span className="truncate text-[11px] text-muted-foreground">{u.mail}</span> : null}
-                  </span>
-                )}
+                renderOption={(u) => <UserSearchOption user={u} />}
                 name="uids"
                 placeholder="输入 UID / 用户名 / 邮箱搜索"
                 emptyText="没有找到用户"
@@ -556,6 +566,8 @@ export function ProblemEditPage() {
   const [sourceSeason, setSourceSeason] = useState(String(pdoc.sourceMeta?.season || 'spring'));
   const [sourceLevel, setSourceLevel] = useState(String(pdoc.sourceMeta?.level || 'L1'));
   const [sourceRound, setSourceRound] = useState(String(pdoc.sourceMeta?.round || 1));
+  const [selectedManagedAuthors, setSelectedManagedAuthors] = useState<UserOption[]>([]);
+  const [managedAuthorSearchError, setManagedAuthorSearchError] = useState('');
   const initialMindmapIds = new Set((pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String));
   const [selectedMindmapNodes, setSelectedMindmapNodes] = useState<ManagedMindmapOption[]>(
     mindmapOptions.filter((option) => initialMindmapIds.has(option.id)),
@@ -571,6 +583,20 @@ export function ProblemEditPage() {
   const managedTags = [
     ...new Set([...(isCreate ? sourcePreviewTags : pdoc.tag || []), ...(isCreate ? selectedMindmapNodes.flatMap((node) => node.tags) : [])]),
   ];
+
+  const searchManagedAuthors = useCallback(
+    async (query: string): Promise<UserOption[]> => {
+      setManagedAuthorSearchError('');
+      try {
+        return await loadDomainUsers(bs.domain?.id || 'system', query);
+      } catch (error) {
+        console.error('Failed to search managed problem authors', error);
+        setManagedAuthorSearchError(error instanceof Error ? error.message : '用户搜索失败');
+        throw error;
+      }
+    },
+    [bs.domain?.id],
+  );
 
   useEffect(() => {
     if (!selectedTrainingId || eligibleTrainings.some((training) => training.id === selectedTrainingId)) return;
@@ -637,6 +663,13 @@ export function ProblemEditPage() {
     }
     e.preventDefault();
     setSaveError('');
+    if (managed && isCreate && canChooseManagedCreate && selectedManagedAuthors.length !== 1) {
+      const message = '请选择一名出题人。';
+      setManagedAuthorSearchError(message);
+      setSaveError(message);
+      setSaveState('error');
+      return;
+    }
     setSaveState('saving');
     const form = e.currentTarget;
     const fd = new FormData(form);
@@ -967,11 +1000,39 @@ export function ProblemEditPage() {
                           </div>
                         ) : null}
                         {canChooseManagedCreate ? (
-                          <div className="space-y-1.5">
-                            <label className="text-sm font-medium" htmlFor="managed-author-uid">
-                              出题人 UID
-                            </label>
-                            <Input id="managed-author-uid" name="authorUid" type="number" min={1} required />
+                          <div className="space-y-1.5" role="group" aria-labelledby="managed-author-label">
+                            <span id="managed-author-label" className="text-sm font-medium">
+                              出题人
+                            </span>
+                            <MultiSelect<UserOption>
+                              value={selectedManagedAuthors}
+                              onChange={(next) => {
+                                setSelectedManagedAuthors(next);
+                                setManagedAuthorSearchError('');
+                                markDirty();
+                              }}
+                              loadOptions={searchManagedAuthors}
+                              getKey={(user) => String(user._id)}
+                              getLabel={userSearchLabel}
+                              renderChip={(user) => (
+                                <span className="inline-flex items-center gap-1">
+                                  <span className="font-medium">{user.uname || `uid:${user._id}`}</span>
+                                  <span className="font-mono text-[10px] text-muted-foreground">#{user._id}</span>
+                                </span>
+                              )}
+                              renderOption={(user) => <UserSearchOption user={user} />}
+                              name="authorUid"
+                              maxItems={1}
+                              placeholder="输入 UID / 用户名 / 邮箱搜索"
+                              emptyText="没有找到域内用户"
+                              minHeight={44}
+                            />
+                            <p className="text-xs text-muted-foreground">只能选择当前域中的一名用户；服务端会再次校验。</p>
+                            {managedAuthorSearchError ? (
+                              <p role="alert" className="text-xs text-destructive">
+                                {managedAuthorSearchError}
+                              </p>
+                            ) : null}
                           </div>
                         ) : null}
                       </div>

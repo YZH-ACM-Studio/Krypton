@@ -664,8 +664,7 @@ export interface GalleryMember {
     score?: number;
 }
 
-export interface GalleryCard {
-    kind: 'ladder' | 'icpc';
+interface GalleryCardBase {
     year: number | null;
     /** ladder = 奖项类型名（天梯赛-团队一等奖）；icpc = 比赛名。 */
     title: string;
@@ -680,13 +679,28 @@ export interface GalleryCard {
     uploadTarget: { personId: string; awardIndex: number };
 }
 
+export type GalleryTeamRankStatus = 'confirmed' | 'missing' | 'conflict';
+export type LadderGalleryCard = GalleryCardBase & { kind: 'ladder' };
+export type IcpcGalleryCard = GalleryCardBase & {
+    kind: 'icpc';
+    /** ICPC/CCPC 现场队伍排名；异常态必须为 null。 */
+    teamRank: number | null;
+    teamRankStatus: GalleryTeamRankStatus;
+};
+export type GalleryCard = LadderGalleryCard | IcpcGalleryCard;
+export interface GalleryYearBucket {
+    year: number | null;
+    ladder: LadderGalleryCard[];
+    icpc: IcpcGalleryCard[];
+}
+
 /**
  * 按年聚合获奖卡片：天梯赛 = 团队奖按 (year, type, team) 去重合并成员；
  * ICPC/CCPC = 按 (year, contest, team) 一队一卡。年份读取时派生
  * `gpltYear ?? parseInt(date)`（生产数据 ICPC/CCPC 100% 有 date，天梯有
  * gpltYear），两者皆缺进 year=null 分组。照片取组内所有成员奖项的并集。
  */
-export async function buildGallery(): Promise<{ years: Array<{ year: number | null; ladder: GalleryCard[]; icpc: GalleryCard[] }> }> {
+export async function buildGallery(): Promise<{ years: GalleryYearBucket[] }> {
     const [people, awardTypes] = await Promise.all([listPeople(), listAwardTypes({ includeHidden: true })]);
     await applyGpltStoreScores(people);
     const typeMap = new Map(awardTypes.map((t) => [t.key, t]));
@@ -709,6 +723,7 @@ export async function buildGallery(): Promise<{ years: Array<{ year: number | nu
     };
 
     const cards = new Map<string, GalleryCard>();
+    const teamRankStates = new Map<string, { values: Set<number>; missing: boolean; invalid: boolean }>();
     // 记录哪些卡片的封面来自奖项上显式设置的 coverIndex——显式封面一旦
     // 选定就不再被后续奖项的默认首图覆盖。
     const coverExplicit = new Set<string>();
@@ -718,15 +733,27 @@ export async function buildGallery(): Promise<{ years: Array<{ year: number | nu
             const isLadderTeam = String(a.type).startsWith('ladder_team');
             const isIcpc = /^(?:icpc|ccpc)/.test(String(a.type));
             if (!isLadderTeam && !isIcpc) return;
+            const hasTeamRank = Number.isInteger(a.liveRank) && a.liveRank! > 0;
+            const hasRawTeamRank = a.liveRank != null;
             const year = awardYear(a);
             const t = typeMap.get(a.type);
             // ICPC key 必须含奖级（a.type）：同场比赛里 team 都为空的金奖队和
             // 铜奖队成员否则会混进同一张卡（对抗性审查 #5）。
             const key = isLadderTeam ? `L|${year}|${a.type}|${a.team || ''}` : `I|${year}|${a.contest || ''}|${a.type}|${a.team || ''}`;
+            let teamRankState: { values: Set<number>; missing: boolean; invalid: boolean } | undefined;
+            if (isIcpc) {
+                teamRankState = teamRankStates.get(key);
+                if (!teamRankState) {
+                    teamRankState = { values: new Set<number>(), missing: false, invalid: false };
+                    teamRankStates.set(key, teamRankState);
+                }
+                if (hasTeamRank) teamRankState.values.add(a.liveRank!);
+                else if (hasRawTeamRank) teamRankState.invalid = true;
+                else teamRankState.missing = true;
+            }
             let card = cards.get(key);
             if (!card) {
-                card = {
-                    kind: isLadderTeam ? 'ladder' : 'icpc',
+                const cardBase: GalleryCardBase = {
                     year,
                     title: isLadderTeam ? t?.name || a.type : a.contest || t?.name || a.type,
                     typeKey: a.type,
@@ -738,7 +765,23 @@ export async function buildGallery(): Promise<{ years: Array<{ year: number | nu
                     coverIndex: 0,
                     uploadTarget: { personId: String(p._id), awardIndex },
                 };
+                card = isLadderTeam ? { ...cardBase, kind: 'ladder' } : { ...cardBase, kind: 'icpc', teamRank: null, teamRankStatus: 'missing' };
                 cards.set(key, card);
+            }
+            if (teamRankState) {
+                if (card.kind !== 'icpc') {
+                    throw new Error(`Rankboard gallery team-rank state attached to ${card.kind} card: ${key}`);
+                }
+                if (teamRankState.invalid || teamRankState.values.size > 1) {
+                    card.teamRank = null;
+                    card.teamRankStatus = 'conflict';
+                } else if (teamRankState.missing || teamRankState.values.size === 0) {
+                    card.teamRank = null;
+                    card.teamRankStatus = 'missing';
+                } else {
+                    card.teamRank = teamRankState.values.values().next().value!;
+                    card.teamRankStatus = 'confirmed';
+                }
             }
             card.members.push({
                 personId: String(p._id),
@@ -764,7 +807,7 @@ export async function buildGallery(): Promise<{ years: Array<{ year: number | nu
         });
     }
 
-    const byYear = new Map<string, { year: number | null; ladder: GalleryCard[]; icpc: GalleryCard[] }>();
+    const byYear = new Map<string, GalleryYearBucket>();
     for (const card of cards.values()) {
         const yk = card.year == null ? 'unknown' : String(card.year);
         let bucket = byYear.get(yk);
@@ -772,7 +815,8 @@ export async function buildGallery(): Promise<{ years: Array<{ year: number | nu
             bucket = { year: card.year, ladder: [], icpc: [] };
             byYear.set(yk, bucket);
         }
-        (card.kind === 'ladder' ? bucket.ladder : bucket.icpc).push(card);
+        if (card.kind === 'ladder') bucket.ladder.push(card);
+        else bucket.icpc.push(card);
     }
     const years = [...byYear.values()].sort((a, b) => {
         if (a.year == null) return 1;

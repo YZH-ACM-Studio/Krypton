@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { uploadUserFile } from '@/lib/upload';
+import { formatGalleryTeamRank, type GalleryTeamRankStatus } from './gallery-team-rank';
 
 interface GalleryMember {
   personId: string;
@@ -22,8 +23,7 @@ interface GalleryMember {
   score?: number;
 }
 
-interface GalleryCard {
-  kind: 'ladder' | 'icpc';
+interface GalleryCardBase {
   year: number | null;
   title: string;
   typeKey: string;
@@ -35,6 +35,10 @@ interface GalleryCard {
   coverIndex: number;
   uploadTarget: { personId: string; awardIndex: number };
 }
+
+type GalleryCard =
+  | (GalleryCardBase & { kind: 'ladder' })
+  | (GalleryCardBase & { kind: 'icpc'; teamRank: number | null; teamRankStatus: GalleryTeamRankStatus });
 
 interface YearBucket {
   year: number | null;
@@ -63,6 +67,8 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
   const [uploadSucceeded, setUploadSucceeded] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const cover = imageUrls[card.coverIndex] || imageUrls[0] || null;
+  const teamRankStatus = card.kind === 'icpc' ? card.teamRankStatus : null;
+  const teamRankLabel = card.kind === 'icpc' ? formatGalleryTeamRank(card.teamRankStatus, card.teamRank) : null;
 
   const upload = async (file: File) => {
     setUploading(true);
@@ -134,6 +140,20 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
                 </Badge>
               ) : null}
             </div>
+            {teamRankLabel ? (
+              <p
+                className={cn(
+                  'mt-1.5 text-xs font-medium',
+                  teamRankStatus === 'confirmed'
+                    ? 'text-foreground'
+                    : teamRankStatus === 'conflict'
+                      ? 'text-destructive'
+                      : 'text-amber-600 dark:text-amber-400',
+                )}
+              >
+                {teamRankLabel}
+              </p>
+            ) : null}
           </div>
           {card.kind === 'ladder' ? <Trophy className="size-4 shrink-0 text-amber-500" /> : <AwardIcon className="size-4 shrink-0 text-primary" />}
         </div>

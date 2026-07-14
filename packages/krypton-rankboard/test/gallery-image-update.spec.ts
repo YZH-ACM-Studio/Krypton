@@ -132,6 +132,35 @@ describe('rankboard gallery image persistence', () => {
         });
     });
 
+    async function replaceGalleryWithTeam(team: string, type: string, liveRanks: unknown[]): Promise<void> {
+        await Promise.all([peopleColl.deleteMany({}), studentsColl.deleteMany({})]);
+        for (const [index, liveRank] of liveRanks.entries()) {
+            const memberStudentId = new ObjectId();
+            await studentsColl.insertOne({
+                _id: memberStudentId,
+                domainId: 'system',
+                studentId: `2026${String(index + 1).padStart(4, '0')}`,
+                realName: `成员${index + 1}`,
+            });
+            await peopleColl.insertOne({
+                _id: new ObjectId(),
+                studentDocId: memberStudentId,
+                awards: [
+                    {
+                        type,
+                        contest: `2026 ${team} 测试站`,
+                        date: '2026-11',
+                        team,
+                        ...(liveRank === undefined ? {} : { liveRank }),
+                    },
+                ],
+                createdAt: new Date(),
+                updatedAt: new Date(),
+                createdBy: 2,
+            });
+        }
+    }
+
     it('persists a first image on exactly the selected award', async () => {
         const url = '/file/2/new.jpg?noDisposition=1';
         const imageUrls = await model.addAwardImage(personId, 0, url, true, 'ladder_team_gold');
@@ -184,5 +213,69 @@ describe('rankboard gallery image persistence', () => {
         const persisted = await rawPeopleColl.findOne({ _id: personId });
         expect(persisted.awards[1].imageUrls).to.deep.equal([concurrent]);
         expect(persisted.awards[1].coverIndex).to.equal(0);
+    });
+
+    it('publishes a confirmed ICPC team rank when every grouped member has the same live rank', async () => {
+        await replaceGalleryWithTeam('一致队', 'icpc_gold', [42, 42, 42]);
+
+        const gallery = await model.buildGallery();
+        const card = gallery.years[0].icpc[0];
+
+        expect(card.team).to.equal('一致队');
+        expect(card.teamRank).to.equal(42);
+        expect(card.teamRankStatus).to.equal('confirmed');
+    });
+
+    it('publishes a missing ICPC team rank instead of using a populated member as fallback', async () => {
+        for (const missingRank of [undefined, null]) {
+            await replaceGalleryWithTeam('缺失队', 'icpc_silver', [17, missingRank, 17]);
+            const gallery = await model.buildGallery();
+            const card = gallery.years[0].icpc[0];
+
+            expect(card.team).to.equal('缺失队');
+            expect(card.teamRank).to.equal(null);
+            expect(card.teamRankStatus).to.equal('missing');
+        }
+    });
+
+    it('keeps ICPC team-rank conflicts above missing data for every member order', async () => {
+        const rankOrders = [
+            [9, 12, undefined],
+            [9, undefined, 12],
+            [12, 9, undefined],
+            [12, undefined, 9],
+            [undefined, 9, 12],
+            [undefined, 12, 9],
+        ];
+        for (const liveRanks of rankOrders) {
+            await replaceGalleryWithTeam('冲突队', 'ccpc_bronze', liveRanks);
+            const gallery = await model.buildGallery();
+            const card = gallery.years[0].icpc[0];
+
+            expect(card.team).to.equal('冲突队');
+            expect(card.teamRank).to.equal(null);
+            expect(card.teamRankStatus).to.equal('conflict');
+        }
+    });
+
+    it('publishes each invalid non-empty ICPC team rank as a conflict', async () => {
+        for (const [index, invalidRank] of [0, -1, 1.5, '9', '', Number.NaN].entries()) {
+            const team = `脏值队${index}`;
+            await replaceGalleryWithTeam(team, 'icpc_bronze', [invalidRank]);
+            const gallery = await model.buildGallery();
+            const card = gallery.years[0].icpc[0];
+
+            expect(card.team).to.equal(team);
+            expect(card.teamRank).to.equal(null);
+            expect(card.teamRankStatus).to.equal('conflict');
+        }
+    });
+
+    it('does not add ICPC team-rank state to ladder cards', async () => {
+        const gallery = await model.buildGallery();
+        const card = gallery.years[0].ladder[0];
+
+        expect(card).not.to.have.property('teamRank');
+        expect(card).not.to.have.property('teamRankStatus');
     });
 });

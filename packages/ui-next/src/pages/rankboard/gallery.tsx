@@ -5,7 +5,7 @@
  * 再 POST operation=addImage 挂到该卡片的代表奖项上。
  */
 import { useState } from 'react';
-import { AlertCircle, ArrowLeft, Award as AwardIcon, Camera, ImageOff, Trophy, Users } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Award as AwardIcon, Camera, CircleCheck, ImageOff, LoaderCircle, Trophy, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -60,11 +60,13 @@ async function responseErrorMessage(response: Response, fallback: string) {
 function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; canUpload: boolean; uid: number; onLightbox: (url: string) => void }) {
   const [imageUrls, setImageUrls] = useState<string[]>(card.imageUrls);
   const [uploading, setUploading] = useState(false);
+  const [uploadSucceeded, setUploadSucceeded] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const cover = imageUrls[card.coverIndex] || imageUrls[0] || null;
 
   const upload = async (file: File) => {
     setUploading(true);
+    setUploadSucceeded(false);
     setErrorMessage('');
     try {
       const url = await uploadUserFile(file, uid);
@@ -88,9 +90,14 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
           await responseErrorMessage(attach, attach.status === 409 ? '页面数据已过期（奖项列表已被他人修改），请刷新后重试' : '照片关联失败'),
         );
       }
-      const data = await attach.json().catch(() => ({}));
-      setImageUrls(data.imageUrls || [...imageUrls, url]);
+      const data = (await attach.json().catch(() => null)) as { imageUrls?: unknown } | null;
+      if (!data || !Array.isArray(data.imageUrls) || !data.imageUrls.every((item) => typeof item === 'string') || !data.imageUrls.includes(url)) {
+        throw new Error('服务器没有确认照片已保存，请重试');
+      }
+      setImageUrls(data.imageUrls);
+      setUploadSucceeded(true);
     } catch (e: any) {
+      setUploadSucceeded(false);
       setErrorMessage(e?.message || '图片上传失败');
     } finally {
       setUploading(false);
@@ -172,6 +179,7 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
               <input
                 type="file"
                 accept="image/*"
+                aria-label={imageUrls.length ? '替换照片' : '上传照片'}
                 className="hidden"
                 disabled={uploading}
                 onChange={(e) => {
@@ -181,6 +189,17 @@ function TeamCard({ card, canUpload, uid, onLightbox }: { card: GalleryCard; can
                 }}
               />
             </label>
+          ) : null}
+          {uploading ? (
+            <span role="status" aria-live="polite" className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+              <LoaderCircle className="size-3.5 animate-spin" />
+              上传中…
+            </span>
+          ) : uploadSucceeded ? (
+            <span role="status" aria-live="polite" className="inline-flex items-center gap-1 text-xs text-emerald-600">
+              <CircleCheck className="size-3.5" />
+              照片已保存
+            </span>
           ) : null}
         </div>
       </CardContent>

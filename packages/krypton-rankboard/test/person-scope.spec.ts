@@ -108,7 +108,20 @@ const peopleColl = {
     },
     async updateOne(filter: any, update: any) {
         peopleUpdates.push({ filter, update });
-        return { matchedCount: people.some((person) => personMatches(person, filter)) ? 1 : 0 };
+        const person = people.find((candidate) => personMatches(candidate, filter));
+        if (person && !Array.isArray(update)) {
+            for (const [path, value] of Object.entries(update.$set || {})) {
+                const match = path.match(/^awards\.(\d+)\.(imageUrls|coverIndex)$/);
+                if (match) (person.awards[Number(match[1])] as any)[match[2]] = value;
+            }
+            for (const [path, value] of Object.entries(update.$addToSet || {})) {
+                const match = path.match(/^awards\.(\d+)\.imageUrls$/);
+                if (!match) continue;
+                const target = person.awards[Number(match[1])] as any;
+                if (!target.imageUrls.includes(value)) target.imageUrls.push(value);
+            }
+        }
+        return { matchedCount: person ? 1 : 0 };
     },
     async deleteOne(filter: any) {
         peopleDeletes.push(filter);
@@ -223,6 +236,7 @@ try {
 }
 
 beforeEach(() => {
+    for (const person of people) person.awards = [{ ...award, imageUrls: [...(award.imageUrls || [])] }];
     studentFindQueries.length = 0;
     studentFindOneQueries.length = 0;
     peopleUpdates.length = 0;
@@ -293,18 +307,16 @@ describe('historical rankboard person scope', () => {
         expect(peopleUpdates.length).to.be.greaterThanOrEqual(5);
     });
 
-    it('normalizes legacy null image arrays atomically and supports replacement', async () => {
+    it('uses targeted array updates and supports replacement', async () => {
         await model.addAwardImage(systemPersonId, 0, '/file/42/new.jpg', false, 'ladder_team_gold');
         const append = peopleUpdates.at(-1)?.update;
-        expect(append).to.be.an('array');
-        expect(append[0].$set['awards.0.imageUrls'].$setUnion[0].$cond[0]).to.deep.equal({
-            $isArray: '$awards.0.imageUrls',
-        });
+        expect(append).not.to.be.an('array');
+        expect(append.$addToSet['awards.0.imageUrls']).to.equal('/file/42/new.jpg');
 
         await model.addAwardImage(systemPersonId, 0, '/file/42/replacement.jpg', false, 'ladder_team_gold', true);
         const replacement = peopleUpdates.at(-1)?.update;
-        expect(replacement[0].$set['awards.0.imageUrls']).to.deep.equal(['/file/42/replacement.jpg']);
-        expect(replacement[0].$set['awards.0.coverIndex']).to.equal(0);
+        expect(replacement.$set['awards.0.imageUrls']).to.deep.equal(['/file/42/replacement.jpg']);
+        expect(replacement.$set['awards.0.coverIndex']).to.equal(0);
     });
 
     it('limits batch rollback updateMany to scoped system people', async () => {

@@ -27,5 +27,7 @@ export async function uploadUserFile(file: File, uid: number): Promise<string> {
     }
     throw new Error(msg);
   }
-  return `/file/${uid}/${filename}`;
+  // This helper is used for image previews. Without noDisposition the file
+  // endpoint signs a download response, which is not a reliable <img> source.
+  return `/file/${uid}/${filename}?noDisposition=1`;
 }

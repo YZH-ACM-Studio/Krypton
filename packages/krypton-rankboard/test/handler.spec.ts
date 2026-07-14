@@ -836,6 +836,14 @@ describe('rankboard gallery upload authoritative-domain contract', () => {
         expect(source).to.include('<Dialog open={!!errorMessage}');
         expect(source).not.to.match(/\balert\s*\(/);
     });
+
+    it('shows upload progress and only reports success after the server confirms persistence', () => {
+        const source = fs.readFileSync(path.resolve(__dirname, '../../ui-next/src/pages/rankboard/gallery.tsx'), 'utf8');
+        expect(source).to.include('上传中');
+        expect(source).to.include('照片已保存');
+        expect(source).to.include('Array.isArray(data.imageUrls)');
+        expect(source).not.to.include('data.imageUrls ||');
+    });
 });
 
 describe('award type editor form contract', () => {

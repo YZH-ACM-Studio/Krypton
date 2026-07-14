@@ -589,34 +589,66 @@ export async function addAwardImage(
     replace = false,
 ): Promise<string[] | null> {
     const scopedPerson = await requireScopedPerson(personId);
+    const award = scopedPerson.awards?.[awardIndex];
+    if (!award || (expectType && award.type !== expectType)) return null;
     const filter: Record<string, unknown> = {
         _id: scopedPerson._id,
         studentDocId: scopedPerson.studentDocId,
+        [`awards.${awardIndex}`]: { $exists: true },
     };
     if (expectType) filter[`awards.${awardIndex}.type`] = expectType;
     const imageUrlsPath = `awards.${awardIndex}.imageUrls`;
-    const imageUrlsRef = `$${imageUrlsPath}`;
-    // v1 imported missing image arrays as null. `$addToSet` fails on null, so
-    // normalize in the same atomic update instead of requiring a data repair
-    // before the first upload. The pipeline also preserves concurrent appends.
-    const nextImageUrls = replace
-        ? [url]
-        : {
-              $setUnion: [{ $cond: [{ $isArray: imageUrlsRef }, imageUrlsRef, []] }, [url]],
-          };
-    const setFields: Record<string, unknown> = {
-        [imageUrlsPath]: nextImageUrls,
-        updatedAt: new Date(),
-    };
-    if (replace || setCover) {
-        setFields[`awards.${awardIndex}.coverIndex`] = replace ? 0 : { $indexOfArray: [nextImageUrls, url] };
+    const coverIndexPath = `awards.${awardIndex}.coverIndex`;
+    const currentImageUrls = award.imageUrls;
+    if (currentImageUrls != null && !Array.isArray(currentImageUrls)) {
+        throw new Error(`Rankboard award imageUrls is not an array: person=${personId} awardIndex=${awardIndex}`);
     }
-    const res = await peopleColl.updateOne(filter as any, [{ $set: setFields }] as any);
+
+    let res;
+    if (replace) {
+        res = await peopleColl.updateOne(filter as any, {
+            $set: {
+                [imageUrlsPath]: [url],
+                [coverIndexPath]: 0,
+                updatedAt: new Date(),
+            } as any,
+        });
+    } else if (Array.isArray(currentImageUrls)) {
+        res = await peopleColl.updateOne(filter as any, {
+            $addToSet: { [imageUrlsPath]: url } as any,
+            $set: { updatedAt: new Date() },
+        });
+    } else {
+        // Legacy imports may have null/missing imageUrls. Initialize only while
+        // it is still null; if another request won that race, append normally.
+        res = await peopleColl.updateOne({ ...filter, [imageUrlsPath]: null } as any, {
+            $set: { [imageUrlsPath]: [url], updatedAt: new Date() } as any,
+        });
+        if (!res.matchedCount) {
+            res = await peopleColl.updateOne(filter as any, {
+                $addToSet: { [imageUrlsPath]: url } as any,
+                $set: { updatedAt: new Date() },
+            });
+        }
+    }
     if (!res.matchedCount) return null;
-    // Read the committed array so the client never has to guess Mongo's
-    // de-duplicated result.
+
+    // Read and verify the committed array. A matched write without the URL is
+    // an integrity failure, never a successful empty response.
     const person = await getScopedPersonOrNull(scopedPerson._id);
-    const imageUrls = person?.awards?.[awardIndex]?.imageUrls || [];
+    const imageUrls = person?.awards?.[awardIndex]?.imageUrls;
+    if (!Array.isArray(imageUrls) || !imageUrls.includes(url)) {
+        throw new Error(`Rankboard image write postcondition failed: person=${personId} awardIndex=${awardIndex} url=${url}`);
+    }
+    if (setCover && !replace) {
+        const coverIndex = imageUrls.indexOf(url);
+        const coverResult = await peopleColl.updateOne({ ...filter, [imageUrlsPath]: imageUrls } as any, {
+            $set: { [coverIndexPath]: coverIndex, updatedAt: new Date() } as any,
+        });
+        if (!coverResult.matchedCount) {
+            throw new Error(`Rankboard image cover write failed: person=${personId} awardIndex=${awardIndex} url=${url}`);
+        }
+    }
     return imageUrls;
 }
 

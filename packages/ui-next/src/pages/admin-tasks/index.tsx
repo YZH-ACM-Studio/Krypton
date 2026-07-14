@@ -54,7 +54,7 @@ import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { SimpleSelect } from '@/components/ui/select';
+import { SimpleSelect, type SimpleSelectOption } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import {
   TaskGraphRenderer,
@@ -934,6 +934,21 @@ interface NodeParamInputProps {
   userGroups: GroupRef[];
 }
 
+function canonicalTagSelectOptions(options: NonNullable<PresetSummary['params'][number]['options']>): SimpleSelectOption[] {
+  const grouped = new Map<string, typeof options>();
+  for (const option of options) {
+    const group = option.group || '其他';
+    grouped.set(group, [...(grouped.get(group) || []), option]);
+  }
+  const result: SimpleSelectOption[] = [{ value: '', label: '— 选择规范标签 —' }];
+  for (const [group, entries] of grouped) {
+    if (result.length > 1) result.push({ type: 'separator' });
+    result.push({ type: 'label', label: group });
+    result.push(...entries.map((option) => ({ value: option.value, label: option.label })));
+  }
+  return result;
+}
+
 function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings, schools, userGroups }: NodeParamInputProps) {
   if (spec.type === 'select' || spec.type === 'pat_level' || spec.type === 'pat_season' || spec.type === 'gplt_level') {
     return (
@@ -943,6 +958,19 @@ function NodeParamInput({ spec, value, onChange, contests, homeworks, trainings,
           onValueChange={onChange}
           placeholder="—"
           options={[{ value: '', label: '—' }, ...(spec.options?.map((o) => ({ value: o.value, label: o.label })) || [])]}
+        />
+      </FormField>
+    );
+  }
+  if (spec.type === 'canonical_tag') {
+    return (
+      <FormField label={spec.label} hint={spec.helper} required={spec.required}>
+        <SimpleSelect
+          value={value || ''}
+          onValueChange={onChange}
+          placeholder="— 选择规范标签 —"
+          contentClassName="max-h-96"
+          options={canonicalTagSelectOptions(spec.options || [])}
         />
       </FormField>
     );

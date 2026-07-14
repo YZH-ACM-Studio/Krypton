@@ -71,7 +71,7 @@ export interface PresetSummary {
     type: string;
     required?: boolean;
     default?: any;
-    options?: { value: string; label: string }[];
+    options?: { value: string; label: string; group?: string }[];
     helper?: string;
   }>;
 }

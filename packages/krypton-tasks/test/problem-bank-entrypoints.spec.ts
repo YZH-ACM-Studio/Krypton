@@ -13,8 +13,11 @@ const assertionCalls: Array<{
 }> = [];
 const aclDomainCalls: string[] = [];
 const dbDomains: string[] = [];
+const tagValidationCalls: Array<{ domainId: string; graph: any; actorUid: number }> = [];
 const writes = { audit: 0, create: 0, update: 0 };
+let cloneCalls = 0;
 let assertionFailure: Error | null = null;
+let tagValidationFailure: Error | null = null;
 let existingTask: any = null;
 
 const ProblemModel = {
@@ -47,6 +50,10 @@ const taskModel = {
     async updateTask(domainId: string) {
         dbDomains.push(domainId);
         writes.update++;
+    },
+    async cloneTask() {
+        cloneCalls++;
+        return new FakeObjectId('000000000000000000000002');
     },
 };
 
@@ -109,6 +116,10 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
         if (request === './model') return { taskModel };
         if (request === './presets') {
             return {
+                validateTagAcCountGraph: async (domainId: string, graphValue: any, actorUid: number) => {
+                    tagValidationCalls.push({ domainId, graph: graphValue, actorUid });
+                    if (tagValidationFailure) throw tagValidationFailure;
+                },
                 presetSummaries: () => [
                     {
                         id: 'specific_problem',
@@ -133,9 +144,10 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
 };
 
 let adminTasksEditHandlerClass: any;
+let adminTasksListHandlerClass: any;
 try {
     delete require.cache[handlerPath];
-    ({ AdminTasksEditHandler: adminTasksEditHandlerClass } = require(handlerPath));
+    ({ AdminTasksEditHandler: adminTasksEditHandlerClass, AdminTasksListHandler: adminTasksListHandlerClass } = require(handlerPath));
 } finally {
     Module._load = originalLoad;
 }
@@ -158,6 +170,24 @@ function graph(...pids: number[]) {
     };
 }
 
+function tagGraph(tag: string) {
+    return {
+        nodes: [
+            { id: 'start', type: 'start', position: { x: 0, y: 0 } },
+            {
+                id: 'tag-point',
+                type: 'task',
+                position: { x: 0, y: 100 },
+                presetId: 'tag_ac_count',
+                name: 'AC 指定标签题目数',
+                params: { tag, count: 3 },
+            },
+            { id: 'end', type: 'end', position: { x: 0, y: 200 } },
+        ],
+        edges: [],
+    };
+}
+
 function task(graphValue: ReturnType<typeof graph>) {
     return {
         _id: new FakeObjectId(),
@@ -170,6 +200,14 @@ function task(graphValue: ReturnType<typeof graph>) {
 
 function handler() {
     const instance = Reflect.construct(adminTasksEditHandlerClass, []) as FakeHandler;
+    instance.user = { _id: 42, _problemAclDomainId: 'system' };
+    instance.domain = { _id: 'system' };
+    instance.response = {};
+    return instance;
+}
+
+function listHandler(): any {
+    const instance = Reflect.construct(adminTasksListHandlerClass, []) as FakeHandler;
     instance.user = { _id: 42, _problemAclDomainId: 'system' };
     instance.domain = { _id: 'system' };
     instance.response = {};
@@ -210,10 +248,13 @@ beforeEach(() => {
     assertionCalls.length = 0;
     aclDomainCalls.length = 0;
     dbDomains.length = 0;
+    tagValidationCalls.length = 0;
     writes.audit = 0;
     writes.create = 0;
     writes.update = 0;
+    cloneCalls = 0;
     assertionFailure = null;
+    tagValidationFailure = null;
     existingTask = null;
 });
 
@@ -260,5 +301,32 @@ describe('task problem-selection write gate', () => {
         expect(assertionCalls[0].domainId).to.equal('system');
         expect(dbDomains).to.deep.equal(['system', 'system']);
         expect(dbDomains).not.to.include('forged-domain');
+    });
+
+    it('rejects a forged free tag before any task create write', async () => {
+        tagValidationFailure = new FakeValidationError('unknown canonical tag');
+        const error = await captureFailure(post(handler(), undefined, tagGraph('随便写的标签') as any));
+
+        expect(error).to.be.instanceOf(FakeValidationError);
+        expect(tagValidationCalls).to.have.length(1);
+        expect(tagValidationCalls[0]).to.deep.include({ domainId: 'system', actorUid: 42 });
+        expect(tagValidationCalls[0].graph.nodes[1].params.tag).to.equal('随便写的标签');
+        expect(writes).to.deep.equal({ audit: 0, create: 0, update: 0 });
+    });
+
+    it('revalidates a cloned tag graph before problem checks or clone writes', async () => {
+        const tid = new FakeObjectId();
+        existingTask = task(tagGraph('已从目录删除的标签') as any);
+        tagValidationFailure = new FakeValidationError('unknown canonical tag');
+
+        const error = await captureFailure(listHandler().postClone({ domainId: 'forged-domain' }, tid));
+
+        expect(error).to.be.instanceOf(FakeValidationError);
+        expect(tagValidationCalls).to.have.length(1);
+        expect(tagValidationCalls[0]).to.deep.include({ domainId: 'system', actorUid: 42 });
+        expect(tagValidationCalls[0].graph.nodes[1].params.tag).to.equal('已从目录删除的标签');
+        expect(assertionCalls).to.have.length(0);
+        expect(cloneCalls).to.equal(0);
+        expect(writes).to.deep.equal({ audit: 0, create: 0, update: 0 });
     });
 });

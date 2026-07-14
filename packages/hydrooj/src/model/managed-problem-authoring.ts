@@ -17,12 +17,24 @@ export interface ManagedSourceTemplateDefinition {
     id: ManagedSourceTemplate;
     label: string;
     fields: TemplateField[];
+    /** Tags emitted for every problem created from this template. */
+    fixedTags: string[];
+    /** Finite field-derived tags that are valid choices in shared catalogs. */
+    selectableTags?: string[];
+    /** Tag used to decide whether an existing training accepts this template. */
+    trainingAnchorTag: string;
 }
 
 export interface KnowledgeMindmapOption {
     id: string;
     label: string;
     tags: string[];
+}
+
+export interface CanonicalProblemTagOption {
+    value: string;
+    label: string;
+    group: '算法知识点' | '来源与赛事';
 }
 
 export type ManagedMindmapOption = KnowledgeMindmapOption;
@@ -82,29 +94,50 @@ interface PidCounterDoc {
 }
 
 export const MANAGED_SOURCE_TEMPLATES: readonly ManagedSourceTemplateDefinition[] = [
-    { id: 'pat_basic', label: 'PAT 乙级', fields: ['year', 'season'] },
-    { id: 'pat_advanced', label: 'PAT 甲级', fields: ['year', 'season'] },
-    { id: 'gplt_national', label: '天梯全国总决赛', fields: ['year', 'level'] },
-    { id: 'gplt_provincial', label: '天梯省级赛', fields: ['year', 'level'] },
-    { id: 'cauc', label: 'CAUC 校赛', fields: ['year'] },
-    { id: 'self', label: '自命题', fields: ['year'] },
-    { id: 'nowcoder_summer', label: '牛客暑期多校', fields: ['year', 'round'] },
-    { id: 'hdu_summer', label: '杭电暑期多校', fields: ['year', 'round'] },
-    { id: 'hdu_spring', label: '杭电春季赛', fields: ['year', 'round'] },
+    { id: 'pat_basic', label: 'PAT 乙级', fields: ['year', 'season'], fixedTags: ['PAT乙级'], trainingAnchorTag: 'PAT乙级' },
+    { id: 'pat_advanced', label: 'PAT 甲级', fields: ['year', 'season'], fixedTags: ['PAT甲级'], trainingAnchorTag: 'PAT甲级' },
+    {
+        id: 'gplt_national',
+        label: '天梯全国总决赛',
+        fields: ['year', 'level'],
+        fixedTags: ['天梯赛全国总决赛'],
+        selectableTags: ['L1', 'L2', 'L3'],
+        trainingAnchorTag: '天梯赛全国总决赛',
+    },
+    {
+        id: 'gplt_provincial',
+        label: '天梯省级赛',
+        fields: ['year', 'level'],
+        fixedTags: ['天梯赛省级赛'],
+        selectableTags: ['L1', 'L2', 'L3'],
+        trainingAnchorTag: '天梯赛省级赛',
+    },
+    { id: 'cauc', label: 'CAUC 校赛', fields: ['year'], fixedTags: ['CAUC校赛'], trainingAnchorTag: 'CAUC校赛' },
+    { id: 'self', label: '自命题', fields: ['year'], fixedTags: ['自命题'], trainingAnchorTag: '自命题' },
+    {
+        id: 'nowcoder_summer',
+        label: '牛客暑期多校',
+        fields: ['year', 'round'],
+        fixedTags: ['MultiSchool', '牛客暑期多校'],
+        trainingAnchorTag: '牛客暑期多校',
+    },
+    {
+        id: 'hdu_summer',
+        label: '杭电暑期多校',
+        fields: ['year', 'round'],
+        fixedTags: ['MultiSchool', '杭电暑期多校'],
+        trainingAnchorTag: '杭电暑期多校',
+    },
+    {
+        id: 'hdu_spring',
+        label: '杭电春季赛',
+        fields: ['year', 'round'],
+        fixedTags: ['杭电春季赛'],
+        trainingAnchorTag: '杭电春季赛',
+    },
 ] as const;
 
 const TEMPLATE_BY_ID = new Map(MANAGED_SOURCE_TEMPLATES.map((template) => [template.id, template]));
-const TEMPLATE_ANCHOR_TAG: Record<ManagedSourceTemplate, string> = {
-    pat_basic: 'PAT乙级',
-    pat_advanced: 'PAT甲级',
-    gplt_national: '天梯赛全国总决赛',
-    gplt_provincial: '天梯赛省级赛',
-    cauc: 'CAUC校赛',
-    self: '自命题',
-    nowcoder_summer: '牛客暑期多校',
-    hdu_summer: '杭电暑期多校',
-    hdu_spring: '杭电春季赛',
-};
 const mindmapNodesColl = db.collection<MindmapNodeRecord>('mindmap.nodes');
 export const managedPidCountersColl = db.collection<PidCounterDoc>('problem.pid_counters');
 
@@ -162,17 +195,18 @@ export function normalizeManagedSourceMeta(input: unknown): ManagedSourceMeta {
 export function deriveManagedSourceTags(sourceMetaInput: unknown): string[] {
     const sourceMeta = normalizeManagedSourceMeta(sourceMetaInput);
     const { template, year } = sourceMeta;
+    const fixedTags = [...TEMPLATE_BY_ID.get(template)!.fixedTags];
     if (template === 'pat_basic' || template === 'pat_advanced') {
         const season = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' }[sourceMeta.season!];
-        return [template === 'pat_basic' ? 'PAT乙级' : 'PAT甲级', `${year}${season}`];
+        return [...fixedTags, `${year}${season}`];
     }
-    if (template === 'gplt_national') return ['天梯赛全国总决赛', sourceMeta.level!, `${year}CCCC`];
-    if (template === 'gplt_provincial') return ['天梯赛省级赛', sourceMeta.level!, `${year}CCCC-省`];
-    if (template === 'cauc') return ['CAUC校赛', `${year}校赛`];
-    if (template === 'self') return ['自命题', `${year}自命题`];
-    if (template === 'nowcoder_summer') return ['MultiSchool', '牛客暑期多校', `${year}牛客暑期多校`];
-    if (template === 'hdu_summer') return ['MultiSchool', '杭电暑期多校', `${year}杭电暑期多校`];
-    return ['杭电春季赛', `${year}HDU-S`];
+    if (template === 'gplt_national') return [...fixedTags, sourceMeta.level!, `${year}CCCC`];
+    if (template === 'gplt_provincial') return [...fixedTags, sourceMeta.level!, `${year}CCCC-省`];
+    if (template === 'cauc') return [...fixedTags, `${year}校赛`];
+    if (template === 'self') return [...fixedTags, `${year}自命题`];
+    if (template === 'nowcoder_summer') return [...fixedTags, `${year}牛客暑期多校`];
+    if (template === 'hdu_summer') return [...fixedTags, `${year}杭电暑期多校`];
+    return [...fixedTags, `${year}HDU-S`];
 }
 
 export function managedPidCounterNamespace(sourceMetaInput: unknown): string {
@@ -296,6 +330,67 @@ export async function listKnowledgeMindmapOptions(): Promise<KnowledgeMindmapOpt
 
 export const listManagedMindmapOptions = listKnowledgeMindmapOptions;
 
+const MANAGED_ANNUAL_SOURCE_TAG_PATTERNS = [
+    /^(?:20\d{2}|2100)[春夏秋冬]$/,
+    /^(?:20\d{2}|2100)CCCC(?:-省)?$/,
+    /^(?:20\d{2}|2100)校赛$/,
+    /^(?:20\d{2}|2100)自命题$/,
+    /^(?:20\d{2}|2100)牛客暑期多校$/,
+    /^(?:20\d{2}|2100)杭电暑期多校$/,
+    /^(?:20\d{2}|2100)HDU-S$/,
+] as const;
+
+/** Annual source tags are selectable only when one currently exists in this domain. */
+export function isManagedAnnualSourceTag(value: unknown): value is string {
+    return typeof value === 'string' && MANAGED_ANNUAL_SOURCE_TAG_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+/**
+ * Shared P2.14 canonical tag directory.
+ *
+ * Knowledge choices come from live tagged mindmap nodes and retain their full
+ * path. Source choices come from the managed source templates above; only
+ * registered annual tags already present on a problem are included. The
+ * payload deliberately contains no problem counts.
+ */
+export async function listCanonicalProblemTagOptions(domainId: string): Promise<CanonicalProblemTagOption[]> {
+    const [mindmapOptions, existingProblemTags] = await Promise.all([
+        listKnowledgeMindmapOptions(),
+        document.coll.distinct('tag', { domainId, docType: document.TYPE_PROBLEM }),
+    ]);
+    const byValue = new Map<string, CanonicalProblemTagOption>();
+    const knowledgePaths = new Map<string, Set<string>>();
+    for (const option of mindmapOptions) {
+        for (const tag of option.tags) {
+            const paths = knowledgePaths.get(tag) || new Set<string>();
+            paths.add(option.label);
+            knowledgePaths.set(tag, paths);
+        }
+    }
+    for (const [value, paths] of knowledgePaths) {
+        byValue.set(value, {
+            value,
+            label: [...paths].sort((left, right) => left.localeCompare(right, 'zh-CN')).join('；'),
+            group: '算法知识点',
+        });
+    }
+
+    const sourceTags = new Set<string>();
+    for (const template of MANAGED_SOURCE_TEMPLATES) {
+        for (const tag of template.fixedTags) sourceTags.add(tag);
+        for (const tag of template.selectableTags || []) sourceTags.add(tag);
+    }
+    for (const tag of existingProblemTags as unknown[]) {
+        if (isManagedAnnualSourceTag(tag)) sourceTags.add(tag);
+    }
+    for (const value of sourceTags) byValue.set(value, { value, label: value, group: '来源与赛事' });
+
+    const groupOrder = { 算法知识点: 0, 来源与赛事: 1 } as const;
+    return [...byValue.values()].sort(
+        (left, right) => groupOrder[left.group] - groupOrder[right.group] || left.label.localeCompare(right.label, 'zh-CN'),
+    );
+}
+
 /** Re-read the live tree and materialize every tagged ancestor of each selection. */
 export async function materializeKnowledgeMindmapTags(
     nodeIdsInput: unknown,
@@ -357,9 +452,7 @@ export async function listManagedTrainingOptions(domainId: string): Promise<Mana
     for (const training of trainings) {
         const chapters = canonicalTrainingChapters(training.dag);
         const memberTags = new Set(chapters.flatMap((chapter) => chapter.pids.flatMap((pid) => [...(tagsByPid.get(Number(pid)) || [])])));
-        const templates = MANAGED_SOURCE_TEMPLATES.filter((template) => memberTags.has(TEMPLATE_ANCHOR_TAG[template.id])).map(
-            (template) => template.id,
-        );
+        const templates = MANAGED_SOURCE_TEMPLATES.filter((template) => memberTags.has(template.trainingAnchorTag)).map((template) => template.id);
         if (!templates.length) continue;
         result.push({
             id: training.docId.toHexString(),
@@ -405,7 +498,7 @@ export async function validateManagedTrainingPlacement(
                 .filter(Number.isSafeInteger),
         ),
     ];
-    const anchor = TEMPLATE_ANCHOR_TAG[template];
+    const anchor = TEMPLATE_BY_ID.get(template)!.trainingAnchorTag;
     const supportingProblem = memberPids.length
         ? await document.coll.findOne(
               { domainId, docType: document.TYPE_PROBLEM, docId: { $in: memberPids }, tag: anchor },

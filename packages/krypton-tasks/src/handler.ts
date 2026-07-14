@@ -49,7 +49,7 @@ import { userBindModel } from '@hydrooj/krypton-userbind';
 import { canCreateTask, canManageAllTasks, canModifyTask } from './auth';
 import { cspScoreColl, gpltScoreColl, patScoreColl } from './db';
 import { taskModel } from './model';
-import { presetSummaries } from './presets';
+import { listTagAcCountOptions, presetSummaries, validateTagAcCountGraph } from './presets';
 import { buildTaskStatsCsv, defaultTaskGroupName } from './stats-export';
 import type { AdmissionMode, GpltLevel, PatLevel, PatSeason, TaskAccess, TaskDoc, TaskGraph, TaskGraphEdge, TaskGraphNode } from './types';
 import { emptyTaskGraph } from './types';
@@ -429,6 +429,14 @@ class TaskDetailHandler extends Handler {
             })
         ).length;
         const paramRefs = await resolveTaskParamRefs(domainId, task.graph);
+        const selectedCanonicalTags = new Set(
+            task.graph.nodes.flatMap((node) =>
+                node.type === 'task' && node.presetId === 'tag_ac_count' && typeof node.params?.tag === 'string' ? [node.params.tag] : [],
+            ),
+        );
+        const tagOptions = selectedCanonicalTags.size
+            ? (await listTagAcCountOptions(domainId)).filter((option) => selectedCanonicalTags.has(option.value))
+            : [];
         // Resolve current user's enrollmentYear so the UI can highlight the
         // matching `by_grade` branch (read-only — has no effect on backend).
         const myStudent = await userBindModel.findStudentByUserId(domainId, this.user._id);
@@ -439,7 +447,7 @@ class TaskDetailHandler extends Handler {
             progress,
             creatorName: creator?.uname || '系统',
             assignmentCount,
-            presets: presetSummaries(),
+            presets: presetSummaries(tagOptions),
             canManage: canModifyTask(this.user as any, task),
             userEnrollmentYear: myStudent?.enrollmentYear ?? null,
             paramRefs,
@@ -494,7 +502,7 @@ class TaskAssignmentActionHandler extends Handler {
 
 // ─── Admin: tasks ─────────────────────────────────────────────────────────
 
-class AdminTasksListHandler extends Handler {
+export class AdminTasksListHandler extends Handler {
     async prepare() {
         if (!canCreateTask(this.user as any) && !canManageAllTasks(this.user as any)) {
             this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
@@ -524,6 +532,7 @@ class AdminTasksListHandler extends Handler {
         if (!canModifyTask(this.user as any, src)) {
             throw new ValidationError('tid', null, '无权复制');
         }
+        await validateTagAcCountGraph(authoritativeDomainId, src.graph, this.user._id);
         const problemIds = Array.from(collectTaskParamRefs(src.graph).problemIds);
         await ProblemModel.assertProblemBankSelection(authoritativeDomainId, problemIds, this.user as any);
         const newId = await taskModel.cloneTask(authoritativeDomainId, tid, this.user._id);
@@ -567,7 +576,7 @@ export class AdminTasksEditHandler extends Handler {
         // Bootstrap small-cardinality picker sources so the right-side editor
         // can use dropdowns (no manual ObjectId entry). Problems are too many
         // to bootstrap — see admin_tasks_api_problems for autocomplete.
-        const [schools, userGroups, contestDocs, homeworkDocs, trainingDocs] = await Promise.all([
+        const [schools, userGroups, contestDocs, homeworkDocs, trainingDocs, tagOptions] = await Promise.all([
             userBindModel.listSchools(authoritativeDomainId),
             userBindModel.listUserGroups(authoritativeDomainId),
             DocumentModel.coll
@@ -587,13 +596,14 @@ export class AdminTasksEditHandler extends Handler {
                 .project({ docId: 1, title: 1 })
                 .limit(500)
                 .toArray(),
+            listTagAcCountOptions(authoritativeDomainId),
         ]);
         const toRef = (d: any) => ({ _id: d.docId, title: d.title, beginAt: d.beginAt, rule: d.rule });
         this.response.template = 'admin_tasks_edit.html';
         this.response.body = {
             task,
             isEdit: !!task,
-            presets: presetSummaries(),
+            presets: presetSummaries(tagOptions),
             schools,
             userGroups,
             contests: contestDocs.map(toRef),
@@ -661,6 +671,7 @@ export class AdminTasksEditHandler extends Handler {
             if (!canModifyTask(this.user as any, existing)) {
                 throw new ValidationError('tid', null, '无权编辑');
             }
+            await validateTagAcCountGraph(authoritativeDomainId, data.graph as TaskGraph, this.user._id);
             const existingProblemIds = Array.from(collectTaskParamRefs(existing.graph).problemIds);
             await ProblemModel.assertProblemBankSelection(authoritativeDomainId, problemIds, this.user as any, existingProblemIds);
             // Audit task-level edits so we can correlate "condition tightened
@@ -683,6 +694,7 @@ export class AdminTasksEditHandler extends Handler {
             await OplogModel.log(this, 'tasks.update', { taskId: tid });
             this.response.redirect = this.url('admin_tasks');
         } else {
+            await validateTagAcCountGraph(authoritativeDomainId, data.graph as TaskGraph, this.user._id);
             await ProblemModel.assertProblemBankSelection(authoritativeDomainId, problemIds, this.user as any);
             const newId = await taskModel.createTask(authoritativeDomainId, this.user._id, data);
             await OplogModel.log(this, 'tasks.create', { taskId: newId });

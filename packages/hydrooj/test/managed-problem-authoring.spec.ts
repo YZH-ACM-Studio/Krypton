@@ -80,6 +80,16 @@ require.cache[documentPath] = {
         TYPE_PROBLEM: 10,
         TYPE_TRAINING: 40,
         coll: {
+            async distinct(field: string, filter: any) {
+                if (field !== 'tag') throw new Error(`unexpected distinct field ${field}`);
+                return [
+                    ...new Set(
+                        problemDocs
+                            .filter((doc) => doc.domainId === filter.domainId && (doc.docType ?? 10) === filter.docType)
+                            .flatMap((doc) => (Array.isArray(doc.tag) ? doc.tag : [])),
+                    ),
+                ];
+            },
             async createIndex(key: any, options: any) {
                 problemIndexCalls.push({ key: structuredClone(key), options: structuredClone(options) });
                 return options.name;
@@ -344,6 +354,23 @@ describe('P2.14 managed problem mindmap tags', () => {
         expect(await authoring.materializeKnowledgeMindmapTags([''])).to.deep.equal({ nodeIds: [], tags: [] });
         await expectReject(authoring.materializeKnowledgeMindmapTags(['not-an-object-id']), 'knowledgeNodeIds');
         await expectReject(authoring.materializeManagedMindmapTags(['']), 'mindmapNodeIds');
+    });
+
+    it('publishes one grouped canonical tag catalog without counts or unregistered annual tags', async () => {
+        problemDocs = [
+            { domainId: 'system', docType: 10, docId: 101, tag: ['PAT乙级', '2026春', 'Ladder'] },
+            { domainId: 'system', docType: 10, docId: 102, tag: ['天梯赛全国总决赛', 'L1', '2026CCCC'] },
+            { domainId: 'system', docType: 10, docId: 103, tag: ['2026随便'] },
+            { domainId: 'other', docType: 10, docId: 104, tag: ['2025校赛'] },
+        ];
+
+        const catalog = await authoring.listCanonicalProblemTagOptions('system');
+        expect(catalog).to.deep.include({ value: '基础线段树', label: '数据结构 / 线段树 / 基础线段树', group: '算法知识点' });
+        expect(catalog).to.deep.include({ value: 'PAT乙级', label: 'PAT乙级', group: '来源与赛事' });
+        expect(catalog).to.deep.include({ value: '2026春', label: '2026春', group: '来源与赛事' });
+        expect(catalog).to.deep.include({ value: '2026CCCC', label: '2026CCCC', group: '来源与赛事' });
+        expect(catalog.map((option) => option.value)).not.to.include.members(['Ladder', '2026随便', '2025校赛']);
+        expect(catalog.every((option) => !Object.hasOwn(option, 'count'))).to.equal(true);
     });
 });
 

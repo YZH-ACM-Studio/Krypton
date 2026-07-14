@@ -448,7 +448,7 @@ function formatNodeParamValue(node: TaskGraphNode, spec: PresetSummary['params']
   const id = refId(value);
 
   const option = spec.options?.find((o) => String(o.value) === String(value));
-  if (option) return option.label;
+  if (option) return option.group ? `${option.group} / ${option.label}` : option.label;
 
   if (spec.type === 'date') return <DateTime value={String(value)} mode="date" />;
   if (spec.type === 'years') {

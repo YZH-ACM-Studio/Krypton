@@ -353,13 +353,14 @@ export interface TaskPointParamSchema {
         | 'pat_level'
         | 'pat_season'
         | 'gplt_level'
+        | 'canonical_tag'
         | 'aggregate'
         | 'years';
     label: string;
     required?: boolean;
     default?: any;
     /** For type='select'. */
-    options?: Array<{ value: string; label: string }>;
+    options?: Array<{ value: string; label: string; group?: string }>;
     helper?: string;
 }
 

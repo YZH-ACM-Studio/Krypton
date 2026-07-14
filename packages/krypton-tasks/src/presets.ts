@@ -15,10 +15,22 @@
  * The exported `taskPointPresets` is the merged registry; checkers reference
  * the live collections by `import` so we don't pay the registry cost twice.
  */
-import { ContestModel, DocumentModel, ObjectId, RecordModel, STATUS } from 'hydrooj';
+import {
+    type CanonicalProblemTagOption,
+    ContestModel,
+    DocumentModel,
+    listCanonicalProblemTagOptions,
+    ObjectId,
+    RecordModel,
+    STATUS,
+    ValidationError,
+} from 'hydrooj';
+import { Logger } from '@hydrooj/utils';
 import { userBindModel } from '@hydrooj/krypton-userbind';
 import { cspScoreColl, gpltScoreColl, patScoreColl, stayEventsColl } from './db';
-import type { TaskCheckerContext, TaskPointParamSchema, TaskPointPreset, TaskPointResult } from './types';
+import type { TaskCheckerContext, TaskGraph, TaskPointParamSchema, TaskPointPreset, TaskPointResult } from './types';
+
+const logger = new Logger('krypton-tasks-presets');
 
 // ============ shared helpers ============
 
@@ -50,6 +62,10 @@ function hasDateValue(value: DateLike): boolean {
     return dateBoundaryMs(value, 'start') !== null;
 }
 
+function isEmptyDateValue(value: unknown): boolean {
+    return value === null || value === undefined || value === '';
+}
+
 /** Build an ObjectId range from a date/date-time for record query windowing. */
 function dateRangeQuery(start?: DateLike, end?: DateLike): Record<string, any> {
     const r: any = {};
@@ -70,6 +86,59 @@ function dateRangeQuery(start?: DateLike, end?: DateLike): Record<string, any> {
         );
     }
     return r;
+}
+
+type TagDateRangeValidation =
+    | { ok: true; query: Record<string, any> }
+    | {
+          ok: false;
+          reason: 'invalid-start-date' | 'invalid-end-date' | 'start-date-out-of-range' | 'end-date-out-of-range' | 'reversed-date-range';
+          message: string;
+      };
+
+function strictTagDateBoundaryMs(value: unknown, boundary: 'start' | 'end'): { provided: boolean; millis: number | null } {
+    if (value === null || value === undefined || value === '') return { provided: false, millis: null };
+    if (value instanceof Date) {
+        const millis = value.getTime();
+        return { provided: true, millis: Number.isNaN(millis) ? null : millis };
+    }
+    if (typeof value !== 'string' || value !== value.trim()) return { provided: true, millis: null };
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return { provided: true, millis: null };
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const calendarDate = new Date(Date.UTC(year, month - 1, day));
+    if (calendarDate.getUTCFullYear() !== year || calendarDate.getUTCMonth() !== month - 1 || calendarDate.getUTCDate() !== day) {
+        return { provided: true, millis: null };
+    }
+    return { provided: true, millis: dateBoundaryMs(value, boundary) };
+}
+
+/** The tag preset is new and date-backed by an HTML date field, so malformed ranges must fail instead of widening silently. */
+function strictTagDateRangeQuery(start: unknown, end: unknown): TagDateRangeValidation {
+    const startBoundary = strictTagDateBoundaryMs(start, 'start');
+    if (startBoundary.provided && startBoundary.millis === null) {
+        return { ok: false, reason: 'invalid-start-date', message: '开始日期格式无效' };
+    }
+    const endBoundary = strictTagDateBoundaryMs(end, 'end');
+    if (endBoundary.provided && endBoundary.millis === null) {
+        return { ok: false, reason: 'invalid-end-date', message: '结束日期格式无效' };
+    }
+    const objectIdTimestampInRange = (millis: number) => {
+        const seconds = Math.floor(millis / 1000);
+        return Number.isSafeInteger(seconds) && seconds >= 0 && seconds <= 0xffffffff;
+    };
+    if (startBoundary.millis !== null && !objectIdTimestampInRange(startBoundary.millis)) {
+        return { ok: false, reason: 'start-date-out-of-range', message: '开始日期超出可统计范围' };
+    }
+    if (endBoundary.millis !== null && !objectIdTimestampInRange(endBoundary.millis)) {
+        return { ok: false, reason: 'end-date-out-of-range', message: '结束日期超出可统计范围' };
+    }
+    if (startBoundary.millis !== null && endBoundary.millis !== null && startBoundary.millis > endBoundary.millis) {
+        return { ok: false, reason: 'reversed-date-range', message: '开始日期不能晚于结束日期' };
+    }
+    return { ok: true, query: dateRangeQuery(start as DateLike, end as DateLike) };
 }
 
 function dateRangeParams(): TaskPointParamSchema[] {
@@ -94,6 +163,45 @@ async function scoreStudentDocId(ctx: TaskCheckerContext): Promise<ObjectId | nu
     return student?._id ?? null;
 }
 
+export function listTagAcCountOptions(domainId: string): Promise<CanonicalProblemTagOption[]> {
+    return listCanonicalProblemTagOptions(domainId);
+}
+
+/** Re-read the P2.14 catalog at the write boundary; never trust posted tag strings. */
+export async function validateTagAcCountGraph(domainId: string, graph: TaskGraph, actorUid: number): Promise<void> {
+    const nodes = (graph.nodes || []).filter((node) => node.type === 'task' && node.presetId === 'tag_ac_count');
+    if (!nodes.length) return;
+    const allowed = new Set((await listTagAcCountOptions(domainId)).map((option) => option.value));
+    for (const node of nodes) {
+        const tag = node.params?.tag;
+        const rawCount = node.params?.count;
+        const count = typeof rawCount === 'string' && /^\d+$/.test(rawCount) ? Number(rawCount) : rawCount;
+        const dateRange = strictTagDateRangeQuery(node.params?.startDate, node.params?.endDate);
+        let reason = '';
+        let message = '';
+        if (typeof tag !== 'string' || !tag || tag !== tag.trim() || !allowed.has(tag)) reason = 'invalid-canonical-tag';
+        else if (!Number.isSafeInteger(count) || count <= 0) reason = 'invalid-count';
+        else if ('reason' in dateRange) {
+            reason = dateRange.reason;
+            message = dateRange.message;
+        }
+        if (!reason) continue;
+        logger.warn(
+            'Tag AC preset save denied domain=%s actor=%d node=%s tag=%o count=%o start=%o end=%o stage=validate reason=%s',
+            domainId,
+            actorUid,
+            node.id,
+            tag,
+            rawCount,
+            node.params?.startDate,
+            node.params?.endDate,
+            reason,
+        );
+        if (!message) message = reason === 'invalid-canonical-tag' ? '请选择有效的规范标签' : 'AC 题目数必须为正整数';
+        throw new ValidationError('graph', null, message);
+    }
+}
+
 // ============ base 8 presets ============
 
 const acCountPreset: TaskPointPreset = {
@@ -109,6 +217,57 @@ const acCountPreset: TaskPointPreset = {
         const pids = await RecordModel.coll.distinct('pid', query);
         const target = +params.count || 0;
         return pct(pids.length, target, pids.length >= target, `已 AC ${pids.length}/${target} 题`);
+    },
+};
+
+const tagAcCountPreset: TaskPointPreset = {
+    id: 'tag_ac_count',
+    name: 'AC 指定标签题目数',
+    category: 'behavior',
+    description: '统计用户在指定规范标签下独立 AC 的题目数量',
+    params: [
+        {
+            name: 'tag',
+            type: 'canonical_tag',
+            label: '规范标签',
+            required: true,
+            helper: '只能从算法知识点或来源与赛事目录中选择',
+        },
+        { name: 'count', type: 'number', label: '需要 AC 的题目数', default: 3, required: true },
+        ...dateRangeParams(),
+    ],
+    async checker(ctx, params) {
+        const tag = params.tag;
+        const target = +params.count;
+        if (typeof tag !== 'string' || !tag || tag !== tag.trim()) throw new ValidationError('tag');
+        if (!Number.isSafeInteger(target) || target <= 0) throw new ValidationError('count');
+        try {
+            const dateRange = strictTagDateRangeQuery(params.startDate, params.endDate);
+            if ('reason' in dateRange) throw new ValidationError('graph', null, dateRange.message);
+            const problemIds = await DocumentModel.coll.distinct('docId', {
+                domainId: ctx.domainId,
+                docType: DocumentModel.TYPE_PROBLEM,
+                tag,
+            });
+            if (!problemIds.length) return pct(0, target, false, `已 AC 0/${target} 道 ${tag} 题目`);
+            if (problemIds.some((pid) => !Number.isSafeInteger(pid))) {
+                throw new TypeError(`tag ${tag} resolved a non-integer problem docId`);
+            }
+            const query: any = {
+                domainId: ctx.domainId,
+                uid: ctx.userId,
+                status: STATUS.STATUS_ACCEPTED,
+                pid: { $in: problemIds },
+            };
+            const idRange = dateRange.query;
+            if (Object.keys(idRange).length) query._id = idRange;
+            const acceptedProblemIds = await RecordModel.coll.distinct('pid', query);
+            const current = acceptedProblemIds.length;
+            return pct(current, target, current >= target, `已 AC ${current}/${target} 道 ${tag} 题目`);
+        } catch (error) {
+            logger.error('Tag AC preset check failed domain=%s uid=%d tag=%s stage=check error=%o', ctx.domainId, ctx.userId, tag, error);
+            throw error;
+        }
     },
 };
 
@@ -397,6 +556,7 @@ const totalScorePreset: TaskPointPreset = {
 
 const basePresets: TaskPointPreset[] = [
     acCountPreset,
+    tagAcCountPreset,
     submitCountPreset,
     contestParticipatePreset,
     specificContestPreset,
@@ -815,13 +975,13 @@ export const taskPointPresets: Record<string, TaskPointPreset> = Object.fromEntr
 );
 
 /** Public summary (no checkers) — used by frontend to render the toolbox. */
-export function presetSummaries(): Array<Omit<TaskPointPreset, 'checker'>> {
+export function presetSummaries(tagOptions: CanonicalProblemTagOption[] = []): Array<Omit<TaskPointPreset, 'checker'>> {
     return Object.values(taskPointPresets).map((p) => ({
         id: p.id,
         name: p.name,
         category: p.category,
         description: p.description,
-        params: p.params,
+        params: p.params.map((param) => (param.type === 'canonical_tag' ? { ...param, options: tagOptions } : param)),
     }));
 }
 
@@ -833,8 +993,9 @@ export async function runChecker(presetId: string, ctx: TaskCheckerContext, para
     }
     try {
         const effectiveParams = { ...(params || {}) };
-        if (!hasDateValue(effectiveParams.startDate) && ctx.startDate) effectiveParams.startDate = ctx.startDate;
-        if (!hasDateValue(effectiveParams.endDate) && ctx.endDate) effectiveParams.endDate = ctx.endDate;
+        const shouldInheritDate = (value: DateLike) => (presetId === 'tag_ac_count' ? isEmptyDateValue(value) : !hasDateValue(value));
+        if (shouldInheritDate(effectiveParams.startDate) && ctx.startDate) effectiveParams.startDate = ctx.startDate;
+        if (shouldInheritDate(effectiveParams.endDate) && ctx.endDate) effectiveParams.endDate = ctx.endDate;
         return await preset.checker(ctx, effectiveParams);
     } catch (e: any) {
         return { completed: false, current: 0, target: 0, details: `校验错误: ${e?.message || e}` };

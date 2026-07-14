@@ -24,6 +24,7 @@ export * as ContestModel from './model/contest';
 export { default as TokenModel } from './model/token';
 export { default as UserModel } from './model/user';
 export { default as ProblemModel } from './model/problem';
+export { type CanonicalProblemTagOption, listCanonicalProblemTagOptions } from './model/managed-problem-authoring';
 export { default as PaperDraftModel } from './model/paper-draft';
 export { default as RecordModel } from './model/record';
 export { default as ScheduleModel } from './model/schedule';

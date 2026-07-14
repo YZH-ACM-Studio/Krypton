@@ -226,6 +226,48 @@ export interface SimpleSelectProps {
   ariaLabel?: string;
 }
 
+export function renderSimpleSelectOptions(options: SimpleSelectOption[]): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  let index = 0;
+  while (index < options.length) {
+    const option = options[index];
+    if ('type' in option && option.type === 'separator') {
+      nodes.push(<SelectSeparator key={`sep-${index}`} />);
+      index++;
+      continue;
+    }
+    if ('type' in option && option.type === 'label') {
+      const items: React.ReactNode[] = [];
+      let itemIndex = index + 1;
+      while (itemIndex < options.length) {
+        const item = options[itemIndex];
+        if ('type' in item) break;
+        items.push(
+          <SelectItem key={`item-${itemIndex}-${item.value}`} value={item.value} disabled={item.disabled}>
+            {item.label}
+          </SelectItem>,
+        );
+        itemIndex++;
+      }
+      nodes.push(
+        <SelectGroup key={`group-${index}`}>
+          <SelectLabel>{option.label}</SelectLabel>
+          {items}
+        </SelectGroup>,
+      );
+      index = itemIndex;
+      continue;
+    }
+    nodes.push(
+      <SelectItem key={`item-${index}-${option.value}`} value={option.value} disabled={option.disabled}>
+        {option.label}
+      </SelectItem>,
+    );
+    index++;
+  }
+  return nodes;
+}
+
 /**
  * The 90% case: pass `options` + value props, get a styled dropdown that's
  * a drop-in replacement for `<select>`.
@@ -250,21 +292,7 @@ export function SimpleSelect({
       <SelectTrigger size={size} id={id} className={className} aria-label={ariaLabel}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent className={contentClassName}>
-        {options.map((o, i) => {
-          if ('type' in o && o.type === 'separator') {
-            return <SelectSeparator key={`sep-${i}`} />;
-          }
-          if ('type' in o && o.type === 'label') {
-            return <SelectLabel key={`lbl-${i}`}>{o.label}</SelectLabel>;
-          }
-          return (
-            <SelectItem key={o.value} value={o.value} disabled={o.disabled}>
-              {o.label}
-            </SelectItem>
-          );
-        })}
-      </SelectContent>
+      <SelectContent className={contentClassName}>{renderSimpleSelectOptions(options)}</SelectContent>
     </Select>
   );
 }

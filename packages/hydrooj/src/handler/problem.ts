@@ -51,10 +51,10 @@ import {
     isProblemConfigFilename,
     parseProblemConfigObject,
     parseStructuredRegionSubmission,
-    validateCompiledStructuredConfig,
     validateTextProgramFillSubmission,
 } from '../lib/problem-config';
 import { PERM, PRIV, STATUS } from '../model/builtin';
+import { isCodeEvaluationProblem, normalizeCodeEvaluationDraftCreationConfig } from '../model/code-evaluation-lifecycle';
 import * as contest from '../model/contest';
 import * as discussion from '../model/discussion';
 import domain from '../model/domain';
@@ -119,7 +119,7 @@ function defaultBasicObjectiveConfig(kind: BasicObjectiveKind): Record<string, u
 function defaultDedicatedConfig(kind: DedicatedStructuredEditorKind): Record<string, unknown> {
     if (kind === SUBJECTIVE_KIND) return { main: { gradingInstructions: '' } };
     if (kind === PROGRAM_FILL_KIND) return { main: { mode: 'text', answer: '' } };
-    if (kind === FUNCTION_KIND) return { main: { lang: '', markerSource: '', regions: [], cases: [] } };
+    if (kind === FUNCTION_KIND) return { main: { mode: 'function', lang: '' } };
     return defaultBasicObjectiveConfig(kind);
 }
 
@@ -892,7 +892,8 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
         if (['program_fill', 'function'].includes(kind)) {
             try {
                 const rawPdoc = await problem.get(this.pdoc.domainId, this.pdoc.docId, undefined, true);
-                validateCompiledStructuredConfig(kind, parseProblemConfigObject(rawPdoc));
+                if (!rawPdoc) throw new ProblemNotFoundError(this.pdoc.domainId, this.pdoc.docId);
+                problem.assertProblemReadyForUse(rawPdoc, { actor: this.user._id, stage: 'submit-prepare' });
             } catch (error) {
                 logger.error(
                     'Structured submit prepare rejected domain=%s container=%s pid=%d kind=%s revision=%s uid=%d error=%o',
@@ -1174,6 +1175,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
     @post('editorProblemKind', Types.String, true)
     @post('structuredConfig', Types.Content, true)
     @post('metadataOnly', Types.Boolean, true)
+    @post('completeCodeEvaluationDraft', Types.Boolean, true)
     async post(
         _domainId: string,
         pid: string | number,
@@ -1189,6 +1191,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
         editorProblemKind = '',
         structuredConfig = '',
         metadataOnly = false,
+        completeCodeEvaluationDraft = false,
     ) {
         const domainId = this.pdoc.domainId;
         const problemKind = effectiveProblemKind(this.pdoc);
@@ -1261,7 +1264,8 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 lockHidden !== undefined ||
                 expectedStructureRevision !== undefined ||
                 editorProblemKind ||
-                structuredConfig
+                structuredConfig ||
+                completeCodeEvaluationDraft
             ) {
                 throw new ValidationError('metadataOnly');
             }
@@ -1329,13 +1333,20 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 content,
                 config: parseStructuredConfigInput(structuredConfig),
                 metadata: $update,
+                completeCodeEvaluationDraft,
             });
             const responsePid = newPid || pdoc.docId;
-            this.response.body = { ok: true, pid: responsePid, problemKind };
-            this.response.redirect = this.url('problem_detail', { pid: responsePid });
+            this.response.body = {
+                ok: true,
+                pid: responsePid,
+                problemKind,
+                codeEvaluationStatus: pdoc.codeEvaluationStatus,
+                structureRevision: pdoc.structureRevision,
+            };
+            this.response.redirect = this.url(pdoc.codeEvaluationStatus === 'draft' ? 'problem_edit' : 'problem_detail', { pid: responsePid });
             return;
         }
-        if (editorProblemKind || structuredConfig) throw new ValidationError('problemKind');
+        if (editorProblemKind || structuredConfig || completeCodeEvaluationDraft) throw new ValidationError('problemKind');
         const pdoc = await problem.editAuthorized(domainId, this.pdoc.docId, $update, this.user, {}, { expectedStructureRevision });
         const responsePid = newPid || pdoc.docId;
         this.response.body = { ok: true, pid: responsePid, problemKind };
@@ -1362,21 +1373,23 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
     }
 
     @post('title', Types.Title)
-    @post('content', Types.Content)
+    @post('content', Types.Content, true)
     @post('pid', Types.ProblemId, true, (i) => /^(?:[a-z0-9]{1,10}-)?[a-z][a-z0-9]*$/i.test(i))
     @post('difficulty', Types.UnsignedInt, (i) => +i <= 10, true)
     @post('knowledgeNodeIds', Types.CommaSeperatedArray, true)
     @post('editorProblemKind', Types.String)
     @post('structuredConfig', Types.Content)
+    @post('codeEvaluationDraft', Types.Boolean, true)
     async post(
         _domainId: string,
         title: string,
-        content: string,
+        content: string | undefined,
         pid: string | number = '',
         difficulty = 0,
         knowledgeNodeIds: string[] = [],
         editorProblemKind = '',
         structuredConfig = '',
+        codeEvaluationDraft = false,
     ) {
         const domainId = String(this.domain?._id);
         await problem.refreshProblemAcl(this.user, domainId);
@@ -1389,6 +1402,7 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
             'knowledgeNodeIds',
             'editorProblemKind',
             'structuredConfig',
+            'codeEvaluationDraft',
             ...(canUseCustomPid ? ['pid'] : []),
         ]);
         const unknownFields = Object.keys(this.request.body || {}).filter((field) => !allowedFields.has(field));
@@ -1405,6 +1419,24 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
         if (editorProblemKind !== this.problemKind) {
             throw new ValidationError('editorProblemKind');
         }
+        const parsedConfig = parseStructuredConfigInput(structuredConfig);
+        const requiresCodeEvaluationDraft = isCodeEvaluationProblem(this.problemKind, parsedConfig);
+        if (requiresCodeEvaluationDraft !== codeEvaluationDraft) {
+            throw new ValidationError(
+                'codeEvaluationDraft',
+                null,
+                requiresCodeEvaluationDraft ? '代码评测题必须先创建真实隐藏草稿' : '当前题型或模式不能创建代码评测草稿',
+            );
+        }
+        let persistedConfig = parsedConfig;
+        if (codeEvaluationDraft) {
+            if (Object.hasOwn(this.request.body || {}, 'content')) {
+                throw new ValidationError('content', null, '代码评测草稿第一阶段不接受题面、模板或测试数据');
+            }
+            persistedConfig = normalizeCodeEvaluationDraftCreationConfig(this.problemKind, parsedConfig);
+        } else if (content === undefined) {
+            throw new ValidationError('content');
+        }
         if (typeof pid !== 'string') pid = `P${pid}`;
         if (pid && (await problem.get(domainId, pid))) throw new ProblemAlreadyExistError(pid);
         let knowledge: Awaited<ReturnType<typeof materializeKnowledgeMindmapTags>>;
@@ -1420,16 +1452,28 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
             );
             throw error;
         }
-        const docId = await problem.createProblemByKind(this.problemKind, domainId, pid, title, content, this.user._id, knowledge.tags, {
+        const docId = await problem.createProblemByKind(this.problemKind, domainId, pid, title, content || '', this.user._id, knowledge.tags, {
             difficulty,
-            structuredConfig: parseStructuredConfigInput(structuredConfig),
+            structuredConfig: persistedConfig,
             knowledgeNodeIds: knowledge.nodeIds,
+            ...(codeEvaluationDraft ? { codeEvaluationStatus: 'draft' as const } : {}),
         });
+        if (codeEvaluationDraft) {
+            logger.info(
+                'Code evaluation draft created domain=%s pid=%s docId=%d problemKind=%s actor=%d stage=create structureRevision=1 result=draft',
+                domainId,
+                pid || `P${docId}`,
+                docId,
+                this.problemKind,
+                this.user._id,
+            );
+        }
         this.response.body = {
             ok: true,
             pid: pid || docId,
             hidden: true,
             problemKind: this.problemKind,
+            ...(codeEvaluationDraft ? { codeEvaluationStatus: 'draft' } : {}),
             structureRevision: 1,
         };
         this.response.redirect = this.url('problem_edit', { pid: pid || docId });
@@ -1620,6 +1664,19 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
             },
             { capability: 'content' },
         );
+        if (type === 'testdata' && [PROGRAM_FILL_KIND, FUNCTION_KIND].includes(this.pdoc.problemKind as any)) {
+            const latest = await problem.get(domainId, this.pdoc.docId, ['structureRevision', 'data'] as any, true);
+            if (!latest) throw new ProblemNotFoundError(domainId, this.pdoc.docId);
+            this.back({
+                ok: true,
+                operation: 'upload_file',
+                type,
+                filename,
+                structureRevision: latest.structureRevision,
+                testdata: sortFiles(latest.data || []),
+            });
+            return;
+        }
         this.back({ ok: true, operation: 'upload_file', type, filename });
     }
 

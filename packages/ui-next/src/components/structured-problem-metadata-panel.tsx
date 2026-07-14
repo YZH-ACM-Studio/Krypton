@@ -21,6 +21,7 @@ interface StructuredProblemMetadataPanelProps {
   mindmapOptions: KnowledgeMindmapOption[];
   canUseCustomPid: boolean;
   onMetadataChange: () => void;
+  visibilityLockedReason?: string;
   children?: ReactNode;
 }
 
@@ -51,6 +52,7 @@ export function StructuredProblemMetadataPanel({
   mindmapOptions,
   canUseCustomPid,
   onMetadataChange,
+  visibilityLockedReason,
   children,
 }: StructuredProblemMetadataPanelProps) {
   const initialKnowledge = useMemo(() => {
@@ -164,6 +166,15 @@ export function StructuredProblemMetadataPanel({
 
       {isCreate ? (
         <p className="border-y border-border/70 py-3 text-xs text-muted-foreground">新题首次保存固定为隐藏，检查完成后再发布。</p>
+      ) : visibilityLockedReason ? (
+        <div className="space-y-1 border-y border-border/70 py-2">
+          <input type="hidden" name="hidden" value="true" />
+          <label className="flex min-h-9 items-center gap-2 text-sm text-muted-foreground">
+            <Checkbox checked disabled />
+            <span>隐藏题目</span>
+          </label>
+          <p className="text-xs text-muted-foreground">{visibilityLockedReason}</p>
+        </div>
       ) : (
         <label className="flex min-h-11 cursor-pointer items-center gap-2 border-y border-border/70 py-2 text-sm">
           <Checkbox name="hidden" defaultChecked={!!pdoc.hidden} />

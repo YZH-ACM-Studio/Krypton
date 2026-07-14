@@ -3,6 +3,7 @@ import { parseProblemKind } from '@hydrooj/common';
 import { ValidationError } from '../error';
 import { parseRegionMarkers, validateCompiledStructuredConfig } from '../lib/problem-config';
 import db from '../service/db';
+import { normalizeCodeEvaluationCases } from './code-evaluation-lifecycle';
 import * as document from './document';
 
 const recordColl = db.collection('record');
@@ -10,7 +11,15 @@ const recordStatColl = db.collection('record.stat');
 
 const FORBIDDEN_STATEMENT_FIELDS = new Set(['prompt', 'statement', 'description', 'instructions', 'introduction', 'preface']);
 
-export const PROBLEM_STRUCTURAL_FIELDS = new Set(['content', 'config', 'problemKind', 'data', 'additional_file', 'reference']);
+export const PROBLEM_STRUCTURAL_FIELDS = new Set([
+    'content',
+    'config',
+    'problemKind',
+    'codeEvaluationStatus',
+    'data',
+    'additional_file',
+    'reference',
+]);
 
 export function problemCreateChangedFields(
     problemKind: ProblemKind,
@@ -22,6 +31,7 @@ export function problemCreateChangedFields(
         sourceMeta?: unknown;
         managedAuthoring?: unknown;
         knowledgeNodeIds?: unknown;
+        codeEvaluationStatus?: unknown;
     },
 ): string[] {
     return [
@@ -42,6 +52,7 @@ export function problemCreateChangedFields(
         ...(created.sourceMeta ? ['sourceMeta'] : []),
         ...(created.managedAuthoring ? ['managedAuthoring'] : []),
         ...(created.knowledgeNodeIds ? ['knowledgeNodeIds'] : []),
+        ...(created.codeEvaluationStatus ? ['codeEvaluationStatus'] : []),
         ...(problemKind !== 'programming' ? ['config'] : []),
     ];
 }
@@ -91,23 +102,6 @@ function assertNoSecondaryStatement(value: unknown, path = 'config'): void {
     }
 }
 
-function normalizeCases(value: unknown): Array<{ input: string; output: string; score?: number }> {
-    if (!Array.isArray(value) || !value.length) throw new ValidationError('config', null, '至少需要一个测试点');
-    return value.map((item, index) => {
-        if (!isPlainObject(item)) throw new ValidationError('config', null, `测试点 ${index + 1} 格式错误`);
-        const input = typeof item.input === 'string' ? item.input.trim() : '';
-        const output = typeof item.output === 'string' ? item.output.trim() : '';
-        const validName = (name: string) => !!name && name !== 'config.yaml' && !/[\\/]/.test(name);
-        if (!validName(input) || !validName(output)) {
-            throw new ValidationError('config', null, `测试点 ${index + 1} 文件名非法`);
-        }
-        if (item.score !== undefined && (!Number.isFinite(item.score) || Number(item.score) < 0)) {
-            throw new ValidationError('config', null, `测试点 ${index + 1} 分值非法`);
-        }
-        return { input, output, ...(item.score !== undefined ? { score: Number(item.score) } : {}) };
-    });
-}
-
 function normalizeCompilableStructured(kind: 'program_fill' | 'function', main: Record<string, unknown>) {
     const lang = typeof main.lang === 'string' ? main.lang.trim() : '';
     if (!lang || !/^[A-Za-z0-9_.+-]{1,64}$/.test(lang)) throw new ValidationError('config', null, '必须选择唯一评测语言');
@@ -134,7 +128,7 @@ function normalizeCompilableStructured(kind: 'program_fill' | 'function', main: 
             throw new ValidationError('config', null, '程序填空占位内容必须只有一行');
         }
     }
-    const cases = normalizeCases(main.cases);
+    const cases = normalizeCodeEvaluationCases(main.cases, false);
     const config = {
         type: 'fill_function',
         subType: kind === 'program_fill' ? 'program_fill_compile' : 'function',

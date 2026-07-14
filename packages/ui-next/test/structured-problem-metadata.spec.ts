@@ -177,7 +177,9 @@ describe('P3.16 structured metadata and unsaved-navigation contracts', () => {
 
       const handler = read('packages/hydrooj/src/handler/problem.ts');
       expect(handler).to.include("this.back({ ok: true, operation: 'upload_file', type, filename })");
-      expect(handler.match(/this\.response\.body = \{ ok: true, pid: responsePid, problemKind \}/g)).to.have.length(3);
+      expect(handler.match(/this\.response\.body = \{ ok: true, pid: responsePid, problemKind \}/g)).to.have.length(2);
+      expect(handler).to.include('codeEvaluationStatus: pdoc.codeEvaluationStatus');
+      expect(handler).to.include('structureRevision: pdoc.structureRevision');
     } finally {
       (globalThis as any).window = previousWindow;
     }

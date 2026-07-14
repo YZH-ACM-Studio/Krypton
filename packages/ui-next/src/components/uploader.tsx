@@ -483,7 +483,7 @@ export interface FileUploaderProps {
   /** Allowed mime types (e.g. `['image/*']`) */
   accept?: string[];
   /** Called after each successful upload */
-  onUploaded?: (filename: string) => void;
+  onUploaded?: (filename: string, responseBody?: Record<string, unknown>) => void;
   /** Called after the whole batch is done */
   onBatchComplete?: () => void;
   className?: string;
@@ -535,8 +535,18 @@ export function FileUploader({
       shouldRetry: retryOnFailure ? undefined : () => false,
       formData: true,
       withCredentials: true,
+      headers: { Accept: 'application/json' },
       allowedMetaFields: true,
-      getResponseData: () => ({}),
+      getResponseData: (xhr) => {
+        const responseText = xhr.responseText || '';
+        if (!responseText.trim()) return {};
+        try {
+          const parsed = JSON.parse(responseText);
+          return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch {
+          return {};
+        }
+      },
       onAfterResponse: (xhr) => {
         if (xhr.status < 400) return;
         const fallback = `上传失败：HTTP ${xhr.status}`;
@@ -571,9 +581,9 @@ export function FileUploader({
         ),
       );
     });
-    uppy.on('upload-success', (file) => {
+    uppy.on('upload-success', (file, response) => {
       setItems((prev) => prev.map((it) => (it.id === file?.id ? { ...it, status: 'done', progress: 100 } : it)));
-      if (file?.name) onUploaded?.(file.name);
+      if (file?.name) onUploaded?.(file.name, response?.body as Record<string, unknown> | undefined);
     });
     uppy.on('upload-error', (file, error) => {
       const message = error?.message || '上传失败';

@@ -8,8 +8,16 @@ const originalLoad = Module._load;
 
 let problemConfig: unknown;
 let problemKind: string | undefined;
+let codeEvaluationStatus: 'draft' | 'ready' | undefined;
 const queuedTasks: any[] = [];
 const insertedRecords: any[] = [];
+const deletedTaskQueries: any[] = [];
+const structureLockRequests: boolean[] = [];
+
+function assertReady(pdoc: any) {
+    const codeEvaluation = pdoc.problemKind === 'function' || (pdoc.problemKind === 'program_fill' && pdoc.config?.main?.mode === 'compile');
+    if (codeEvaluation && pdoc.codeEvaluationStatus !== 'ready') throw new Error('code evaluation draft is not ready');
+}
 
 const collectionStub = {
     countDocuments: async () => 0,
@@ -59,7 +67,11 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === './message') return {};
     if (request === './problem') {
         return {
-            claimStructureLockForSubmission: async () => undefined,
+            claimStructureLockForSubmission: async (_domainId: string, _pid: number, lockStructure = true) => {
+                structureLockRequests.push(lockStructure);
+                assertReady({ problemKind, config: problemConfig, codeEvaluationStatus });
+            },
+            assertProblemReadyForUse: assertReady,
             get: async () => ({
                 domainId: 'system',
                 docId: 7,
@@ -68,13 +80,16 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                 data: ['1.in', '1.out'],
                 config: problemConfig,
                 problemKind,
+                codeEvaluationStatus,
             }),
         };
     }
     if (request === './system') return {};
     if (request === './task') {
         return {
-            deleteMany: async () => undefined,
+            deleteMany: async (query: any) => {
+                deletedTaskQueries.push(query);
+            },
             addMany: async (tasks: any[]) => {
                 queuedTasks.push(...tasks);
                 return tasks;
@@ -97,8 +112,11 @@ try {
 beforeEach(() => {
     problemConfig = undefined;
     problemKind = undefined;
+    codeEvaluationStatus = undefined;
     queuedTasks.length = 0;
     insertedRecords.length = 0;
+    deletedTaskQueries.length = 0;
+    structureLockRequests.length = 0;
 });
 
 describe('record judge problem config', () => {
@@ -143,6 +161,7 @@ describe('record judge problem config', () => {
 
     it('queues a valid function problem with its private template and physical testdata', async () => {
         problemKind = 'function';
+        codeEvaluationStatus = 'ready';
         problemConfig = {
             type: 'fill_function',
             subType: 'function',
@@ -180,6 +199,7 @@ describe('record judge problem config', () => {
 
     it('rejects a function submission whose language differs from the immutable template', async () => {
         problemKind = 'function';
+        codeEvaluationStatus = 'ready';
         problemConfig = {
             type: 'fill_function',
             subType: 'function',
@@ -211,6 +231,45 @@ describe('record judge problem config', () => {
         const error = await recordModel.judge('system', record).catch((caught) => caught);
         expect(error).to.be.instanceOf(Error);
         expect(error.message).to.include('language mismatch');
+        expect(queuedTasks).to.deep.equal([]);
+    });
+
+    it('rejects a code evaluation draft before deleting or enqueueing judge tasks', async () => {
+        problemKind = 'function';
+        codeEvaluationStatus = 'draft';
+        problemConfig = {
+            type: 'fill_function',
+            subType: 'function',
+            main: { mode: 'function', lang: 'cc.cc17' },
+        };
+        const record = {
+            _id: new ObjectId(),
+            domainId: 'system',
+            pid: 7,
+            uid: 42,
+            lang: 'cc.cc17',
+            code: '{}',
+        } as any;
+
+        const error = await recordModel.judge('system', record).catch((caught) => caught);
+
+        expect(error).to.be.instanceOf(Error);
+        expect(error.message).to.include('not ready');
+        expect(deletedTaskQueries).to.deep.equal([]);
+        expect(queuedTasks).to.deep.equal([]);
+    });
+
+    it('rejects testdata generation for a draft before inserting its record', async () => {
+        problemKind = 'program_fill';
+        codeEvaluationStatus = 'draft';
+        problemConfig = { main: { mode: 'compile', lang: 'cc.cc17' } };
+
+        const error = await recordModel.add('system', 7, 42, '_', 'gen.cpp\nstd.cpp', true, { type: 'generate' }).catch((caught) => caught);
+
+        expect(error).to.be.instanceOf(Error);
+        expect(error.message).to.include('not ready');
+        expect(structureLockRequests).to.deep.equal([false]);
+        expect(insertedRecords).to.deep.equal([]);
         expect(queuedTasks).to.deep.equal([]);
     });
 

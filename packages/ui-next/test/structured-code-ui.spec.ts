@@ -59,3 +59,47 @@ describe('P3.11 structured code UI contract', () => {
     expect(model).to.include('cloneStructuredProblemForLanguage');
   });
 });
+
+describe('P3.17 code evaluation draft workspace', () => {
+  it('creates a real hidden draft before rendering statement, template, or testdata controls', () => {
+    const editor = read('packages/ui-next/src/pages/structured-code-editors.tsx');
+    expect(editor).to.include('const draftCreation = isCreate && compileMode');
+    expect(editor).to.include('main: draftCreation');
+    expect(editor).to.include("? { mode: kind === 'program_fill' ? 'compile' : 'function', lang }");
+    expect(editor).to.include('name="codeEvaluationDraft" value="true"');
+    expect(editor).to.include("draftCreation ? '创建草稿' : '保存'");
+    expect(editor).to.include('{!draftCreation ? (');
+  });
+
+  it('maps cases only through selectors backed by the canonical uploaded file list', () => {
+    const editor = read('packages/ui-next/src/pages/structured-code-editors.tsx');
+    const casesStart = editor.indexOf('function CasesEditor(');
+    const casesEnd = editor.indexOf('function StructuredCodeEditor(', casesStart);
+    const casesEditor = editor.slice(casesStart, casesEnd);
+    expect(casesEditor).to.include('<SimpleSelect');
+    expect(casesEditor).to.include('caseFileOptions(files, item.input)');
+    expect(casesEditor).to.include('caseFileOptions(files, item.output)');
+    expect(casesEditor).not.to.include('<Input');
+    expect(editor).to.include('<FileUploader');
+    expect(editor).to.include('uploadConcurrency={1}');
+    expect(editor).to.include('retryOnFailure={false}');
+    expect(editor).to.include('proposeCasePairs(current, canonicalFiles)');
+  });
+
+  it('uses explicit save-draft and atomic completion actions with the latest upload revision', () => {
+    const editor = read('packages/ui-next/src/pages/structured-code-editors.tsx');
+    expect(editor).to.include("formData.set('expectedStructureRevision', String(structureRevision))");
+    expect(editor).to.include("formData.set('completeCodeEvaluationDraft', 'true')");
+    expect(editor).to.include('保存草稿');
+    expect(editor).to.include('完成配置');
+    expect(editor).to.include('服务端未返回最新结构版本与文件清单');
+    expect(editor).to.include('visibilityLockedReason=');
+  });
+
+  it('parses successful upload JSON so the workspace receives canonical revision and files', () => {
+    const uploader = read('packages/ui-next/src/components/uploader.tsx');
+    expect(uploader).to.include("headers: { Accept: 'application/json' }");
+    expect(uploader).to.include('getResponseData: (xhr) =>');
+    expect(uploader).to.include('onUploaded?.(file.name, response?.body');
+  });
+});

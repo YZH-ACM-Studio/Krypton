@@ -252,6 +252,8 @@ declare module './model/problem' {
         };
         /** Canonical knowledge selections for dedicated structured problems; `tag` is server-derived from these nodes. */
         knowledgeNodeIds?: ObjectId[];
+        /** Explicit lifecycle for function and compile-mode program-fill problems. */
+        codeEvaluationStatus?: 'draft' | 'ready';
         structureRevision?: number;
         structureLockedAt?: Date;
         structureLockReason?: 'first_submission' | 'container_started';

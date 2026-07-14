@@ -126,13 +126,15 @@ export default class RecordModel {
             throw new ValidationError('rid', null, '人工阅卷记录不能进入自动评测队列');
         }
         let source = `${domainId}/${rdocs[0].pid}`;
-        let [pdoc] = await Promise.all([problem.get(domainId, rdocs[0].pid, undefined, true), task.deleteMany({ rid: { $in: _rids } })]);
+        let pdoc = await problem.get(domainId, rdocs[0].pid, undefined, true);
         if (!pdoc) throw new ProblemNotFoundError(domainId, rdocs[0].pid);
         if (pdoc.reference) {
             pdoc = await problem.get(pdoc.reference.domainId, pdoc.reference.pid, undefined, true);
             if (!pdoc) throw new ProblemNotFoundError(domainId, rdocs[0].pid);
             source = `${pdoc.domainId}/${pdoc.docId}`;
         }
+        problem.assertProblemReadyForUse(pdoc, { actor: rdocs[0].uid, stage: 'judge-queue' });
+        await task.deleteMany({ rid: { $in: _rids } });
         const judgeConfig =
             parseProblemConfigObject(pdoc) ?? (pdoc.config == null || (typeof pdoc.config === 'string' && !pdoc.config.trim()) ? {} : null);
         if (!judgeConfig) throw new Error(`Cannot parse problem config: ${pdoc.domainId}/${pdoc.docId}`);
@@ -243,7 +245,7 @@ export default class RecordModel {
         } else if (args.type === 'generate') {
             data.contest = RecordModel.RECORD_GENERATE;
         }
-        if (args.type !== 'generate') await problem.claimStructureLockForSubmission(domainId, pid);
+        await problem.claimStructureLockForSubmission(domainId, pid, args.type !== 'generate', uid);
         let res;
         try {
             res = await RecordModel.coll.insertOne(data);

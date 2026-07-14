@@ -16,9 +16,11 @@ const loggerWarnCalls: any[][] = [];
 
 const TYPE_PROBLEM = 10;
 const countCalls: Array<{ domainId: string; docType: number; query: unknown }> = [];
+const selectionReadCalls: Array<{ filter: any; options: any }> = [];
 const guardedUpdateCalls: Array<{ filter: any; update: any }> = [];
 const updateCalls: Array<{ filter: any; update: any }> = [];
 let countResult = 0;
+let selectionNotReady: any = null;
 let liveProblem: any = null;
 let failNextUpdateAfterApply = false;
 let beforeFindOneAndUpdate: (() => void) | null = null;
@@ -109,7 +111,15 @@ require.cache[documentPath] = {
                 }
                 return { matchedCount: 1 };
             },
-            async findOne(filter: any) {
+            find(filter: any, options?: any) {
+                selectionReadCalls.push({ filter: structuredClone(filter), options: structuredClone(options) });
+                return {
+                    async toArray() {
+                        return selectionNotReady ? [structuredClone(selectionNotReady)] : [];
+                    },
+                };
+            },
+            async findOne(filter: any, _options?: any) {
                 return matchesGuardedFilter(liveProblem, filter) ? structuredClone(liveProblem) : null;
             },
         },
@@ -221,9 +231,11 @@ async function captureFailure(run: () => Promise<unknown>) {
 
 beforeEach(() => {
     countCalls.length = 0;
+    selectionReadCalls.length = 0;
     guardedUpdateCalls.length = 0;
     updateCalls.length = 0;
     countResult = 0;
+    selectionNotReady = null;
     liveProblem = null;
     failNextUpdateAfterApply = false;
     beforeFindOneAndUpdate = null;
@@ -532,6 +544,89 @@ describe('P2.11 linearizable problem metadata writes', () => {
         expect(liveProblem.knowledgeNodeIds).to.deep.equal([]);
     });
 
+    it('rejects a low-level config change that would detach a ready status from compile evaluation', async () => {
+        const user = makeUser('creator');
+        liveProblem = {
+            ...pdoc(100, user._id),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 2,
+            aclMutationLocks: [],
+            problemKind: 'program_fill',
+            codeEvaluationStatus: 'ready',
+            structureRevision: 3,
+            config: { main: { mode: 'compile', lang: 'cc.cc17' } },
+            data: [{ name: '1.in' }, { name: '1.out' }],
+        };
+
+        const error = await captureFailure(() =>
+            (access as any).commitProblemAclGuardedUpdate(
+                user,
+                structuredClone(liveProblem),
+                { config: { main: { mode: 'text', answer: 'i++' } } },
+                {},
+            ),
+        );
+
+        expect(error?.name).to.equal('ValidationError');
+        expect(liveProblem.config).to.deep.equal({ main: { mode: 'compile', lang: 'cc.cc17' } });
+        expect(guardedUpdateCalls).to.deep.equal([]);
+        expect(loggerWarnCalls[0]?.slice(0, 8)).to.deep.equal([
+            'Code evaluation lifecycle patch rejected domain=%s pid=%s docId=%d problemKind=%s actor=%d stage=%s structureRevision=%s result=denied fields=%o error=%o',
+            'system',
+            '-',
+            100,
+            'program_fill',
+            42,
+            'acl-guarded-update',
+            3,
+        ]);
+    });
+
+    it('rejects publishing a code-evaluation draft at the ACL-guarded commit primitive', async () => {
+        const user = makeUser('creator');
+        liveProblem = {
+            ...pdoc(100, user._id),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 2,
+            aclMutationLocks: [],
+            problemKind: 'function',
+            codeEvaluationStatus: 'draft',
+            structureRevision: 3,
+            config: { main: { mode: 'function', lang: 'cc.cc17' } },
+            data: [],
+        };
+
+        const error = await captureFailure(() => commit(user, structuredClone(liveProblem), { hidden: false }, {}));
+
+        expect(error?.name).to.equal('ValidationError');
+        expect(liveProblem.hidden).to.equal(true);
+        expect(guardedUpdateCalls).to.deep.equal([]);
+        expect(loggerWarnCalls.at(-1)?.[6]).to.equal('acl-guarded-publish');
+    });
+
+    it('rejects forged testdata metadata at the ACL-guarded commit primitive', async () => {
+        const user = makeUser('creator');
+        liveProblem = {
+            ...pdoc(100, user._id),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 2,
+            aclMutationLocks: [],
+            problemKind: 'function',
+            codeEvaluationStatus: 'draft',
+            structureRevision: 3,
+            config: { main: { mode: 'function', lang: 'cc.cc17' } },
+            data: [],
+        };
+
+        const error = await captureFailure(() =>
+            commit(user, structuredClone(liveProblem), { data: [{ name: 'ghost.in' }, { name: 'ghost.out' }] }, {}),
+        );
+
+        expect(error?.name).to.equal('ValidationError');
+        expect(liveProblem.data).to.deep.equal([]);
+        expect(guardedUpdateCalls).to.deep.equal([]);
+    });
+
     it('denies the guarded update while the same uid has a persistent ProblemDoc lock', async () => {
         const user = makeUser('admin');
         liveProblem = {
@@ -586,6 +681,51 @@ describe('P2.11 durable global problem write claim', () => {
         const stale = await (access as any).commitProblemAclGuardedUpdate(user, snapshot, { title: 'stale' }, {});
         expect(stale).to.equal(null);
         expect(liveProblem.title).to.equal('before');
+    });
+
+    it('rejects unsetting hidden on a code-evaluation draft at the claimed commit primitive', async () => {
+        const user = makeUser('creator');
+        liveProblem = {
+            ...pdoc(100, user._id),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+            problemKind: 'function',
+            codeEvaluationStatus: 'draft',
+            structureRevision: 3,
+            config: { main: { mode: 'function', lang: 'cc.cc17' } },
+            data: [],
+        };
+        const claim = await acquire(user, structuredClone(liveProblem), 'draft-publish', 'metadata-edit');
+        expect(claim).not.to.equal(null);
+
+        const error = await captureFailure(() => commit(claim, {}, { hidden: '' }));
+
+        expect(error?.name).to.equal('ValidationError');
+        expect(liveProblem.hidden).to.equal(true);
+        expect(loggerWarnCalls.at(-1)?.[6]).to.equal('claim-publish');
+    });
+
+    it('does not trust a caller-controlled files-upload claim to write testdata metadata generically', async () => {
+        const user = makeUser('creator');
+        liveProblem = {
+            ...pdoc(100, user._id),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+            problemKind: 'function',
+            codeEvaluationStatus: 'draft',
+            structureRevision: 3,
+            config: { main: { mode: 'function', lang: 'cc.cc17' } },
+            data: [],
+        };
+        const claim = await acquire(user, structuredClone(liveProblem), 'forged-files-upload', 'files-upload');
+        expect(claim).not.to.equal(null);
+
+        const error = await captureFailure(() => commit(claim, { data: [{ name: 'ghost.in' }, { name: 'ghost.out' }] }, {}, 'content'));
+
+        expect(error?.name).to.equal('ValidationError');
+        expect(liveProblem.data).to.deep.equal([]);
     });
 
     it('makes revoke-first and write-first mutually exclusive at revision plus lock state', async () => {
@@ -1285,6 +1425,12 @@ describe('P2.11 problem selection assertion', () => {
         countResult = 1;
         const user = makeUser('creator', { _maintainedPids: new Set([20]) });
         await assertProblemBankSelection('system', [10, 20, 20], user, [10]);
+        expect(selectionReadCalls).to.have.length(1);
+        expect(selectionReadCalls[0].filter).to.deep.include({
+            domainId: 'system',
+            docType: TYPE_PROBLEM,
+            docId: { $in: [10, 20] },
+        });
         expect(countCalls).to.deep.equal([
             {
                 domainId: 'system',
@@ -1296,15 +1442,17 @@ describe('P2.11 problem selection assertion', () => {
         ]);
     });
 
-    it('allows an all-grandfathered selection without requiring current browse ability or querying Mongo', async () => {
+    it('allows an all-grandfathered ready selection without requiring current browse ability', async () => {
         await assertProblemBankSelection('system', [10, 10], makeUser('student'), [10]);
         expect(countCalls).to.deep.equal([]);
+        expect(selectionReadCalls).to.have.length(1);
     });
 
     it('checks the authoritative ACL domain before an all-grandfathered early return', async () => {
         const error = await captureFailure(() => assertProblemBankSelection('course-domain', [10], makeUser('student'), [10]));
         expect(error?.name).to.equal('PermissionError');
         expect(countCalls).to.deep.equal([]);
+        expect(selectionReadCalls).to.deep.equal([]);
     });
 
     it('rejects missing or out-of-scope selections with the same non-disclosing permission error', async () => {
@@ -1323,17 +1471,53 @@ describe('P2.11 problem selection assertion', () => {
         const error = await captureFailure(() => assertProblemBankSelection('system', [20], makeUser('student'), [10]));
         expect(error?.name).to.equal('PermissionError');
         expect(countCalls).to.deep.equal([]);
+        expect(selectionReadCalls).to.deep.equal([]);
     });
 
     it('fails closed before Mongo when non-admin ACL state belongs to another domain', async () => {
         const error = await captureFailure(() => assertProblemBankSelection('course-domain', [20], makeUser('creator')));
         expect(error?.name).to.equal('PermissionError');
         expect(countCalls).to.deep.equal([]);
+        expect(selectionReadCalls).to.deep.equal([]);
     });
 
     it('also rejects an administrator selection when its loaded ACL belongs to another domain', async () => {
         const error = await captureFailure(() => assertProblemBankSelection('course-domain', [20], makeUser('admin')));
         expect(error?.name).to.equal('PermissionError');
+        expect(countCalls).to.deep.equal([]);
+        expect(selectionReadCalls).to.deep.equal([]);
+    });
+
+    it('rejects a non-ready code evaluation problem even when it is grandfathered', async () => {
+        selectionNotReady = {
+            domainId: 'system',
+            docId: 10,
+            pid: 'F10',
+            problemKind: 'function',
+            structureRevision: 4,
+        };
+
+        const error = await captureFailure(() => assertProblemBankSelection('system', [10], makeUser('student'), [10]));
+
+        expect(error?.name).to.equal('PermissionError');
+        expect(countCalls).to.deep.equal([]);
+        expect(loggerWarnCalls).to.have.length(1);
+        expect(loggerWarnCalls[0].slice(0, 7)).to.deep.equal([
+            'Problem selection ready gate rejected domain=%s pid=%s docId=%d problemKind=%s actor=%d stage=container-reference structureRevision=%s result=not-ready error=%o',
+            'system',
+            'F10',
+            10,
+            'function',
+            42,
+            4,
+        ]);
+        expect(loggerWarnCalls[0][7]).to.be.instanceOf(Error);
+    });
+
+    it('rejects invalid selected ids before any database query', async () => {
+        const error = await captureFailure(() => assertProblemBankSelection('system', [Number.NaN], makeUser('creator')));
+        expect(error?.name).to.equal('PermissionError');
+        expect(selectionReadCalls).to.deep.equal([]);
         expect(countCalls).to.deep.equal([]);
     });
 });

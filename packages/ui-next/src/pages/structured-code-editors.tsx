@@ -1,9 +1,10 @@
-import { ArrowDown, ArrowLeft, ArrowUp, Copy, Plus, Save, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, Copy, FileCode2, Plus, Save, Trash2 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { StructuredRegionInputs } from '@/components/structured-region-inputs';
 import { StructuredProblemMetadataPanel, type KnowledgeMindmapOption } from '@/components/structured-problem-metadata-panel';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
+import { FileUploader } from '@/components/uploader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SimpleSelect } from '@/components/ui/select';
@@ -20,6 +21,10 @@ interface CaseMeta {
   input: string;
   output: string;
 }
+interface TestdataFile {
+  name: string;
+  size?: number;
+}
 
 async function responseMessage(response: Response) {
   if (response.status === 409) return '题目结构已锁定或已被其他窗口修改，请重新载入。';
@@ -35,13 +40,33 @@ function move<T>(items: T[], index: number, delta: number) {
   return next;
 }
 
-function CasesEditor({ cases, onChange }: { cases: CaseMeta[]; onChange: (cases: CaseMeta[]) => void }) {
+function caseFileOptions(files: TestdataFile[], current: string) {
+  const options = [{ value: '', label: '选择已上传文件' }, ...files.map((file) => ({ value: file.name, label: file.name }))];
+  if (current && !files.some((file) => file.name === current)) options.push({ value: current, label: `已缺失 · ${current}` });
+  return options;
+}
+
+function proposeCasePairs(cases: CaseMeta[], files: TestdataFile[]): CaseMeta[] {
+  const names = new Set(files.map((file) => file.name));
+  const used = new Set(cases.flatMap((item) => [item.input, item.output]).filter(Boolean));
+  const proposed = [...cases];
+  for (const input of [...names].filter((name) => name.toLowerCase().endsWith('.in')).sort()) {
+    const output = `${input.slice(0, -3)}.out`;
+    if (!names.has(output) || used.has(input) || used.has(output)) continue;
+    proposed.push({ input, output });
+    used.add(input);
+    used.add(output);
+  }
+  return proposed;
+}
+
+function CasesEditor({ cases, files, onChange }: { cases: CaseMeta[]; files: TestdataFile[]; onChange: (cases: CaseMeta[]) => void }) {
   return (
     <section className="space-y-3 border-t border-border/70 pt-5">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold">测试数据映射</h2>
-          <p className="text-xs text-muted-foreground">填写已上传的输入/输出文件名；发布前服务端会逐一核对。</p>
+          <p className="text-xs text-muted-foreground">输入与输出只能从当前题真实存在的文件中选择；同 basename 的 .in/.out 会自动提出配对。</p>
         </div>
         <Button type="button" variant="outline" size="sm" onClick={() => onChange([...cases, { input: '', output: '' }])}>
           <Plus className="size-3.5" />
@@ -50,22 +75,27 @@ function CasesEditor({ cases, onChange }: { cases: CaseMeta[]; onChange: (cases:
       </div>
       {cases.map((item, index) => (
         <div key={index} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-          <Input
+          <SimpleSelect
             value={item.input}
-            onChange={(event) => onChange(cases.map((row, i) => (i === index ? { ...row, input: event.target.value } : row)))}
-            placeholder="1.in"
+            onValueChange={(value) => onChange(cases.map((row, i) => (i === index ? { ...row, input: value } : row)))}
+            options={caseFileOptions(files, item.input)}
           />
-          <Input
+          <SimpleSelect
             value={item.output}
-            onChange={(event) => onChange(cases.map((row, i) => (i === index ? { ...row, output: event.target.value } : row)))}
-            placeholder="1.out"
+            onValueChange={(value) => onChange(cases.map((row, i) => (i === index ? { ...row, output: value } : row)))}
+            options={caseFileOptions(files, item.output)}
           />
           <Button type="button" variant="ghost" size="icon" onClick={() => onChange(cases.filter((_, i) => i !== index))} aria-label="删除测试点">
             <Trash2 className="size-4" />
           </Button>
         </div>
       ))}
-      {!cases.length ? <p className="text-sm text-destructive">编译评测至少需要一个测试点。</p> : null}
+      {!cases.length ? <p className="text-sm text-muted-foreground">尚未映射测试点；上传配对文件或手动添加一行。</p> : null}
+      {cases.some((item) => !files.some((file) => file.name === item.input) || !files.some((file) => file.name === item.output)) ? (
+        <p role="alert" className="text-sm text-destructive">
+          映射中存在缺失文件，保存或完成前必须重新选择。
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -78,6 +108,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const isCreate = String(data.page_name || '').startsWith('problem_create_');
   const locked = !!pdoc.structureLockedAt;
   const pid = String(pdoc.pid || pdoc.docId || '');
+  const codeEvaluationDraft = pdoc.codeEvaluationStatus === 'draft';
   const [mode, setMode] = useState<'text' | 'compile'>(initial.mode === 'compile' ? 'compile' : 'text');
   const [answer, setAnswer] = useState(String(initial.answer || ''));
   const [lang, setLang] = useState(String(initial.lang || ''));
@@ -89,23 +120,32 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const [cases, setCases] = useState<CaseMeta[]>(() =>
     Array.isArray(initial.cases) ? initial.cases.map((item: R) => ({ input: String(item.input || ''), output: String(item.output || '') })) : [],
   );
+  const [testdataFiles, setTestdataFiles] = useState<TestdataFile[]>(() =>
+    Array.isArray(data.testdata)
+      ? data.testdata.map((file: R) => ({ name: String(file.name || ''), size: Number(file.size) || 0 })).filter((file) => file.name)
+      : [],
+  );
+  const [structureRevision, setStructureRevision] = useState(Number(pdoc.structureRevision) || 1);
   const [saving, setSaving] = useState(false);
+  const [saveAction, setSaveAction] = useState<'save' | 'complete'>('save');
   const [cloning, setCloning] = useState(false);
   const [error, setError] = useState('');
   const formRef = useRef<HTMLFormElement>(null);
   const compileMode = kind === 'function' || mode === 'compile';
+  const draftCreation = isCreate && compileMode;
   const langOptions = Object.entries(data.langRange || {}).map(([value, label]) => ({ value, label: String(label) }));
   const cloneLangOptions = langOptions.filter((option) => option.value !== lang);
   const [cloneLang, setCloneLang] = useState('');
 
   const structuredConfig = useMemo(
     () => ({
-      main:
-        kind === 'program_fill' && !compileMode
+      main: draftCreation
+        ? { mode: kind === 'program_fill' ? 'compile' : 'function', lang }
+        : kind === 'program_fill' && !compileMode
           ? { mode: 'text', answer }
           : { mode: kind === 'program_fill' ? 'compile' : 'function', lang, markerSource, regions, cases },
     }),
-    [answer, cases, compileMode, kind, lang, markerSource, regions],
+    [answer, cases, compileMode, draftCreation, kind, lang, markerSource, regions],
   );
   const dirtyState = useFormDirtyState(formRef, JSON.stringify(structuredConfig));
   const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saving || cloning);
@@ -113,17 +153,23 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const completing = submitter?.value === 'complete';
     const submittedSnapshot = dirtyState.snapshot();
     if (submittedSnapshot === null) {
       setError('无法读取当前表单，未发送保存请求。');
       return;
     }
+    setSaveAction(completing ? 'complete' : 'save');
     setSaving(true);
     setError('');
     try {
+      const formData = new FormData(form);
+      if (!isCreate) formData.set('expectedStructureRevision', String(structureRevision));
+      if (completing) formData.set('completeCodeEvaluationDraft', 'true');
       const response = await fetch(form.action || window.location.pathname, {
         method: 'POST',
-        body: new URLSearchParams(new FormData(form) as any),
+        body: new URLSearchParams(formData as any),
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       });
@@ -133,6 +179,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
         console.warn('Structured code problem saved, but local form changed during request; navigation withheld', { destination });
         setError('服务器已保存提交时的版本，但保存过程中检测到新的本地修改；为避免丢失，未自动跳转。');
         setSaving(false);
+        setSaveAction('save');
         dirtyState.recompute();
         return;
       }
@@ -142,7 +189,23 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
     } catch (caught: any) {
       setError(caught?.message || '保存失败');
       setSaving(false);
+      setSaveAction('save');
     }
+  };
+
+  const acceptUploadedFile = (filename: string, responseBody?: Record<string, unknown>) => {
+    const revision = Number(responseBody?.structureRevision);
+    const files = responseBody?.testdata;
+    if (!Number.isSafeInteger(revision) || revision < 1 || !Array.isArray(files)) {
+      console.error('Structured testdata upload response missing canonical file state', { filename, responseBody });
+      setError('文件已上传，但服务端未返回最新结构版本与文件清单；为避免覆盖并发修改，请重新载入。');
+      return;
+    }
+    const canonicalFiles = files.map((file: R) => ({ name: String(file?.name || ''), size: Number(file?.size) || 0 })).filter((file) => file.name);
+    setStructureRevision(revision);
+    setTestdataFiles(canonicalFiles);
+    setCases((current) => proposeCasePairs(current, canonicalFiles));
+    setError('');
   };
 
   const cloneForLanguage = async () => {
@@ -190,14 +253,32 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
             {isCreate ? `新建${kind === 'program_fill' ? '程序填空题' : '函数题'}` : `编辑 ${pdoc.title || '题目'}`}
           </h1>
         </div>
-        <Button type="submit" form="structured-code-form" disabled={saving} className="min-h-11 gap-1.5">
-          <Save className="size-4" />
-          {saving ? '保存中…' : '保存'}
-        </Button>
+        {codeEvaluationDraft && !locked ? (
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" value="save" form="structured-code-form" variant="outline" disabled={saving} className="min-h-11 gap-1.5">
+              <Save className="size-4" />
+              {saving && saveAction === 'save' ? '保存中…' : '保存草稿'}
+            </Button>
+            <Button type="submit" value="complete" form="structured-code-form" disabled={saving} className="min-h-11 gap-1.5">
+              <CheckCircle2 className="size-4" />
+              {saving && saveAction === 'complete' ? '校验中…' : '完成配置'}
+            </Button>
+          </div>
+        ) : (
+          <Button type="submit" value="save" form="structured-code-form" disabled={saving} className="min-h-11 gap-1.5">
+            <Save className="size-4" />
+            {saving ? '保存中…' : draftCreation ? '创建草稿' : '保存'}
+          </Button>
+        )}
       </header>
 
       {locked ? (
         <p className="border-y border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">结构已锁定；仅可修改标题、标签和可见性。</p>
+      ) : null}
+      {codeEvaluationDraft ? (
+        <p className="border-y border-sky-300 bg-sky-50 px-3 py-3 text-sm text-sky-900 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
+          当前是隐藏的代码评测草稿。可以反复保存；“完成配置”会在一个服务端 CAS 中重查模板、区域、测试点与真实文件。
+        </p>
       ) : null}
       {error ? (
         <p role="alert" className="border-y border-destructive/40 px-3 py-3 text-sm text-destructive">
@@ -221,15 +302,17 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           <>
             <input type="hidden" name="editorProblemKind" value={kind} />
             <input type="hidden" name="structuredConfig" value={JSON.stringify(structuredConfig)} />
-            {!isCreate ? <input type="hidden" name="expectedStructureRevision" value={pdoc.structureRevision} /> : null}
+            {draftCreation ? <input type="hidden" name="codeEvaluationDraft" value="true" /> : null}
           </>
         )}
 
         <fieldset disabled={locked} className={cn('min-w-0 space-y-6', locked && 'opacity-60')}>
-          <section className="space-y-3">
-            <h2 className="text-sm font-semibold">题面</h2>
-            <MarkdownEditor name="content" value={pdoc.content || ''} minHeight={300} />
-          </section>
+          {!draftCreation ? (
+            <section className="space-y-3">
+              <h2 className="text-sm font-semibold">题面</h2>
+              <MarkdownEditor name="content" value={pdoc.content || ''} minHeight={300} />
+            </section>
+          ) : null}
 
           {kind === 'program_fill' ? (
             <section className="space-y-3 border-t border-border/70 pt-5">
@@ -247,7 +330,17 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
             </section>
           ) : null}
 
-          {!compileMode ? (
+          {draftCreation ? (
+            <section className="space-y-4 border-t border-border/70 pt-5">
+              <div className="space-y-1">
+                <h2 className="text-sm font-semibold">先固定评测语言</h2>
+                <p className="text-xs text-muted-foreground">
+                  创建后立即获得真实题号，再在同一工作区上传测试数据并编辑题面与模板。草稿始终隐藏，完成校验前不能提交或加入任何容器。
+                </p>
+              </div>
+              <SimpleSelect value={lang} onValueChange={setLang} options={langOptions.length ? langOptions : [{ value: '', label: '请选择语言' }]} />
+            </section>
+          ) : !compileMode ? (
             <section className="space-y-2 border-t border-border/70 pt-5">
               <h2 className="text-sm font-semibold">标准答案（单行）</h2>
               <Input value={answer} onChange={(event) => setAnswer(event.target.value.replace(/[\r\n]/g, ''))} className="font-mono" />
@@ -332,7 +425,43 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                   <StructuredRegionInputs regions={regions} values={{}} onChange={() => {}} singleLine={kind === 'program_fill'} readOnly />
                 </div>
               </section>
-              <CasesEditor cases={cases} onChange={setCases} />
+              <section className="space-y-3 border-t border-border/70 pt-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h2 className="flex items-center gap-1.5 text-sm font-semibold">
+                      <FileCode2 className="size-4" />
+                      真实测试数据
+                    </h2>
+                    <p className="text-xs text-muted-foreground">可一次选择多个文件；上传直接写入当前题，失败不会创建空文件或默认映射。</p>
+                  </div>
+                  <span className="text-xs text-muted-foreground">结构版本 {structureRevision}</span>
+                </div>
+                <FileUploader
+                  endpoint={`/p/${encodeURIComponent(pid)}/files`}
+                  fieldName="file"
+                  meta={{ type: 'testdata' }}
+                  maxFileSize={null}
+                  maxFiles={null}
+                  uploadConcurrency={1}
+                  retryOnFailure={false}
+                  onUploaded={acceptUploadedFile}
+                />
+                {testdataFiles.length ? (
+                  <div className="flex flex-wrap gap-1.5" aria-label="已上传测试数据">
+                    {testdataFiles.map((file) => (
+                      <span key={file.name} className="rounded-md border border-border/70 px-2 py-1 font-mono text-xs">
+                        {file.name}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">尚未上传测试数据文件。</p>
+                )}
+                <Button asChild variant="ghost" size="sm">
+                  <a href={`/p/${encodeURIComponent(pid)}/files?section=testdata`}>打开完整文件管理</a>
+                </Button>
+              </section>
+              <CasesEditor cases={cases} files={testdataFiles} onChange={setCases} />
             </>
           )}
         </fieldset>
@@ -344,16 +473,9 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           mindmapOptions={(data.knowledgeMindmapOptions || []) as KnowledgeMindmapOption[]}
           canUseCustomPid={data.canUseCustomPid === true}
           onMetadataChange={dirtyState.recompute}
+          visibilityLockedReason={codeEvaluationDraft ? '完成题面、私有模板、区域与测试数据映射后，才能解除隐藏。' : undefined}
         >
-          {compileMode && !isCreate ? (
-            <div className="space-y-2 border-y py-3 text-xs text-muted-foreground">
-              <p>测试数据文件：{(data.testdata || []).length} 个</p>
-              <Button asChild variant="outline" size="sm">
-                <a href={`/p/${pid}/files`}>管理测试数据</a>
-              </Button>
-            </div>
-          ) : null}
-          {compileMode && !isCreate && cloneLangOptions.length ? (
+          {compileMode && !isCreate && !codeEvaluationDraft && cloneLangOptions.length ? (
             <div className="space-y-2 border-y py-3">
               <p className="text-xs font-medium">克隆为其他语言</p>
               <SimpleSelect value={cloneLang} onValueChange={setCloneLang} options={[{ value: '', label: '选择目标语言' }, ...cloneLangOptions]} />

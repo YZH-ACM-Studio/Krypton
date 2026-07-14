@@ -1554,7 +1554,6 @@ describe('P3.11 program-fill and function HTTP boundaries', () => {
         const fn = makeHandler(ProblemCreateFunctionHandler, {});
         fn.request.body = {
             title: 'Function',
-            content: 'Statement',
             difficulty: '0',
             knowledgeNodeIds: '',
             editorProblemKind: 'function',
@@ -1562,16 +1561,14 @@ describe('P3.11 program-fill and function HTTP boundaries', () => {
                 main: {
                     mode: 'function',
                     lang: 'cpp',
-                    markerSource: 'source',
-                    regions: [{ id: 'solve' }],
-                    cases: [{ input: '1.in', output: '1.out' }],
                 },
             }),
+            codeEvaluationDraft: 'true',
         };
         await fn.post(
             'forged',
             'Function',
-            'Statement',
+            undefined,
             '',
             0,
             [],
@@ -1580,15 +1577,17 @@ describe('P3.11 program-fill and function HTTP boundaries', () => {
                 main: {
                     mode: 'function',
                     lang: 'cpp',
-                    markerSource: 'source',
-                    regions: [{ id: 'solve' }],
-                    cases: [{ input: '1.in', output: '1.out' }],
                 },
             }),
+            true,
         );
         expect(createKinds.slice(-2)).to.deep.equal(['program_fill', 'function']);
         expect(calls.add.at(-2)[6].structuredConfig).to.have.nested.property('main.mode', 'text');
-        expect(calls.add.at(-1)[6].structuredConfig).to.have.nested.property('main.lang', 'cpp');
+        expect(calls.add.at(-1)[6]).to.deep.include({
+            structuredConfig: { main: { mode: 'function', lang: 'cpp' } },
+            codeEvaluationStatus: 'draft',
+        });
+        expect(fn.response.body).to.deep.include({ hidden: true, problemKind: 'function', codeEvaluationStatus: 'draft' });
     });
 
     it('forces the immutable template language and requires the exact function region map', async () => {

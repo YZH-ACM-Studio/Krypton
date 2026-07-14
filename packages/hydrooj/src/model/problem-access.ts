@@ -3,6 +3,7 @@ import { Logger } from '@hydrooj/utils';
 import { PermissionError, ValidationError } from '../error';
 import type { User } from '../interface';
 import { PERM, PRIV } from './builtin';
+import { assertCodeEvaluationLifecyclePatch, assertProblemReadyForUse, CODE_EVALUATION_CANDIDATE_FILTER } from './code-evaluation-lifecycle';
 import * as document from './document';
 import { managedProblemPatchCapability, managedProblemPatchStateFilter } from './managed-problem-patch';
 import type { ProblemDoc } from './problem';
@@ -48,6 +49,63 @@ export const PROBLEM_ACL_INTERNAL_FIELDS = new Set(['aclMutationRevision', 'aclM
 
 function sorted(values?: Set<number>): number[] {
     return Array.from(values || []).sort((a, b) => a - b);
+}
+
+function assertCodeEvaluationLifecyclePatchWithTrace(
+    pdoc: ProblemDoc,
+    $set: Record<string, unknown>,
+    $unset: Record<string, unknown>,
+    context: { actor: number; operation: string; stage: string },
+): void {
+    try {
+        assertCodeEvaluationLifecyclePatch(pdoc, $set, $unset, context.operation);
+    } catch (error) {
+        logger.warn(
+            'Code evaluation lifecycle patch rejected domain=%s pid=%s docId=%d problemKind=%s actor=%d stage=%s structureRevision=%s result=denied fields=%o error=%o',
+            pdoc.domainId,
+            pdoc.pid || '-',
+            pdoc.docId,
+            pdoc.problemKind || 'programming',
+            context.actor,
+            context.stage,
+            pdoc.structureRevision ?? '-',
+            [...Object.keys($set), ...Object.keys($unset)],
+            error,
+        );
+        throw error;
+    }
+}
+
+function publishesProblemPatch($set: Record<string, unknown>, $unset: Record<string, unknown>): boolean {
+    return $set.hidden === false || Object.keys($unset).some((field) => field === 'hidden' || field.startsWith('hidden.'));
+}
+
+function codeEvaluationSnapshotAfterPatch(pdoc: ProblemDoc, $set: Record<string, unknown>, $unset: Record<string, unknown>): ProblemDoc {
+    const next = { ...pdoc } as Record<string, unknown>;
+    for (const field of ['problemKind', 'config', 'codeEvaluationStatus', 'data']) {
+        if (Object.hasOwn($unset, field)) delete next[field];
+        if (Object.hasOwn($set, field)) next[field] = $set[field];
+    }
+    return next as unknown as ProblemDoc;
+}
+
+function assertCodeEvaluationReadyWithTrace(pdoc: ProblemDoc, context: { actor: number; stage: string }): void {
+    try {
+        assertProblemReadyForUse(pdoc, context);
+    } catch (error) {
+        logger.warn(
+            'Code evaluation ready gate rejected domain=%s pid=%s docId=%d problemKind=%s actor=%d stage=%s structureRevision=%s result=denied error=%o',
+            pdoc.domainId,
+            pdoc.pid || '-',
+            pdoc.docId,
+            pdoc.problemKind || 'programming',
+            context.actor,
+            context.stage,
+            pdoc.structureRevision ?? '-',
+            error,
+        );
+        throw error;
+    }
 }
 
 function isAclFenced(user: ProblemAclUser, pid: number): boolean {
@@ -237,9 +295,38 @@ export async function commitProblemAclGuardedUpdate(
     if (authorizedPdoc.owner !== user._id && !isProblemBankAdmin(user)) {
         filter.maintainer = user._id;
     }
-    if (touchesCanonicalProblemFields($set as Record<string, unknown>, $unset)) {
-        const current = await document.coll.findOne(filter, { projection: { problemKind: 1 } });
+    const set = $set as Record<string, unknown>;
+    const lifecycleTouched = [...Object.keys(set), ...Object.keys($unset || {})].some((field) =>
+        ['problemKind', 'config', 'codeEvaluationStatus', 'data'].includes(field.split('.')[0]),
+    );
+    const publishes = publishesProblemPatch(set, $unset);
+    if (touchesCanonicalProblemFields(set, $unset) || lifecycleTouched || publishes) {
+        const current = await document.coll.findOne(filter, {
+            projection: {
+                domainId: 1,
+                docId: 1,
+                pid: 1,
+                problemKind: 1,
+                config: 1,
+                codeEvaluationStatus: 1,
+                structureRevision: 1,
+                data: 1,
+            },
+        });
         if (!current) return null;
+        if (lifecycleTouched) {
+            assertCodeEvaluationLifecyclePatchWithTrace(current as ProblemDoc, set, $unset, {
+                actor: user._id,
+                operation: 'acl-guarded-update',
+                stage: 'acl-guarded-update',
+            });
+        }
+        if (publishes) {
+            assertCodeEvaluationReadyWithTrace(codeEvaluationSnapshotAfterPatch(current as ProblemDoc, set, $unset), {
+                actor: user._id,
+                stage: 'acl-guarded-publish',
+            });
+        }
         await canonicalizeStructuredKnowledgePatch(
             current,
             $set,
@@ -339,13 +426,32 @@ export async function commitProblemWriteClaimUpdate(
     const current = await document.coll.findOne(filter, {
         projection: {
             ...Object.fromEntries(requestedFields.map((field) => [field, 1])),
+            domainId: 1,
+            docId: 1,
+            pid: 1,
             problemKind: 1,
+            config: 1,
+            data: 1,
+            structureRevision: 1,
             authoringMode: 1,
             hidden: 1,
+            codeEvaluationStatus: 1,
             managedAuthoring: 1,
         },
     });
     if (!current) return null;
+    const set = $set as Record<string, unknown>;
+    assertCodeEvaluationLifecyclePatchWithTrace(current as ProblemDoc, set, $unset, {
+        actor: claim.actor,
+        operation: claim.operation,
+        stage: 'claim-commit',
+    });
+    if (publishesProblemPatch(set, $unset)) {
+        assertCodeEvaluationReadyWithTrace(codeEvaluationSnapshotAfterPatch(current as ProblemDoc, set, $unset), {
+            actor: claim.actor,
+            stage: 'claim-publish',
+        });
+    }
     if (current.authoringMode === 'managed') {
         const guard = managedProblemPatchCapability(current, $set, $unset);
         if (guard.immutableFields.length || guard.publishes || !problemWriteCapabilityAllows(claim.capability, guard.capability)) {
@@ -721,9 +827,11 @@ export async function readStableEditableProblem(
 }
 
 /**
- * Validate only newly selected problem ids against the caller's bank scope.
- * Existing/grandfathered references survive later permission changes. One
- * scoped count keeps missing and unauthorized ids indistinguishable.
+ * Validate every selected code-evaluation problem through the full ready gate,
+ * then check only newly selected ids against the caller's bank scope.
+ * Existing/grandfathered references survive later permission changes, but can
+ * never grandfather an incomplete draft. One scoped count keeps missing and
+ * unauthorized ids indistinguishable.
  */
 export async function assertProblemBankSelection(
     domainId: string,
@@ -732,11 +840,53 @@ export async function assertProblemBankSelection(
     grandfatheredPids: number[] = [],
 ): Promise<void> {
     assertProblemAclDomain(user, domainId);
+    const selected = Array.from(new Set(pids));
+    if (!selected.every((pid) => Number.isSafeInteger(pid) && pid > 0)) throw selectionDenied();
     const grandfathered = new Set(grandfatheredPids);
-    const added = Array.from(new Set(pids)).filter((pid) => !grandfathered.has(pid));
+    const added = selected.filter((pid) => !grandfathered.has(pid));
+    if (added.length && !canBrowseProblemBank(user)) throw selectionDenied();
+    if (selected.length) {
+        const candidates = await document.coll
+            .find(
+                {
+                    domainId,
+                    docType: document.TYPE_PROBLEM,
+                    docId: { $in: selected },
+                    ...CODE_EVALUATION_CANDIDATE_FILTER,
+                } as Filter<ProblemDoc>,
+                {
+                    projection: {
+                        domainId: 1,
+                        docId: 1,
+                        pid: 1,
+                        problemKind: 1,
+                        codeEvaluationStatus: 1,
+                        structureRevision: 1,
+                        config: 1,
+                        data: 1,
+                    },
+                },
+            )
+            .toArray();
+        for (const candidate of candidates) {
+            try {
+                assertProblemReadyForUse(candidate as ProblemDoc, { actor: user._id, stage: 'container-reference' });
+            } catch (error) {
+                logger.warn(
+                    'Problem selection ready gate rejected domain=%s pid=%s docId=%d problemKind=%s actor=%d stage=container-reference structureRevision=%s result=not-ready error=%o',
+                    domainId,
+                    candidate.pid || '-',
+                    candidate.docId,
+                    candidate.problemKind || 'programming',
+                    user._id,
+                    candidate.structureRevision ?? '-',
+                    error,
+                );
+                throw selectionDenied();
+            }
+        }
+    }
     if (!added.length) return;
-    if (!added.every((pid) => Number.isSafeInteger(pid) && pid > 0)) throw selectionDenied();
-    if (!canBrowseProblemBank(user)) throw selectionDenied();
 
     const count = await document.count(domainId, document.TYPE_PROBLEM, {
         $and: [buildProblemBankScope(user), { docId: { $in: added }, archivedAt: { $exists: false } }],

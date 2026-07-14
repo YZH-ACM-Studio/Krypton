@@ -21,9 +21,9 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         }
     });
 
-    it('locks revision-managed problems before inserting a submission', () => {
+    it('ready-gates every problem and locks revision-managed submissions before insertion', () => {
         const source = readFileSync(resolve(root, 'src/model/record.ts'), 'utf8');
-        const lock = source.indexOf('claimStructureLockForSubmission(domainId, pid)');
+        const lock = source.indexOf("claimStructureLockForSubmission(domainId, pid, args.type !== 'generate', uid)");
         const insert = source.indexOf('RecordModel.coll.insertOne(data)');
         expect(lock).to.be.greaterThan(-1);
         expect(insert).to.be.greaterThan(lock);
@@ -40,6 +40,7 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
         expect(source).to.include('const problemKind = parseProblemKind(meta?.problemKind)');
         expect(source).to.include('hidden: true');
+        expect(source).to.include("if (args.hidden !== true) throw new ValidationError('hidden'");
         expect(source).to.include('structureRevision: 1');
     });
 
@@ -125,7 +126,8 @@ describe('P2.12 YAGNI lifecycle contract', () => {
 
     it('keeps archived problems hidden and preserves HTML when cloning', () => {
         const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
-        expect(source.match(/current\.archivedAt && \$set\.hidden === false/g)).to.have.length(2);
+        expect(source.match(/current\.archivedAt && publishes/g)).to.have.length(2);
+        expect(source).to.include("$set.hidden === false || Object.keys($unset).some((field) => field === 'hidden'");
         expect(source).to.include('html: !!original.html');
     });
 
@@ -180,13 +182,15 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(method).not.to.include("changedFields: ['title'");
     });
 
-    it('rejects every type-only fill-function publication, including legacy programming problems', () => {
+    it('rejects every non-ready or invalid code-evaluation publication through the central gate', () => {
         const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
-        expect(source).to.include('function assertPublishableFillFunction');
-        expect(source.match(/assertPublishableFillFunction\(\{/g)).to.have.length(4);
-        expect(source).to.include('validateCompiledStructuredConfig(problemKind, config)');
-        expect(source).to.include('validateFillFunctionTestdataFiles(config, input.data || [])');
-        expect(source.match(/config:\s*1,\s*data:\s*1/g)).to.have.length(3);
+        const lifecycle = readFileSync(resolve(root, 'src/model/code-evaluation-lifecycle.ts'), 'utf8');
+        expect(source).to.include('function assertPublishableProblem');
+        expect(source.match(/assertPublishableProblem\(\{/g)).to.have.length(4);
+        expect(source).to.include('assertProblemReadyForUseWithTrace(');
+        expect(lifecycle).to.include("pdoc.codeEvaluationStatus !== 'ready'");
+        expect(lifecycle).to.include('validateCompiledStructuredConfig(String(pdoc.problemKind), config)');
+        expect(lifecycle).to.include('validateFillFunctionTestdataFiles(config, pdoc.data || [])');
     });
 
     it('blocks every config yaml alias at direct, claimed, and event-backed structured writes', () => {
@@ -264,7 +268,7 @@ describe('P2.12 YAGNI lifecycle contract', () => {
     it('audits a hook-injected managed field before rejecting the claimed write', () => {
         const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
         const helperStart = source.indexOf('async function auditManagedClaimPatchDenied(');
-        const helperEnd = source.indexOf('function assertPublishableFillFunction', helperStart);
+        const helperEnd = source.indexOf('function assertPublishableProblem', helperStart);
         const helper = source.slice(helperStart, helperEnd);
         expect(helper).to.include("type: 'problem.managed.write.denied'");
         expect(helper).to.include('phase');

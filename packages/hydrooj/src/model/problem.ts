@@ -23,12 +23,7 @@ import {
 } from '../error';
 import type { Document, ProblemDict, ProblemStatusDoc, User } from '../interface';
 import { copyProblemStorageFiles } from '../lib/problem-clone';
-import {
-    isProblemConfigFilename,
-    parseProblemConfigObject,
-    validateCompiledStructuredConfig,
-    validateFillFunctionTestdataFiles,
-} from '../lib/problem-config';
+import { isProblemConfigFilename } from '../lib/problem-config';
 import { normalizeProblemTestdataUpload } from '../lib/problem-testdata-upload';
 import { parseConfig } from '../lib/testdataConfig';
 import bus from '../service/bus';
@@ -36,6 +31,18 @@ import db from '../service/db';
 import { ArrayKeys, MaybeArray, NumberKeys, Projection } from '../typeutils';
 import { buildProjection } from '../utils';
 import { PERM, STATUS } from './builtin';
+import {
+    assertCodeEvaluationFileMutation,
+    assertCodeEvaluationLifecyclePatch,
+    assertCodeEvaluationMappingsExist,
+    assertCodeEvaluationStatusInvariant,
+    assertCodeEvaluationStatusTransition,
+    assertProblemReadyForUse as assertCodeEvaluationProblemReady,
+    type CodeEvaluationFileMutation,
+    isCodeEvaluationProblem,
+    normalizeCodeEvaluationCreationStatus,
+    normalizeCodeEvaluationDraftConfig,
+} from './code-evaluation-lifecycle';
 import * as document from './document';
 import DomainModel from './domain';
 import * as OplogModel from './oplog';
@@ -110,6 +117,104 @@ export type Field = keyof ProblemDoc;
 
 const logger = new Logger('problem');
 
+type CodeEvaluationReadySnapshot = Pick<
+    ProblemDoc,
+    'domainId' | 'docId' | 'pid' | 'problemKind' | 'codeEvaluationStatus' | 'structureRevision' | 'config' | 'data'
+>;
+
+function assertProblemReadyForUseWithTrace(pdoc: CodeEvaluationReadySnapshot, context: { actor?: number; stage: string }): void {
+    try {
+        assertCodeEvaluationProblemReady(pdoc, context);
+    } catch (error) {
+        logger.warn(
+            'Code evaluation ready gate rejected domain=%s pid=%s docId=%d problemKind=%s actor=%s stage=%s structureRevision=%s result=denied error=%o',
+            pdoc.domainId,
+            pdoc.pid || '-',
+            pdoc.docId,
+            pdoc.problemKind || 'programming',
+            context.actor ?? '-',
+            context.stage,
+            pdoc.structureRevision ?? '-',
+            error,
+        );
+        throw error;
+    }
+}
+
+function assertCodeEvaluationMappingsExistWithTrace(
+    pdoc: CodeEvaluationReadySnapshot,
+    config: unknown,
+    context: { actor?: number; stage: string },
+): void {
+    try {
+        assertCodeEvaluationMappingsExist(config, pdoc.data, true);
+    } catch (error) {
+        logger.warn(
+            'Code evaluation mapping rejected domain=%s pid=%s docId=%d problemKind=%s actor=%s stage=%s structureRevision=%s result=denied error=%o',
+            pdoc.domainId,
+            pdoc.pid || '-',
+            pdoc.docId,
+            pdoc.problemKind || 'programming',
+            context.actor ?? '-',
+            context.stage,
+            pdoc.structureRevision ?? '-',
+            error,
+        );
+        throw error;
+    }
+}
+
+function assertCodeEvaluationFileMutationWithTrace(
+    pdoc: CodeEvaluationReadySnapshot,
+    mutation: CodeEvaluationFileMutation,
+    context: { actor?: number; stage: string },
+): void {
+    try {
+        assertCodeEvaluationFileMutation(pdoc, mutation);
+    } catch (error) {
+        logger.warn(
+            'Code evaluation file mutation rejected domain=%s pid=%s docId=%d problemKind=%s actor=%s stage=%s structureRevision=%s result=denied mutation=%o error=%o',
+            pdoc.domainId,
+            pdoc.pid || '-',
+            pdoc.docId,
+            pdoc.problemKind || 'programming',
+            context.actor ?? '-',
+            context.stage,
+            pdoc.structureRevision ?? '-',
+            mutation,
+            error,
+        );
+        throw error;
+    }
+}
+
+function assertCodeEvaluationLifecyclePatchWithTrace(
+    pdoc: CodeEvaluationReadySnapshot,
+    $set: Record<string, unknown>,
+    $unset: Record<string, unknown>,
+    context: { actor?: number; operation: string; stage: string; physicalTestdataMutation?: boolean },
+): void {
+    try {
+        assertCodeEvaluationLifecyclePatch(pdoc, $set, $unset, context.operation, {
+            physicalTestdataMutation: context.physicalTestdataMutation,
+        });
+    } catch (error) {
+        logger.warn(
+            'Code evaluation lifecycle patch rejected domain=%s pid=%s docId=%d problemKind=%s actor=%s stage=%s structureRevision=%s result=denied fields=%o error=%o',
+            pdoc.domainId,
+            pdoc.pid || '-',
+            pdoc.docId,
+            pdoc.problemKind || 'programming',
+            context.actor ?? '-',
+            context.stage,
+            pdoc.structureRevision ?? '-',
+            [...Object.keys($set), ...Object.keys($unset)],
+            error,
+        );
+        throw error;
+    }
+}
+
 function managedValidationContext(sourceMeta: unknown, pendingTrainingPlacement: unknown) {
     const source = sourceMeta && typeof sourceMeta === 'object' && !Array.isArray(sourceMeta) ? (sourceMeta as Record<string, unknown>) : {};
     const placement =
@@ -133,6 +238,10 @@ function sortable(source: string, namespaces: Record<string, string>) {
 
 function isStructuralPatch($set: Record<string, unknown>, $unset: Record<string, unknown> = {}) {
     return [...Object.keys($set), ...Object.keys($unset)].some((field) => PROBLEM_STRUCTURAL_FIELDS.has(field));
+}
+
+function publishesProblemPatch($set: Record<string, unknown>, $unset: Record<string, unknown> = {}): boolean {
+    return $set.hidden === false || Object.keys($unset).some((field) => field === 'hidden' || field.startsWith('hidden.'));
 }
 
 async function readActiveProblemWriteClaim(
@@ -188,31 +297,30 @@ async function auditManagedClaimPatchDenied(
     } as any);
 }
 
-function assertPublishableFillFunction(input: {
+function assertPublishableProblem(input: {
     domainId: string;
-    pid: number;
+    docId: number;
+    publicPid?: string;
+    actor?: number;
     problemKind?: unknown;
+    codeEvaluationStatus?: unknown;
     structureRevision?: unknown;
     config: unknown;
     data?: Array<{ name: string }>;
 }) {
-    const config = parseProblemConfigObject({ config: input.config });
-    if (config?.type !== 'fill_function') return;
-    const problemKind = input.problemKind === undefined ? 'programming' : parseProblemKind(input.problemKind);
-    try {
-        validateCompiledStructuredConfig(problemKind, config);
-        validateFillFunctionTestdataFiles(config, input.data || []);
-    } catch (error: any) {
-        logger.error(
-            'Fill-function publish rejected domain=%s pid=%d kind=%s revision=%s error=%o',
-            input.domainId,
-            input.pid,
-            problemKind,
-            input.structureRevision,
-            error,
-        );
-        throw new ValidationError('hidden', null, error.message);
-    }
+    assertProblemReadyForUseWithTrace(
+        {
+            domainId: input.domainId,
+            docId: input.docId,
+            pid: input.publicPid || '',
+            problemKind: input.problemKind as any,
+            codeEvaluationStatus: input.codeEvaluationStatus as any,
+            structureRevision: input.structureRevision as any,
+            config: input.config as any,
+            data: (input.data || []) as any,
+        },
+        { actor: input.actor, stage: 'publish' },
+    );
 }
 
 async function prepareManagedPublish(claim: ProblemWriteClaim): Promise<void> {
@@ -326,6 +434,7 @@ interface ProblemCreateOptions {
     sourceMeta?: ProblemDoc['sourceMeta'];
     managedAuthoring?: ProblemDoc['managedAuthoring'];
     knowledgeNodeIds?: ProblemDoc['knowledgeNodeIds'];
+    codeEvaluationStatus?: 'draft';
 }
 
 interface ProblemCreateHooks {
@@ -349,6 +458,7 @@ export class ProblemModel {
         'hidden',
         'stats',
         'problemKind',
+        'codeEvaluationStatus',
         'structureRevision',
         'structureLockedAt',
         'structureLockReason',
@@ -451,6 +561,10 @@ export class ProblemModel {
         return canCloneProblemAccess(user, pdoc);
     }
 
+    static assertProblemReadyForUse(pdoc: ProblemDoc, context: { actor?: number; stage: string }) {
+        return assertProblemReadyForUseWithTrace(pdoc, context);
+    }
+
     static assertProblemBankSelection(domainId: string, pids: number[], user: ProblemAclUser, grandfatheredPids: number[] = []) {
         return assertProblemBankSelectionAccess(domainId, pids, user, grandfatheredPids);
     }
@@ -530,6 +644,10 @@ export class ProblemModel {
     ) {
         const ddoc = await DomainModel.get(domainId);
         const problemKind = parseProblemKind(meta?.problemKind);
+        const codeEvaluationStatus = normalizeCodeEvaluationCreationStatus((meta as unknown as Record<string, unknown>).codeEvaluationStatus);
+        if (problemKind === 'programming' && codeEvaluationStatus !== undefined) {
+            throw new ValidationError('codeEvaluationStatus', null, '编程题不能设置结构化代码评测状态');
+        }
         const args: Partial<ProblemDoc> = {
             title,
             tag,
@@ -551,7 +669,13 @@ export class ProblemModel {
         if (problemKind !== 'programming') {
             args.knowledgeNodeIds = meta.knowledgeNodeIds ?? [];
             try {
-                args.config = normalizeStructuredProblemConfig(problemKind, meta.structuredConfig) as any;
+                args.config = (
+                    codeEvaluationStatus === 'draft'
+                        ? normalizeCodeEvaluationDraftConfig(problemKind, meta.structuredConfig)
+                        : normalizeStructuredProblemConfig(problemKind, meta.structuredConfig)
+                ) as any;
+                if (codeEvaluationStatus) args.codeEvaluationStatus = codeEvaluationStatus;
+                assertCodeEvaluationStatusInvariant(problemKind, args.config, args.codeEvaluationStatus);
             } catch (error) {
                 logger.error('Structured problem create rejected domain=%s pid=%d kind=%s revision=1 error=%o', domainId, docId, problemKind, error);
                 throw error;
@@ -567,6 +691,11 @@ export class ProblemModel {
         }
         await bus.parallel('problem/before-add', domainId, content, owner, docId, args);
         if (args.problemKind !== problemKind) throw new ValidationError('problemKind');
+        if (args.codeEvaluationStatus !== codeEvaluationStatus) {
+            throw new ValidationError('codeEvaluationStatus', null, '创建钩子不能改变代码评测生命周期状态');
+        }
+        if (args.hidden !== true) throw new ValidationError('hidden', null, '创建钩子不能公开尚未完成创建流程的题目');
+        assertCodeEvaluationStatusInvariant(problemKind, args.config, args.codeEvaluationStatus);
         await canonicalizeStructuredKnowledgePatch(
             { problemKind },
             args,
@@ -604,6 +733,7 @@ export class ProblemModel {
                         sourceMeta: args.sourceMeta,
                         managedAuthoring: args.managedAuthoring,
                         knowledgeNodeIds: args.knowledgeNodeIds,
+                        codeEvaluationStatus: args.codeEvaluationStatus,
                     }),
                     time: new Date(),
                 } as any),
@@ -923,10 +1053,13 @@ export class ProblemModel {
                     );
                     throw error;
                 }
-                assertPublishableFillFunction({
+                assertPublishableProblem({
                     domainId: input.domainId,
-                    pid: input.docId,
+                    docId: input.docId,
+                    publicPid: pdoc.pid,
+                    actor: input.actor,
                     problemKind: pdoc.problemKind,
+                    codeEvaluationStatus: pdoc.codeEvaluationStatus,
                     structureRevision: pdoc.structureRevision,
                     config: pdoc.config,
                     data: pdoc.data,
@@ -1060,17 +1193,42 @@ export class ProblemModel {
         return true;
     }
 
-    static async claimStructureLockForSubmission(domainId: string, pid: number): Promise<void> {
+    static async claimStructureLockForSubmission(domainId: string, pid: number, lockStructure = true, actor?: number): Promise<void> {
+        const projection = {
+            domainId: 1,
+            docId: 1,
+            pid: 1,
+            problemKind: 1,
+            codeEvaluationStatus: 1,
+            config: 1,
+            data: 1,
+            reference: 1,
+            structureRevision: 1,
+            structureLockedAt: 1,
+        } as const;
         const pdoc = await document.coll.findOne(
             {
                 domainId,
                 docType: document.TYPE_PROBLEM,
                 docId: pid,
             },
-            { projection: { problemKind: 1, structureRevision: 1, structureLockedAt: 1 } },
+            { projection },
         );
         if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
-        if (pdoc.problemKind === undefined || pdoc.structureLockedAt) return;
+        assertProblemReadyForUseWithTrace(pdoc as ProblemDoc, { actor, stage: 'record-create' });
+        if (pdoc.reference) {
+            const source = await document.coll.findOne(
+                {
+                    domainId: pdoc.reference.domainId,
+                    docType: document.TYPE_PROBLEM,
+                    docId: pdoc.reference.pid,
+                },
+                { projection },
+            );
+            if (!source) throw new ProblemNotFoundError(pdoc.reference.domainId, pdoc.reference.pid);
+            assertProblemReadyForUseWithTrace(source as ProblemDoc, { actor, stage: 'record-create-reference' });
+        }
+        if (!lockStructure || pdoc.problemKind === undefined || pdoc.structureLockedAt) return;
         parseProblemKind(pdoc.problemKind);
         assertStructureRevision(pdoc.structureRevision);
         const now = new Date();
@@ -1111,11 +1269,24 @@ export class ProblemModel {
         $set: Partial<ProblemDoc>;
         expectedProblemKind: ProblemKind;
         expectedStructureRevision?: number;
+        validateSnapshot?: (before: ProblemDoc, nextConfig: unknown) => void;
     }): Promise<{ before: ProblemDoc; result: ProblemDoc; auditedFields: string[] }> {
         const auditedFields = problemEditAuditedFields(input.$set as Record<string, unknown>);
         return ProblemModel.withAuthorizedWriteClaim(input.domainId, input.pid, input.user, input.operation, async (claim) => {
             const projection = Object.fromEntries(
-                [...new Set([...auditedFields, 'problemKind', 'structureRevision', 'config', 'data'])].map((field) => [field, 1]),
+                [
+                    ...new Set([
+                        ...auditedFields,
+                        'domainId',
+                        'docId',
+                        'pid',
+                        'problemKind',
+                        'codeEvaluationStatus',
+                        'structureRevision',
+                        'config',
+                        'data',
+                    ]),
+                ].map((field) => [field, 1]),
             );
             const before = (await document.coll.findOne(
                 {
@@ -1149,11 +1320,15 @@ export class ProblemModel {
             if (hasConfigUpdate && input.expectedProblemKind === 'function' && existingMain && existingMain.lang !== nextMain?.lang) {
                 throw new ValidationError('lang', null, '评测语言创建后不可修改');
             }
+            input.validateSnapshot?.(before, nextConfig);
             if (input.$set.hidden === false) {
-                assertPublishableFillFunction({
+                assertPublishableProblem({
                     domainId: input.domainId,
-                    pid: input.pid,
+                    docId: input.pid,
+                    publicPid: before.pid,
+                    actor: input.user._id,
                     problemKind: input.expectedProblemKind,
+                    codeEvaluationStatus: input.$set.codeEvaluationStatus ?? before.codeEvaluationStatus,
                     structureRevision: before.structureRevision,
                     config: nextConfig,
                     data: before.data,
@@ -1182,32 +1357,107 @@ export class ProblemModel {
         content: string;
         config: unknown;
         metadata?: Partial<Pick<ProblemDoc, 'title' | 'pid' | 'hidden' | 'tag' | 'difficulty' | 'lockHidden' | 'html' | 'knowledgeNodeIds'>>;
+        completeCodeEvaluationDraft?: boolean;
     }): Promise<ProblemDoc> {
         const problemKind = parseProblemKind(input.problemKind);
+        const lifecycle = await document.coll.findOne(
+            { domainId: input.domainId, docType: document.TYPE_PROBLEM, docId: input.pid },
+            { projection: { problemKind: 1, codeEvaluationStatus: 1, config: 1 } },
+        );
+        if (!lifecycle) throw new ProblemNotFoundError(input.domainId, input.pid);
+        if (parseProblemKind(lifecycle.problemKind) !== problemKind) throw new ValidationError('problemKind');
+        const codeEvaluation = isCodeEvaluationProblem(problemKind, lifecycle.config);
+        if (input.completeCodeEvaluationDraft && (!codeEvaluation || lifecycle.codeEvaluationStatus !== 'draft')) {
+            throw new ValidationError('codeEvaluationStatus', null, '只有未完成的代码评测草稿可以执行完成操作');
+        }
         let config: Record<string, unknown>;
         try {
-            config = normalizeStructuredProblemConfig(problemKind, input.config);
+            config =
+                codeEvaluation && lifecycle.codeEvaluationStatus === 'draft' && !input.completeCodeEvaluationDraft
+                    ? normalizeCodeEvaluationDraftConfig(problemKind, input.config)
+                    : normalizeStructuredProblemConfig(problemKind, input.config);
         } catch (error) {
             logger.error(
-                'Structured problem save rejected domain=%s pid=%d kind=%s revision=%d error=%o',
+                'Structured problem save rejected domain=%s pid=%d kind=%s revision=%d stage=%s error=%o',
                 input.domainId,
                 input.pid,
                 problemKind,
                 input.expectedStructureRevision,
+                input.completeCodeEvaluationDraft ? 'complete-normalize' : 'save-normalize',
                 error,
             );
             throw error;
         }
-        const $set = { ...input.metadata, content: input.content, config, problemKind } as any;
-        const { before, result, auditedFields } = await ProblemModel.editAuthorizedWithSnapshot({
-            domainId: input.domainId,
-            pid: input.pid,
-            user: input.user,
-            operation: 'structure-save',
-            $set,
-            expectedProblemKind: problemKind,
-            expectedStructureRevision: input.expectedStructureRevision,
-        });
+        const completing = input.completeCodeEvaluationDraft === true;
+        const $set = {
+            ...input.metadata,
+            content: input.content,
+            config,
+            problemKind,
+            ...(completing ? { hidden: true, codeEvaluationStatus: 'ready' as const } : {}),
+        } as any;
+        if (completing) {
+            logger.info(
+                'Code evaluation completion started domain=%s pid=%d problemKind=%s actor=%d stage=complete structureRevision=%d result=attempt',
+                input.domainId,
+                input.pid,
+                problemKind,
+                input.actor,
+                input.expectedStructureRevision,
+            );
+        }
+        let snapshot: Awaited<ReturnType<typeof ProblemModel.editAuthorizedWithSnapshot>>;
+        try {
+            snapshot = await ProblemModel.editAuthorizedWithSnapshot({
+                domainId: input.domainId,
+                pid: input.pid,
+                user: input.user,
+                operation: completing ? 'code-evaluation-complete' : 'structure-save',
+                $set,
+                expectedProblemKind: problemKind,
+                expectedStructureRevision: input.expectedStructureRevision,
+                validateSnapshot: (before, nextConfig) => {
+                    if (!codeEvaluation) return;
+                    assertCodeEvaluationStatusInvariant(problemKind, nextConfig, before.codeEvaluationStatus);
+                    if (before.codeEvaluationStatus === 'draft') {
+                        if (completing) {
+                            assertProblemReadyForUseWithTrace(
+                                {
+                                    ...before,
+                                    config: nextConfig as any,
+                                    codeEvaluationStatus: 'ready',
+                                },
+                                { actor: input.actor, stage: 'complete-cas' },
+                            );
+                        } else {
+                            assertCodeEvaluationMappingsExistWithTrace(before, nextConfig, {
+                                actor: input.actor,
+                                stage: 'draft-save-mapping',
+                            });
+                        }
+                        return;
+                    }
+                    if (before.codeEvaluationStatus !== 'ready') {
+                        throw new ValidationError('codeEvaluationStatus', null, '代码评测题缺少有效生命周期状态');
+                    }
+                    assertProblemReadyForUseWithTrace({ ...before, config: nextConfig as any }, { actor: input.actor, stage: 'ready-save' });
+                },
+            });
+        } catch (error) {
+            if (completing) {
+                logger.warn(
+                    'Code evaluation completion rejected domain=%s pid=%d problemKind=%s actor=%d stage=complete structureRevision=%d result=denied error=%o',
+                    input.domainId,
+                    input.pid,
+                    problemKind,
+                    input.actor,
+                    input.expectedStructureRevision,
+                    error,
+                );
+            }
+            throw error;
+        }
+        const { before, result, auditedFields } = snapshot;
         const changedFields = auditedFields.filter((field) => !isEqual(before[field], result[field]));
         await OplogModel.add({
             type: 'problem.structure.save',
@@ -1219,6 +1469,17 @@ export class ProblemModel {
             changedFields,
             time: new Date(),
         } as any);
+        if (completing) {
+            logger.info(
+                'Code evaluation completion succeeded domain=%s pid=%s docId=%d problemKind=%s actor=%d stage=complete structureRevision=%d result=ready',
+                input.domainId,
+                result.pid || '-',
+                input.pid,
+                problemKind,
+                input.actor,
+                result.structureRevision,
+            );
+        }
         return result;
     }
 
@@ -1550,10 +1811,14 @@ export class ProblemModel {
             },
             {
                 projection: {
+                    domainId: 1,
+                    docId: 1,
                     content: 1,
                     config: 1,
                     data: 1,
+                    pid: 1,
                     problemKind: 1,
+                    codeEvaluationStatus: 1,
                     structureRevision: 1,
                     structureLockedAt: 1,
                     archivedAt: 1,
@@ -1570,18 +1835,27 @@ export class ProblemModel {
             ]);
             throw new ValidationError('authoringMode', null, '托管题必须使用授权写入口');
         }
+        assertCodeEvaluationStatusTransition(current.codeEvaluationStatus, $set as Record<string, unknown>, $unset, 'raw-edit');
         const rawEditContext = { domainId, pid: _id, operation: 'raw-edit' };
         const knowledgePairRequired = await canonicalizeStructuredKnowledgePatch(current, $set, $unset, rawEditContext, 'request');
         await bus.parallel('problem/before-edit', $set, $unset);
+        assertCodeEvaluationStatusTransition(current.codeEvaluationStatus, $set as Record<string, unknown>, $unset, 'raw-edit');
+        assertCodeEvaluationLifecyclePatchWithTrace(current as ProblemDoc, $set as Record<string, unknown>, $unset, {
+            operation: 'raw-edit',
+            stage: 'raw-edit',
+        });
         await canonicalizeStructuredKnowledgePatch(current, $set, $unset, rawEditContext, 'after-hook', {
             requireKnowledgePair: knowledgePairRequired,
         });
-        if (current.archivedAt && $set.hidden === false) throw new ValidationError('hidden');
-        if ($set.hidden === false) {
-            assertPublishableFillFunction({
+        const publishes = publishesProblemPatch($set as Record<string, unknown>, $unset);
+        if (current.archivedAt && publishes) throw new ValidationError('hidden');
+        if (publishes) {
+            assertPublishableProblem({
                 domainId,
-                pid: _id,
+                docId: _id,
+                publicPid: current.pid,
                 problemKind: current.problemKind,
+                codeEvaluationStatus: $set.codeEvaluationStatus ?? current.codeEvaluationStatus,
                 structureRevision: current.structureRevision,
                 config: $set.config ?? current.config,
                 data: ($set.data ?? current.data) as any,
@@ -1803,21 +2077,34 @@ export class ProblemModel {
         pid: number,
         testdata = false,
         testdataNames: string[] = [],
-    ): Promise<boolean> {
+    ): Promise<ProblemDoc | null> {
         const pdoc = await document.coll.findOne(
             {
                 domainId,
                 docType: document.TYPE_PROBLEM,
                 docId: pid,
             },
-            { projection: { problemKind: 1, config: 1, structureLockedAt: 1, archivedAt: 1, authoringMode: 1 } },
+            {
+                projection: {
+                    domainId: 1,
+                    docId: 1,
+                    pid: 1,
+                    problemKind: 1,
+                    codeEvaluationStatus: 1,
+                    config: 1,
+                    data: 1,
+                    structureLockedAt: 1,
+                    archivedAt: 1,
+                    authoringMode: 1,
+                },
+            },
         );
         if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
         if (pdoc.authoringMode === 'managed') {
             logger.error('Raw managed problem file write rejected domain=%s pid=%d names=%o', domainId, pid, testdataNames);
             throw new ValidationError('authoringMode', null, '托管题文件必须使用授权写入口');
         }
-        if (pdoc.problemKind === undefined) return false;
+        if (pdoc.problemKind === undefined) return null;
         const problemKind = parseProblemKind(pdoc.problemKind);
         if (testdata && problemKind !== 'programming' && !structuredProblemUsesTestdata(problemKind, pdoc.config)) {
             throw new ValidationError('problemKind', null, '结构化题不接受 testdata/config.yaml 文件写入');
@@ -1828,7 +2115,7 @@ export class ProblemModel {
         if (pdoc.archivedAt || pdoc.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, pid))) {
             throw new ProblemStructureConflictError(pid);
         }
-        return true;
+        return pdoc as ProblemDoc;
     }
 
     private static async bumpDirectStructureRevision(domainId: string, pid: number): Promise<void> {
@@ -1882,10 +2169,14 @@ export class ProblemModel {
             {
                 projection: {
                     ...Object.fromEntries(requestedFields.map((field) => [field, 1])),
+                    domainId: 1,
+                    docId: 1,
                     content: 1,
                     config: 1,
                     data: 1,
+                    pid: 1,
                     problemKind: 1,
+                    codeEvaluationStatus: 1,
                     structureRevision: 1,
                     structureLockedAt: 1,
                     archivedAt: 1,
@@ -1923,12 +2214,21 @@ export class ProblemModel {
             managedGuard = finalGuard;
         }
         await canonicalizeStructuredKnowledgePatch(current, $set, $unset, claim, 'after-hook', { requireKnowledgePair: knowledgePairRequired });
-        if (current.archivedAt && $set.hidden === false) throw new ValidationError('hidden');
-        if ($set.hidden === false) {
-            assertPublishableFillFunction({
+        assertCodeEvaluationLifecyclePatchWithTrace(current as ProblemDoc, $set as Record<string, unknown>, $unset, {
+            actor: claim.actor,
+            operation: claim.operation,
+            stage: 'claim-edit',
+        });
+        const publishes = publishesProblemPatch($set as Record<string, unknown>, $unset);
+        if (current.archivedAt && publishes) throw new ValidationError('hidden');
+        if (publishes) {
+            assertPublishableProblem({
                 domainId,
-                pid: _id,
+                docId: _id,
+                publicPid: current.pid,
+                actor: claim.actor,
                 problemKind: current.problemKind,
+                codeEvaluationStatus: $set.codeEvaluationStatus ?? current.codeEvaluationStatus,
                 structureRevision: current.structureRevision,
                 config: $set.config ?? current.config,
                 data: ($set.data ?? current.data) as any,
@@ -2123,6 +2423,7 @@ export class ProblemModel {
             if (!activeClaim) throw new Error(`problem write claim ownership lost before clone: ${claim.requestId}`);
         }
         if (original.reference) throw new ValidationError('reference');
+        assertProblemReadyForUseWithTrace(original, { actor: attribution.actor, stage: 'clone-source' });
         if (pid && (/^[0-9]+$/.test(pid) || (await ProblemModel.get(target, pid)))) pid = '';
         if (!pid && original.pid && !(await ProblemModel.get(target, original.pid))) pid = original.pid;
         const problemKind = original.problemKind === undefined ? 'programming' : parseProblemKind(original.problemKind);
@@ -2156,6 +2457,7 @@ export class ProblemModel {
         const cloneConfig = structuredLanguage
             ? cloneStructuredProblemForLanguage(problemKind, original.config, structuredLanguage)
             : original.config;
+        const cloneIsCodeEvaluation = isCodeEvaluationProblem(problemKind, cloneConfig);
         const cloneOwner = attribution.owner ?? original.owner;
         const cloneActor = attribution.actor ?? cloneOwner;
         const cloneId = await ProblemModel.createProblemByKind(
@@ -2166,7 +2468,12 @@ export class ProblemModel {
             original.content,
             cloneOwner,
             cloneKnowledge?.tags ?? original.tag,
-            { difficulty: original.difficulty, structuredConfig: cloneConfig, knowledgeNodeIds: cloneKnowledge?.nodeIds },
+            {
+                difficulty: original.difficulty,
+                structuredConfig: cloneIsCodeEvaluation ? { main: (cloneConfig as any).main } : cloneConfig,
+                knowledgeNodeIds: cloneKnowledge?.nodeIds,
+                ...(cloneIsCodeEvaluation ? { codeEvaluationStatus: 'draft' as const } : {}),
+            },
         );
         const sourcePrefix = `problem/${domainId}/${_id}/`;
         const targetPrefix = `problem/${target}/${cloneId}/`;
@@ -2222,11 +2529,13 @@ export class ProblemModel {
 
     static push<T extends ArrayKeys<ProblemDoc>>(domainId: string, _id: number, key: ArrayKeys<ProblemDoc>, value: ProblemDoc[T][0]) {
         assertNoCanonicalProblemPrimitiveMutation(String(key), { domainId, pid: _id, operation: 'problem-array-write' }, 'push');
+        if (key === 'data') throw new ValidationError('data', null, '测试数据元数据只能由测试数据文件服务写入');
         return document.push(domainId, document.TYPE_PROBLEM, _id, key, value);
     }
 
     static pull<T extends ArrayKeys<ProblemDoc>>(domainId: string, pid: number, key: ArrayKeys<ProblemDoc>, values: ProblemDoc[T][0][]) {
         assertNoCanonicalProblemPrimitiveMutation(String(key), { domainId, pid, operation: 'problem-array-write' }, 'pull');
+        if (key === 'data') throw new ValidationError('data', null, '测试数据元数据只能由测试数据文件服务写入');
         return document.deleteSub(domainId, document.TYPE_PROBLEM, pid, key, values);
     }
 
@@ -2367,6 +2676,9 @@ export class ProblemModel {
         name = name.trim();
         if (!name) throw new ValidationError('name');
         const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid, true, [name]);
+        if (revisionManaged) {
+            assertCodeEvaluationFileMutationWithTrace(revisionManaged, { type: 'upload', filename: name }, { actor: operator, stage: 'file-upload' });
+        }
         f = await normalizeProblemTestdataUpload(name, f);
         const [[, fileinfo]] = await Promise.all([
             document.getSub(domainId, document.TYPE_PROBLEM, pid, 'data', name),
@@ -2376,7 +2688,7 @@ export class ProblemModel {
         if (!meta) throw new FileUploadError();
         const payload = { name, ...pick(meta, ['size', 'lastModified', 'etag']) };
         payload.lastModified ||= new Date();
-        if (!fileinfo) await ProblemModel.push(domainId, pid, 'data', { _id: name, ...payload });
+        if (!fileinfo) await document.push(domainId, document.TYPE_PROBLEM, pid, 'data', { _id: name, ...payload });
         else await document.setSub(domainId, document.TYPE_PROBLEM, pid, 'data', name, payload);
         await bus.emit('problem/addTestdata', domainId, pid, name, payload);
         if (revisionManaged) await ProblemModel.bumpDirectStructureRevision(domainId, pid);
@@ -2385,6 +2697,13 @@ export class ProblemModel {
     static async renameTestdata(domainId: string, pid: number, file: string, newName: string, operator = 1) {
         if (file === newName) return;
         const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid, true, [file, newName]);
+        if (revisionManaged) {
+            assertCodeEvaluationFileMutationWithTrace(
+                revisionManaged,
+                { type: 'rename', filename: file, newFilename: newName },
+                { actor: operator, stage: 'file-rename' },
+            );
+        }
         if (isProblemConfigFilename(newName)) {
             const source = await storage.get(`problem/${domainId}/${pid}/testdata/${file}`);
             await normalizeProblemTestdataUpload(newName, source);
@@ -2403,12 +2722,19 @@ export class ProblemModel {
     static async delTestdata(domainId: string, pid: number, name: string | string[], operator = 1) {
         const names = name instanceof Array ? name : [name];
         const revisionManaged = await ProblemModel.assertDirectStructureWritable(domainId, pid, true, names);
+        if (revisionManaged) {
+            assertCodeEvaluationFileMutationWithTrace(
+                revisionManaged,
+                { type: 'delete', filenames: names },
+                { actor: operator, stage: 'file-delete' },
+            );
+        }
         await Promise.all([
             storage.del(
                 names.map((t) => `problem/${domainId}/${pid}/testdata/${t}`),
                 operator,
             ),
-            ProblemModel.pull(domainId, pid, 'data', names),
+            document.deleteSub(domainId, document.TYPE_PROBLEM, pid, 'data', names),
         ]);
         await bus.emit('problem/delTestdata', domainId, pid, names);
         if (revisionManaged) await ProblemModel.bumpDirectStructureRevision(domainId, pid);
@@ -2461,7 +2787,7 @@ export class ProblemModel {
         claim: ProblemWriteClaim,
         key: 'data' | 'additional_file',
         testdataNames: string[] = [],
-    ): Promise<any[]> {
+    ): Promise<ProblemDoc> {
         const doc = await document.coll.findOne(
             {
                 domainId: claim.domainId,
@@ -2472,7 +2798,19 @@ export class ProblemModel {
                 'aclWriteClaim.capability': claim.capability,
                 'aclWriteClaim.state': 'active',
             },
-            { projection: { [key]: 1, problemKind: 1, config: 1, authoringMode: 1 } },
+            {
+                projection: {
+                    domainId: 1,
+                    docId: 1,
+                    pid: 1,
+                    [key]: 1,
+                    problemKind: 1,
+                    codeEvaluationStatus: 1,
+                    config: 1,
+                    structureRevision: 1,
+                    authoringMode: 1,
+                },
+            },
         );
         if (!doc) throw new Error(`problem write claim ownership lost before file operation: ${claim.requestId}`);
         if (doc.authoringMode === 'managed' && !problemWriteCapabilityAllows(claim.capability, 'content')) {
@@ -2487,13 +2825,48 @@ export class ProblemModel {
                 throw new ValidationError('name', null, '结构化题配置不通过 testdata 文件修改');
             }
         }
-        return Array.isArray(doc[key]) ? doc[key] : [];
+        if (!Array.isArray(doc[key])) doc[key] = [] as any;
+        return doc as ProblemDoc;
+    }
+
+    private static async commitClaimedTestdataState(
+        claim: ProblemWriteClaim,
+        current: ProblemDoc,
+        nextData: ProblemDoc['data'],
+        expectedOperation: 'files-upload' | 'files-rename' | 'files-delete',
+    ): Promise<void> {
+        if (claim.operation !== expectedOperation) {
+            throw new TypeError(`testdata ${expectedOperation} requires a matching write claim`);
+        }
+        if (!problemWriteCapabilityAllows(claim.capability, 'content')) {
+            throw new TypeError(`problem write claim capability ${claim.capability} cannot modify testdata`);
+        }
+        assertStructureRevision(current.structureRevision);
+        assertCodeEvaluationLifecyclePatchWithTrace(
+            current,
+            { data: nextData } as any,
+            {},
+            {
+                actor: claim.actor,
+                operation: expectedOperation,
+                stage: 'physical-testdata-commit',
+                physicalTestdataMutation: true,
+            },
+        );
+        const result = await document.coll.findOneAndUpdate(
+            { ...revisionClaimFilter(claim, current.structureRevision), data: current.data },
+            { $set: { data: nextData } },
+            { returnDocument: 'after' },
+        );
+        if (!result) throw new Error(`problem write claim ownership lost after ${expectedOperation}: ${claim.requestId}`);
     }
 
     static async addTestdataWithClaim(claim: ProblemWriteClaim, name: string, f: Readable | Buffer | string, operator = 1) {
         name = name.trim();
         if (!name) throw new ValidationError('name');
-        const current = await ProblemModel.getClaimedProblemFiles(claim, 'data', [name]);
+        const state = await ProblemModel.getClaimedProblemFiles(claim, 'data', [name]);
+        assertCodeEvaluationFileMutationWithTrace(state, { type: 'upload', filename: name }, { actor: claim.actor, stage: 'file-upload' });
+        const current = state.data;
         f = await normalizeProblemTestdataUpload(name, f);
         await storage.put(`problem/${claim.domainId}/${claim.pid}/testdata/${name}`, f, operator);
         const meta = await storage.getMeta(`problem/${claim.domainId}/${claim.pid}/testdata/${name}`);
@@ -2502,15 +2875,19 @@ export class ProblemModel {
         payload.lastModified ||= new Date();
         const next = current.filter((item) => item.name !== name);
         next.push({ _id: name, ...payload });
-        if (!(await commitProblemWriteClaimUpdate(claim, { data: next } as any, {}, 'content'))) {
-            throw new Error(`problem write claim ownership lost after testdata upload: ${claim.requestId}`);
-        }
+        await ProblemModel.commitClaimedTestdataState(claim, state, next, 'files-upload');
         await bus.emit('problem/addTestdata', claim.domainId, claim.pid, name, payload, claim);
     }
 
     static async renameTestdataWithClaim(claim: ProblemWriteClaim, file: string, newName: string, operator = 1) {
         if (file === newName) return;
-        const current = await ProblemModel.getClaimedProblemFiles(claim, 'data', [file, newName]);
+        const state = await ProblemModel.getClaimedProblemFiles(claim, 'data', [file, newName]);
+        assertCodeEvaluationFileMutationWithTrace(
+            state,
+            { type: 'rename', filename: file, newFilename: newName },
+            { actor: claim.actor, stage: 'file-rename' },
+        );
+        const current = state.data;
         if (isProblemConfigFilename(newName)) {
             const source = await storage.get(`problem/${claim.domainId}/${claim.pid}/testdata/${file}`);
             await normalizeProblemTestdataUpload(newName, source);
@@ -2526,29 +2903,32 @@ export class ProblemModel {
         const next = current
             .filter((item) => item.name !== newName)
             .map((item) => (item.name === file ? { ...item, _id: newName, name: newName, lastModified: new Date() } : item));
-        if (!(await commitProblemWriteClaimUpdate(claim, { data: next } as any, {}, 'content'))) {
-            throw new Error(`problem write claim ownership lost after testdata rename: ${claim.requestId}`);
-        }
+        await ProblemModel.commitClaimedTestdataState(claim, state, next, 'files-rename');
         await bus.emit('problem/renameTestdata', claim.domainId, claim.pid, file, newName, claim);
     }
 
     static async delTestdataWithClaim(claim: ProblemWriteClaim, name: string | string[], operator = 1) {
         const names = name instanceof Array ? name : [name];
-        const current = await ProblemModel.getClaimedProblemFiles(claim, 'data', names);
+        const state = await ProblemModel.getClaimedProblemFiles(claim, 'data', names);
+        assertCodeEvaluationFileMutationWithTrace(state, { type: 'delete', filenames: names }, { actor: claim.actor, stage: 'file-delete' });
+        const current = state.data;
         await storage.del(
             names.map((item) => `problem/${claim.domainId}/${claim.pid}/testdata/${item}`),
             operator,
         );
-        if (!(await commitProblemWriteClaimUpdate(claim, { data: current.filter((item) => !names.includes(item.name)) } as any, {}, 'content'))) {
-            throw new Error(`problem write claim ownership lost after testdata delete: ${claim.requestId}`);
-        }
+        await ProblemModel.commitClaimedTestdataState(
+            claim,
+            state,
+            current.filter((item) => !names.includes(item.name)),
+            'files-delete',
+        );
         await bus.emit('problem/delTestdata', claim.domainId, claim.pid, names, claim);
     }
 
     static async addAdditionalFileWithClaim(claim: ProblemWriteClaim, name: string, f: Readable | Buffer | string, operator = 1) {
         name = name.trim();
         if (!name) throw new ValidationError('name');
-        const current = await ProblemModel.getClaimedProblemFiles(claim, 'additional_file');
+        const current = (await ProblemModel.getClaimedProblemFiles(claim, 'additional_file')).additional_file;
         await storage.put(`problem/${claim.domainId}/${claim.pid}/additional_file/${name}`, f, operator);
         const meta = await storage.getMeta(`problem/${claim.domainId}/${claim.pid}/additional_file/${name}`);
         if (!meta) throw new FileUploadError();
@@ -2563,7 +2943,7 @@ export class ProblemModel {
 
     static async renameAdditionalFileWithClaim(claim: ProblemWriteClaim, file: string, newName: string, operator = 1) {
         if (file === newName) return;
-        const current = await ProblemModel.getClaimedProblemFiles(claim, 'additional_file');
+        const current = (await ProblemModel.getClaimedProblemFiles(claim, 'additional_file')).additional_file;
         if (current.some((item) => item.name === newName)) {
             await storage.del([`problem/${claim.domainId}/${claim.pid}/additional_file/${newName}`], operator);
         }
@@ -2583,7 +2963,7 @@ export class ProblemModel {
 
     static async delAdditionalFileWithClaim(claim: ProblemWriteClaim, name: MaybeArray<string>, operator = 1) {
         const names = name instanceof Array ? name : [name];
-        const current = await ProblemModel.getClaimedProblemFiles(claim, 'additional_file');
+        const current = (await ProblemModel.getClaimedProblemFiles(claim, 'additional_file')).additional_file;
         await storage.del(
             names.map((item) => `problem/${claim.domainId}/${claim.pid}/additional_file/${item}`),
             operator,

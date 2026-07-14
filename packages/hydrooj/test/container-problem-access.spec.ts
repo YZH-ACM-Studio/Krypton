@@ -358,6 +358,23 @@ beforeEach(() => {
 });
 
 describe('P3.8 course workspace capabilities', () => {
+    it('keeps the advertised system-admin create capability through handler prepare', async () => {
+        const adminUser = makeUser({
+            hasPerm: () => false,
+            hasPriv: (priv: number) => priv === PRIV.PRIV_USER_PROFILE || priv === PRIV.PRIV_EDIT_SYSTEM,
+        });
+        const listHandler = makeHandler(courseRoutes.course_main, adminUser);
+        await listHandler.get('forged-domain', 1, '');
+        expect(listHandler.response.body.canCreate).to.equal(true);
+
+        const createHandler = makeHandler(courseRoutes.course_create, adminUser);
+        createHandler.checkPerm = (perm: bigint) => {
+            if (!adminUser.hasPerm(perm)) throw new TestPermissionError();
+        };
+        const error = await captureFailure(() => createHandler.prepare('forged-domain', null));
+        expect(error).to.equal(null);
+    });
+
     it('does not treat create permission as edit-all permission', async () => {
         trainingRows = [
             { docId: 'own', owner: 42, kind: 'course', title: 'Own', dag: [] },

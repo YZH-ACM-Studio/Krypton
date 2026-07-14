@@ -265,7 +265,14 @@ class CourseEditHandler extends Handler {
             this.tdoc = await training.get(authoritativeDomainId, tid);
             if (this.tdoc.kind !== 'course') throw new ValidationError('tid', null, 'Not a course');
             if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_COURSE);
-        } else {
+        } else if (!this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
+            if (!this.user.hasPerm(PERM.PERM_CREATE_COURSE)) {
+                logger.warn(
+                    'Course creation denied domain=%s uid=%d stage=prepare reason=missing-create-permission',
+                    authoritativeDomainId,
+                    this.user._id,
+                );
+            }
             this.checkPerm(PERM.PERM_CREATE_COURSE);
         }
     }

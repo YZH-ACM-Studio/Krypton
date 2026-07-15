@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   BarChart3,
   BookOpen,
   CheckCircle2,
@@ -32,6 +33,7 @@ import { useRecordSocket } from '@/hooks/use-record-socket';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { replaceRouteTokens } from '@/lib/format';
+import { shouldShowNoTestdataWarning } from '@/lib/problem-testcase-warning';
 import { extractSamples } from '@/lib/samples';
 
 type R = Record<string, any>;
@@ -58,6 +60,21 @@ function statusBadge(status: number | undefined) {
     );
   }
   return null;
+}
+
+function NoTestdataWarning() {
+  return (
+    <div
+      role="alert"
+      className="flex items-start gap-2 rounded-xl border border-amber-300/70 bg-amber-50/70 px-3 py-2.5 text-amber-950 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100"
+    >
+      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+      <div>
+        <p className="text-sm font-medium">此题没有测试点</p>
+        <p className="text-xs opacity-80">当前没有可用于评测的测试用例。</p>
+      </div>
+    </div>
+  );
 }
 
 function formatMemory(kb: number | undefined): string {
@@ -600,7 +617,7 @@ export function ProblemDetailPage() {
   const pdoc: R = data.pdoc || {};
   const udoc: R = data.udoc || {};
   const psdoc: R = data.psdoc || {};
-  const config: R = typeof pdoc.config === 'object' ? pdoc.config : {};
+  const config: R = pdoc.config && typeof pdoc.config === 'object' ? pdoc.config : {};
   const content = pdoc.content || '';
   const nSubmit = pdoc.nSubmit || 0;
   const nAccept = pdoc.nAccept || 0;
@@ -616,6 +633,7 @@ export function ProblemDetailPage() {
   /* ── Contest mode ── */
   const tdoc: R | null = data.tdoc || null;
   const examMode: R | null = data.examMode || null;
+  const showNoTestdataWarning = shouldShowNoTestdataWarning(pdoc, !!examMode?.enabled);
   const examUrls: R = examMode?.urls || {};
   const mode: string = data.mode || 'normal';
   // mode ∈ 'normal' | 'view' | 'contest' | 'correction' | 'none' (from problem.ts ProblemDetailHandler)
@@ -786,6 +804,8 @@ export function ProblemDetailPage() {
                   )}
                 </div>
 
+                {showNoTestdataWarning ? <NoTestdataWarning /> : null}
+
                 {/* Info chips */}
                 <div className="flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border bg-muted/30 px-3 py-2">
                   <InfoChip icon={User} label="出题人" value={udoc.uname || `UID ${udoc._id || '?'}`} />
@@ -916,6 +936,8 @@ export function ProblemDetailPage() {
     <motion.div className="space-y-4" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
       {/* Contest mode banner — visible whenever we entered via a contest tid */}
       {inContest && contestUrl ? <ContestBanner tdoc={tdoc!} mode={mode} letter={contestLetter} contestUrl={contestUrl} /> : null}
+
+      {showNoTestdataWarning ? <NoTestdataWarning /> : null}
 
       {/* Breadcrumb + title row */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

@@ -1,5 +1,6 @@
 <div class="section__body typo richmedia" data-fragment-id="problem-description">
-  {% if not pdoc.data.length and not pdoc.reference %}
+  {% set preserveExamWarning = tdoc and tdoc.rule == 'exam' %}
+  {% if (preserveExamWarning and not pdoc.data.length and not pdoc.reference) or (not preserveExamWarning and pdoc.config and typeof(pdoc.config) == 'object' and not instanceof(pdoc.config, Array) and pdoc.config.type != 'remote_judge' and not (pdoc.config.type == 'program_fill' and pdoc.config.mode == 'text') and not pdoc.config.count and not pdoc.reference) %}
     <blockquote class="warn">
       <p>{{ _('No {0} at current.').format(_("testdata")) }}</p>
     </blockquote>

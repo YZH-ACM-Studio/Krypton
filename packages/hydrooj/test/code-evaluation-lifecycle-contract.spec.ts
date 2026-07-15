@@ -92,6 +92,8 @@ describe('P3.17 code evaluation lifecycle wiring', () => {
             const end = model.indexOf(nextMethod, start);
             const method = model.slice(start, end);
             expect(method).to.include('assertCodeEvaluationFileMutationWithTrace(');
+            expect(method.indexOf('assertClaimedTestdataWriteClaim(')).to.be.lessThan(method.indexOf(storageCall));
+            expect(method.indexOf('getClaimedProblemFiles(')).to.be.lessThan(method.indexOf(storageCall));
             expect(method.indexOf(mutation)).to.be.lessThan(method.indexOf(storageCall));
         }
 
@@ -111,10 +113,23 @@ describe('P3.17 code evaluation lifecycle wiring', () => {
         const claimedCommitStart = model.indexOf('private static async commitClaimedTestdataState(');
         const claimedCommitEnd = model.indexOf('static async addTestdataWithClaim(', claimedCommitStart);
         const claimedCommit = model.slice(claimedCommitStart, claimedCommitEnd);
+        const claimedReadStart = model.indexOf('private static async getClaimedProblemFiles(');
+        const claimedRead = model.slice(claimedReadStart, claimedCommitStart);
         expect(claimedCommit).to.include('physicalTestdataMutation: true');
-        expect(claimedCommit).to.include('claim.operation !== expectedOperation');
+        expect(claimedCommit).to.include('problemWriteClaimAllowsTestdataMutation');
+        expect(claimedCommit).to.include('current.problemKind === undefined');
+        expect(claimedCommit).to.include('expectedData,');
+        expect(claimedCommit).to.include('problemDataSnapshotFilter(expectedData)');
+        const access = read('packages/hydrooj/src/model/problem-access.ts');
+        expect(access).to.include('normalizeProblemFileListSnapshot(');
+        expect(access).to.include("'aclWriteClaim.operation': claim.operation");
+        expect(claimedRead).to.include("'aclWriteClaim.operation': claim.operation");
+        expect(access).to.include("if (snapshot.state === 'missing') return { data: { $exists: false } }");
+        expect(access).to.include("$expr: { $eq: ['$data', { $literal: snapshot.value }] }");
+        expect(access).to.include("upload: new Set(['files-upload', 'generate-testdata-callback', 'crawler-testdata-replace'])");
+        expect(access).to.include("delete: new Set(['files-delete', 'crawler-testdata-replace'])");
         expect(model.match(/commitClaimedTestdataState\(/g)).to.have.length(4);
-        expect(model).not.to.match(/commitProblemWriteClaimUpdate\(claim, \{ data:/);
+        expect(claimedCommit.indexOf('current.problemKind === undefined')).to.be.lessThan(claimedCommit.indexOf('assertStructureRevision('));
     });
 
     it('rejects incomplete clone sources and always returns code-evaluation clones as hidden drafts', () => {

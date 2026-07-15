@@ -24,7 +24,7 @@ describe('P3.13 problem testdata config boundary', () => {
         it(`rejects legacy ${legacyType} before any model storage write`, async () => {
             await assert.rejects(
                 normalizeProblemTestdataUpload('config.yaml', Buffer.from(`type: ${legacyType}\n`)),
-                hasDetail('复合客观题与旧函数填空配置已下线'),
+                hasDetail('复合客观题与结构化代码题配置不能通过 config.yaml 创建'),
             );
         });
     }

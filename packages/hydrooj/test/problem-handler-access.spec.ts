@@ -923,6 +923,32 @@ describe('P2.11 authoritative problem route domain', () => {
         await files.postUploadFile('forged', 'config.yaml', 'testdata');
         expect(calls.renameFile[0][0]).to.equal('system');
     });
+
+    it('routes the complete legacy owner file mutation matrix through canonical content claims', async () => {
+        const handler = makeHandler(ProblemFilesHandler, {});
+        handler.pdoc = { domainId: 'system', docId: 7, owner: 42, data: [], additional_file: [] };
+        handler.request.files = {
+            file: { filepath: '/tmp/file.txt', originalFilename: 'file.txt', size: 1 },
+        };
+
+        await handler.postUploadFile('forged', 'config.yaml', 'testdata');
+        await handler.postUploadFile('forged', 'notes.txt', 'additional_file');
+        await handler.postRenameFiles('forged', ['config.yaml'], ['config.yml'], 'testdata');
+        await handler.postRenameFiles('forged', ['notes.txt'], ['readme.txt'], 'additional_file');
+        await handler.postDeleteFiles('forged', ['config.yml'], 'testdata');
+        await handler.postDeleteFiles('forged', ['readme.txt'], 'additional_file');
+
+        expect(calls.claims.map(({ operation, options }) => ({ operation, capability: options.capability }))).to.deep.equal([
+            { operation: 'files-upload', capability: 'content' },
+            { operation: 'files-upload', capability: 'content' },
+            { operation: 'files-rename', capability: 'content' },
+            { operation: 'files-rename', capability: 'content' },
+            { operation: 'files-delete', capability: 'content' },
+            { operation: 'files-delete', capability: 'content' },
+        ]);
+        expect(calls.renameFile).to.have.length(6);
+        expect(calls.renameFile.every((args) => args[0] === 'system' && args[1] === 7)).to.equal(true);
+    });
 });
 
 describe('P2.13 managed programming edit boundary', () => {

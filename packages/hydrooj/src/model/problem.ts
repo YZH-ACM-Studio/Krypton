@@ -68,7 +68,12 @@ import {
     commitProblemWriteClaimUpdate,
     isProblemBankAdmin as isProblemBankAdminAccess,
     markProblemWriteClaimError,
+    normalizeProblemFileListSnapshot,
+    problemDataSnapshotFilter,
+    type ProblemFileListSnapshot,
+    type ProblemTestdataMutation,
     problemWriteCapabilityAllows,
+    problemWriteClaimAllowsTestdataMutation,
     PROBLEM_ACL_INTERNAL_FIELDS,
     type ProblemAclUser,
     type ProblemWriteCapability,
@@ -250,6 +255,7 @@ async function readActiveProblemWriteClaim(
     pid: number,
     requestId: string,
     actor: number,
+    operation: string,
     capability: ProblemWriteCapability,
 ): Promise<ProblemWriteClaim | null> {
     const pdoc = await document.coll.findOne(
@@ -259,6 +265,7 @@ async function readActiveProblemWriteClaim(
             docId: pid,
             'aclWriteClaim.requestId': requestId,
             'aclWriteClaim.actor': actor,
+            'aclWriteClaim.operation': operation,
             'aclWriteClaim.capability': capability,
             'aclWriteClaim.state': 'active',
         },
@@ -391,6 +398,7 @@ function revisionClaimFilter(claim: ProblemWriteClaim, expectedStructureRevision
         docId: claim.pid,
         'aclWriteClaim.requestId': claim.requestId,
         'aclWriteClaim.actor': claim.actor,
+        'aclWriteClaim.operation': claim.operation,
         'aclWriteClaim.capability': claim.capability,
         'aclWriteClaim.state': 'active',
         structureRevision: expectedStructureRevision,
@@ -930,7 +938,14 @@ export class ProblemModel {
                         try {
                             const claimToMark =
                                 authorAssignmentClaim ||
-                                (await readActiveProblemWriteClaim(domainId, docId, authorAssignmentClaimRequestId!, creator, 'publish'));
+                                (await readActiveProblemWriteClaim(
+                                    domainId,
+                                    docId,
+                                    authorAssignmentClaimRequestId!,
+                                    creator,
+                                    'managed-draft-author-assignment',
+                                    'publish',
+                                ));
                             const marked = claimToMark ? await markProblemWriteClaimError(claimToMark, cleanupError) : false;
                             if (!marked) {
                                 logger.error(
@@ -1006,6 +1021,7 @@ export class ProblemModel {
                         docId: input.docId,
                         'aclWriteClaim.requestId': claim.requestId,
                         'aclWriteClaim.actor': claim.actor,
+                        'aclWriteClaim.operation': claim.operation,
                         'aclWriteClaim.capability': 'publish',
                         'aclWriteClaim.state': 'active',
                     },
@@ -1077,7 +1093,7 @@ export class ProblemModel {
                 const committed = await commitManagedProblemPublication({
                     domainId: input.domainId,
                     docId: input.docId,
-                    claim: { requestId: claim.requestId, actor: claim.actor, capability: 'publish' },
+                    claim: { requestId: claim.requestId, actor: claim.actor, operation: claim.operation, capability: 'publish' },
                     title: formalTitle,
                     difficulty: input.difficulty,
                     tags: prepared.tags,
@@ -1301,6 +1317,7 @@ export class ProblemModel {
                     docId: input.pid,
                     'aclWriteClaim.requestId': claim.requestId,
                     'aclWriteClaim.actor': claim.actor,
+                    'aclWriteClaim.operation': claim.operation,
                     'aclWriteClaim.capability': claim.capability,
                     'aclWriteClaim.state': 'active',
                 },
@@ -2055,6 +2072,7 @@ export class ProblemModel {
                         docId: pid,
                         'aclWriteClaim.requestId': claim.requestId,
                         'aclWriteClaim.actor': claim.actor,
+                        'aclWriteClaim.operation': claim.operation,
                         'aclWriteClaim.capability': claim.capability,
                         'aclWriteClaim.state': 'active',
                     },
@@ -2168,6 +2186,7 @@ export class ProblemModel {
                 docId: _id,
                 'aclWriteClaim.requestId': claim.requestId,
                 'aclWriteClaim.actor': claim.actor,
+                'aclWriteClaim.operation': claim.operation,
                 'aclWriteClaim.capability': claim.capability,
                 'aclWriteClaim.state': 'active',
             },
@@ -2271,6 +2290,7 @@ export class ProblemModel {
                     docId: _id,
                     'aclWriteClaim.requestId': claim.requestId,
                     'aclWriteClaim.actor': claim.actor,
+                    'aclWriteClaim.operation': claim.operation,
                     'aclWriteClaim.capability': claim.capability,
                     'aclWriteClaim.state': 'active',
                 },
@@ -2334,6 +2354,7 @@ export class ProblemModel {
                     docId: _id,
                     'aclWriteClaim.requestId': claim.requestId,
                     'aclWriteClaim.actor': claim.actor,
+                    'aclWriteClaim.operation': claim.operation,
                     'aclWriteClaim.capability': claim.capability,
                     'aclWriteClaim.state': 'active',
                 });
@@ -2422,6 +2443,7 @@ export class ProblemModel {
                 docId: _id,
                 'aclWriteClaim.requestId': claim.requestId,
                 'aclWriteClaim.actor': claim.actor,
+                'aclWriteClaim.operation': claim.operation,
                 'aclWriteClaim.capability': claim.capability,
                 'aclWriteClaim.state': 'active',
             });
@@ -2650,6 +2672,7 @@ export class ProblemModel {
                 docId,
                 'aclWriteClaim.requestId': claim.requestId,
                 'aclWriteClaim.actor': claim.actor,
+                'aclWriteClaim.operation': claim.operation,
                 'aclWriteClaim.capability': claim.capability,
                 'aclWriteClaim.state': 'active',
             });
@@ -2803,7 +2826,7 @@ export class ProblemModel {
         claim: ProblemWriteClaim,
         key: 'data' | 'additional_file',
         testdataNames: string[] = [],
-    ): Promise<ProblemDoc> {
+    ): Promise<{ doc: ProblemDoc; snapshot: ProblemFileListSnapshot }> {
         const doc = await document.coll.findOne(
             {
                 domainId: claim.domainId,
@@ -2811,6 +2834,7 @@ export class ProblemModel {
                 docId: claim.pid,
                 'aclWriteClaim.requestId': claim.requestId,
                 'aclWriteClaim.actor': claim.actor,
+                'aclWriteClaim.operation': claim.operation,
                 'aclWriteClaim.capability': claim.capability,
                 'aclWriteClaim.state': 'active',
             },
@@ -2841,21 +2865,29 @@ export class ProblemModel {
                 throw new ValidationError('name', null, '结构化题配置不通过 testdata 文件修改');
             }
         }
-        if (!Array.isArray(doc[key])) doc[key] = [] as any;
-        return doc as ProblemDoc;
+        const { files, snapshot } = normalizeProblemFileListSnapshot(doc[key], Object.hasOwn(doc, key), key);
+        doc[key] = files as any;
+        return { doc: doc as ProblemDoc, snapshot };
     }
 
     private static async commitClaimedTestdataState(
         claim: ProblemWriteClaim,
         current: ProblemDoc,
         nextData: ProblemDoc['data'],
-        expectedOperation: 'files-upload' | 'files-rename' | 'files-delete',
+        mutation: ProblemTestdataMutation,
+        expectedData: ProblemFileListSnapshot,
     ): Promise<void> {
-        if (claim.operation !== expectedOperation) {
-            throw new TypeError(`testdata ${expectedOperation} requires a matching write claim`);
-        }
-        if (!problemWriteCapabilityAllows(claim.capability, 'content')) {
-            throw new TypeError(`problem write claim capability ${claim.capability} cannot modify testdata`);
+        ProblemModel.assertClaimedTestdataWriteClaim(claim, mutation);
+        if (current.problemKind === undefined) {
+            const result = await commitProblemWriteClaimUpdate(claim, { data: nextData } as any, {}, 'content', {
+                expectedData,
+            });
+            if (!result) {
+                throw new Error(
+                    `problem testdata metadata CAS failed stage=legacy-testdata-metadata-commit operation=${claim.operation} mutation=${mutation} requestId=${claim.requestId}`,
+                );
+            }
+            return;
         }
         assertStructureRevision(current.structureRevision);
         assertCodeEvaluationLifecyclePatchWithTrace(
@@ -2864,23 +2896,37 @@ export class ProblemModel {
             {},
             {
                 actor: claim.actor,
-                operation: expectedOperation,
+                operation: claim.operation,
                 stage: 'physical-testdata-commit',
                 physicalTestdataMutation: true,
             },
         );
         const result = await document.coll.findOneAndUpdate(
-            { ...revisionClaimFilter(claim, current.structureRevision), data: current.data },
+            { ...revisionClaimFilter(claim, current.structureRevision), ...problemDataSnapshotFilter(expectedData) },
             { $set: { data: nextData } },
             { returnDocument: 'after' },
         );
-        if (!result) throw new Error(`problem write claim ownership lost after ${expectedOperation}: ${claim.requestId}`);
+        if (!result) {
+            throw new Error(
+                `problem testdata metadata CAS failed stage=structured-testdata-metadata-commit operation=${claim.operation} mutation=${mutation} requestId=${claim.requestId}`,
+            );
+        }
+    }
+
+    private static assertClaimedTestdataWriteClaim(claim: ProblemWriteClaim, mutation: ProblemTestdataMutation): void {
+        if (!problemWriteClaimAllowsTestdataMutation(claim, mutation)) {
+            throw new TypeError(
+                `problem write claim cannot mutate testdata operation=${claim.operation} mutation=${mutation} capability=${claim.capability} state=${claim.state}`,
+            );
+        }
     }
 
     static async addTestdataWithClaim(claim: ProblemWriteClaim, name: string, f: Readable | Buffer | string, operator = 1) {
+        ProblemModel.assertClaimedTestdataWriteClaim(claim, 'upload');
         name = name.trim();
         if (!name) throw new ValidationError('name');
-        const state = await ProblemModel.getClaimedProblemFiles(claim, 'data', [name]);
+        const claimed = await ProblemModel.getClaimedProblemFiles(claim, 'data', [name]);
+        const state = claimed.doc;
         assertCodeEvaluationFileMutationWithTrace(state, { type: 'upload', filename: name }, { actor: claim.actor, stage: 'file-upload' });
         const current = state.data;
         f = await normalizeProblemTestdataUpload(name, f);
@@ -2891,13 +2937,15 @@ export class ProblemModel {
         payload.lastModified ||= new Date();
         const next = current.filter((item) => item.name !== name);
         next.push({ _id: name, ...payload });
-        await ProblemModel.commitClaimedTestdataState(claim, state, next, 'files-upload');
+        await ProblemModel.commitClaimedTestdataState(claim, state, next, 'upload', claimed.snapshot);
         await bus.emit('problem/addTestdata', claim.domainId, claim.pid, name, payload, claim);
     }
 
     static async renameTestdataWithClaim(claim: ProblemWriteClaim, file: string, newName: string, operator = 1) {
+        ProblemModel.assertClaimedTestdataWriteClaim(claim, 'rename');
         if (file === newName) return;
-        const state = await ProblemModel.getClaimedProblemFiles(claim, 'data', [file, newName]);
+        const claimed = await ProblemModel.getClaimedProblemFiles(claim, 'data', [file, newName]);
+        const state = claimed.doc;
         assertCodeEvaluationFileMutationWithTrace(
             state,
             { type: 'rename', filename: file, newFilename: newName },
@@ -2919,13 +2967,15 @@ export class ProblemModel {
         const next = current
             .filter((item) => item.name !== newName)
             .map((item) => (item.name === file ? { ...item, _id: newName, name: newName, lastModified: new Date() } : item));
-        await ProblemModel.commitClaimedTestdataState(claim, state, next, 'files-rename');
+        await ProblemModel.commitClaimedTestdataState(claim, state, next, 'rename', claimed.snapshot);
         await bus.emit('problem/renameTestdata', claim.domainId, claim.pid, file, newName, claim);
     }
 
     static async delTestdataWithClaim(claim: ProblemWriteClaim, name: string | string[], operator = 1) {
+        ProblemModel.assertClaimedTestdataWriteClaim(claim, 'delete');
         const names = name instanceof Array ? name : [name];
-        const state = await ProblemModel.getClaimedProblemFiles(claim, 'data', names);
+        const claimed = await ProblemModel.getClaimedProblemFiles(claim, 'data', names);
+        const state = claimed.doc;
         assertCodeEvaluationFileMutationWithTrace(state, { type: 'delete', filenames: names }, { actor: claim.actor, stage: 'file-delete' });
         const current = state.data;
         await storage.del(
@@ -2936,7 +2986,8 @@ export class ProblemModel {
             claim,
             state,
             current.filter((item) => !names.includes(item.name)),
-            'files-delete',
+            'delete',
+            claimed.snapshot,
         );
         await bus.emit('problem/delTestdata', claim.domainId, claim.pid, names, claim);
     }
@@ -2944,7 +2995,7 @@ export class ProblemModel {
     static async addAdditionalFileWithClaim(claim: ProblemWriteClaim, name: string, f: Readable | Buffer | string, operator = 1) {
         name = name.trim();
         if (!name) throw new ValidationError('name');
-        const current = (await ProblemModel.getClaimedProblemFiles(claim, 'additional_file')).additional_file;
+        const current = (await ProblemModel.getClaimedProblemFiles(claim, 'additional_file')).doc.additional_file;
         await storage.put(`problem/${claim.domainId}/${claim.pid}/additional_file/${name}`, f, operator);
         const meta = await storage.getMeta(`problem/${claim.domainId}/${claim.pid}/additional_file/${name}`);
         if (!meta) throw new FileUploadError();
@@ -2959,7 +3010,7 @@ export class ProblemModel {
 
     static async renameAdditionalFileWithClaim(claim: ProblemWriteClaim, file: string, newName: string, operator = 1) {
         if (file === newName) return;
-        const current = (await ProblemModel.getClaimedProblemFiles(claim, 'additional_file')).additional_file;
+        const current = (await ProblemModel.getClaimedProblemFiles(claim, 'additional_file')).doc.additional_file;
         if (current.some((item) => item.name === newName)) {
             await storage.del([`problem/${claim.domainId}/${claim.pid}/additional_file/${newName}`], operator);
         }
@@ -2979,7 +3030,7 @@ export class ProblemModel {
 
     static async delAdditionalFileWithClaim(claim: ProblemWriteClaim, name: MaybeArray<string>, operator = 1) {
         const names = name instanceof Array ? name : [name];
-        const current = (await ProblemModel.getClaimedProblemFiles(claim, 'additional_file')).additional_file;
+        const current = (await ProblemModel.getClaimedProblemFiles(claim, 'additional_file')).doc.additional_file;
         await storage.del(
             names.map((item) => `problem/${claim.domainId}/${claim.pid}/additional_file/${item}`),
             operator,

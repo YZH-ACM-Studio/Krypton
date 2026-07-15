@@ -17,6 +17,7 @@ const loggerWarnCalls: any[][] = [];
 const TYPE_PROBLEM = 10;
 const countCalls: Array<{ domainId: string; docType: number; query: unknown }> = [];
 const selectionReadCalls: Array<{ filter: any; options: any }> = [];
+const findOneCalls: Array<{ filter: any; options: any }> = [];
 const guardedUpdateCalls: Array<{ filter: any; update: any }> = [];
 const updateCalls: Array<{ filter: any; update: any }> = [];
 let countResult = 0;
@@ -36,13 +37,25 @@ function matchesGuardedFilter(doc: any, filter: any): boolean {
     if (lockedUid !== undefined && doc.aclMutationLocks?.some((lock: any) => lock.uid === lockedUid)) return false;
     if (filter['aclMutationLocks.0']?.$exists === false && doc.aclMutationLocks?.length) return false;
     if (filter.aclWriteClaim?.$exists === false && doc.aclWriteClaim !== undefined) return false;
-    for (const key of ['aclWriteClaim.requestId', 'aclWriteClaim.actor', 'aclWriteClaim.capability', 'aclWriteClaim.state']) {
+    for (const key of [
+        'aclWriteClaim.requestId',
+        'aclWriteClaim.actor',
+        'aclWriteClaim.operation',
+        'aclWriteClaim.capability',
+        'aclWriteClaim.state',
+    ]) {
         if (filter[key] !== undefined && doc.aclWriteClaim?.[key.split('.')[1]] !== filter[key]) return false;
     }
     if (filter.authoringMode !== undefined && doc.authoringMode !== filter.authoringMode) return false;
     if (filter.hidden !== undefined && doc.hidden !== filter.hidden) return false;
     if (filter.managedAuthoring !== undefined && !isDeepStrictEqual(doc.managedAuthoring, filter.managedAuthoring)) return false;
     if (filter.structureRevision !== undefined && doc.structureRevision !== filter.structureRevision) return false;
+    if (Object.hasOwn(filter, 'data') && !matchesDataCondition(doc, filter.data)) return false;
+    if (filter.$and?.some((term: any) => Object.hasOwn(term, 'data') && !matchesDataCondition(doc, term.data))) return false;
+    if (filter.$expr?.$eq) {
+        const [left, right] = filter.$expr.$eq;
+        if (left !== '$data' || !Object.hasOwn(right, '$literal') || !isDeepStrictEqual(doc.data, right.$literal)) return false;
+    }
     if (filter.tag !== undefined && !isDeepStrictEqual(doc.tag, filter.tag)) return false;
     if (filter.structureLockedAt?.$exists === false && doc.structureLockedAt !== undefined) return false;
     if (filter.maintainer !== undefined && !doc.maintainer?.includes(filter.maintainer)) return false;
@@ -56,6 +69,21 @@ function matchesGuardedFilter(doc: any, filter: any): boolean {
     ) {
         return false;
     }
+    return true;
+}
+
+function matchesDataCondition(doc: any, condition: any): boolean {
+    const present = Object.hasOwn(doc, 'data');
+    if (condition === null) {
+        return !present || doc.data === null || (Array.isArray(doc.data) && doc.data.includes(null));
+    }
+    if (!condition || typeof condition !== 'object' || Array.isArray(condition)) {
+        return isDeepStrictEqual(doc.data, condition);
+    }
+    if (condition.$exists !== undefined && present !== condition.$exists) return false;
+    if (condition.$not?.$type === 'array' && Array.isArray(doc.data)) return false;
+    if (condition.$in && !condition.$in.some((value: unknown) => isDeepStrictEqual(doc.data ?? null, value))) return false;
+    if (Object.hasOwn(condition, '$eq') && !isDeepStrictEqual(doc.data, condition.$eq)) return false;
     return true;
 }
 
@@ -119,7 +147,8 @@ require.cache[documentPath] = {
                     },
                 };
             },
-            async findOne(filter: any, _options?: any) {
+            async findOne(filter: any, options?: any) {
+                findOneCalls.push({ filter: structuredClone(filter), options: structuredClone(options) });
                 return matchesGuardedFilter(liveProblem, filter) ? structuredClone(liveProblem) : null;
             },
         },
@@ -180,6 +209,7 @@ const {
     readStableViewableProblem,
     readStableViewableProblems,
     refreshProblemAcl,
+    normalizeProblemFileListSnapshot,
 } = access;
 
 const { PERM, PRIV } = require('../src/model/builtin.ts');
@@ -232,6 +262,7 @@ async function captureFailure(run: () => Promise<unknown>) {
 beforeEach(() => {
     countCalls.length = 0;
     selectionReadCalls.length = 0;
+    findOneCalls.length = 0;
     guardedUpdateCalls.length = 0;
     updateCalls.length = 0;
     countResult = 0;
@@ -648,6 +679,70 @@ describe('P2.11 durable global problem write claim', () => {
     const markError = (access as any).markProblemWriteClaimError;
     const clear = (access as any).clearProblemWriteClaim;
 
+    it('allows only the explicit server operations needed by each physical testdata mutation', () => {
+        const allows = (access as any).problemWriteClaimAllowsTestdataMutation;
+        const claim = (operation: string, overrides: Record<string, unknown> = {}) => ({
+            domainId: 'system',
+            pid: 100,
+            requestId: `claim-${operation}`,
+            actor: 42,
+            operation,
+            capability: 'content',
+            state: 'active',
+            lastError: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            ...overrides,
+        });
+
+        for (const [operation, mutation] of [
+            ['files-upload', 'upload'],
+            ['files-rename', 'rename'],
+            ['files-delete', 'delete'],
+            ['generate-testdata-callback', 'upload'],
+            ['crawler-testdata-replace', 'delete'],
+            ['crawler-testdata-replace', 'upload'],
+        ]) {
+            expect(allows(claim(operation), mutation), `${operation}:${mutation}`).to.equal(true);
+        }
+        for (const [operation, mutation, overrides] of [
+            ['files-upload', 'delete', {}],
+            ['generate-testdata-callback', 'delete', {}],
+            ['crawler-testdata-replace', 'rename', {}],
+            ['metadata-edit', 'upload', {}],
+            ['files-upload', 'upload', { state: 'error' }],
+            ['files-upload', 'upload', { capability: 'archive' }],
+        ] as const) {
+            expect(allows(claim(operation, overrides), mutation), `${operation}:${mutation}:${JSON.stringify(overrides)}`).to.equal(false);
+        }
+    });
+
+    it('binds an in-memory testdata operation to the operation stored by the active claim', async () => {
+        const user = makeUser('creator');
+        liveProblem = {
+            ...pdoc(100, user._id),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+            data: [],
+        };
+        const actualClaim = await acquire(user, structuredClone(liveProblem), 'operation-bound', 'metadata-edit', {
+            capability: 'content',
+        });
+        const forgedClaim = { ...actualClaim, operation: 'files-upload' };
+
+        const result = await commit(forgedClaim, { data: [{ _id: '1.in', name: '1.in', size: 1 }] }, {}, 'content', {
+            expectedData: { state: 'array', value: [] },
+        });
+
+        expect(result).to.equal(null);
+        expect(findOneCalls.at(-1)?.filter['aclWriteClaim.operation']).to.equal('files-upload');
+        expect(liveProblem.data).to.deep.equal([]);
+        expect(await clear(forgedClaim)).to.equal(false);
+        expect(liveProblem.aclWriteClaim.operation).to.equal('metadata-edit');
+        expect(await clear(actualClaim)).to.equal(true);
+    });
+
     it('lets a live maintainer claim the global latch and rejects every overlapping writer', async () => {
         const user = makeUser('creator', { _maintainedPids: new Set([100]) });
         liveProblem = {
@@ -786,6 +881,144 @@ describe('P2.11 durable global problem write claim', () => {
         expect(result).to.equal(null);
         expect(liveProblem.tag).to.deep.equal(['L2', 'manual-tag']);
         expect(guardedUpdateCalls.at(-1)?.filter).to.deep.include({ tag: ['L2'] });
+    });
+
+    it('commits legacy testdata metadata under the active claim without inventing a structure revision', async () => {
+        const user = makeUser('creator');
+        liveProblem = {
+            ...pdoc(100, user._id),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+            data: [{ _id: '1.in', name: '1.in', size: 2 }],
+        };
+        const claim = await acquire(user, structuredClone(liveProblem), 'legacy-files-upload', 'files-upload', { capability: 'content' });
+        const previousData = structuredClone(liveProblem.data);
+        const nextData = [...previousData, { _id: '1.out', name: '1.out', size: 2 }];
+
+        const result = await commit(claim, { data: nextData }, {}, 'content', {
+            expectedData: { state: 'array', value: previousData },
+        });
+
+        expect(result?.data).to.deep.equal(nextData);
+        expect(guardedUpdateCalls.at(-1)?.filter.$expr).to.deep.equal({
+            $eq: ['$data', { $literal: previousData }],
+        });
+        expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('structureRevision');
+    });
+
+    it('rejects a legacy testdata metadata race at the final data snapshot CAS', async () => {
+        const user = makeUser('creator');
+        liveProblem = {
+            ...pdoc(100, user._id),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+            data: [{ _id: '1.in', name: '1.in', size: 2 }],
+        };
+        const claim = await acquire(user, structuredClone(liveProblem), 'legacy-files-delete', 'files-delete', { capability: 'content' });
+        const previousData = structuredClone(liveProblem.data);
+        beforeFindOneAndUpdate = () => {
+            liveProblem.data = [...previousData, { _id: 'raced.out', name: 'raced.out', size: 3 }];
+        };
+
+        const result = await commit(claim, { data: [] }, {}, 'content', {
+            expectedData: { state: 'array', value: previousData },
+        });
+
+        expect(result).to.equal(null);
+        expect(liveProblem.data).to.deep.equal([...previousData, { _id: 'raced.out', name: 'raced.out', size: 3 }]);
+    });
+
+    it('commits the first legacy testdata file only while the data field remains absent', async () => {
+        const user = makeUser('creator');
+        liveProblem = {
+            ...pdoc(100, user._id),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+        };
+        const claim = await acquire(user, structuredClone(liveProblem), 'legacy-first-file', 'files-upload', { capability: 'content' });
+        const nextData = [{ _id: 'config.yaml', name: 'config.yaml', size: 14 }];
+
+        const result = await commit(claim, { data: nextData }, {}, 'content', { expectedData: { state: 'missing' } });
+
+        expect(result?.data).to.deep.equal(nextData);
+        expect(guardedUpdateCalls.at(-1)?.filter.data).to.deep.equal({ $exists: false });
+    });
+
+    it('commits the first legacy testdata file only while the data field remains exactly null', async () => {
+        const user = makeUser('creator');
+        liveProblem = {
+            ...pdoc(100, user._id),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+            data: null,
+        };
+        const claim = await acquire(user, structuredClone(liveProblem), 'legacy-null-first-file', 'files-upload', {
+            capability: 'content',
+        });
+        const nextData = [{ _id: 'config.yaml', name: 'config.yaml', size: 14 }];
+
+        const result = await commit(claim, { data: nextData }, {}, 'content', { expectedData: { state: 'null' } });
+
+        expect(result?.data).to.deep.equal(nextData);
+        expect(guardedUpdateCalls.at(-1)?.filter.$and).to.deep.equal([
+            { data: null },
+            { data: { $exists: true } },
+            { data: { $not: { $type: 'array' } } },
+        ]);
+    });
+
+    it('does not mistake malformed concurrent arrays for an empty legacy data snapshot', async () => {
+        const user = makeUser('creator');
+        const assertRejectedRace = async (racedData: unknown[], requestId: string) => {
+            liveProblem = {
+                ...pdoc(100, user._id),
+                docType: TYPE_PROBLEM,
+                aclMutationRevision: 0,
+                aclMutationLocks: [],
+                data: [],
+            };
+            const claim = await acquire(user, structuredClone(liveProblem), requestId, 'files-upload', {
+                capability: 'content',
+            });
+            beforeFindOneAndUpdate = () => {
+                liveProblem.data = structuredClone(racedData);
+            };
+
+            const result = await commit(claim, { data: [{ _id: '1.in', name: '1.in', size: 1 }] }, {}, 'content', {
+                expectedData: { state: 'array', value: [] },
+            });
+
+            expect(result).to.equal(null);
+            expect(liveProblem.data).to.deep.equal(racedData);
+        };
+
+        await assertRejectedRace([null], 'legacy-empty-race-null');
+        await assertRejectedRace([[]], 'legacy-empty-race-nested-array');
+    });
+
+    it('rejects malformed problem file metadata instead of normalizing it to an empty list', () => {
+        expect(normalizeProblemFileListSnapshot(undefined, false, 'data')).to.deep.equal({
+            files: [],
+            snapshot: { state: 'missing' },
+        });
+        expect(normalizeProblemFileListSnapshot(null, true, 'data')).to.deep.equal({
+            files: [],
+            snapshot: { state: 'null' },
+        });
+        const files = [{ _id: '1.in', name: '1.in', size: 1 }];
+        expect(normalizeProblemFileListSnapshot(files, true, 'data')).to.deep.equal({
+            files,
+            snapshot: { state: 'array', value: files },
+        });
+        for (const malformed of [undefined, {}, 'broken', [null], [[]], [{ _id: '1.in' }]]) {
+            expect(() => normalizeProblemFileListSnapshot(malformed, true, 'data'))
+                .to.throw()
+                .with.property('name', 'ValidationError');
+        }
     });
 
     it('rejects raw structured metadata at the lowest claim commit primitive', async () => {

@@ -28,6 +28,8 @@ export type ProblemAclUser = Pick<User, '_id' | 'hasPerm' | 'hasPriv'> & {
 };
 
 export type ProblemWriteCapability = 'maintain' | 'content' | 'metadata' | 'collaborators' | 'publish' | 'archive' | 'hard-delete' | 'clone';
+export type ProblemTestdataMutation = 'upload' | 'rename' | 'delete';
+export type ProblemFileListSnapshot = { state: 'missing' } | { state: 'null' } | { state: 'array'; value: NonNullable<ProblemDoc['data']> };
 
 export interface ProblemWriteClaim {
     domainId: string;
@@ -260,9 +262,46 @@ function claimFilter(claim: ProblemWriteClaim): Record<string, unknown> {
         docId: claim.pid,
         'aclWriteClaim.requestId': claim.requestId,
         'aclWriteClaim.actor': claim.actor,
+        'aclWriteClaim.operation': claim.operation,
         'aclWriteClaim.capability': claim.capability,
         'aclWriteClaim.state': 'active',
     };
+}
+
+export function normalizeProblemFileListSnapshot(
+    value: unknown,
+    present: boolean,
+    field: 'data' | 'additional_file',
+): { files: NonNullable<ProblemDoc['data']>; snapshot: ProblemFileListSnapshot } {
+    if (!present) return { files: [], snapshot: { state: 'missing' } };
+    if (value === null) return { files: [], snapshot: { state: 'null' } };
+    if (!Array.isArray(value)) {
+        throw new ValidationError(field, null, `题目 ${field} 文件元数据必须是数组、null 或缺失`);
+    }
+    const invalidIndex = value.findIndex(
+        (item) =>
+            !item ||
+            typeof item !== 'object' ||
+            Array.isArray(item) ||
+            typeof (item as { name?: unknown }).name !== 'string' ||
+            !(item as { name: string }).name.trim(),
+    );
+    if (invalidIndex !== -1) {
+        throw new ValidationError(field, null, `题目 ${field} 文件元数据第 ${invalidIndex + 1} 项缺少有效文件名`);
+    }
+    return { files: value as NonNullable<ProblemDoc['data']>, snapshot: { state: 'array', value: value as NonNullable<ProblemDoc['data']> } };
+}
+
+export function problemDataSnapshotFilter(snapshot: ProblemFileListSnapshot): Filter<ProblemDoc> {
+    if (snapshot.state === 'missing') return { data: { $exists: false } } as Filter<ProblemDoc>;
+    if (snapshot.state === 'null') {
+        return {
+            $and: [{ data: null }, { data: { $exists: true } }, { data: { $not: { $type: 'array' } } }],
+        } as Filter<ProblemDoc>;
+    }
+    return {
+        $expr: { $eq: ['$data', { $literal: snapshot.value }] },
+    } as Filter<ProblemDoc>;
 }
 
 /**
@@ -404,7 +443,7 @@ export async function commitProblemWriteClaimUpdate(
     $set: Partial<ProblemDoc>,
     $unset: Record<string, unknown> = {},
     requiredCapability: ProblemWriteCapability = claim.capability,
-    options: { expectedStructureRevision?: number; expectedTag?: string[] } = {},
+    options: { expectedStructureRevision?: number; expectedTag?: string[]; expectedData?: ProblemFileListSnapshot } = {},
 ): Promise<ProblemDoc | null> {
     const requestedFields = [...Object.keys($set || {}), ...Object.keys($unset || {})];
     if (requestedFields.some((key) => PROBLEM_ACL_INTERNAL_FIELDS.has(key.split('.')[0]))) {
@@ -422,6 +461,7 @@ export async function commitProblemWriteClaimUpdate(
                   structureLockedAt: { $exists: false },
               }),
         ...(options.expectedTag === undefined ? {} : { tag: options.expectedTag }),
+        ...(options.expectedData === undefined ? {} : problemDataSnapshotFilter(options.expectedData)),
     };
     const current = await document.coll.findOne(filter, {
         projection: {
@@ -634,6 +674,21 @@ export function problemWriteCapabilityAllows(granted: ProblemWriteCapability, re
     if (granted === 'metadata') return required === 'content';
     if (granted === 'publish') return ['content', 'metadata'].includes(required);
     return false;
+}
+
+const TESTDATA_CLAIM_OPERATIONS: Record<ProblemTestdataMutation, ReadonlySet<string>> = {
+    upload: new Set(['files-upload', 'generate-testdata-callback', 'crawler-testdata-replace']),
+    rename: new Set(['files-rename']),
+    delete: new Set(['files-delete', 'crawler-testdata-replace']),
+};
+
+/** Keep physical testdata writers bound to their explicit server operation. */
+export function problemWriteClaimAllowsTestdataMutation(claim: ProblemWriteClaim, mutation: ProblemTestdataMutation): boolean {
+    return (
+        claim.state === 'active' &&
+        problemWriteCapabilityAllows(claim.capability, 'content') &&
+        TESTDATA_CLAIM_OPERATIONS[mutation].has(claim.operation)
+    );
 }
 
 function applyCapabilityIdentityFilter(

@@ -17,6 +17,7 @@ let trainingReadFailures = 0;
 const calls = {
     updates: [] as any[],
     problemUpdates: [] as any[],
+    problemReads: [] as any[],
     sessions: [] as any[],
 };
 
@@ -41,8 +42,9 @@ const documentColl = {
         chapter.pids = chapter.pids.filter((pid: number | string) => !values.includes(pid));
         return { matchedCount: 1, modifiedCount: 1 };
     },
-    async findOneAndUpdate(_filter: any, update: any, options: any) {
-        calls.problemUpdates.push({ update, options });
+    async findOneAndUpdate(filter: any, update: any, options: any) {
+        calls.problemUpdates.push({ filter, update, options });
+        if (filter['aclWriteClaim.operation'] !== problemDoc?.aclWriteClaim?.operation) return null;
         if (casMode === 'null') return null;
         Object.assign(problemDoc, update.$set);
         if (casMode === 'throw-after-write') throw new Error('problem update response lost');
@@ -56,11 +58,13 @@ const documentColl = {
             }
             return trainingDoc ? { ...trainingDoc, dag: trainingDoc.dag.map((chapter: any) => ({ ...chapter, pids: [...chapter.pids] })) } : null;
         }
+        calls.problemReads.push(filter);
         const expectedAt = filter['managedAuthoring.approvedAt'];
         if (
             problemDoc?.hidden === false &&
             problemDoc.managedAuthoring?.metadataStatus === 'confirmed' &&
-            problemDoc.managedAuthoring?.approvedAt?.getTime() === expectedAt?.getTime()
+            problemDoc.managedAuthoring?.approvedAt?.getTime() === expectedAt?.getTime() &&
+            filter['aclWriteClaim.operation'] === problemDoc.aclWriteClaim?.operation
         ) {
             return { ...problemDoc };
         }
@@ -79,7 +83,13 @@ const session = {
 
 const dbStub = {
     client: {
-        topology: { description: { get type() { return topology; } } },
+        topology: {
+            description: {
+                get type() {
+                    return topology;
+                },
+            },
+        },
         startSession() {
             calls.sessions.push(session);
             return session;
@@ -119,7 +129,7 @@ function input(withTraining = false): ManagedProblemPublicationCommit {
     return {
         domainId: 'system',
         docId: 101,
-        claim: { requestId: 'publish-101', actor: 1, capability: 'publish' },
+        claim: { requestId: 'publish-101', actor: 1, operation: 'managed-review-publish', capability: 'publish' },
         title: '正式标题',
         difficulty: 4,
         tags: ['PAT乙级', '2026春', '数据结构'],
@@ -159,7 +169,13 @@ beforeEach(() => {
         authoringMode: 'managed',
         hidden: true,
         managedAuthoring: { workingTitle: '工作标题', metadataStatus: 'draft' },
-        aclWriteClaim: { requestId: 'publish-101', actor: 1, capability: 'publish', state: 'active' },
+        aclWriteClaim: {
+            requestId: 'publish-101',
+            actor: 1,
+            operation: 'managed-review-publish',
+            capability: 'publish',
+            state: 'active',
+        },
     };
     trainingDoc = {
         domainId: 'system',
@@ -170,6 +186,7 @@ beforeEach(() => {
     };
     calls.updates.length = 0;
     calls.problemUpdates.length = 0;
+    calls.problemReads.length = 0;
     calls.sessions.length = 0;
 });
 
@@ -177,8 +194,23 @@ describe('P2.14 managed problem publication persistence', () => {
     it('publishes one standalone draft without touching training when no placement was selected', async () => {
         const result = await publication.commitManagedProblemPublication(input());
         expect(result).to.include({ hidden: false, title: '正式标题', difficulty: 4 });
+        expect(calls.problemUpdates[0].filter['aclWriteClaim.operation']).to.equal('managed-review-publish');
         expect(calls.updates).to.have.lengthOf(0);
         expect(calls.sessions).to.have.lengthOf(0);
+    });
+
+    it('rejects a publish-capability claim from another operation before any persistence', async () => {
+        const request = input();
+        request.claim.operation = 'managed-draft-author-assignment';
+
+        const error = await captureFailure(publication.commitManagedProblemPublication(request));
+
+        expect(error).to.be.instanceOf(TypeError);
+        expect(error?.message).to.include('managed-review-publish');
+        expect(problemDoc.hidden).to.equal(true);
+        expect(calls.updates).to.have.lengthOf(0);
+        expect(calls.problemUpdates).to.have.lengthOf(0);
+        expect(calls.problemReads).to.have.lengthOf(0);
     });
 
     it('re-publishes a confirmed managed problem hidden by a later lifecycle action through the same CAS', async () => {
@@ -232,6 +264,7 @@ describe('P2.14 managed problem publication persistence', () => {
         casMode = 'throw-after-write';
         const result = await publication.commitManagedProblemPublication(input(true));
         expect(result.hidden).to.equal(false);
+        expect(calls.problemReads.at(-1)['aclWriteClaim.operation']).to.equal('managed-review-publish');
         expect(trainingDoc.dag[0].pids).to.deep.equal([101]);
         expect(calls.updates.filter((call) => call.update.$pull)).to.have.lengthOf(0);
     });

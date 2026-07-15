@@ -10,6 +10,7 @@ const logger = new Logger('managed-problem-publication');
 export interface ManagedPublicationClaim {
     requestId: string;
     actor: number;
+    operation: string;
     capability: 'publish';
 }
 
@@ -43,6 +44,7 @@ function claimedDraftFilter(input: ManagedProblemPublicationCommit) {
         'managedAuthoring.metadataStatus': input.expectedMetadataStatus,
         'aclWriteClaim.requestId': input.claim.requestId,
         'aclWriteClaim.actor': input.claim.actor,
+        'aclWriteClaim.operation': input.claim.operation,
         'aclWriteClaim.capability': input.claim.capability,
         'aclWriteClaim.state': 'active',
     };
@@ -203,6 +205,7 @@ async function confirmPublished(input: ManagedProblemPublicationCommit): Promise
         'managedAuthoring.approvedAt': input.managedAuthoring.approvedAt,
         'aclWriteClaim.requestId': input.claim.requestId,
         'aclWriteClaim.actor': input.claim.actor,
+        'aclWriteClaim.operation': input.claim.operation,
         'aclWriteClaim.capability': input.claim.capability,
         'aclWriteClaim.state': 'active',
     }) as Promise<ProblemDoc | null>;
@@ -273,6 +276,9 @@ async function commitWithCompensation(input: ManagedProblemPublicationCommit): P
 
 /** Commit only metadata/training visibility; ACL cleanup and audit remain in the caller's single publish service. */
 export async function commitManagedProblemPublication(input: ManagedProblemPublicationCommit): Promise<ProblemDoc> {
+    if (input.claim.operation !== 'managed-review-publish') {
+        throw new TypeError(`managed publication requires managed-review-publish claim, received ${input.claim.operation}`);
+    }
     logger.info(
         'Managed publish persistence start domain=%s pid=%d requestId=%s training=%s chapter=%s transaction=%s stage=commit',
         input.domainId,

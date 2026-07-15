@@ -2010,6 +2010,91 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
         expect(calls.storageGet).to.deep.equal([]);
     });
 
+    it('signs every validated file in a bulk selection larger than the form parser array limit', async () => {
+        const names = Array.from({ length: 34 }, (_, index) => `${String(index + 1).padStart(2, '0')}.in`);
+        const pdoc = {
+            domainId: 'system',
+            docId: 2860,
+            owner: 42,
+            data: names.map((name, index) => ({ name, size: index + 1 })),
+            additional_file: [],
+        };
+        const handler = makeHandler(ProblemFilesHandler, { _id: 42 });
+        handler.pdoc = pdoc;
+        maintainableResults = [pdoc];
+
+        await handler.postGetLinks('forged', new Set(names), 'testdata');
+
+        expect(calls.storageSign).to.have.length(names.length);
+        expect(calls.storageSign.map((args) => args[0])).to.deep.equal(names.map((name) => `problem/system/2860/testdata/${name}`));
+        expect(Object.keys(handler.response.body.links)).to.deep.equal(names);
+        expect(calls.oplog).to.have.length(1);
+    });
+
+    it('rejects a qs overflow object before signing an [object Object] file path', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 2860,
+            owner: 42,
+            data: [{ name: '01.in', size: 1 }],
+            additional_file: [],
+        };
+        const handler = makeHandler(ProblemFilesHandler, { _id: 42 });
+        handler.pdoc = pdoc;
+        maintainableResults = [pdoc];
+
+        const error = await captureFailure(() => handler.postGetLinks('forged', new Set([{ 0: '01.in', 1: '01.out' }] as any[]), 'testdata'));
+
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.storageSign).to.deep.equal([]);
+        expect(calls.oplog).to.deep.equal([]);
+    });
+
+    it('rejects unknown bulk file names before signing any partial response', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 2860,
+            owner: 42,
+            data: [{ name: '01.in', size: 1 }],
+            additional_file: [],
+        };
+        const handler = makeHandler(ProblemFilesHandler, { _id: 42 });
+        handler.pdoc = pdoc;
+        maintainableResults = [pdoc];
+
+        const error = await captureFailure(() => handler.postGetLinks('forged', new Set(['01.in', 'missing.out']), 'testdata'));
+
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.storageSign).to.deep.equal([]);
+        expect(calls.oplog).to.deep.equal([]);
+    });
+
+    it('rejects a file removed by the stable metadata read before signing or logging', async () => {
+        const handler = makeHandler(ProblemFilesHandler, { _id: 42 });
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 2860,
+            owner: 42,
+            data: [{ name: 'removed.in', size: 1 }],
+            additional_file: [],
+        };
+        const stable = {
+            domainId: 'system',
+            docId: 2860,
+            owner: 42,
+            data: [],
+            additional_file: [],
+        };
+        maintainableResults = [stable];
+
+        const error = await captureFailure(() => handler.postGetLinks('forged', new Set(['removed.in']), 'testdata'));
+
+        expect(error).to.be.instanceOf(GenericError);
+        expect(handler.pdoc).to.equal(stable);
+        expect(calls.storageSign).to.deep.equal([]);
+        expect(calls.oplog).to.deep.equal([]);
+    });
+
     it('signs no bulk testdata links after downgrade wins the stable final read', async () => {
         const handler = makeHandler(ProblemFilesHandler, { _id: 42 });
         handler.pdoc = {

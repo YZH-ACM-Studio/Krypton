@@ -200,6 +200,46 @@ async function assertManagedFileWriteBody(handler: Handler, pdoc: ProblemDoc) {
     throw new ValidationError('fields', null, `托管题文件操作不接受字段：${unknownFields.join(', ')}`);
 }
 
+function validateProblemBulkDownloadFiles(
+    handler: Handler,
+    pdoc: ProblemDoc,
+    type: 'testdata' | 'additional_file',
+    files: Set<unknown>,
+): { names: string[]; metadata: Array<{ name: string; size?: number }> } {
+    const requested = Array.from(files);
+    const invalidTypeCount = requested.filter((file) => typeof file !== 'string').length;
+    if (invalidTypeCount) {
+        logger.warn(
+            'Bulk problem download rejected domain=%s pid=%d actor=%d type=%s count=%d invalidTypeCount=%d result=invalid-files-shape',
+            pdoc.domainId,
+            pdoc.docId,
+            handler.user._id,
+            type,
+            requested.length,
+            invalidTypeCount,
+        );
+        throw new ValidationError('files', null, '文件列表必须是字符串数组');
+    }
+
+    const names = requested as string[];
+    const metadata = (pdoc[type === 'testdata' ? 'data' : 'additional_file'] || []) as Array<{ name: string; size?: number }>;
+    const available = new Set(metadata.map((file) => file.name));
+    const missingCount = names.filter((name) => !available.has(name)).length;
+    if (missingCount) {
+        logger.warn(
+            'Bulk problem download rejected domain=%s pid=%d actor=%d type=%s count=%d missingCount=%d result=missing-files',
+            pdoc.domainId,
+            pdoc.docId,
+            handler.user._id,
+            type,
+            names.length,
+            missingCount,
+        );
+        throw new ValidationError('files', null, `请求的文件不存在（${missingCount} 个）`);
+    }
+    return { names, metadata };
+}
+
 function problemAuthoringCapabilities(udoc: User, pdoc: ProblemDoc) {
     return {
         managed: pdoc.authoringMode === 'managed',
@@ -1547,7 +1587,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
 
     @post('files', Types.Set)
     @post('type', Types.Range(['testdata', 'additional_file']), true)
-    async postGetLinks(_domainId: string, files: Set<string>, type = 'testdata') {
+    async postGetLinks(_domainId: string, files: Set<unknown>, type: 'testdata' | 'additional_file' = 'testdata') {
         if (type === 'testdata' && this.pdoc.reference) {
             throw new ProblemIsReferencedError('download testdata.');
         }
@@ -1560,13 +1600,15 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
             }
         }
         if (this.pdoc.reference) this.pdoc = await problem.get(this.pdoc.reference.domainId, this.pdoc.reference.pid);
-        const links = {};
-        const size = Math.sum(this.pdoc[type === 'testdata' ? 'data' : 'additional_file']?.filter((i) => files.has(i.name))?.map((i) => i.size)) || 0;
+        const { names, metadata } = validateProblemBulkDownloadFiles(this, this.pdoc, type, files);
+        const requestedNames = new Set(names);
+        const links: Record<string, string> = Object.create(null);
+        const size = Math.sum(metadata.filter((file) => requestedNames.has(file.name)).map((file) => file.size || 0)) || 0;
         await oplog.log(this, 'download.problem.bulk', {
-            target: Array.from(files).map((file) => `problem/${this.pdoc.domainId}/${this.pdoc.docId}/${type}/${file}`),
+            target: names.map((file) => `problem/${this.pdoc.domainId}/${this.pdoc.docId}/${type}/${file}`),
             size,
         });
-        for (const file of files) {
+        for (const file of names) {
             links[file] = await storage.signDownloadLink(`problem/${this.pdoc.domainId}/${this.pdoc.docId}/${type}/${file}`, file, false, 'user');
         }
         this.response.body.links = links;

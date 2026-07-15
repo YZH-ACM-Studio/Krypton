@@ -1,5 +1,5 @@
 import * as YAML from 'yaml';
-import { downloadZip, type ZipDownloadTarget } from '@/lib/download-zip';
+import { downloadZip, type ZipDownloadTarget } from './download-zip';
 
 type R = Record<string, any>;
 
@@ -86,30 +86,29 @@ async function responseMessage(res: Response) {
 
 async function getFileLinks(problemUrl: string, files: string[], type: 'testdata' | 'additional_file') {
   if (!files.length) return {};
-  const body = new URLSearchParams();
-  body.set('operation', 'get_links');
-  body.set('type', type);
-  for (const file of files) body.append('files', file);
-
   const res = await fetch(`${problemUrl}/files`, {
     method: 'POST',
     credentials: 'same-origin',
     headers: {
       Accept: 'application/json',
-      'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+      'Content-Type': 'application/json',
     },
-    body: body.toString(),
+    body: JSON.stringify({ operation: 'get_links', type, files }),
   });
   if (!res.ok) throw new Error(await responseMessage(res));
-  const data = await res.json().catch(() => ({}));
-  return (data?.links || {}) as Record<string, string>;
+  const data = await res.json().catch(() => null);
+  const links = data?.links;
+  if (!links || typeof links !== 'object' || Array.isArray(links)) {
+    throw new Error('服务器返回的下载链接格式无效');
+  }
+  const missing = files.filter((file) => typeof links[file] !== 'string' || !links[file]);
+  if (missing.length) throw new Error(`服务器未返回下载链接：${missing.join(', ')}`);
+  return Object.fromEntries(files.map((file) => [file, links[file]])) as Record<string, string>;
 }
 
 export async function downloadProblemFiles({ pdoc, problemUrl, files, type }: ProblemFilesDownloadOptions) {
   if (!files.length) throw new Error('请至少选择一个文件');
   const links = await getFileLinks(problemUrl, files, type);
-  const missing = files.filter((file) => !links[file]);
-  if (missing.length) throw new Error(`服务器未返回下载链接：${missing.join(', ')}`);
   const targets = files.map((file) => ({ name: file, url: links[file] }));
   const folder = problemFolder(pdoc);
   const filename = cleanDownloadName(`${folder} ${pdoc.title || pdoc.pid || 'problem'} ${type}.zip`);

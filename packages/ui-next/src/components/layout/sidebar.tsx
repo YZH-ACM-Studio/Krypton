@@ -252,7 +252,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           label: '账号管理',
           href: '/admin/accounts',
           icon: UserRoundCog,
-          templates: ['admin_accounts.html'],
+          templates: ['admin_accounts.html', 'admin_account_detail.html'],
         });
         adminItems.push({
           label: '系统',

@@ -11,6 +11,7 @@ import {
     filterAndSortAccountRows,
     markCanonicalImportDuplicates,
     normalizeTargetUids,
+    normalizeAccountListReturnTo,
     paginateAccountRows,
     parseAccountImportForCommit,
     redactAccountSecrets,
@@ -28,7 +29,7 @@ import RecordModel from '../model/record';
 import system from '../model/system';
 import token from '../model/token';
 import user, { handleMailLower } from '../model/user';
-import { Handler, Types } from '../service/server';
+import { Handler, param, Types } from '../service/server';
 
 const logger = new Logger('admin-account');
 
@@ -67,6 +68,27 @@ const LIST_SECURITY_FILTERS = new Set(['all', 'tfa', 'webauthn', 'oauth', 'none'
 const LIST_BINDING_FILTERS = new Set(['all', 'bound', 'unbound']);
 const SECURITY_ACTIONS = new Set(['clear_tfa', 'clear_webauthn', 'unlink_oauth', 'revoke_sessions', 'revoke_api_tokens', 'revoke_all']);
 const BULK_ACTIONS = new Set(['disable', 'restore', 'force_logout', 'group_add', 'group_remove', 'set_role']);
+const ACCOUNT_DETAIL_VIEWS = new Set(['profile', 'security', 'permissions', 'related', 'audit']);
+const ACCOUNT_LIST_RETURN_QUERY_KEYS = [
+    'q',
+    'status',
+    'admin',
+    'security',
+    'binding',
+    'groupDomain',
+    'group',
+    'roleDomain',
+    'role',
+    'registeredFrom',
+    'registeredTo',
+    'loginFrom',
+    'loginTo',
+    'sort',
+    'order',
+    'page',
+    'pageSize',
+    'view',
+] as const;
 
 interface AuditContext {
     targetUid?: number | null;
@@ -92,6 +114,24 @@ function integerArg(value: unknown, field: string, positive = true): number {
     const parsed = typeof value === 'number' ? value : Number(String(value || '').trim());
     if (!Number.isSafeInteger(parsed) || (positive && parsed <= 0)) validation(field, `${field} 必须是${positive ? '正' : ''}整数`);
     return parsed;
+}
+
+function legacyAccountDetailPath(args: any, uid: number): string {
+    const returnParams = new URLSearchParams();
+    for (const key of ACCOUNT_LIST_RETURN_QUERY_KEYS) {
+        const value = args[key];
+        if (value == null || String(value).trim() === '') continue;
+        returnParams.set(key, String(value));
+    }
+    const detailParams = new URLSearchParams();
+    const view = String(args.view || args.tab || '');
+    if (ACCOUNT_DETAIL_VIEWS.has(view)) detailParams.set('view', view);
+    if (String(args.action || '') === 'impersonate') detailParams.set('action', 'impersonate');
+    for (const key of ['groupDomain', 'roleDomain'] as const) {
+        if (args[key]) detailParams.set(key, String(args[key]));
+    }
+    detailParams.set('returnTo', normalizeAccountListReturnTo(`/admin/accounts${returnParams.size ? `?${returnParams}` : ''}`));
+    return `/admin/accounts/${uid}?${detailParams}`;
 }
 
 function booleanArg(value: unknown, field: string): boolean {
@@ -587,6 +627,7 @@ async function listAdminMetadata(groupDomain: string, roleDomain: string) {
         defaultPriv: siteDefaultPrivilege(),
         bulkLimit: ACCOUNT_BULK_LIMIT,
         superadminUid: SUPERADMIN_UID,
+        timeZone: String(system.get('preference.timeZone') || 'Asia/Shanghai'),
     };
 }
 
@@ -626,13 +667,20 @@ async function setDomainRole(domainId: string, role: string, uids: number[]) {
     for (const uid of uids) await domain.setUserRole(domainId, uid, role, true);
 }
 
-class AdminAccountsHandler extends Handler {
+class AdminAccountManagementHandler extends Handler {
     async prepare() {
         this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
         if (this.session.sudoUid) throw new ForbiddenError('请先退出代理身份再管理账号');
     }
+}
 
+class AdminAccountsHandler extends AdminAccountManagementHandler {
     async get(args: any) {
+        if (args.uid != null && String(args.uid).trim() !== '') {
+            const uid = integerArg(args.uid, 'uid');
+            this.response.redirect = legacyAccountDetailPath(args, uid);
+            return;
+        }
         const query = parseListQuery(args);
         const { rows, bindingAvailable } = await listAccountRows(this, query);
         if (String(args.format || '') === 'csv') {
@@ -645,11 +693,7 @@ class AdminAccountsHandler extends Handler {
         const requestedPage = args.page ? integerArg(args.page, 'page') : 1;
         const pageSizeRaw = args.pageSize ? integerArg(args.pageSize, 'pageSize') : 50;
         const paginated = paginateAccountRows(rows, requestedPage, pageSizeRaw);
-        const selectedUid = args.uid ? integerArg(args.uid, 'uid') : null;
-        const [metadata, detail] = await Promise.all([
-            listAdminMetadata(query.groupDomain, query.roleDomain),
-            selectedUid ? getAccountDetail(this, selectedUid) : null,
-        ]);
+        const metadata = await listAdminMetadata(query.groupDomain, query.roleDomain);
         this.response.template = 'admin_accounts.html';
         this.response.body = {
             accounts: paginated.rows,
@@ -675,7 +719,6 @@ class AdminAccountsHandler extends Handler {
                 order: query.order,
             },
             bindingAvailable,
-            detail,
             metadata,
         };
     }
@@ -1176,6 +1219,24 @@ class AdminAccountsHandler extends Handler {
     }
 }
 
+class AdminAccountDetailHandler extends AdminAccountManagementHandler {
+    @param('uid', Types.Int)
+    async get(args: any, uid: number) {
+        const groupDomain = stringArg(args.groupDomain || 'system', 'groupDomain', 128, false).trim();
+        const roleDomain = stringArg(args.roleDomain || 'system', 'roleDomain', 128, false).trim();
+        const [metadata, detail] = await Promise.all([
+            listAdminMetadata(groupDomain, roleDomain),
+            getAccountDetail(this, uid),
+        ]);
+        this.response.template = 'admin_account_detail.html';
+        this.response.body = {
+            detail,
+            metadata,
+            returnTo: normalizeAccountListReturnTo(args.returnTo),
+        };
+    }
+}
+
 class AdminAccountsReturnHandler extends Handler {
     noCheckPermView = true;
 
@@ -1208,4 +1269,5 @@ export const inject = ['oauth'];
 export async function apply(ctx: Context) {
     ctx.Route('admin_accounts', '/admin/accounts', AdminAccountsHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('admin_accounts_return', '/admin/accounts/return', AdminAccountsReturnHandler);
+    ctx.Route('admin_account_detail', '/admin/accounts/:uid', AdminAccountDetailHandler, PRIV.PRIV_EDIT_SYSTEM);
 }

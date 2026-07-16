@@ -1,5 +1,5 @@
 import { useBootstrap } from '@/lib/bootstrap';
-import { AdminAccountsPage } from '@/pages/admin-accounts';
+import { AdminAccountDetailPage, AdminAccountsPage } from '@/pages/admin-accounts';
 import { DomainDashboardPage, ManageDashboardPage, StatusPage } from '@/pages/admin';
 import {
   AdminTasksAssignPage,
@@ -227,6 +227,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'manage_realpass.html': RealPassManagePage,
   'admin_stats.html': AdminStatsPage,
   'admin_accounts.html': AdminAccountsPage,
+  'admin_account_detail.html': AdminAccountDetailPage,
 
   // Misc
   'status.html': StatusPage,

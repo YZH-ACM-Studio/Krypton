@@ -37,11 +37,22 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  ADMIN_ACCOUNTS_ENDPOINT,
+  adminAccountAuditImpactLabel,
+  adminAccountSemanticValueLabel,
+  buildAdminAccountDetailHref,
+  buildAdminAccountDetailStateHref,
+  buildAdminAccountFiltersClearHref,
+  buildAdminAccountListHref,
+  isAdminAccountPermissionsView,
+  isAdminAccountDateField,
+} from '@/lib/admin-account-ui';
 import { useBootstrap } from '@/lib/bootstrap';
-import { makeInitials } from '@/lib/format';
+import { formatDateTime, makeInitials } from '@/lib/format';
 import { PRIV } from '@/lib/perms';
 
-const ENDPOINT = '/admin/accounts';
+const ENDPOINT = ADMIN_ACCOUNTS_ENDPOINT;
 
 interface AccountRow {
   uid: number;
@@ -159,6 +170,7 @@ interface AccountMetadata {
   defaultPriv: number;
   bulkLimit: number;
   superadminUid: number;
+  timeZone: string;
 }
 
 interface AdminAccountsData {
@@ -169,8 +181,13 @@ interface AdminAccountsData {
   pageCount: number;
   filters: AccountFilters;
   bindingAvailable: boolean;
-  detail: AccountDetail | null;
   metadata: AccountMetadata;
+}
+
+interface AdminAccountDetailData {
+  detail: AccountDetail;
+  metadata: AccountMetadata;
+  returnTo: string;
 }
 
 interface PendingAction {
@@ -227,26 +244,21 @@ function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short', hour12: false }).format(date);
-}
-
-function compactJson(value: unknown): string {
-  if (value == null) return '—';
-  try {
-    return JSON.stringify(value);
-  } catch (error) {
-    return `无法序列化：${error instanceof Error ? error.message : String(error)}`;
-  }
+  const configured = window.__KRYPTON_BOOTSTRAP__?.page?.data?.metadata?.timeZone;
+  const timeZone = typeof configured === 'string' && configured ? configured : 'Asia/Shanghai';
+  return formatDateTime(date, 'zh-CN', timeZone);
 }
 
 function accountHref(patch: Record<string, string | number | null | undefined>): string {
-  const url = new URL(window.location.href);
-  url.pathname = ENDPOINT;
-  for (const [key, value] of Object.entries(patch)) {
-    if (value == null || value === '') url.searchParams.delete(key);
-    else url.searchParams.set(key, String(value));
-  }
-  return `${url.pathname}${url.search}`;
+  return buildAdminAccountListHref(window.location.href, patch);
+}
+
+function accountDetailHref(uid: number): string {
+  return buildAdminAccountDetailHref(window.location.href, uid);
+}
+
+function detailHref(patch: Record<string, string | number | null | undefined>): string {
+  return buildAdminAccountDetailStateHref(window.location.href, patch);
 }
 
 function exportHref(selected?: number[]): string {
@@ -295,11 +307,200 @@ function privilegeLabel(key: string): string {
   return labels[key] || key.replace(/^PRIV_/, '').toLocaleLowerCase().replaceAll('_', ' ');
 }
 
+const STRUCTURED_FIELD_LABELS: Record<string, string> = {
+  _id: '记录 ID',
+  action: '操作',
+  activeUid: '当前账号 UID',
+  actorUid: '管理员 UID',
+  afterCount: '操作后数量',
+  afterMembers: '操作后成员',
+  apiTokens: 'API / 工具令牌',
+  at: '操作时间',
+  banReason: '禁用说明',
+  beforeCount: '操作前数量',
+  beforeMembers: '操作前成员',
+  bindingStatus: '绑定状态',
+  businessData: '业务数据',
+  by: '操作者 UID',
+  channels: '可用频道',
+  count: '数量',
+  createdAccounts: '已创建账号',
+  createdAt: '创建时间',
+  displayName: '展示名',
+  domainId: '域 ID',
+  email: '邮箱',
+  enabled: '是否启用',
+  enrollmentYear: '入学年',
+  error: '错误',
+  expiresAt: '过期时间',
+  gender: '性别',
+  group: '用户组',
+  groupIds: '所属用户组',
+  isAdmin: '系统管理员',
+  label: '名称',
+  lastUsedAt: '最近使用',
+  linked: '是否关联',
+  member: '是否为成员',
+  name: '名称',
+  operator: '操作者 UID',
+  platform: '平台',
+  previousPriv: '禁用前权限',
+  priv: '权限值',
+  processedUids: '已处理账号 UID',
+  realName: '姓名',
+  revoked: '是否已撤销',
+  role: '域角色',
+  school: '学校',
+  schoolId: '学校档案 ID',
+  sessions: '登录会话',
+  stage: '执行阶段',
+  status: '状态',
+  studentId: '学号',
+  targetDomainId: '目标域',
+  targetUid: '目标账号 UID',
+  targetUids: '目标账号 UID',
+  uid: '账号 UID',
+  updatedAt: '更新时间',
+  username: '用户名',
+};
+
+const AUDIT_TYPE_LABELS: Record<string, string> = {
+  'admin.account.bulk': '批量账号操作',
+  'admin.account.bulk.disable': '批量禁用账号',
+  'admin.account.bulk.force_logout': '批量强制退出',
+  'admin.account.bulk.group_add': '批量加入用户组',
+  'admin.account.bulk.group_remove': '批量移出用户组',
+  'admin.account.bulk.restore': '批量恢复账号',
+  'admin.account.bulk.set_role': '批量设置域角色',
+  'admin.account.create': '创建账号',
+  'admin.account.disable': '禁用账号',
+  'admin.account.group': '修改用户组',
+  'admin.account.group.add': '加入用户组',
+  'admin.account.group.remove': '移出用户组',
+  'admin.account.import': '批量导入账号',
+  'admin.account.impersonate': '切换账号',
+  'admin.account.impersonate.return': '返回管理员账号',
+  'admin.account.password': '替换密码',
+  'admin.account.privilege': '修改全站权限',
+  'admin.account.profile': '修改基本资料',
+  'admin.account.restore': '恢复账号',
+  'admin.account.role': '修改域角色',
+  'admin.account.security': '安全恢复',
+  'admin.account.security.clear_tfa': '清除 TOTP',
+  'admin.account.security.clear_webauthn': '移除全部 Passkey',
+  'admin.account.security.revoke_all': '撤销全部访问凭据',
+  'admin.account.security.revoke_api_tokens': '撤销 API / 工具令牌',
+  'admin.account.security.revoke_sessions': '撤销全部会话',
+  'admin.account.security.unlink_oauth': '解除 OAuth 关联',
+};
+
+function auditResultLabel(result: string | undefined): string {
+  if (!result) return '未知结果';
+  return adminAccountSemanticValueLabel('result', result) || result;
+}
+
+function auditTypeLabel(type: string | undefined): string {
+  if (!type) return '账号管理';
+  if (AUDIT_TYPE_LABELS[type]) return AUDIT_TYPE_LABELS[type];
+  return `账号管理：${structuredFieldLabel(type.replace(/^admin\.account\./, ''))}`;
+}
+
+function auditImpactLabel(impact: string): string {
+  return adminAccountAuditImpactLabel(impact);
+}
+
+function structuredFieldLabel(key: string): string {
+  if (STRUCTURED_FIELD_LABELS[key]) return STRUCTURED_FIELD_LABELS[key];
+  return key
+    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (character) => character.toLocaleUpperCase());
+}
+
+function parseStructuredString(value: string): unknown {
+  const trimmed = value.trim();
+  const looksLikeObject = trimmed.startsWith('{') && trimmed.endsWith('}');
+  const looksLikeArray = trimmed.startsWith('[') && trimmed.endsWith(']');
+  if (!looksLikeObject && !looksLikeArray) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function structuredPrimitiveText(value: string | number | boolean, fieldKey: string | undefined): string {
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  if (typeof value === 'number') return String(value);
+  return adminAccountSemanticValueLabel(fieldKey, value) || value || '—';
+}
+
+const STRUCTURED_JSON_FIELDS = new Set(['after', 'before', 'detail', 'disabled', 'progress', 'student']);
+
+function StructuredValue({
+  value,
+  depth = 0,
+  fieldKey,
+  parseJson = true,
+}: {
+  value: unknown;
+  depth?: number;
+  fieldKey?: string;
+  parseJson?: boolean;
+}) {
+  const normalized = typeof value === 'string' && parseJson ? parseStructuredString(value) : value;
+  if (normalized == null || normalized === '') return <span className="text-muted-foreground">—</span>;
+  if (normalized instanceof Date) return <span>{formatDate(normalized.toISOString())}</span>;
+  if (typeof normalized === 'boolean') return <Badge variant="outline">{normalized ? '是' : '否'}</Badge>;
+  if (typeof normalized === 'number') return <span className="tabular-nums">{normalized}</span>;
+  if (typeof normalized === 'string') {
+    if (isAdminAccountDateField(fieldKey) && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(normalized)) return <span>{formatDate(normalized)}</span>;
+    const translated = adminAccountSemanticValueLabel(fieldKey, normalized);
+    if (translated) return <Badge variant="outline">{translated}</Badge>;
+    return <span className="break-words leading-5">{normalized}</span>;
+  }
+  if (Array.isArray(normalized)) {
+    if (!normalized.length) return <span className="text-muted-foreground">无</span>;
+    if (normalized.every((item) => ['string', 'number', 'boolean'].includes(typeof item))) {
+      return (
+        <div className="flex flex-wrap gap-1.5">
+          {normalized.map((item, index) => <Badge key={`${String(item)}-${index}`} variant="secondary">{structuredPrimitiveText(item as string | number | boolean, fieldKey)}</Badge>)}
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-2">
+        {normalized.map((item, index) => (
+          <div key={index} className="rounded-md bg-background/70 px-3 py-2">
+            <p className="mb-1 text-[11px] font-medium text-muted-foreground">第 {index + 1} 项</p>
+            <StructuredValue value={item} depth={depth + 1} fieldKey={fieldKey} parseJson={parseJson} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (typeof normalized === 'object') {
+    const entries = Object.entries(normalized as Record<string, unknown>);
+    if (!entries.length) return <span className="text-muted-foreground">无</span>;
+    return (
+      <dl className={depth ? 'divide-y divide-border/60' : 'grid gap-x-5 gap-y-3 sm:grid-cols-2'}>
+        {entries.map(([key, entry]) => (
+          <div key={key} className={depth ? 'grid gap-1 py-2 first:pt-0 last:pb-0 sm:grid-cols-[9rem_minmax(0,1fr)]' : 'min-w-0'}>
+            <dt className="text-[11px] font-medium text-muted-foreground">{structuredFieldLabel(key)}</dt>
+            <dd className="mt-0.5 min-w-0 text-xs"><StructuredValue value={entry} depth={depth + 1} fieldKey={key} parseJson={STRUCTURED_JSON_FIELDS.has(key)} /></dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+  return <span>{String(normalized)}</span>;
+}
+
 function SummaryBox({ label, value }: { label: string; value: unknown }) {
   return (
     <div className="min-w-0 rounded-lg border bg-muted/20 p-3">
       <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <pre className="whitespace-pre-wrap break-all font-sans text-xs leading-5">{compactJson(value)}</pre>
+      <div className="text-xs"><StructuredValue value={value} /></div>
     </div>
   );
 }
@@ -660,14 +861,16 @@ function ImportAccountsDialog({ open, onClose }: { open: boolean; onClose: () =>
 function AccountFiltersPanel({ data }: { data: AdminAccountsData }) {
   const { filters, metadata } = data;
   const domainOptions = metadata.domains.map((item) => ({ value: item.id, label: `${item.name} (${item.id})` }));
+  const permissionsView = isAdminAccountPermissionsView(window.location.href);
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
         <CardTitle className="flex items-center gap-2 text-sm"><Search className="size-4" />搜索与筛选</CardTitle>
-        <Button asChild variant="ghost" size="sm"><a href={ENDPOINT}>清空</a></Button>
+        <Button asChild variant="ghost" size="sm"><a href={buildAdminAccountFiltersClearHref(window.location.href)}>清空</a></Button>
       </CardHeader>
       <CardContent className="pt-0">
         <form method="get" action={ENDPOINT} className="space-y-3">
+          {permissionsView ? <input type="hidden" name="view" value="permissions" /> : null}
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <FormField label="关键词" className="xl:col-span-2">
               <Input name="q" defaultValue={filters.q} placeholder="UID、用户名、邮箱、展示名、学号或学校" />
@@ -868,7 +1071,7 @@ function AccountList({ data, selected, setSelected, openBulk }: {
                 <TableCell>{account.binding ? <><p>{account.binding.realName || '已绑定'}</p><p className="text-xs text-muted-foreground">{account.binding.studentId || '—'}{account.binding.enrollmentYear ? ` · ${account.binding.enrollmentYear}` : ''}</p></> : <span className="text-muted-foreground">未绑定</span>}</TableCell>
                 <TableCell><div className="flex flex-wrap gap-1">{account.hasTfa ? <Badge variant="secondary">TOTP</Badge> : null}{account.hasWebAuthn ? <Badge variant="secondary">Passkey</Badge> : null}{account.oauthProviders.map((provider) => <Badge key={provider} variant="outline">{provider}</Badge>)}{!account.hasTfa && !account.hasWebAuthn && !account.oauthProviders.length ? <span className="text-muted-foreground">—</span> : null}</div></TableCell>
                 <TableCell className="whitespace-nowrap text-xs">{formatDate(account.lastLoginAt)}</TableCell>
-                <TableCell className="text-right"><Button asChild size="sm" variant="ghost"><a href={accountHref({ uid: account.uid })}>查看档案</a></Button></TableCell>
+                <TableCell className="text-right"><Button asChild size="sm" variant="ghost"><a href={accountDetailHref(account.uid)}>查看档案</a></Button></TableCell>
               </TableRow>
             ))}
             {!data.accounts.length ? <TableRow><TableCell colSpan={8} className="py-12 text-center text-muted-foreground">没有符合条件的账号</TableCell></TableRow> : null}
@@ -937,7 +1140,7 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
 
   const selectTab = (next: DetailTab) => {
     setTab(next);
-    window.history.pushState({}, '', accountHref({ view: next === 'profile' ? null : next }));
+    window.history.pushState({}, '', detailHref({ view: next === 'profile' ? null : next }));
   };
 
   const target = `${account.displayName || account.username}（UID ${account.uid}）`;
@@ -1041,7 +1244,6 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
               <p className="truncate text-sm text-muted-foreground">{account.username} · {account.email}</p>
             </div>
           </div>
-          <Button asChild size="sm" variant="ghost"><a href={accountHref({ uid: null })}><X />关闭档案</a></Button>
         </div>
         {protectedMessage ? <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"><Shield className="mr-2 inline size-4" />{protectedMessage}</div> : (
           <div className="flex flex-wrap gap-2">
@@ -1119,7 +1321,7 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
                 <CardContent className="space-y-3 pt-0">
                   <div className="flex flex-wrap gap-2">{!account.protected ? <><Button size="sm" variant="outline" onClick={() => simpleAction('security', '撤销全部 session', '目标账号将在所有已登录设备退出。', { sessions: detail.security.sessions.length }, { sessions: 0 }, { action: 'revoke_sessions' }, true)}><LogOut />撤销 session</Button><Button size="sm" variant="outline" onClick={() => simpleAction('security', '撤销 API/工具 token', '撤销与目标账号绑定的 API/工具访问凭据。', { apiTokens: detail.security.apiTokens.filter((item) => !item.revoked).length }, { apiTokens: 0 }, { action: 'revoke_api_tokens' }, true)}><KeyRound />撤销 API token</Button><Button size="sm" variant="destructive" onClick={() => simpleAction('security', '撤销全部访问凭据', '同时撤销 session、恢复 token 与 API/工具 token。', { sessions: detail.security.sessions.length, apiTokens: detail.security.apiTokens.filter((item) => !item.revoked).length }, { sessions: 0, apiTokens: 0 }, { action: 'revoke_all' }, true)}><ShieldAlert />全部撤销</Button></> : null}</div>
                   <div className="rounded-lg border p-3"><p className="mb-2 text-sm font-medium">登录 session（仅元数据）</p>{detail.security.sessions.length ? detail.security.sessions.map((session, index) => <div key={`${session.createdAt}-${index}`} className="border-t py-2 text-xs"><p>{formatDate(session.updatedAt || session.createdAt)} · {session.updatedIp || session.createdIp || '未知 IP'}</p><p className="truncate text-muted-foreground">{session.userAgent || '未知设备'}</p></div>) : <p className="text-xs text-muted-foreground">无有效 session</p>}</div>
-                  <div className="rounded-lg border p-3"><p className="mb-2 text-sm font-medium">API/工具 token（仅元数据）</p>{detail.security.apiTokens.length ? detail.security.apiTokens.map((item) => <div key={item.id} className="border-t py-2 text-xs"><p className="font-medium">{item.label || item.display || '未命名'} {item.revoked ? '· 已撤销' : ''}</p><p className="text-muted-foreground">{item.channels.join(', ') || '无频道'} · 最近使用 {formatDate(item.lastUsedAt)}</p></div>) : <p className="text-xs text-muted-foreground">无账号绑定 token</p>}</div>
+                  <div className="rounded-lg border p-3"><p className="mb-2 text-sm font-medium">API/工具 token（仅元数据）</p>{detail.security.apiTokens.length ? detail.security.apiTokens.map((item) => <div key={item.id} className="border-t py-2 text-xs"><div className="flex flex-wrap items-center gap-1.5"><p className="font-medium">{item.label || item.display || '未命名'}</p>{item.revoked ? <Badge variant="secondary">已撤销</Badge> : <Badge variant="outline">有效</Badge>}</div><p className="mt-1 text-muted-foreground">最近使用 {formatDate(item.lastUsedAt)}</p><div className="mt-1.5 flex flex-wrap gap-1">{item.channels.length ? item.channels.map((channel) => <Badge key={channel} variant="secondary">{channel}</Badge>) : <span className="text-muted-foreground">无频道</span>}</div></div>) : <p className="text-xs text-muted-foreground">无账号绑定 token</p>}</div>
                 </CardContent>
               </Card>
             </div>
@@ -1145,7 +1347,7 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
           <div className="space-y-5">
             <div className="grid gap-3 sm:grid-cols-3"><SummaryBox label="system 域练习提交" value={detail.related.submissionCount} /><SummaryBox label="system 域通过提交" value={detail.related.acceptedCount} /><SummaryBox label="system 域拥有题目" value={detail.related.ownedProblems} /></div>
             <div className="flex flex-wrap gap-2"><Button asChild variant="outline" size="sm"><a href={detail.related.links.submissions}>查看练习提交</a></Button><Button asChild variant="outline" size="sm"><a href={detail.related.links.ownedProblems}>查看拥有题目</a></Button>{detail.binding.available ? <Button asChild variant="outline" size="sm"><a href={`/admin/userbind/students?q=${encodeURIComponent(account.studentId || account.username)}`}>打开绑定管理</a></Button> : null}</div>
-            <Card><CardHeader><CardTitle className="text-sm">绑定档案（只读）</CardTitle></CardHeader><CardContent className="pt-0"><pre className="whitespace-pre-wrap break-all text-xs">{detail.binding.available ? compactJson(detail.binding.student || '未绑定') : '用户绑定模块不可用；未将其伪装为空数据。'}</pre></CardContent></Card>
+            <Card><CardHeader><CardTitle className="text-sm">绑定档案（只读）</CardTitle></CardHeader><CardContent className="pt-0 text-sm">{detail.binding.available ? detail.binding.student ? <StructuredValue value={detail.binding.student} /> : <p className="text-muted-foreground">当前账号未绑定学生档案</p> : <p className="text-destructive">用户绑定模块不可用；未将其伪装为空数据。</p>}</CardContent></Card>
             <Card><CardHeader><CardTitle className="text-sm">最近登录活动（只读）</CardTitle></CardHeader><CardContent className="space-y-2 pt-0">{detail.activity.length ? detail.activity.map((item, index) => <div key={`${item.time}-${index}`} className="rounded-lg border p-3 text-xs"><p>{formatDate(item.time)} · {item.operateIp || '未知 IP'}</p><p className="truncate text-muted-foreground">{item.ua || '未知设备'}</p></div>) : <p className="text-sm text-muted-foreground">暂无登录活动记录</p>}</CardContent></Card>
           </div>
         ) : null}
@@ -1153,7 +1355,7 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
         {tab === 'audit' ? (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">最近 50 条与此账号相关的账号管理审计。秘密字段已在服务端净化。</p>
-            {detail.audit.length ? detail.audit.map((entry, index) => <div key={entry._id || `${entry.time}-${index}`} className="rounded-lg border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div className="flex flex-wrap items-center gap-2"><Badge variant={entry.result === 'success' ? 'default' : entry.result === 'failed' ? 'destructive' : 'secondary'}>{entry.result || 'unknown'}</Badge><code className="text-xs">{entry.type || 'admin.account'}</code></div><span className="text-xs text-muted-foreground">{formatDate(entry.time)}</span></div><p className="mt-2 text-xs text-muted-foreground">操作者 UID {entry.operator ?? '—'} · IP {entry.operateIp || '—'}{entry.impact ? ` · ${entry.impact}` : ''}{entry.targetUids ? ` · ${entry.targetUids.length} 个目标` : ''}</p><div className="mt-3 grid gap-2 sm:grid-cols-2"><SummaryBox label="变更前" value={entry.before} /><SummaryBox label="变更后" value={entry.after} />{entry.progress ? <SummaryBox label="执行阶段" value={entry.progress} /> : null}{entry.detail ? <SummaryBox label="结果摘要" value={entry.detail} /> : null}</div>{entry.error?.message ? <p className="mt-2 text-xs text-destructive">{entry.error.message}</p> : null}</div>) : <p className="py-8 text-center text-sm text-muted-foreground">暂无账号管理审计</p>}
+            {detail.audit.length ? detail.audit.map((entry, index) => <div key={entry._id || `${entry.time}-${index}`} className="rounded-lg border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div className="flex flex-wrap items-center gap-2"><Badge variant={entry.result === 'success' ? 'default' : entry.result === 'failed' ? 'destructive' : 'secondary'}>{auditResultLabel(entry.result)}</Badge><span className="text-xs font-medium">{auditTypeLabel(entry.type)}</span></div><span className="text-xs text-muted-foreground">{formatDate(entry.time)}</span></div><p className="mt-2 text-xs text-muted-foreground">操作者 UID {entry.operator ?? '—'} · IP {entry.operateIp || '—'}{entry.impact ? ` · ${auditImpactLabel(entry.impact)}` : ''}{entry.targetUids ? ` · ${entry.targetUids.length} 个目标` : ''}</p><div className="mt-3 grid gap-2 sm:grid-cols-2"><SummaryBox label="变更前" value={entry.before} /><SummaryBox label="变更后" value={entry.after} />{entry.progress ? <SummaryBox label="执行阶段" value={entry.progress} /> : null}{entry.detail ? <SummaryBox label="结果摘要" value={entry.detail} /> : null}</div>{entry.error?.message ? <p className="mt-2 text-xs text-destructive">{entry.error.message}</p> : null}</div>) : <p className="py-8 text-center text-sm text-muted-foreground">暂无账号管理审计</p>}
           </div>
         ) : null}
       </CardContent>
@@ -1162,7 +1364,7 @@ function AccountDetailPanel({ detail, metadata }: { detail: AccountDetail; metad
         onClose={() => {
           setPending(null);
           if (new URLSearchParams(window.location.search).has('action')) {
-            window.history.replaceState({}, '', accountHref({ action: null }));
+            window.history.replaceState({}, '', detailHref({ action: null }));
           }
         }}
       />
@@ -1213,19 +1415,39 @@ export function AdminAccountsPage() {
       )}
     >
       <AccountFiltersPanel data={data} />
-      {!data.detail && new URLSearchParams(window.location.search).get('view') === 'permissions' ? (
+      {new URLSearchParams(window.location.search).get('view') === 'permissions' ? (
         <div className="rounded-lg border border-primary/25 bg-primary/5 px-4 py-3 text-sm text-muted-foreground">
           旧权限管理入口已合并到账号档案。请选择一个账号，页面会直接打开“权限与成员关系”。
         </div>
       ) : null}
-      <div className={data.detail ? 'grid min-w-0 gap-5 2xl:grid-cols-[minmax(0,1.15fr)_minmax(520px,.85fr)]' : ''}>
-        <AccountList data={data} selected={selected} setSelected={setSelected} openBulk={() => setBulkOpen(true)} />
-        {data.detail ? <AccountDetailPanel detail={data.detail} metadata={data.metadata} /> : null}
-      </div>
+      <AccountList data={data} selected={selected} setSelected={setSelected} openBulk={() => setBulkOpen(true)} />
       <CreateAccountDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={setCreated} />
       <OneTimePasswordDialog result={created} onClose={() => { setCreated(null); window.location.reload(); }} />
       <ImportAccountsDialog open={importOpen} onClose={closeImport} />
       <BulkActionDialog open={bulkOpen} selected={selectedArray} metadata={data.metadata} onClose={() => setBulkOpen(false)} />
+    </AdminPage>
+  );
+}
+
+export function AdminAccountDetailPage() {
+  const bs = useBootstrap();
+  const data = bs.page.data as AdminAccountDetailData;
+  const account = data.detail.account;
+
+  return (
+    <AdminPage
+      title="账号档案"
+      description={`${account.displayName || account.username}（UID ${account.uid}）的资料、安全、权限、关联数据与操作审计。`}
+      requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
+      hideSidebar
+      contentClassName="pb-6"
+      actions={(
+        <Button asChild variant="outline">
+          <a href={data.returnTo}><ChevronLeft />返回账号列表</a>
+        </Button>
+      )}
+    >
+      <AccountDetailPanel detail={data.detail} metadata={data.metadata} />
     </AdminPage>
   );
 }

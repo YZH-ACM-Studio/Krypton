@@ -8,6 +8,7 @@ import {
     buildAccountCsv,
     filterAndSortAccountRows,
     markCanonicalImportDuplicates,
+    normalizeAccountListReturnTo,
     normalizeTargetUids,
     paginateAccountRows,
     parseAccountImport,
@@ -129,6 +130,20 @@ describe('admin account management contracts', () => {
         expect(() => resolveRestoredPrivilege(undefined, 1)).to.throw(/默认权限/);
     });
 
+    it('keeps detail-page return links on the account list and strips action-only state', () => {
+        expect(normalizeAccountListReturnTo('/admin/accounts?q=student&page=2&uid=8&action=impersonate'))
+            .to.equal('/admin/accounts?q=student&page=2');
+        expect(normalizeAccountListReturnTo('/admin/accounts?format=csv&selected=7,8&status=disabled'))
+            .to.equal('/admin/accounts?status=disabled');
+        expect(normalizeAccountListReturnTo('/admin/accounts?view=permissions&q=student'))
+            .to.equal('/admin/accounts?q=student&view=permissions');
+        expect(normalizeAccountListReturnTo('/admin/accounts?view=import')).to.equal('/admin/accounts');
+        expect(normalizeAccountListReturnTo('/admin/accounts?unknown=value')).to.equal('/admin/accounts');
+        expect(normalizeAccountListReturnTo('/admin/accounts/8?q=student')).to.equal('/admin/accounts');
+        expect(normalizeAccountListReturnTo('https://example.com/admin/accounts')).to.equal('/admin/accounts');
+        expect(normalizeAccountListReturnTo('//example.com/admin/accounts')).to.equal('/admin/accounts');
+    });
+
     it('redacts every account credential recursively without mutating the source', () => {
         const source = {
             password: 'actor-secret',
@@ -193,7 +208,7 @@ describe('admin account management contracts', () => {
         expect(csv).not.to.match(/password|hash|token|secret/i);
     });
 
-    it('wires one gated route and removes direct GET impersonation', () => {
+    it('wires gated list and detail pages and removes direct GET impersonation', () => {
         const handler = readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/handler/admin-account.ts'), 'utf8');
         const misc = readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/handler/misc.ts'), 'utf8');
         const resolver = readFileSync(resolve(process.cwd(), 'packages/ui-next/src/pages/resolver.tsx'), 'utf8');
@@ -205,7 +220,10 @@ describe('admin account management contracts', () => {
         const token = readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/model/token.ts'), 'utf8');
 
         expect(handler).to.include("ctx.Route('admin_accounts', '/admin/accounts', AdminAccountsHandler, PRIV.PRIV_EDIT_SYSTEM)");
+        expect(handler).to.include("ctx.Route('admin_account_detail', '/admin/accounts/:uid', AdminAccountDetailHandler, PRIV.PRIV_EDIT_SYSTEM)");
         expect(handler).to.include("ctx.Route('admin_accounts_return', '/admin/accounts/return', AdminAccountsReturnHandler)");
+        expect(handler).to.include("this.response.template = 'admin_account_detail.html'");
+        expect(handler).to.include('this.response.redirect = legacyAccountDetailPath(args, uid)');
         expect(handler).to.include("export const inject = ['oauth']");
         expect(handler).to.include('this.checkPriv(PRIV.PRIV_EDIT_SYSTEM)');
         expect(handler).to.include('auditAccountOperation');
@@ -225,7 +243,9 @@ describe('admin account management contracts', () => {
         expect(privilegeHandler.indexOf('revokeAccountAccess')).to.be.lessThan(privilegeHandler.indexOf('user.setPriv'));
         expect(misc).not.to.include('this.session.sudoUid = this.user._id');
         expect(resolver).to.include("'admin_accounts.html': AdminAccountsPage");
+        expect(resolver).to.include("'admin_account_detail.html': AdminAccountDetailPage");
         expect(sidebar).to.include("href: '/admin/accounts'");
+        expect(sidebar).to.include("templates: ['admin_accounts.html', 'admin_account_detail.html']");
         expect(manage).to.include("this.response.redirect = '/admin/accounts?view=import'");
         expect(manage).to.include("this.response.redirect = '/admin/accounts?view=permissions'");
         expect(router).to.include('bs.user.impersonation');
@@ -236,10 +256,15 @@ describe('admin account management contracts', () => {
         expect(token).to.include('{ tokenType: TokenModel.TYPE_SESSION, sudoUid: uid }');
         expect(token).to.include('delAccountAccessByUid');
         expect(page).to.include("window.addEventListener('popstate'");
+        expect(page).to.include('export function AdminAccountDetailPage()');
+        expect(page).to.include('accountDetailHref(account.uid)');
+        expect(page).to.include('<StructuredValue value={value} />');
         expect(page).to.include('expectedProfileVersion');
         for (const section of ['基本资料', '账号安全', '权限与成员关系', '关联数据', '操作审计']) expect(page).to.include(section);
         expect(page).to.include('<Dialog');
         expect(page).not.to.match(/window\.(?:alert|confirm|prompt)\s*\(/);
+        expect(page).not.to.match(/<pre\b/);
+        expect(page).not.to.include('JSON.stringify');
         expect(page).not.to.match(/passwordHash|credentialPublicKey|attestationObject/);
     });
 });

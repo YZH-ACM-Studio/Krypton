@@ -6,12 +6,13 @@ export function toDate(value: unknown) {
   return date;
 }
 
-export function formatDateTime(value: unknown, locale: string) {
+export function formatDateTime(value: unknown, locale: string, timeZone?: string) {
   const date = toDate(value);
   if (!date) return 'TBD';
   return new Intl.DateTimeFormat(locale || 'zh-CN', {
     dateStyle: 'medium',
     timeStyle: 'short',
+    ...(timeZone ? { timeZone } : {}),
   }).format(date);
 }
 

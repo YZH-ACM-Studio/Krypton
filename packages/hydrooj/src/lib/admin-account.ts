@@ -4,6 +4,52 @@ import { isCredentialSecretKey } from './credential-sanitizer';
 
 export const SUPERADMIN_UID = 2;
 export const ACCOUNT_BULK_LIMIT = 100;
+const ACCOUNT_LIST_PATH = '/admin/accounts';
+const ACCOUNT_LIST_RETURN_PARAMS = [
+    'q',
+    'status',
+    'admin',
+    'security',
+    'binding',
+    'groupDomain',
+    'group',
+    'roleDomain',
+    'role',
+    'registeredFrom',
+    'registeredTo',
+    'loginFrom',
+    'loginTo',
+    'sort',
+    'order',
+    'page',
+    'pageSize',
+] as const;
+
+/**
+ * Account detail pages may return only to the account list on this site.
+ * Export/action-only parameters are stripped so the back link cannot trigger a
+ * download, reopen a sensitive action, or redirect to another detail page.
+ */
+export function normalizeAccountListReturnTo(value: unknown): string {
+    if (typeof value !== 'string') return ACCOUNT_LIST_PATH;
+    const raw = value.trim();
+    if (!raw || raw.length > 2048) return ACCOUNT_LIST_PATH;
+    const base = new URL('https://krypton.invalid');
+    let parsed: URL;
+    try {
+        parsed = new URL(raw, base);
+    } catch {
+        return ACCOUNT_LIST_PATH;
+    }
+    if (parsed.origin !== base.origin || parsed.pathname !== ACCOUNT_LIST_PATH) return ACCOUNT_LIST_PATH;
+    const normalized = new URLSearchParams();
+    for (const key of ACCOUNT_LIST_RETURN_PARAMS) {
+        const entry = parsed.searchParams.get(key);
+        if (entry) normalized.set(key, entry);
+    }
+    if (parsed.searchParams.get('view') === 'permissions') normalized.set('view', 'permissions');
+    return `${ACCOUNT_LIST_PATH}${normalized.size ? `?${normalized}` : ''}`;
+}
 
 export interface AccountListCandidate {
     uid: number;

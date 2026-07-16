@@ -45,24 +45,32 @@ interface NavGroup {
   show?: boolean;
 }
 
+// The 44px item is centered in a 64px rail: 10px inset + 8px visual gap.
+const COLLAPSED_TOOLTIP_OFFSET = 18;
+
 function SidebarLink({ item, active, collapsed }: { item: NavItem; active: boolean; collapsed: boolean }) {
   const link = (
     <a
       href={item.href}
+      aria-current={active ? 'page' : undefined}
+      aria-label={collapsed ? item.label : undefined}
       className={cn(
-        'flex items-center rounded-md text-sm font-medium transition-colors',
-        collapsed ? 'justify-center px-2 py-2' : 'gap-3 px-3 py-2',
+        'relative flex items-center text-sm font-medium outline-none transition-[background-color,color,box-shadow,scale] duration-150 ease-out focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-background active:scale-[0.96]',
+        collapsed ? 'mx-auto size-11 justify-center rounded-[14px]' : 'min-h-11 w-full gap-3 rounded-xl px-3 py-2 md:min-h-10',
         active
-          ? 'bg-sidebar-primary/10 text-sidebar-primary'
-          : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          ? 'bg-sidebar-primary/12 text-sidebar-primary shadow-sm'
+          : 'text-sidebar-foreground/68 hover:bg-sidebar-accent/80 hover:text-sidebar-accent-foreground',
       )}
     >
-      <item.icon className="size-4 shrink-0" />
-      {!collapsed && <span>{item.label}</span>}
+      <item.icon className="size-[18px] shrink-0" aria-hidden="true" />
+      {!collapsed && <span className="truncate">{item.label}</span>}
       {item.badge ? (
         <Badge
           variant="destructive"
-          className={cn('h-5 min-w-5 justify-center px-1.5 text-[10px]', collapsed ? 'absolute -right-1 -top-1' : 'ml-auto')}
+          className={cn(
+            'h-5 min-w-5 justify-center px-1.5 text-[10px] shadow-sm',
+            collapsed ? 'absolute -right-0.5 -top-0.5' : 'ml-auto',
+          )}
         >
           {item.badge}
         </Badge>
@@ -74,8 +82,11 @@ function SidebarLink({ item, active, collapsed }: { item: NavItem; active: boole
     return (
       <Tooltip>
         <TooltipTrigger asChild>{link}</TooltipTrigger>
-        <TooltipContent side="right" sideOffset={8}>
-          {item.label}{item.badge ? ` (${item.badge})` : ''}
+        <TooltipContent side="right" sideOffset={COLLAPSED_TOOLTIP_OFFSET}>
+          <span className="flex items-center gap-2">
+            <span>{item.label}</span>
+            {item.badge ? <span className="text-xs tabular-nums text-muted-foreground">{item.badge}</span> : null}
+          </span>
         </TooltipContent>
       </Tooltip>
     );
@@ -282,16 +293,23 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
     })(),
   ];
 
-  const sidebarContent = (
+  const renderSidebarContent = (isCollapsed: boolean) => (
     <div className="flex h-full flex-col">
       {/* Logo */}
-      <div className={cn('flex shrink-0 items-center border-b', collapsed ? 'h-12 justify-center px-2' : 'h-12 gap-2 px-4')}>
-        <a href={bs.urls.home} className="flex items-center gap-2 font-semibold">
+      <div className={cn('flex shrink-0 items-center border-b', isCollapsed ? 'h-12 justify-center px-2' : 'h-12 gap-2 px-4')}>
+        <a
+          href={bs.urls.home}
+          aria-label={isCollapsed ? 'Krypton 首页' : undefined}
+          className={cn(
+            'flex items-center gap-2 font-semibold outline-none transition-[background-color,color,scale] duration-150 ease-out focus-visible:ring-2 focus-visible:ring-sidebar-ring active:scale-[0.96]',
+            isCollapsed ? 'size-10 justify-center rounded-xl hover:bg-sidebar-accent' : '',
+          )}
+        >
           <Swords className="size-5 text-primary" />
-          {!collapsed && <span>Krypton</span>}
+          {!isCollapsed && <span>Krypton</span>}
         </a>
-        {!collapsed && <div className="flex-1" />}
-        {!collapsed && (
+        {!isCollapsed && <div className="flex-1" />}
+        {!isCollapsed && (
           <Button variant="ghost" size="icon" className="size-7 md:hidden" onClick={onClose}>
             <X className="size-4" />
           </Button>
@@ -299,22 +317,22 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
       </div>
 
       {/* Nav */}
-      <TooltipProvider delayDuration={0}>
-        <ScrollArea className="flex-1" viewportClassName={cn(collapsed ? 'p-1.5' : 'p-3')}>
-          <nav>
+      <TooltipProvider delayDuration={160}>
+        <ScrollArea type="hover" className="min-h-0 flex-1" viewportClassName={cn(isCollapsed ? 'px-2 py-2.5' : 'p-3')}>
+          <nav aria-label="主导航">
             {groups.map((group, gi) => {
               if (group.show === false) return null;
               return (
                 <div key={gi} className="mb-2">
                   {group.label ? (
                     <>
-                      <Separator className="my-3" />
-                      {!collapsed && <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{group.label}</p>}
+                      <Separator className={cn('my-3', isCollapsed ? 'mx-auto w-8' : '')} />
+                      {!isCollapsed && <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{group.label}</p>}
                     </>
                   ) : null}
-                  <div className="space-y-0.5">
+                  <div className="space-y-1">
                     {group.items.map((item) => (
-                      <SidebarLink key={item.href} item={item} active={item.templates.includes(tpl)} collapsed={collapsed} />
+                      <SidebarLink key={item.href} item={item} active={item.templates.includes(tpl)} collapsed={isCollapsed} />
                     ))}
                   </div>
                 </div>
@@ -331,11 +349,11 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
       {/* Desktop sidebar */}
       <aside
         className={cn(
-          'hidden shrink-0 border-r border-sidebar-border bg-sidebar-background text-sidebar-foreground transition-[width] duration-200 md:block',
-          collapsed ? 'w-14' : 'w-56',
+          'hidden shrink-0 border-r border-sidebar-border bg-sidebar-background text-sidebar-foreground transition-[width] duration-200 ease-out md:block',
+          collapsed ? 'w-16' : 'w-56',
         )}
       >
-        {sidebarContent}
+        {renderSidebarContent(collapsed)}
       </aside>
 
       {/* Mobile overlay */}
@@ -343,7 +361,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
         <div className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={onClose} />
           <aside className="relative h-full w-[min(18rem,82vw)] border-r border-sidebar-border bg-sidebar-background text-sidebar-foreground shadow-2xl">
-            {sidebarContent}
+            {renderSidebarContent(false)}
           </aside>
         </div>
       ) : null}

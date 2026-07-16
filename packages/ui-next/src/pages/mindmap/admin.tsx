@@ -162,7 +162,7 @@ export function AdminMindmapPage() {
 
   return (
     <ReactFlowProvider>
-      <div className="flex h-[calc(100dvh-5.75rem)] min-h-[38rem] flex-col overflow-hidden rounded-2xl border bg-background shadow-sm">
+      <div className="flex h-[calc(100dvh-5.75rem)] min-h-[38rem] w-full min-w-0 flex-col overflow-hidden bg-background">
         <header className="shrink-0 border-b bg-background px-4 py-3 sm:px-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">

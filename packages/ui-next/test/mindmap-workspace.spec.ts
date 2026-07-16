@@ -52,6 +52,23 @@ describe('P2.16 mindmap workspace contracts', () => {
     expect(adminPage).to.include('<MindmapCanvas');
     expect(adminPage).to.include('<MindmapInspector');
     expect(adminPage).to.include("type MobilePane = 'outline' | 'preview' | 'inspector'");
+    const workspaceMatch = adminPage.match(/<ReactFlowProvider>\s*<div className="([^"]+)"/);
+    expect(workspaceMatch, 'mindmap admin workspace root').not.to.equal(null);
+    const workspaceClasses = workspaceMatch![1].split(/\s+/);
+    const utilityName = (value: string) => value.split(':').at(-1) || value;
+    expect(workspaceClasses.some((value) => utilityName(value).startsWith('rounded'))).to.equal(false);
+    expect(workspaceClasses.some((value) => utilityName(value).startsWith('border'))).to.equal(false);
+    expect(workspaceClasses.some((value) => utilityName(value).startsWith('shadow'))).to.equal(false);
+    expect(workspaceClasses).to.include.members([
+      'flex',
+      'h-[calc(100dvh-5.75rem)]',
+      'min-h-[38rem]',
+      'w-full',
+      'min-w-0',
+      'flex-col',
+      'overflow-hidden',
+      'bg-background',
+    ]);
     expect(resolver).to.include("'admin_mindmap.html': AdminMindmapPage");
     expect(sidebar).to.include("href: '/admin/mindmap'");
     expect(combined).not.to.match(/\b(?:prompt|confirm|alert)\s*\(/);

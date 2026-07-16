@@ -1203,6 +1203,8 @@ class AdminAccountsReturnHandler extends Handler {
     }
 }
 
+export const inject = ['oauth'];
+
 export async function apply(ctx: Context) {
     ctx.Route('admin_accounts', '/admin/accounts', AdminAccountsHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('admin_accounts_return', '/admin/accounts/return', AdminAccountsReturnHandler);

@@ -206,6 +206,7 @@ describe('admin account management contracts', () => {
 
         expect(handler).to.include("ctx.Route('admin_accounts', '/admin/accounts', AdminAccountsHandler, PRIV.PRIV_EDIT_SYSTEM)");
         expect(handler).to.include("ctx.Route('admin_accounts_return', '/admin/accounts/return', AdminAccountsReturnHandler)");
+        expect(handler).to.include("export const inject = ['oauth']");
         expect(handler).to.include('this.checkPriv(PRIV.PRIV_EDIT_SYSTEM)');
         expect(handler).to.include('auditAccountOperation');
         expect(handler).not.to.include('cleanUserEffect');

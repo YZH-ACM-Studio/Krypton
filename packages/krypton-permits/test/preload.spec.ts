@@ -16,6 +16,7 @@ describe('problem ACL preload', () => {
                     authoredPids: new Set([1]),
                     maintainedPids: new Set([2]),
                     fencedPids: new Set([1]),
+                    ownsLegacyProblems: true,
                 };
             },
             (error) => {
@@ -27,6 +28,7 @@ describe('problem ACL preload', () => {
         expect(user._problemAclLoaded).to.equal(true);
         expect(user._problemAclDomainId).to.equal('system');
         expect([...user._aclFencedPids]).to.deep.equal([1]);
+        expect(user._ownsLegacyProblems).to.equal(true);
     });
 
     it('fails closed and reports the load error without retaining stale ACL state', async () => {
@@ -36,6 +38,7 @@ describe('problem ACL preload', () => {
             _authoredPids: new Set([999]),
             _maintainedPids: new Set([999]),
             _aclFencedPids: new Set(),
+            _ownsLegacyProblems: true,
             _problemAclLoaded: true,
             _problemAclDomainId: 'other',
         };
@@ -55,6 +58,65 @@ describe('problem ACL preload', () => {
         expect([...user._authoredPids]).to.deep.equal([]);
         expect([...user._maintainedPids]).to.deep.equal([]);
         expect([...user._aclFencedPids]).to.deep.equal([]);
+        expect(user._ownsLegacyProblems).to.equal(false);
         expect((errors[0] as Error).message).to.equal('database unavailable');
+    });
+
+    it('fails closed when a loader omits the legacy ownership fact', async () => {
+        const user: any = { _id: 8, _ownsLegacyProblems: true };
+        const errors: unknown[] = [];
+
+        await preloadProblemAcl(
+            user,
+            'system',
+            async () =>
+                ({
+                    permitPids: new Set(),
+                    authoredPids: new Set(),
+                    maintainedPids: new Set(),
+                    fencedPids: new Set(),
+                }) as any,
+            (error) => errors.push(error),
+        );
+
+        expect(user._problemAclLoaded).to.equal(false);
+        expect(user._ownsLegacyProblems).to.equal(false);
+        expect(errors[0]).to.be.instanceOf(TypeError);
+    });
+
+    it('fails closed when a loader returns an incomplete ACL set snapshot', async () => {
+        const user: any = {
+            _id: 9,
+            _permitPids: new Set([999]),
+            _authoredPids: new Set([999]),
+            _maintainedPids: new Set([999]),
+            _aclFencedPids: new Set([999]),
+            _ownsLegacyProblems: true,
+            _problemAclLoaded: true,
+            _problemAclDomainId: 'other',
+        };
+        const errors: unknown[] = [];
+
+        await preloadProblemAcl(
+            user,
+            'system',
+            async () =>
+                ({
+                    permitPids: new Set([1]),
+                    authoredPids: new Set([2]),
+                    maintainedPids: new Set([3]),
+                    ownsLegacyProblems: true,
+                }) as any,
+            (error) => errors.push(error),
+        );
+
+        expect(user._problemAclLoaded).to.equal(false);
+        expect(user._problemAclDomainId).to.equal(undefined);
+        expect([...user._permitPids]).to.deep.equal([]);
+        expect([...user._authoredPids]).to.deep.equal([]);
+        expect([...user._maintainedPids]).to.deep.equal([]);
+        expect([...user._aclFencedPids]).to.deep.equal([]);
+        expect(user._ownsLegacyProblems).to.equal(false);
+        expect(errors[0]).to.be.instanceOf(TypeError);
     });
 });

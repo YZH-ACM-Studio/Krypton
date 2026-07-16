@@ -14,6 +14,7 @@ class MemoryServiceRepository implements AclServiceRepository {
     problemWriteClaims = new Map<string, any>();
     missingProblems = new Set<string>();
     managedProblems = new Set<string>();
+    legacyProblemOwners = new Set<string>();
     mutationCalls = 0;
     failOnceAt: string | null = null;
     failNextClaimRecoveryCas = false;
@@ -146,6 +147,10 @@ class MemoryServiceRepository implements AclServiceRepository {
 
     async listProblemAclMutationLocksForUser(domainId: string, uid: number) {
         return [...this.problemLocks.values()].filter((lock) => lock.domainId === domainId && lock.uid === uid);
+    }
+
+    async hasLegacyOwnedProblem(domainId: string, uid: number) {
+        return this.legacyProblemOwners.has(`${domainId}:${uid}`);
     }
 
     async listFencesForDomain(domainId: string) {
@@ -506,6 +511,19 @@ describe('ACL service', () => {
         expect([...loaded.authoredPids]).to.deep.equal([]);
         expect([...loaded.maintainedPids]).to.deep.equal([]);
         expect([...loaded.fencedPids]).to.deep.equal([6]);
+    });
+
+    it('preloads legacy ownership as a separate non-role capability fact', async () => {
+        repo.legacyProblemOwners.add('system:85');
+
+        const owner = await service.loadUserAcl('system', 85);
+        const student = await service.loadUserAcl('system', 86);
+
+        expect(owner.ownsLegacyProblems).to.equal(true);
+        expect([...owner.permitPids]).to.deep.equal([]);
+        expect([...owner.authoredPids]).to.deep.equal([]);
+        expect([...owner.maintainedPids]).to.deep.equal([]);
+        expect(student.ownsLegacyProblems).to.equal(false);
     });
 
     it('preload denies an orphan ProblemDoc lock even when fence insertion never completed', async () => {

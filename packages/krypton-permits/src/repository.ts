@@ -352,6 +352,18 @@ export class MongoAclRepository implements AclServiceRepository {
         );
     }
 
+    async hasLegacyOwnedProblem(domainId: string, uid: number): Promise<boolean> {
+        return !!(await documentColl.findOne(
+            {
+                domainId,
+                docType: TYPE_PROBLEM,
+                owner: uid,
+                authoringMode: { $ne: 'managed' },
+            },
+            { ...this.options(), projection: { _id: 1 } },
+        ));
+    }
+
     async listFencesForDomain(domainId: string): Promise<AclMutationFence[]> {
         return (await aclMutationFencesColl.find({ domainId }, this.options()).toArray()).map(fenceFromDoc);
     }

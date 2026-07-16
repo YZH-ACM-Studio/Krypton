@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import { describe, it } from 'node:test';
 import { assertNoCanonicalProblemPrimitiveMutation, canonicalizeStructuredKnowledgePatch } from '../src/model/structured-problem-metadata';
 
+const Module = require('module');
 const context = { domainId: 'system', pid: 17, actor: 42, operation: 'test' };
 
 async function captureFailure(run: () => unknown | Promise<unknown>): Promise<Error> {
@@ -14,6 +15,29 @@ async function captureFailure(run: () => unknown | Promise<unknown>): Promise<Er
 }
 
 describe('P3.16 canonical structured metadata guard', () => {
+    it('materializes a non-empty node pair through the lazy loader instead of native ESM resolution', async () => {
+        const originalLoad = Module._load;
+        const canonicalNode = { toHexString: () => '507f1f77bcf86cd799439011' };
+        Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
+            if (request === './managed-problem-authoring' && parent?.filename.endsWith('structured-problem-metadata.ts')) {
+                return {
+                    async materializeKnowledgeMindmapTags() {
+                        return { nodeIds: [canonicalNode], tags: ['图论'] };
+                    },
+                };
+            }
+            return originalLoad.call(this, request, parent, isMain);
+        };
+        try {
+            const patch: any = { tag: ['图论'], knowledgeNodeIds: ['507f1f77bcf86cd799439011'] };
+            const required = await canonicalizeStructuredKnowledgePatch({ problemKind: 'single' }, patch, {}, context, 'request');
+            expect(required).to.equal(true);
+            expect(patch.knowledgeNodeIds).to.deep.equal([canonicalNode]);
+        } finally {
+            Module._load = originalLoad;
+        }
+    });
+
     it('rejects converting a legacy programming problem into a structured kind', async () => {
         const error = await captureFailure(() =>
             canonicalizeStructuredKnowledgePatch({}, { problemKind: 'single', tag: [], knowledgeNodeIds: [] }, {}, context, 'request'),

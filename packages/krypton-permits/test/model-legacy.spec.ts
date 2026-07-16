@@ -107,6 +107,7 @@ const aclService = {
             authoredPids: new Set<number>(),
             maintainedPids: new Set([2, 4]),
             fencedPids: new Set<number>(),
+            ownsLegacyProblems: false,
         };
     },
     async revokePairs(...args: any[]) {

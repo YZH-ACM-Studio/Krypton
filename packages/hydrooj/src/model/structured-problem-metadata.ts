@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { parseProblemKind, type ProblemKind } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
+import type { ObjectId } from 'mongodb';
 import { ValidationError } from '../error';
 import type { ProblemDoc } from './problem';
 import { isCanonicalManagedSourceTag } from './managed-problem-source';
@@ -112,10 +113,13 @@ export async function canonicalizeStructuredKnowledgePatch(
         );
     }
 
-    const knowledge =
-        Array.isArray($set.knowledgeNodeIds) && !$set.knowledgeNodeIds.length
-            ? { nodeIds: [], tags: [] }
-            : await (await import('./managed-problem-authoring')).materializeKnowledgeMindmapTags($set.knowledgeNodeIds);
+    const knowledge = Array.isArray($set.knowledgeNodeIds) && !$set.knowledgeNodeIds.length
+        ? { nodeIds: [], tags: [] }
+        : await (
+              require('./managed-problem-authoring') as {
+                  materializeKnowledgeMindmapTags(input: unknown): Promise<{ nodeIds: ObjectId[]; tags: string[] }>;
+              }
+          ).materializeKnowledgeMindmapTags($set.knowledgeNodeIds);
     if (problemKind === 'programming' && !knowledge.nodeIds.length) {
         deny(
             context,

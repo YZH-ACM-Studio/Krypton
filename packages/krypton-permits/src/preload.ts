@@ -3,6 +3,7 @@ export interface LoadedProblemAcl {
     authoredPids: Set<number>;
     maintainedPids: Set<number>;
     fencedPids: Set<number>;
+    ownsLegacyProblems: boolean;
 }
 
 /** Atomically replaces request-scoped ACL state; errors leave a deny state. */
@@ -16,6 +17,7 @@ export async function preloadProblemAcl(
     user._authoredPids = new Set<number>();
     user._maintainedPids = new Set<number>();
     user._aclFencedPids = new Set<number>();
+    user._ownsLegacyProblems = false;
     user._problemAclLoaded = false;
     user._problemAclDomainId = undefined;
     const uid = user?._id;
@@ -30,10 +32,20 @@ export async function preloadProblemAcl(
     }
     try {
         const loaded = await load(domainId, uid);
+        if (
+            !(loaded?.permitPids instanceof Set)
+            || !(loaded?.authoredPids instanceof Set)
+            || !(loaded?.maintainedPids instanceof Set)
+            || !(loaded?.fencedPids instanceof Set)
+            || typeof loaded?.ownsLegacyProblems !== 'boolean'
+        ) {
+            throw new TypeError('ACL preload returned an invalid snapshot');
+        }
         user._permitPids = loaded.permitPids;
         user._authoredPids = loaded.authoredPids;
         user._maintainedPids = loaded.maintainedPids;
         user._aclFencedPids = loaded.fencedPids;
+        user._ownsLegacyProblems = loaded.ownsLegacyProblems;
         user._problemAclDomainId = domainId;
         user._problemAclLoaded = true;
     } catch (error) {

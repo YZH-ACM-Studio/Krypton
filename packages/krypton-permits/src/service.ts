@@ -36,6 +36,7 @@ export interface AclServiceRepository extends AclRepository {
     listCanonicalForUser(domainId: string, uid: number): Promise<CanonicalPermit[]>;
     listFencesForUser(domainId: string, uid: number): Promise<AclMutationFence[]>;
     listProblemAclMutationLocksForUser(domainId: string, uid: number): Promise<ProblemAclMutationLock[]>;
+    hasLegacyOwnedProblem(domainId: string, uid: number): Promise<boolean>;
     listFencesForDomain(domainId: string): Promise<AclMutationFence[]>;
     listProblemAclMutationLocksForDomain(domainId: string): Promise<ProblemAclMutationLock[]>;
     listProblemAclMutationLocksForProblem(domainId: string, pid: number): Promise<ProblemAclMutationLock[]>;
@@ -613,10 +614,11 @@ export function createAclService(repo: AclServiceRepository, options: { now?: ()
     }
 
     async function loadUserAcl(domainId: string, uid: number) {
-        const [canonical, fences, problemLocks] = await Promise.all([
+        const [canonical, fences, problemLocks, ownsLegacyProblems] = await Promise.all([
             repo.listCanonicalForUser(domainId, uid),
             repo.listFencesForUser(domainId, uid),
             repo.listProblemAclMutationLocksForUser(domainId, uid),
+            repo.hasLegacyOwnedProblem(domainId, uid),
         ]);
         const fencedPids = new Set([...fences.map((fence) => fence.pid), ...problemLocks.map((lock) => lock.pid)]);
         const active = canonical.filter((permit) => permit.active === true && !fencedPids.has(permit.pid));
@@ -625,6 +627,7 @@ export function createAclService(repo: AclServiceRepository, options: { now?: ()
             authoredPids: new Set(active.filter((permit) => permit.role === 'author').map((permit) => permit.pid)),
             maintainedPids: new Set(active.filter((permit) => permit.role === 'maintainer').map((permit) => permit.pid)),
             fencedPids,
+            ownsLegacyProblems,
         };
     }
 

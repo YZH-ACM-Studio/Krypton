@@ -206,6 +206,7 @@ function makeUser(uid = 42, overrides: Record<string, unknown> = {}) {
         _authoredPids: new Set<number>(),
         _maintainedPids: new Set<number>(),
         _aclFencedPids: new Set<number>(),
+        _ownsLegacyProblems: false,
         hasPerm: (perm: bigint) => perm === PERM.PERM_CREATE_PROBLEM,
         ...overrides,
     } as any;
@@ -246,6 +247,7 @@ beforeEach(() => {
         authoredPids: new Set<number>(),
         maintainedPids: new Set<number>(),
         fencedPids: new Set<number>(),
+        ownsLegacyProblems: false,
     };
     loadedAclSequence = [];
     (global as any).Hydro.model.permits = {
@@ -263,6 +265,7 @@ describe('crawler problem ACL', () => {
             authoredPids: new Set<number>(),
             maintainedPids: new Set([12]),
             fencedPids: new Set([13]),
+            ownsLegacyProblems: true,
         };
         const handler = makeHandler('crawler_problem');
         await handler.prepare();
@@ -272,6 +275,7 @@ describe('crawler problem ACL', () => {
         expect(tokenUser._problemAclDomainId).to.equal('token-domain');
         expect([...tokenUser._maintainedPids]).to.deep.equal([12]);
         expect([...tokenUser._aclFencedPids]).to.deep.equal([13]);
+        expect(tokenUser._ownsLegacyProblems).to.equal(true);
     });
 
     it('fails closed and clears stale markers when token-domain ACL reload fails', async () => {
@@ -381,12 +385,14 @@ describe('crawler problem ACL', () => {
             authoredPids: new Set<number>(),
             maintainedPids: new Set([30]),
             fencedPids: new Set<number>(),
+            ownsLegacyProblems: false,
         };
         const fenced = {
             permitPids: new Set([30]),
             authoredPids: new Set<number>(),
             maintainedPids: new Set([30]),
             fencedPids: new Set([30]),
+            ownsLegacyProblems: false,
         };
         // prepare, target preflight, atomic write-claim authorization
         loadedAclSequence = [maintained, maintained, fenced];

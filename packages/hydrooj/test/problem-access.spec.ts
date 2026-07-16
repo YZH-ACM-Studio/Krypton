@@ -230,6 +230,7 @@ function makeUser(kind: UserKind, overrides: Record<string, unknown> = {}) {
         _authoredPids: new Set<number>(),
         _maintainedPids: new Set<number>(),
         _aclFencedPids: new Set<number>(),
+        _ownsLegacyProblems: false,
         _problemAclDomainId: 'system',
         _problemAclLoaded: true,
         hasPerm: (...wanted: bigint[]) => wanted.some((perm) => perms.has(perm)),
@@ -279,6 +280,7 @@ beforeEach(() => {
                 authoredPids: new Set<number>(),
                 maintainedPids: new Set<number>(),
                 fencedPids: new Set<number>(),
+                ownsLegacyProblems: false,
             };
         },
     };
@@ -291,12 +293,23 @@ describe('P2.11 problem-bank capability matrix', () => {
         expect(isProblemBankAdmin(makeUser('creator', { role: 'admin' }))).to.equal(false);
     });
 
-    it('lets only admins or creators with a successfully loaded ACL browse', () => {
+    it('lets admins, creators, and actual legacy owners with a successfully loaded ACL browse', () => {
         expect(canBrowseProblemBank(makeUser('student'))).to.equal(false);
         expect(canBrowseProblemBank(makeUser('hidden-viewer'))).to.equal(false);
+        expect(canBrowseProblemBank(makeUser('student', { _ownsLegacyProblems: true }))).to.equal(true);
         expect(canBrowseProblemBank(makeUser('creator'))).to.equal(true);
         expect(canBrowseProblemBank(makeUser('creator', { _problemAclLoaded: false }))).to.equal(false);
         expect(canBrowseProblemBank(makeUser('admin', { _problemAclLoaded: false }))).to.equal(false);
+    });
+
+    it('enumerates only own legacy problems for an owner without broad create permission', () => {
+        const scope = buildProblemBankScope(makeUser('student', { _ownsLegacyProblems: true }));
+        expect(scope).to.deep.equal({
+            $and: [
+                { $and: [{ owner: 42 }, { authoringMode: { $ne: 'managed' } }] },
+                { 'aclMutationLocks.uid': { $ne: 42 } },
+            ],
+        });
     });
 
     it('builds an owner plus active-maintainer Mongo scope and excludes fenced pairs', () => {
@@ -1302,6 +1315,7 @@ describe('P2.11 stable direct-problem reads', () => {
             authoredPids: new Set<number>(),
             maintainedPids: new Set<number>(),
             fencedPids: new Set<number>(),
+            ownsLegacyProblems: false,
         };
     }
 
@@ -1311,6 +1325,7 @@ describe('P2.11 stable direct-problem reads', () => {
             authoredPids: new Set<number>(),
             maintainedPids: new Set(pids),
             fencedPids: new Set<number>(),
+            ownsLegacyProblems: false,
         };
     }
 
@@ -1320,6 +1335,7 @@ describe('P2.11 stable direct-problem reads', () => {
             authoredPids: new Set(pids),
             maintainedPids: new Set<number>(),
             fencedPids: new Set<number>(),
+            ownsLegacyProblems: false,
         };
     }
 

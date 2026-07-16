@@ -15,14 +15,16 @@ import { canonicalizeStructuredKnowledgePatch, touchesCanonicalProblemFields } f
  * `_permitPids` contains every active role, `_authoredPids` contains managed
  * authors, and `_maintainedPids` contains maintainers. `_aclFencedPids`
  * contains pairs currently undergoing an ACL role mutation for this user and
- * domain. Non-admin callers must never infer an empty ACL from absent state;
- * only `_problemAclLoaded === true` makes permit-derived access authoritative.
+ * domain. `_ownsLegacyProblems` is an indexed existence fact, not a role.
+ * Non-admin callers must never infer an empty ACL from absent state; only
+ * `_problemAclLoaded === true` makes this complete snapshot authoritative.
  */
 export type ProblemAclUser = Pick<User, '_id' | 'hasPerm' | 'hasPriv'> & {
     _permitPids?: Set<number>;
     _authoredPids?: Set<number>;
     _maintainedPids?: Set<number>;
     _aclFencedPids?: Set<number>;
+    _ownsLegacyProblems?: boolean;
     _problemAclDomainId?: string;
     _problemAclLoaded?: boolean;
 };
@@ -150,6 +152,7 @@ export function canBrowseProblemBank(user: ProblemAclUser): boolean {
         isProblemBankAdmin(user) ||
         user.hasPerm(PERM.PERM_CREATE_PROBLEM) ||
         user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT) ||
+        user._ownsLegacyProblems === true ||
         (user._authoredPids?.size || 0) > 0 ||
         (user._maintainedPids?.size || 0) > 0
     );
@@ -174,7 +177,7 @@ export function buildProblemBankScope(user: ProblemAclUser): Filter<ProblemDoc> 
     const maintained = sorted(new Set(sorted(user._maintainedPids).filter((pid) => !user._aclFencedPids?.has(pid))));
     const authored = sorted(new Set(sorted(user._authoredPids).filter((pid) => !user._aclFencedPids?.has(pid))));
     const authorScopes: Filter<ProblemDoc>[] = [];
-    if (user.hasPerm(PERM.PERM_CREATE_PROBLEM)) {
+    if (user.hasPerm(PERM.PERM_CREATE_PROBLEM) || user._ownsLegacyProblems === true) {
         authorScopes.push({ $and: [{ owner: user._id }, { authoringMode: { $ne: 'managed' } }] });
     }
     if (maintained.length) {
@@ -198,6 +201,7 @@ function denyProblemAcl(user: ProblemAclUser): void {
     user._authoredPids = new Set<number>();
     user._maintainedPids = new Set<number>();
     user._aclFencedPids = new Set<number>();
+    user._ownsLegacyProblems = false;
     user._problemAclDomainId = undefined;
     user._problemAclLoaded = false;
 }
@@ -215,7 +219,8 @@ export async function refreshProblemAcl(user: ProblemAclUser, authoritativeDomai
             !(loaded?.permitPids instanceof Set) ||
             !(loaded?.authoredPids instanceof Set) ||
             !(loaded?.maintainedPids instanceof Set) ||
-            !(loaded?.fencedPids instanceof Set)
+            !(loaded?.fencedPids instanceof Set) ||
+            typeof loaded?.ownsLegacyProblems !== 'boolean'
         ) {
             throw new TypeError('permits.loadAclForUser returned an invalid ACL snapshot');
         }
@@ -223,6 +228,7 @@ export async function refreshProblemAcl(user: ProblemAclUser, authoritativeDomai
         user._authoredPids = loaded.authoredPids;
         user._maintainedPids = loaded.maintainedPids;
         user._aclFencedPids = loaded.fencedPids;
+        user._ownsLegacyProblems = loaded.ownsLegacyProblems;
         user._problemAclDomainId = authoritativeDomainId;
         user._problemAclLoaded = true;
     } catch (error) {

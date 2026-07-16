@@ -52,6 +52,7 @@ function denyProblemAcl(user: any) {
         _authoredPids: new Set<number>(),
         _maintainedPids: new Set<number>(),
         _aclFencedPids: new Set<number>(),
+        _ownsLegacyProblems: false,
         _problemAclDomainId: undefined,
         _problemAclLoaded: false,
     });
@@ -67,7 +68,8 @@ async function loadCrawlerProblemAcl(user: any, domainId: string): Promise<void>
             !(loaded?.permitPids instanceof Set) ||
             !(loaded?.authoredPids instanceof Set) ||
             !(loaded?.maintainedPids instanceof Set) ||
-            !(loaded?.fencedPids instanceof Set)
+            !(loaded?.fencedPids instanceof Set) ||
+            typeof loaded?.ownsLegacyProblems !== 'boolean'
         ) {
             throw new TypeError('permits.loadAclForUser returned an invalid ACL snapshot');
         }
@@ -76,6 +78,7 @@ async function loadCrawlerProblemAcl(user: any, domainId: string): Promise<void>
             _authoredPids: loaded.authoredPids,
             _maintainedPids: loaded.maintainedPids,
             _aclFencedPids: loaded.fencedPids,
+            _ownsLegacyProblems: loaded.ownsLegacyProblems,
             _problemAclDomainId: domainId,
             _problemAclLoaded: true,
         });

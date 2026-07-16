@@ -514,6 +514,7 @@ export async function loadAclForUser(domainId: string, uid: number) {
             authoredPids: new Set<number>(),
             maintainedPids: new Set<number>(),
             fencedPids: new Set<number>(),
+            ownsLegacyProblems: false,
         };
     }
     return aclService.loadUserAcl(domainId, uid);

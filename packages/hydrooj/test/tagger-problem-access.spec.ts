@@ -237,6 +237,7 @@ function installAclLoader(
         authoredPids: new Set(),
         maintainedPids: new Set([7]),
         fencedPids: new Set([9]),
+        ownsLegacyProblems: false,
     }),
 ) {
     (global as any).Hydro.model.permits = {
@@ -406,6 +407,7 @@ describe('P2.11 tagger enumeration gates and scopes', () => {
             authoredPids: new Set(),
             maintainedPids: new Set(),
             fencedPids: new Set(),
+            ownsLegacyProblems: false,
         }));
         const handler = makeHandler('tagger_audit');
         await handler.prepare();
@@ -422,8 +424,20 @@ describe('P2.11 tagger enumeration gates and scopes', () => {
         installAclLoader(async () => {
             load++;
             return load === 1
-                ? { permitPids: new Set([7]), authoredPids: new Set(), maintainedPids: new Set([7]), fencedPids: new Set() }
-                : { permitPids: new Set(), authoredPids: new Set(), maintainedPids: new Set(), fencedPids: new Set() };
+                ? {
+                      permitPids: new Set([7]),
+                      authoredPids: new Set(),
+                      maintainedPids: new Set([7]),
+                      fencedPids: new Set(),
+                      ownsLegacyProblems: false,
+                  }
+                : {
+                      permitPids: new Set(),
+                      authoredPids: new Set(),
+                      maintainedPids: new Set(),
+                      fencedPids: new Set(),
+                      ownsLegacyProblems: false,
+                  };
         });
         const handler = makeHandler('tagger_problems');
         await handler.prepare();
@@ -669,6 +683,7 @@ describe('P2.11 tagger mutation gates', () => {
             authoredPids: new Set(),
             maintainedPids: new Set([7]),
             fencedPids: new Set(),
+            ownsLegacyProblems: false,
         }));
         const handler = makeHandler('tagger_retag');
         await handler.prepare();

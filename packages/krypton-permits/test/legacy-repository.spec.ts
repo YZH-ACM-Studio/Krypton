@@ -45,7 +45,12 @@ describe('legacy canonical repository compatibility', () => {
         const collections = new Map<string, any>();
         const collection = (name: string) => {
             if (!collections.has(name)) {
-                const docs = name === 'problem.permits' ? rows : [];
+                const docs =
+                    name === 'problem.permits'
+                        ? rows
+                        : name === 'document'
+                          ? [{ domainId: 'system', docType: 10, docId: 101, owner: 9 }]
+                          : [];
                 collections.set(name, {
                     find(filter: any) {
                         return { toArray: async () => docs.filter((doc) => matches(doc, filter)) };
@@ -90,6 +95,7 @@ describe('legacy canonical repository compatibility', () => {
             expect([...loaded.permitPids]).to.deep.equal([1, 2, 3, 4]);
             expect([...loaded.authoredPids]).to.deep.equal([]);
             expect([...loaded.maintainedPids]).to.deep.equal([2, 4]);
+            expect(loaded.ownsLegacyProblems).to.equal(true);
             expect(writes).to.deep.equal([]);
         } finally {
             Module._load = originalLoad;

@@ -4,9 +4,8 @@ import type { ObjectId } from 'mongodb';
  * MindmapNode — one node in the single global mindmap. Tree is implicit via
  * parentId; root node has parentId = null and config.rootNodeId points at it.
  *
- * `position` is the manual layout override — when set, ELK auto-layout is
- * skipped for that node and the saved x/y is used instead. Admin "reset
- * layout" clears all positions.
+ * Layout is derived from the tree and sibling order. Root branches may select
+ * a relative side, but absolute x/y coordinates are deliberately unsupported.
  */
 export interface MindmapNode {
     _id: ObjectId;
@@ -15,7 +14,8 @@ export interface MindmapNode {
     description?: string;
     /** Tailwind color name: gray, sky, blue, green, amber, rose, purple. */
     color?: string;
-    position?: { x: number; y: number };
+    /** Only meaningful for direct children of the configured root. */
+    layoutSide?: 'left' | 'right';
     /** Hydro problem tags — used to auto-fetch problems for the node panel. */
     tags: string[];
     /** Manually-pinned problem PIDs. Union with `tags`-matched problems. */

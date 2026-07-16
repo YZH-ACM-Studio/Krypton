@@ -57,6 +57,7 @@ import { HomeworkDetailPage, HomeworkPage } from '@/pages/homework';
 import { HomeworkEditPage, HomeworkFilesPage } from '@/pages/homework-manage';
 import { ManualGradingPage } from '@/pages/manual-grading';
 import { MindmapPage } from '@/pages/mindmap';
+import { AdminMindmapPage } from '@/pages/mindmap/admin';
 import { DomainsPage } from '@/pages/misc';
 import { MyVerifyInboxPage } from '@/pages/permits/inbox';
 import { FpsImportPage, TelegramLoginPage, XcpcioBoardPage } from '@/pages/plugin-pages';
@@ -301,6 +302,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
 
   // krypton-mindmap
   'mindmap_main.html': MindmapPage,
+  'admin_mindmap.html': AdminMindmapPage,
 
   // auth-token admin (Krypton access tokens)
   'admin_authtoken.html': AdminAuthTokenPage,

@@ -18,8 +18,15 @@ const calls = {
     assertDomain: [] as any[],
     buildScope: [] as any[],
     canBrowse: [] as any[],
+    createNode: [] as any[],
+    deleteNode: [] as any[],
+    getReferenceCounts: [] as any[],
     listProblems: [] as any[],
     loggerError: [] as any[],
+    loggerWarn: [] as any[],
+    moveNode: [] as any[],
+    searchProblems: [] as any[],
+    updateNode: [] as any[],
 };
 let browseAllowed = false;
 let assertFailure: Error | null = null;
@@ -27,6 +34,13 @@ let browseFailure: Error | null = null;
 let scopeFailure: Error | null = null;
 let canonicalScope: Record<string, unknown> = {};
 let bootstrapNodes: any[] = [];
+let mutationFailure:
+    | (Error & {
+          code?: number;
+          params?: unknown[];
+          mindmapMutationContext?: Record<string, unknown>;
+      })
+    | null = null;
 
 class Logger {
     name: string;
@@ -37,6 +51,10 @@ class Logger {
 
     error(...args: any[]) {
         calls.loggerError.push(args);
+    }
+
+    warn(...args: any[]) {
+        calls.loggerWarn.push(args);
     }
 }
 
@@ -68,23 +86,42 @@ const sensitiveProblems = [
 ];
 
 const modelStub = {
-    clearAllPositions: async () => undefined,
-    createNode: async () => ({}),
-    deleteNodeRecursive: async () => 0,
+    async createNode(...args: any[]) {
+        calls.createNode.push(args);
+        if (mutationFailure) throw mutationFailure;
+        return {};
+    },
+    async deleteNode(...args: any[]) {
+        calls.deleteNode.push(args);
+        if (mutationFailure) throw mutationFailure;
+    },
     getConfig: async () => ({
         title: '公开知识导图',
         rootNodeId: bootstrapNodes[0]?._id || null,
         layoutDirection: 'RIGHT',
+        updatedAt: new Date('2026-07-16T00:00:00.000Z'),
     }),
+    async getNodeReferenceCounts(...args: any[]) {
+        calls.getReferenceCounts.push(args);
+        return Object.fromEntries(bootstrapNodes.map((node) => [node._id.toHexString(), 0]));
+    },
     listAllNodes: async () => bootstrapNodes,
     async listProblemsForNode(...args: any[]) {
         calls.listProblems.push(args);
         return sensitiveProblems;
     },
-    moveNode: async () => undefined,
-    setConfig: async () => undefined,
-    setNodePosition: async () => undefined,
-    updateNode: async () => undefined,
+    async moveNode(...args: any[]) {
+        calls.moveNode.push(args);
+        if (mutationFailure) throw mutationFailure;
+    },
+    async searchProblemsForAdmin(...args: any[]) {
+        calls.searchProblems.push(args);
+        return sensitiveProblems;
+    },
+    async updateNode(...args: any[]) {
+        calls.updateNode.push(args);
+        if (mutationFailure) throw mutationFailure;
+    },
 };
 
 const hydroojStub = {
@@ -136,8 +173,8 @@ applyHandlers({
 function makeUser() {
     return {
         _id: 42,
-        hasPerm: () => false,
-        hasPriv: () => false,
+        hasPerm: (_permission?: number) => false,
+        hasPriv: (_privilege?: number) => false,
     };
 }
 
@@ -294,6 +331,103 @@ async function dispatchMindmapPage(user = makeUser(), authoritativeDomainId = 's
     return { response };
 }
 
+async function dispatchAdminRoute({
+    route,
+    method = 'GET',
+    path,
+    user = makeUser(),
+    authoritativeDomainId = 'system',
+    args = {},
+    body = {},
+    query = {},
+    json = true,
+}: {
+    route: string;
+    method?: 'GET' | 'POST';
+    path: string;
+    user?: ReturnType<typeof makeUser>;
+    authoritativeDomainId?: string;
+    args?: Record<string, unknown>;
+    body?: Record<string, unknown>;
+    query?: Record<string, unknown>;
+    json?: boolean;
+}) {
+    const HandlerClass = routes.get(route);
+    expect(HandlerClass, `missing ${route} route`).to.be.a('function');
+    const request = {
+        method: method.toLowerCase(),
+        host: 'example.test',
+        hostname: 'example.test',
+        ip: '127.0.0.1',
+        headers: {},
+        cookies: {},
+        body,
+        files: {},
+        query,
+        querystring: new URLSearchParams(query as Record<string, string>).toString(),
+        path,
+        originalPath: path,
+        params: {},
+        referer: '',
+        json,
+        websocket: false,
+    };
+    const response = {
+        body: undefined as any,
+        type: '',
+        status: 200,
+        template: undefined as string | undefined,
+        redirect: undefined as string | undefined,
+        attachment() {},
+        addHeader() {},
+    };
+    const koaContext: any = {
+        method,
+        params: {},
+        request,
+        session: {},
+        holdFiles: [],
+        HydroContext: { args: { domainId: authoritativeDomainId, ...args }, request, response, UiContext: {} },
+    };
+    const service: any = {
+        activeHandlers: new Map(),
+        ctx: {
+            async parallel(event: string, handler: any) {
+                if (event !== 'handler/create') return;
+                handler.user = user;
+                handler.domain = { _id: authoritativeDomainId };
+                handler.onerror = async (error: any) => {
+                    response.status = error.code || 500;
+                    response.body = { error: { name: error.name, params: error.params } };
+                };
+            },
+            async serial() {
+                return undefined;
+            },
+        },
+    };
+    const savedContext = {
+        plugin() {
+            return {
+                ctx: { server: { renderers: {} } },
+                async dispose() {
+                    return undefined;
+                },
+            };
+        },
+    };
+    await (framework.WebService.prototype as any).handleHttp.call(service, koaContext, HandlerClass, () => {}, savedContext);
+    return response;
+}
+
+function makeAdminUser() {
+    return {
+        ...makeUser(),
+        hasPerm: (_permission?: number): boolean => true,
+        hasPriv: (privilege?: number): boolean => privilege === 1,
+    };
+}
+
 function expectNoProblemDisclosure(body: unknown) {
     const serialized = JSON.stringify(body);
     expect(serialized).not.to.include('SECRET_PID');
@@ -309,6 +443,7 @@ beforeEach(() => {
     browseFailure = null;
     scopeFailure = null;
     canonicalScope = {};
+    mutationFailure = null;
     bootstrapNodes = [
         {
             _id: new ObjectId(),
@@ -319,6 +454,8 @@ beforeEach(() => {
             tags: ['SECRET_TAG'],
             problemIds: ['SECRET_PID'],
             order: 0,
+            createdAt: new Date('2026-07-16T00:00:00.000Z'),
+            updatedAt: new Date('2026-07-16T00:00:00.000Z'),
         },
     ];
 });
@@ -346,14 +483,16 @@ describe('mindmap page bootstrap metadata boundary', () => {
         expect(calls.loggerError).to.deep.equal([]);
     });
 
-    it('preserves real node tags and problem ids for a matching-domain bank browser', async () => {
+    it('preserves visible tags but never exposes manual problem ids in the public bootstrap', async () => {
         browseAllowed = true;
+        canonicalScope = { owner: 42 };
 
         const { response } = await dispatchMindmapPage();
 
         expect(response.status).to.equal(200);
         expect(response.body.nodes[0].tags).to.deep.equal(['SECRET_TAG']);
-        expect(response.body.nodes[0].problemIds).to.deep.equal(['SECRET_PID']);
+        expect(response.body.nodes[0].problemIds).to.deep.equal([]);
+        expect(JSON.stringify(response.body)).not.to.include('SECRET_PID');
         expect(calls.loggerError).to.deep.equal([]);
     });
 
@@ -441,5 +580,199 @@ describe('mindmap problem enumeration HTTP boundary', () => {
         expect(response.status).to.equal(500);
         expect(calls.listProblems).to.deep.equal([]);
         expectNoProblemDisclosure(response.body);
+    });
+});
+
+describe('mindmap administrator HTTP boundary', () => {
+    it('gates the page, search, association API, and writes with PRIV_EDIT_SYSTEM', async () => {
+        const nodeId = bootstrapNodes[0]._id.toHexString();
+        const page = await dispatchAdminRoute({ route: 'admin_mindmap', path: '/admin/mindmap', json: false });
+        const search = await dispatchAdminRoute({
+            route: 'admin_mindmap_problem_search',
+            path: '/api/mindmap/admin/problems',
+            args: { q: 'P1' },
+            query: { q: 'P1' },
+        });
+        const associations = await dispatchAdminRoute({
+            route: 'admin_mindmap_node_problems',
+            path: '/api/mindmap/admin/node-problems',
+            args: { nodeId },
+            query: { nodeId },
+        });
+        const write = await dispatchAdminRoute({
+            route: 'admin_mindmap_nodes',
+            method: 'POST',
+            path: '/admin/mindmap/nodes',
+            args: { operation: 'delete', payload: JSON.stringify({ id: nodeId, expectedUpdatedAt: '2026-07-16T00:00:00.000Z' }) },
+            body: { operation: 'delete', payload: JSON.stringify({ id: nodeId, expectedUpdatedAt: '2026-07-16T00:00:00.000Z' }) },
+        });
+
+        expect([page.status, search.status, associations.status, write.status]).to.deep.equal([403, 403, 403, 403]);
+        expect(calls.searchProblems).to.deep.equal([]);
+        expect(calls.listProblems).to.deep.equal([]);
+        expect(calls.deleteNode).to.deep.equal([]);
+        expect(calls.loggerWarn).to.have.lengthOf(4);
+        for (const warning of calls.loggerWarn) expect(warning.join(' ')).to.include('result=forbidden');
+    });
+
+    it('renders the dedicated admin template with a reference-aware snapshot', async () => {
+        const response = await dispatchAdminRoute({
+            route: 'admin_mindmap',
+            path: '/admin/mindmap',
+            user: makeAdminUser(),
+            json: false,
+        });
+
+        expect(response.status).to.equal(200);
+        expect(response.template).to.equal('admin_mindmap.html');
+        expect(response.body.nodes[0]).to.include({ topic: '公开根节点', parentId: null });
+        expect(response.body.nodes[0]._id).to.equal(bootstrapNodes[0]._id.toHexString());
+        expect(response.body.referenceCounts).to.deep.equal({ [bootstrapNodes[0]._id.toHexString()]: 0 });
+        expect(calls.getReferenceCounts).to.have.lengthOf(1);
+    });
+
+    it('uses the authoritative domain for administrator problem search and association queries', async () => {
+        const nodeId = bootstrapNodes[0]._id.toHexString();
+        const search = await dispatchAdminRoute({
+            route: 'admin_mindmap_problem_search',
+            path: '/api/mindmap/admin/problems',
+            user: makeAdminUser(),
+            authoritativeDomainId: 'course-a',
+            args: { q: 'graph' },
+            query: { q: 'graph' },
+        });
+        const associations = await dispatchAdminRoute({
+            route: 'admin_mindmap_node_problems',
+            path: '/api/mindmap/admin/node-problems',
+            user: makeAdminUser(),
+            authoritativeDomainId: 'course-a',
+            args: { nodeId },
+            query: { nodeId },
+        });
+
+        expect(search.status, JSON.stringify(search.body)).to.equal(200);
+        expect(associations.status, JSON.stringify(associations.body)).to.equal(200);
+        expect(calls.searchProblems[0]).to.deep.equal(['course-a', 'graph']);
+        expect(calls.listProblems[0]).to.deep.equal(['course-a', new ObjectId(nodeId), {}, { includeHidden: true }]);
+    });
+
+    it('rejects legacy write fields and removed operations before calling the model', async () => {
+        const base = { id: bootstrapNodes[0]._id.toHexString(), expectedUpdatedAt: '2026-07-16T00:00:00.000Z' };
+        const legacy = await dispatchAdminRoute({
+            route: 'admin_mindmap_nodes',
+            method: 'POST',
+            path: '/admin/mindmap/nodes',
+            user: makeAdminUser(),
+            args: { operation: 'update', payload: JSON.stringify({ ...base, fields: { topic: 'x' } }) },
+            body: { operation: 'update', payload: JSON.stringify({ ...base, fields: { topic: 'x' } }), tagsCsv: 'forged' },
+        });
+        const removed = await dispatchAdminRoute({
+            route: 'admin_mindmap_nodes',
+            method: 'POST',
+            path: '/admin/mindmap/nodes',
+            user: makeAdminUser(),
+            args: { operation: 'setPosition', payload: JSON.stringify(base) },
+            body: { operation: 'setPosition', payload: JSON.stringify(base) },
+        });
+
+        expect(legacy.status, JSON.stringify(legacy.body)).to.equal(400);
+        expect(removed.status).to.equal(405);
+        expect(calls.updateNode).to.deep.equal([]);
+        expect(calls.loggerWarn).to.have.lengthOf(1);
+        expect(routes.has('admin_mindmap_config')).to.equal(false);
+    });
+
+    it('parses a strict mutation envelope and returns a complete fresh snapshot', async () => {
+        const parent = bootstrapNodes[0];
+        const payload = {
+            parentId: parent._id.toHexString(),
+            expectedParentUpdatedAt: parent.updatedAt.toISOString(),
+            topic: '新节点',
+            description: '',
+            color: 'sky',
+            tags: [],
+            problemIds: [],
+        };
+        const response = await dispatchAdminRoute({
+            route: 'admin_mindmap_nodes',
+            method: 'POST',
+            path: '/admin/mindmap/nodes',
+            user: makeAdminUser(),
+            authoritativeDomainId: 'course-a',
+            args: { operation: 'create', payload: JSON.stringify(payload) },
+            body: { operation: 'create', payload: JSON.stringify(payload) },
+        });
+
+        expect(response.status, JSON.stringify(response.body)).to.equal(200);
+        expect(response.body.ok).to.equal(true);
+        expect(response.body.nodes).to.have.lengthOf(1);
+        expect(response.body.referenceCounts).to.have.property(parent._id.toHexString(), 0);
+        expect(calls.createNode).to.have.lengthOf(1);
+        expect(calls.createNode[0][0]).to.deep.include({ domainId: 'course-a', actor: 42, topic: '新节点', color: 'sky' });
+        expect(calls.createNode[0][0].parentId).to.equal(parent._id.toHexString());
+        expect(calls.createNode[0][0].expectedParentUpdatedAt).to.deep.equal(parent.updatedAt);
+    });
+
+    it('logs a blocked mutation with domain, actor, operation, node, result, and affected count', async () => {
+        const node = bootstrapNodes[0];
+        mutationFailure = Object.assign(new Error('引用保护阻断'), {
+            code: 409,
+            mindmapMutationContext: {
+                fromParent: 'old-parent',
+                toParent: 'new-parent',
+                fromIndex: 2,
+                toIndex: 0,
+                expectedUpdatedAt: node.updatedAt.toISOString(),
+                expectedParentUpdatedAt: node.updatedAt.toISOString(),
+            },
+            params: [
+                '引用保护阻断',
+                {
+                    reason: 'inherited-tags-change',
+                    problems: [
+                        { domainId: 'system', docId: 1, pid: 'P1' },
+                        { domainId: 'course-a', docId: 2, pid: 'C2' },
+                    ],
+                },
+            ],
+        });
+        const payload = {
+            id: node._id.toHexString(),
+            newParentId: node._id.toHexString(),
+            targetIndex: 0,
+            expectedUpdatedAt: node.updatedAt.toISOString(),
+            expectedParentUpdatedAt: node.updatedAt.toISOString(),
+        };
+
+        const response = await dispatchAdminRoute({
+            route: 'admin_mindmap_nodes',
+            method: 'POST',
+            path: '/admin/mindmap/nodes',
+            user: makeAdminUser(),
+            args: { operation: 'move', payload: JSON.stringify(payload) },
+            body: { operation: 'move', payload: JSON.stringify(payload) },
+        });
+
+        expect(response.status).to.equal(409);
+        expect(calls.loggerWarn).to.have.lengthOf(1);
+        const serialized = calls.loggerWarn[0].join(' ');
+        expect(serialized).to.include('domain=%s');
+        expect(serialized).to.include('actor=%d');
+        expect(serialized).to.include('operation=%s');
+        expect(serialized).to.include('node=%s');
+        expect(serialized).to.include('fromParent=%s');
+        expect(serialized).to.include('toParent=%s');
+        expect(serialized).to.include('fromIndex=%s');
+        expect(serialized).to.include('toIndex=%s');
+        expect(serialized).to.include('expectedUpdatedAt=%s');
+        expect(serialized).to.include('expectedParentUpdatedAt=%s');
+        expect(serialized).to.include('result=error');
+        expect(serialized).to.include('committed=%s');
+        expect(serialized).to.include('affectedProblems=%d');
+        expect(calls.loggerWarn[0]).to.include('old-parent');
+        expect(calls.loggerWarn[0]).to.include('new-parent');
+        expect(calls.loggerWarn[0]).to.include('2');
+        expect(calls.loggerWarn[0]).to.include('0');
+        expect(calls.loggerWarn[0]).to.include(2);
     });
 });

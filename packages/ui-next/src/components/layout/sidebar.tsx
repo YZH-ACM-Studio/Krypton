@@ -202,6 +202,12 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
       }
       if (canSeeAdminAffordance(userCtx, 'systemAdmin')) {
         adminItems.push({
+          label: '导图管理',
+          href: '/admin/mindmap',
+          icon: Network,
+          templates: ['admin_mindmap.html'],
+        });
+        adminItems.push({
           label: '用户绑定',
           href: '/admin/userbind/schools',
           icon: UserRoundCog,

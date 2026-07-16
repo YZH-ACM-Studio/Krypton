@@ -71,3 +71,13 @@ export function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLD
 export function DialogTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
   return <h2 className={cn('text-base font-semibold', className)} {...props} />;
 }
+
+/**
+ * Scrollable dialog body for long forms. DialogContent owns the viewport
+ * bound; this flex child shrinks within it while headers and action bars stay
+ * visible. Native overflow is intentional here: it remains reliable when the
+ * dialog has a max-height rather than a fixed height.
+ */
+export function DialogBody({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain', className)} {...props} />;
+}

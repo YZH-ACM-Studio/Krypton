@@ -137,6 +137,7 @@ const UINextConfig = {
         `packages/ui-next/src/**/*.${ext}`,
         `packages/ui-next/test/**/*.${ext}`,
         `packages/ui-next/vite.config.${ext}`,
+        `packages/ui-next/announcement-capabilities.${ext}`,
         `packages/ui-next/rankboard-capabilities.${ext}`,
     ]),
     compilerOptions: {
@@ -197,6 +198,7 @@ const CheckConfig = {
         'packages/ui-default/index.ts',
         'packages/ui-default/backendlib/**/*.ts',
         'packages/ui-next/index.ts',
+        'packages/ui-next/announcement-capabilities.ts',
         'packages/ui-next/rankboard-capabilities.ts',
     ],
     compilerOptions: {

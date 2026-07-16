@@ -8,7 +8,7 @@
  *   admin_announce_categories.html → AdminAnnounceCategoriesPage
  */
 import { useMemo, useState } from 'react';
-import { ArrowUpDown, Calendar, Eye, EyeOff, GripVertical, Megaphone, Pencil, Pin, PinOff, Plus, Save, Tag, Trash2 } from 'lucide-react';
+import { ArrowUpDown, Calendar, Eye, EyeOff, GripVertical, Megaphone, Pencil, Pin, PinOff, Plus, Save, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,38 +22,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { TableAction, TableActions } from '@/components/ui/table-actions';
 import { DateTime } from '@/components/ui/datetime';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
-import { AdminPage } from '@/components/admin/admin-page';
+import { ModuleWorkspace, type ModuleWorkspaceNavItem } from '@/components/management/module-workspace';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap } from '@/lib/bootstrap';
-import { registerAdminNavSection } from '@/lib/admin-nav-registry';
 import { PRIV } from '@/lib/perms';
 import { cn } from '@/lib/cn';
-
-// Sidebar registration: 公告管理 lives under domainAdmin.
-registerAdminNavSection({
-  key: 'announce',
-  label: '公告',
-  order: 22,
-  requiredAccess: 'domainAdmin',
-  items: [
-    {
-      key: 'list',
-      label: '公告列表',
-      href: '/admin/announce',
-      icon: Megaphone,
-      templateNames: ['admin_announce_list.html'],
-      requiredAccess: 'domainAdmin',
-    },
-    {
-      key: 'categories',
-      label: '分类管理',
-      href: '/admin/announce/categories',
-      icon: Tag,
-      templateNames: ['admin_announce_categories.html'],
-      requiredPriv: PRIV.PRIV_EDIT_SYSTEM,
-    },
-  ],
-});
 
 interface Category {
   _id: string;
@@ -92,6 +65,29 @@ const COLOR_CLASSES: Record<string, string> = {
   rose: 'bg-rose-100 text-rose-900 border-rose-300 dark:bg-rose-950/40 dark:text-rose-200 dark:border-rose-700/50',
   sky: 'bg-sky-100 text-sky-900 border-sky-300 dark:bg-sky-950/40 dark:text-sky-200 dark:border-sky-700/50',
 };
+
+const ANNOUNCEMENT_WORKSPACE_NAV: Array<ModuleWorkspaceNavItem & { systemOnly: boolean }> = [
+  {
+    key: 'announcements',
+    label: '公告',
+    href: '/admin/announce',
+    templateNames: ['admin_announce_list.html', 'admin_announce_edit.html'],
+    systemOnly: false,
+  },
+  {
+    key: 'categories',
+    label: '分类',
+    href: '/admin/announce/categories',
+    templateNames: ['admin_announce_categories.html'],
+    systemOnly: true,
+  },
+];
+
+function announcementWorkspaceNav(canManageCategories: boolean): ModuleWorkspaceNavItem[] {
+  return ANNOUNCEMENT_WORKSPACE_NAV
+    .filter((item) => canManageCategories || !item.systemOnly)
+    .map(({ systemOnly: _systemOnly, ...item }) => item);
+}
 
 function CategoryChip({ category, size = 'sm' }: { category: { name: string; color: string } | undefined; size?: 'sm' | 'md' }) {
   if (!category) return null;
@@ -255,6 +251,8 @@ export function AdminAnnounceListPage() {
   // Drag-and-drop reorder state — held locally; flushed on save.
   const [orderedIds, setOrderedIds] = useState<string[]>(() => data.docs.map((d) => d._id));
   const dragRef = useState<string | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
 
   const items = useMemo(() => {
     const map = new Map(data.docs.map((d) => [d._id, d]));
@@ -265,33 +263,44 @@ export function AdminAnnounceListPage() {
   }, [data.docs, orderedIds]);
 
   const handleSaveOrder = async () => {
+    if (savingOrder) return;
+    setSavingOrder(true);
+    setOrderError(null);
     const form = new URLSearchParams();
     form.set('operation', 'reorder');
     for (const id of orderedIds) form.append('orderedIds', id);
-    await fetch('/admin/announce', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
-      body: form,
-    });
-    window.location.reload();
+    try {
+      const response = await fetch('/admin/announce', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+        body: form,
+      });
+      if (!response.ok) {
+        const detail = (await response.text()).trim();
+        throw new Error(detail || `保存顺序失败（HTTP ${response.status}）`);
+      }
+      window.location.reload();
+    } catch (error) {
+      setOrderError(error instanceof Error ? error.message : String(error));
+      setSavingOrder(false);
+    }
   };
 
   return (
-    <AdminPage
-      title={
-        <div className="flex items-center gap-2">
-          <Megaphone className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">公告管理</h1>
-        </div>
-      }
+    <ModuleWorkspace
+      moduleTitle="公告管理"
+      title="公告"
+      description="集中维护当前域公告；系统管理员还可以发布全站公告和管理分类。"
+      navItems={announcementWorkspaceNav(data.canEditGlobal)}
+      activeKey="announcements"
       bypassPrivGate
       actions={
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleSaveOrder} className="gap-1">
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => void handleSaveOrder()} className="min-h-10 gap-1" disabled={savingOrder}>
             <Save className="size-3.5" />
-            保存顺序
+            {savingOrder ? '保存中…' : '保存顺序'}
           </Button>
-          <Button asChild className="gap-1">
+          <Button asChild className="min-h-10 gap-1">
             <a href="/admin/announce/new">
               <Plus className="size-3.5" />
               新建公告
@@ -300,8 +309,9 @@ export function AdminAnnounceListPage() {
         </div>
       }
     >
+      {orderError ? <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">{orderError}</p> : null}
       <Card>
-        <CardContent className="p-0">
+        <CardContent className="overflow-x-auto p-0">
           <Table>
             <TableHeader>
               <TableRow>
@@ -354,7 +364,7 @@ export function AdminAnnounceListPage() {
                       <CategoryChip category={cat} />
                     </TableCell>
                     <TableCell className="text-sm font-medium">
-                      <a href={`/announce/${doc._id}`} className="hover:text-primary">
+                      <a href={`/announce/${doc._id}`} className="inline-flex min-h-10 items-center hover:text-primary">
                         {doc.title}
                       </a>
                     </TableCell>
@@ -385,13 +395,14 @@ export function AdminAnnounceListPage() {
                     </TableCell>
                     <TableCell className="pr-5">
                       <TableActions>
-                        <TableAction href={`/admin/announce/${doc._id}/edit`} icon={Pencil}>
+                        <TableAction href={`/admin/announce/${doc._id}/edit`} icon={Pencil} className="min-h-10">
                           编辑
                         </TableAction>
                         <TableAction
                           formAction={`/admin/announce/${doc._id}/edit`}
                           hidden={{ operation: 'update', aid: doc._id, pin: doc.pin ? 'false' : 'true' }}
                           icon={doc.pin ? PinOff : Pin}
+                          className="min-h-10"
                         >
                           {doc.pin ? '取消置顶' : '置顶'}
                         </TableAction>
@@ -400,6 +411,7 @@ export function AdminAnnounceListPage() {
                           hidden={{ operation: 'delete', aid: doc._id }}
                           icon={Trash2}
                           variant="destructive"
+                          className="min-h-10"
                           confirm="确定要删除这条公告吗？该操作无法撤销。"
                         >
                           删除
@@ -420,7 +432,7 @@ export function AdminAnnounceListPage() {
           </Table>
         </CardContent>
       </Card>
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -449,124 +461,132 @@ export function AdminAnnounceEditorPage() {
   const [unpublishAt, setUnpublishAt] = useState(data.doc?.unpublishAt ? new Date(data.doc.unpublishAt).toISOString().slice(0, 16) : '');
 
   return (
-    <AdminPage
-      title={
-        <div className="flex items-center gap-2">
-          <Megaphone className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">{isNew ? '新建公告' : '编辑公告'}</h1>
-        </div>
-      }
+    <ModuleWorkspace
+      moduleTitle="公告管理"
+      title={isNew ? '新建公告' : '编辑公告'}
+      description={isNew ? '撰写正文并设置发布范围与时间。' : '修改公告内容和发布设置，保存后立即按现有可见性规则生效。'}
+      navItems={announcementWorkspaceNav(data.canEditGlobal)}
+      activeKey="announcements"
       bypassPrivGate
       actions={
-        <div className="flex gap-2">
-          <Button asChild variant="ghost">
-            <a href="/admin/announce">返回列表</a>
-          </Button>
-        </div>
+        <Button asChild variant="outline" className="min-h-10">
+          <a href="/admin/announce">返回列表</a>
+        </Button>
       }
     >
-      <Card>
-        <CardContent className="p-6">
-          <form method="post" action={isNew ? '/admin/announce' : `/admin/announce/${data.doc!._id}/edit`} className="space-y-5">
-            <input type="hidden" name="operation" value={isNew ? 'create' : 'update'} />
-            {!isNew && <input type="hidden" name="aid" value={data.doc!._id} />}
-            <input type="hidden" name="content" value={content} />
+      <form method="post" action={isNew ? '/admin/announce' : `/admin/announce/${data.doc!._id}/edit`} className="space-y-5">
+        <input type="hidden" name="operation" value={isNew ? 'create' : 'update'} />
+        {!isNew && <input type="hidden" name="aid" value={data.doc!._id} />}
+        <input type="hidden" name="content" value={content} />
+        {/* Explicit booleans preserve the existing update contract when a
+            checkbox is cleared; unchecked native checkboxes submit nothing. */}
+        <input type="hidden" name="pin" value={pin ? 'true' : 'false'} />
+        <input type="hidden" name="hidden" value={hidden ? 'true' : 'false'} />
 
-            <FormField label="标题" required htmlFor="ann-title">
-              <Input id="ann-title" name="title" value={title} onChange={(e) => setTitle(e.target.value)} required className="max-w-2xl" />
-            </FormField>
-
-            <FormRow columns={2}>
-              <FormField label="分类" required htmlFor="ann-cat">
-                <SimpleSelect
-                  id="ann-cat"
-                  name="category"
-                  value={category}
-                  onValueChange={setCategory}
-                  className="max-w-md"
-                  options={data.categories.map((c) => ({ value: c.key, label: c.name }))}
+        <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-start">
+          <Card className="min-w-0">
+            <CardHeader>
+              <CardTitle className="text-base">公告内容</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <FormField label="标题" required htmlFor="ann-title">
+                <Input id="ann-title" name="title" value={title} onChange={(e) => setTitle(e.target.value)} required className="min-h-10" />
+              </FormField>
+              <FormField label="正文（Markdown）">
+                <MarkdownEditor
+                  value={content}
+                  onChange={setContent}
+                  minHeight={480}
+                  pasteUpload={{
+                    endpoint: '/file',
+                    makeUrl: (filename) => `/file/${uid}/${filename}`,
+                  }}
                 />
               </FormField>
-              <FormField label="范围" htmlFor="ann-scope">
-                <SimpleSelect
-                  id="ann-scope"
-                  name="scope"
-                  value={scope}
-                  onValueChange={(v) => setScope(v as 'global' | 'domain')}
-                  disabled={!isNew}
-                  className="max-w-md"
-                  options={[{ value: 'domain', label: '当前域' }, ...(data.canEditGlobal ? [{ value: 'global', label: '全局（全 OJ）' }] : [])]}
-                />
-              </FormField>
-            </FormRow>
+            </CardContent>
+          </Card>
 
-            <FormRow columns={2}>
-              <FormField label="发布时间" htmlFor="ann-pub">
-                <Input
-                  id="ann-pub"
-                  name="publishAt"
-                  type="datetime-local"
-                  value={publishAt}
-                  onChange={(e) => setPublishAt(e.target.value)}
-                  className="max-w-md"
-                />
-              </FormField>
-              <FormField label="下线时间（可选）" htmlFor="ann-unpub">
-                <Input
-                  id="ann-unpub"
-                  name="unpublishAt"
-                  type="datetime-local"
-                  value={unpublishAt}
-                  onChange={(e) => setUnpublishAt(e.target.value)}
-                  className="max-w-md"
-                />
-              </FormField>
-            </FormRow>
+          <div className="space-y-5">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">发布设置</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <FormField label="分类" required htmlFor="ann-cat">
+                  <SimpleSelect
+                    id="ann-cat"
+                    name="category"
+                    value={category}
+                    onValueChange={setCategory}
+                    className="min-h-10"
+                    contentClassName="[&_[role=option]]:min-h-10"
+                    options={data.categories.map((c) => ({ value: c.key, label: c.name }))}
+                  />
+                </FormField>
+                <FormField label="范围" htmlFor="ann-scope">
+                  <SimpleSelect
+                    id="ann-scope"
+                    name="scope"
+                    value={scope}
+                    onValueChange={(v) => setScope(v as 'global' | 'domain')}
+                    disabled={!isNew}
+                    className="min-h-10"
+                    contentClassName="[&_[role=option]]:min-h-10"
+                    options={[{ value: 'domain', label: '当前域' }, ...(data.canEditGlobal ? [{ value: 'global', label: '全局（全 OJ）' }] : [])]}
+                  />
+                </FormField>
+                <FormField label="发布时间" htmlFor="ann-pub">
+                  <Input
+                    id="ann-pub"
+                    name="publishAt"
+                    type="datetime-local"
+                    value={publishAt}
+                    onChange={(e) => setPublishAt(e.target.value)}
+                    className="min-h-10"
+                  />
+                </FormField>
+                <FormField label="下线时间（可选）" htmlFor="ann-unpub">
+                  <Input
+                    id="ann-unpub"
+                    name="unpublishAt"
+                    type="datetime-local"
+                    value={unpublishAt}
+                    onChange={(e) => setUnpublishAt(e.target.value)}
+                    className="min-h-10"
+                  />
+                </FormField>
+              </CardContent>
+            </Card>
 
-            {/* Always submit explicit true/false. A native checkbox omits its
-                field entirely when unchecked, so unchecking "隐藏"/"置顶" sent
-                nothing and postUpdate (a partial patch — it only touches fields
-                that are present) left the old value stuck. Hidden inputs force
-                the field to always be sent; the Checkbox is now display-only
-                (no name/value) so it can't double-submit the same field. */}
-            <input type="hidden" name="pin" value={pin ? 'true' : 'false'} />
-            <input type="hidden" name="hidden" value={hidden ? 'true' : 'false'} />
-            <div className="flex items-center gap-6">
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox checked={pin} onChange={(e) => setPin(e.target.checked)} />
-                置顶
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
-                隐藏（暂不公开）
-              </label>
-            </div>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">展示状态</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm">
+                  <Checkbox checked={pin} onChange={(e) => setPin(e.target.checked)} />
+                  置顶
+                </label>
+                <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm">
+                  <Checkbox checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
+                  隐藏（暂不公开）
+                </label>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
 
-            <FormField label="正文（Markdown）">
-              <MarkdownEditor
-                value={content}
-                onChange={setContent}
-                minHeight={480}
-                pasteUpload={{
-                  endpoint: '/file',
-                  makeUrl: (filename) => `/file/${uid}/${filename}`,
-                }}
-              />
-            </FormField>
-
-            <div className="flex justify-end gap-2 border-t pt-4">
-              <Button type="button" variant="ghost" asChild>
-                <a href="/admin/announce">取消</a>
-              </Button>
-              <Button type="submit" className="gap-1">
-                <Save className="size-3.5" />
-                {isNew ? '创建' : '保存'}
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-    </AdminPage>
+        <div className="flex justify-end gap-2 border-t pt-4">
+          <Button type="button" variant="ghost" asChild className="min-h-10">
+            <a href="/admin/announce">取消</a>
+          </Button>
+          <Button type="submit" className="min-h-10 gap-1">
+            <Save className="size-3.5" />
+            {isNew ? '创建' : '保存'}
+          </Button>
+        </div>
+      </form>
+    </ModuleWorkspace>
   );
 }
 
@@ -578,23 +598,22 @@ export function AdminAnnounceCategoriesPage() {
   const [creating, setCreating] = useState(false);
 
   return (
-    <AdminPage
-      title={
-        <div className="flex items-center gap-2">
-          <Tag className="size-5 text-primary" />
-          <h1 className="text-xl font-semibold">公告分类</h1>
-        </div>
-      }
+    <ModuleWorkspace
+      moduleTitle="公告管理"
+      title="分类"
+      description="维护公告分类的名称、配色、显示状态和排序。内建分类不可删除。"
+      navItems={announcementWorkspaceNav(true)}
+      activeKey="categories"
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
       actions={
-        <Button onClick={() => setCreating(true)} className="gap-1">
+        <Button onClick={() => setCreating(true)} className="min-h-10 gap-1">
           <Plus className="size-3.5" />
           新增分类
         </Button>
       }
     >
       <Card>
-        <CardContent className="p-0">
+        <CardContent className="overflow-x-auto p-0">
           <Table>
             <TableHeader>
               <TableRow>
@@ -626,7 +645,7 @@ export function AdminAnnounceCategoriesPage() {
                   </TableCell>
                   <TableCell className="pr-5">
                     <TableActions>
-                      <TableAction onClick={() => setEditing(c)} icon={Pencil}>
+                      <TableAction onClick={() => setEditing(c)} icon={Pencil} className="min-h-10">
                         编辑
                       </TableAction>
                       {!c.builtin && (
@@ -635,6 +654,7 @@ export function AdminAnnounceCategoriesPage() {
                           hidden={{ operation: 'delete', key: c.key }}
                           icon={Trash2}
                           variant="destructive"
+                          className="min-h-10"
                           confirm="确定删除分类？"
                         >
                           删除
@@ -658,7 +678,7 @@ export function AdminAnnounceCategoriesPage() {
           }}
         />
       )}
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -681,10 +701,10 @@ function CategoryEditorDialog({ category, onClose }: { category: Category | null
           <div className="space-y-4 p-5">
             <FormRow columns={2}>
               <FormField label="Key" required htmlFor="cat-key">
-                <Input id="cat-key" name="key" value={key} onChange={(e) => setKey(e.target.value)} disabled={!isNew} required />
+                <Input id="cat-key" name="key" value={key} onChange={(e) => setKey(e.target.value)} disabled={!isNew} required className="min-h-10" />
               </FormField>
               <FormField label="显示名称" required htmlFor="cat-name">
-                <Input id="cat-name" name="name" value={name} onChange={(e) => setName(e.target.value)} required />
+                <Input id="cat-name" name="name" value={name} onChange={(e) => setName(e.target.value)} required className="min-h-10" />
               </FormField>
             </FormRow>
             <FormRow columns={2}>
@@ -694,6 +714,8 @@ function CategoryEditorDialog({ category, onClose }: { category: Category | null
                   name="color"
                   value={color}
                   onValueChange={setColor}
+                  className="min-h-10"
+                  contentClassName="[&_[role=option]]:min-h-10"
                   options={['gray', 'amber', 'blue', 'purple', 'green', 'rose', 'sky'].map((c) => ({
                     value: c,
                     label: c,
@@ -701,10 +723,10 @@ function CategoryEditorDialog({ category, onClose }: { category: Category | null
                 />
               </FormField>
               <FormField label="排序" htmlFor="cat-order">
-                <Input id="cat-order" name="order" type="number" value={order} onChange={(e) => setOrder(Number(e.target.value) || 100)} />
+                <Input id="cat-order" name="order" type="number" value={order} onChange={(e) => setOrder(Number(e.target.value) || 100)} className="min-h-10" />
               </FormField>
             </FormRow>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex min-h-10 cursor-pointer items-center gap-2 text-sm">
               <Checkbox name="hidden" value="true" checked={hidden} onChange={(e) => setHidden(e.target.checked)} />
               隐藏（仍可用于已有公告，但不出现在新建下拉里）
             </label>
@@ -714,10 +736,10 @@ function CategoryEditorDialog({ category, onClose }: { category: Category | null
             </div>
           </div>
           <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
-            <Button type="button" variant="ghost" onClick={onClose}>
+            <Button type="button" variant="ghost" onClick={onClose} className="min-h-10">
               取消
             </Button>
-            <Button type="submit">保存</Button>
+            <Button type="submit" className="min-h-10">保存</Button>
           </div>
         </form>
       </DialogContent>

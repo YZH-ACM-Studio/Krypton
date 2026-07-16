@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { FormField } from '@/components/ui/form';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DateTime } from '@/components/ui/datetime';
 
 // ── sidebar nav (registered at module load — read by AdminSidebar) ──────────
@@ -167,7 +167,7 @@ function IssueDialog({ open, onClose, onIssued }: { open: boolean; onClose: () =
         <DialogHeader>
           <DialogTitle>签发访问令牌</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 px-5 py-4">
+        <DialogBody className="space-y-4 px-5 py-4">
           <div className="space-y-2">
             <div className="text-sm font-medium">
               频道 <span className="text-destructive">*</span>
@@ -213,8 +213,8 @@ function IssueDialog({ open, onClose, onIssued }: { open: boolean; onClose: () =
           </FormField>
 
           {error && <p className="text-sm text-destructive">{error}</p>}
-        </div>
-        <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+        </DialogBody>
+        <div className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-5 py-3">
           <Button variant="ghost" onClick={close}>
             取消
           </Button>

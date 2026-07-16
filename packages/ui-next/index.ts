@@ -4,6 +4,7 @@ import c2k from 'koa2-connect';
 import { Context, PERM, PRIV, ProblemModel } from 'hydrooj';
 import { serializer } from '@hydrooj/framework';
 import type { ViteDevServer } from 'vite';
+import { resolveAnnouncementManagementCapability } from './announcement-capabilities';
 import { resolveRankboardCapabilities } from './rankboard-capabilities';
 
 interface ManifestChunk {
@@ -222,6 +223,22 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       console.error('[ui-next] rankboard capability resolution failed:', error);
     },
   });
+  const canManageAnnouncements = resolveAnnouncementManagementCapability({
+    user: context.handler?.user,
+    editSystemPriv: PRIV.PRIV_EDIT_SYSTEM,
+    editDomainPerm: PERM.PERM_EDIT_DOMAIN,
+    onError(error) {
+      console.error(
+        '[ui-next] announcement management capability resolution failed:',
+        {
+          domainId: String(domain?._id || ''),
+          uid: Number(context.handler?.user?._id || 0),
+          templateName,
+        },
+        error,
+      );
+    },
+  });
   const problemBankCapability = resolveProblemBankCapability(context.handler?.user, (error) => {
     console.error(
       '[ui-next] problem bank capability resolution failed; denying navigation:',
@@ -272,6 +289,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       canBrowseProblemBank: problemBankCapability,
       canImportRankboard: rankboardCapabilities.canImportRankboard,
       canManageRankboard: rankboardCapabilities.canManageRankboard,
+      canManageAnnouncements,
       impersonation,
     },
     domain: {

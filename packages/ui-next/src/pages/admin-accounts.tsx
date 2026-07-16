@@ -29,7 +29,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { FormField, FormRow, FormSection } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
@@ -572,7 +572,7 @@ function SensitiveActionDialog({ action, onClose }: { action: PendingAction | nu
             {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
           </div>
         </ScrollArea>
-        <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+        <div className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-5 py-3">
           <Button type="button" variant="ghost" onClick={close} disabled={busy}>取消</Button>
           <Button
             type="button"
@@ -651,7 +651,7 @@ function CreateAccountDialog({ open, onClose, onCreated }: {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Plus className="size-4" />创建账号</DialogTitle>
         </DialogHeader>
-        <ScrollArea className="min-h-0 flex-1">
+        <DialogBody>
           <div className="space-y-5 px-5 py-4">
             <FormSection title="登录信息" description="UID 由系统分配；密码只在本次创建流程中显示。">
               <FormRow columns={2}>
@@ -691,8 +691,8 @@ function CreateAccountDialog({ open, onClose, onCreated }: {
             </FormField>
             {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
           </div>
-        </ScrollArea>
-        <div className="flex justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+        </DialogBody>
+        <div className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-5 py-3">
           <Button type="button" variant="ghost" disabled={busy} onClick={close}>取消</Button>
           <Button type="button" disabled={busy || !username.trim() || !email.trim() || !accountPassword || !adminPassword} onClick={() => void submit()}>
             {busy ? <RefreshCw className="animate-spin" /> : <Plus />}{busy ? '创建中…' : '创建账号'}

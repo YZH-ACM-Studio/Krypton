@@ -1,31 +1,13 @@
 import { useState } from 'react';
-import { BarChart3, Download, LineChart as LineChartIcon, Search } from 'lucide-react';
+import { Download, LineChart as LineChartIcon, Search } from 'lucide-react';
 import { AdminPage } from '@/components/admin/admin-page';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { registerAdminNavSection } from '@/lib/admin-nav-registry';
 import { useBootstrap } from '@/lib/bootstrap';
 import { PRIV } from '@/lib/perms';
-
-registerAdminNavSection({
-  key: 'statistics',
-  label: '数据统计',
-  order: 15,
-  requiredPriv: PRIV.PRIV_EDIT_SYSTEM,
-  items: [
-    {
-      key: 'admin_stats',
-      label: '统计中心',
-      href: '/admin/stats',
-      icon: BarChart3,
-      templateNames: ['admin_stats.html'],
-      requiredPriv: PRIV.PRIV_EDIT_SYSTEM,
-    },
-  ],
-});
 
 interface SelectorDoc {
   docId: string;
@@ -653,6 +635,7 @@ export function AdminStatsPage() {
   return (
     <AdminPage
       requiredPriv={PRIV.PRIV_EDIT_SYSTEM}
+      hideSidebar
       title="统计中心"
       description={`实时聚合，单次查询最长 ${data.maxTimeMs / 1000} 秒。`}
       actions={(

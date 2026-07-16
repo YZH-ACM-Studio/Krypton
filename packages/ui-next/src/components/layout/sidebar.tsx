@@ -192,6 +192,14 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           ],
         });
       }
+      if (bs.user.canManageAnnouncements) {
+        adminItems.push({
+          label: '公告管理',
+          href: '/admin/announce',
+          icon: Megaphone,
+          templates: ['admin_announce_list.html', 'admin_announce_edit.html', 'admin_announce_categories.html'],
+        });
+      }
       if (bs.user.canImportRankboard || bs.user.canManageRankboard) {
         adminItems.push({
           label: '荣誉管理',

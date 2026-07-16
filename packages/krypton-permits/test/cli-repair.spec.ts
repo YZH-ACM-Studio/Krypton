@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 const Module = require('module');
 const calls = {
+    runtimeLoads: 0,
     orphan: [] as any[],
     fenceWithoutLock: [] as any[],
     writeClaim: [] as any[],
@@ -32,6 +33,7 @@ const permitsModel = new Proxy(
     },
     {
         get(target, key: string) {
+            if (key === 'then') return undefined;
             return target[key] || (async () => undefined);
         },
     },
@@ -79,19 +81,25 @@ function getRepairAction() {
             return chain;
         },
     };
-    registerCommands({
-        cli: {
-            command(name: string) {
-                if (name.startsWith('permits:repair ')) return chain;
-                return {
-                    ...chain,
-                    action() {
-                        return chain;
-                    },
-                };
+    registerCommands(
+        {
+            cli: {
+                command(name: string) {
+                    if (name.startsWith('permits:repair ')) return chain;
+                    return {
+                        ...chain,
+                        action() {
+                            return chain;
+                        },
+                    };
+                },
             },
         },
-    });
+        async () => {
+            calls.runtimeLoads++;
+            return permitsModel as any;
+        },
+    );
     return action;
 }
 
@@ -112,16 +120,19 @@ describe('ACL repair CLI', () => {
             actor: '7',
             confirm: 'REPAIR_ACL',
         };
+        const runtimeLoadsBefore = calls.runtimeLoads;
 
         const refused = await capture(() => action('problem-write-claim', 'system', '12', undefined, base));
         expect(refused?.message).to.contain('manually inspect partial storage/metadata');
         expect(calls.writeClaim).to.deep.equal([]);
+        expect(calls.runtimeLoads).to.equal(runtimeLoadsBefore);
 
         await action('problem-write-claim', 'system', '12', undefined, {
             ...base,
             writeClaimCheck: 'PARTIAL_WRITE_INSPECTED',
         });
         expect(calls.writeClaim).to.deep.equal([['system', 12, 'claim-1']]);
+        expect(calls.runtimeLoads).to.equal(runtimeLoadsBefore + 1);
     });
 
     it('keeps the ERROR token compatible and routes only the process-quiesced token to ACTIVE recovery', async () => {

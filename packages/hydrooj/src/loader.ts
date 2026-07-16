@@ -252,3 +252,11 @@ export async function loadCli() {
     await require('./entry/cli').load(app);
     setTimeout(() => process.exit(0), 300);
 }
+
+/** Initializes models and addons for a top-level addon command without parsing `hydrooj cli` arguments. */
+export async function loadAddonCommandContext() {
+    process.env.HYDRO_CLI = 'true';
+    process.env.HYDRO_ADDON_COMMAND_CONTEXT = 'true';
+    await preload();
+    await require('./entry/cli').initializeCliRuntime(app);
+}

@@ -99,7 +99,7 @@ async function cli() {
     return console.log(result);
 }
 
-export async function load(ctx: Context) {
+export async function initializeCliRuntime(ctx: Context) {
     fs.ensureDirSync(tmpdir);
     require('../utils');
     require('../error');
@@ -132,5 +132,9 @@ export async function load(ctx: Context) {
     await addon(pending, fail, ctx);
     const scriptDir = path.resolve(__dirname, '..', 'script');
     await Promise.all((await fs.readdir(scriptDir)).map((h) => ctx.loader.reloadPlugin(path.resolve(scriptDir, h), '')));
+}
+
+export async function load(ctx: Context) {
+    await initializeCliRuntime(ctx);
     await cli();
 }

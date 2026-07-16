@@ -1,8 +1,17 @@
 import { Logger } from '@hydrooj/utils';
-import { permitsModel } from './model';
 import { ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION } from './types';
 
 const logger = new Logger('krypton-permits.cli');
+type PermitsCliModel = typeof import('./model').permitsModel;
+type LoadPermitsCliModel = () => Promise<PermitsCliModel>;
+
+async function loadPermitsCliModel(): Promise<PermitsCliModel> {
+    const { loadAddonCommandContext } = require('hydrooj/src/loader') as {
+        loadAddonCommandContext(): Promise<void>;
+    };
+    await loadAddonCommandContext();
+    return (require('./model') as typeof import('./model')).permitsModel;
+}
 
 function parsePositiveInt(value: string | number, field: string): number {
     const parsed = Number(value);
@@ -10,7 +19,7 @@ function parsePositiveInt(value: string | number, field: string): number {
     return parsed;
 }
 
-export function registerCommands(ctx: any): void {
+export function registerCommands(ctx: any, loadModel: LoadPermitsCliModel = loadPermitsCliModel): void {
     let cli: any;
     try {
         cli = ctx.get?.('cli') ?? ctx.cli;
@@ -20,6 +29,7 @@ export function registerCommands(ctx: any): void {
     if (!cli) return;
 
     cli.command('permits:drift-report <domainId>').action(async (domainId: string) => {
+        const permitsModel = await loadModel();
         const report = await permitsModel.buildDriftReport(domainId);
         process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     });
@@ -59,42 +69,44 @@ export function registerCommands(ctx: any): void {
                 if (!pairRepair && uidRaw !== undefined) {
                     throw new Error('uid must be omitted for problem-write-claim repair');
                 }
+                let loadedModel: PermitsCliModel | undefined;
+                const getModel = async () => (loadedModel ||= await loadModel());
                 if (kind === 'legacy-without-canonical') {
                     const strategy = options.strategy as 'grant-maintainer' | 'remove-legacy';
                     if (!['grant-maintainer', 'remove-legacy'].includes(strategy)) {
                         throw new Error('--strategy must be grant-maintainer or remove-legacy');
                     }
-                    await permitsModel.repairLegacyMaintainerWithoutCanonical(domainId, pid, uid!, strategy, actor, options.requestId);
+                    await (await getModel()).repairLegacyMaintainerWithoutCanonical(domainId, pid, uid!, strategy, actor, options.requestId);
                 } else if (kind === 'canonical-without-legacy') {
-                    await permitsModel.repairCanonicalMaintainerWithoutLegacy(domainId, pid, uid!, actor, options.requestId);
+                    await (await getModel()).repairCanonicalMaintainerWithoutLegacy(domainId, pid, uid!, actor, options.requestId);
                 } else if (kind === 'verifier-in-legacy') {
-                    await permitsModel.repairVerifierInLegacy(domainId, pid, uid!, actor, options.requestId);
+                    await (await getModel()).repairVerifierInLegacy(domainId, pid, uid!, actor, options.requestId);
                 } else if (kind === 'legacy-canonical-without-source') {
                     if (options.strategy) {
                         throw new Error('legacy canonical source is derived from viaContest; do not pass --strategy');
                     }
-                    await permitsModel.repairLegacyCanonicalWithoutSource(domainId, pid, uid!, actor, options.requestId);
+                    await (await getModel()).repairLegacyCanonicalWithoutSource(domainId, pid, uid!, actor, options.requestId);
                 } else if (kind === 'source-canonical-conflict') {
                     const strategy = options.strategy as 'reconcile-from-sources';
                     if (strategy !== 'reconcile-from-sources') {
                         throw new Error('--strategy must be reconcile-from-sources');
                     }
-                    await permitsModel.repairSourceCanonicalConflict(domainId, pid, uid!, strategy, actor, options.requestId);
+                    await (await getModel()).repairSourceCanonicalConflict(domainId, pid, uid!, strategy, actor, options.requestId);
                 } else if (kind === 'orphan-problem-lock') {
                     if (options.strategy) throw new Error('do not pass --strategy for orphan-problem-lock');
-                    await permitsModel.repairOrphanProblemLock(domainId, pid, uid!, options.requestId);
+                    await (await getModel()).repairOrphanProblemLock(domainId, pid, uid!, options.requestId);
                 } else if (kind === 'fence-without-problem-lock') {
                     if (options.strategy) throw new Error('do not pass --strategy for fence-without-problem-lock');
-                    await permitsModel.repairFenceWithoutProblemLock(domainId, pid, uid!, options.requestId);
+                    await (await getModel()).repairFenceWithoutProblemLock(domainId, pid, uid!, options.requestId);
                 } else if (kind === 'acl-mutation') {
                     if (options.strategy) throw new Error('do not pass --strategy for acl-mutation');
-                    await permitsModel.repairAclMutation(domainId, pid, uid!, options.requestId);
+                    await (await getModel()).repairAclMutation(domainId, pid, uid!, options.requestId);
                 } else if (kind === 'problem-write-claim') {
                     if (options.strategy) throw new Error('do not pass --strategy for problem-write-claim');
                     if (options.writeClaimCheck === ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION) {
-                        await permitsModel.recoverActiveProblemWriteClaim(domainId, pid, options.requestId, options.writeClaimCheck);
+                        await (await getModel()).recoverActiveProblemWriteClaim(domainId, pid, options.requestId, options.writeClaimCheck);
                     } else if (options.writeClaimCheck === 'PARTIAL_WRITE_INSPECTED') {
-                        await permitsModel.repairErroredProblemWriteClaim(domainId, pid, options.requestId);
+                        await (await getModel()).repairErroredProblemWriteClaim(domainId, pid, options.requestId);
                     } else {
                         throw new Error(
                             'repair refused: manually inspect partial storage/metadata, then pass ' +
@@ -105,6 +117,7 @@ export function registerCommands(ctx: any): void {
                 } else {
                     throw new Error(`unknown repair kind: ${kind}`);
                 }
+                const permitsModel = await getModel();
                 const report = await permitsModel.buildDriftReport(domainId);
                 logger.success('repair completed requestId=%s domain=%s pid=%d uid=%s actor=%d', options.requestId, domainId, pid, uid ?? '-', actor);
                 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

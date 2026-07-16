@@ -1,15 +1,15 @@
 import cac from 'cac';
 import { getAddons } from '../src/options';
 
-const argv = cac().parse();
+const argv = cac().parse(process.argv, { run: false });
 
-if (!argv.args[0] || argv.args[0] === 'cli') {
-    const hydro = require('../src/loader');
-    (argv.args[0] === 'cli' ? hydro.loadCli : hydro.load)().catch((e) => {
-        console.error(e);
-        process.exit(1);
-    });
-} else {
+async function main() {
+    if (!argv.args[0] || argv.args[0] === 'cli') {
+        const hydro = require('../src/loader');
+        await (argv.args[0] === 'cli' ? hydro.loadCli : hydro.load)();
+        return;
+    }
+
     const cli = cac();
     require('../src/commands/install').register(cli);
     require('../src/commands/addon').register(cli);
@@ -17,7 +17,7 @@ if (!argv.args[0] || argv.args[0] === 'cli') {
     require('../src/commands/patch').register(cli);
     require('../src/commands/diagnosis').register(cli);
     cli.help();
-    cli.parse();
+    cli.parse(process.argv, { run: false });
     if (!cli.matchedCommand) {
         const addons = getAddons();
         for (const i of addons) {
@@ -29,10 +29,27 @@ if (!argv.args[0] || argv.args[0] === 'cli') {
                 } catch (err) {}
             }
         }
-        cli.parse();
+        cli.parse(process.argv, { run: false });
         if (!cli.matchedCommand) {
             console.log('Unknown command.');
             cli.outputHelp();
+            return;
         }
     }
+
+    await cli.runMatchedCommand();
+    if (process.env.HYDRO_ADDON_COMMAND_CONTEXT === 'true') {
+        await new Promise<void>((resolve, reject) =>
+            process.stdout.write('', (error) => {
+                if (error) reject(error);
+                else resolve();
+            }),
+        );
+        process.exit(0);
+    }
 }
+
+main().catch((error) => {
+    const message = error instanceof Error ? error.stack || error.message : String(error);
+    process.stderr.write(`${message}\n`, () => process.exit(1));
+});

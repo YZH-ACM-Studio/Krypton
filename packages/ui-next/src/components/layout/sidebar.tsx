@@ -249,6 +249,12 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           templates: ['manage_realpass.html'],
         });
         adminItems.push({
+          label: '账号管理',
+          href: '/admin/accounts',
+          icon: UserRoundCog,
+          templates: ['admin_accounts.html'],
+        });
+        adminItems.push({
           label: '系统',
           href: bs.urls.manage,
           icon: Wrench,
@@ -257,8 +263,6 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
             'manage_script.html',
             'manage_setting.html',
             'manage_config.html',
-            'manage_user_import.html',
-            'manage_user_priv.html',
           ],
         });
       }

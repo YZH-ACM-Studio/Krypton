@@ -1,6 +1,7 @@
 import { cloneDeep } from 'lodash';
 import { ObjectId } from 'mongodb';
 import { OplogDoc } from '../interface';
+import { isCredentialSecretKey } from '../lib/credential-sanitizer';
 import bus from '../service/bus';
 import db from '../service/db';
 import type { ConnectionHandler, Handler } from '../service/server';
@@ -23,7 +24,12 @@ function safeKeys(data: any) {
     else if (data instanceof ObjectId) return data;
     else if (data instanceof Object) {
         for (const key in data) {
-            if (['password', 'verifyPassword'].includes(key) || key.startsWith('__')) {
+            // Handler args are copied into the generic oplog. Keep the list
+            // exact (so harmless metadata such as tokenType remains useful),
+            // but cover every credential spelling used by account/security
+            // handlers. `__*` remains the convention for secret-bearing bulk
+            // payloads such as account imports.
+            if (isCredentialSecretKey(key)) {
                 delete data[key];
                 continue;
             }
@@ -52,7 +58,7 @@ export async function log<T extends Handler | ConnectionHandler>(handler: T, typ
         args,
         operator: handler.user?._id,
         operateIp: handler.request.ip,
-        json: handler.request.json,
+        json: safeKeys(cloneDeep(handler.request.json)),
     });
     return res.insertedId;
 }

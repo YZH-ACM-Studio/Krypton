@@ -233,6 +233,16 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       error,
     );
   });
+  const proxyActorUid = Number(context.handler?.session?.sudoUid || 0);
+  const impersonation = proxyActorUid > 0
+    ? {
+        actorUid: proxyActorUid,
+        actorName: String(context.handler?.session?.sudoUname || `UID ${proxyActorUid}`),
+        targetUid: Number(currentUser._id || 0),
+        targetName: String(currentUser.uname || `UID ${currentUser._id || 0}`),
+        startedAt: context.handler?.session?.sudoStartedAt || null,
+      }
+    : null;
 
   return {
     appName: 'Krypton',
@@ -262,6 +272,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       canBrowseProblemBank: problemBankCapability,
       canImportRankboard: rankboardCapabilities.canImportRankboard,
       canManageRankboard: rankboardCapabilities.canManageRankboard,
+      impersonation,
     },
     domain: {
       id: String(domain._id || 'system'),

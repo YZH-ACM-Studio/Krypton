@@ -1,16 +1,13 @@
 import { exec } from 'child_process';
 import { inspect } from 'util';
 import * as yaml from 'js-yaml';
-import { omit } from 'lodash';
 import Schema from 'schemastery';
-import { CannotEditSuperAdminError, NotLaunchedByPM2Error, UserNotFoundError, ValidationError } from '../error';
+import { NotLaunchedByPM2Error, ValidationError } from '../error';
 import { Logger } from '../logger';
 import { PRIV, STATUS } from '../model/builtin';
-import domain from '../model/domain';
 import record from '../model/record';
 import * as setting from '../model/setting';
 import system from '../model/system';
-import user from '../model/user';
 import { ConnectionHandler, Handler, param, requireSudo, Types } from '../service/server';
 import { JudgeResultCallbackContext } from './judge';
 
@@ -234,129 +231,21 @@ class SystemConfigHandler extends SystemHandler {
 
 class SystemUserImportHandler extends SystemHandler {
     async get() {
-        this.response.body.users = [];
-        this.response.template = 'manage_user_import.html';
+        this.response.redirect = '/admin/accounts?view=import';
     }
 
-    @param('users', Types.Content)
-    @param('draft', Types.Boolean)
-    async post(domainId: string, _users: string, draft: boolean) {
-        const users = _users.split('\n');
-        const udocs: { email: string; username: string; password: string; displayName?: string; [key: string]: any }[] = [];
-        const messages = [];
-        const mapping = Object.create(null);
-        const groups: Record<string, string[]> = Object.create(null);
-        for (const i in users) {
-            const u = users[i];
-            if (!u.trim()) continue;
-            let [email, username, password, displayName, extra] = u.split('\t').map((t) => t.trim());
-            if (!email || !username || !password) {
-                const data = u.split(',').map((t) => t.trim());
-                [email, username, password, displayName, extra] = data;
-                if (data.length > 5) extra = data.slice(4).join(',');
-            }
-            if (email && username && password) {
-                if (!Types.Email[1](email)) messages.push(`Line ${+i + 1}: Invalid email.`);
-                else if (!Types.Username[1](username)) messages.push(`Line ${+i + 1}: Invalid username`);
-                else if (!Types.Password[1](password)) messages.push(`Line ${+i + 1}: Invalid password`);
-                else if (udocs.find((t) => t.email === email) || (await user.getByEmail('system', email))) {
-                    messages.push(`Line ${+i + 1}: Email ${email} already exists.`);
-                } else if (udocs.find((t) => t.username === username) || (await user.getByUname('system', username))) {
-                    messages.push(`Line ${+i + 1}: Username ${username} already exists.`);
-                } else {
-                    const payload: any = {};
-                    try {
-                        const data = JSON.parse(extra);
-                        if (data.group) {
-                            groups[data.group] ||= [];
-                            groups[data.group].push(email);
-                        }
-                        Object.assign(payload, data);
-                    } catch (e) {}
-                    Object.assign(payload, {
-                        email,
-                        username,
-                        password,
-                        displayName,
-                    });
-                    await this.ctx.serial('user/import/parse', payload);
-                    udocs.push(payload);
-                }
-            } else messages.push(`Line ${+i + 1}: Input invalid.`);
-        }
-        messages.push(`${udocs.length} users found.`);
-        if (!draft) {
-            for (const udoc of udocs) {
-                try {
-                    const uid = await user.create(udoc.email, udoc.username, udoc.password);
-                    mapping[udoc.email] = uid;
-                    if (udoc.displayName) await domain.setUserInDomain(domainId, uid, { displayName: udoc.displayName });
-                    if (udoc.school) await user.setById(uid, { school: udoc.school });
-                    if (udoc.studentId) await user.setById(uid, { studentId: udoc.studentId });
-                    await this.ctx.serial('user/import/create', uid, udoc);
-                } catch (e) {
-                    messages.push(e.message);
-                }
-            }
-            const existing = await user.listGroup(domainId);
-            for (const name in groups) {
-                const uids = groups[name].map((i) => mapping[i]).filter((i) => i);
-                const current = existing.find((i) => i.name === name)?.uids || [];
-                if (uids.length) await user.updateGroup(domainId, name, Array.from(new Set([...current, ...uids])));
-            }
-        }
-        this.response.body.users = udocs;
-        this.response.body.messages = messages;
+    async post() {
+        this.response.redirect = '/admin/accounts?view=import';
     }
 }
 
-const Priv = omit(PRIV, ['PRIV_DEFAULT', 'PRIV_NEVER', 'PRIV_NONE', 'PRIV_ALL']);
-const allPriv = Math.sum(Object.values(Priv));
-
 class SystemUserPrivHandler extends SystemHandler {
-    @requireSudo
-    @param('extraIgnore', Types.NumericArray, true)
-    async get({}, extraIgnore: number[] = []) {
-        const defaultPriv = system.get('default.priv');
-        const udocs = await user
-            .getMulti({
-                _id: { $gte: -1000, $ne: 1 },
-                priv: { $nin: [0, defaultPriv, ...extraIgnore] },
-            })
-            .limit(1000)
-            .sort({ _id: 1 })
-            .toArray();
-        const banudocs = await user
-            .getMulti({ _id: { $gte: -1000, $ne: 1 }, priv: 0 })
-            .limit(1000)
-            .sort({ _id: 1 })
-            .toArray();
-        this.response.body = {
-            udocs: [...udocs, ...banudocs],
-            defaultPriv,
-            Priv,
-        };
-        this.response.pjax = 'partials/manage_user_priv.html';
-        this.response.template = 'manage_user_priv.html';
+    async get() {
+        this.response.redirect = '/admin/accounts?view=permissions';
     }
 
-    @requireSudo
-    @param('uid', Types.Int)
-    @param('priv', Types.UnsignedInt)
-    @param('system', Types.Boolean)
-    async post(domainId: string, uid: number, priv: number, editSystem: boolean) {
-        if (!editSystem) {
-            const udoc = await user.getById(domainId, uid);
-            if (!udoc) throw new UserNotFoundError(uid);
-            if (udoc.priv === -1 || priv === -1 || priv === allPriv) throw new CannotEditSuperAdminError();
-            await user.setPriv(uid, priv);
-        } else {
-            const defaultPriv = system.get('default.priv');
-            await user.coll.updateMany({ priv: defaultPriv }, { $set: { priv } });
-            await system.set('default.priv', priv);
-            this.ctx.broadcast('user/delcache', true);
-        }
-        this.back();
+    async post() {
+        this.response.redirect = '/admin/accounts?view=permissions';
     }
 }
 

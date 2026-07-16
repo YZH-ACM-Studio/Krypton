@@ -55,6 +55,14 @@ export interface KryptonUser {
   canImportRankboard?: boolean;
   /** system 域荣誉结构维护能力；MANAGE 蕴含 IMPORT。 */
   canManageRankboard?: boolean;
+  /** 管理员代理身份；只来自服务端 session，普通账号不可自行声明。 */
+  impersonation?: {
+    actorUid: number;
+    actorName: string;
+    targetUid: number;
+    targetName: string;
+    startedAt: string | null;
+  } | null;
 }
 
 export interface KryptonDomain {

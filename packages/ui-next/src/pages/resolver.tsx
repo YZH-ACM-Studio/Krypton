@@ -1,4 +1,5 @@
 import { useBootstrap } from '@/lib/bootstrap';
+import { AdminAccountsPage } from '@/pages/admin-accounts';
 import { DomainDashboardPage, ManageDashboardPage, StatusPage } from '@/pages/admin';
 import {
   AdminTasksAssignPage,
@@ -80,7 +81,7 @@ import { SpikeWebViewProbePage } from '@/pages/spike-webview';
 import { FunctionProblemEditorPage, ProgramFillProblemEditorPage } from '@/pages/structured-code-editors';
 import { SubjectiveProblemEditorPage } from '@/pages/subjective-editor';
 import { SudoPage, SudoRedirectPage } from '@/pages/sudo';
-import { ManageConfigPage, ManageScriptPage, ManageSettingPage, ManageUserImportPage, ManageUserPrivPage } from '@/pages/system-manage';
+import { ManageConfigPage, ManageScriptPage, ManageSettingPage } from '@/pages/system-manage';
 import { TaskCenterPage, TaskDetailPage, TaskMyPage } from '@/pages/tasks';
 import { TrainingDetailPage, TrainingPage } from '@/pages/training';
 import { TrainingEditPage, TrainingFilesPage } from '@/pages/training-manage';
@@ -223,10 +224,9 @@ const PAGE_MAP: Record<string, PageComponent> = {
   'manage_script.html': ManageScriptPage,
   'manage_setting.html': ManageSettingPage,
   'manage_config.html': ManageConfigPage,
-  'manage_user_import.html': ManageUserImportPage,
-  'manage_user_priv.html': ManageUserPrivPage,
   'manage_realpass.html': RealPassManagePage,
   'admin_stats.html': AdminStatsPage,
+  'admin_accounts.html': AdminAccountsPage,
 
   // Misc
   'status.html': StatusPage,

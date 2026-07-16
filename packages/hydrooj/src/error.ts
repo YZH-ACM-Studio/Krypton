@@ -81,6 +81,12 @@ export const ManualGradeConflictError = Err(
     'The submission or grade has changed. Reload the grading workspace and try again.',
     409,
 );
+export const AccountStateConflictError = Err(
+    'AccountStateConflictError',
+    UserFacingError,
+    'Account state changed ({0}). Reload the account workspace and try again.',
+    409,
+);
 export const ProblemNotAllowPretestError = Err('ProblemNotAllowPretestError', ForbiddenError, 'Pretesting is not supported for {0}.');
 export const ProblemNotAllowLanguageError = Err('ProblemNotAllowSubmitError', ForbiddenError, 'This language is not allowed to submit.');
 export const ProblemNotAllowCopyError = Err('ProblemNotAllowCopyError', ForbiddenError, 'You are not allowed to copy this problem from {0} to {1}.');

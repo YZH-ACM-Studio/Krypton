@@ -8,7 +8,7 @@ import * as oplog from '../model/oplog';
 import storage from '../model/storage';
 import system from '../model/system';
 import user, { User } from '../model/user';
-import { Handler, param, post, requireSudo, Types } from '../service/server';
+import { Handler, param, post, Types } from '../service/server';
 import { encodeRFC5987ValueChars } from '../service/storage';
 import { sortFiles } from '../utils';
 
@@ -125,12 +125,12 @@ export class StorageHandler extends Handler {
 }
 
 export class SwitchAccountHandler extends Handler {
-    @requireSudo
     @param('uid', Types.Int)
     async get({}, uid: number) {
-        this.session.sudoUid = this.user._id;
-        this.session.uid = uid;
-        this.back();
+        // Compatibility entry only. The actual identity switch is a POST on
+        // /admin/accounts with current-admin password re-authentication,
+        // protected-target checks and a dedicated audit trail.
+        this.response.redirect = `/admin/accounts?uid=${uid}&action=impersonate`;
     }
 }
 

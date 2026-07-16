@@ -223,6 +223,20 @@ export async function revokeAuthToken(id: ObjectId): Promise<boolean> {
 }
 
 /**
+ * Revoke every live user-bound KAT for an account. Account disable/password
+ * recovery uses this in addition to Hydro's core `token` collection so a
+ * desktop/tool credential cannot outlive the web sessions it was derived from.
+ */
+export async function revokeAuthTokensByUid(uid: number): Promise<number> {
+    const now = new Date();
+    const res = await coll.updateMany(
+        { uid, revoked: { $ne: true } },
+        { $set: { revoked: true, expiresAt: now } },
+    );
+    return res.modifiedCount;
+}
+
+/**
  * Renew: extend (or clear, with null) the expiry of a LIVE token. Refuses to
  * touch a revoked row — revoke is a permanent kill; a leaked secret must never
  * be resurrected. To re-grant access, issue a fresh token.

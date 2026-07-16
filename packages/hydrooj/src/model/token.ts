@@ -86,6 +86,14 @@ class TokenModel {
         return TokenModel.coll.find({ uid, tokenType: TokenModel.TYPE_SESSION }).sort('updateAt', -1).limit(100).toArray();
     }
 
+    /** Include sessions where this account is the original actor currently using proxy identity. */
+    static getAccountSessionListByUid(uid: number) {
+        return TokenModel.coll.find({
+            tokenType: TokenModel.TYPE_SESSION,
+            $or: [{ uid }, { sudoUid: uid }],
+        }).sort('updateAt', -1).limit(100).toArray();
+    }
+
     @ArgMethod
     static async getMostRecentSessionByUid(uid: number, projection: string[]) {
         return await TokenModel.coll.findOne(
@@ -97,6 +105,16 @@ class TokenModel {
     @ArgMethod
     static delByUid(uid: number) {
         return TokenModel.coll.deleteMany({ uid });
+    }
+
+    /** Revoke owned tokens plus any proxy session whose original actor is this account. */
+    static delAccountAccessByUid(uid: number) {
+        return TokenModel.coll.deleteMany({
+            $or: [
+                { uid },
+                { tokenType: TokenModel.TYPE_SESSION, sudoUid: uid },
+            ],
+        });
     }
 }
 

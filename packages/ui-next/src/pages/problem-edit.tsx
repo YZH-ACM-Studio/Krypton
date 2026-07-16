@@ -44,6 +44,25 @@ interface ManagedMindmapOption {
   tags: string[];
 }
 
+interface ProgrammingTagState {
+  mode: 'managed' | 'converted' | 'unconverted';
+  sourceTags: string[];
+  selectedNodeIds: string[];
+  suggestions?: Array<{ tag: string; nodeId: string; label: string }>;
+  ambiguousTags?: Array<{ tag: string; candidates: string[] }>;
+  unknownTags?: string[];
+}
+
+interface ProgrammingTagPreview {
+  sourceTags: string[];
+  selectedNodeIds: string[];
+  nextTags: string[];
+  retainedTags: string[];
+  addedTags: string[];
+  removedTags: string[];
+  fingerprint: string;
+}
+
 interface ManagedTrainingOption {
   id: string;
   title: string;
@@ -139,6 +158,8 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [open, setOpen] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<PermitRow | null>(null);
+  const [revokeBusy, setRevokeBusy] = useState(false);
   const [selectedUsers, setSelectedUsers] = useState<UserOption[]>([]);
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteError, setInviteError] = useState('');
@@ -188,11 +209,12 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
     [bs.domain?.id],
   );
 
-  async function revoke(permitId: string) {
-    if (!confirm('确定撤销该权限？')) return;
+  async function revoke() {
+    if (!revokeTarget) return;
+    setRevokeBusy(true);
     setLoadError('');
     const fd = new FormData();
-    fd.set('permitId', permitId);
+    fd.set('permitId', revokeTarget._id);
     try {
       const r = await fetch(`/p/${apiPid}/permits/revoke`, {
         method: 'POST',
@@ -204,9 +226,12 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
         setLoadError(await responseErrorMessage(r, '撤销权限失败'));
         return;
       }
+      setRevokeTarget(null);
       await refresh();
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : '撤销权限失败');
+    } finally {
+      setRevokeBusy(false);
     }
   }
 
@@ -300,7 +325,7 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
                   </p>
                 </div>
                 {p.role !== 'maintainer' || canManageMaintainers ? (
-                  <Button type="button" size="sm" variant="ghost" onClick={() => revoke(p._id)}>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setRevokeTarget(p)}>
                     撤销
                   </Button>
                 ) : null}
@@ -378,6 +403,41 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={revokeTarget !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && !revokeBusy) setRevokeTarget(null);
+        }}
+      >
+        <DialogContent className="w-full sm:w-[460px]" onClose={() => !revokeBusy && setRevokeTarget(null)}>
+          <DialogHeader>
+            <DialogTitle>确认撤销协作权限</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 p-5">
+            <p className="text-sm leading-6 text-muted-foreground">
+              确定撤销
+              <span className="mx-1 font-medium text-foreground">
+                {revokeTarget ? udict[revokeTarget.uid]?.uname || `uid:${revokeTarget.uid}` : ''}
+              </span>
+              的{revokeTarget ? PERMIT_ROLE_LABELS[revokeTarget.role] : '协作'}权限？
+            </p>
+            {loadError ? (
+              <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {loadError}
+              </p>
+            ) : null}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button type="button" variant="outline" disabled={revokeBusy} onClick={() => setRevokeTarget(null)}>
+                取消
+              </Button>
+              <Button type="button" variant="destructive" disabled={revokeBusy} onClick={revoke}>
+                {revokeBusy ? <Loader2 className="mr-1 size-4 animate-spin motion-reduce:animate-none" /> : null}
+                确认撤销
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </section>
@@ -520,15 +580,21 @@ export function ProblemEditPage() {
   const capabilities: R = data.problemAuthoringCapabilities || {};
   const isCreate = !pdoc.docId;
   const managedExisting = pdoc.authoringMode === 'managed' || capabilities.managed === true;
-  const canChooseManagedCreate = isCreate && data.canCreateManagedProblem === true && !data.managedCreateDefault;
-  const [managedCreateMode, setManagedCreateMode] = useState(data.managedCreateDefault === true);
-  const managed = managedExisting || (isCreate && managedCreateMode);
+  const managed = managedExisting || isCreate;
+  const canAssignManagedAuthor = isCreate && data.canAssignManagedAuthor === true;
+  const initialProgrammingTagState: ProgrammingTagState = data.programmingTagState || {
+    mode: 'managed',
+    sourceTags: [],
+    selectedNodeIds: (pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String),
+  };
+  const [programmingTagState, setProgrammingTagState] = useState<ProgrammingTagState>(initialProgrammingTagState);
+  const programmingTagMode = isCreate ? 'managed' : programmingTagState.mode;
+  const pidEditable = !managed && programmingTagMode === 'unconverted';
   const pid = pdoc.pid || pdoc.docId || '';
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const additionalFiles: R[] = data.additional_file || [];
   const testdataFiles: R[] = data.testdata || pdoc.data || [];
   const canEditDraftMetadata = !managed || capabilities.canEditDraftMetadata === true;
-  const canEditCanonicalMetadata = !managed || capabilities.canPublish === true;
   const canPublish = !managed;
   const canDelete = !managed || capabilities.canDelete === true;
   const canManageCollaborators = !managed || capabilities.canManageCollaborators === true;
@@ -553,13 +619,13 @@ export function ProblemEditPage() {
   const formRef = useRef<HTMLFormElement>(null);
   const editVersion = useRef(0);
 
-  const tags: string[] = pdoc.tag || [];
-  const [tagInput, setTagInput] = useState(tags.join(', '));
+  const [persistedTags, setPersistedTags] = useState<string[]>(pdoc.tag || []);
+  const [persistedStructureRevision, setPersistedStructureRevision] = useState<number | undefined>(pdoc.structureRevision);
   const [hiddenValue, setHiddenValue] = useState(isCreate || !!pdoc.hidden);
   const [lockHiddenValue, setLockHiddenValue] = useState(!!pdoc.lockHidden);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const sourceTemplates: ManagedSourceTemplateOption[] = data.managedSourceTemplates || [];
-  const mindmapOptions: ManagedMindmapOption[] = data.managedMindmapOptions || [];
+  const mindmapOptions: ManagedMindmapOption[] = data.programmingMindmapOptions || data.managedMindmapOptions || [];
   const trainingOptions: ManagedTrainingOption[] = data.managedTrainingOptions || [];
   const initialTemplate = pdoc.sourceMeta?.template || sourceTemplates[0]?.id || '';
   const [sourceTemplate, setSourceTemplate] = useState(initialTemplate);
@@ -569,10 +635,23 @@ export function ProblemEditPage() {
   const [sourceRound, setSourceRound] = useState(String(pdoc.sourceMeta?.round || 1));
   const [selectedManagedAuthors, setSelectedManagedAuthors] = useState<UserOption[]>([]);
   const [managedAuthorSearchError, setManagedAuthorSearchError] = useState('');
-  const initialMindmapIds = new Set((pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String));
+  const initialMindmapIds = isCreate
+    ? (pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String)
+    : programmingTagState.selectedNodeIds || [];
+  const mindmapOptionsById = new Map(mindmapOptions.map((option) => [option.id, option]));
   const [selectedMindmapNodes, setSelectedMindmapNodes] = useState<ManagedMindmapOption[]>(
-    mindmapOptions.filter((option) => initialMindmapIds.has(option.id)),
+    initialMindmapIds.map((id) => mindmapOptionsById.get(id)).filter((option): option is ManagedMindmapOption => !!option),
   );
+  const [persistedMindmapNodeIds, setPersistedMindmapNodeIds] = useState(initialMindmapIds);
+  const selectedMindmapNodeIds = selectedMindmapNodes.map((node) => node.id);
+  const tagSelectionDirty =
+    !managed &&
+    (selectedMindmapNodeIds.length !== persistedMindmapNodeIds.length ||
+      selectedMindmapNodeIds.some((nodeId, index) => nodeId !== persistedMindmapNodeIds[index]));
+  const [tagPreview, setTagPreview] = useState<ProgrammingTagPreview | null>(null);
+  const [tagPreviewOpen, setTagPreviewOpen] = useState(false);
+  const [tagOperationState, setTagOperationState] = useState<'idle' | 'previewing' | 'applying' | 'saved' | 'error'>('idle');
+  const [tagOperationError, setTagOperationError] = useState('');
   const [selectedTrainingId, setSelectedTrainingId] = useState(String(pdoc.managedAuthoring?.pendingTrainingPlacement?.trainingId || ''));
   const [selectedChapterId, setSelectedChapterId] = useState(String(pdoc.managedAuthoring?.pendingTrainingPlacement?.chapterId || ''));
   const selectedTemplateDefinition = sourceTemplates.find((template) => template.id === sourceTemplate);
@@ -581,13 +660,8 @@ export function ProblemEditPage() {
   const eligibleTrainings = trainingOptions.filter((training) => training.templates.includes(sourceTemplate));
   const selectedTraining = eligibleTrainings.find((training) => training.id === selectedTrainingId);
   const sourcePreviewTags = managedSourceTagPreview(sourceTemplate, sourceYear, sourceSeason, sourceLevel);
-  const managedTags = [
-    ...new Set([...(isCreate ? sourcePreviewTags : pdoc.tag || []), ...(isCreate ? selectedMindmapNodes.flatMap((node) => node.tags) : [])]),
-  ];
   const editorRevisionKey = JSON.stringify({
     draftContent,
-    managedCreateMode,
-    tagInput,
     hiddenValue,
     lockHiddenValue,
     sourceTemplate,
@@ -596,13 +670,13 @@ export function ProblemEditPage() {
     sourceLevel,
     sourceRound,
     managedAuthors: selectedManagedAuthors.map((author) => author._id),
-    mindmapNodes: selectedMindmapNodes.map((node) => node.id),
+    mindmapNodes: isCreate ? selectedMindmapNodeIds : undefined,
     selectedTrainingId,
     selectedChapterId,
   });
   const previousRevisionKey = useRef(editorRevisionKey);
   const dirtyState = useFormDirtyState(formRef, editorRevisionKey);
-  const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saveState === 'saving');
+  const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || tagSelectionDirty || saveState === 'saving' || tagOperationState === 'applying');
 
   const searchManagedAuthors = useCallback(
     async (query: string): Promise<UserOption[]> => {
@@ -656,12 +730,7 @@ export function ProblemEditPage() {
             ...pdoc,
             pid: String(fd.get('pid') || pdoc.pid || ''),
             title: String(fd.get('title') || pdoc.title || ''),
-            tag: fd.has('tag')
-              ? String(fd.get('tag') || '')
-                  .split(',')
-                  .map((tag) => tag.trim())
-                  .filter(Boolean)
-              : pdoc.tag || [],
+            tag: persistedTags,
             difficulty: Number(fd.get('difficulty') || pdoc.difficulty || 0),
           }
         : pdoc;
@@ -677,7 +746,96 @@ export function ProblemEditPage() {
     } finally {
       setDownloading(false);
     }
-  }, [additionalFiles, draftContent, isCreate, pdoc, problemUrl, testdataFiles]);
+  }, [additionalFiles, draftContent, isCreate, pdoc, persistedTags, problemUrl, testdataFiles]);
+
+  const requestTagNormalizationPreview = async () => {
+    setTagOperationError('');
+    if (!selectedMindmapNodeIds.length) {
+      setTagOperationError('请至少选择一个知识导图节点。');
+      setTagOperationState('error');
+      return;
+    }
+    setTagOperationState('previewing');
+    try {
+      const response = await fetch(`${problemUrl}/tags/preview`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: new URLSearchParams({ knowledgeNodeIds: selectedMindmapNodeIds.join(',') }),
+      });
+      if (!response.ok) {
+        throw new Error(await responseErrorMessage(response, response.status === 409 ? '题目或导图已变化，请刷新后重试' : '标签预览失败'));
+      }
+      const body = await response.json();
+      const preview = body?.preview as ProgrammingTagPreview | undefined;
+      if (
+        !preview ||
+        typeof preview.fingerprint !== 'string' ||
+        !Array.isArray(preview.selectedNodeIds) ||
+        !Array.isArray(preview.nextTags) ||
+        !Array.isArray(preview.retainedTags) ||
+        !Array.isArray(preview.addedTags) ||
+        !Array.isArray(preview.removedTags)
+      ) {
+        throw new Error('标签预览响应格式错误');
+      }
+      setTagPreview(preview);
+      setTagPreviewOpen(true);
+      setTagOperationState('idle');
+    } catch (error) {
+      console.error('Failed to preview programming tag normalization', error);
+      setTagOperationError(error instanceof Error ? error.message : '标签预览失败');
+      setTagOperationState('error');
+    }
+  };
+
+  const confirmTagNormalization = async () => {
+    if (!tagPreview) return;
+    setTagOperationError('');
+    setTagOperationState('applying');
+    try {
+      const response = await fetch(`${problemUrl}/tags/apply`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: new URLSearchParams({
+          knowledgeNodeIds: tagPreview.selectedNodeIds.join(','),
+          intent: 'normalize',
+          confirmed: 'true',
+          previewFingerprint: tagPreview.fingerprint,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await responseErrorMessage(response, response.status === 409 ? '预览已过期，请重新预览标签变化' : '标签规范化失败'));
+      }
+      const body = await response.json();
+      if (
+        body?.ok !== true ||
+        body?.programmingTagState?.mode !== 'converted' ||
+        (pdoc.problemKind && (!Number.isSafeInteger(body?.structureRevision) || body.structureRevision < 1))
+      ) {
+        throw new Error('标签规范化响应格式错误');
+      }
+      const normalizedNodeIds = tagPreview.selectedNodeIds.map(String);
+      const normalizedNodes = normalizedNodeIds
+        .map((nodeId) => mindmapOptionsById.get(nodeId))
+        .filter((option): option is ManagedMindmapOption => !!option);
+      setPersistedTags([...tagPreview.nextTags]);
+      if (Number.isSafeInteger(body.structureRevision)) setPersistedStructureRevision(body.structureRevision);
+      setSelectedMindmapNodes(normalizedNodes);
+      setPersistedMindmapNodeIds(normalizedNodeIds);
+      setProgrammingTagState({ mode: 'converted', sourceTags: [...tagPreview.sourceTags], selectedNodeIds: normalizedNodeIds });
+      setTagPreviewOpen(false);
+      setTagPreview(null);
+      setTagOperationState('saved');
+    } catch (error) {
+      console.error('Failed to apply programming tag normalization', error);
+      setTagPreviewOpen(false);
+      setTagPreview(null);
+      setTagOperationError(error instanceof Error ? error.message : '标签规范化失败');
+      setTagOperationState('error');
+    }
+  };
 
   const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
     const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
@@ -688,9 +846,17 @@ export function ProblemEditPage() {
     }
     e.preventDefault();
     setSaveError('');
-    if (managed && isCreate && canChooseManagedCreate && selectedManagedAuthors.length !== 1) {
+    if (managed && isCreate && canAssignManagedAuthor && selectedManagedAuthors.length !== 1) {
       const message = '请选择一名出题人。';
       setManagedAuthorSearchError(message);
+      setSaveError(message);
+      setSaveState('error');
+      return;
+    }
+    if (tagSelectionDirty) {
+      const message = '知识标签选择尚未确认；请先在“标签与知识导图”中预览并确认标签变化。';
+      setTagOperationError(message);
+      setTagOperationState('error');
       setSaveError(message);
       setSaveState('error');
       return;
@@ -827,24 +993,10 @@ export function ProblemEditPage() {
             aria-busy={saveState === 'saving'}
             className="space-y-6"
           >
-            {!isCreate && pdoc.problemKind && pdoc.structureRevision ? (
-              <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision)} />
+            {!isCreate && pdoc.problemKind && persistedStructureRevision ? (
+              <input type="hidden" name="expectedStructureRevision" value={String(persistedStructureRevision)} />
             ) : null}
             {isCreate && managed ? <input type="hidden" name="managed" value="true" /> : null}
-
-            {canChooseManagedCreate ? (
-              <section className="rounded-2xl border border-border/70 bg-card/30 p-5">
-                <label className="flex cursor-pointer items-start gap-3">
-                  <Checkbox checked={managedCreateMode} onCheckedChange={setManagedCreateMode} aria-label="创建托管题" />
-                  <span>
-                    <span className="block text-sm font-semibold">创建托管题并指定出题人</span>
-                    <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                      PID、来源标签和算法标签由服务端生成；关闭后保留管理员原有的完整创建方式。
-                    </span>
-                  </span>
-                </label>
-              </section>
-            ) : null}
 
             <section aria-labelledby="problem-content-heading" className="overflow-hidden rounded-2xl border border-border/70 bg-card/30">
               <header className="border-b border-border/60 px-5 py-4">
@@ -881,48 +1033,17 @@ export function ProblemEditPage() {
                     </label>
                     <Input
                       id="edit-pid"
-                      name={managed ? undefined : 'pid'}
+                      name={pidEditable ? 'pid' : undefined}
                       defaultValue={typeof pid === 'string' ? pid : ''}
-                      placeholder={managed ? '由服务端分配' : '如 P1001'}
+                      placeholder={managed ? '由服务端分配' : programmingTagMode === 'converted' ? '规范化后锁定' : '如 P1001'}
                       pattern="^(?:[a-z0-9]{1,10}-)?[a-zA-Z][a-zA-Z0-9]*$"
-                      readOnly={managed}
+                      readOnly={!pidEditable}
                     />
                   </div>
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_13rem]">
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium" htmlFor="edit-tag">
-                      <Tag className="mr-1 inline-block size-3.5" />
-                      标签
-                    </label>
-                    <Input
-                      id="edit-tag"
-                      name={managed ? undefined : 'tag'}
-                      value={managed ? managedTags.join(', ') : tagInput}
-                      onChange={(event) => {
-                        if (canEditCanonicalMetadata) setTagInput(event.target.value);
-                      }}
-                      placeholder={managed ? '托管题标签由审核流程确定' : '用逗号分隔，如：模拟, 数学, 贪心'}
-                      readOnly={managed}
-                    />
-                    {(managed ? managedTags.length : tagInput) ? (
-                      <div className="flex flex-wrap gap-1 pt-1">
-                        {(managed
-                          ? managedTags
-                          : tagInput
-                              .split(',')
-                              .map((tag) => tag.trim())
-                              .filter(Boolean)
-                        ).map((tag) => (
-                          <Badge key={tag} variant="secondary" className="text-[10px]">
-                            {tag}
-                          </Badge>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="space-y-1.5">
+                <div className="flex justify-end">
+                  <div className="w-full space-y-1.5 sm:w-52">
                     <label className="text-sm font-medium" htmlFor="edit-difficulty">
                       难度
                     </label>
@@ -947,6 +1068,141 @@ export function ProblemEditPage() {
                   </div>
                 </div>
               </div>
+
+              {!managed ? (
+                <div className="border-t border-border/60">
+                  <header className="px-5 py-4">
+                    <h3 className="flex items-center gap-2 text-sm font-semibold tracking-tight">
+                      <Tag className="size-4 text-muted-foreground" aria-hidden="true" />
+                      标签与知识导图
+                    </h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {programmingTagMode === 'unconverted'
+                        ? '旧标签只用于给出选择建议；普通保存不会改动它们，只有查看完整增删预览并确认后才会规范化。'
+                        : '来源标签只读保留；知识标签仅由所选节点及其带标签祖先实时派生。'}
+                    </p>
+                  </header>
+                  <div className="space-y-5 p-5 pt-0">
+                    <div className="rounded-xl bg-muted/45 px-4 py-3">
+                      <p className="text-xs font-medium text-muted-foreground">只读来源与赛事标签</p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {programmingTagState.sourceTags.length ? (
+                          programmingTagState.sourceTags.map((tag) => (
+                            <Badge key={tag} variant="secondary">
+                              {tag}
+                            </Badge>
+                          ))
+                        ) : (
+                          <span className="text-xs text-muted-foreground">当前没有可识别的来源标签</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {programmingTagMode === 'unconverted' ? (
+                      <div className="grid gap-3 lg:grid-cols-3">
+                        <div className="rounded-xl border border-border/70 px-4 py-3">
+                          <p className="text-xs font-semibold">唯一匹配建议</p>
+                          <div className="mt-2 space-y-2">
+                            {programmingTagState.suggestions?.length ? (
+                              programmingTagState.suggestions.map((suggestion) => (
+                                <div key={`${suggestion.tag}:${suggestion.nodeId}`} className="text-xs">
+                                  <Badge variant="outline">{suggestion.tag}</Badge>
+                                  <p className="mt-1 break-words text-muted-foreground">{suggestion.label}</p>
+                                </div>
+                              ))
+                            ) : (
+                              <span className="text-xs text-muted-foreground">没有可唯一反推的旧标签</span>
+                            )}
+                          </div>
+                          <p className="mt-3 text-[11px] leading-5 text-muted-foreground">建议已预填选择器，但尚未写入数据库。</p>
+                        </div>
+                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.035] px-4 py-3">
+                          <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">映射歧义</p>
+                          <div className="mt-2 space-y-2">
+                            {programmingTagState.ambiguousTags?.length ? (
+                              programmingTagState.ambiguousTags.map((entry) => (
+                                <div key={entry.tag} className="text-xs">
+                                  <Badge variant="outline">{entry.tag}</Badge>
+                                  <p className="mt-1 break-words text-muted-foreground">{entry.candidates.join('；')}</p>
+                                </div>
+                              ))
+                            ) : (
+                              <span className="text-xs text-muted-foreground">没有同名节点歧义</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-destructive/25 bg-destructive/[0.025] px-4 py-3">
+                          <p className="text-xs font-semibold text-destructive">无法识别的历史标签</p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {programmingTagState.unknownTags?.length ? (
+                              programmingTagState.unknownTags.map((tag) => (
+                                <Badge key={tag} variant="destructive">
+                                  {tag}
+                                </Badge>
+                              ))
+                            ) : (
+                              <span className="text-xs text-muted-foreground">没有无法识别的标签</span>
+                            )}
+                          </div>
+                          <p className="mt-3 text-[11px] leading-5 text-muted-foreground">确认规范化时，这些标签会列入删除项。</p>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="space-y-1.5">
+                      <label className="text-sm font-medium">算法知识点</label>
+                      <MultiSelect
+                        options={mindmapOptions}
+                        value={selectedMindmapNodes}
+                        onChange={(next) => {
+                          setSelectedMindmapNodes(next);
+                          setTagPreview(null);
+                          setTagOperationError('');
+                          setTagOperationState('idle');
+                        }}
+                        getKey={(node) => node.id}
+                        getLabel={(node) => node.label}
+                        getDescription={(node) => node.tags.join(' / ')}
+                        placeholder="按完整导图路径搜索，可多选"
+                        emptyText="没有可选的带标签节点"
+                        disabled={tagOperationState === 'previewing' || tagOperationState === 'applying'}
+                      />
+                      <p className="text-xs text-muted-foreground">服务端会重新读取节点与祖先；这里不接受自由标签文本。</p>
+                    </div>
+
+                    {tagOperationError ? (
+                      <p role="alert" className="rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                        {tagOperationError}
+                      </p>
+                    ) : null}
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <span aria-live="polite" className="text-xs text-muted-foreground">
+                        {tagOperationState === 'saved'
+                          ? '标签已按确认内容原子保存'
+                          : tagSelectionDirty
+                            ? '节点选择尚未确认'
+                            : programmingTagMode === 'unconverted'
+                              ? '建议选择尚未写入'
+                              : '节点选择与服务器一致'}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={requestTagNormalizationPreview}
+                        disabled={
+                          !selectedMindmapNodes.length ||
+                          tagOperationState === 'previewing' ||
+                          tagOperationState === 'applying' ||
+                          (programmingTagMode === 'converted' && !tagSelectionDirty)
+                        }
+                      >
+                        {tagOperationState === 'previewing' ? <Loader2 className="mr-1 size-3.5 animate-spin motion-reduce:animate-none" /> : null}
+                        {programmingTagMode === 'unconverted' ? '预览并规范化标签' : '预览标签变更'}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               {managed ? (
                 <div className="border-t border-border/60">
@@ -1043,7 +1299,7 @@ export function ProblemEditPage() {
                             <p className="text-xs text-muted-foreground">场次只进入来源元数据和训练章节，不生成标签。</p>
                           </div>
                         ) : null}
-                        {canChooseManagedCreate ? (
+                        {canAssignManagedAuthor ? (
                           <div className="space-y-1.5" role="group" aria-labelledby="managed-author-label">
                             <span id="managed-author-label" className="text-sm font-medium">
                               出题人
@@ -1168,6 +1424,36 @@ export function ProblemEditPage() {
                             : '未选择'}
                         </p>
                       </div>
+                      <div className="space-y-3 rounded-xl bg-muted/45 px-4 py-3 md:col-span-2">
+                        <div>
+                          <p className="text-xs text-muted-foreground">只读来源与赛事标签</p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {programmingTagState.sourceTags.length ? (
+                              programmingTagState.sourceTags.map((tag) => (
+                                <Badge key={tag} variant="secondary">
+                                  {tag}
+                                </Badge>
+                              ))
+                            ) : (
+                              <span className="text-xs text-muted-foreground">未识别到来源标签</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <p className="text-xs text-muted-foreground">已选知识导图节点</p>
+                          <MultiSelect
+                            options={mindmapOptions}
+                            value={selectedMindmapNodes}
+                            onChange={() => undefined}
+                            getKey={(node) => node.id}
+                            getLabel={(node) => node.label}
+                            getDescription={(node) => node.tags.join(' / ')}
+                            placeholder="没有已选节点"
+                            disabled
+                          />
+                          <p className="text-[11px] leading-5 text-muted-foreground">托管题继续使用创建时保存的节点引用，发布前由服务端重新物化。</p>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1285,6 +1571,71 @@ export function ProblemEditPage() {
           </form>
         </div>
       )}
+      <Dialog
+        open={tagPreviewOpen}
+        onOpenChange={(open) => {
+          if (tagOperationState === 'applying') return;
+          setTagPreviewOpen(open);
+          if (!open) setTagPreview(null);
+        }}
+      >
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{programmingTagMode === 'unconverted' ? '确认规范化历史标签' : '确认知识标签变更'}</DialogTitle>
+          </DialogHeader>
+          {tagPreview ? (
+            <div className="space-y-5">
+              <p className="text-sm leading-6 text-muted-foreground">
+                以下结果由服务器根据当前题目与实时导图计算。确认后会一次写入节点引用与完整派生标签；取消不会修改数据库。
+              </p>
+              <div className="grid gap-3 md:grid-cols-3">
+                {[
+                  { label: '保留', tags: tagPreview.retainedTags, tone: 'border-border/70' },
+                  { label: '新增', tags: tagPreview.addedTags, tone: 'border-emerald-500/30 bg-emerald-500/[0.035]' },
+                  { label: '删除', tags: tagPreview.removedTags, tone: 'border-destructive/30 bg-destructive/[0.025]' },
+                ].map((group) => (
+                  <div key={group.label} className={`rounded-xl border px-4 py-3 ${group.tone}`}>
+                    <p className="text-xs font-semibold">{group.label}</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {group.tags.length ? (
+                        group.tags.map((tag, index) => (
+                          <Badge key={`${group.label}:${tag}:${index}`} variant={group.label === '删除' ? 'destructive' : 'secondary'}>
+                            {tag}
+                          </Badge>
+                        ))
+                      ) : (
+                        <span className="text-xs text-muted-foreground">无</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {tagPreview.removedTags.length ? (
+                <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                  确认后，上述“删除”标签不会保留为自由文本；如选择有误，请取消并重新选择完整路径节点。
+                </p>
+              ) : null}
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={tagOperationState === 'applying'}
+                  onClick={() => {
+                    setTagPreviewOpen(false);
+                    setTagPreview(null);
+                  }}
+                >
+                  取消
+                </Button>
+                <Button type="button" disabled={tagOperationState === 'applying'} onClick={confirmTagNormalization}>
+                  {tagOperationState === 'applying' ? <Loader2 className="mr-1 size-4 animate-spin motion-reduce:animate-none" /> : null}
+                  确认并保存标签
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
       {navigationGuard.guardDialog}
     </ProblemEditorWorkspace>
   );

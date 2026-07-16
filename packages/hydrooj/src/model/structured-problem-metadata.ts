@@ -3,6 +3,7 @@ import { parseProblemKind, type ProblemKind } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
 import { ValidationError } from '../error';
 import type { ProblemDoc } from './problem';
+import { isCanonicalManagedSourceTag } from './managed-problem-source';
 
 const logger = new Logger('structured-problem-metadata');
 
@@ -63,7 +64,7 @@ function deny(
  * the validated pair.
  */
 export async function canonicalizeStructuredKnowledgePatch(
-    current: Pick<ProblemDoc, 'problemKind'>,
+    current: Pick<ProblemDoc, 'problemKind'> & Partial<Pick<ProblemDoc, 'authoringMode' | 'knowledgeNodeIds' | 'tag'>>,
     $set: Partial<ProblemDoc>,
     $unset: Record<string, unknown>,
     context: StructuredProblemMutationContext,
@@ -85,9 +86,12 @@ export async function canonicalizeStructuredKnowledgePatch(
         deny(context, current.problemKind, stage, ['problemKind'], 'problem-kind-mutation', 'problemKind', '题型创建后不可原地修改');
     }
 
-    if (current.problemKind === undefined) return false;
-    const problemKind = parseProblemKind(current.problemKind);
-    if (!DEDICATED_STRUCTURED_PROBLEM_KINDS.has(problemKind)) return false;
+    const problemKind = current.problemKind === undefined ? 'programming' : parseProblemKind(current.problemKind);
+    const convertedProgramming =
+        problemKind === 'programming' && current.authoringMode !== 'managed' && Object.hasOwn(current, 'knowledgeNodeIds');
+    const startsProgrammingConversion =
+        problemKind === 'programming' && current.authoringMode !== 'managed' && Object.hasOwn($set, 'knowledgeNodeIds');
+    if (!DEDICATED_STRUCTURED_PROBLEM_KINDS.has(problemKind) && !convertedProgramming && !startsProgrammingConversion) return false;
 
     const setsTag = Object.hasOwn($set, 'tag');
     const setsKnowledge = Object.hasOwn($set, 'knowledgeNodeIds');
@@ -112,11 +116,31 @@ export async function canonicalizeStructuredKnowledgePatch(
         Array.isArray($set.knowledgeNodeIds) && !$set.knowledgeNodeIds.length
             ? { nodeIds: [], tags: [] }
             : await (await import('./managed-problem-authoring')).materializeKnowledgeMindmapTags($set.knowledgeNodeIds);
-    if (!Array.isArray($set.tag) || !isDeepStrictEqual($set.tag, knowledge.tags)) {
+    if (problemKind === 'programming' && !knowledge.nodeIds.length) {
+        deny(
+            context,
+            problemKind,
+            stage,
+            ['tag', 'knowledgeNodeIds'],
+            'empty-programming-knowledge',
+            'knowledgeNodeIds',
+            '编程题标签规范化至少需要一个知识导图节点',
+        );
+    }
+    const canonicalTags =
+        problemKind === 'programming'
+            ? [
+                  ...new Set([
+                      ...(Array.isArray(current.tag) ? current.tag.filter(isCanonicalManagedSourceTag) : []),
+                      ...knowledge.tags,
+                  ]),
+              ]
+            : knowledge.tags;
+    if (!Array.isArray($set.tag) || !isDeepStrictEqual($set.tag, canonicalTags)) {
         deny(context, problemKind, stage, ['tag', 'knowledgeNodeIds'], 'tag-mismatch', 'tag', '结构化题标签与知识导图派生结果不一致');
     }
     $set.knowledgeNodeIds = knowledge.nodeIds;
-    $set.tag = knowledge.tags;
+    $set.tag = canonicalTags;
     logger.info(
         'Structured knowledge write canonicalized domain=%s pid=%d kind=%s actor=%s operation=%s stage=%s nodes=%d tags=%d result=allowed',
         context.domainId,
@@ -126,7 +150,7 @@ export async function canonicalizeStructuredKnowledgePatch(
         context.operation,
         stage,
         knowledge.nodeIds.length,
-        knowledge.tags.length,
+        canonicalTags.length,
     );
     return true;
 }

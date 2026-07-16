@@ -374,6 +374,119 @@ describe('P2.14 managed problem mindmap tags', () => {
     });
 });
 
+describe('P2.17 legacy programming tag normalization', () => {
+    const root = new ObjectId('64b000000000000000000021');
+    const unique = new ObjectId('64b000000000000000000022');
+    const duplicateA = new ObjectId('64b000000000000000000023');
+    const duplicateB = new ObjectId('64b000000000000000000024');
+    const mindmapVersion = new Date('2026-07-16T00:00:00.000Z');
+
+    beforeEach(() => {
+        mindmapDocs = [
+            { _id: root, parentId: null, topic: '算法', tags: ['算法'], updatedAt: new Date(mindmapVersion.getTime()) },
+            { _id: unique, parentId: root, topic: '二分', tags: ['二分'], updatedAt: new Date(mindmapVersion.getTime()) },
+            { _id: duplicateA, parentId: root, topic: '快速幂 A', tags: ['快速幂'], updatedAt: new Date(mindmapVersion.getTime()) },
+            { _id: duplicateB, parentId: root, topic: '快速幂 B', tags: ['快速幂'], updatedAt: new Date(mindmapVersion.getTime()) },
+        ];
+    });
+
+    it('classifies source, unique, ambiguous, and unknown legacy tags without writing a selection', async () => {
+        const options = await authoring.listKnowledgeMindmapOptions();
+        const classified = authoring.classifyLegacyProgrammingTags(['PAT乙级', '2026春', '二分', '快速幂', 'Dijksrta'], options);
+
+        expect(classified.sourceTags).to.deep.equal(['PAT乙级', '2026春']);
+        expect(classified.suggestions).to.deep.equal([
+            { tag: '二分', nodeId: unique.toHexString(), label: '算法 / 二分' },
+        ]);
+        expect(classified.suggestedNodeIds).to.deep.equal([unique.toHexString()]);
+        expect(classified.ambiguousTags).to.deep.equal([
+            { tag: '快速幂', candidates: ['算法 / 快速幂 A', '算法 / 快速幂 B'] },
+        ]);
+        expect(classified.unknownTags).to.deep.equal(['Dijksrta']);
+    });
+
+    it('previews one explicit atomic replacement with retained source tags and live ancestors', async () => {
+        const preview = await authoring.previewProgrammingTagNormalization({
+            domainId: 'system',
+            docId: 17,
+            structureRevision: 9,
+            currentTags: ['二分', 'PAT乙级', 'Dijksrta'],
+            selectedNodeIds: [unique.toHexString()],
+        });
+
+        expect(preview.sourceTags).to.deep.equal(['PAT乙级']);
+        expect(preview.nextTags).to.deep.equal(['PAT乙级', '算法', '二分']);
+        expect(preview.retainedTags).to.deep.equal(['二分', 'PAT乙级']);
+        expect(preview.addedTags).to.deep.equal(['算法']);
+        expect(preview.removedTags).to.deep.equal(['Dijksrta']);
+        expect(preview.selectedNodeIds.map(String)).to.deep.equal([unique.toHexString()]);
+        expect(preview.fingerprint).to.match(/^[a-f0-9]{64}$/);
+    });
+
+    it('requires at least one live node and changes the fingerprint when source state changes', async () => {
+        await expectReject(
+            authoring.previewProgrammingTagNormalization({
+                domainId: 'system',
+                docId: 17,
+                structureRevision: 9,
+                currentTags: ['PAT乙级'],
+                selectedNodeIds: [],
+            }),
+            'knowledgeNodeIds',
+        );
+        const first = await authoring.previewProgrammingTagNormalization({
+            domainId: 'system',
+            docId: 17,
+            structureRevision: 9,
+            currentTags: ['PAT乙级'],
+            selectedNodeIds: [unique.toHexString()],
+        });
+        const changed = await authoring.previewProgrammingTagNormalization({
+            domainId: 'system',
+            docId: 17,
+            structureRevision: 10,
+            currentTags: ['PAT乙级', '2026春'],
+            selectedNodeIds: [unique.toHexString()],
+        });
+        expect(changed.fingerprint).not.to.equal(first.fingerprint);
+
+        const legacy = await authoring.previewProgrammingTagNormalization({
+            domainId: 'system',
+            docId: 18,
+            structureRevision: undefined,
+            currentTags: ['PAT乙级'],
+            selectedNodeIds: [unique.toHexString()],
+        });
+        expect(legacy.fingerprint).to.match(/^[a-f0-9]{64}$/);
+        expect(legacy.fingerprint).not.to.equal(first.fingerprint);
+    });
+
+    it('invalidates a preview when the selected full path changes without changing its tags', async () => {
+        const first = await authoring.previewProgrammingTagNormalization({
+            domainId: 'system',
+            docId: 17,
+            structureRevision: 9,
+            currentTags: ['PAT乙级', '二分'],
+            selectedNodeIds: [unique.toHexString()],
+        });
+        mindmapDocs = mindmapDocs.map((node) =>
+            node._id.equals(unique)
+                ? { ...node, topic: '二分查找', updatedAt: new Date(mindmapVersion.getTime() + 1) }
+                : node,
+        );
+        const renamed = await authoring.previewProgrammingTagNormalization({
+            domainId: 'system',
+            docId: 17,
+            structureRevision: 9,
+            currentTags: ['PAT乙级', '二分'],
+            selectedNodeIds: [unique.toHexString()],
+        });
+
+        expect(renamed.nextTags).to.deep.equal(first.nextTags);
+        expect(renamed.fingerprint).not.to.equal(first.fingerprint);
+    });
+});
+
 describe('P2.14 managed problem training placement', () => {
     const trainingId = new ObjectId('64b000000000000000000010');
 

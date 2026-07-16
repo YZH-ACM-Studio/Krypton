@@ -299,6 +299,44 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(structural).not.to.include('document.coll.findOneAndUpdate(');
     });
 
+    it('applies programming tag normalization under one claim with preview and final CAS', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const start = source.indexOf('static async applyProgrammingTagNormalization(');
+        const end = source.indexOf('static async claimStructureLockForSubmission', start);
+        const method = source.slice(start, end);
+
+        expect(start).to.be.greaterThan(-1);
+        expect(method).to.include("'programming-tag-normalize'");
+        expect(method).to.include('const preview = await previewProgrammingTagNormalization({');
+        expect(method.indexOf('preview.fingerprint !== input.previewFingerprint')).to.be.lessThan(method.indexOf('ProblemModel.editWithClaim('));
+        expect(method).to.include('{ tag: preview.nextTags, knowledgeNodeIds: preview.selectedNodeIds }');
+        expect(method).to.include('expectedStructureRevision: current.structureRevision');
+        expect(method).to.include('expectedTag: current.tag || []');
+        expect(method).to.include("{ capability: 'maintain' }");
+        expect(method).to.include('Programming tag normalization succeeded');
+
+        const editStart = source.indexOf('static async editWithClaim(');
+        const editEnd = source.indexOf('static async editAuthorized(', editStart);
+        const edit = source.slice(editStart, editEnd);
+        expect(edit).to.include("claim.operation === 'programming-tag-normalize'");
+        expect(edit).to.include('写入钩子不能改变用户已确认的标签结果');
+    });
+
+    it('keeps ordinary programming saves free of hook-injected tag writes', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const rawStart = source.indexOf('static async edit(');
+        const rawEnd = source.indexOf('static async beginAuthorizedWriteClaim(', rawStart);
+        const rawEdit = source.slice(rawStart, rawEnd);
+        const claimedStart = source.indexOf('static async editWithClaim(');
+        const claimedEnd = source.indexOf('static async editAuthorized(', claimedStart);
+        const claimedEdit = source.slice(claimedStart, claimedEnd);
+
+        expect(rawEdit).to.include('const preserveProgrammingTagPair =');
+        expect(rawEdit).to.include('未请求标签变更时，写入钩子不能修改编程题标签');
+        expect(claimedEdit).to.include('const preserveProgrammingTagPair =');
+        expect(claimedEdit).to.include('Programming tag hook write rejected');
+    });
+
     it('keeps managed PID, kind, system tags, source metadata, and confirmed title outside generic edits', () => {
         const source = readFileSync(resolve(root, 'src/model/managed-problem-patch.ts'), 'utf8');
         const guardStart = source.indexOf('export function managedProblemPatchCapability(');

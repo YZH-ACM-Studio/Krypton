@@ -51,7 +51,7 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(handler).to.include("ctx.Route('problem_create', '/problem/create', ProblemCreateHubHandler");
     expect(handler).to.include("problemKindToSlug('programming')");
     expect(handler).to.include('ProblemCreateProgrammingHandler');
-    expect(handler).to.match(/problem\.createProblemByKind\(\s*'programming'/);
+    expect(handler).to.include('problem.createManagedProgrammingDraft(');
     expect(shell).to.include("const createDisabledReason = '创建题目后可用'");
     expect(shell).to.include('disabled: isCreate || !collaborationEnabled');
     expect(shell).to.include('取得真实题号后，评测配置、文件与协作功能会在完整工作区开放');
@@ -108,8 +108,9 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(edit).to.include("name={!managed || canSubmitManagedWorkingTitle ? 'title' : undefined}");
     expect(edit).to.include("const managedMetadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft'");
     expect(edit).to.match(/managedMetadataDraft\s*\? pdoc\.managedAuthoring\?\.workingTitle \|\| ''\s*: pdoc\.title \|\| ''/);
-    expect(edit).to.include("name={managed ? undefined : 'pid'}");
-    expect(edit).to.include("name={managed ? undefined : 'tag'}");
+    expect(edit).to.include("name={pidEditable ? 'pid' : undefined}");
+    expect(edit).not.to.include("name={managed ? undefined : 'tag'}");
+    expect(edit).not.to.include('id="edit-tag"');
     expect(config).to.include("formData.append('operation', 'upload_file')");
     expect(config).to.include("formData.append('type', 'testdata')");
     expect(config).to.include("formData.append('filename', 'config.yaml')");

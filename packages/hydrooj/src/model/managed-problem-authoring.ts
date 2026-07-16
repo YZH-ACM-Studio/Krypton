@@ -1,29 +1,32 @@
 import { ObjectId } from 'mongodb';
+import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { Logger } from '@hydrooj/utils';
 import { ManagedProblemMetadataConflictError, ValidationError } from '../error';
 import type { ProblemDoc, TrainingNode } from '../interface';
 import db from '../service/db';
 import * as document from './document';
+import {
+    isCanonicalManagedSourceTag,
+    isManagedAnnualSourceTag,
+    MANAGED_FIXED_SOURCE_TAGS,
+    MANAGED_SOURCE_TEMPLATES,
+    type ManagedSourceMeta,
+    type ManagedSourceTemplate,
+} from './managed-problem-source';
+
+export {
+    isCanonicalManagedSourceTag,
+    isManagedAnnualSourceTag,
+    MANAGED_SOURCE_TEMPLATES,
+} from './managed-problem-source';
+export type {
+    ManagedSourceMeta,
+    ManagedSourceTemplate,
+    ManagedSourceTemplateDefinition,
+} from './managed-problem-source';
 
 const logger = new Logger('managed-problem-authoring');
-
-export type ManagedSourceMeta = NonNullable<ProblemDoc['sourceMeta']>;
-export type ManagedSourceTemplate = ManagedSourceMeta['template'];
-
-type TemplateField = 'year' | 'season' | 'level' | 'round';
-
-export interface ManagedSourceTemplateDefinition {
-    id: ManagedSourceTemplate;
-    label: string;
-    fields: TemplateField[];
-    /** Tags emitted for every problem created from this template. */
-    fixedTags: string[];
-    /** Finite field-derived tags that are valid choices in shared catalogs. */
-    selectableTags?: string[];
-    /** Tag used to decide whether an existing training accepts this template. */
-    trainingAnchorTag: string;
-}
 
 export interface KnowledgeMindmapOption {
     id: string;
@@ -35,6 +38,24 @@ export interface CanonicalProblemTagOption {
     value: string;
     label: string;
     group: '算法知识点' | '来源与赛事';
+}
+
+export interface LegacyProgrammingTagClassification {
+    sourceTags: string[];
+    suggestions: Array<{ tag: string; nodeId: string; label: string }>;
+    suggestedNodeIds: string[];
+    ambiguousTags: Array<{ tag: string; candidates: string[] }>;
+    unknownTags: string[];
+}
+
+export interface ProgrammingTagNormalizationPreview {
+    sourceTags: string[];
+    selectedNodeIds: ObjectId[];
+    nextTags: string[];
+    retainedTags: string[];
+    addedTags: string[];
+    removedTags: string[];
+    fingerprint: string;
 }
 
 export type ManagedMindmapOption = KnowledgeMindmapOption;
@@ -84,6 +105,14 @@ interface MindmapNodeRecord {
     parentId: ObjectId | null;
     topic: string;
     tags: string[];
+    updatedAt: Date;
+}
+
+interface MindmapPathVersion {
+    id: string;
+    parentId: string | null;
+    topic: string;
+    updatedAt: string;
 }
 
 interface PidCounterDoc {
@@ -92,50 +121,6 @@ interface PidCounterDoc {
     value: number;
     updatedAt: Date;
 }
-
-export const MANAGED_SOURCE_TEMPLATES: readonly ManagedSourceTemplateDefinition[] = [
-    { id: 'pat_basic', label: 'PAT 乙级', fields: ['year', 'season'], fixedTags: ['PAT乙级'], trainingAnchorTag: 'PAT乙级' },
-    { id: 'pat_advanced', label: 'PAT 甲级', fields: ['year', 'season'], fixedTags: ['PAT甲级'], trainingAnchorTag: 'PAT甲级' },
-    {
-        id: 'gplt_national',
-        label: '天梯全国总决赛',
-        fields: ['year', 'level'],
-        fixedTags: ['天梯赛全国总决赛'],
-        selectableTags: ['L1', 'L2', 'L3'],
-        trainingAnchorTag: '天梯赛全国总决赛',
-    },
-    {
-        id: 'gplt_provincial',
-        label: '天梯省级赛',
-        fields: ['year', 'level'],
-        fixedTags: ['天梯赛省级赛'],
-        selectableTags: ['L1', 'L2', 'L3'],
-        trainingAnchorTag: '天梯赛省级赛',
-    },
-    { id: 'cauc', label: 'CAUC 校赛', fields: ['year'], fixedTags: ['CAUC校赛'], trainingAnchorTag: 'CAUC校赛' },
-    { id: 'self', label: '自命题', fields: ['year'], fixedTags: ['自命题'], trainingAnchorTag: '自命题' },
-    {
-        id: 'nowcoder_summer',
-        label: '牛客暑期多校',
-        fields: ['year', 'round'],
-        fixedTags: ['MultiSchool', '牛客暑期多校'],
-        trainingAnchorTag: '牛客暑期多校',
-    },
-    {
-        id: 'hdu_summer',
-        label: '杭电暑期多校',
-        fields: ['year', 'round'],
-        fixedTags: ['MultiSchool', '杭电暑期多校'],
-        trainingAnchorTag: '杭电暑期多校',
-    },
-    {
-        id: 'hdu_spring',
-        label: '杭电春季赛',
-        fields: ['year', 'round'],
-        fixedTags: ['杭电春季赛'],
-        trainingAnchorTag: '杭电春季赛',
-    },
-] as const;
 
 const TEMPLATE_BY_ID = new Map(MANAGED_SOURCE_TEMPLATES.map((template) => [template.id, template]));
 const mindmapNodesColl = db.collection<MindmapNodeRecord>('mindmap.nodes');
@@ -294,7 +279,7 @@ function normalizeNodeIds(nodeIds: unknown, required: boolean, field: 'knowledge
 }
 
 async function loadMindmapNodes(): Promise<MindmapNodeRecord[]> {
-    return mindmapNodesColl.find({}, { projection: { _id: 1, parentId: 1, topic: 1, tags: 1 } }).toArray();
+    return mindmapNodesColl.find({}, { projection: { _id: 1, parentId: 1, topic: 1, tags: 1, updatedAt: 1 } }).toArray();
 }
 
 function buildNodePath(node: MindmapNodeRecord, byId: Map<string, MindmapNodeRecord>): MindmapNodeRecord[] {
@@ -330,19 +315,103 @@ export async function listKnowledgeMindmapOptions(): Promise<KnowledgeMindmapOpt
 
 export const listManagedMindmapOptions = listKnowledgeMindmapOptions;
 
-const MANAGED_ANNUAL_SOURCE_TAG_PATTERNS = [
-    /^(?:20\d{2}|2100)[春夏秋冬]$/,
-    /^(?:20\d{2}|2100)CCCC(?:-省)?$/,
-    /^(?:20\d{2}|2100)校赛$/,
-    /^(?:20\d{2}|2100)自命题$/,
-    /^(?:20\d{2}|2100)牛客暑期多校$/,
-    /^(?:20\d{2}|2100)杭电暑期多校$/,
-    /^(?:20\d{2}|2100)HDU-S$/,
-] as const;
+function requireStoredProblemTags(input: unknown): string[] {
+    if (!Array.isArray(input) || input.some((tag) => typeof tag !== 'string')) {
+        throw new TypeError('stored problem tags must be a string array');
+    }
+    return [...input];
+}
 
-/** Annual source tags are selectable only when one currently exists in this domain. */
-export function isManagedAnnualSourceTag(value: unknown): value is string {
-    return typeof value === 'string' && MANAGED_ANNUAL_SOURCE_TAG_PATTERNS.some((pattern) => pattern.test(value));
+/** Classify one legacy tag array without selecting or writing any node. */
+export function classifyLegacyProgrammingTags(
+    currentTagsInput: unknown,
+    mindmapOptions: readonly KnowledgeMindmapOption[],
+): LegacyProgrammingTagClassification {
+    const currentTags = requireStoredProblemTags(currentTagsInput);
+    const nodesByTag = new Map<string, KnowledgeMindmapOption[]>();
+    for (const option of mindmapOptions) {
+        for (const tag of option.tags) {
+            const candidates = nodesByTag.get(tag) || [];
+            if (!candidates.some((candidate) => candidate.id === option.id)) candidates.push(option);
+            nodesByTag.set(tag, candidates);
+        }
+    }
+    const sourceTags: string[] = [];
+    const suggestions: LegacyProgrammingTagClassification['suggestions'] = [];
+    const ambiguousTags: LegacyProgrammingTagClassification['ambiguousTags'] = [];
+    const unknownTags: string[] = [];
+    for (const tag of currentTags) {
+        if (isCanonicalManagedSourceTag(tag)) {
+            sourceTags.push(tag);
+            continue;
+        }
+        const candidates = nodesByTag.get(tag) || [];
+        if (candidates.length === 1) {
+            suggestions.push({ tag, nodeId: candidates[0].id, label: candidates[0].label });
+        } else if (candidates.length > 1) {
+            ambiguousTags.push({ tag, candidates: candidates.map((candidate) => candidate.label) });
+        } else {
+            unknownTags.push(tag);
+        }
+    }
+    return {
+        sourceTags,
+        suggestions,
+        suggestedNodeIds: [...new Set(suggestions.map((suggestion) => suggestion.nodeId))],
+        ambiguousTags,
+        unknownTags,
+    };
+}
+
+/** Re-read the live tree and build the exact atomic replacement shown in the confirmation dialog. */
+export async function previewProgrammingTagNormalization(input: {
+    domainId: string;
+    docId: number;
+    structureRevision?: number;
+    currentTags: unknown;
+    selectedNodeIds: unknown;
+}): Promise<ProgrammingTagNormalizationPreview> {
+    const currentTags = requireStoredProblemTags(input.currentTags);
+    if (
+        input.structureRevision !== undefined &&
+        (!Number.isSafeInteger(input.structureRevision) || input.structureRevision < 1)
+    ) {
+        throw new TypeError('programming problem structureRevision must be a positive integer');
+    }
+    const knowledge = await materializeKnowledgeMindmapState(input.selectedNodeIds, {
+        required: true,
+        field: 'knowledgeNodeIds',
+        includePathVersion: true,
+    });
+    const sourceTags = currentTags.filter(isCanonicalManagedSourceTag);
+    const nextTags = [...new Set([...sourceTags, ...knowledge.tags])];
+    const currentSet = new Set(currentTags);
+    const nextSet = new Set(nextTags);
+    const retainedTags = currentTags.filter((tag) => nextSet.has(tag));
+    const addedTags = nextTags.filter((tag) => !currentSet.has(tag));
+    const removedTags = currentTags.filter((tag) => !nextSet.has(tag));
+    const fingerprint = createHash('sha256')
+        .update(
+            JSON.stringify({
+                domainId: input.domainId,
+                docId: input.docId,
+                structureRevision: input.structureRevision ?? null,
+                currentTags,
+                selectedNodeIds: knowledge.nodeIds.map(String),
+                nextTags,
+                mindmapPathVersion: knowledge.pathVersion,
+            }),
+        )
+        .digest('hex');
+    return {
+        sourceTags,
+        selectedNodeIds: knowledge.nodeIds,
+        nextTags,
+        retainedTags,
+        addedTags,
+        removedTags,
+        fingerprint,
+    };
 }
 
 /**
@@ -375,11 +444,7 @@ export async function listCanonicalProblemTagOptions(domainId: string): Promise<
         });
     }
 
-    const sourceTags = new Set<string>();
-    for (const template of MANAGED_SOURCE_TEMPLATES) {
-        for (const tag of template.fixedTags) sourceTags.add(tag);
-        for (const tag of template.selectableTags || []) sourceTags.add(tag);
-    }
+    const sourceTags = new Set<string>(MANAGED_FIXED_SOURCE_TAGS);
     for (const tag of existingProblemTags as unknown[]) {
         if (isManagedAnnualSourceTag(tag)) sourceTags.add(tag);
     }
@@ -392,28 +457,53 @@ export async function listCanonicalProblemTagOptions(domainId: string): Promise<
 }
 
 /** Re-read the live tree and materialize every tagged ancestor of each selection. */
-export async function materializeKnowledgeMindmapTags(
+async function materializeKnowledgeMindmapState(
     nodeIdsInput: unknown,
-    options: { required?: boolean; field?: 'knowledgeNodeIds' | 'mindmapNodeIds' } = {},
-): Promise<{ nodeIds: ObjectId[]; tags: string[] }> {
+    options: { required?: boolean; field?: 'knowledgeNodeIds' | 'mindmapNodeIds'; includePathVersion?: boolean } = {},
+): Promise<{ nodeIds: ObjectId[]; tags: string[]; pathVersion: MindmapPathVersion[] }> {
     const nodeIds = normalizeNodeIds(nodeIdsInput, options.required === true, options.field || 'knowledgeNodeIds');
-    if (!nodeIds.length) return { nodeIds: [], tags: [] };
+    if (!nodeIds.length) return { nodeIds: [], tags: [], pathVersion: [] };
     const nodes = await loadMindmapNodes();
     const byId = new Map(nodes.map((node) => [node._id.toHexString(), node]));
     const tags: string[] = [];
+    const pathVersion = new Map<string, MindmapPathVersion>();
     for (const id of nodeIds) {
         const node = byId.get(id);
         if (!node || !Array.isArray(node.tags) || !node.tags.some((tag) => typeof tag === 'string' && tag.trim())) {
             throw new ManagedProblemMetadataConflictError(`导图节点 ${id} 已删除或不可选`);
         }
         for (const pathNode of buildNodePath(node, byId)) {
+            if (options.includePathVersion) {
+                if (!(pathNode.updatedAt instanceof Date) || Number.isNaN(pathNode.updatedAt.getTime())) {
+                    throw new TypeError(`mindmap node ${pathNode._id.toHexString()} updatedAt must be a valid date`);
+                }
+                const pathNodeId = pathNode._id.toHexString();
+                pathVersion.set(pathNodeId, {
+                    id: pathNodeId,
+                    parentId: pathNode.parentId?.toHexString() || null,
+                    topic: pathNode.topic,
+                    updatedAt: pathNode.updatedAt.toISOString(),
+                });
+            }
             for (const tag of Array.isArray(pathNode.tags) ? pathNode.tags : []) {
                 const normalized = typeof tag === 'string' ? tag.trim() : '';
                 if (normalized && !tags.includes(normalized)) tags.push(normalized);
             }
         }
     }
-    return { nodeIds: nodeIds.map((id) => new ObjectId(id)), tags };
+    return {
+        nodeIds: nodeIds.map((id) => new ObjectId(id)),
+        tags,
+        pathVersion: [...pathVersion.values()].sort((left, right) => left.id.localeCompare(right.id)),
+    };
+}
+
+export async function materializeKnowledgeMindmapTags(
+    nodeIdsInput: unknown,
+    options: { required?: boolean; field?: 'knowledgeNodeIds' | 'mindmapNodeIds' } = {},
+): Promise<{ nodeIds: ObjectId[]; tags: string[] }> {
+    const { nodeIds, tags } = await materializeKnowledgeMindmapState(nodeIdsInput, options);
+    return { nodeIds, tags };
 }
 
 export function materializeManagedMindmapTags(nodeIdsInput: unknown): Promise<{ nodeIds: ObjectId[]; tags: string[] }> {

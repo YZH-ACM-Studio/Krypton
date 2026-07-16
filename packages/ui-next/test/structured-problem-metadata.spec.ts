@@ -143,7 +143,7 @@ describe('P3.16 structured metadata and unsaved-navigation contracts', () => {
     expect(rawEdit).to.include('requireKnowledgePair: knowledgePairRequired');
     expect(create).to.include('args.knowledgeNodeIds = meta.knowledgeNodeIds ?? []');
     expect(create.match(/canonicalizeStructuredKnowledgePatch\(/g)).to.have.length(2);
-    expect(create).to.include("{ requireKnowledgePair: problemKind !== 'programming' }");
+    expect(create).to.include("{ requireKnowledgePair: problemKind !== 'programming' || meta.knowledgeNodeIds !== undefined }");
     expect(clone).to.include('cloneKnowledge = await materializeKnowledgeMindmapTags(original.knowledgeNodeIds ?? [])');
     expect(clone).to.include('cloneKnowledge?.tags ?? original.tag');
     expect(access.match(/canonicalizeStructuredKnowledgePatch\(/g)).to.have.length(2);

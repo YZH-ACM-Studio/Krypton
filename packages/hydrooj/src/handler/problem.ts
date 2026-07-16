@@ -56,12 +56,15 @@ import { markManualPending } from '../model/manual-grade';
 import * as oplog from '../model/oplog';
 import problem from '../model/problem';
 import {
+    classifyLegacyProgrammingTags,
     listKnowledgeMindmapOptions,
     listManagedMindmapOptions,
     listManagedTrainingOptions,
     MANAGED_SOURCE_TEMPLATES,
     materializeKnowledgeMindmapTags,
+    previewProgrammingTagNormalization,
 } from '../model/managed-problem-authoring';
+import { isCanonicalManagedSourceTag } from '../model/managed-problem-source';
 import { structuredProblemConfigForEditor, structuredProblemUsesTestdata } from '../model/problem-lifecycle';
 import record from '../model/record';
 import * as setting from '../model/setting';
@@ -92,6 +95,55 @@ type DedicatedStructuredEditorKind = BasicObjectiveKind | typeof SUBJECTIVE_KIND
 
 function isDedicatedStructuredEditorKind(kind: ReturnType<typeof effectiveProblemKind>): kind is DedicatedStructuredEditorKind {
     return isBasicObjectiveKind(kind) || [SUBJECTIVE_KIND, PROGRAM_FILL_KIND, FUNCTION_KIND].includes(kind as any);
+}
+
+function programmingTagEditorState(pdoc: ProblemDoc, mindmapOptions: Awaited<ReturnType<typeof listKnowledgeMindmapOptions>>) {
+    const classification = classifyLegacyProgrammingTags(pdoc.tag || [], mindmapOptions);
+    if (pdoc.authoringMode === 'managed') {
+        return {
+            mode: 'managed' as const,
+            sourceTags: classification.sourceTags,
+            selectedNodeIds: (pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String),
+        };
+    }
+    if (Object.hasOwn(pdoc, 'knowledgeNodeIds')) {
+        return {
+            mode: 'converted' as const,
+            sourceTags: classification.sourceTags,
+            selectedNodeIds: (pdoc.knowledgeNodeIds || []).map(String),
+        };
+    }
+    return { mode: 'unconverted' as const, ...classification, selectedNodeIds: classification.suggestedNodeIds };
+}
+
+function programmingTagPreviewResponse(preview: Awaited<ReturnType<typeof previewProgrammingTagNormalization>>) {
+    return { ...preview, selectedNodeIds: preview.selectedNodeIds.map(String) };
+}
+
+function logProgrammingTagNormalizationRejected(
+    pdoc: ProblemDoc,
+    actor: number,
+    stage: 'preview' | 'confirm',
+    selectedNodeIds: unknown,
+    error: unknown,
+) {
+    const tags = Array.isArray(pdoc.tag) ? pdoc.tag : [];
+    const sourceTags = tags.filter(isCanonicalManagedSourceTag);
+    const selectedNodeCount = Array.isArray(selectedNodeIds) ? selectedNodeIds.length : 0;
+    logger.warn(
+        'Programming tag normalization rejected domain=%s pid=%s docId=%d actor=%d stage=%s result=rejected oldTagCount=%d sourceTagCount=%d selectedNodeCount=%d addedTagCount=0 removedTagCount=0 revision=%s sourceTags=%o error=%o',
+        pdoc.domainId,
+        pdoc.pid || `P${pdoc.docId}`,
+        pdoc.docId,
+        actor,
+        stage,
+        tags.length,
+        sourceTags.length,
+        selectedNodeCount,
+        pdoc.structureRevision ?? '-',
+        sourceTags,
+        error,
+    );
 }
 
 function structuredEditorTemplate(kind: DedicatedStructuredEditorKind): string {
@@ -1151,15 +1203,22 @@ export class ProblemEditHandler extends ProblemManageHandler {
         this.response.body.testdata = sortFiles(this.pdoc.data || []);
         this.response.body.additional_file = sortFiles(this.pdoc.additional_file || []);
         this.response.body.statementLangs = this.ctx.i18n.langs(false);
-        if (this.pdoc.authoringMode === 'managed') {
-            const [managedMindmapOptions, managedTrainingOptions] = await Promise.all([
-                listManagedMindmapOptions(),
-                listManagedTrainingOptions(this.pdoc.domainId),
+        const problemKind = effectiveProblemKind(this.pdoc);
+        if (problemKind === 'programming') {
+            const [programmingMindmapOptions, managedTrainingOptions] = await Promise.all([
+                listKnowledgeMindmapOptions(),
+                this.pdoc.authoringMode === 'managed' ? listManagedTrainingOptions(this.pdoc.domainId) : Promise.resolve([]),
             ]);
             Object.assign(this.response.body, {
-                managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
-                managedMindmapOptions,
-                managedTrainingOptions,
+                programmingMindmapOptions,
+                programmingTagState: programmingTagEditorState(this.pdoc, programmingMindmapOptions),
+                ...(this.pdoc.authoringMode === 'managed'
+                    ? {
+                          managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
+                          managedMindmapOptions: programmingMindmapOptions,
+                          managedTrainingOptions,
+                      }
+                    : {}),
             });
         }
         // 原始 config YAML（本页 gated by ProblemManageHandler）：前端类型
@@ -1167,7 +1226,6 @@ export class ProblemEditHandler extends ProblemManageHandler {
         // 该路由对缺失文件不返回 404（照签跳转链接），新题/无 config 题的
         // 类型编辑永远初始化失败（Rev.12 bug 修复）。
         const rawPdoc = await requireStableEditableProblem(this.user, this.pdoc, ['config'] as any, true);
-        const problemKind = effectiveProblemKind(this.pdoc);
         if (isDedicatedStructuredEditorKind(problemKind)) {
             const config = parseProblemConfigObject(rawPdoc);
             const editorConfig = structuredProblemConfigForEditor(problemKind, config);
@@ -1224,6 +1282,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
         const managed = this.pdoc.authoringMode === 'managed';
         const body = this.request.body || {};
         const dedicatedStructured = isDedicatedStructuredEditorKind(problemKind);
+        const legacyProgramming = !managed && problemKind === 'programming';
         let structuredKnowledge: Awaited<ReturnType<typeof materializeKnowledgeMindmapTags>> | null = null;
         if (!managed && title === undefined) throw new ValidationError('title');
         if (managed) {
@@ -1260,6 +1319,28 @@ export class ProblemEditHandler extends ProblemManageHandler {
             if (forbiddenFields.length) {
                 await auditManagedWriteDenied(this, this.pdoc, 'edit', 'fields', forbiddenFields);
                 throw new ValidationError('fields', null, `当前角色不可修改字段：${forbiddenFields.join(', ')}`);
+            }
+        }
+        if (legacyProgramming) {
+            const canonicalFields = ['tag', 'knowledgeNodeIds'].filter((field) => Object.hasOwn(body, field));
+            if (canonicalFields.length) {
+                logger.warn(
+                    'Programming tag write rejected domain=%s pid=%d actor=%d stage=ordinary-save fields=%o result=denied',
+                    domainId,
+                    this.pdoc.docId,
+                    this.user._id,
+                    canonicalFields,
+                );
+                throw new ValidationError('fields', null, '编程题标签只能从知识导图选择并单独确认');
+            }
+            if (Object.hasOwn(this.pdoc, 'knowledgeNodeIds') && Object.hasOwn(body, 'pid')) {
+                logger.warn(
+                    'Converted programming PID write rejected domain=%s pid=%d actor=%d stage=ordinary-save result=denied',
+                    domainId,
+                    this.pdoc.docId,
+                    this.user._id,
+                );
+                throw new ValidationError('pid', null, '已规范化编程题的编号不可自由修改');
             }
         }
         if (dedicatedStructured) {
@@ -1324,10 +1405,14 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 title,
                 pid: newPid,
                 hidden,
-                tag: structuredKnowledge ? structuredKnowledge.tags : (tag ?? []),
-                ...(structuredKnowledge ? { knowledgeNodeIds: structuredKnowledge.nodeIds } : {}),
                 difficulty: difficulty ?? 0,
                 lockHidden: !!lockHidden,
+                ...(structuredKnowledge
+                    ? {
+                          tag: structuredKnowledge.tags,
+                          knowledgeNodeIds: structuredKnowledge.nodeIds,
+                      }
+                    : {}),
             });
         } else {
             if (Object.hasOwn(body, 'title')) {
@@ -1377,6 +1462,96 @@ export class ProblemEditHandler extends ProblemManageHandler {
         const responsePid = newPid || pdoc.docId;
         this.response.body = { ok: true, pid: responsePid, problemKind };
         this.response.redirect = this.url('problem_detail', { pid: responsePid });
+    }
+}
+
+export class ProblemProgrammingTagPreviewHandler extends ProblemManageHandler {
+    @route('pid', Types.ProblemId)
+    @post('knowledgeNodeIds', Types.CommaSeperatedArray)
+    async post(_domainId: string, _pid: string | number, knowledgeNodeIds: string[]) {
+        try {
+            const bodyFields = Object.keys(this.request.body || {});
+            if (bodyFields.some((field) => field !== 'knowledgeNodeIds')) {
+                throw new ValidationError('fields', null, '标签预览只接受知识导图节点');
+            }
+            const domainId = this.pdoc.domainId;
+            await problem.assertProgrammingTagNormalizationUnlocked(domainId, this.pdoc.docId);
+            const live = await requireStableEditableProblem(this.user, this.pdoc, problem.PROJECTION_MANAGED_EDITOR);
+            const preview = await previewProgrammingTagNormalization({
+                domainId,
+                docId: live.docId,
+                structureRevision: live.structureRevision,
+                currentTags: live.tag || [],
+                selectedNodeIds: knowledgeNodeIds,
+            });
+            logger.info(
+                'Programming tag normalization previewed domain=%s pid=%s docId=%d actor=%d stage=preview result=success oldTagCount=%d sourceTagCount=%d selectedNodeCount=%d addedTagCount=%d removedTagCount=%d revision=%s sourceTags=%o addedTags=%o removedTags=%o',
+                domainId,
+                live.pid || `P${live.docId}`,
+                live.docId,
+                this.user._id,
+                live.tag?.length || 0,
+                preview.sourceTags.length,
+                preview.selectedNodeIds.length,
+                preview.addedTags.length,
+                preview.removedTags.length,
+                live.structureRevision ?? 'legacy',
+                preview.sourceTags,
+                preview.addedTags,
+                preview.removedTags,
+            );
+            this.response.body = { ok: true, preview: programmingTagPreviewResponse(preview) };
+        } catch (error) {
+            logProgrammingTagNormalizationRejected(this.pdoc, this.user._id, 'preview', knowledgeNodeIds, error);
+            throw error;
+        }
+    }
+}
+
+export class ProblemProgrammingTagApplyHandler extends ProblemManageHandler {
+    @route('pid', Types.ProblemId)
+    @post('knowledgeNodeIds', Types.CommaSeperatedArray)
+    @post('intent', Types.String)
+    @post('confirmed', Types.Boolean)
+    @post('previewFingerprint', Types.String)
+    async post(
+        _domainId: string,
+        _pid: string | number,
+        knowledgeNodeIds: string[],
+        intent: string,
+        confirmed: boolean,
+        previewFingerprint: string,
+    ) {
+        try {
+            const bodyFields = Object.keys(this.request.body || {});
+            const allowedFields = new Set(['knowledgeNodeIds', 'intent', 'confirmed', 'previewFingerprint']);
+            if (bodyFields.some((field) => !allowedFields.has(field))) {
+                throw new ValidationError('fields', null, '标签规范化请求包含未允许字段');
+            }
+            if (intent !== 'normalize' || confirmed !== true) {
+                throw new ValidationError('confirmed', null, '请先查看完整增删预览并明确确认');
+            }
+            const result = await problem.applyProgrammingTagNormalization({
+                domainId: this.pdoc.domainId,
+                pid: this.pdoc.docId,
+                user: this.user,
+                selectedNodeIds: knowledgeNodeIds,
+                previewFingerprint,
+            });
+            this.response.body = {
+                ok: true,
+                pid: result.pdoc.pid || result.pdoc.docId,
+                structureRevision: result.pdoc.structureRevision,
+                programmingTagState: {
+                    mode: 'converted',
+                    sourceTags: result.preview.sourceTags,
+                    selectedNodeIds: result.preview.selectedNodeIds.map(String),
+                },
+            };
+        } catch (error) {
+            logProgrammingTagNormalizationRejected(this.pdoc, this.user._id, 'confirm', knowledgeNodeIds, error);
+            throw error;
+        }
     }
 }
 
@@ -2091,11 +2266,11 @@ export class ProblemCreateProgrammingHandler extends Handler {
         const legacyCreate = this.user.hasPerm(PERM.PERM_CREATE_PROBLEM);
         const managedCreate = this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         if (!legacyCreate && !managedCreate) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
-        const restricted = !legacyCreate;
-        const canCreateManagedProblem = restricted || problem.isProblemBankAdmin(this.user);
-        const [managedMindmapOptions, managedTrainingOptions] = canCreateManagedProblem
-            ? await Promise.all([listManagedMindmapOptions(), listManagedTrainingOptions(String(this.domain?._id))])
-            : [[], []];
+        const canAssignManagedAuthor = problem.isProblemBankAdmin(this.user);
+        const [managedMindmapOptions, managedTrainingOptions] = await Promise.all([
+            listManagedMindmapOptions(),
+            listManagedTrainingOptions(String(this.domain?._id)),
+        ]);
         this.response.template = 'problem_edit.html';
         this.response.body = {
             page_name: 'problem_create_programming',
@@ -2104,31 +2279,26 @@ export class ProblemCreateProgrammingHandler extends Handler {
             pdoc: {
                 hidden: true,
                 problemKind: 'programming',
-                ...(restricted
-                    ? {
-                          authoringMode: 'managed',
-                          managedAuthoring: { workingTitle: '', selectedMindmapNodeIds: [], metadataStatus: 'draft' },
-                      }
-                    : {}),
+                authoringMode: 'managed',
+                managedAuthoring: { workingTitle: '', selectedMindmapNodeIds: [], metadataStatus: 'draft' },
             },
-            canCreateManagedProblem,
-            managedCreateDefault: restricted,
+            canCreateManagedProblem: true,
+            canAssignManagedAuthor,
+            managedCreateDefault: true,
             managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
             managedMindmapOptions,
             managedTrainingOptions,
-            problemAuthoringCapabilities: restricted
-                ? {
-                      managed: true,
-                      canEditContent: true,
-                      canEditDraftMetadata: false,
-                      canManageCollaborators: false,
-                      canManageMaintainers: false,
-                      canPublish: false,
-                      canArchive: false,
-                      canDelete: false,
-                      canClone: false,
-                  }
-                : null,
+            problemAuthoringCapabilities: {
+                managed: true,
+                canEditContent: true,
+                canEditDraftMetadata: false,
+                canManageCollaborators: false,
+                canManageMaintainers: false,
+                canPublish: false,
+                canArchive: false,
+                canDelete: false,
+                canClone: false,
+            },
         };
     }
 
@@ -2152,10 +2322,10 @@ export class ProblemCreateProgrammingHandler extends Handler {
         _domainId: string,
         title: string,
         content: string,
-        pid: string | number = '',
+        _pid: string | number = '',
         _hidden = false,
         difficulty = 0,
-        tag: string[] = [],
+        _tag: string[] = [],
         managed = false,
         template = '',
         year: string | number = '',
@@ -2173,92 +2343,70 @@ export class ProblemCreateProgrammingHandler extends Handler {
         if (!legacyCreate && !managedCreate) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
-        const managedMode = !legacyCreate || managed;
-        if (managedMode) {
-            const isBankAdmin = problem.isProblemBankAdmin(this.user);
-            if (legacyCreate && !isBankAdmin) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
-            const allowed = new Set([
-                'title',
-                'content',
-                'managed',
-                'template',
-                'year',
-                'season',
-                'level',
-                'round',
-                'difficulty',
-                'mindmapNodeIds',
-                'trainingId',
-                'chapterId',
-                ...(isBankAdmin ? ['authorUid'] : []),
-            ]);
-            const unknownFields = Object.keys(this.request.body || {}).filter((field) => !allowed.has(field));
-            if (unknownFields.length) {
-                logger.warn('Managed draft create rejected domain=%s actor=%d fields=%o result=denied', domainId, this.user._id, unknownFields);
-                await oplog.log(this, 'problem.managed.write.denied', {
-                    action: 'create',
-                    fields: unknownFields,
-                    result: 'denied',
-                });
-                throw new ValidationError('fields', null, `托管草稿不接受字段：${unknownFields.join(', ')}`);
-            }
-            if (isBankAdmin && !authorUid) throw new ValidationError('authorUid');
-            if (!isBankAdmin && authorUid) throw new ValidationError('authorUid');
-            if (isBankAdmin) {
-                const author = await user.getById(domainId, authorUid);
-                if (!author || author._id !== authorUid) throw new ValidationError('authorUid');
-            }
-            const sourceMeta = {
-                template,
-                year,
-                ...(season ? { season } : {}),
-                ...(level ? { level } : {}),
-                ...(round ? { round } : {}),
-            };
-            const created = await problem.createManagedProgrammingDraft(
-                domainId,
-                {
-                    workingTitle: title,
-                    content,
-                    difficulty,
-                    sourceMeta,
-                    mindmapNodeIds,
-                    ...(trainingId || chapterId ? { pendingTrainingPlacement: { trainingId, chapterId } } : {}),
-                    ...(isBankAdmin ? { authorUid } : {}),
-                },
-                this.user._id,
-                isBankAdmin ? this.user : undefined,
-            );
-            this.response.body = {
-                ok: true,
-                pid: created.pid,
-                docId: created.docId,
-                hidden: true,
-                problemKind: 'programming',
-                authoringMode: 'managed',
-                structureRevision: 1,
-            };
-            this.response.redirect = this.url('problem_edit', { pid: created.pid });
-            return;
+        const isBankAdmin = problem.isProblemBankAdmin(this.user);
+        const allowed = new Set([
+            'title',
+            'content',
+            'managed',
+            'template',
+            'year',
+            'season',
+            'level',
+            'round',
+            'difficulty',
+            'mindmapNodeIds',
+            'trainingId',
+            'chapterId',
+            ...(isBankAdmin ? ['authorUid'] : []),
+        ]);
+        const unknownFields = Object.keys(this.request.body || {}).filter((field) => !allowed.has(field));
+        if (unknownFields.length || managed !== true) {
+            const fields = [...unknownFields, ...(managed === true ? [] : ['managed'])];
+            logger.warn('Managed draft create rejected domain=%s actor=%d fields=%o result=denied', domainId, this.user._id, fields);
+            await oplog.log(this, 'problem.managed.write.denied', {
+                action: 'create',
+                fields,
+                result: 'denied',
+            });
+            throw new ValidationError('fields', null, `托管草稿不接受字段或创建模式：${fields.join(', ')}`);
         }
-        if (typeof pid !== 'string') pid = `P${pid}`;
-        if (pid && (await problem.get(domainId, pid))) throw new ProblemAlreadyExistError(pid);
-        const docId = await problem.createProblemByKind('programming', domainId, pid, title, content, this.user._id, tag ?? [], { difficulty });
-        const files = new Set(Array.from(content.matchAll(/file:\/\/([\w-]+\.[a-zA-Z0-9]+)/g)).map((i) => i[1]));
-        const tasks = [];
-        for (const file of files) {
-            if (this.user._files.find((i) => i.name === file)) {
-                tasks.push(
-                    storage
-                        .rename(`user/${this.user._id}/${file}`, `problem/${domainId}/${docId}/additional_file/${file}`, this.user._id)
-                        .then(() => problem.addAdditionalFile(domainId, docId, file, '', this.user._id, true)),
-                    user.setById(this.user._id, { _files: this.user._files.filter((i) => i.name !== file) }),
-                );
-            }
+        if (isBankAdmin && !authorUid) throw new ValidationError('authorUid');
+        if (!isBankAdmin && authorUid) throw new ValidationError('authorUid');
+        if (isBankAdmin) {
+            const author = await user.getById(domainId, authorUid);
+            if (!author || author._id !== authorUid) throw new ValidationError('authorUid');
         }
-        await Promise.all(tasks);
-        this.response.body = { ok: true, pid: pid || docId, hidden: true, problemKind: 'programming', structureRevision: 1 };
-        this.response.redirect = this.url('problem_files', { pid: pid || docId });
+        const sourceMeta = {
+            template,
+            year,
+            ...(season ? { season } : {}),
+            ...(level ? { level } : {}),
+            ...(round ? { round } : {}),
+        };
+        const created = await problem.createManagedProgrammingDraft(
+            domainId,
+            {
+                workingTitle: title,
+                content,
+                difficulty,
+                sourceMeta,
+                mindmapNodeIds,
+                ...(trainingId || chapterId ? { pendingTrainingPlacement: { trainingId, chapterId } } : {}),
+                ...(isBankAdmin ? { authorUid } : {}),
+            },
+            this.user._id,
+            isBankAdmin ? this.user : undefined,
+        );
+        this.response.body = {
+            ok: true,
+            pid: created.pid,
+            docId: created.docId,
+            hidden: true,
+            problemKind: 'programming',
+            authoringMode: 'managed',
+            structureRevision: 1,
+        };
+        this.response.redirect = this.url('problem_edit', { pid: created.pid });
     }
 }
 
@@ -2335,6 +2483,8 @@ export async function apply(ctx: Context) {
     ctx.Route('problem_submit', '/p/:pid/submit', ProblemSubmitHandler, PERM.PERM_SUBMIT_PROBLEM);
     ctx.Route('problem_hack', '/p/:pid/hack/:rid', ProblemHackHandler, PERM.PERM_SUBMIT_PROBLEM);
     ctx.Route('problem_edit', '/p/:pid/edit', ProblemEditHandler);
+    ctx.Route('problem_programming_tags_preview', '/p/:pid/tags/preview', ProblemProgrammingTagPreviewHandler);
+    ctx.Route('problem_programming_tags_apply', '/p/:pid/tags/apply', ProblemProgrammingTagApplyHandler);
     ctx.Route('problem_config', '/p/:pid/config', ProblemConfigHandler);
     ctx.Route('problem_files', '/p/:pid/files', ProblemFilesHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_file_download', '/p/:pid/file/:filename', ProblemFileDownloadHandler);

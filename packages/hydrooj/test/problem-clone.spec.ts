@@ -82,4 +82,30 @@ describe('physical problem storage clone', () => {
         });
         expect((failure!.error as Error).message).to.equal('disk failure');
     });
+
+    it('re-materializes converted programming tags while preserving unconverted legacy clones', () => {
+        const source = readFileSync(resolve(__dirname, '../src/model/problem.ts'), 'utf8');
+        const start = source.indexOf('static async copy(');
+        const end = source.indexOf('static push<', start);
+        const method = source.slice(start, end);
+
+        expect(method).to.include("problemKind === 'programming'");
+        expect(method).to.include("original.authoringMode !== 'managed'");
+        expect(method).to.include("Object.hasOwn(original, 'knowledgeNodeIds')");
+        expect(method).to.include('cloneKnowledge = await materializeKnowledgeMindmapTags(original.knowledgeNodeIds ?? [])');
+        expect(method).to.include('cloneKnowledge?.tags ?? original.tag');
+        expect(method).to.include('knowledgeNodeIds: cloneKnowledge?.nodeIds');
+    });
+
+    it('keeps trusted programming imports legacy unless canonical node IDs are explicitly supplied', () => {
+        const source = readFileSync(resolve(__dirname, '../src/model/problem.ts'), 'utf8');
+        const start = source.indexOf('static async addWithId(');
+        const end = source.indexOf('static async createManagedProgrammingDraft', start);
+        const method = source.slice(start, end);
+
+        expect(method).to.include("problemKind === 'programming' && meta.knowledgeNodeIds !== undefined");
+        expect(method).to.include('args.knowledgeNodeIds = meta.knowledgeNodeIds');
+        expect(method).to.include("requireKnowledgePair: problemKind !== 'programming' || meta.knowledgeNodeIds !== undefined");
+        expect(method).not.to.include("if (problemKind === 'programming') args.knowledgeNodeIds = []");
+    });
 });

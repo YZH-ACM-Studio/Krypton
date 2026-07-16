@@ -69,6 +69,8 @@ const calls = {
     status: [] as any[],
     structuredMetadataSaves: [] as any[],
     structuredSaves: [] as any[],
+    tagNormalizations: [] as any[],
+    tagUnlocks: [] as any[],
     contestUpdates: [] as any[],
     storageGet: [] as any[],
     storageGetMeta: [] as any[],
@@ -168,6 +170,19 @@ const problemStub = {
         createKinds.push('managed-programming');
         calls.add.push(args);
         return { docId: 7, pid: 'P3101' };
+    },
+    async assertProgrammingTagNormalizationUnlocked(...args: any[]) {
+        calls.tagUnlocks.push(args);
+    },
+    async applyProgrammingTagNormalization(input: any) {
+        calls.tagNormalizations.push(input);
+        return {
+            pdoc: { domainId: input.domainId, docId: input.pid, pid: 'P7', structureRevision: 5 },
+            preview: {
+                sourceTags: ['PAT乙级'],
+                selectedNodeIds: input.selectedNodeIds,
+            },
+        };
     },
     async addAdditionalFile(...args: any[]) {
         calls.renameFile.push(args);
@@ -378,6 +393,13 @@ const managedAuthoringStub = {
     listKnowledgeMindmapOptions: async () => [{ id: 'node-1', label: '数据结构 / 线段树', tags: ['线段树'] }],
     listManagedMindmapOptions: async () => [{ id: 'node-1', label: '数据结构 / 线段树', tags: ['线段树'] }],
     listManagedTrainingOptions: async () => [],
+    classifyLegacyProgrammingTags: (tags: string[]) => ({
+        sourceTags: tags.filter((tag) => tag === 'PAT乙级'),
+        suggestions: tags.includes('二分') ? [{ tag: '二分', nodeId: 'node-1', label: '数据结构 / 线段树' }] : [],
+        suggestedNodeIds: tags.includes('二分') ? ['node-1'] : [],
+        ambiguousTags: [],
+        unknownTags: tags.filter((tag) => !['PAT乙级', '二分'].includes(tag)),
+    }),
     materializeKnowledgeMindmapTags: async (nodeIds: string[]) => {
         calls.knowledgeMaterializations.push([...nodeIds]);
         if (nodeIds.includes('stale-node')) throw new GenericError('stale knowledge node');
@@ -386,6 +408,15 @@ const managedAuthoringStub = {
             tags: nodeIds.map((nodeId) => `derived:${nodeId}`),
         };
     },
+    previewProgrammingTagNormalization: async (input: any) => ({
+        sourceTags: (input.currentTags || []).filter((tag: string) => tag === 'PAT乙级'),
+        selectedNodeIds: [...input.selectedNodeIds],
+        nextTags: ['PAT乙级', ...input.selectedNodeIds.map((nodeId: string) => `derived:${nodeId}`)],
+        retainedTags: ['PAT乙级'],
+        addedTags: input.selectedNodeIds.map((nodeId: string) => `derived:${nodeId}`),
+        removedTags: (input.currentTags || []).filter((tag: string) => tag !== 'PAT乙级'),
+        fingerprint: 'preview-fingerprint',
+    }),
 };
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     if (request === '../error') return errors;
@@ -470,6 +501,8 @@ const {
     ProblemCreateSubjectiveHandler,
     ProblemDetailHandler,
     ProblemEditHandler,
+    ProblemProgrammingTagApplyHandler,
+    ProblemProgrammingTagPreviewHandler,
     ProblemConfigHandler,
     ProblemFileDownloadHandler,
     ProblemFilesHandler,
@@ -745,8 +778,18 @@ describe('P2.11 authoritative problem route domain', () => {
         const handler = makeHandler(ProblemCreateProgrammingHandler, {
             hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM,
         });
-        await handler.post('forged', 'Title', 'Statement', '', false, 0, []);
+        handler.request.body = {
+            title: 'Title',
+            content: 'Statement',
+            managed: 'true',
+            template: 'self',
+            year: '2026',
+            difficulty: '2',
+            mindmapNodeIds: 'node-1',
+        };
+        await handler.post('forged', 'Title', 'Statement', '', false, 2, [], true, 'self', 2026, '', '', 0, ['node-1']);
         expect(calls.add[0][0]).to.equal('system');
+        expect(createKinds).to.deep.equal(['managed-programming']);
     });
 
     it('creates a field-restricted managed draft and assigns the trusted creator path', async () => {
@@ -756,6 +799,7 @@ describe('P2.11 authoritative problem route domain', () => {
         handler.request.body = {
             title: 'Working title',
             content: 'Statement',
+            managed: 'true',
             template: 'pat_basic',
             year: '2026',
             season: 'spring',
@@ -763,7 +807,7 @@ describe('P2.11 authoritative problem route domain', () => {
             mindmapNodeIds: 'node-1',
         };
 
-        await handler.post('forged', 'Working title', 'Statement', '', false, 4, [], false, 'pat_basic', 2026, 'spring', '', 0, ['node-1']);
+        await handler.post('forged', 'Working title', 'Statement', '', false, 4, [], true, 'pat_basic', 2026, 'spring', '', 0, ['node-1']);
 
         expect(createKinds).to.deep.equal(['managed-programming']);
         expect(calls.add[0]).to.deep.equal([
@@ -790,7 +834,7 @@ describe('P2.11 authoritative problem route domain', () => {
         ]) {
             handler.request.body = { ...validBody, [field]: value };
             const forged = await captureFailure(() =>
-                handler.post('forged', 'Working title', 'Statement', 'P9999', false, 4, [], false, 'pat_basic', 2026, 'spring', '', 0, ['node-1']),
+                handler.post('forged', 'Working title', 'Statement', 'P9999', false, 4, [], true, 'pat_basic', 2026, 'spring', '', 0, ['node-1']),
             );
             expect(forged).to.be.instanceOf(GenericError);
         }
@@ -804,6 +848,7 @@ describe('P2.11 authoritative problem route domain', () => {
         const commonBody = {
             title: 'Working title',
             content: 'Statement',
+            managed: 'true',
             year: '2026',
             difficulty: '4',
         };
@@ -834,7 +879,7 @@ describe('P2.11 authoritative problem route domain', () => {
                 false,
                 4,
                 [],
-                false,
+                true,
                 testCase.args[0],
                 testCase.args[1],
                 '',
@@ -890,7 +935,7 @@ describe('P2.11 authoritative problem route domain', () => {
         const denied = await captureFailure(() =>
             teacher.post('forged', 'Admin draft', 'Statement', '', false, 3, [], true, 'self', 2026, '', '', 0, ['node-1'], undefined, 0, 77),
         );
-        expect(denied).to.be.instanceOf(TestPermissionError);
+        expect(denied).to.be.instanceOf(GenericError);
     });
 
     it('submits and hacks against the loaded problem domain', async () => {
@@ -1069,6 +1114,116 @@ describe('P2.13 managed programming edit boundary', () => {
         expect(calls.renameFile).to.have.lengthOf(0);
         expect(calls.oplog.at(-1)?.[1]).to.equal('problem.managed.write.denied');
         expect(calls.oplog.at(-1)?.[2]?.fields).to.deep.equal(['hidden']);
+    });
+});
+
+describe('P2.17 programming tag HTTP boundaries', () => {
+    it('serves the managed creation protocol to legacy creators and bank administrators alike', async () => {
+        for (const user of [
+            { hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM },
+            { admin: true, hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM },
+        ]) {
+            const handler = makeHandler(ProblemCreateProgrammingHandler, user);
+            await handler.get();
+            expect(handler.response.body.pdoc.authoringMode).to.equal('managed');
+            expect(handler.response.body.managedCreateDefault).to.equal(true);
+            expect(handler.response.body.managedMindmapOptions).to.have.length(1);
+            expect(handler.response.body.canAssignManagedAuthor).to.equal(user.admin === true);
+        }
+    });
+
+    it('preserves an unconverted legacy tag array exactly during an ordinary edit save', async () => {
+        const handler = makeHandler(ProblemEditHandler, {});
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            title: 'Old',
+            tag: ['PAT乙级', 'Dijksrta', '二分'],
+            problemKind: 'programming',
+            structureRevision: 4,
+        };
+        handler.request.body = {
+            title: 'New',
+            content: 'Statement',
+            pid: 'P7',
+            hidden: 'false',
+            difficulty: '2',
+            lockHidden: 'false',
+            expectedStructureRevision: '4',
+        };
+
+        await handler.post('forged', 'P7', 'New', 'Statement', 'P7', false, [], [], 2, false, 4);
+
+        expect(calls.edit).to.have.length(1);
+        expect(calls.edit[0][2]).not.to.have.keys('tag', 'knowledgeNodeIds');
+        expect(handler.pdoc.tag).to.deep.equal(['PAT乙级', 'Dijksrta', '二分']);
+    });
+
+    it('rejects raw tag writes and a free PID after conversion before the model write boundary', async () => {
+        const handler = makeHandler(ProblemEditHandler, {});
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            tag: ['PAT乙级', '二分'],
+            problemKind: 'programming',
+            structureRevision: 4,
+        };
+        handler.request.body = { title: 'Title', content: 'Statement', tag: 'forged' };
+        const rawTag = await captureFailure(() => handler.post('forged', 'P7', 'Title', 'Statement', undefined, false, ['forged'], [], 2, false, 4));
+        expect(rawTag).to.be.instanceOf(GenericError);
+
+        handler.pdoc.knowledgeNodeIds = ['node-1'];
+        handler.request.body = { title: 'Title', content: 'Statement', pid: 'CUSTOM' };
+        const freePid = await captureFailure(() => handler.post('forged', 'P7', 'Title', 'Statement', 'CUSTOM', false, [], [], 2, false, 4));
+        expect(freePid).to.be.instanceOf(GenericError);
+        expect(calls.edit).to.deep.equal([]);
+    });
+
+    it('returns a server-computed preview and requires explicit confirmation for the atomic write', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            tag: ['PAT乙级', 'Dijksrta'],
+            problemKind: 'programming',
+            structureRevision: 4,
+        };
+        const preview = makeHandler(ProblemProgrammingTagPreviewHandler, {});
+        preview.pdoc = pdoc;
+        preview.request.body = { knowledgeNodeIds: 'node-1' };
+        maintainableResults = [{ ...pdoc }];
+        await preview.post('forged', 'P7', ['node-1']);
+        expect(calls.tagUnlocks).to.deep.equal([['system', 7]]);
+        expect(preview.response.body.preview).to.deep.include({
+            selectedNodeIds: ['node-1'],
+            removedTags: ['Dijksrta'],
+            fingerprint: 'preview-fingerprint',
+        });
+
+        const apply = makeHandler(ProblemProgrammingTagApplyHandler, {});
+        apply.pdoc = pdoc;
+        apply.request.body = {
+            knowledgeNodeIds: 'node-1',
+            intent: 'normalize',
+            confirmed: 'true',
+            previewFingerprint: 'preview-fingerprint',
+        };
+        await apply.post('forged', 'P7', ['node-1'], 'normalize', true, 'preview-fingerprint');
+        expect(calls.tagNormalizations).to.have.length(1);
+        expect(calls.tagNormalizations[0]).to.deep.include({
+            domainId: 'system',
+            pid: 7,
+            selectedNodeIds: ['node-1'],
+            previewFingerprint: 'preview-fingerprint',
+        });
+        expect(apply.response.body).to.deep.include({ ok: true, structureRevision: 5 });
+
+        calls.tagNormalizations.length = 0;
+        const unconfirmed = await captureFailure(() => apply.post('forged', 'P7', ['node-1'], 'normalize', false, 'preview-fingerprint'));
+        expect(unconfirmed).to.be.instanceOf(GenericError);
+        expect(calls.tagNormalizations).to.deep.equal([]);
     });
 });
 

@@ -48,4 +48,31 @@ describe('P3.16 canonical structured metadata guard', () => {
         expect(push).to.have.property('name', 'ValidationError');
         expect(inc).to.have.property('name', 'ValidationError');
     });
+
+    it('requires an atomic tag and node pair after a legacy programming problem is normalized', async () => {
+        const converted = { problemKind: 'programming' as const, knowledgeNodeIds: [], tag: ['PAT乙级'] };
+        const tagOnly = await captureFailure(() =>
+            canonicalizeStructuredKnowledgePatch(converted, { tag: ['forged'] }, {}, context, 'request'),
+        );
+        const nodesOnly = await captureFailure(() =>
+            canonicalizeStructuredKnowledgePatch(converted, { knowledgeNodeIds: [] }, {}, context, 'request'),
+        );
+        expect(tagOnly).to.have.property('name', 'ValidationError');
+        expect(nodesOnly).to.have.property('name', 'ValidationError');
+        const emptyPair = await captureFailure(() =>
+            canonicalizeStructuredKnowledgePatch(converted, { tag: ['PAT乙级'], knowledgeNodeIds: [] }, {}, context, 'request'),
+        );
+        expect(emptyPair).to.have.property('name', 'ValidationError');
+    });
+
+    it('allows a trusted raw tag write to remain an unconverted legacy programming problem', async () => {
+        const required = await canonicalizeStructuredKnowledgePatch(
+            { problemKind: 'programming' },
+            { tag: ['external legacy tag'] },
+            {},
+            context,
+            'request',
+        );
+        expect(required).to.equal(false);
+    });
 });

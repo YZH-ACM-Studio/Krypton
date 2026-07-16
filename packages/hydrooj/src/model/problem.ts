@@ -104,8 +104,10 @@ import {
     type ManagedProblemDraftInput,
     prepareManagedProblemDraft,
     prepareManagedProblemPublication,
+    previewProgrammingTagNormalization,
     reserveManagedProblemPid,
 } from './managed-problem-authoring';
+import { isCanonicalManagedSourceTag } from './managed-problem-source';
 import { managedProblemPatchCapability } from './managed-problem-patch';
 import { commitManagedProblemPublication } from './managed-problem-publication';
 import RecordModel from './record';
@@ -244,6 +246,12 @@ function sortable(source: string, namespaces: Record<string, string>) {
 
 function isStructuralPatch($set: Record<string, unknown>, $unset: Record<string, unknown> = {}) {
     return [...Object.keys($set), ...Object.keys($unset)].some((field) => PROBLEM_STRUCTURAL_FIELDS.has(field));
+}
+
+function touchesProgrammingTagPair($set: Record<string, unknown>, $unset: Record<string, unknown> = {}) {
+    return [...Object.keys($set), ...Object.keys($unset)].some(
+        (field) => field === 'tag' || field.startsWith('tag.') || field === 'knowledgeNodeIds' || field.startsWith('knowledgeNodeIds.'),
+    );
 }
 
 function publishesProblemPatch($set: Record<string, unknown>, $unset: Record<string, unknown> = {}): boolean {
@@ -654,6 +662,7 @@ export class ProblemModel {
         const ddoc = await DomainModel.get(domainId);
         const problemKind = parseProblemKind(meta?.problemKind);
         const codeEvaluationStatus = normalizeCodeEvaluationCreationStatus((meta as unknown as Record<string, unknown>).codeEvaluationStatus);
+        const originalCreateTags = [...tag];
         if (problemKind === 'programming' && codeEvaluationStatus !== undefined) {
             throw new ValidationError('codeEvaluationStatus', null, '编程题不能设置结构化代码评测状态');
         }
@@ -675,6 +684,9 @@ export class ProblemModel {
         if (meta.authoringMode) args.authoringMode = meta.authoringMode;
         if (meta.sourceMeta) args.sourceMeta = meta.sourceMeta;
         if (meta.managedAuthoring) args.managedAuthoring = meta.managedAuthoring;
+        if (problemKind === 'programming' && meta.knowledgeNodeIds !== undefined) {
+            args.knowledgeNodeIds = meta.knowledgeNodeIds;
+        }
         if (problemKind !== 'programming') {
             args.knowledgeNodeIds = meta.knowledgeNodeIds ?? [];
             try {
@@ -706,12 +718,12 @@ export class ProblemModel {
         if (args.hidden !== true) throw new ValidationError('hidden', null, '创建钩子不能公开尚未完成创建流程的题目');
         assertCodeEvaluationStatusInvariant(problemKind, args.config, args.codeEvaluationStatus);
         await canonicalizeStructuredKnowledgePatch(
-            { problemKind },
+            { problemKind, tag: originalCreateTags },
             args,
             {},
             { domainId, pid: docId, actor: owner, operation: 'create' },
             'after-hook',
-            { requireKnowledgePair: problemKind !== 'programming' },
+            { requireKnowledgePair: problemKind !== 'programming' || meta.knowledgeNodeIds !== undefined },
         );
         const result = await document.add(domainId, content, owner, document.TYPE_PROBLEM, docId, null, null, args, {
             onPrepared: (prepared) => hooks.onAllocated?.(docId, prepared._id),
@@ -1208,6 +1220,132 @@ export class ProblemModel {
             },
         );
         return true;
+    }
+
+    /** Deny programming-tag preview and normalization once the lifecycle structure is no longer writable. */
+    static async assertProgrammingTagNormalizationUnlocked(domainId: string, pid: number): Promise<void> {
+        const pdoc = await document.coll.findOne(
+            { domainId, docType: document.TYPE_PROBLEM, docId: pid },
+            { projection: { problemKind: 1, authoringMode: 1, structureLockedAt: 1, archivedAt: 1 } },
+        );
+        if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
+        const problemKind = pdoc.problemKind === undefined ? 'programming' : parseProblemKind(pdoc.problemKind);
+        if (problemKind !== 'programming' || pdoc.authoringMode === 'managed') {
+            throw new ValidationError('problemKind', null, '只有普通编程题可以规范化历史标签');
+        }
+        if (pdoc.archivedAt || pdoc.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, pid))) {
+            throw new ProblemStructureConflictError(pid);
+        }
+    }
+
+    static async applyProgrammingTagNormalization(input: {
+        domainId: string;
+        pid: number;
+        user: ProblemAclUser;
+        selectedNodeIds: unknown;
+        previewFingerprint: string;
+    }) {
+        return ProblemModel.withAuthorizedWriteClaim(
+            input.domainId,
+            input.pid,
+            input.user,
+            'programming-tag-normalize',
+            async (claim) => {
+                const current = await document.coll.findOne(
+                    {
+                        domainId: input.domainId,
+                        docType: document.TYPE_PROBLEM,
+                        docId: input.pid,
+                        'aclWriteClaim.requestId': claim.requestId,
+                        'aclWriteClaim.actor': claim.actor,
+                        'aclWriteClaim.operation': claim.operation,
+                        'aclWriteClaim.capability': claim.capability,
+                        'aclWriteClaim.state': 'active',
+                    },
+                    {
+                        projection: {
+                            domainId: 1,
+                            docId: 1,
+                            pid: 1,
+                            problemKind: 1,
+                            authoringMode: 1,
+                            tag: 1,
+                            knowledgeNodeIds: 1,
+                            structureRevision: 1,
+                            structureLockedAt: 1,
+                            archivedAt: 1,
+                        },
+                    },
+                );
+                if (!current) throw new Error(`problem write claim ownership lost before tag normalization: ${claim.requestId}`);
+                const problemKind = current.problemKind === undefined ? 'programming' : parseProblemKind(current.problemKind);
+                if (problemKind !== 'programming' || current.authoringMode === 'managed') {
+                    throw new ValidationError('problemKind', null, '只有普通编程题可以规范化历史标签');
+                }
+                if (
+                    current.archivedAt ||
+                    current.structureLockedAt ||
+                    (await ProblemModel.materializeStartedContainerLock(input.domainId, input.pid))
+                ) {
+                    throw new ProblemStructureConflictError(input.pid);
+                }
+                const preview = await previewProgrammingTagNormalization({
+                    domainId: input.domainId,
+                    docId: input.pid,
+                    structureRevision: current.structureRevision,
+                    currentTags: current.tag || [],
+                    selectedNodeIds: input.selectedNodeIds,
+                });
+                if (preview.fingerprint !== input.previewFingerprint) {
+                    logger.warn(
+                        'Programming tag normalization rejected domain=%s pid=%s docId=%d actor=%d stage=confirm result=stale-preview oldTagCount=%d sourceTagCount=%d selectedNodeCount=%d addedTagCount=%d removedTagCount=%d revision=%s',
+                        input.domainId,
+                        current.pid || `P${current.docId}`,
+                        current.docId,
+                        input.user._id,
+                        current.tag?.length || 0,
+                        preview.sourceTags.length,
+                        preview.selectedNodeIds.length,
+                        preview.addedTags.length,
+                        preview.removedTags.length,
+                        current.structureRevision ?? 'legacy',
+                    );
+                    throw new ProblemTagConflictError(input.pid);
+                }
+                let result: ProblemDoc;
+                try {
+                    result = await ProblemModel.editWithClaim(
+                        claim,
+                        { tag: preview.nextTags, knowledgeNodeIds: preview.selectedNodeIds },
+                        {},
+                        { expectedStructureRevision: current.structureRevision, expectedTag: current.tag || [] },
+                    );
+                } catch (error) {
+                    if (!(error instanceof ValidationError)) throw error;
+                    const conflict = new ProblemTagConflictError(input.pid);
+                    Object.defineProperty(conflict, 'cause', { value: error, configurable: true });
+                    throw conflict;
+                }
+                logger.info(
+                    'Programming tag normalization succeeded domain=%s pid=%s docId=%d actor=%d stage=commit result=success oldTagCount=%d sourceTagCount=%d selectedNodeCount=%d addedTagCount=%d removedTagCount=%d revision=%s sourceTags=%o addedTags=%o removedTags=%o',
+                    input.domainId,
+                    current.pid || `P${current.docId}`,
+                    current.docId,
+                    input.user._id,
+                    current.tag?.length || 0,
+                    preview.sourceTags.length,
+                    preview.selectedNodeIds.length,
+                    preview.addedTags.length,
+                    preview.removedTags.length,
+                    current.structureRevision ?? 'legacy',
+                    preview.sourceTags,
+                    preview.addedTags,
+                    preview.removedTags,
+                );
+                return { pdoc: result, preview };
+            },
+            { capability: 'maintain' },
+        );
     }
 
     static async claimStructureLockForSubmission(domainId: string, pid: number, lockStructure = true, actor?: number): Promise<ProblemDoc> {
@@ -1846,6 +1984,8 @@ export class ProblemModel {
                     archivedAt: 1,
                     hidden: 1,
                     authoringMode: 1,
+                    tag: 1,
+                    knowledgeNodeIds: 1,
                 },
             },
         );
@@ -1859,8 +1999,24 @@ export class ProblemModel {
         }
         assertCodeEvaluationStatusTransition(current.codeEvaluationStatus, $set as Record<string, unknown>, $unset, 'raw-edit');
         const rawEditContext = { domainId, pid: _id, operation: 'raw-edit' };
+        const preserveProgrammingTagPair =
+            current.authoringMode !== 'managed' &&
+            (current.problemKind === undefined || parseProblemKind(current.problemKind) === 'programming') &&
+            !touchesProgrammingTagPair($set as Record<string, unknown>, $unset);
         const knowledgePairRequired = await canonicalizeStructuredKnowledgePatch(current, $set, $unset, rawEditContext, 'request');
         await bus.parallel('problem/before-edit', $set, $unset);
+        if (preserveProgrammingTagPair && touchesProgrammingTagPair($set as Record<string, unknown>, $unset)) {
+            logger.warn(
+                'Programming tag hook write rejected domain=%s pid=%d actor=- operation=raw-edit stage=after-hook result=denied fields=%o',
+                domainId,
+                _id,
+                [...Object.keys($set), ...Object.keys($unset)].filter(
+                    (field) =>
+                        field === 'tag' || field.startsWith('tag.') || field === 'knowledgeNodeIds' || field.startsWith('knowledgeNodeIds.'),
+                ),
+            );
+            throw new ValidationError('tag', null, '未请求标签变更时，写入钩子不能修改编程题标签');
+        }
         assertCodeEvaluationStatusTransition(current.codeEvaluationStatus, $set as Record<string, unknown>, $unset, 'raw-edit');
         assertCodeEvaluationLifecyclePatchWithTrace(current as ProblemDoc, $set as Record<string, unknown>, $unset, {
             operation: 'raw-edit',
@@ -2207,6 +2363,7 @@ export class ProblemModel {
                     hidden: 1,
                     authoringMode: 1,
                     managedAuthoring: 1,
+                    knowledgeNodeIds: 1,
                 },
             },
         );
@@ -2223,8 +2380,53 @@ export class ProblemModel {
                 throw new ValidationError('hidden', null, '托管草稿必须从统一题库审核入口发布');
             }
         }
+        const preserveProgrammingTagPair =
+            current.authoringMode !== 'managed' &&
+            (current.problemKind === undefined || parseProblemKind(current.problemKind) === 'programming') &&
+            !touchesProgrammingTagPair($set as Record<string, unknown>, $unset);
         const knowledgePairRequired = await canonicalizeStructuredKnowledgePatch(current, $set, $unset, claim, 'request');
+        const confirmedProgrammingTagPair =
+            claim.operation === 'programming-tag-normalize'
+                ? {
+                      tags: Array.isArray($set.tag) ? [...$set.tag] : [],
+                      nodeIds: Array.isArray($set.knowledgeNodeIds) ? $set.knowledgeNodeIds.map(String) : [],
+                  }
+                : null;
         await bus.parallel('problem/before-edit', $set, $unset);
+        const hookTagFields = [...Object.keys($set), ...Object.keys($unset)].filter(
+            (field) => field === 'tag' || field.startsWith('tag.') || field === 'knowledgeNodeIds' || field.startsWith('knowledgeNodeIds.'),
+        );
+        if (preserveProgrammingTagPair && hookTagFields.length) {
+            logger.warn(
+                'Programming tag hook write rejected domain=%s pid=%d actor=%d operation=%s stage=after-hook result=denied fields=%o',
+                domainId,
+                _id,
+                claim.actor,
+                claim.operation,
+                hookTagFields,
+            );
+            throw new ValidationError('tag', null, '未请求标签变更时，写入钩子不能修改编程题标签');
+        }
+        if (
+            confirmedProgrammingTagPair &&
+            (!Array.isArray($set.tag) ||
+                !isEqual($set.tag, confirmedProgrammingTagPair.tags) ||
+                !Array.isArray($set.knowledgeNodeIds) ||
+                !isEqual($set.knowledgeNodeIds.map(String), confirmedProgrammingTagPair.nodeIds) ||
+                Object.keys($unset).some(
+                    (field) =>
+                        field === 'tag' || field.startsWith('tag.') || field === 'knowledgeNodeIds' || field.startsWith('knowledgeNodeIds.'),
+                ))
+        ) {
+            logger.warn(
+                'Programming tag confirmed pair rejected domain=%s pid=%d actor=%d operation=%s stage=after-hook result=changed-by-hook',
+                domainId,
+                _id,
+                claim.actor,
+                claim.operation,
+            );
+            throw new ValidationError('tag', null, '写入钩子不能改变用户已确认的标签结果');
+        }
         if (current.authoringMode === 'managed') {
             const finalGuard = managedProblemPatchCapability(current, $set, $unset);
             if (finalGuard.immutableFields.length || !problemWriteCapabilityAllows(claim.capability, finalGuard.capability)) {
@@ -2279,10 +2481,11 @@ export class ProblemModel {
             });
         } else {
             result = await commitProblemWriteClaimUpdate(claim, $set, $unset, managedGuard?.capability || claim.capability, {
+                expectedStructureRevision: options.expectedStructureRevision,
                 expectedTag: options.expectedTag,
             });
         }
-        if (!result && options.expectedTag !== undefined) {
+        if (!result && (options.expectedTag !== undefined || options.expectedStructureRevision !== undefined)) {
             const live = await document.coll.findOne(
                 {
                     domainId,
@@ -2294,9 +2497,22 @@ export class ProblemModel {
                     'aclWriteClaim.capability': claim.capability,
                     'aclWriteClaim.state': 'active',
                 },
-                { projection: { tag: 1 } },
+                { projection: { tag: 1, structureRevision: 1, structureLockedAt: 1 } },
             );
-            if (live && !isEqual(Array.isArray(live.tag) ? live.tag : [], options.expectedTag)) throw new ProblemTagConflictError(_id);
+            if (
+                live &&
+                options.expectedTag !== undefined &&
+                !isEqual(Array.isArray(live.tag) ? live.tag : [], options.expectedTag)
+            ) {
+                throw new ProblemTagConflictError(_id);
+            }
+            if (
+                live &&
+                options.expectedStructureRevision !== undefined &&
+                (live.structureLockedAt || live.structureRevision !== options.expectedStructureRevision)
+            ) {
+                throw new ProblemStructureConflictError(_id);
+            }
         }
         if (!result) throw new Error(`problem write claim ownership lost during edit: ${claim.requestId}`);
         bus.emit('problem/edit', result, claim.requestId, { hidden: current.hidden });
@@ -2455,11 +2671,18 @@ export class ProblemModel {
         if (!pid && original.pid && !(await ProblemModel.get(target, original.pid))) pid = original.pid;
         const problemKind = original.problemKind === undefined ? 'programming' : parseProblemKind(original.problemKind);
         let cloneKnowledge: Awaited<ReturnType<typeof materializeKnowledgeMindmapTags>> | null = null;
-        if (DEDICATED_STRUCTURED_PROBLEM_KINDS.has(problemKind)) {
+        const convertedProgramming =
+            problemKind === 'programming' && original.authoringMode !== 'managed' && Object.hasOwn(original, 'knowledgeNodeIds');
+        if (DEDICATED_STRUCTURED_PROBLEM_KINDS.has(problemKind) || convertedProgramming) {
             try {
                 cloneKnowledge = await materializeKnowledgeMindmapTags(original.knowledgeNodeIds ?? []);
+                if (convertedProgramming) {
+                    cloneKnowledge.tags = [
+                        ...new Set([...(original.tag || []).filter(isCanonicalManagedSourceTag), ...cloneKnowledge.tags]),
+                    ];
+                }
                 logger.info(
-                    'Structured clone knowledge canonicalized domain=%s pid=%d target=%s actor=%s kind=%s nodes=%d tags=%d stage=clone-materialize result=allowed',
+                    'Problem clone knowledge canonicalized domain=%s pid=%d target=%s actor=%s kind=%s nodes=%d tags=%d stage=clone-materialize result=allowed',
                     domainId,
                     _id,
                     target,
@@ -2470,7 +2693,7 @@ export class ProblemModel {
                 );
             } catch (error) {
                 logger.warn(
-                    'Structured clone knowledge rejected domain=%s pid=%d target=%s actor=%s kind=%s stage=clone-materialize error=%o',
+                    'Problem clone knowledge rejected domain=%s pid=%d target=%s actor=%s kind=%s stage=clone-materialize error=%o',
                     domainId,
                     _id,
                     target,

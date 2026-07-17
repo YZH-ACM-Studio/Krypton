@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
-import { readProblemConfigUploadSuccess, readProblemSaveSuccess } from '../src/lib/problem-save-response.ts';
+import { readHydroResponseError, readProblemConfigUploadSuccess, readProblemSaveSuccess } from '../src/lib/problem-save-response.ts';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 
@@ -183,5 +183,30 @@ describe('P3.16 structured metadata and unsaved-navigation contracts', () => {
     } finally {
       (globalThis as any).window = previousWindow;
     }
+  });
+
+  it('renders Hydro validation parameters instead of exposing raw placeholders', async () => {
+    const validation = await readHydroResponseError(
+      new Response(
+        JSON.stringify({
+          error: {
+            message: 'Field {0} validation failed.',
+            params: ['content'],
+          },
+        }),
+        { status: 400, headers: { 'content-type': 'application/json' } },
+      ),
+      '保存失败',
+    );
+    expect(validation).to.equal('Field content validation failed.');
+
+    const plain = await readHydroResponseError(new Response('upstream failed', { status: 502 }), '保存失败');
+    expect(plain).to.equal('upstream failed');
+
+    const html = await readHydroResponseError(
+      new Response('<!DOCTYPE html><html><body>proxy error</body></html>', { status: 503 }),
+      '保存失败',
+    );
+    expect(html).to.equal('保存失败：HTTP 503');
   });
 });

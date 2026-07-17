@@ -61,6 +61,7 @@ const calls = {
     manualStatus: [] as any[],
     oplog: [] as any[],
     provider: [] as any[],
+    permits: [] as any[],
     publish: [] as any[],
     random: [] as any[],
     refresh: [] as any[],
@@ -82,6 +83,9 @@ let maintainableResults: any[] = [];
 let countResult = 0;
 let maintainResult = false;
 let claimAllowed = true;
+let permitResults: any[] = [];
+let missingUserIds = new Set<number>();
+let managedTrainingPlacementResults: any[] = [];
 const createKinds: string[] = [];
 
 function cursor(docs: any[] = []) {
@@ -329,6 +333,12 @@ const emptyModel = {
     canShowSelfRecord() {
         return true;
     },
+    isDone() {
+        return false;
+    },
+    isNotStarted() {
+        return false;
+    },
 };
 const discussionStub = { count: async () => 0 };
 const domainStub = {
@@ -376,7 +386,12 @@ const userStub = {
         return { _id: uid };
     },
     async getList(_domainId: string, ownerIds: number[]) {
-        return Object.fromEntries(ownerIds.map((ownerId) => [ownerId, { _id: ownerId, uname: `user-${ownerId}` }]));
+        return Object.fromEntries(
+            ownerIds.map((ownerId) => [
+                ownerId,
+                missingUserIds.has(ownerId) ? { _id: 0, uname: 'Unknown User' } : { _id: ownerId, uname: `user-${ownerId}` },
+            ]),
+        );
     },
     async setById() {
         return undefined;
@@ -392,6 +407,7 @@ const managedAuthoringStub = {
     ],
     listKnowledgeMindmapOptions: async () => [{ id: 'node-1', label: '数据结构 / 线段树', tags: ['线段树'] }],
     listManagedMindmapOptions: async () => [{ id: 'node-1', label: '数据结构 / 线段树', tags: ['线段树'] }],
+    listManagedProblemTrainingPlacements: async () => managedTrainingPlacementResults,
     listManagedTrainingOptions: async () => [],
     classifyLegacyProgrammingTags: (tags: string[]) => ({
         sourceTags: tags.filter((tag) => tag === 'PAT乙级'),
@@ -523,6 +539,7 @@ function makeHandler(HandlerClass: any, user: Record<string, unknown>) {
             _problemAclDomainId: 'system',
             hasPerm: () => false,
             hasPriv: () => false,
+            own: () => false,
             ...user,
         },
         response: { body: {} },
@@ -571,8 +588,17 @@ beforeEach(() => {
     countResult = 0;
     maintainResult = false;
     claimAllowed = true;
+    permitResults = [];
+    missingUserIds = new Set();
+    managedTrainingPlacementResults = [];
     createKinds.length = 0;
     (global as any).Hydro.module.problemSearch = {};
+    (global as any).Hydro.model.permits = {
+        listForProblem: async (...args: any[]) => {
+            calls.permits.push(args);
+            return permitResults;
+        },
+    };
 });
 
 describe('P2.11 enumeration entry gates', () => {
@@ -772,6 +798,104 @@ describe('P2.11 authoritative problem route domain', () => {
         expect(calls.getViewableAuthorized[0][0]).to.equal('system');
         expect(calls.get).to.deep.equal([]);
         expect(calls.status[0][0]).to.equal('system');
+        expect(handler.response.body.authorUdocs).to.deep.equal([{ _id: 42 }]);
+        expect(handler.response.body.canEditProblem).to.equal(false);
+    });
+
+    it('exposes the canonical managed author instead of presenting the storage owner as the author', async () => {
+        const handler = makeHandler(ProblemDetailHandler, {});
+        permitResults = [{ uid: 77, role: 'author' }];
+        getResults = [
+            {
+                domainId: 'system',
+                docId: 7,
+                owner: 42,
+                hidden: false,
+                title: 'Managed problem',
+                content: 'statement',
+                config: '',
+                additional_file: [],
+                tag: [],
+                authoringMode: 'managed',
+            },
+        ];
+
+        await handler._prepare('forged', 7);
+
+        expect(handler.response.body.udoc).to.deep.equal({ _id: 42 });
+        expect(handler.response.body.authorUdocs).to.deep.equal([{ _id: 77, uname: 'user-77' }]);
+    });
+
+    it('preserves the storage owner in contest and exam problem DOM without querying managed permits', async () => {
+        const handler = makeHandler(ProblemDetailHandler, {});
+        handler.tdoc = { docId: 'contest', owner: 99, pids: [7], rule: 'acm' };
+        handler.tsdoc = { attend: true, startAt: new Date() };
+        permitResults = [{ uid: 77, role: 'author' }];
+        getResults = [
+            {
+                domainId: 'system',
+                docId: 7,
+                owner: 42,
+                hidden: false,
+                title: 'Managed contest problem',
+                content: 'statement',
+                config: '',
+                additional_file: [],
+                tag: [],
+                authoringMode: 'managed',
+            },
+        ];
+
+        await handler._prepare('forged', 7, 'contest');
+
+        expect(handler.response.body.authorUdocs).to.deep.equal([{ _id: 42 }]);
+        expect(calls.permits).to.deep.equal([]);
+    });
+
+    it('does not fall back to owner when a managed author profile is missing', async () => {
+        const handler = makeHandler(ProblemDetailHandler, {});
+        permitResults = [{ uid: 77, role: 'author' }];
+        missingUserIds.add(77);
+        getResults = [
+            {
+                domainId: 'system',
+                docId: 7,
+                owner: 42,
+                hidden: false,
+                title: 'Managed problem',
+                content: 'statement',
+                config: '',
+                additional_file: [],
+                tag: [],
+                authoringMode: 'managed',
+            },
+        ];
+
+        await handler._prepare('forged', 7);
+
+        expect(handler.response.body.authorUdocs).to.deep.equal([]);
+    });
+
+    it('reports an unset managed author without substituting the storage owner', async () => {
+        const handler = makeHandler(ProblemDetailHandler, {});
+        getResults = [
+            {
+                domainId: 'system',
+                docId: 7,
+                owner: 42,
+                hidden: false,
+                title: 'Managed problem',
+                content: 'statement',
+                config: '',
+                additional_file: [],
+                tag: [],
+                authoringMode: 'managed',
+            },
+        ];
+
+        await handler._prepare('forged', 7);
+
+        expect(handler.response.body.authorUdocs).to.deep.equal([]);
     });
 
     it('creates a problem only in the authoritative handler domain', async () => {
@@ -938,6 +1062,49 @@ describe('P2.11 authoritative problem route domain', () => {
         expect(denied).to.be.instanceOf(GenericError);
     });
 
+    it('defaults an administrator-created managed draft to the current administrator author', async () => {
+        const handler = makeHandler(ProblemCreateProgrammingHandler, {
+            admin: true,
+            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM,
+        });
+        handler.request.body = {
+            title: 'Own admin draft',
+            content: 'Statement',
+            managed: 'true',
+            template: 'self',
+            year: '2026',
+            difficulty: '3',
+            mindmapNodeIds: 'node-1',
+        };
+
+        await handler.post('forged', 'Own admin draft', 'Statement', '', false, 3, [], true, 'self', 2026, '', '', 0, ['node-1']);
+
+        expect(calls.add.at(-1)?.[1]).to.deep.include({
+            workingTitle: 'Own admin draft',
+            authorUid: 42,
+        });
+        expect(calls.add.at(-1)?.[2]).to.equal(42);
+        expect(calls.add.at(-1)?.[3]).to.equal(handler.user);
+    });
+
+    it('defaults an omitted managed draft difficulty to level one at the HTTP boundary', async () => {
+        const handler = makeHandler(ProblemCreateProgrammingHandler, {
+            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROGRAMMING_DRAFT,
+        });
+        handler.request.body = {
+            title: 'Difficulty default',
+            content: 'Statement',
+            managed: 'true',
+            template: 'self',
+            year: '2026',
+            mindmapNodeIds: 'node-1',
+        };
+
+        await handler.post('forged', 'Difficulty default', 'Statement', '', false, 0, [], true, 'self', 2026, '', '', 0, ['node-1']);
+
+        expect(calls.add.at(-1)?.[1]?.difficulty).to.equal(1);
+    });
+
     it('submits and hacks against the loaded problem domain', async () => {
         const submit = makeHandler(ProblemSubmitHandler, {});
         submit.pdoc = { domainId: 'system', docId: 7, config: { type: 'default' } };
@@ -1025,6 +1192,23 @@ describe('P2.13 managed programming edit boundary', () => {
 
         expect(calls.edit).to.have.lengthOf(1);
         expect(calls.edit[0][2]).to.deep.equal({ content: 'New statement', html: false });
+    });
+
+    it('serves persisted training memberships for a confirmed managed problem', async () => {
+        const handler = managedHandler();
+        handler.pdoc.hidden = false;
+        handler.pdoc.managedAuthoring.metadataStatus = 'confirmed';
+        handler.pdoc.data = [];
+        handler.pdoc.additional_file = [];
+        managedTrainingPlacementResults = [
+            { trainingId: 'training-1', trainingTitle: '牛客暑期多校训练集', chapterId: 40, chapterTitle: '2026年牛客-第1场' },
+            { trainingId: 'training-2', trainingTitle: '数据结构训练', chapterId: 3, chapterTitle: '并查集' },
+        ];
+        maintainableResults = [{ config: 'type: default\n' }];
+
+        await handler.get();
+
+        expect(handler.response.body.managedTrainingPlacements).to.deep.equal(managedTrainingPlacementResults);
     });
 
     it('keeps a confirmed formal title out of generic content saves and rejects a forged title', async () => {

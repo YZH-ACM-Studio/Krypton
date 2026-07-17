@@ -15,16 +15,8 @@ import {
     type ManagedSourceTemplate,
 } from './managed-problem-source';
 
-export {
-    isCanonicalManagedSourceTag,
-    isManagedAnnualSourceTag,
-    MANAGED_SOURCE_TEMPLATES,
-} from './managed-problem-source';
-export type {
-    ManagedSourceMeta,
-    ManagedSourceTemplate,
-    ManagedSourceTemplateDefinition,
-} from './managed-problem-source';
+export { isCanonicalManagedSourceTag, isManagedAnnualSourceTag, MANAGED_SOURCE_TEMPLATES } from './managed-problem-source';
+export type { ManagedSourceMeta, ManagedSourceTemplate, ManagedSourceTemplateDefinition } from './managed-problem-source';
 
 const logger = new Logger('managed-problem-authoring');
 
@@ -70,6 +62,13 @@ export interface ManagedTrainingOption {
 export interface ManagedTrainingPlacement {
     trainingId: ObjectId;
     chapterId: number;
+}
+
+export interface ManagedProblemTrainingPlacementView {
+    trainingId: string;
+    trainingTitle: string;
+    chapterId: number;
+    chapterTitle: string;
 }
 
 export interface ManagedProblemDraftInput {
@@ -372,10 +371,7 @@ export async function previewProgrammingTagNormalization(input: {
     selectedNodeIds: unknown;
 }): Promise<ProgrammingTagNormalizationPreview> {
     const currentTags = requireStoredProblemTags(input.currentTags);
-    if (
-        input.structureRevision !== undefined &&
-        (!Number.isSafeInteger(input.structureRevision) || input.structureRevision < 1)
-    ) {
+    if (input.structureRevision !== undefined && (!Number.isSafeInteger(input.structureRevision) || input.structureRevision < 1)) {
         throw new TypeError('programming problem structureRevision must be a positive integer');
     }
     const knowledge = await materializeKnowledgeMindmapState(input.selectedNodeIds, {
@@ -552,6 +548,24 @@ export async function listManagedTrainingOptions(domainId: string): Promise<Mana
         });
     }
     return result;
+}
+
+/** Read the persisted training membership of an existing problem. */
+export async function listManagedProblemTrainingPlacements(domainId: string, pid: number): Promise<ManagedProblemTrainingPlacementView[]> {
+    const trainings = await document.coll
+        .find({ domainId, docType: document.TYPE_TRAINING, kind: { $ne: 'course' } }, { projection: { docId: 1, title: 1, dag: 1 } })
+        .sort({ title: 1, docId: 1 })
+        .toArray();
+    return trainings.flatMap((training) =>
+        canonicalTrainingChapters(training.dag)
+            .filter((chapter) => chapter.pids.some((memberPid) => Number(memberPid) === pid))
+            .map((chapter) => ({
+                trainingId: training.docId.toHexString(),
+                trainingTitle: training.title,
+                chapterId: chapter._id,
+                chapterTitle: chapter.title,
+            })),
+    );
 }
 
 /** Validate one optional pending placement against live training membership. */

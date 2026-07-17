@@ -202,6 +202,33 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(handler).to.include('files.some(isProblemConfigFilename)');
     });
 
+    it('waits for testdata observers before releasing direct or claimed writes', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const helperStart = source.indexOf('async function waitForProblemTestdataObservers(');
+        const helperEnd = source.indexOf('function assertProblemReadyForUseWithTrace', helperStart);
+        const helper = source.slice(helperStart, helperEnd);
+        expect(helperStart).to.be.greaterThan(-1);
+        expect(helper).to.include('await notify()');
+        expect(helper).to.include('stage=testdata-observer');
+        expect(helper).to.include('files=%o');
+        expect(helper).to.include('context.files');
+        expect(helper).to.include('throw error');
+        expect(source.match(/await waitForProblemTestdataObservers\(/g)).to.have.length(6);
+        expect(source.match(/files: \[name\]/g)).to.have.length(2);
+        expect(source.match(/files: \[file, newName\]/g)).to.have.length(2);
+        expect(source.match(/files: names/g)).to.have.length(2);
+        for (const event of ['addTestdata', 'renameTestdata', 'delTestdata']) {
+            expect(source.match(new RegExp(`await parallelAllSettled\\('problem/${event}'`, 'g')), event).to.have.length(2);
+            expect(source).not.to.include(`await bus.emit('problem/${event}'`);
+        }
+        const busSource = readFileSync(resolve(root, 'src/service/bus.ts'), 'utf8');
+        const settledStart = busSource.indexOf('export async function parallelAllSettled');
+        const settledEnd = busSource.indexOf('\nexport function apply(', settledStart);
+        const settled = busSource.slice(settledStart, settledEnd);
+        expect(settled).to.include('await Promise.allSettled(');
+        expect(settled).to.include("app.events.dispatch('emit', dispatchArgs)");
+    });
+
     it('validates config rename sources and Hydro imports before their first mutation', () => {
         const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
         const directStart = source.indexOf('static async renameTestdata(');

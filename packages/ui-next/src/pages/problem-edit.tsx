@@ -6,6 +6,11 @@
 import { AlertCircle, ArrowRight, CheckCircle2, Download, Eye, EyeOff, FileText, Loader2, Lock, Save, ShieldCheck, Tag, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
+import {
+  ManagedProblemTrainingStatus,
+  type ManagedTrainingOptionView,
+  type ManagedTrainingPlacementView,
+} from '@/components/problem-authoring-state';
 import { ProblemEditorWorkspace } from '@/components/problem-editor-workspace';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Badge } from '@/components/ui/badge';
@@ -19,24 +24,9 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { downloadProblemPackage } from '@/lib/problem-package';
 import { managedSourceFieldViews, managedSourceTagPreview, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
-import { readProblemSaveSuccess } from '@/lib/problem-save-response';
+import { readHydroResponseError, readProblemSaveSuccess } from '@/lib/problem-save-response';
 
 type R = Record<string, any>;
-
-async function responseErrorMessage(response: Response, fallback: string) {
-  const raw = await response.text().catch(() => '');
-  if (raw) {
-    try {
-      const body = JSON.parse(raw);
-      const message = body?.error?.message || body?.message || body?.error;
-      if (typeof message === 'string' && message.trim()) return message;
-    } catch {
-      const text = raw.trim();
-      if (text && !text.startsWith('<!DOCTYPE') && !text.startsWith('<html')) return text.slice(0, 180);
-    }
-  }
-  return `${fallback}：HTTP ${response.status}`;
-}
 
 interface ManagedMindmapOption {
   id: string;
@@ -61,13 +51,6 @@ interface ProgrammingTagPreview {
   addedTags: string[];
   removedTags: string[];
   fingerprint: string;
-}
-
-interface ManagedTrainingOption {
-  id: string;
-  title: string;
-  templates: string[];
-  chapters: Array<{ id: number; title: string }>;
 }
 
 const DIFFICULTY_OPTIONS = [
@@ -119,7 +102,7 @@ async function loadDomainUsers(domainId: string, query: string): Promise<UserOpt
       projection: ['_id', 'uname', 'mail', 'avatarUrl'],
     }),
   });
-  if (!response.ok) throw new Error(await responseErrorMessage(response, '用户搜索失败'));
+  if (!response.ok) throw new Error(await readHydroResponseError(response, '用户搜索失败'));
   const users = await response.json();
   if (!Array.isArray(users) || users.some((item) => !Number.isSafeInteger(item?._id) || item._id <= 0)) {
     throw new Error('用户搜索响应格式错误');
@@ -173,7 +156,7 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
     setLoaded(false);
     try {
       const r = await fetch(`/p/${apiPid}/permits`, { credentials: 'include', headers: { Accept: 'application/json' } });
-      if (!r.ok) throw new Error(await responseErrorMessage(r, '权限列表加载失败'));
+      if (!r.ok) throw new Error(await readHydroResponseError(r, '权限列表加载失败'));
       const j = await r.json();
       if (!Array.isArray(j?.permits)) throw new Error('权限列表响应格式错误');
       setPermits(j.permits || []);
@@ -223,7 +206,7 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
         headers: { Accept: 'application/json' },
       });
       if (!r.ok) {
-        setLoadError(await responseErrorMessage(r, '撤销权限失败'));
+        setLoadError(await readHydroResponseError(r, '撤销权限失败'));
         return;
       }
       setRevokeTarget(null);
@@ -253,7 +236,7 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
         headers: { Accept: 'application/json' },
       });
       if (!r.ok) {
-        setInviteError(await responseErrorMessage(r, '发送邀请失败'));
+        setInviteError(await readHydroResponseError(r, '发送邀请失败'));
         return;
       }
       setSelectedUsers([]);
@@ -452,7 +435,7 @@ function ManagedReviewPanel({
 }: {
   pdoc: R;
   sourceTemplates: ManagedSourceTemplateOption[];
-  trainingOptions: ManagedTrainingOption[];
+  trainingOptions: ManagedTrainingOptionView[];
   problemsUrl: string;
 }) {
   const [reviewing, setReviewing] = useState(false);
@@ -463,6 +446,12 @@ function ManagedReviewPanel({
   const pendingTraining = trainingOptions.find((training) => training.id === String(pendingPlacement?.trainingId || ''));
   const pendingChapter = pendingTraining?.chapters.find((chapter) => chapter.id === pendingPlacement?.chapterId);
   const metadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft';
+  const reviewHeading = metadataDraft ? '管理员审核与发布' : pdoc.hidden ? '重新公开托管题' : '发布状态';
+  const reviewDescription = metadataDraft
+    ? '确认正式标题、来源、标签和待挂训练后，通过既有统一发布服务公开题目。'
+    : pdoc.hidden
+      ? '该题已完成审核确认，但当前处于隐藏状态；重新公开不会再次消费待挂训练。'
+      : '该题已完成审核确认；当前来源、标签和所属训练均为只读。';
 
   const submitReview = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -475,7 +464,7 @@ function ManagedReviewPanel({
         headers: { Accept: 'application/json' },
         body: new URLSearchParams(new FormData(event.currentTarget) as any),
       });
-      if (!response.ok) throw new Error(await responseErrorMessage(response, '审核发布失败'));
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '审核发布失败'));
       const body = await response.json();
       if (typeof body?.url !== 'string' || !body.url) throw new Error('审核发布响应缺少跳转地址');
       window.location.assign(body.url);
@@ -489,15 +478,15 @@ function ManagedReviewPanel({
     <section aria-labelledby="managed-review-heading" className="rounded-2xl border border-primary/25 bg-primary/[0.025]">
       <header className="border-b border-primary/15 px-5 py-4">
         <h2 id="managed-review-heading" className="text-base font-semibold tracking-tight">
-          管理员审核与发布
+          {reviewHeading}
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground">确认正式标题、来源、标签和待挂训练后，通过既有统一发布服务公开题目。</p>
+        <p className="mt-1 text-sm text-muted-foreground">{reviewDescription}</p>
       </header>
       <div className="space-y-5 p-5">
         <dl className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
           <div>
-            <dt className="text-xs text-muted-foreground">工作标题</dt>
-            <dd className="mt-1 font-medium">{pdoc.managedAuthoring?.workingTitle || '—'}</dd>
+            <dt className="text-xs text-muted-foreground">{metadataDraft ? '工作标题' : '正式标题'}</dt>
+            <dd className="mt-1 font-medium">{metadataDraft ? pdoc.managedAuthoring?.workingTitle || '—' : pdoc.title || '—'}</dd>
           </div>
           {sourceFields.map((field) => (
             <div key={field.label}>
@@ -505,14 +494,16 @@ function ManagedReviewPanel({
               <dd className="mt-1 font-medium">{field.value}</dd>
             </div>
           ))}
-          <div>
-            <dt className="text-xs text-muted-foreground">待挂训练</dt>
-            <dd className="mt-1 font-medium">
-              {pendingPlacement
-                ? `${pendingTraining?.title || '训练已失效'} / ${pendingChapter?.title || `章节 ${pendingPlacement.chapterId}`}`
-                : '不挂入训练'}
-            </dd>
-          </div>
+          {metadataDraft ? (
+            <div>
+              <dt className="text-xs text-muted-foreground">待挂训练</dt>
+              <dd className="mt-1 font-medium">
+                {pendingPlacement
+                  ? `${pendingTraining?.title || '训练已失效'} / ${pendingChapter?.title || `章节 ${pendingPlacement.chapterId}`}`
+                  : '不挂入训练'}
+              </dd>
+            </div>
+          ) : null}
         </dl>
 
         <div>
@@ -626,7 +617,8 @@ export function ProblemEditPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const sourceTemplates: ManagedSourceTemplateOption[] = data.managedSourceTemplates || [];
   const mindmapOptions: ManagedMindmapOption[] = data.programmingMindmapOptions || data.managedMindmapOptions || [];
-  const trainingOptions: ManagedTrainingOption[] = data.managedTrainingOptions || [];
+  const trainingOptions: ManagedTrainingOptionView[] = data.managedTrainingOptions || [];
+  const managedTrainingPlacements: ManagedTrainingPlacementView[] = data.managedTrainingPlacements || [];
   const initialTemplate = pdoc.sourceMeta?.template || sourceTemplates[0]?.id || '';
   const [sourceTemplate, setSourceTemplate] = useState(initialTemplate);
   const [sourceYear, setSourceYear] = useState(String(pdoc.sourceMeta?.year || new Date().getFullYear()));
@@ -635,9 +627,7 @@ export function ProblemEditPage() {
   const [sourceRound, setSourceRound] = useState(String(pdoc.sourceMeta?.round || 1));
   const [selectedManagedAuthors, setSelectedManagedAuthors] = useState<UserOption[]>([]);
   const [managedAuthorSearchError, setManagedAuthorSearchError] = useState('');
-  const initialMindmapIds = isCreate
-    ? (pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String)
-    : programmingTagState.selectedNodeIds || [];
+  const initialMindmapIds = isCreate ? (pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String) : programmingTagState.selectedNodeIds || [];
   const mindmapOptionsById = new Map(mindmapOptions.map((option) => [option.id, option]));
   const [selectedMindmapNodes, setSelectedMindmapNodes] = useState<ManagedMindmapOption[]>(
     initialMindmapIds.map((id) => mindmapOptionsById.get(id)).filter((option): option is ManagedMindmapOption => !!option),
@@ -764,7 +754,7 @@ export function ProblemEditPage() {
         body: new URLSearchParams({ knowledgeNodeIds: selectedMindmapNodeIds.join(',') }),
       });
       if (!response.ok) {
-        throw new Error(await responseErrorMessage(response, response.status === 409 ? '题目或导图已变化，请刷新后重试' : '标签预览失败'));
+        throw new Error(await readHydroResponseError(response, response.status === 409 ? '题目或导图已变化，请刷新后重试' : '标签预览失败'));
       }
       const body = await response.json();
       const preview = body?.preview as ProgrammingTagPreview | undefined;
@@ -806,7 +796,7 @@ export function ProblemEditPage() {
         }),
       });
       if (!response.ok) {
-        throw new Error(await responseErrorMessage(response, response.status === 409 ? '预览已过期，请重新预览标签变化' : '标签规范化失败'));
+        throw new Error(await readHydroResponseError(response, response.status === 409 ? '预览已过期，请重新预览标签变化' : '标签规范化失败'));
       }
       const body = await response.json();
       if (
@@ -846,9 +836,15 @@ export function ProblemEditPage() {
     }
     e.preventDefault();
     setSaveError('');
-    if (managed && isCreate && canAssignManagedAuthor && selectedManagedAuthors.length !== 1) {
-      const message = '请选择一名出题人。';
-      setManagedAuthorSearchError(message);
+    const contentText = typeof draftContent === 'string' ? draftContent : JSON.stringify(draftContent);
+    if (!contentText.trim()) {
+      const message = '请填写题面正文。';
+      setSaveError(message);
+      setSaveState('error');
+      return;
+    }
+    if (contentText.length > 65535) {
+      const message = '题面正文不能超过 65535 个字符。';
       setSaveError(message);
       setSaveState('error');
       return;
@@ -873,7 +869,7 @@ export function ProblemEditPage() {
         headers: { Accept: 'application/json' },
       });
       if (!editRes.ok) {
-        throw new Error(await responseErrorMessage(editRes, editRes.status === 409 ? '题目已被其他操作修改或锁定，请刷新后重试' : '保存失败'));
+        throw new Error(await readHydroResponseError(editRes, editRes.status === 409 ? '题目已被其他操作修改或锁定，请刷新后重试' : '保存失败'));
       }
       const saved = await readProblemSaveSuccess(editRes, 'programming');
       if (isCreate) {
@@ -1057,7 +1053,7 @@ export function ProblemEditPage() {
                       <SimpleSelect
                         id="edit-difficulty"
                         name="difficulty"
-                        defaultValue={String(pdoc.difficulty || '')}
+                        defaultValue={String(pdoc.difficulty || (managed && isCreate ? 1 : ''))}
                         onValueChange={markDirty}
                         options={DIFFICULTY_OPTIONS.filter((option) => !managed || option.value !== '').map((option) => ({
                           value: String(option.value),
@@ -1211,7 +1207,9 @@ export function ProblemEditPage() {
                     <p className="mt-1 text-sm text-muted-foreground">
                       {isCreate
                         ? '选择固定来源和知识导图节点；PID 与标签仅由服务端计算。训练选择只记录待审核位置。'
-                        : '来源、PID 与系统标签已锁定；最终发布由管理员审核。'}
+                        : managedMetadataDraft
+                          ? '来源、PID 与系统标签已锁定；发布前由管理员审核。'
+                          : '来源、PID 与系统标签已锁定；该题已完成审核并发布。'}
                     </p>
                   </header>
                   {isCreate ? (
@@ -1302,7 +1300,7 @@ export function ProblemEditPage() {
                         {canAssignManagedAuthor ? (
                           <div className="space-y-1.5" role="group" aria-labelledby="managed-author-label">
                             <span id="managed-author-label" className="text-sm font-medium">
-                              出题人
+                              代指定出题人（可选）
                             </span>
                             <MultiSelect<UserOption>
                               value={selectedManagedAuthors}
@@ -1327,7 +1325,7 @@ export function ProblemEditPage() {
                               emptyText="没有找到域内用户"
                               minHeight={44}
                             />
-                            <p className="text-xs text-muted-foreground">只能选择当前域中的一名用户；服务端会再次校验。</p>
+                            <p className="text-xs text-muted-foreground">不选择时默认为当前管理员；代建时只能选择当前域中的一名用户，服务端会再次校验。</p>
                             {managedAuthorSearchError ? (
                               <p role="alert" className="text-xs text-destructive">
                                 {managedAuthorSearchError}
@@ -1411,19 +1409,12 @@ export function ProblemEditPage() {
                           </div>
                         ))}
                       </div>
-                      <div className="rounded-xl bg-muted/45 px-4 py-3">
-                        <p className="text-xs text-muted-foreground">待挂训练</p>
-                        <p className="mt-1 text-sm font-medium">
-                          {pdoc.managedAuthoring?.pendingTrainingPlacement
-                            ? `${trainingOptions.find((training) => training.id === String(pdoc.managedAuthoring.pendingTrainingPlacement.trainingId))?.title || '训练'} / ${
-                                trainingOptions
-                                  .flatMap((training) => training.chapters)
-                                  .find((chapter) => chapter.id === pdoc.managedAuthoring.pendingTrainingPlacement.chapterId)?.title ||
-                                `章节 ${pdoc.managedAuthoring.pendingTrainingPlacement.chapterId}`
-                              }`
-                            : '未选择'}
-                        </p>
-                      </div>
+                      <ManagedProblemTrainingStatus
+                        metadataStatus={pdoc.managedAuthoring?.metadataStatus}
+                        pendingPlacement={pdoc.managedAuthoring?.pendingTrainingPlacement}
+                        trainingOptions={trainingOptions}
+                        placements={managedTrainingPlacements}
+                      />
                       <div className="space-y-3 rounded-xl bg-muted/45 px-4 py-3 md:col-span-2">
                         <div>
                           <p className="text-xs text-muted-foreground">只读来源与赛事标签</p>
@@ -1451,7 +1442,11 @@ export function ProblemEditPage() {
                             placeholder="没有已选节点"
                             disabled
                           />
-                          <p className="text-[11px] leading-5 text-muted-foreground">托管题继续使用创建时保存的节点引用，发布前由服务端重新物化。</p>
+                          <p className="text-[11px] leading-5 text-muted-foreground">
+                            {managedMetadataDraft
+                              ? '托管题继续使用创建时保存的节点引用，发布前由服务端重新物化。'
+                              : '节点已在审核发布时由服务端重新物化。'}
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -1496,7 +1491,11 @@ export function ProblemEditPage() {
                   <header className="px-5 py-4">
                     <h3 className="text-sm font-semibold tracking-tight">可见性</h3>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {managed ? '托管草稿保持隐藏；管理员从权限与协作页确认元数据并发布。' : '发布与维护权限沿用现有模型。'}
+                      {managed
+                        ? managedMetadataDraft
+                          ? '托管草稿保持隐藏；管理员从权限与协作页确认元数据并发布。'
+                          : '该题已完成审核并发布；可见性仍由管理员按权限维护。'
+                        : '发布与维护权限沿用现有模型。'}
                     </p>
                   </header>
                   <div className="grid gap-4 p-5 sm:grid-cols-2">

@@ -2,6 +2,37 @@ import type { ProblemKind } from '@hydrooj/common';
 
 type JsonRecord = Record<string, unknown>;
 
+function substituteHydroErrorParams(template: string, params: unknown[]): string {
+  return template.replace(/\{(\d+)\}/g, (token, rawIndex) => {
+    const value = params[Number(rawIndex)];
+    return value === undefined || value === null ? token : String(value);
+  });
+}
+
+/** Read Hydro's JSON error envelope without leaking untranslated `{0}` placeholders. */
+export async function readHydroResponseError(response: Response, fallback: string): Promise<string> {
+  let raw = '';
+  try {
+    raw = await response.text();
+  } catch (error) {
+    console.error('Failed to read Hydro error response', error);
+    return `${fallback}：HTTP ${response.status}`;
+  }
+  if (raw) {
+    try {
+      const body = JSON.parse(raw);
+      const error = body?.error;
+      const message = error?.message || body?.message || error;
+      const params = Array.isArray(error?.params) ? error.params : [];
+      if (typeof message === 'string' && message.trim()) return substituteHydroErrorParams(message.trim(), params);
+    } catch {
+      const plain = raw.trim();
+      if (plain && !/^<!doctype\s+html/i.test(plain) && !/^<html/i.test(plain)) return plain.slice(0, 180);
+    }
+  }
+  return `${fallback}：HTTP ${response.status}`;
+}
+
 async function readExplicitJsonSuccess(response: Response): Promise<JsonRecord> {
   if (response.redirected) throw new Error('保存请求发生了非预期重定向，服务器未确认保存成功');
   const contentType = response.headers.get('content-type') || '';

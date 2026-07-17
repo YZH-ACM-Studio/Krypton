@@ -121,6 +121,25 @@ export interface EventMap {
     'record/judge': (rdoc: RecordDoc, updated: boolean, pdoc?: ProblemDoc, updater?: any) => VoidReturn;
 }
 
+/**
+ * Dispatch every listener and wait until all of them settle before reporting
+ * failures. Cordis `parallel()` uses fail-fast `Promise.all()`, which is not
+ * suitable for mutations whose observers may still be writing state.
+ */
+export async function parallelAllSettled<K extends keyof EventMap>(event: K, ...args: Parameters<EventMap[K]>): Promise<void> {
+    const dispatchArgs: any[] = [event, ...args];
+    const listeners = app.events.dispatch('emit', dispatchArgs);
+    const results = await Promise.allSettled(listeners.map((listener) => Promise.resolve().then(() => listener(...dispatchArgs))));
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failures.length === 1) throw failures[0].reason;
+    if (failures.length > 1) {
+        throw new AggregateError(
+            failures.map((failure) => failure.reason),
+            `Multiple observers failed for ${String(event)}`,
+        );
+    }
+}
+
 export function apply(ctx: Context) {
     try {
         if (!process.send || !pm2 || process.env.exec_mode !== 'cluster_mode') throw new Error('not in cluster mode');

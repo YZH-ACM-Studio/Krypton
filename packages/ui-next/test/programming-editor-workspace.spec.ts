@@ -86,7 +86,7 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(edit).to.include('<ManagedReviewPanel');
     expect(edit).to.include('name="operation" value="managedPublish"');
     expect(edit).to.include('action={problemsUrl}');
-    expect(edit).to.include("responseErrorMessage(response, '审核发布失败')");
+    expect(edit).to.include("readHydroResponseError(response, '审核发布失败')");
   });
 
   it('keeps testdata and additional files on refresh-stable views of the existing files route', () => {
@@ -124,6 +124,34 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(files).to.include('await downloadProblemFiles({');
   });
 
+  it('renders managed authoring state from canonical capabilities and persisted publication data', () => {
+    const detail = read('packages/ui-next/src/pages/problem-detail.tsx');
+    const edit = read('packages/ui-next/src/pages/problem-edit.tsx');
+
+    expect(detail).to.include('const canEditProblem = data.canEditProblem === true;');
+    expect(detail).to.include('<ProblemEditGate canEditProblem={canEditProblem} inContest={!!inContest}>');
+    expect(detail).to.include('<ProblemAuthorText authors={authorUdocs} />');
+    expect(detail).to.include('data.authorUdocs');
+    expect(detail).not.to.include('label="出题人" value={udoc.uname');
+
+    expect(edit).to.include('<ManagedProblemTrainingStatus');
+    expect(edit).to.include('data.managedTrainingPlacements');
+    expect(edit).to.include('该题已完成审核并发布');
+    expect(edit).to.include("metadataDraft ? '管理员审核与发布' : pdoc.hidden ? '重新公开托管题' : '发布状态'");
+    expect(edit).to.include("metadataDraft ? '工作标题' : '正式标题'");
+    expect(edit).to.include('该题已完成审核确认；当前来源、标签和所属训练均为只读');
+    expect(edit).to.include('托管草稿保持隐藏；管理员从权限与协作页确认元数据并发布。');
+  });
+
+  it('starts managed creation with a valid difficulty and validates required statement content before posting', () => {
+    const edit = read('packages/ui-next/src/pages/problem-edit.tsx');
+
+    expect(edit).to.include("defaultValue={String(pdoc.difficulty || (managed && isCreate ? 1 : ''))}");
+    expect(edit).to.include("const contentText = typeof draftContent === 'string' ? draftContent : JSON.stringify(draftContent);");
+    expect(edit).to.include("const message = '请填写题面正文。';");
+    expect(edit).to.include("const message = '题面正文不能超过 65535 个字符。';");
+  });
+
   it('serializes both checkbox states explicitly so administrators can clear them', () => {
     const edit = read('packages/ui-next/src/pages/problem-edit.tsx');
     expect(edit).to.include("name=\"hidden\" value={hiddenValue ? 'true' : 'false'}");
@@ -140,6 +168,7 @@ describe('P3.15 programming editor workspace correction', () => {
     const files = read('packages/ui-next/src/pages/problem-manage.tsx');
     const uploader = read('packages/ui-next/src/components/uploader.tsx');
     const guard = read('packages/ui-next/src/components/unsaved-changes-guard.tsx');
+    const responseErrors = read('packages/ui-next/src/lib/problem-save-response.ts');
     expect(edit).to.include("'idle' | 'dirty' | 'saving' | 'saved' | 'error'");
     expect(edit).to.include('useFormDirtyState(formRef, editorRevisionKey)');
     expect(edit).to.include('useUnsavedChangesGuard(dirtyState.dirty');
@@ -148,7 +177,9 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(edit).to.include('dirtyState.markClean()');
     expect(edit).to.include('navigationGuard.allowNavigation()');
     expect(edit).to.include("current === 'saving' ? current : 'dirty'");
-    expect(edit).to.include('body?.error?.message || body?.message || body?.error');
+    expect(edit).to.include('readHydroResponseError(editRes');
+    expect(responseErrors).to.include('error?.message || body?.message || error');
+    expect(responseErrors).to.include('Array.isArray(error?.params)');
     expect(edit).to.include('role="alert"');
     expect(edit).not.to.include('alert(');
     expect(config).to.include('const [savedYaml, setSavedYaml] = useState(initialSubmittedYaml)');

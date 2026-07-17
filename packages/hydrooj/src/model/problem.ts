@@ -26,7 +26,7 @@ import { copyProblemStorageFiles } from '../lib/problem-clone';
 import { isProblemConfigFilename, parseProblemConfigObject } from '../lib/problem-config';
 import { normalizeProblemTestdataUpload } from '../lib/problem-testdata-upload';
 import { parseConfig } from '../lib/testdataConfig';
-import bus from '../service/bus';
+import bus, { parallelAllSettled } from '../service/bus';
 import db from '../service/db';
 import { ArrayKeys, MaybeArray, NumberKeys, Projection } from '../typeutils';
 import { buildProjection } from '../utils';
@@ -124,6 +124,35 @@ export interface ProblemDoc extends Document {}
 export type Field = keyof ProblemDoc;
 
 const logger = new Logger('problem');
+
+interface ProblemTestdataObserverContext {
+    domainId: string;
+    pid: number;
+    actor: number;
+    operation: 'upload' | 'rename' | 'delete';
+    mode: 'direct' | 'claimed';
+    files: string[];
+    requestId?: string;
+}
+
+async function waitForProblemTestdataObservers(context: ProblemTestdataObserverContext, notify: () => Promise<unknown>): Promise<void> {
+    try {
+        await notify();
+    } catch (error) {
+        logger.error(
+            'Problem testdata observer failed domainId=%s docId=%d actor=%d operation=%s mode=%s requestId=%s files=%o stage=testdata-observer error=%o',
+            context.domainId,
+            context.pid,
+            context.actor,
+            context.operation,
+            context.mode,
+            context.requestId || '-',
+            context.files,
+            error,
+        );
+        throw error;
+    }
+}
 
 type CodeEvaluationReadySnapshot = Pick<
     ProblemDoc,
@@ -2952,7 +2981,9 @@ export class ProblemModel {
         payload.lastModified ||= new Date();
         if (!fileinfo) await document.push(domainId, document.TYPE_PROBLEM, pid, 'data', { _id: name, ...payload });
         else await document.setSub(domainId, document.TYPE_PROBLEM, pid, 'data', name, payload);
-        await bus.emit('problem/addTestdata', domainId, pid, name, payload);
+        await waitForProblemTestdataObservers({ domainId, pid, actor: operator, operation: 'upload', mode: 'direct', files: [name] }, async () => {
+            await parallelAllSettled('problem/addTestdata', domainId, pid, name, payload);
+        });
         if (revisionManaged) await ProblemModel.bumpDirectStructureRevision(domainId, pid);
     }
 
@@ -2977,7 +3008,12 @@ export class ProblemModel {
             storage.rename(`problem/${domainId}/${pid}/testdata/${file}`, `problem/${domainId}/${pid}/testdata/${newName}`, operator),
             document.setSub(domainId, document.TYPE_PROBLEM, pid, 'data', file, payload),
         ]);
-        await bus.emit('problem/renameTestdata', domainId, pid, file, newName);
+        await waitForProblemTestdataObservers(
+            { domainId, pid, actor: operator, operation: 'rename', mode: 'direct', files: [file, newName] },
+            async () => {
+                await parallelAllSettled('problem/renameTestdata', domainId, pid, file, newName);
+            },
+        );
         if (revisionManaged) await ProblemModel.bumpDirectStructureRevision(domainId, pid);
     }
 
@@ -2998,7 +3034,9 @@ export class ProblemModel {
             ),
             document.deleteSub(domainId, document.TYPE_PROBLEM, pid, 'data', names),
         ]);
-        await bus.emit('problem/delTestdata', domainId, pid, names);
+        await waitForProblemTestdataObservers({ domainId, pid, actor: operator, operation: 'delete', mode: 'direct', files: names }, async () => {
+            await parallelAllSettled('problem/delTestdata', domainId, pid, names);
+        });
         if (revisionManaged) await ProblemModel.bumpDirectStructureRevision(domainId, pid);
     }
 
@@ -3161,7 +3199,20 @@ export class ProblemModel {
         const next = current.filter((item) => item.name !== name);
         next.push({ _id: name, ...payload });
         await ProblemModel.commitClaimedTestdataState(claim, state, next, 'upload', claimed.snapshot);
-        await bus.emit('problem/addTestdata', claim.domainId, claim.pid, name, payload, claim);
+        await waitForProblemTestdataObservers(
+            {
+                domainId: claim.domainId,
+                pid: claim.pid,
+                actor: operator,
+                operation: 'upload',
+                mode: 'claimed',
+                files: [name],
+                requestId: claim.requestId,
+            },
+            async () => {
+                await parallelAllSettled('problem/addTestdata', claim.domainId, claim.pid, name, payload, claim);
+            },
+        );
     }
 
     static async renameTestdataWithClaim(claim: ProblemWriteClaim, file: string, newName: string, operator = 1) {
@@ -3191,7 +3242,20 @@ export class ProblemModel {
             .filter((item) => item.name !== newName)
             .map((item) => (item.name === file ? { ...item, _id: newName, name: newName, lastModified: new Date() } : item));
         await ProblemModel.commitClaimedTestdataState(claim, state, next, 'rename', claimed.snapshot);
-        await bus.emit('problem/renameTestdata', claim.domainId, claim.pid, file, newName, claim);
+        await waitForProblemTestdataObservers(
+            {
+                domainId: claim.domainId,
+                pid: claim.pid,
+                actor: operator,
+                operation: 'rename',
+                mode: 'claimed',
+                files: [file, newName],
+                requestId: claim.requestId,
+            },
+            async () => {
+                await parallelAllSettled('problem/renameTestdata', claim.domainId, claim.pid, file, newName, claim);
+            },
+        );
     }
 
     static async delTestdataWithClaim(claim: ProblemWriteClaim, name: string | string[], operator = 1) {
@@ -3212,7 +3276,20 @@ export class ProblemModel {
             'delete',
             claimed.snapshot,
         );
-        await bus.emit('problem/delTestdata', claim.domainId, claim.pid, names, claim);
+        await waitForProblemTestdataObservers(
+            {
+                domainId: claim.domainId,
+                pid: claim.pid,
+                actor: operator,
+                operation: 'delete',
+                mode: 'claimed',
+                files: names,
+                requestId: claim.requestId,
+            },
+            async () => {
+                await parallelAllSettled('problem/delTestdata', claim.domainId, claim.pid, names, claim);
+            },
+        );
     }
 
     static async addAdditionalFileWithClaim(claim: ProblemWriteClaim, name: string, f: Readable | Buffer | string, operator = 1) {

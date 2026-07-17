@@ -395,13 +395,9 @@ describe('P2.17 legacy programming tag normalization', () => {
         const classified = authoring.classifyLegacyProgrammingTags(['PAT乙级', '2026春', '二分', '快速幂', 'Dijksrta'], options);
 
         expect(classified.sourceTags).to.deep.equal(['PAT乙级', '2026春']);
-        expect(classified.suggestions).to.deep.equal([
-            { tag: '二分', nodeId: unique.toHexString(), label: '算法 / 二分' },
-        ]);
+        expect(classified.suggestions).to.deep.equal([{ tag: '二分', nodeId: unique.toHexString(), label: '算法 / 二分' }]);
         expect(classified.suggestedNodeIds).to.deep.equal([unique.toHexString()]);
-        expect(classified.ambiguousTags).to.deep.equal([
-            { tag: '快速幂', candidates: ['算法 / 快速幂 A', '算法 / 快速幂 B'] },
-        ]);
+        expect(classified.ambiguousTags).to.deep.equal([{ tag: '快速幂', candidates: ['算法 / 快速幂 A', '算法 / 快速幂 B'] }]);
         expect(classified.unknownTags).to.deep.equal(['Dijksrta']);
     });
 
@@ -470,9 +466,7 @@ describe('P2.17 legacy programming tag normalization', () => {
             selectedNodeIds: [unique.toHexString()],
         });
         mindmapDocs = mindmapDocs.map((node) =>
-            node._id.equals(unique)
-                ? { ...node, topic: '二分查找', updatedAt: new Date(mindmapVersion.getTime() + 1) }
-                : node,
+            node._id.equals(unique) ? { ...node, topic: '二分查找', updatedAt: new Date(mindmapVersion.getTime() + 1) } : node,
         );
         const renamed = await authoring.previewProgrammingTagNormalization({
             domainId: 'system',
@@ -524,6 +518,30 @@ describe('P2.14 managed problem training placement', () => {
             }),
             TestMetadataConflictError,
         );
+    });
+
+    it('reports the live training chapters that already contain a published problem', async () => {
+        trainingDocs.push({
+            domainId: 'system',
+            docId: new ObjectId('64b000000000000000000020'),
+            title: 'Other training',
+            dag: [{ _id: 5, title: 'Round 5', requireNids: [], pids: ['100', 101] }],
+        });
+
+        expect(await authoring.listManagedProblemTrainingPlacements('system', 100)).to.deep.equal([
+            {
+                trainingId: trainingId.toHexString(),
+                trainingTitle: 'PAT 乙级训练',
+                chapterId: 1,
+                chapterTitle: '2026 春季',
+            },
+            {
+                trainingId: '64b000000000000000000020',
+                trainingTitle: 'Other training',
+                chapterId: 5,
+                chapterTitle: 'Round 5',
+            },
+        ]);
     });
 
     it('prepares one canonical draft with source and ancestor tags', async () => {

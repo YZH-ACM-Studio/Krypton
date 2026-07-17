@@ -59,6 +59,7 @@ import {
     classifyLegacyProgrammingTags,
     listKnowledgeMindmapOptions,
     listManagedMindmapOptions,
+    listManagedProblemTrainingPlacements,
     listManagedTrainingOptions,
     MANAGED_SOURCE_TEMPLATES,
     materializeKnowledgeMindmapTags,
@@ -81,6 +82,40 @@ export const parseCategory = (value: string) =>
         .split(',')
         .map((e) => e.trim());
 const logger = new Logger('problem-handler');
+
+async function problemAuthorUsers(pdoc: ProblemDoc, owner: User): Promise<User[]> {
+    if (pdoc.authoringMode !== 'managed') return owner ? [owner] : [];
+    const permits = (global.Hydro?.model as any)?.permits;
+    if (typeof permits?.listForProblem !== 'function') throw new TypeError('permits.listForProblem is unavailable');
+    const rows = await permits.listForProblem(pdoc.domainId, pdoc.docId);
+    const malformed = rows.find((row: any) => row?.role === 'author' && (!Number.isSafeInteger(row.uid) || row.uid <= 0));
+    if (malformed) throw new TypeError(`managed problem ${pdoc.domainId}/${pdoc.docId} has a malformed author permit`);
+    const authorUids = [...new Set<number>(rows.filter((row: any) => row?.role === 'author').map((row: any) => row.uid))].sort((a, b) => a - b);
+    if (!authorUids.length) {
+        logger.error(
+            'Managed problem author unavailable domainId=%s docId=%d owner=%d authorUids=%o stage=detail-author-resolution',
+            pdoc.domainId,
+            pdoc.docId,
+            pdoc.owner,
+            authorUids,
+        );
+        return [];
+    }
+    const authorDict = await user.getList(pdoc.domainId, authorUids);
+    const missing = authorUids.filter((uid) => authorDict[uid]?._id !== uid);
+    if (missing.length) {
+        logger.error(
+            'Managed problem author unavailable domainId=%s docId=%d owner=%d authorUids=%o stage=detail-author-resolution missingProfiles=%o',
+            pdoc.domainId,
+            pdoc.docId,
+            pdoc.owner,
+            authorUids,
+            missing,
+        );
+        return [];
+    }
+    return authorUids.map((uid) => authorDict[uid]);
+}
 
 const BASIC_OBJECTIVE_TEMPLATES: Record<BasicObjectiveKind, string> = {
     [BASIC_OBJECTIVE_KIND.single]: 'problem_edit_single.html',
@@ -827,13 +862,15 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             problem.getStatus(this.pdoc.domainId, this.pdoc.docId, this.user._id),
             user.getById(this.pdoc.domainId, this.pdoc.owner),
         ]);
-        const [scnt, dcnt] = await Promise.all([
+        const [scnt, dcnt, authorUdocs] = await Promise.all([
             solution.count(this.pdoc.domainId, { parentId: this.pdoc.docId }),
             discussion.count(this.pdoc.domainId, { parentId: this.pdoc.docId }),
+            tid ? Promise.resolve(this.udoc ? [this.udoc] : []) : problemAuthorUsers(this.pdoc, this.udoc),
         ]);
         this.response.body = {
             pdoc: this.pdoc,
             udoc: this.udoc,
+            authorUdocs,
             psdoc: tid ? null : this.psdoc,
             title: this.pdoc.title,
             solutionCount: scnt,
@@ -1205,9 +1242,12 @@ export class ProblemEditHandler extends ProblemManageHandler {
         this.response.body.statementLangs = this.ctx.i18n.langs(false);
         const problemKind = effectiveProblemKind(this.pdoc);
         if (problemKind === 'programming') {
-            const [programmingMindmapOptions, managedTrainingOptions] = await Promise.all([
+            const [programmingMindmapOptions, managedTrainingOptions, managedTrainingPlacements] = await Promise.all([
                 listKnowledgeMindmapOptions(),
                 this.pdoc.authoringMode === 'managed' ? listManagedTrainingOptions(this.pdoc.domainId) : Promise.resolve([]),
+                this.pdoc.authoringMode === 'managed'
+                    ? listManagedProblemTrainingPlacements(this.pdoc.domainId, this.pdoc.docId)
+                    : Promise.resolve([]),
             ]);
             Object.assign(this.response.body, {
                 programmingMindmapOptions,
@@ -1217,6 +1257,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                           managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
                           managedMindmapOptions: programmingMindmapOptions,
                           managedTrainingOptions,
+                          managedTrainingPlacements,
                       }
                     : {}),
             });
@@ -1514,14 +1555,7 @@ export class ProblemProgrammingTagApplyHandler extends ProblemManageHandler {
     @post('intent', Types.String)
     @post('confirmed', Types.Boolean)
     @post('previewFingerprint', Types.String)
-    async post(
-        _domainId: string,
-        _pid: string | number,
-        knowledgeNodeIds: string[],
-        intent: string,
-        confirmed: boolean,
-        previewFingerprint: string,
-    ) {
+    async post(_domainId: string, _pid: string | number, knowledgeNodeIds: string[], intent: string, confirmed: boolean, previewFingerprint: string) {
         try {
             const bodyFields = Object.keys(this.request.body || {});
             const allowedFields = new Set(['knowledgeNodeIds', 'intent', 'confirmed', 'previewFingerprint']);
@@ -2370,9 +2404,10 @@ export class ProblemCreateProgrammingHandler extends Handler {
             });
             throw new ValidationError('fields', null, `托管草稿不接受字段或创建模式：${fields.join(', ')}`);
         }
-        if (isBankAdmin && !authorUid) throw new ValidationError('authorUid');
         if (!isBankAdmin && authorUid) throw new ValidationError('authorUid');
-        if (isBankAdmin) {
+        const resolvedAuthorUid = isBankAdmin ? authorUid || this.user._id : undefined;
+        const resolvedDifficulty = difficulty || 1;
+        if (isBankAdmin && resolvedAuthorUid !== this.user._id) {
             const author = await user.getById(domainId, authorUid);
             if (!author || author._id !== authorUid) throw new ValidationError('authorUid');
         }
@@ -2388,11 +2423,11 @@ export class ProblemCreateProgrammingHandler extends Handler {
             {
                 workingTitle: title,
                 content,
-                difficulty,
+                difficulty: resolvedDifficulty,
                 sourceMeta,
                 mindmapNodeIds,
                 ...(trainingId || chapterId ? { pendingTrainingPlacement: { trainingId, chapterId } } : {}),
-                ...(isBankAdmin ? { authorUid } : {}),
+                ...(resolvedAuthorUid ? { authorUid: resolvedAuthorUid } : {}),
             },
             this.user._id,
             isBankAdmin ? this.user : undefined,

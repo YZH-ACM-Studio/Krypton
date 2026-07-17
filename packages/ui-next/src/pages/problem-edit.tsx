@@ -7,6 +7,12 @@ import { AlertCircle, ArrowRight, CheckCircle2, Download, Eye, EyeOff, FileText,
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import {
+  ManagedKnowledgeSuggestionField,
+  ManagedProgrammingAuthorControl,
+  ManagedProgrammingTrainingControl,
+  ManagedReviewPanel,
+} from '@/components/managed-programming-authority';
+import {
   ManagedProblemTrainingStatus,
   type ManagedTrainingOptionView,
   type ManagedTrainingPlacementView,
@@ -427,141 +433,6 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
   );
 }
 
-function ManagedReviewPanel({
-  pdoc,
-  sourceTemplates,
-  trainingOptions,
-  problemsUrl,
-}: {
-  pdoc: R;
-  sourceTemplates: ManagedSourceTemplateOption[];
-  trainingOptions: ManagedTrainingOptionView[];
-  problemsUrl: string;
-}) {
-  const [reviewing, setReviewing] = useState(false);
-  const [reviewError, setReviewError] = useState('');
-  const template = sourceTemplates.find((item) => item.id === pdoc.sourceMeta?.template);
-  const sourceFields = managedSourceFieldViews(pdoc.sourceMeta, template);
-  const pendingPlacement = pdoc.managedAuthoring?.pendingTrainingPlacement;
-  const pendingTraining = trainingOptions.find((training) => training.id === String(pendingPlacement?.trainingId || ''));
-  const pendingChapter = pendingTraining?.chapters.find((chapter) => chapter.id === pendingPlacement?.chapterId);
-  const metadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft';
-  const reviewHeading = metadataDraft ? '管理员审核与发布' : pdoc.hidden ? '重新公开托管题' : '发布状态';
-  const reviewDescription = metadataDraft
-    ? '确认正式标题、来源、标签和待挂训练后，通过既有统一发布服务公开题目。'
-    : pdoc.hidden
-      ? '该题已完成审核确认，但当前处于隐藏状态；重新公开不会再次消费待挂训练。'
-      : '该题已完成审核确认；当前来源、标签和所属训练均为只读。';
-
-  const submitReview = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setReviewError('');
-    setReviewing(true);
-    try {
-      const response = await fetch(problemsUrl, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { Accept: 'application/json' },
-        body: new URLSearchParams(new FormData(event.currentTarget) as any),
-      });
-      if (!response.ok) throw new Error(await readHydroResponseError(response, '审核发布失败'));
-      const body = await response.json();
-      if (typeof body?.url !== 'string' || !body.url) throw new Error('审核发布响应缺少跳转地址');
-      window.location.assign(body.url);
-    } catch (error) {
-      setReviewError(error instanceof Error ? error.message : '审核发布失败');
-      setReviewing(false);
-    }
-  };
-
-  return (
-    <section aria-labelledby="managed-review-heading" className="rounded-2xl border border-primary/25 bg-primary/[0.025]">
-      <header className="border-b border-primary/15 px-5 py-4">
-        <h2 id="managed-review-heading" className="text-base font-semibold tracking-tight">
-          {reviewHeading}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">{reviewDescription}</p>
-      </header>
-      <div className="space-y-5 p-5">
-        <dl className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
-          <div>
-            <dt className="text-xs text-muted-foreground">{metadataDraft ? '工作标题' : '正式标题'}</dt>
-            <dd className="mt-1 font-medium">{metadataDraft ? pdoc.managedAuthoring?.workingTitle || '—' : pdoc.title || '—'}</dd>
-          </div>
-          {sourceFields.map((field) => (
-            <div key={field.label}>
-              <dt className="text-xs text-muted-foreground">{field.label}</dt>
-              <dd className="mt-1 font-medium">{field.value}</dd>
-            </div>
-          ))}
-          {metadataDraft ? (
-            <div>
-              <dt className="text-xs text-muted-foreground">待挂训练</dt>
-              <dd className="mt-1 font-medium">
-                {pendingPlacement
-                  ? `${pendingTraining?.title || '训练已失效'} / ${pendingChapter?.title || `章节 ${pendingPlacement.chapterId}`}`
-                  : '不挂入训练'}
-              </dd>
-            </div>
-          ) : null}
-        </dl>
-
-        <div>
-          <p className="text-xs text-muted-foreground">最终标签</p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {(pdoc.tag || []).map((tag: string) => (
-              <Badge key={tag} variant="secondary">
-                {tag}
-              </Badge>
-            ))}
-          </div>
-        </div>
-
-        {pdoc.hidden ? (
-          <form
-            method="post"
-            action={problemsUrl}
-            className="grid gap-4 border-t border-primary/15 pt-5 sm:grid-cols-[minmax(0,1fr)_12rem_auto] sm:items-end"
-            onSubmit={submitReview}
-          >
-            <input type="hidden" name="operation" value="managedPublish" />
-            <input type="hidden" name="pid" value={String(pdoc.docId)} />
-            <label className="space-y-1.5">
-              <span className="text-sm font-medium">正式标题</span>
-              <Input
-                name="formalTitle"
-                defaultValue={metadataDraft ? pdoc.managedAuthoring?.workingTitle || '' : pdoc.title || pdoc.managedAuthoring?.workingTitle || ''}
-                required
-              />
-            </label>
-            <label className="space-y-1.5">
-              <span className="text-sm font-medium">难度</span>
-              <SimpleSelect
-                name="difficulty"
-                defaultValue={String(pdoc.difficulty ?? 0)}
-                options={DIFFICULTY_OPTIONS.map((option) => ({ value: String(option.value || 0), label: option.label }))}
-              />
-            </label>
-            <Button type="submit" className="min-h-11" disabled={reviewing}>
-              {reviewing ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : null}
-              {metadataDraft ? '确认并发布' : '重新公开'}
-            </Button>
-            {reviewError ? (
-              <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive sm:col-span-3">
-                {reviewError}
-              </p>
-            ) : null}
-          </form>
-        ) : (
-          <p role="status" className="border-t border-primary/15 pt-4 text-sm text-muted-foreground">
-            此题已经发布；如因生命周期操作重新隐藏，仍需从本区走统一重新公开流程。
-          </p>
-        )}
-      </div>
-    </section>
-  );
-}
-
 /* ---------- Main edit page ---------- */
 
 export function ProblemEditPage() {
@@ -573,6 +444,7 @@ export function ProblemEditPage() {
   const managedExisting = pdoc.authoringMode === 'managed' || capabilities.managed === true;
   const managed = managedExisting || isCreate;
   const canAssignManagedAuthor = isCreate && data.canAssignManagedAuthor === true;
+  const canAssignManagedTraining = isCreate && data.canAssignManagedTraining === true;
   const initialProgrammingTagState: ProgrammingTagState = data.programmingTagState || {
     mode: 'managed',
     sourceTags: [],
@@ -585,6 +457,7 @@ export function ProblemEditPage() {
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const additionalFiles: R[] = data.additional_file || [];
   const testdataFiles: R[] = data.testdata || pdoc.data || [];
+  const canEditContent = !managed || capabilities.canEditContent === true;
   const canEditDraftMetadata = !managed || capabilities.canEditDraftMetadata === true;
   const canPublish = !managed;
   const canDelete = !managed || capabilities.canDelete === true;
@@ -594,6 +467,7 @@ export function ProblemEditPage() {
   const requestedSection = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('section');
   const showCollaboration = requestedSection === 'collaboration' && collaborationEnabled;
   const managedMetadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft';
+  const managedKnowledgeEditable = managed && !isCreate && managedMetadataDraft && canEditContent;
   const canSubmitManagedWorkingTitle = isCreate || (managedMetadataDraft && canEditDraftMetadata);
   const filesBase = pdoc.docId ? `${problemUrl}/files` : '';
 
@@ -634,10 +508,11 @@ export function ProblemEditPage() {
   );
   const [persistedMindmapNodeIds, setPersistedMindmapNodeIds] = useState(initialMindmapIds);
   const selectedMindmapNodeIds = selectedMindmapNodes.map((node) => node.id);
-  const tagSelectionDirty =
-    !managed &&
-    (selectedMindmapNodeIds.length !== persistedMindmapNodeIds.length ||
-      selectedMindmapNodeIds.some((nodeId, index) => nodeId !== persistedMindmapNodeIds[index]));
+  const mindmapSelectionChanged =
+    selectedMindmapNodeIds.length !== persistedMindmapNodeIds.length ||
+    selectedMindmapNodeIds.some((nodeId, index) => nodeId !== persistedMindmapNodeIds[index]);
+  const tagSelectionDirty = !managed && mindmapSelectionChanged;
+  const managedKnowledgeDirty = managedKnowledgeEditable && mindmapSelectionChanged;
   const [tagPreview, setTagPreview] = useState<ProgrammingTagPreview | null>(null);
   const [tagPreviewOpen, setTagPreviewOpen] = useState(false);
   const [tagOperationState, setTagOperationState] = useState<'idle' | 'previewing' | 'applying' | 'saved' | 'error'>('idle');
@@ -660,13 +535,15 @@ export function ProblemEditPage() {
     sourceLevel,
     sourceRound,
     managedAuthors: selectedManagedAuthors.map((author) => author._id),
-    mindmapNodes: isCreate ? selectedMindmapNodeIds : undefined,
+    mindmapNodes: isCreate || managedKnowledgeEditable ? selectedMindmapNodeIds : undefined,
     selectedTrainingId,
     selectedChapterId,
   });
   const previousRevisionKey = useRef(editorRevisionKey);
   const dirtyState = useFormDirtyState(formRef, editorRevisionKey);
-  const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || tagSelectionDirty || saveState === 'saving' || tagOperationState === 'applying');
+  const navigationGuard = useUnsavedChangesGuard(
+    dirtyState.dirty || tagSelectionDirty || managedKnowledgeDirty || saveState === 'saving' || tagOperationState === 'applying',
+  );
 
   const searchManagedAuthors = useCallback(
     async (query: string): Promise<UserOption[]> => {
@@ -963,7 +840,14 @@ export function ProblemEditPage() {
         <div className="space-y-6">
           {canManageCollaborators ? <PermitsPanel pid={String(pid)} pdocId={pdoc.docId} hidden={!!pdoc.hidden} managed={managed} /> : null}
           {canReviewManaged ? (
-            <ManagedReviewPanel pdoc={pdoc} sourceTemplates={sourceTemplates} trainingOptions={trainingOptions} problemsUrl={bs.urls.problems} />
+            <ManagedReviewPanel
+              pdoc={pdoc}
+              sourceTemplates={sourceTemplates}
+              trainingOptions={trainingOptions}
+              problemsUrl={bs.urls.problems}
+              difficultyOptions={DIFFICULTY_OPTIONS}
+              reviewPreview={data.managedReviewPreview}
+            />
           ) : null}
         </div>
       ) : (
@@ -1206,7 +1090,9 @@ export function ProblemEditPage() {
                     <h3 className="text-sm font-semibold tracking-tight">来源与归档</h3>
                     <p className="mt-1 text-sm text-muted-foreground">
                       {isCreate
-                        ? '选择固定来源和知识导图节点；PID 与标签仅由服务端计算。训练选择只记录待审核位置。'
+                        ? canAssignManagedTraining
+                          ? '选择固定来源和知识导图节点；PID 与标签仅由服务端计算。训练选择只记录待审核位置。'
+                          : '使用自命题来源并选择知识导图节点；作者、PID、标签与隐藏状态均由服务端固定。'
                         : managedMetadataDraft
                           ? '来源、PID 与系统标签已锁定；发布前由管理员审核。'
                           : '来源、PID 与系统标签已锁定；该题已完成审核并发布。'}
@@ -1297,7 +1183,7 @@ export function ProblemEditPage() {
                             <p className="text-xs text-muted-foreground">场次只进入来源元数据和训练章节，不生成标签。</p>
                           </div>
                         ) : null}
-                        {canAssignManagedAuthor ? (
+                        <ManagedProgrammingAuthorControl allowed={canAssignManagedAuthor}>
                           <div className="space-y-1.5" role="group" aria-labelledby="managed-author-label">
                             <span id="managed-author-label" className="text-sm font-medium">
                               代指定出题人（可选）
@@ -1325,14 +1211,16 @@ export function ProblemEditPage() {
                               emptyText="没有找到域内用户"
                               minHeight={44}
                             />
-                            <p className="text-xs text-muted-foreground">不选择时默认为当前管理员；代建时只能选择当前域中的一名用户，服务端会再次校验。</p>
+                            <p className="text-xs text-muted-foreground">
+                              不选择时默认为当前管理员；代建时只能选择当前域中的一名用户，服务端会再次校验。
+                            </p>
                             {managedAuthorSearchError ? (
                               <p role="alert" className="text-xs text-destructive">
                                 {managedAuthorSearchError}
                               </p>
                             ) : null}
                           </div>
-                        ) : null}
+                        </ManagedProgrammingAuthorControl>
                       </div>
 
                       <div className="space-y-1.5">
@@ -1351,42 +1239,44 @@ export function ProblemEditPage() {
                         <p className="text-xs text-muted-foreground">服务端会同时物化每个节点路径上所有带标签的祖先。</p>
                       </div>
 
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-1.5">
-                          <label className="text-sm font-medium" htmlFor="managed-training">
-                            待挂训练（可选）
-                          </label>
-                          <SimpleSelect
-                            id="managed-training"
-                            name="trainingId"
-                            value={selectedTrainingId}
-                            onValueChange={(value) => {
-                              setSelectedTrainingId(value);
-                              setSelectedChapterId('');
-                            }}
-                            options={[
-                              { value: '', label: '暂不加入训练' },
-                              ...eligibleTrainings.map((training) => ({ value: training.id, label: training.title })),
-                            ]}
-                          />
+                      <ManagedProgrammingTrainingControl allowed={canAssignManagedTraining}>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium" htmlFor="managed-training">
+                              待挂训练（可选）
+                            </label>
+                            <SimpleSelect
+                              id="managed-training"
+                              name="trainingId"
+                              value={selectedTrainingId}
+                              onValueChange={(value) => {
+                                setSelectedTrainingId(value);
+                                setSelectedChapterId('');
+                              }}
+                              options={[
+                                { value: '', label: '暂不加入训练' },
+                                ...eligibleTrainings.map((training) => ({ value: training.id, label: training.title })),
+                              ]}
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-sm font-medium" htmlFor="managed-chapter">
+                              现有章节
+                            </label>
+                            <SimpleSelect
+                              id="managed-chapter"
+                              name={selectedTrainingId ? 'chapterId' : undefined}
+                              value={selectedChapterId}
+                              onValueChange={setSelectedChapterId}
+                              disabled={!selectedTraining}
+                              options={[
+                                { value: '', label: selectedTraining ? '请选择章节' : '先选择训练' },
+                                ...(selectedTraining?.chapters || []).map((chapter) => ({ value: String(chapter.id), label: chapter.title })),
+                              ]}
+                            />
+                          </div>
                         </div>
-                        <div className="space-y-1.5">
-                          <label className="text-sm font-medium" htmlFor="managed-chapter">
-                            现有章节
-                          </label>
-                          <SimpleSelect
-                            id="managed-chapter"
-                            name={selectedTrainingId ? 'chapterId' : undefined}
-                            value={selectedChapterId}
-                            onValueChange={setSelectedChapterId}
-                            disabled={!selectedTraining}
-                            options={[
-                              { value: '', label: selectedTraining ? '请选择章节' : '先选择训练' },
-                              ...(selectedTraining?.chapters || []).map((chapter) => ({ value: String(chapter.id), label: chapter.title })),
-                            ]}
-                          />
-                        </div>
-                      </div>
+                      </ManagedProgrammingTrainingControl>
 
                       <div className="rounded-xl bg-muted/45 px-4 py-3">
                         <p className="text-xs font-medium text-muted-foreground">服务端将生成的来源标签</p>
@@ -1430,24 +1320,22 @@ export function ProblemEditPage() {
                             )}
                           </div>
                         </div>
-                        <div className="space-y-1.5">
-                          <p className="text-xs text-muted-foreground">已选知识导图节点</p>
+                        <ManagedKnowledgeSuggestionField
+                          editable={managedKnowledgeEditable}
+                          metadataDraft={managedMetadataDraft}
+                          selectedNodeIds={selectedMindmapNodeIds}
+                        >
                           <MultiSelect
                             options={mindmapOptions}
                             value={selectedMindmapNodes}
-                            onChange={() => undefined}
+                            onChange={setSelectedMindmapNodes}
                             getKey={(node) => node.id}
                             getLabel={(node) => node.label}
                             getDescription={(node) => node.tags.join(' / ')}
                             placeholder="没有已选节点"
-                            disabled
+                            disabled={!managedKnowledgeEditable}
                           />
-                          <p className="text-[11px] leading-5 text-muted-foreground">
-                            {managedMetadataDraft
-                              ? '托管题继续使用创建时保存的节点引用，发布前由服务端重新物化。'
-                              : '节点已在审核发布时由服务端重新物化。'}
-                          </p>
-                        </div>
+                        </ManagedKnowledgeSuggestionField>
                       </div>
                     </div>
                   )}

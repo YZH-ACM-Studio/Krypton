@@ -176,7 +176,11 @@ describe('P2.14 managed generic patch guard', () => {
         pid: 'P3101',
         tag: ['PAT乙级'],
         sourceMeta: { template: 'pat_basic', year: 2026, season: 'spring' },
-        managedAuthoring: { workingTitle: '旧标题', metadataStatus: 'draft' },
+        managedAuthoring: {
+            workingTitle: '旧标题',
+            selectedMindmapNodeIds: [new ObjectId('64b000000000000000000011')],
+            metadataStatus: 'draft',
+        },
     } as any;
 
     it('rejects dotted canonical writes before administrator publish capability can authorize them', () => {
@@ -209,6 +213,30 @@ describe('P2.14 managed generic patch guard', () => {
         };
         const confirmedGuard = managedProblemPatchCapability(confirmed, update, {});
         expect(confirmedGuard.immutableFields).to.have.members(['title', 'managedAuthoring']);
+    });
+
+    it('allows an author to suggest live mindmap nodes without gaining metadata authority', () => {
+        const suggested = {
+            ...draft.managedAuthoring,
+            selectedMindmapNodeIds: [new ObjectId('64b000000000000000000012')],
+        };
+        const contentGuard = managedProblemPatchCapability(draft, { content: 'updated', managedAuthoring: suggested }, {});
+        expect(contentGuard.capability).to.equal('content');
+        expect(contentGuard.immutableFields).to.deep.equal([]);
+
+        const metadataGuard = managedProblemPatchCapability(
+            draft,
+            { title: '待审核 · 新标题', managedAuthoring: { ...suggested, workingTitle: '新标题' } },
+            {},
+        );
+        expect(metadataGuard.capability).to.equal('metadata');
+        expect(metadataGuard.immutableFields).to.deep.equal([]);
+
+        const confirmed = {
+            ...draft,
+            managedAuthoring: { ...draft.managedAuthoring, metadataStatus: 'confirmed' },
+        };
+        expect(managedProblemPatchCapability(confirmed, { managedAuthoring: suggested }, {}).immutableFields).to.include('managedAuthoring');
     });
 
     it('treats every removal or non-true hidden value as a unified-publication attempt', () => {
@@ -341,6 +369,29 @@ describe('P2.14 managed problem mindmap tags', () => {
             label: '数据结构 / 线段树 / 基础线段树',
             tags: ['基础线段树'],
         });
+    });
+
+    it('canonicalizes managed draft suggestions from live node ids before persistence', async () => {
+        const current = {
+            authoringMode: 'managed' as const,
+            managedAuthoring: {
+                workingTitle: '工作标题',
+                selectedMindmapNodeIds: [parent],
+                metadataStatus: 'draft' as const,
+            },
+        };
+        const patch: any = {
+            managedAuthoring: {
+                ...current.managedAuthoring,
+                selectedMindmapNodeIds: [leaf.toHexString()],
+            },
+        };
+
+        expect(await authoring.canonicalizeManagedDraftMindmapPatch(current as any, patch)).to.deep.equal([leaf.toHexString()]);
+        expect(patch.managedAuthoring.selectedMindmapNodeIds[0]).to.be.instanceOf(ObjectId);
+
+        mindmapDocs = mindmapDocs.filter((node) => !node._id.equals(leaf));
+        await expectReject(authoring.canonicalizeManagedDraftMindmapPatch(current as any, patch), TestMetadataConflictError);
     });
 
     it('returns 409-style conflicts when a selected node or ancestor vanished', async () => {

@@ -40,7 +40,7 @@
 import * as React from 'react';
 import * as RSelect from '@radix-ui/react-select';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
-import { cn } from '@/lib/cn';
+import { cn } from '../../lib/cn';
 
 const EMPTY_VALUE = '__EMPTY__';
 const toInternal = (v: string | undefined): string | undefined => (v === '' ? EMPTY_VALUE : v);

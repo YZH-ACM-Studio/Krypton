@@ -506,6 +506,26 @@ export function materializeManagedMindmapTags(nodeIdsInput: unknown): Promise<{ 
     return materializeKnowledgeMindmapTags(nodeIdsInput, { required: true, field: 'mindmapNodeIds' });
 }
 
+/** Re-read live mindmap nodes before any managed draft patch reaches Mongo. */
+export async function canonicalizeManagedDraftMindmapPatch(
+    current: Pick<ProblemDoc, 'authoringMode' | 'managedAuthoring'>,
+    $set: Partial<ProblemDoc>,
+): Promise<string[] | null> {
+    if (current.authoringMode !== 'managed' || !Object.hasOwn($set, 'managedAuthoring')) return null;
+    if (current.managedAuthoring?.metadataStatus !== 'draft' || $set.managedAuthoring?.metadataStatus !== 'draft') {
+        throw new ValidationError('knowledgeNodeIds', null, '只有托管草稿可以提交知识节点建议');
+    }
+    const materialized = await materializeKnowledgeMindmapTags($set.managedAuthoring.selectedMindmapNodeIds, {
+        required: true,
+        field: 'knowledgeNodeIds',
+    });
+    $set.managedAuthoring = {
+        ...$set.managedAuthoring,
+        selectedMindmapNodeIds: materialized.nodeIds,
+    };
+    return materialized.nodeIds.map(String);
+}
+
 function canonicalTrainingChapters(dag: unknown): TrainingNode[] {
     if (!Array.isArray(dag)) return [];
     return dag.filter(

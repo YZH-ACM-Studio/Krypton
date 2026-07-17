@@ -36,38 +36,52 @@ export function managedProblemPatchCapability(
             .map(([field]) => field),
         ...Object.keys($unset).filter((field) => field.includes('.') || (current as any)[field] !== undefined),
     ];
-    const publishes =
-        current.hidden === true &&
-        ((Object.hasOwn($set, 'hidden') && $set.hidden !== true) || Object.hasOwn($unset, 'hidden'));
-    const touchesWorkingTitle = requestedFields.some((field) => field === 'title' || field === 'managedAuthoring');
-    const coupledWorkingTitle =
-        !touchesWorkingTitle ||
-        (Object.hasOwn($set, 'title') &&
-            Object.hasOwn($set, 'managedAuthoring') &&
-            !Object.hasOwn($unset, 'title') &&
-            !Object.hasOwn($unset, 'managedAuthoring') &&
-            typeof $set.managedAuthoring?.workingTitle === 'string' &&
-            $set.title === `待审核 · ${$set.managedAuthoring.workingTitle.trim()}`);
-    const workingTitleOnly =
-        coupledWorkingTitle &&
+    const publishes = current.hidden === true && ((Object.hasOwn($set, 'hidden') && $set.hidden !== true) || Object.hasOwn($unset, 'hidden'));
+    const hasManagedAuthoring = Object.hasOwn($set, 'managedAuthoring');
+    const titleRequested = requestedFields.includes('title');
+    const proposedAuthoring = $set.managedAuthoring;
+    const workingTitleChanged = hasManagedAuthoring && proposedAuthoring?.workingTitle !== current.managedAuthoring?.workingTitle;
+    const managedDraftAuthoringPatch =
         !Object.hasOwn($unset, 'managedAuthoring') &&
-        (!Object.hasOwn($set, 'managedAuthoring') ||
+        (!hasManagedAuthoring ||
             (current.managedAuthoring?.metadataStatus === 'draft' &&
-                $set.managedAuthoring?.metadataStatus === 'draft' &&
-                typeof $set.managedAuthoring.workingTitle === 'string' &&
-                !!$set.managedAuthoring.workingTitle.trim() &&
-                isEqual({ ...$set.managedAuthoring, workingTitle: current.managedAuthoring.workingTitle }, current.managedAuthoring)));
+                proposedAuthoring?.metadataStatus === 'draft' &&
+                typeof proposedAuthoring.workingTitle === 'string' &&
+                !!proposedAuthoring.workingTitle.trim() &&
+                Array.isArray(proposedAuthoring.selectedMindmapNodeIds) &&
+                proposedAuthoring.selectedMindmapNodeIds.length > 0 &&
+                isEqual(
+                    {
+                        ...proposedAuthoring,
+                        workingTitle: current.managedAuthoring.workingTitle,
+                        selectedMindmapNodeIds: current.managedAuthoring.selectedMindmapNodeIds,
+                    },
+                    current.managedAuthoring,
+                )));
+    const titleCoupled =
+        (!titleRequested && !workingTitleChanged) ||
+        (titleRequested &&
+            hasManagedAuthoring &&
+            Object.hasOwn($set, 'title') &&
+            !Object.hasOwn($unset, 'title') &&
+            typeof proposedAuthoring?.workingTitle === 'string' &&
+            $set.title === `待审核 · ${proposedAuthoring.workingTitle.trim()}`);
+    const managedDraftPatch = managedDraftAuthoringPatch && titleCoupled;
+    const managedSuggestionPatch = managedDraftPatch && hasManagedAuthoring && !titleRequested && !workingTitleChanged;
     // Generic managed writes never need Mongo dotted paths. Reject every one
     // before capability evaluation so canonical subfields cannot be forged.
     const immutableFields = requestedFields.filter((field) => field.includes('.') || MANAGED_CANONICAL_FIELDS.has(field));
-    if (!workingTitleOnly) {
+    if (!managedDraftPatch) {
         if (requestedFields.includes('title')) immutableFields.push('title');
         if (requestedFields.includes('managedAuthoring')) immutableFields.push('managedAuthoring');
     }
-    if (!requestedFields.length || requestedFields.every((field) => MANAGED_CONTENT_FIELDS.has(field))) {
+    const contentPatch =
+        !requestedFields.length ||
+        requestedFields.every((field) => MANAGED_CONTENT_FIELDS.has(field) || (field === 'managedAuthoring' && managedSuggestionPatch));
+    if (contentPatch) {
         return { capability: 'content', requestedFields, changedFields, immutableFields, publishes };
     }
-    if (workingTitleOnly && requestedFields.every((field) => MANAGED_CONTENT_FIELDS.has(field) || MANAGED_DRAFT_METADATA_FIELDS.has(field))) {
+    if (managedDraftPatch && requestedFields.every((field) => MANAGED_CONTENT_FIELDS.has(field) || MANAGED_DRAFT_METADATA_FIELDS.has(field))) {
         return { capability: 'metadata', requestedFields, changedFields, immutableFields, publishes };
     }
     if (requestedFields.every((field) => MANAGED_CONTENT_FIELDS.has(field) || field === 'hidden' || MANAGED_ARCHIVE_FIELDS.has(field))) {

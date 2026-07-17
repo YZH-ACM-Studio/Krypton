@@ -63,6 +63,7 @@ import {
     listManagedTrainingOptions,
     MANAGED_SOURCE_TEMPLATES,
     materializeKnowledgeMindmapTags,
+    prepareManagedProblemPublication,
     previewProgrammingTagNormalization,
 } from '../model/managed-problem-authoring';
 import { isCanonicalManagedSourceTag } from '../model/managed-problem-source';
@@ -153,6 +154,43 @@ function programmingTagEditorState(pdoc: ProblemDoc, mindmapOptions: Awaited<Ret
 
 function programmingTagPreviewResponse(preview: Awaited<ReturnType<typeof previewProgrammingTagNormalization>>) {
     return { ...preview, selectedNodeIds: preview.selectedNodeIds.map(String) };
+}
+
+async function managedProblemReviewPreview(pdoc: ProblemDoc) {
+    const revision = pdoc.structureRevision;
+    if (pdoc.managedAuthoring?.metadataStatus !== 'draft') {
+        return {
+            state: 'confirmed' as const,
+            structureRevision: revision,
+            tags: [...(pdoc.tag || [])],
+            selectedMindmapNodeIds: (pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String),
+        };
+    }
+    try {
+        const prepared = await prepareManagedProblemPublication(pdoc.domainId, pdoc);
+        return {
+            state: 'ready' as const,
+            structureRevision: revision,
+            tags: prepared.tags,
+            selectedMindmapNodeIds: prepared.selectedMindmapNodeIds.map(String),
+        };
+    } catch (error) {
+        logger.warn(
+            'Managed review preview rejected domain=%s pid=%d publicPid=%s revision=%s stage=review-preview result=invalid error=%o',
+            pdoc.domainId,
+            pdoc.docId,
+            pdoc.pid,
+            revision ?? '-',
+            error,
+        );
+        return {
+            state: 'invalid' as const,
+            structureRevision: revision,
+            tags: [] as string[],
+            selectedMindmapNodeIds: [] as string[],
+            message: error instanceof Error && error.message ? error.message : '来源、知识节点或待挂训练预检失败',
+        };
+    }
 }
 
 function logProgrammingTagNormalizationRejected(
@@ -507,6 +545,7 @@ export class ProblemMainHandler extends Handler {
         const ownerDict = ownerIds.length ? await user.getList(domainId, ownerIds) : {};
         const ownerNames = Object.fromEntries(pdocs.map((pdoc) => [pdoc.owner, ownerDict[pdoc.owner]?.uname || `UID ${pdoc.owner}`]));
         const canManageByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canEditProblemContent(this.user, pdoc)]));
+        const canCloneByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canCloneProblem(this.user, pdoc)]));
         const managedReviewableByDocId = Object.fromEntries(
             (quick ? [] : pdocs).map((pdoc) => [
                 pdoc.docId,
@@ -566,6 +605,7 @@ export class ProblemMainHandler extends Handler {
                 canReviewManaged: isBankAdmin,
                 ownerNames,
                 canManageByDocId,
+                canCloneByDocId,
                 managedReviewableByDocId,
                 managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
                 managedTrainingOptions,
@@ -693,20 +733,44 @@ export class ProblemMainHandler extends Handler {
     @param('pid', Types.UnsignedInt)
     @param('formalTitle', Types.Title)
     @param('difficulty', Types.UnsignedInt)
-    async postManagedPublish(_domainId: string, pid: number, formalTitle: string, difficulty: number) {
+    @param('expectedStructureRevision', Types.PositiveInt)
+    async postManagedPublish(_domainId: string, pid: number, formalTitle: string, difficulty: number, expectedStructureRevision: number) {
         const domainId = String(this.domain?._id);
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
         if (!problem.isProblemBankAdmin(this.user)) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
         if (difficulty > 10) throw new ValidationError('difficulty');
-        await problem.publishManagedProgrammingProblem({
+        const result = await problem.publishManagedProgrammingProblem({
             domainId,
             docId: pid,
             formalTitle,
             difficulty,
+            expectedStructureRevision,
             actor: this.user._id,
             user: this.user,
         });
+        if (result.state === 'committed_with_error') {
+            const stageLabels: Record<(typeof result.incompleteStages)[number], string> = {
+                'persistence-session-finalization': '数据库会话收尾',
+                'publication-claim-finalization': '发布写入凭据收尾',
+                'verifier-cleanup': '验题人权限清理',
+                'edit-observers': '发布事件通知',
+                'success-audit': '发布结果审计',
+            };
+            const stages = result.incompleteStages.map((stage) => stageLabels[stage]).join('、');
+            this.response.status = 500;
+            this.response.body = {
+                error: {
+                    name: 'ManagedPublicationFinalizationError',
+                    message: `题目已经公开，但发布收尾未完成（${stages}）。请勿重复发布；刷新题目后按日志中的 requestId 处理。`,
+                },
+                publicationState: result.state,
+                incompleteStages: result.incompleteStages,
+                requestId: result.requestId,
+                url: this.url('problem_detail', { pid: result.pdoc.pid || pid }),
+            };
+            return;
+        }
         this.response.redirect = this.url('problem_main', { query: { managedReview: 'pending' } });
     }
 
@@ -787,13 +851,23 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
     pdoc: ProblemDoc;
     udoc: User;
     psdoc: ProblemStatusDoc;
+    protected canEditLoadedProblem = false;
 
     @route('pid', Types.ProblemId, true)
     @query('tid', Types.ObjectId, true)
     async _prepare(_domainId: string, pid: number | string, tid?: ObjectId) {
         const domainId = String(this.domain?._id);
-        this.pdoc = tid ? await problem.get(domainId, pid) : await problem.getViewableAuthorized(domainId, pid, this.user);
+        this.pdoc = tid
+            ? await problem.get(domainId, pid)
+            : await problem.getViewableAuthorized(domainId, pid, this.user, [...problem.PROJECTION_PUBLIC, 'managedAuthoring']);
         if (!this.pdoc) throw new ProblemNotFoundError(domainId, pid);
+        if (!tid) {
+            this.canEditLoadedProblem = problem.canEditProblemContent(this.user, this.pdoc);
+            // `managedAuthoring` is read only to evaluate the author draft
+            // capability. Keep the internal workflow state out of hooks and
+            // every public problem-detail response.
+            delete this.pdoc.managedAuthoring;
+        }
         if (tid) {
             if (!this.tdoc?.pids?.includes(this.pdoc.docId)) throw new ContestNotFoundError(domainId, tid);
             if (contest.isNotStarted(this.tdoc)) throw new ContestNotLiveError(tid);
@@ -887,7 +961,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                       ? 'correction'
                       : 'none',
             canPreviewSubjective: effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND && problem.canMaintainProblem(this.user, this.pdoc),
-            canEditProblem: !tid && problem.canEditProblemContent(this.user, this.pdoc),
+            canEditProblem: this.canEditLoadedProblem,
         };
         if (this.tdoc && this.tsdoc) {
             const fields = ['attend', 'startAt'];
@@ -1224,12 +1298,13 @@ export class ProblemHackHandler extends ProblemDetailHandler {
 export class ProblemManageHandler extends ProblemDetailHandler {
     async prepare() {
         this.pdoc = await requireStableEditableProblem(this.user, this.pdoc, problem.PROJECTION_MANAGED_EDITOR);
+        this.canEditLoadedProblem = problem.canEditProblemContent(this.user, this.pdoc);
         // `_prepare` may have loaded the statement through a contest `tid`.
         // That container access never upgrades the response to editor data.
         if (this.response.body) {
             this.response.body.pdoc = this.pdoc;
             this.response.body.problemAuthoringCapabilities = problemAuthoringCapabilities(this.user, this.pdoc);
-            this.response.body.canEditProblem = problem.canEditProblemContent(this.user, this.pdoc);
+            this.response.body.canEditProblem = this.canEditLoadedProblem;
             this.response.body.canDeleteProblem = problem.canDeleteProblem(this.user, this.pdoc);
         }
     }
@@ -1242,12 +1317,14 @@ export class ProblemEditHandler extends ProblemManageHandler {
         this.response.body.statementLangs = this.ctx.i18n.langs(false);
         const problemKind = effectiveProblemKind(this.pdoc);
         if (problemKind === 'programming') {
-            const [programmingMindmapOptions, managedTrainingOptions, managedTrainingPlacements] = await Promise.all([
+            const canReviewManaged = this.pdoc.authoringMode === 'managed' && problem.canPublishProblem(this.user, this.pdoc);
+            const [programmingMindmapOptions, managedTrainingOptions, managedTrainingPlacements, managedReviewPreview] = await Promise.all([
                 listKnowledgeMindmapOptions(),
                 this.pdoc.authoringMode === 'managed' ? listManagedTrainingOptions(this.pdoc.domainId) : Promise.resolve([]),
                 this.pdoc.authoringMode === 'managed'
                     ? listManagedProblemTrainingPlacements(this.pdoc.domainId, this.pdoc.docId)
                     : Promise.resolve([]),
+                canReviewManaged ? managedProblemReviewPreview(this.pdoc) : Promise.resolve(undefined),
             ]);
             Object.assign(this.response.body, {
                 programmingMindmapOptions,
@@ -1258,6 +1335,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                           managedMindmapOptions: programmingMindmapOptions,
                           managedTrainingOptions,
                           managedTrainingPlacements,
+                          ...(managedReviewPreview ? { managedReviewPreview } : {}),
                       }
                     : {}),
             });
@@ -1325,6 +1403,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
         const dedicatedStructured = isDedicatedStructuredEditorKind(problemKind);
         const legacyProgramming = !managed && problemKind === 'programming';
         let structuredKnowledge: Awaited<ReturnType<typeof materializeKnowledgeMindmapTags>> | null = null;
+        let managedKnowledge: Awaited<ReturnType<typeof materializeKnowledgeMindmapTags>> | null = null;
         if (!managed && title === undefined) throw new ValidationError('title');
         if (managed) {
             const allowed = new Set([
@@ -1333,6 +1412,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 'pid',
                 'hidden',
                 'tag',
+                'knowledgeNodeIds',
                 'difficulty',
                 'lockHidden',
                 'expectedStructureRevision',
@@ -1353,13 +1433,32 @@ export class ProblemEditHandler extends ProblemManageHandler {
             const capabilities = problemAuthoringCapabilities(this.user, this.pdoc);
             const metadataFields = ['title', 'difficulty'].filter((field) => Object.hasOwn(body, field));
             const publishFields = ['hidden', 'lockHidden'].filter((field) => Object.hasOwn(body, field));
+            const knowledgeFields = Object.hasOwn(body, 'knowledgeNodeIds') ? ['knowledgeNodeIds'] : [];
             const forbiddenFields = [
                 ...(!capabilities.canEditDraftMetadata ? metadataFields : []),
                 ...(!capabilities.canPublish ? publishFields : []),
+                ...(!capabilities.canEditContent || this.pdoc.managedAuthoring?.metadataStatus !== 'draft' ? knowledgeFields : []),
             ];
             if (forbiddenFields.length) {
                 await auditManagedWriteDenied(this, this.pdoc, 'edit', 'fields', forbiddenFields);
                 throw new ValidationError('fields', null, `当前角色不可修改字段：${forbiddenFields.join(', ')}`);
+            }
+            if (knowledgeFields.length) {
+                try {
+                    managedKnowledge = await materializeKnowledgeMindmapTags(knowledgeNodeIds, {
+                        required: true,
+                        field: 'knowledgeNodeIds',
+                    });
+                } catch (error) {
+                    logger.warn(
+                        'Managed knowledge suggestion rejected domain=%s pid=%d actor=%d stage=knowledge-materialize result=denied error=%o',
+                        domainId,
+                        this.pdoc.docId,
+                        this.user._id,
+                        error,
+                    );
+                    throw error;
+                }
             }
         }
         if (legacyProgramming) {
@@ -1456,6 +1555,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                     : {}),
             });
         } else {
+            let nextManagedAuthoring = this.pdoc.managedAuthoring;
             if (Object.hasOwn(body, 'title')) {
                 if (this.pdoc.managedAuthoring?.metadataStatus !== 'draft') {
                     await auditManagedWriteDenied(this, this.pdoc, 'edit', 'fields', ['title']);
@@ -1464,8 +1564,15 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 const workingTitle = title?.trim();
                 if (!workingTitle) throw new ValidationError('title');
                 $update.title = `待审核 · ${workingTitle}`;
-                $update.managedAuthoring = { ...this.pdoc.managedAuthoring!, workingTitle };
+                nextManagedAuthoring = { ...nextManagedAuthoring!, workingTitle };
             }
+            if (managedKnowledge) {
+                nextManagedAuthoring = {
+                    ...nextManagedAuthoring!,
+                    selectedMindmapNodeIds: managedKnowledge.nodeIds,
+                };
+            }
+            if (nextManagedAuthoring !== this.pdoc.managedAuthoring) $update.managedAuthoring = nextManagedAuthoring;
             if (Object.hasOwn(body, 'pid')) $update.pid = newPid;
             if (Object.hasOwn(body, 'hidden')) $update.hidden = hidden;
             if (Object.hasOwn(body, 'tag')) $update.tag = tag ?? [];
@@ -1791,7 +1898,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
         if (this.args.operation === 'get_links') return;
         await assertManagedFileWriteBody(this, this.pdoc);
         if (this.pdoc.reference) throw new ProblemIsReferencedError('edit files');
-        await assertProblemWriteCapability(this, this.pdoc, problem.canEditProblemContent(this.user, this.pdoc), 'files', 'content');
+        await assertProblemWriteCapability(this, this.pdoc, this.canEditLoadedProblem, 'files', 'content');
     }
 
     @post('files', Types.Set)
@@ -2272,22 +2379,26 @@ export class ProblemMineHandler extends Handler {
             problem.getMulti(domainId, bankScope).count(),
         ]);
         this.response.template = 'problem_mine.html';
+        const canCreate = problem.isProblemBankAdmin(this.user) || this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         this.response.body = {
             pdocs,
             page,
             pcount,
             ppcount: Math.ceil(pcount / limit),
-            canCreate: this.user.hasPerm(PERM.PERM_CREATE_PROBLEM),
-            canCreateProgrammingDraft: this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT),
+            canCreate,
         };
     }
 }
 
 export class ProblemCreateHubHandler extends Handler {
     async get() {
+        const isBankAdmin = problem.isProblemBankAdmin(this.user);
+        const canCreateManagedDraft = this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        if (!isBankAdmin && !canCreateManagedDraft) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        const availableKinds = isBankAdmin ? PROBLEM_KINDS : (['programming'] as const);
         this.response.template = 'problem_create_hub.html';
         this.response.body = {
-            problemKinds: PROBLEM_KINDS.map((kind) => ({
+            problemKinds: availableKinds.map((kind) => ({
                 kind,
                 slug: problemKindToSlug(kind),
             })),
@@ -2297,13 +2408,12 @@ export class ProblemCreateHubHandler extends Handler {
 
 export class ProblemCreateProgrammingHandler extends Handler {
     async get() {
-        const legacyCreate = this.user.hasPerm(PERM.PERM_CREATE_PROBLEM);
-        const managedCreate = this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
-        if (!legacyCreate && !managedCreate) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         const canAssignManagedAuthor = problem.isProblemBankAdmin(this.user);
+        const managedCreate = this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        if (!canAssignManagedAuthor && !managedCreate) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         const [managedMindmapOptions, managedTrainingOptions] = await Promise.all([
             listManagedMindmapOptions(),
-            listManagedTrainingOptions(String(this.domain?._id)),
+            canAssignManagedAuthor ? listManagedTrainingOptions(String(this.domain?._id)) : Promise.resolve([]),
         ]);
         this.response.template = 'problem_edit.html';
         this.response.body = {
@@ -2318,8 +2428,11 @@ export class ProblemCreateProgrammingHandler extends Handler {
             },
             canCreateManagedProblem: true,
             canAssignManagedAuthor,
+            canAssignManagedTraining: canAssignManagedAuthor,
             managedCreateDefault: true,
-            managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
+            managedSourceTemplates: canAssignManagedAuthor
+                ? MANAGED_SOURCE_TEMPLATES
+                : MANAGED_SOURCE_TEMPLATES.filter((template) => template.id === 'self'),
             managedMindmapOptions,
             managedTrainingOptions,
             problemAuthoringCapabilities: {
@@ -2372,12 +2485,39 @@ export class ProblemCreateProgrammingHandler extends Handler {
         authorUid = 0,
     ) {
         const domainId = String(this.domain?._id);
-        const legacyCreate = this.user.hasPerm(PERM.PERM_CREATE_PROBLEM);
+        const isBankAdmin = problem.isProblemBankAdmin(this.user);
         const managedCreate = this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
-        if (!legacyCreate && !managedCreate) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        if (!isBankAdmin && !managedCreate) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
-        const isBankAdmin = problem.isProblemBankAdmin(this.user);
+        if (
+            !isBankAdmin &&
+            (template !== 'self' ||
+                Object.hasOwn(this.request.body || {}, 'authorUid') ||
+                Object.hasOwn(this.request.body || {}, 'trainingId') ||
+                Object.hasOwn(this.request.body || {}, 'chapterId'))
+        ) {
+            const restrictedFields = [
+                ...(template !== 'self' ? ['template'] : []),
+                ...(Object.hasOwn(this.request.body || {}, 'authorUid') ? ['authorUid'] : []),
+                ...(Object.hasOwn(this.request.body || {}, 'trainingId') ? ['trainingId'] : []),
+                ...(Object.hasOwn(this.request.body || {}, 'chapterId') ? ['chapterId'] : []),
+            ];
+            logger.warn(
+                'Managed draft authority rejected domain=%s actor=%d template=%s fields=%o stage=create-authority result=denied',
+                domainId,
+                this.user._id,
+                template,
+                restrictedFields,
+            );
+            await oplog.log(this, 'problem.managed.write.denied', {
+                action: 'create',
+                fields: restrictedFields,
+                stage: 'create-authority',
+                result: 'denied',
+            });
+            throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        }
         const allowed = new Set([
             'title',
             'content',
@@ -2404,8 +2544,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
             });
             throw new ValidationError('fields', null, `托管草稿不接受字段或创建模式：${fields.join(', ')}`);
         }
-        if (!isBankAdmin && authorUid) throw new ValidationError('authorUid');
-        const resolvedAuthorUid = isBankAdmin ? authorUid || this.user._id : undefined;
+        const resolvedAuthorUid = isBankAdmin ? authorUid || this.user._id : this.user._id;
         const resolvedDifficulty = difficulty || 1;
         if (isBankAdmin && resolvedAuthorUid !== this.user._id) {
             const author = await user.getById(domainId, authorUid);
@@ -2430,7 +2569,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
                 ...(resolvedAuthorUid ? { authorUid: resolvedAuthorUid } : {}),
             },
             this.user._id,
-            isBankAdmin ? this.user : undefined,
+            this.user,
         );
         this.response.body = {
             ok: true,
@@ -2529,7 +2668,7 @@ export async function apply(ctx: Context) {
     ctx.Route('problem_solution_reply_raw', '/p/:pid/solution/:psid/:psrid/raw', ProblemSolutionRawHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_statistics', '/p/:pid/stat', ProblemStatisticsHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_mine', '/problem/mine', ProblemMineHandler, PRIV.PRIV_USER_PROFILE);
-    ctx.Route('problem_create', '/problem/create', ProblemCreateHubHandler, PERM.PERM_CREATE_PROBLEM);
+    ctx.Route('problem_create', '/problem/create', ProblemCreateHubHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route(
         'problem_create_programming',
         `/problem/create/${problemKindToSlug('programming')}`,

@@ -76,7 +76,8 @@ test('unified problem bank pushes filters into the canonical author scope', () =
     assert.match(list, /archivedAt:\s*\{\s*\$exists:/);
     assert.match(list, /hidden:\s*\{\s*\$ne:\s*true\s*\}/);
     assertBefore(list, 'buildProblemTextFilter(text)', 'this.paginate(', 'problem bank scoped search');
-    assert.match(list, /problem\.canMaintainProblem\(this\.user, pdoc\)/);
+    assert.match(list, /problem\.canEditProblemContent\(this\.user, pdoc\)/);
+    assert.match(list, /problem\.canCloneProblem\(this\.user, pdoc\)/);
     assert.match(list, /async postClone/);
     assert.match(list, /async postArchive/);
 });

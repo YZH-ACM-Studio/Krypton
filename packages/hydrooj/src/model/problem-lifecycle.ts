@@ -19,6 +19,7 @@ export const PROBLEM_STRUCTURAL_FIELDS = new Set([
     'data',
     'additional_file',
     'reference',
+    'managedAuthoring',
 ]);
 
 export function problemCreateChangedFields(
@@ -293,6 +294,47 @@ export function cloneStructuredProblemForLanguage(kind: ProblemKind, config: unk
 export function assertStructureRevision(value: unknown): asserts value is number {
     if (!Number.isSafeInteger(value) || Number(value) < 1) {
         throw new ValidationError('expectedStructureRevision');
+    }
+}
+
+/**
+ * Managed programming publication accepts only author-declared test points.
+ * File-name inference remains useful while editing legacy Hydro problems, but
+ * it must not make an otherwise unconfigured managed draft publishable.
+ */
+export function assertProgrammingTestcasesConfigured(configInput: unknown, data: Array<{ name: string }> | undefined): void {
+    const config = parseProblemConfigObject({ config: configInput });
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+        throw new ValidationError('config', null, '发布前必须保存有效评测配置');
+    }
+    const cases: unknown[] = [];
+    if (Array.isArray(config.cases)) cases.push(...config.cases);
+    if (Array.isArray(config.subtasks)) {
+        for (const subtask of config.subtasks) {
+            if (!subtask || typeof subtask !== 'object' || Array.isArray(subtask) || !Array.isArray(subtask.cases)) {
+                throw new ValidationError('cases', null, '子任务必须包含显式测试点');
+            }
+            cases.push(...subtask.cases);
+        }
+    }
+    if (!cases.length) throw new ValidationError('cases', null, '发布前至少需要一个显式测试点');
+
+    const files = new Set((data || []).map((file) => file?.name).filter((name): name is string => typeof name === 'string' && !!name));
+    for (const [index, testcase] of cases.entries()) {
+        if (!testcase || typeof testcase !== 'object' || Array.isArray(testcase)) {
+            throw new ValidationError('cases', null, `测试点 ${index + 1} 格式错误`);
+        }
+        const input = (testcase as { input?: unknown }).input;
+        const output = (testcase as { output?: unknown }).output;
+        if (typeof input !== 'string' || !input.trim() || typeof output !== 'string' || !output.trim()) {
+            throw new ValidationError('cases', null, `测试点 ${index + 1} 必须同时配置输入与输出`);
+        }
+        if (input !== '/dev/null' && !files.has(input)) {
+            throw new ValidationError('cases', null, `测试点 ${index + 1} 输入文件不存在：${input}`);
+        }
+        if (output !== '/dev/null' && !files.has(output)) {
+            throw new ValidationError('cases', null, `测试点 ${index + 1} 输出文件不存在：${output}`);
+        }
     }
 }
 

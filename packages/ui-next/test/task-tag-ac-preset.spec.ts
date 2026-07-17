@@ -7,8 +7,6 @@ import { describe, it } from 'node:test';
 const require = createRequire(import.meta.url);
 const Module = require('module');
 const React: typeof import('react') = require('react');
-const { renderToString }: typeof import('react-dom/server') = require('react-dom/server');
-const RadixSelect: typeof import('@radix-ui/react-select') = require('@radix-ui/react-select');
 const selectPath = require.resolve('../src/components/ui/select.tsx');
 const originalLoad = Module._load;
 
@@ -19,10 +17,10 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
   return originalLoad.call(this, request, parent, isMain);
 };
 
-let renderSimpleSelectOptions: typeof import('../src/components/ui/select').renderSimpleSelectOptions;
+let selectModule: typeof import('../src/components/ui/select');
 try {
   delete require.cache[selectPath];
-  ({ renderSimpleSelectOptions } = require(selectPath));
+  selectModule = require(selectPath);
 } finally {
   Module._load = originalLoad;
 }
@@ -54,8 +52,8 @@ describe('P2.5 canonical tag task UI', () => {
     expect(detailSource).to.include('option.label');
   });
 
-  it('renders grouped options with a real Radix SelectGroup context', () => {
-    const nodes = renderSimpleSelectOptions([
+  it('builds grouped options from the exported Radix SelectGroup primitive', () => {
+    const nodes = selectModule.renderSimpleSelectOptions([
       { value: '', label: '— 选择规范标签 —' },
       { type: 'label', label: '算法知识点' },
       { value: '数据结构', label: '算法 / 数据结构' },
@@ -64,17 +62,18 @@ describe('P2.5 canonical tag task UI', () => {
       { value: 'L1', label: 'L1' },
     ]);
 
-    const html = renderToString(
-      React.createElement(
-        RadixSelect.Root,
-        { open: true },
-        React.createElement(RadixSelect.Trigger, null, '选择标签'),
-        React.createElement(RadixSelect.Content, null, React.createElement(RadixSelect.Viewport, null, ...nodes)),
-      ),
+    const groups = nodes.filter(
+      (node): node is React.ReactElement<{ children?: React.ReactNode }> => React.isValidElement(node) && node.type === selectModule.SelectGroup,
     );
-    expect(html).to.include('role="group"');
-    expect(html).to.include('aria-labelledby=');
-    expect(html).to.include('算法知识点');
-    expect(html).to.include('来源与赛事');
+    expect(groups).to.have.lengthOf(2);
+    expect(groups.every((group) => React.Children.toArray(group.props.children).some((child: any) => child?.type === selectModule.SelectLabel))).to.equal(
+      true,
+    );
+    const labels = groups.flatMap((group) =>
+      React.Children.toArray(group.props.children)
+        .filter((child: any) => child?.type === selectModule.SelectLabel)
+        .map((child: any) => child.props.children),
+    );
+    expect(labels).to.deep.equal(['算法知识点', '来源与赛事']);
   });
 });

@@ -1,7 +1,7 @@
 import { ArrowLeft, ArrowRight, Binary, Braces, CheckCircle2, CircleDot, Code2, FileQuestion, ListChecks, TextCursorInput } from 'lucide-react';
 import { PROBLEM_KIND_TO_SLUG, PROBLEM_KINDS, type ProblemKind } from '@hydrooj/common';
-import { Button } from '@/components/ui/button';
-import { useBootstrap } from '@/lib/bootstrap';
+import { Button } from '../components/ui/button';
+import { useBootstrap } from '../lib/bootstrap';
 
 const KIND_META: Record<
   ProblemKind,
@@ -64,16 +64,15 @@ const KIND_META: Record<
 
 const GROUPS = ['基础题型', '人工阅卷', '代码评测'] as const;
 
-export function ProblemCreateHubPage() {
-  const data = useBootstrap().page.data as {
-    problemKinds?: Array<{ kind: ProblemKind; slug: string }>;
-  };
-  const serverMapping = new Map((data.problemKinds || []).map((item) => [item.kind, item.slug]));
-  for (const kind of PROBLEM_KINDS) {
-    if (serverMapping.get(kind) !== PROBLEM_KIND_TO_SLUG[kind]) {
-      throw new Error(`Problem kind route mapping mismatch: ${kind}`);
+export function ProblemCreateHubView({ problemKinds }: { problemKinds: Array<{ kind: ProblemKind; slug: string }> }) {
+  const serverMapping = new Map<ProblemKind, string>();
+  for (const item of problemKinds) {
+    if (!PROBLEM_KINDS.includes(item.kind) || item.slug !== PROBLEM_KIND_TO_SLUG[item.kind] || serverMapping.has(item.kind)) {
+      throw new Error(`Problem kind route mapping mismatch: ${item.kind}`);
     }
+    serverMapping.set(item.kind, item.slug);
   }
+  const visibleKinds = PROBLEM_KINDS.filter((kind) => serverMapping.has(kind));
 
   return (
     <main className="w-full min-w-0 space-y-7 pb-12">
@@ -95,7 +94,8 @@ export function ProblemCreateHubPage() {
 
       <div className="space-y-8">
         {GROUPS.map((group) => {
-          const kinds = PROBLEM_KINDS.filter((kind) => KIND_META[kind].group === group);
+          const kinds = visibleKinds.filter((kind) => KIND_META[kind].group === group);
+          if (!kinds.length) return null;
           return (
             <section key={group} aria-labelledby={`problem-kind-${group}`} className="space-y-2.5">
               <h2 id={`problem-kind-${group}`} className="px-1 text-sm font-semibold">
@@ -133,4 +133,11 @@ export function ProblemCreateHubPage() {
       </div>
     </main>
   );
+}
+
+export function ProblemCreateHubPage() {
+  const data = useBootstrap().page.data as {
+    problemKinds?: Array<{ kind: ProblemKind; slug: string }>;
+  };
+  return <ProblemCreateHubView problemKinds={data.problemKinds || []} />;
 }

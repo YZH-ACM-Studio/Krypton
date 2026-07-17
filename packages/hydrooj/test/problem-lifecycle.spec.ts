@@ -144,6 +144,42 @@ describe('P2.12 minimal problem lifecycle', () => {
         expect(lifecycle.problemEditAuditedFields({ title: 'Only metadata' })).to.deep.equal(['title']);
     });
 
+    it('treats managed review metadata as revision-bound structure', () => {
+        expect(lifecycle.PROBLEM_STRUCTURAL_FIELDS.has('managedAuthoring')).to.equal(true);
+    });
+
+    it('accepts explicit flat or subtask programming test points and verifies their files', () => {
+        expect(() =>
+            lifecycle.assertProgrammingTestcasesConfigured({ cases: [{ input: '1.in', output: '1.out' }] }, [{ name: '1.in' }, { name: '1.out' }]),
+        ).not.to.throw();
+        expect(() =>
+            lifecycle.assertProgrammingTestcasesConfigured(
+                {
+                    subtasks: [
+                        { id: 1, cases: [{ input: '1.in', output: '1.out' }] },
+                        { id: 2, cases: [{ input: '2.in', output: '2.out' }] },
+                    ],
+                },
+                [{ name: '1.in' }, { name: '1.out' }, { name: '2.in' }, { name: '2.out' }],
+            ),
+        ).not.to.throw();
+    });
+
+    it('does not infer publishable programming test points from uploaded files', () => {
+        expect(() =>
+            lifecycle.assertProgrammingTestcasesConfigured('time: 1s\nmemory: 256m\n', [
+                { name: 'config.yaml' },
+                { name: '1.in' },
+                { name: '1.out' },
+            ]),
+        ).to.throw(TestValidationError);
+        expect(() =>
+            lifecycle.assertProgrammingTestcasesConfigured({ subtasks: [{ id: 1, cases: [{ input: 'missing.in', output: '1.out' }] }] }, [
+                { name: '1.out' },
+            ]),
+        ).to.throw(TestValidationError);
+    });
+
     it('keeps content as the only statement and fixes the structured score at 100', () => {
         expect(
             lifecycle.normalizeStructuredProblemConfig('single', {

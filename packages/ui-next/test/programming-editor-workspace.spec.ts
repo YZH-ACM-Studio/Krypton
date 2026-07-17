@@ -78,15 +78,17 @@ describe('P3.15 programming editor workspace correction', () => {
 
   it('restores a capability-gated collaboration view and the existing managed review service', () => {
     const edit = read('packages/ui-next/src/pages/problem-edit.tsx');
+    const bank = read('packages/ui-next/src/pages/problems.tsx');
     expect(edit).to.include("new URLSearchParams(window.location.search).get('section')");
     expect(edit).to.include("requestedSection === 'collaboration' && collaborationEnabled");
     expect(edit).to.include('<PermitsPanel');
     expect(edit).to.include('/permits/inbox');
     for (const role of ['出题人', '验题人', '维护者']) expect(edit).to.include(role);
     expect(edit).to.include('<ManagedReviewPanel');
-    expect(edit).to.include('name="operation" value="managedPublish"');
-    expect(edit).to.include('action={problemsUrl}');
-    expect(edit).to.include("readHydroResponseError(response, '审核发布失败')");
+    expect(bank).to.include('<ManagedPublishProtocolFields');
+    expect(bank).to.include('expectedStructureRevision={pdoc.structureRevision}');
+    expect(edit).to.include('const managedKnowledgeEditable = managed && !isCreate && managedMetadataDraft && canEditContent');
+    expect(edit).to.include('<ManagedKnowledgeSuggestionField');
   });
 
   it('keeps testdata and additional files on refresh-stable views of the existing files route', () => {
@@ -137,9 +139,6 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(edit).to.include('<ManagedProblemTrainingStatus');
     expect(edit).to.include('data.managedTrainingPlacements');
     expect(edit).to.include('该题已完成审核并发布');
-    expect(edit).to.include("metadataDraft ? '管理员审核与发布' : pdoc.hidden ? '重新公开托管题' : '发布状态'");
-    expect(edit).to.include("metadataDraft ? '工作标题' : '正式标题'");
-    expect(edit).to.include('该题已完成审核确认；当前来源、标签和所属训练均为只读');
     expect(edit).to.include('托管草稿保持隐藏；管理员从权限与协作页确认元数据并发布。');
   });
 
@@ -150,6 +149,9 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(edit).to.include("const contentText = typeof draftContent === 'string' ? draftContent : JSON.stringify(draftContent);");
     expect(edit).to.include("const message = '请填写题面正文。';");
     expect(edit).to.include("const message = '题面正文不能超过 65535 个字符。';");
+    expect(edit).to.include('const canAssignManagedTraining = isCreate && data.canAssignManagedTraining === true;');
+    expect(edit).to.include('<ManagedProgrammingTrainingControl allowed={canAssignManagedTraining}>');
+    expect(edit).to.include('作者、PID、标签与隐藏状态均由服务端固定。');
   });
 
   it('serializes both checkbox states explicitly so administrators can clear them', () => {
@@ -171,7 +173,8 @@ describe('P3.15 programming editor workspace correction', () => {
     const responseErrors = read('packages/ui-next/src/lib/problem-save-response.ts');
     expect(edit).to.include("'idle' | 'dirty' | 'saving' | 'saved' | 'error'");
     expect(edit).to.include('useFormDirtyState(formRef, editorRevisionKey)');
-    expect(edit).to.include('useUnsavedChangesGuard(dirtyState.dirty');
+    expect(edit).to.include('useUnsavedChangesGuard(');
+    expect(edit).to.include('dirtyState.dirty || tagSelectionDirty || managedKnowledgeDirty');
     expect(edit).to.include('const editVersion = useRef(0)');
     expect(edit).to.include('if (editVersion.current === savedVersion)');
     expect(edit).to.include('dirtyState.markClean()');

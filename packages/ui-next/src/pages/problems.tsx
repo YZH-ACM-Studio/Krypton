@@ -10,6 +10,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { managedSourceFieldViews, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
+import { ManagedPublishProtocolFields } from '@/components/managed-programming-authority';
 
 type R = Record<string, any>;
 
@@ -174,6 +175,7 @@ export function ProblemsPage() {
   const problemKinds: Array<{ kind: ProblemKind; slug: string }> = data.problemKinds || [];
   const ownerNames: Record<string, string> = data.ownerNames || {};
   const canManageByDocId: Record<string, boolean> = data.canManageByDocId || {};
+  const canCloneByDocId: Record<string, boolean> = data.canCloneByDocId || {};
   const managedReviewableByDocId: Record<string, boolean> = data.managedReviewableByDocId || {};
   const managedSourceTemplates: ManagedSourceTemplateOption[] = data.managedSourceTemplates || [];
   const managedTrainingOptions: R[] = data.managedTrainingOptions || [];
@@ -280,6 +282,7 @@ export function ProblemsPage() {
               const displayPid = String(pdoc.pid || pdoc.docId);
               const kind = effectiveProblemKind(pdoc);
               const canManage = !!canManageByDocId[docId];
+              const canClone = !!canCloneByDocId[docId];
               const canReviewManaged = !!managedReviewableByDocId[docId];
               const detailUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: displayPid });
               const status = psdict[docId]?.status;
@@ -363,8 +366,10 @@ export function ProblemsPage() {
                               if (!window.confirm(`${action}「${pdoc.title || displayPid}」？`)) event.preventDefault();
                             }}
                           >
-                            <input type="hidden" name="operation" value="managedPublish" />
-                            <input type="hidden" name="pid" value={docId} />
+                            <ManagedPublishProtocolFields
+                              docId={pdoc.docId}
+                              expectedStructureRevision={pdoc.structureRevision}
+                            />
                             <label className="space-y-1.5">
                               <span className="text-xs font-medium text-muted-foreground">正式标题</span>
                               <Input
@@ -409,14 +414,16 @@ export function ProblemsPage() {
                               编辑
                             </a>
                           </Button>
-                          <form method="post">
-                            <input type="hidden" name="operation" value="clone" />
-                            <input type="hidden" name="pid" value={docId} />
-                            <Button type="submit" variant="ghost" size="sm">
-                              <Copy className="size-3.5" />
-                              克隆
-                            </Button>
-                          </form>
+                          {canClone ? (
+                            <form method="post">
+                              <input type="hidden" name="operation" value="clone" />
+                              <input type="hidden" name="pid" value={docId} />
+                              <Button type="submit" variant="ghost" size="sm">
+                                <Copy className="size-3.5" />
+                                克隆
+                              </Button>
+                            </form>
+                          ) : null}
                           {!pdoc.archivedAt ? (
                             <form
                               method="post"

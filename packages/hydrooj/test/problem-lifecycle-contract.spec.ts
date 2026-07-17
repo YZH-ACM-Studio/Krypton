@@ -255,12 +255,8 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const publish = source.slice(publishStart, publishEnd);
         expect(publish.indexOf('prepareManagedProblemPublication(')).to.be.lessThan(publish.indexOf('await prepareManagedPublish(claim)'));
         expect(publish.indexOf('await prepareManagedPublish(claim)')).to.be.lessThan(publish.indexOf('commitManagedProblemPublication({'));
-        expect(publish.indexOf('commitManagedProblemPublication({')).to.be.lessThan(publish.lastIndexOf("type: 'problem.managed.publish'"));
-        expect(publish.indexOf('const published = await ProblemModel.withAuthorizedWriteClaim(')).to.be.lessThan(
-            publish.indexOf('if (!finalization)'),
-        );
-        expect(publish.indexOf('if (!finalization)')).to.be.lessThan(publish.indexOf('await OplogModel.add({'));
-        expect(publish.indexOf('await OplogModel.add({')).to.be.lessThan(publish.indexOf("await bus.emit('problem/edit'"));
+        expect(publish.indexOf('commitManagedProblemPublication({')).to.be.lessThan(publish.indexOf("'managed-publish-verifier-cleanup'"));
+        expect(publish).to.include('finalizeManagedPublishAcl(claim, context.verifierUids)');
         expect(publish).to.include("{ capability: 'publish' }");
 
         const editStart = source.indexOf('static async editAuthorized(');
@@ -273,6 +269,48 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(persistence).to.include("{ $addToSet: { 'dag.$.pids': input.docId } }");
         expect(persistence).to.include("{ $pull: { 'dag.$.pids': { $in: [input.docId, String(input.docId)] } } }");
         expect(persistence).to.include('managed publication compensation failed: pid=');
+    });
+
+    it('revalidates managed creation authority and every publish prerequisite before visibility changes', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const createStart = source.indexOf('static async createManagedProgrammingDraft(');
+        const publishStart = source.indexOf('static async publishManagedProgrammingProblem(', createStart);
+        const create = source.slice(createStart, publishStart);
+        const publishEnd = source.indexOf('static createProblemByKind(', publishStart);
+        const publish = source.slice(publishStart, publishEnd);
+
+        expect(create).to.include('actorUser.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT)');
+        expect(create).to.include("requestedTemplate !== 'self'");
+        expect(create).to.include("['pendingTrainingPlacement']");
+        expect(create).to.include('throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT)');
+
+        for (const field of ['content: 1', 'config: 1', 'data: 1', 'structureRevision: 1']) expect(publish).to.include(field);
+        const readiness = publish.indexOf("stage: 'publish-explicit-testpoints'");
+        const permitCheck = publish.indexOf('await prepareManagedPublish(claim)');
+        const commit = publish.indexOf('commitManagedProblemPublication({');
+        expect(readiness).to.be.greaterThan(-1);
+        expect(readiness).to.be.lessThan(permitCheck);
+        expect(permitCheck).to.be.lessThan(commit);
+        expect(publish).to.include('assertProgrammingTestcasesConfiguredWithTrace(');
+        expect(publish).to.include('pdoc.structureRevision !== input.expectedStructureRevision');
+        expect(publish).to.include('expectedStructureRevision: input.expectedStructureRevision');
+        expect(publish).to.include('publicationState=committed_with_error stage=verifier-cleanup');
+        expect(publish).not.to.include('managed publication committed but finalization failed:');
+
+        const prepareStart = source.indexOf('async function prepareManagedPublish(');
+        const prepareEnd = source.indexOf('async function finalizeManagedPublishAcl(', prepareStart);
+        const prepare = source.slice(prepareStart, prepareEnd);
+        expect(prepare).to.include("row?.role === 'author'");
+        expect(prepare).to.include('authorUids.length !== 1');
+        expect(prepare).not.to.include('await permits.clearVerifiersForProblem');
+
+        const finalizeStart = source.indexOf('async function finalizeManagedPublishAcl(', prepareEnd);
+        const finalizeEnd = source.indexOf('function revisionClaimFilter', finalizeStart);
+        expect(source.slice(finalizeStart, finalizeEnd)).to.include('permits.clearVerifiersForProblem');
+
+        const persistence = readFileSync(resolve(root, 'src/model/managed-problem-publication.ts'), 'utf8');
+        expect(persistence).to.include('structureRevision: input.expectedStructureRevision');
+        expect(persistence).to.include('structureLockedAt: { $exists: false }');
     });
 
     it('requires a durable capability claim for every managed clone, delete, edit, and file mutation', () => {

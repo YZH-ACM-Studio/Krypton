@@ -24,7 +24,23 @@ export interface ManagedProblemPublicationCommit {
     sourceMeta: ManagedSourceMeta;
     managedAuthoring: NonNullable<ProblemDoc['managedAuthoring']>;
     expectedMetadataStatus: 'draft' | 'confirmed';
+    expectedStructureRevision: number;
     pendingTrainingPlacement?: ManagedTrainingPlacement;
+}
+
+/**
+ * The visibility CAS committed, but Mongo session cleanup failed afterwards.
+ * Callers must continue publication finalization with the committed document
+ * and report the incomplete persistence cleanup instead of retrying publish.
+ */
+export class ManagedProblemPublicationCommittedError extends Error {
+    constructor(
+        readonly pdoc: ProblemDoc,
+        cause: unknown,
+    ) {
+        super(`managed publication committed but session finalization failed: ${pdoc.domainId}/${pdoc.docId}`, { cause });
+        this.name = 'ManagedProblemPublicationCommittedError';
+    }
 }
 
 function transactionCapable(): boolean {
@@ -41,6 +57,8 @@ function claimedDraftFilter(input: ManagedProblemPublicationCommit) {
         authoringMode: 'managed',
         hidden: true,
         archivedAt: { $exists: false },
+        structureRevision: input.expectedStructureRevision,
+        structureLockedAt: { $exists: false },
         'managedAuthoring.metadataStatus': input.expectedMetadataStatus,
         'aclWriteClaim.requestId': input.claim.requestId,
         'aclWriteClaim.actor': input.claim.actor,
@@ -203,6 +221,7 @@ async function confirmPublished(input: ManagedProblemPublicationCommit): Promise
         'managedAuthoring.metadataStatus': 'confirmed',
         'managedAuthoring.approvedBy': input.managedAuthoring.approvedBy,
         'managedAuthoring.approvedAt': input.managedAuthoring.approvedAt,
+        structureRevision: input.expectedStructureRevision,
         'aclWriteClaim.requestId': input.claim.requestId,
         'aclWriteClaim.actor': input.claim.actor,
         'aclWriteClaim.operation': input.claim.operation,
@@ -241,23 +260,53 @@ async function confirmAfterWriteError(input: ManagedProblemPublicationCommit, wr
 
 async function commitWithTransaction(input: ManagedProblemPublicationCommit): Promise<ProblemDoc> {
     const session = (db as any).client.startSession();
+    let published: ProblemDoc | null = null;
+    let transactionFailed = false;
+    let transactionError: unknown;
     try {
-        let published: ProblemDoc | null = null;
+        await session.withTransaction(async () => {
+            await attachToTraining(input, session);
+            published = await updateProblem(input, session);
+            if (!published) throw new Error(`managed publication CAS failed: ${input.domainId}/${input.docId}`);
+        });
+    } catch (error) {
         try {
-            await session.withTransaction(async () => {
-                await attachToTraining(input, session);
-                published = await updateProblem(input, session);
-                if (!published) throw new Error(`managed publication CAS failed: ${input.domainId}/${input.docId}`);
-            });
-        } catch (error) {
             const confirmed = await confirmAfterWriteError(input, error);
-            if (confirmed) return confirmed;
-            throw error;
+            if (confirmed) published = confirmed;
+            else {
+                transactionFailed = true;
+                transactionError = error;
+            }
+        } catch (confirmationError) {
+            transactionFailed = true;
+            transactionError = confirmationError;
         }
-        return published!;
-    } finally {
-        await session.endSession();
     }
+    let sessionFinalizationError: unknown;
+    try {
+        await session.endSession();
+    } catch (error) {
+        sessionFinalizationError = error;
+    }
+    if (transactionFailed) {
+        if (sessionFinalizationError) {
+            logger.error(
+                'Managed publish transaction and session finalization both failed domain=%s pid=%d requestId=%s stage=session-finalization transactionError=%o sessionError=%o',
+                input.domainId,
+                input.docId,
+                input.claim.requestId,
+                transactionError,
+                sessionFinalizationError,
+            );
+        }
+        throw transactionError;
+    }
+    if (sessionFinalizationError) {
+        if (published) throw new ManagedProblemPublicationCommittedError(published, sessionFinalizationError);
+        throw sessionFinalizationError;
+    }
+    if (!published) throw new Error(`managed publication transaction returned without a committed document: ${input.domainId}/${input.docId}`);
+    return published;
 }
 
 async function commitWithCompensation(input: ManagedProblemPublicationCommit): Promise<ProblemDoc> {
@@ -274,11 +323,24 @@ async function commitWithCompensation(input: ManagedProblemPublicationCommit): P
     return compensateTraining(input, new Error(`managed publication CAS failed: ${input.domainId}/${input.docId}`));
 }
 
+async function commitProblemOnly(input: ManagedProblemPublicationCommit): Promise<ProblemDoc> {
+    try {
+        const published = await updateProblem(input);
+        if (published) return published;
+    } catch (error) {
+        const confirmed = await confirmAfterWriteError(input, error);
+        if (confirmed) return confirmed;
+        throw error;
+    }
+    throw new Error(`managed publication CAS failed: ${input.domainId}/${input.docId}`);
+}
+
 /** Commit only metadata/training visibility; ACL cleanup and audit remain in the caller's single publish service. */
 export async function commitManagedProblemPublication(input: ManagedProblemPublicationCommit): Promise<ProblemDoc> {
     if (input.claim.operation !== 'managed-review-publish') {
         throw new TypeError(`managed publication requires managed-review-publish claim, received ${input.claim.operation}`);
     }
+    const usesTransaction = !!input.pendingTrainingPlacement && transactionCapable();
     logger.info(
         'Managed publish persistence start domain=%s pid=%d requestId=%s training=%s chapter=%s transaction=%s stage=commit',
         input.domainId,
@@ -286,9 +348,13 @@ export async function commitManagedProblemPublication(input: ManagedProblemPubli
         input.claim.requestId,
         input.pendingTrainingPlacement?.trainingId,
         input.pendingTrainingPlacement?.chapterId,
-        transactionCapable(),
+        usesTransaction,
     );
-    const published = transactionCapable() ? await commitWithTransaction(input) : await commitWithCompensation(input);
+    const published = !input.pendingTrainingPlacement
+        ? await commitProblemOnly(input)
+        : usesTransaction
+          ? await commitWithTransaction(input)
+          : await commitWithCompensation(input);
     logger.info(
         'Managed publish persistence complete domain=%s pid=%d requestId=%s training=%s chapter=%s stage=committed',
         input.domainId,

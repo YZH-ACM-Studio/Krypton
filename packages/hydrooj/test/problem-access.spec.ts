@@ -13,6 +13,7 @@ const originalLoad = Module._load;
 const realUtils = require('@hydrooj/utils');
 const loggerErrorCalls: any[][] = [];
 const loggerWarnCalls: any[][] = [];
+const managedMindmapMaterializations: string[][] = [];
 
 const TYPE_PROBLEM = 10;
 const countCalls: Array<{ domainId: string; docType: number; query: unknown }> = [];
@@ -43,12 +44,19 @@ function matchesGuardedFilter(doc: any, filter: any): boolean {
         'aclWriteClaim.operation',
         'aclWriteClaim.capability',
         'aclWriteClaim.state',
+        'aclWriteClaim.managedAuthorDraftOnly',
     ]) {
         if (filter[key] !== undefined && doc.aclWriteClaim?.[key.split('.')[1]] !== filter[key]) return false;
     }
     if (filter.authoringMode !== undefined && doc.authoringMode !== filter.authoringMode) return false;
     if (filter.hidden !== undefined && doc.hidden !== filter.hidden) return false;
     if (filter.managedAuthoring !== undefined && !isDeepStrictEqual(doc.managedAuthoring, filter.managedAuthoring)) return false;
+    if (
+        filter['managedAuthoring.metadataStatus'] !== undefined &&
+        doc.managedAuthoring?.metadataStatus !== filter['managedAuthoring.metadataStatus']
+    ) {
+        return false;
+    }
     if (filter.structureRevision !== undefined && doc.structureRevision !== filter.structureRevision) return false;
     if (Object.hasOwn(filter, 'data') && !matchesDataCondition(doc, filter.data)) return false;
     if (filter.$and?.some((term: any) => Object.hasOwn(term, 'data') && !matchesDataCondition(doc, term.data))) return false;
@@ -178,6 +186,23 @@ try {
                 },
             };
         }
+        if (request === './managed-problem-authoring') {
+            return {
+                canonicalizeManagedDraftMindmapPatch: async (current: any, $set: any) => {
+                    if (current.authoringMode !== 'managed' || !Object.hasOwn($set, 'managedAuthoring')) return null;
+                    const ids = $set.managedAuthoring?.selectedMindmapNodeIds;
+                    if (!Array.isArray(ids) || !ids.length || ids.map(String).includes('stale-node')) {
+                        const error = new Error('stale managed mindmap node');
+                        error.name = 'ValidationError';
+                        throw error;
+                    }
+                    const canonical = ids.map(String);
+                    managedMindmapMaterializations.push(canonical);
+                    $set.managedAuthoring = { ...$set.managedAuthoring, selectedMindmapNodeIds: canonical };
+                    return canonical;
+                },
+            };
+        }
         return originalLoad.call(this, request, parent, isMain);
     };
     delete require.cache[accessPath];
@@ -195,6 +220,7 @@ const {
     canArchiveProblem,
     canAuthorProblem,
     canBrowseProblemBank,
+    canCloneProblem,
     canDeleteProblem,
     canEditProblemContent,
     canEditProblemMetadata,
@@ -247,7 +273,7 @@ function managedPdoc(docId: number, owner = 7, hidden = true, maintainer: number
     return {
         ...pdoc(docId, owner, hidden, maintainer, domainId),
         authoringMode: 'managed',
-        managedAuthoring: { workingTitle: 'working', metadataStatus: 'draft' },
+        managedAuthoring: { workingTitle: 'working', selectedMindmapNodeIds: ['node-1'], metadataStatus: 'draft' },
     } as any;
 }
 
@@ -273,6 +299,7 @@ beforeEach(() => {
     beforeFindOneAndUpdate = null;
     loggerErrorCalls.length = 0;
     loggerWarnCalls.length = 0;
+    managedMindmapMaterializations.length = 0;
     (global as any).Hydro.model.permits = {
         async loadAclForUser() {
             return {
@@ -305,10 +332,7 @@ describe('P2.11 problem-bank capability matrix', () => {
     it('enumerates only own legacy problems for an owner without broad create permission', () => {
         const scope = buildProblemBankScope(makeUser('student', { _ownsLegacyProblems: true }));
         expect(scope).to.deep.equal({
-            $and: [
-                { $and: [{ owner: 42 }, { authoringMode: { $ne: 'managed' } }] },
-                { 'aclMutationLocks.uid': { $ne: 42 } },
-            ],
+            $and: [{ $and: [{ owner: 42 }, { authoringMode: { $ne: 'managed' } }] }, { 'aclMutationLocks.uid': { $ne: 42 } }],
         });
     });
 
@@ -466,7 +490,10 @@ describe('P2.13 managed programming authoring matrix', () => {
         expect(canArchiveProblem(maintainer, draft)).to.equal(false);
         expect(canDeleteProblem(maintainer, draft)).to.equal(false);
 
-        const confirmed = { ...draft, managedAuthoring: { ...draft.managedAuthoring, metadataStatus: 'confirmed' } };
+        const confirmed = { ...draft, hidden: false, managedAuthoring: { ...draft.managedAuthoring, metadataStatus: 'confirmed' } };
+        expect(canEditProblemContent(author, confirmed)).to.equal(false);
+        expect(canEditProblemContent(maintainer, confirmed)).to.equal(true);
+        expect(canEditProblemContent(admin, confirmed)).to.equal(true);
         expect(canEditProblemMetadata(maintainer, confirmed)).to.equal(false);
 
         const legacy = pdoc(200, legacyOwner._id);
@@ -483,6 +510,9 @@ describe('P2.13 managed programming authoring matrix', () => {
         expect(canPublishProblem(admin, draft)).to.equal(true);
         expect(canArchiveProblem(admin, draft)).to.equal(true);
         expect(canDeleteProblem(admin, draft)).to.equal(true);
+        expect(canCloneProblem(admin, draft)).to.equal(false);
+        expect(canCloneProblem(legacyOwner, legacy)).to.equal(false);
+        expect(canCloneProblem(legacyOwner, { ...legacy, problemKind: 'single' })).to.equal(true);
     });
 
     it('lets an active author acquire only a content write claim without a maintainer mirror', async () => {
@@ -492,6 +522,7 @@ describe('P2.13 managed programming authoring matrix', () => {
         liveProblem = {
             ...managedPdoc(100),
             docType: TYPE_PROBLEM,
+            content: 'before',
             aclMutationRevision: 2,
             aclMutationLocks: [],
             maintainer: [],
@@ -499,13 +530,29 @@ describe('P2.13 managed programming authoring matrix', () => {
         const contentClaim = await acquire(author, structuredClone(liveProblem), 'author-content', 'metadata-edit', { capability: 'content' });
         expect(contentClaim?.actor).to.equal(42);
         expect(contentClaim?.capability).to.equal('content');
+        expect(contentClaim?.managedAuthorDraftOnly).to.equal(true);
         expect(liveProblem.aclWriteClaim.capability).to.equal('content');
+        expect(liveProblem.aclWriteClaim.managedAuthorDraftOnly).to.equal(true);
         expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('maintainer');
         expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('$or');
+        expect(guardedUpdateCalls.at(-1)?.filter).to.include({ hidden: true, 'managedAuthoring.metadataStatus': 'draft' });
         const escalation = await captureFailure(() => (access as any).commitProblemWriteClaimUpdate(contentClaim, { hidden: false }, {}, 'publish'));
         expect(escalation).to.be.instanceOf(TypeError);
         expect(liveProblem.hidden).to.equal(true);
+
+        liveProblem.hidden = false;
+        liveProblem.managedAuthoring.metadataStatus = 'confirmed';
+        const staleAuthorCommit = await captureFailure(() =>
+            (access as any).commitProblemWriteClaimUpdate(contentClaim, { content: 'after publish' }, {}, 'content'),
+        );
+        expect(staleAuthorCommit).to.have.property('name', 'ValidationError');
+        expect(liveProblem.content).to.equal('before');
         expect(await clear(contentClaim)).to.equal(true);
+
+        const publishedContentClaim = await acquire(author, structuredClone(liveProblem), 'author-published-content', 'metadata-edit', {
+            capability: 'content',
+        });
+        expect(publishedContentClaim).to.equal(null);
 
         const metadataClaim = await acquire(author, structuredClone(liveProblem), 'author-metadata', 'metadata-edit', { capability: 'metadata' });
         expect(metadataClaim).to.equal(null);
@@ -1091,6 +1138,31 @@ describe('P2.11 durable global problem write claim', () => {
         expect(await clear(claim)).to.equal(true);
     });
 
+    it('revalidates managed draft mindmap suggestions at the lowest claim commit primitive', async () => {
+        const author = makeUser('draft-creator', { _authoredPids: new Set([100]) });
+        liveProblem = {
+            ...managedPdoc(100),
+            docType: TYPE_PROBLEM,
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+            content: 'before',
+        };
+        const claim = await acquire(author, structuredClone(liveProblem), 'managed-knowledge-suggestion', 'metadata-edit', {
+            capability: 'content',
+        });
+        const nextAuthoring = { ...liveProblem.managedAuthoring, selectedMindmapNodeIds: ['node-2'] };
+
+        const result = await commit(claim, { content: 'after', managedAuthoring: nextAuthoring }, {}, 'content');
+
+        expect(result?.managedAuthoring.selectedMindmapNodeIds).to.deep.equal(['node-2']);
+        expect(managedMindmapMaterializations).to.deep.equal([['node-2']]);
+
+        const stale = { ...result!.managedAuthoring, selectedMindmapNodeIds: ['stale-node'] };
+        const error = await captureFailure(() => commit(claim, { managedAuthoring: stale }, {}, 'content'));
+        expect(error).to.have.property('name', 'ValidationError');
+        expect(liveProblem.managedAuthoring.selectedMindmapNodeIds).to.deep.equal(['node-2']);
+    });
+
     it('rejects a stale managed structural save when publication wins between guard read and final CAS', async () => {
         const admin = makeUser('admin');
         liveProblem = {
@@ -1120,7 +1192,7 @@ describe('P2.11 durable global problem write claim', () => {
             {
                 content: 'stale content',
                 title: '待审核 · revised',
-                managedAuthoring: { workingTitle: 'revised', metadataStatus: 'draft' },
+                managedAuthoring: { workingTitle: 'revised', selectedMindmapNodeIds: ['node-1'], metadataStatus: 'draft' },
             },
             {},
             'metadata',
@@ -1565,6 +1637,22 @@ describe('P2.11 stable direct-problem reads', () => {
         expect(loads).to.equal(2);
     });
 
+    it('denies every stable editor workspace read to an author after publication', async () => {
+        liveProblem = {
+            ...managedPdoc(100, 7, false),
+            managedAuthoring: { ...managedPdoc(100).managedAuthoring, metadataStatus: 'confirmed' },
+            docType: TYPE_PROBLEM,
+            config: 'secret: true',
+            aclMutationRevision: 1,
+            aclMutationLocks: [],
+        };
+        (global as any).Hydro.model.permits.loadAclForUser = async () => authorSnapshot(100);
+
+        const result = await readStableEditableProblem('system', makeUser('student'), readLiveProblem());
+
+        expect(result).to.equal(null);
+    });
+
     it('requires a stable owner-or-maintainer mirror for maintainer-only reads', async () => {
         liveProblem = {
             ...pdoc(100, 7, true, []),
@@ -1788,6 +1876,20 @@ describe('P2.11 ProblemModel public surface', () => {
         expect(source).to.include('PROBLEM_ACL_INTERNAL_FIELDS');
         expect(source).not.to.include('pdoc.maintainer?.includes(udoc._id)');
         expect(source).not.to.include('i.maintainer?.includes(canViewHidden as any)');
+    });
+
+    it('loads publication state before both stable editor and write-claim authorization checks', () => {
+        const editableStart = source.indexOf('static async getEditableAuthorized(');
+        const editableEnd = source.indexOf('\n    static getMulti(', editableStart);
+        const editableSource = source.slice(editableStart, editableEnd);
+        expect(editableSource).to.include("'authoringMode', 'hidden', 'managedAuthoring'");
+
+        const claimStart = source.indexOf('static async beginAuthorizedWriteClaim(');
+        const claimEnd = source.indexOf('\n    static async withAuthorizedWriteClaim(', claimStart);
+        const claimSource = source.slice(claimStart, claimEnd);
+        expect(claimSource).to.include("'authoringMode',");
+        expect(claimSource).to.include("'hidden',");
+        expect(claimSource).to.include("'managedAuthoring',");
     });
 });
 

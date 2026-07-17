@@ -71,6 +71,6 @@ describe('P2.17 programming tag normalization UI contract', () => {
     expect(edit).to.include('if (tagSelectionDirty) {');
     expect(edit).to.include('知识标签选择尚未确认');
     expect(edit).to.include('setPersistedMindmapNodeIds(normalizedNodeIds)');
-    expect(edit).to.include('useUnsavedChangesGuard(dirtyState.dirty || tagSelectionDirty');
+    expect(edit).to.include('dirtyState.dirty || tagSelectionDirty || managedKnowledgeDirty');
   });
 });

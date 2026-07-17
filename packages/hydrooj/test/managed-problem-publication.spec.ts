@@ -13,6 +13,7 @@ let trainingDoc: any;
 let casMode: 'success' | 'null' | 'throw-after-write' = 'success';
 let attachMode: 'success' | 'throw-after-write' = 'success';
 let pullMode: 'success' | 'throw' = 'success';
+let endSessionMode: 'success' | 'throw' = 'success';
 let trainingReadFailures = 0;
 const calls = {
     updates: [] as any[],
@@ -45,6 +46,7 @@ const documentColl = {
     async findOneAndUpdate(filter: any, update: any, options: any) {
         calls.problemUpdates.push({ filter, update, options });
         if (filter['aclWriteClaim.operation'] !== problemDoc?.aclWriteClaim?.operation) return null;
+        if (filter.structureRevision !== problemDoc?.structureRevision || problemDoc?.structureLockedAt) return null;
         if (casMode === 'null') return null;
         Object.assign(problemDoc, update.$set);
         if (casMode === 'throw-after-write') throw new Error('problem update response lost');
@@ -64,6 +66,7 @@ const documentColl = {
             problemDoc?.hidden === false &&
             problemDoc.managedAuthoring?.metadataStatus === 'confirmed' &&
             problemDoc.managedAuthoring?.approvedAt?.getTime() === expectedAt?.getTime() &&
+            filter.structureRevision === problemDoc.structureRevision &&
             filter['aclWriteClaim.operation'] === problemDoc.aclWriteClaim?.operation
         ) {
             return { ...problemDoc };
@@ -77,6 +80,7 @@ const session = {
         await work();
     },
     async endSession() {
+        if (endSessionMode === 'throw') throw new Error('session finalization failed');
         return undefined;
     },
 };
@@ -142,6 +146,7 @@ function input(withTraining = false): ManagedProblemPublicationCommit {
             approvedAt,
         },
         expectedMetadataStatus: 'draft',
+        expectedStructureRevision: 1,
         ...(withTraining ? { pendingTrainingPlacement: { trainingId: trainingDoc.docId, chapterId: 1 } } : {}),
     };
 }
@@ -160,6 +165,7 @@ beforeEach(() => {
     casMode = 'success';
     attachMode = 'success';
     pullMode = 'success';
+    endSessionMode = 'success';
     trainingReadFailures = 0;
     problemDoc = {
         domainId: 'system',
@@ -168,6 +174,7 @@ beforeEach(() => {
         problemKind: 'programming',
         authoringMode: 'managed',
         hidden: true,
+        structureRevision: 1,
         managedAuthoring: { workingTitle: '工作标题', metadataStatus: 'draft' },
         aclWriteClaim: {
             requestId: 'publish-101',
@@ -199,6 +206,16 @@ describe('P2.14 managed problem publication persistence', () => {
         expect(calls.sessions).to.have.lengthOf(0);
     });
 
+    it('does not open a transaction for a problem-only publish even when Mongo supports transactions', async () => {
+        topology = 'ReplicaSetWithPrimary';
+
+        const result = await publication.commitManagedProblemPublication(input());
+
+        expect(result.hidden).to.equal(false);
+        expect(calls.sessions).to.have.lengthOf(0);
+        expect(calls.problemUpdates[0].options.session).to.equal(undefined);
+    });
+
     it('rejects a publish-capability claim from another operation before any persistence', async () => {
         const request = input();
         request.claim.operation = 'managed-draft-author-assignment';
@@ -220,6 +237,15 @@ describe('P2.14 managed problem publication persistence', () => {
         const result = await publication.commitManagedProblemPublication(request);
         expect(result).to.include({ hidden: false, title: '正式标题' });
         expect(calls.problemUpdates[0].update.$set.managedAuthoring.metadataStatus).to.equal('confirmed');
+    });
+
+    it('keeps the draft hidden when its structure revision changes before the publication CAS', async () => {
+        problemDoc.structureRevision = 2;
+        const error = await captureFailure(publication.commitManagedProblemPublication(input()));
+        expect(error?.message).to.include('managed publication CAS failed');
+        expect(problemDoc.hidden).to.equal(true);
+        expect(calls.problemUpdates[0].filter.structureRevision).to.equal(1);
+        expect(calls.problemUpdates[0].filter.structureLockedAt).to.deep.equal({ $exists: false });
     });
 
     it('adds the problem to one chapter exactly once before the standalone publication CAS', async () => {
@@ -285,6 +311,18 @@ describe('P2.14 managed problem publication persistence', () => {
         expect(calls.sessions).to.have.lengthOf(1);
         expect(calls.updates[0].options).to.deep.equal({ session });
         expect(calls.problemUpdates[0].options.session).to.equal(session);
+    });
+
+    it('returns the committed document in a typed error when session finalization fails after commit', async () => {
+        topology = 'ReplicaSetWithPrimary';
+        endSessionMode = 'throw';
+
+        const error = await captureFailure(publication.commitManagedProblemPublication(input(true)));
+
+        expect(error).to.be.instanceOf(publication.ManagedProblemPublicationCommittedError);
+        expect((error as InstanceType<typeof publication.ManagedProblemPublicationCommittedError>).pdoc.hidden).to.equal(false);
+        expect(problemDoc.hidden).to.equal(false);
+        expect(trainingDoc.dag[0].pids).to.deep.equal([101]);
     });
 
     it('raises an observable 5xx-style error when bounded compensation cannot remove the member', async () => {

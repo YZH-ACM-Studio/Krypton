@@ -86,6 +86,8 @@ let claimAllowed = true;
 let permitResults: any[] = [];
 let missingUserIds = new Set<number>();
 let managedTrainingPlacementResults: any[] = [];
+let managedPublishResult: any = null;
+let managedPublicationPreviewError: Error | null = null;
 const createKinds: string[] = [];
 
 function cursor(docs: any[] = []) {
@@ -207,7 +209,14 @@ const problemStub = {
     },
     async publishManagedProgrammingProblem(input: any) {
         calls.publish.push(input);
-        return { domainId: input.domainId, docId: input.docId, hidden: false };
+        return (
+            managedPublishResult || {
+                state: 'published',
+                pdoc: { domainId: input.domainId, docId: input.docId, pid: `P${input.docId}`, hidden: false },
+                requestId: 'publish-test',
+                incompleteStages: [],
+            }
+        );
     },
     async addAdditionalFileWithClaim(claim: any, ...args: any[]) {
         calls.renameFile.push([claim.domainId, claim.pid, ...args]);
@@ -416,12 +425,21 @@ const managedAuthoringStub = {
         ambiguousTags: [],
         unknownTags: tags.filter((tag) => !['PAT乙级', '二分'].includes(tag)),
     }),
-    materializeKnowledgeMindmapTags: async (nodeIds: string[]) => {
+    materializeKnowledgeMindmapTags: async (nodeIds: string[], options: { required?: boolean } = {}) => {
         calls.knowledgeMaterializations.push([...nodeIds]);
+        if (options.required && !nodeIds.length) throw new GenericError('knowledge node required');
         if (nodeIds.includes('stale-node')) throw new GenericError('stale knowledge node');
         return {
             nodeIds: [...nodeIds],
             tags: nodeIds.map((nodeId) => `derived:${nodeId}`),
+        };
+    },
+    prepareManagedProblemPublication: async (_domainId: string, pdoc: any) => {
+        if (managedPublicationPreviewError) throw managedPublicationPreviewError;
+        return {
+            sourceMeta: pdoc.sourceMeta,
+            selectedMindmapNodeIds: pdoc.managedAuthoring.selectedMindmapNodeIds,
+            tags: ['自命题', 'derived:node-1'],
         };
     },
     previewProgrammingTagNormalization: async (input: any) => ({
@@ -510,6 +528,7 @@ try {
 
 const {
     ProblemApi,
+    ProblemCreateHubHandler,
     ProblemCreateProgrammingHandler,
     ProblemCreateFunctionHandler,
     ProblemCreateProgramFillHandler,
@@ -591,6 +610,8 @@ beforeEach(() => {
     permitResults = [];
     missingUserIds = new Set();
     managedTrainingPlacementResults = [];
+    managedPublishResult = null;
+    managedPublicationPreviewError = null;
     createKinds.length = 0;
     (global as any).Hydro.module.problemSearch = {};
     (global as any).Hydro.model.permits = {
@@ -647,6 +668,34 @@ describe('P2.11 enumeration entry gates', () => {
         expect(calls.getMulti[1].query).to.deep.equal(scope);
         expect(calls.getMulti[2].query).to.deep.equal(scope);
         expect(calls.refresh.map(({ domainId }) => domainId)).to.deep.equal(['system', 'system']);
+    });
+
+    it('shows the create entry only when the unified managed-create route will accept the user', async () => {
+        for (const [user, expected] of [
+            [
+                {
+                    canBrowse: true,
+                    scope: {},
+                    hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM,
+                },
+                false,
+            ],
+            [
+                {
+                    canBrowse: true,
+                    scope: {},
+                    hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROGRAMMING_DRAFT,
+                },
+                true,
+            ],
+            [{ canBrowse: true, scope: {}, admin: true, hasPerm: () => false }, true],
+        ] as const) {
+            getMultiResults = [[], []];
+            const handler = makeHandler(ProblemMineHandler, user);
+            await handler.get('system', 1);
+            expect(handler.response.body.canCreate).to.equal(expected);
+            expect(handler.response.body).not.to.have.property('canCreateProgrammingDraft');
+        }
     });
 
     it('combines every unified-bank filter before find and count', async () => {
@@ -734,18 +783,19 @@ describe('P2.11 enumeration entry gates', () => {
 
     it('publishes managed drafts only through the administrator review service', async () => {
         const admin = makeHandler(ProblemMainHandler, { canBrowse: true, admin: true });
-        await admin.postManagedPublish('forged', 7, '正式标题', 4);
+        await admin.postManagedPublish('forged', 7, '正式标题', 4, 9);
         expect(calls.publish).to.have.lengthOf(1);
         expect(calls.publish[0]).to.deep.include({
             domainId: 'system',
             docId: 7,
             formalTitle: '正式标题',
             difficulty: 4,
+            expectedStructureRevision: 9,
             actor: 42,
         });
 
         const author = makeHandler(ProblemMainHandler, { canBrowse: true, admin: false });
-        const denied = await captureFailure(() => author.postManagedPublish('forged', 7, '正式标题', 4));
+        const denied = await captureFailure(() => author.postManagedPublish('forged', 7, '正式标题', 4, 9));
         expect(denied).to.be.instanceOf(TestPermissionError);
         expect(calls.publish).to.have.lengthOf(1);
 
@@ -753,6 +803,29 @@ describe('P2.11 enumeration entry gates', () => {
         const bypass = await captureFailure(() => admin.postUnhide('forged', [7]));
         expect(bypass).to.be.instanceOf(GenericError);
         expect(calls.publish).to.have.lengthOf(1);
+    });
+
+    it('reports the actual committed state instead of redirecting when publication finalization is incomplete', async () => {
+        managedPublishResult = {
+            state: 'committed_with_error',
+            pdoc: { domainId: 'system', docId: 7, pid: 'P3107', hidden: false },
+            requestId: 'publish-partial-test',
+            incompleteStages: ['verifier-cleanup', 'edit-observers'],
+        };
+        const admin = makeHandler(ProblemMainHandler, { canBrowse: true, admin: true });
+
+        await admin.postManagedPublish('forged', 7, '正式标题', 4, 9);
+
+        expect(admin.response.status).to.equal(500);
+        expect(admin.response.redirect).to.equal(undefined);
+        expect(admin.response.body).to.deep.include({
+            publicationState: 'committed_with_error',
+            requestId: 'publish-partial-test',
+            incompleteStages: ['verifier-cleanup', 'edit-observers'],
+        });
+        expect(admin.response.body.error.message).to.include('题目已经公开');
+        expect(admin.response.body.error.message).to.include('验题人权限清理、发布事件通知');
+        expect(admin.response.body.url).to.equal('/problem_detail');
     });
 
     it('ignores a forged method domainId and queries only the authoritative handler domain', async () => {
@@ -800,6 +873,59 @@ describe('P2.11 authoritative problem route domain', () => {
         expect(calls.status[0][0]).to.equal('system');
         expect(handler.response.body.authorUdocs).to.deep.equal([{ _id: 42 }]);
         expect(handler.response.body.canEditProblem).to.equal(false);
+    });
+
+    it('computes the managed draft edit entry from internal state without exposing that state', async () => {
+        const handler = makeHandler(ProblemDetailHandler, { canEditContent: true });
+        getResults = [
+            {
+                domainId: 'system',
+                docId: 7,
+                owner: 42,
+                hidden: true,
+                title: 'Managed draft',
+                content: 'statement',
+                config: '',
+                additional_file: [],
+                tag: [],
+                authoringMode: 'managed',
+                managedAuthoring: { workingTitle: 'Managed draft', metadataStatus: 'draft' },
+            },
+        ];
+
+        await handler._prepare('forged', 7);
+
+        expect(calls.getViewableAuthorized[0][3]).to.include('managedAuthoring');
+        expect(handler.response.body.canEditProblem).to.equal(true);
+        expect(handler.response.body.pdoc).not.to.have.property('managedAuthoring');
+        expect(handler.pdoc).not.to.have.property('managedAuthoring');
+    });
+
+    it('carries the stable managed draft content capability into the files preflight', async () => {
+        const handler = makeHandler(ProblemFilesHandler, { canEditContent: true });
+        getResults = [
+            {
+                domainId: 'system',
+                docId: 7,
+                owner: 42,
+                hidden: true,
+                title: 'Managed draft',
+                content: 'statement',
+                config: '',
+                data: [],
+                additional_file: [],
+                tag: [],
+                authoringMode: 'managed',
+                managedAuthoring: { workingTitle: 'Managed draft', metadataStatus: 'draft' },
+            },
+        ];
+        handler.args = { operation: 'upload_file' };
+        handler.request.body = { operation: 'upload_file', filename: '1.in', type: 'testdata' };
+
+        await handler._prepare('forged', 7);
+        await handler.post();
+
+        expect(handler.response.body.canEditProblem).to.equal(true);
     });
 
     it('exposes the canonical managed author instead of presenting the storage owner as the author', async () => {
@@ -898,9 +1024,26 @@ describe('P2.11 authoritative problem route domain', () => {
         expect(handler.response.body.authorUdocs).to.deep.equal([]);
     });
 
+    it('opens the creation hub only for a bank administrator or trusted managed creator', async () => {
+        const trusted = makeHandler(ProblemCreateHubHandler, {
+            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROGRAMMING_DRAFT,
+        });
+        await trusted.get();
+        expect(trusted.response.body.problemKinds).to.deep.equal([{ kind: 'programming', slug: 'programming' }]);
+
+        const admin = makeHandler(ProblemCreateHubHandler, { admin: true });
+        await admin.get();
+        expect(admin.response.body.problemKinds).to.have.length.greaterThan(1);
+
+        for (const user of [{}, { hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM }]) {
+            const denied = await captureFailure(() => makeHandler(ProblemCreateHubHandler, user).get());
+            expect(denied).to.be.instanceOf(TestPermissionError);
+        }
+    });
+
     it('creates a problem only in the authoritative handler domain', async () => {
         const handler = makeHandler(ProblemCreateProgrammingHandler, {
-            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM,
+            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROGRAMMING_DRAFT,
         });
         handler.request.body = {
             title: 'Title',
@@ -924,14 +1067,13 @@ describe('P2.11 authoritative problem route domain', () => {
             title: 'Working title',
             content: 'Statement',
             managed: 'true',
-            template: 'pat_basic',
+            template: 'self',
             year: '2026',
-            season: 'spring',
             difficulty: '4',
             mindmapNodeIds: 'node-1',
         };
 
-        await handler.post('forged', 'Working title', 'Statement', '', false, 4, [], true, 'pat_basic', 2026, 'spring', '', 0, ['node-1']);
+        await handler.post('forged', 'Working title', 'Statement', '', false, 4, [], true, 'self', 2026, '', '', 0, ['node-1']);
 
         expect(createKinds).to.deep.equal(['managed-programming']);
         expect(calls.add[0]).to.deep.equal([
@@ -940,11 +1082,12 @@ describe('P2.11 authoritative problem route domain', () => {
                 workingTitle: 'Working title',
                 content: 'Statement',
                 difficulty: 4,
-                sourceMeta: { template: 'pat_basic', year: 2026, season: 'spring' },
+                sourceMeta: { template: 'self', year: 2026 },
                 mindmapNodeIds: ['node-1'],
+                authorUid: 42,
             },
             42,
-            undefined,
+            handler.user,
         ]);
         expect(handler.response.body).to.include({ docId: 7, authoringMode: 'managed', hidden: true });
 
@@ -954,13 +1097,45 @@ describe('P2.11 authoritative problem route domain', () => {
             ['tag', 'forged'],
             ['sourceMeta', '{"template":"self"}'],
             ['hidden', 'false'],
-            ['authorUid', '77'],
         ]) {
             handler.request.body = { ...validBody, [field]: value };
             const forged = await captureFailure(() =>
-                handler.post('forged', 'Working title', 'Statement', 'P9999', false, 4, [], true, 'pat_basic', 2026, 'spring', '', 0, ['node-1']),
+                handler.post('forged', 'Working title', 'Statement', 'P9999', false, 4, [], true, 'self', 2026, '', '', 0, ['node-1']),
             );
             expect(forged).to.be.instanceOf(GenericError);
+        }
+
+        for (const [body, args] of [
+            [{ ...validBody, template: 'pat_basic' }, { template: 'pat_basic' }],
+            [{ ...validBody, authorUid: '77' }, { authorUid: 77 }],
+            [
+                { ...validBody, trainingId: '64b000000000000000000010', chapterId: '1' },
+                { trainingId: '64b000000000000000000010', chapterId: 1 },
+            ],
+        ] as const) {
+            handler.request.body = body;
+            const forged = await captureFailure(() =>
+                handler.post(
+                    'forged',
+                    'Working title',
+                    'Statement',
+                    '',
+                    false,
+                    4,
+                    [],
+                    true,
+                    args.template || 'self',
+                    2026,
+                    '',
+                    '',
+                    0,
+                    ['node-1'],
+                    args.trainingId || '',
+                    args.chapterId || '',
+                    args.authorUid || 0,
+                ),
+            );
+            expect(forged).to.be.instanceOf(TestPermissionError);
         }
         expect(calls.add).to.have.lengthOf(1);
     });
@@ -986,16 +1161,13 @@ describe('P2.11 authoritative problem route domain', () => {
                 body: { ...commonBody, template: 'self' },
                 args: ['self', 2026, [], '', ''],
             },
-            {
-                body: { ...commonBody, template: 'self', mindmapNodeIds: 'node-1', trainingId },
-                args: ['self', 2026, ['node-1'], trainingId, ''],
-            },
         ] as const;
 
+        const admin = makeHandler(ProblemCreateProgrammingHandler, { admin: true });
         for (const testCase of cases) {
             calls.add.length = 0;
-            handler.request.body = testCase.body;
-            await handler.post(
+            admin.request.body = testCase.body;
+            await admin.post(
                 'forged',
                 'Working title',
                 'Statement',
@@ -1016,7 +1188,12 @@ describe('P2.11 authoritative problem route domain', () => {
 
             expect(calls.add).to.have.lengthOf(1);
         }
-        expect(calls.add[0][1].pendingTrainingPlacement).to.deep.equal({ trainingId, chapterId: '' });
+
+        handler.request.body = { ...commonBody, template: 'self', mindmapNodeIds: 'node-1', trainingId };
+        const deniedTraining = await captureFailure(() =>
+            handler.post('forged', 'Working title', 'Statement', '', false, 4, [], true, 'self', 2026, '', '', '', ['node-1'], trainingId, ''),
+        );
+        expect(deniedTraining).to.be.instanceOf(TestPermissionError);
 
         const source = readFileSync(resolve(__dirname, '../src/handler/problem.ts'), 'utf8');
         const start = source.indexOf('export class ProblemCreateProgrammingHandler');
@@ -1059,7 +1236,7 @@ describe('P2.11 authoritative problem route domain', () => {
         const denied = await captureFailure(() =>
             teacher.post('forged', 'Admin draft', 'Statement', '', false, 3, [], true, 'self', 2026, '', '', 0, ['node-1'], undefined, 0, 77),
         );
-        expect(denied).to.be.instanceOf(GenericError);
+        expect(denied).to.be.instanceOf(TestPermissionError);
     });
 
     it('defaults an administrator-created managed draft to the current administrator author', async () => {
@@ -1179,7 +1356,7 @@ describe('P2.13 managed programming edit boundary', () => {
             problemKind: 'programming',
             structureRevision: 2,
             authoringMode: 'managed',
-            managedAuthoring: { workingTitle: 'Working title', metadataStatus: 'draft' },
+            managedAuthoring: { workingTitle: 'Working title', selectedMindmapNodeIds: ['node-1'], metadataStatus: 'draft' },
         };
         return handler;
     }
@@ -1192,6 +1369,42 @@ describe('P2.13 managed programming edit boundary', () => {
 
         expect(calls.edit).to.have.lengthOf(1);
         expect(calls.edit[0][2]).to.deep.equal({ content: 'New statement', html: false });
+    });
+
+    it('accepts a managed author knowledge-node suggestion only while the problem is a draft', async () => {
+        const handler = managedHandler();
+        handler.user.canEditContent = true;
+        handler.request.body = { content: 'New statement', knowledgeNodeIds: 'node-1', expectedStructureRevision: '2' };
+
+        await handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], ['node-1'], undefined, undefined, 2);
+
+        expect(calls.knowledgeMaterializations.at(-1)).to.deep.equal(['node-1']);
+        expect(calls.edit[0][2]).to.deep.equal({
+            content: 'New statement',
+            html: false,
+            managedAuthoring: {
+                workingTitle: 'Working title',
+                selectedMindmapNodeIds: ['node-1'],
+                metadataStatus: 'draft',
+            },
+        });
+
+        calls.edit.length = 0;
+        handler.request.body = { content: 'New statement', knowledgeNodeIds: '', expectedStructureRevision: '2' };
+        const empty = await captureFailure(() =>
+            handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], [], undefined, undefined, 2),
+        );
+        expect(empty).to.be.instanceOf(GenericError);
+        expect(calls.knowledgeMaterializations.at(-1)).to.deep.equal([]);
+        expect(calls.edit).to.deep.equal([]);
+
+        calls.edit.length = 0;
+        handler.pdoc.managedAuthoring.metadataStatus = 'confirmed';
+        const denied = await captureFailure(() =>
+            handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], ['node-1'], undefined, undefined, 2),
+        );
+        expect(denied).to.be.instanceOf(GenericError);
+        expect(calls.edit).to.deep.equal([]);
     });
 
     it('serves persisted training memberships for a confirmed managed problem', async () => {
@@ -1302,18 +1515,91 @@ describe('P2.13 managed programming edit boundary', () => {
 });
 
 describe('P2.17 programming tag HTTP boundaries', () => {
-    it('serves the managed creation protocol to legacy creators and bank administrators alike', async () => {
-        for (const user of [
-            { hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM },
-            { admin: true, hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM },
-        ]) {
+    it('serves only self creation to trusted creators and every fixed template to bank administrators', async () => {
+        for (const user of [{ hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROGRAMMING_DRAFT }, { admin: true }]) {
             const handler = makeHandler(ProblemCreateProgrammingHandler, user);
             await handler.get();
             expect(handler.response.body.pdoc.authoringMode).to.equal('managed');
             expect(handler.response.body.managedCreateDefault).to.equal(true);
             expect(handler.response.body.managedMindmapOptions).to.have.length(1);
             expect(handler.response.body.canAssignManagedAuthor).to.equal(user.admin === true);
+            expect(handler.response.body.canAssignManagedTraining).to.equal(user.admin === true);
+            expect(handler.response.body.managedSourceTemplates.map((template: any) => template.id)).to.deep.equal(
+                user.admin === true ? ['pat_basic', 'self'] : ['self'],
+            );
         }
+
+        const broadOnly = makeHandler(ProblemCreateProgrammingHandler, {
+            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM,
+        });
+        expect(await captureFailure(() => broadOnly.get())).to.be.instanceOf(TestPermissionError);
+    });
+
+    it('serves the administrator a revision-bound review preview derived from live catalog data', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P3107',
+            title: '工作标题',
+            tag: ['stale-tag'],
+            problemKind: 'programming',
+            authoringMode: 'managed',
+            hidden: true,
+            sourceMeta: { template: 'self', year: 2026 },
+            managedAuthoring: {
+                workingTitle: '工作标题',
+                selectedMindmapNodeIds: ['node-1'],
+                metadataStatus: 'draft',
+            },
+            config: { cases: [{ input: '1.in', output: '1.out' }] },
+            data: [{ name: '1.in' }, { name: '1.out' }],
+            additional_file: [],
+            structureRevision: 9,
+        };
+        const handler = makeHandler(ProblemEditHandler, { canPublish: true });
+        handler.pdoc = pdoc;
+        maintainableResults = [pdoc];
+
+        await handler.get();
+
+        expect(handler.response.body.managedReviewPreview).to.deep.equal({
+            state: 'ready',
+            structureRevision: 9,
+            tags: ['自命题', 'derived:node-1'],
+            selectedMindmapNodeIds: ['node-1'],
+        });
+        expect(handler.response.body.managedReviewPreview.tags).not.to.include('stale-tag');
+    });
+
+    it('keeps an invalid managed review preview visible and non-publishable', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P3107',
+            tag: ['stale-tag'],
+            problemKind: 'programming',
+            authoringMode: 'managed',
+            hidden: true,
+            sourceMeta: { template: 'self', year: 2026 },
+            managedAuthoring: { workingTitle: '工作标题', selectedMindmapNodeIds: ['node-1'], metadataStatus: 'draft' },
+            config: {},
+            data: [],
+            additional_file: [],
+            structureRevision: 9,
+        };
+        managedPublicationPreviewError = new Error('知识节点已失效');
+        const handler = makeHandler(ProblemEditHandler, { canPublish: true });
+        handler.pdoc = pdoc;
+        maintainableResults = [pdoc];
+
+        await handler.get();
+
+        expect(handler.response.body.managedReviewPreview).to.deep.include({
+            state: 'invalid',
+            structureRevision: 9,
+            tags: [],
+            message: '知识节点已失效',
+        });
     });
 
     it('preserves an unconverted legacy tag array exactly during an ordinary edit save', async () => {
@@ -1427,7 +1713,7 @@ describe('P3.15 files workspace capability contract', () => {
             {
                 role: 'author',
                 user: {
-                    canEditContent: true,
+                    canEditContent: false,
                     canEditMetadata: false,
                     canManageCollaborators: false,
                     canManageMaintainers: false,
@@ -1436,7 +1722,7 @@ describe('P3.15 files workspace capability contract', () => {
                     canDelete: false,
                     canClone: false,
                 },
-                expected: { canEditContent: true, canManageCollaborators: false, canPublish: false },
+                expected: { canEditContent: false, canManageCollaborators: false, canPublish: false },
             },
             {
                 role: 'maintainer',
@@ -2292,7 +2578,7 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
         maintainResult = false;
         const filesError = await captureFailure(() => files.post());
         expect(filesError).to.be.instanceOf(TestPermissionError);
-        expect(calls.maintain.at(-1)?.pdoc).to.equal(pdoc);
+        expect(calls.renameFile).to.deep.equal([]);
     });
 
     it('contains no legacy ProblemDoc own-or-wide-edit fallback in this handler', () => {

@@ -5,6 +5,7 @@ import type { User } from '../interface';
 import { PERM, PRIV } from './builtin';
 import { assertCodeEvaluationLifecyclePatch, assertProblemReadyForUse, CODE_EVALUATION_CANDIDATE_FILTER } from './code-evaluation-lifecycle';
 import * as document from './document';
+import { canonicalizeManagedDraftMindmapPatch } from './managed-problem-authoring';
 import { managedProblemPatchCapability, managedProblemPatchStateFilter } from './managed-problem-patch';
 import type { ProblemDoc } from './problem';
 import { canonicalizeStructuredKnowledgePatch, touchesCanonicalProblemFields } from './structured-problem-metadata';
@@ -40,6 +41,8 @@ export interface ProblemWriteClaim {
     actor: number;
     operation: string;
     capability: ProblemWriteCapability;
+    /** Content claim acquired solely through the managed author role. */
+    managedAuthorDraftOnly?: true;
     state: 'active' | 'error';
     lastError: string | null;
     createdAt: Date;
@@ -271,6 +274,7 @@ function claimFilter(claim: ProblemWriteClaim): Record<string, unknown> {
         'aclWriteClaim.operation': claim.operation,
         'aclWriteClaim.capability': claim.capability,
         'aclWriteClaim.state': 'active',
+        ...(claim.managedAuthorDraftOnly ? { 'aclWriteClaim.managedAuthorDraftOnly': true } : {}),
     };
 }
 
@@ -408,6 +412,7 @@ export async function acquireProblemWriteClaim(
 
     const capability = options.capability || 'maintain';
     if (!selfRevoke && !canUseProblemWriteCapability(user, authorizedPdoc, capability)) return null;
+    const managedAuthorDraftOnly = !selfRevoke && isManagedAuthorDraftOnly(user, authorizedPdoc, capability);
 
     const timestamp = options.now || new Date();
     const stored = {
@@ -415,6 +420,7 @@ export async function acquireProblemWriteClaim(
         actor: user._id,
         operation: operation.trim(),
         capability,
+        ...(managedAuthorDraftOnly ? { managedAuthorDraftOnly: true as const } : {}),
         state: 'active' as const,
         lastError: null,
         createdAt: timestamp,
@@ -483,9 +489,27 @@ export async function commitProblemWriteClaimUpdate(
             hidden: 1,
             codeEvaluationStatus: 1,
             managedAuthoring: 1,
+            aclWriteClaim: 1,
         },
     });
     if (!current) return null;
+    const managedAuthorDraftOnly = (current as any).aclWriteClaim?.managedAuthorDraftOnly === true;
+    if (
+        managedAuthorDraftOnly &&
+        (current.authoringMode !== 'managed' || current.hidden !== true || current.managedAuthoring?.metadataStatus !== 'draft')
+    ) {
+        logger.warn(
+            'Managed author claim commit rejected domain=%s pid=%d actor=%d requestId=%s capability=%s hidden=%s metadataStatus=%s stage=claim-commit result=denied',
+            claim.domainId,
+            claim.pid,
+            claim.actor,
+            claim.requestId,
+            claim.capability,
+            current.hidden,
+            current.managedAuthoring?.metadataStatus || '-',
+        );
+        throw new ValidationError('fields', null, '普通出题人只能修改尚未发布的托管草稿');
+    }
     const set = $set as Record<string, unknown>;
     assertCodeEvaluationLifecyclePatchWithTrace(current as ProblemDoc, set, $unset, {
         actor: claim.actor,
@@ -499,7 +523,7 @@ export async function commitProblemWriteClaimUpdate(
         });
     }
     if (current.authoringMode === 'managed') {
-        const guard = managedProblemPatchCapability(current, $set, $unset);
+        let guard = managedProblemPatchCapability(current, $set, $unset);
         if (guard.immutableFields.length || guard.publishes || !problemWriteCapabilityAllows(claim.capability, guard.capability)) {
             logger.warn(
                 'Managed claim commit rejected domain=%s pid=%d actor=%d requestId=%s claimCapability=%s requiredCapability=%s fields=%o publishes=%s result=denied',
@@ -514,7 +538,20 @@ export async function commitProblemWriteClaimUpdate(
             );
             throw new ValidationError('fields', null, '写入字段不能绕过托管题统一服务');
         }
+        await canonicalizeManagedDraftMindmapPatch(current, $set);
+        guard = managedProblemPatchCapability(current, $set, $unset);
+        if (guard.immutableFields.length || guard.publishes || !problemWriteCapabilityAllows(claim.capability, guard.capability)) {
+            throw new ValidationError('fields', null, '知识节点物化结果超出托管题写入凭据');
+        }
         filter = { ...filter, ...managedProblemPatchStateFilter(current) };
+        if (managedAuthorDraftOnly) {
+            filter = {
+                ...filter,
+                hidden: true,
+                'managedAuthoring.metadataStatus': 'draft',
+                'aclWriteClaim.managedAuthorDraftOnly': true,
+            } as Filter<ProblemDoc>;
+        }
     }
     await canonicalizeStructuredKnowledgePatch(current, $set, $unset, claim, 'claim-commit');
     const update: any = {};
@@ -621,7 +658,8 @@ export function canAuthorProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolea
 
 export function canEditProblemContent(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (pdoc.authoringMode !== 'managed') return canMaintainProblem(user, pdoc);
-    return canMaintainProblem(user, pdoc) || canAuthorProblem(user, pdoc);
+    if (canMaintainProblem(user, pdoc)) return true;
+    return pdoc.hidden === true && pdoc.managedAuthoring?.metadataStatus === 'draft' && canAuthorProblem(user, pdoc);
 }
 
 export function canEditProblemMetadata(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
@@ -655,6 +693,7 @@ export function canDeleteProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolea
 }
 
 export function canCloneProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    if (pdoc.problemKind === undefined || pdoc.problemKind === 'programming') return false;
     return pdoc.authoringMode === 'managed' ? canPublishProblem(user, pdoc) : canMaintainProblem(user, pdoc);
 }
 
@@ -707,8 +746,16 @@ function applyCapabilityIdentityFilter(
         filter.$or = [{ owner: user._id }, { maintainer: user._id }];
         return;
     }
-    if (capability === 'content' && user._authoredPids?.has(pdoc.docId) && !user._maintainedPids?.has(pdoc.docId)) return;
+    if (isManagedAuthorDraftOnly(user, pdoc, capability)) {
+        filter.hidden = true;
+        filter['managedAuthoring.metadataStatus'] = 'draft';
+        return;
+    }
     filter.maintainer = user._id;
+}
+
+function isManagedAuthorDraftOnly(user: ProblemAclUser, pdoc: ProblemDoc, capability: ProblemWriteCapability): boolean {
+    return capability === 'content' && pdoc.authoringMode === 'managed' && canAuthorProblem(user, pdoc) && !canMaintainProblem(user, pdoc);
 }
 
 /** Canonical direct-problem view check used by ProblemModel.canViewBy. */

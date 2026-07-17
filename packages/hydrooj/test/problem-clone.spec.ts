@@ -83,18 +83,17 @@ describe('physical problem storage clone', () => {
         expect((failure!.error as Error).message).to.equal('disk failure');
     });
 
-    it('re-materializes converted programming tags while preserving unconverted legacy clones', () => {
+    it('rejects every programming clone before creating a replacement document', () => {
         const source = readFileSync(resolve(__dirname, '../src/model/problem.ts'), 'utf8');
         const start = source.indexOf('static async copy(');
         const end = source.indexOf('static push<', start);
         const method = source.slice(start, end);
 
-        expect(method).to.include("problemKind === 'programming'");
-        expect(method).to.include("original.authoringMode !== 'managed'");
-        expect(method).to.include("Object.hasOwn(original, 'knowledgeNodeIds')");
-        expect(method).to.include('cloneKnowledge = await materializeKnowledgeMindmapTags(original.knowledgeNodeIds ?? [])');
-        expect(method).to.include('cloneKnowledge?.tags ?? original.tag');
-        expect(method).to.include('knowledgeNodeIds: cloneKnowledge?.nodeIds');
+        const rejection = method.indexOf("if (problemKind === 'programming')");
+        const creation = method.indexOf('createProblemByKind(');
+        expect(rejection).to.be.greaterThan(-1);
+        expect(method).to.include('编程题不能通过复制创建；请从托管编程题入口新建');
+        expect(rejection).to.be.lessThan(creation);
     });
 
     it('keeps trusted programming imports legacy unless canonical node IDs are explicitly supplied', () => {

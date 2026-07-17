@@ -4,7 +4,8 @@
  * 自己 own 的题：列表 + 建题入口。数据来自 ProblemMineHandler
  * （/problem/mine，只查 owner=自己）。
  */
-import { BookOpen, Eye, EyeOff, Pencil, Plus } from 'lucide-react';
+import { BookOpen, Eye, EyeOff, Pencil } from 'lucide-react';
+import { ProblemMineCreateAction } from '@/components/problem-mine-create-action';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -21,7 +22,6 @@ export function ProblemMinePage() {
     pcount: number;
     ppcount: number;
     canCreate: boolean;
-    canCreateProgrammingDraft: boolean;
   };
   const pdocs = data.pdocs || [];
   const page = data.page || 1;
@@ -32,14 +32,7 @@ export function ProblemMinePage() {
         <BookOpen className="size-5 text-primary" />
         <h1 className="text-xl font-semibold">我的题目</h1>
         <span className="ml-2 text-xs text-muted-foreground">共 {data.pcount ?? pdocs.length} 题</span>
-        {data.canCreate || data.canCreateProgrammingDraft ? (
-          <Button asChild size="sm" className="ml-auto gap-1">
-            <a href={data.canCreate ? '/problem/create' : '/problem/create/programming'}>
-              <Plus className="size-3.5" />
-              新建题目
-            </a>
-          </Button>
-        ) : null}
+        <ProblemMineCreateAction allowed={data.canCreate === true} />
       </header>
 
       <Card>
@@ -58,7 +51,7 @@ export function ProblemMinePage() {
               {pdocs.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="py-12 text-center text-sm text-muted-foreground">
-                    你还没有参与出题。{data.canCreate || data.canCreateProgrammingDraft ? '点击右上角「新建题目」开始。' : ''}
+                    你还没有参与出题。{data.canCreate ? '点击右上角「新建题目」开始。' : ''}
                   </TableCell>
                 </TableRow>
               ) : (

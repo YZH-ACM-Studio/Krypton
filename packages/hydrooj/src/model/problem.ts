@@ -108,6 +108,7 @@ import {
     prepareManagedProblemPublication,
     previewProgrammingTagNormalization,
     reserveManagedProblemPid,
+    validateManagedTrainingPlacement,
 } from './managed-problem-authoring';
 import { managedProblemPatchCapability } from './managed-problem-patch';
 import { commitManagedProblemPublication, ManagedProblemPublicationCommittedError } from './managed-problem-publication';
@@ -556,6 +557,7 @@ interface ProblemCreateOptions {
     managedAuthoring?: ProblemDoc['managedAuthoring'];
     knowledgeNodeIds?: ProblemDoc['knowledgeNodeIds'];
     codeEvaluationStatus?: 'draft';
+    batchImport?: ProblemDoc['batchImport'];
 }
 
 interface ProblemCreateHooks {
@@ -814,6 +816,10 @@ export class ProblemModel {
         if (meta.authoringMode) args.authoringMode = meta.authoringMode;
         if (meta.sourceMeta) args.sourceMeta = meta.sourceMeta;
         if (meta.managedAuthoring) args.managedAuthoring = meta.managedAuthoring;
+        if (meta.batchImport) {
+            args.batchImport = meta.batchImport;
+            args.hasBatchImportIdentity = true;
+        }
         if (problemKind === 'programming' && meta.knowledgeNodeIds !== undefined) {
             args.knowledgeNodeIds = meta.knowledgeNodeIds;
         }
@@ -901,6 +907,7 @@ export class ProblemModel {
                         managedAuthoring: args.managedAuthoring,
                         knowledgeNodeIds: args.knowledgeNodeIds,
                         codeEvaluationStatus: args.codeEvaluationStatus,
+                        batchImport: args.batchImport,
                     }),
                     time: new Date(),
                 } as any),
@@ -930,6 +937,7 @@ export class ProblemModel {
             ...(!isBankAdmin && requestedTemplate && requestedTemplate !== 'self' ? ['template'] : []),
             ...(!isBankAdmin && input.authorUid !== undefined && Number(input.authorUid) !== creator ? ['authorUid'] : []),
             ...(!isBankAdmin && input.pendingTrainingPlacement !== undefined ? ['pendingTrainingPlacement'] : []),
+            ...(!isBankAdmin && input.batchImport !== undefined ? ['batchImport'] : []),
         ];
         if (deniedFields.length) {
             logger.warn(
@@ -982,6 +990,7 @@ export class ProblemModel {
                         metadataStatus: 'draft',
                         ...(prepared.pendingTrainingPlacement ? { pendingTrainingPlacement: prepared.pendingTrainingPlacement } : {}),
                     },
+                    ...(prepared.batchImport ? { batchImport: prepared.batchImport } : {}),
                 },
                 {
                     onAllocated: (allocatedDocId, allocatedDocumentId) => {
@@ -1157,6 +1166,91 @@ export class ProblemModel {
             }
             throw error;
         }
+    }
+
+    /** Bind one already-created batch draft to the exact approved training chapter immediately before publication. */
+    static async setManagedProgrammingDraftTrainingPlacement(input: {
+        domainId: string;
+        docId: number;
+        trainingId: ObjectId;
+        chapterId: number;
+        expectedStructureRevision: number;
+        expectedBatchImportIdentity: string;
+        actor: number;
+        user: ProblemAclUser;
+    }): Promise<ProblemDoc> {
+        assertStructureRevision(input.expectedStructureRevision);
+        if (input.user._id !== input.actor || !ProblemModel.isProblemBankAdmin(input.user)) {
+            throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+        }
+        return ProblemModel.withAuthorizedWriteClaim(
+            input.domainId,
+            input.docId,
+            input.user,
+            'managed-batch-training-placement',
+            async (claim) => {
+                const pdoc = await document.coll.findOne({
+                    domainId: input.domainId,
+                    docType: document.TYPE_PROBLEM,
+                    docId: input.docId,
+                    problemKind: 'programming',
+                    authoringMode: 'managed',
+                    hidden: true,
+                    structureRevision: input.expectedStructureRevision,
+                    structureLockedAt: { $exists: false },
+                    'managedAuthoring.metadataStatus': 'draft',
+                    'batchImport.identity': input.expectedBatchImportIdentity,
+                    'aclWriteClaim.requestId': claim.requestId,
+                    'aclWriteClaim.actor': claim.actor,
+                    'aclWriteClaim.operation': claim.operation,
+                    'aclWriteClaim.capability': claim.capability,
+                    'aclWriteClaim.state': 'active',
+                });
+                if (!pdoc?.sourceMeta || !pdoc.managedAuthoring) {
+                    throw new ManagedProblemMetadataConflictError('批量导入草稿状态已变化');
+                }
+                const placement = await validateManagedTrainingPlacement(input.domainId, pdoc.sourceMeta.template, {
+                    trainingId: input.trainingId,
+                    chapterId: input.chapterId,
+                });
+                if (!placement) throw new ManagedProblemMetadataConflictError('批量导入训练章节不存在');
+                const nextManagedAuthoring = { ...pdoc.managedAuthoring, pendingTrainingPlacement: placement };
+                const updated = await document.coll.findOneAndUpdate(
+                    {
+                        domainId: input.domainId,
+                        docType: document.TYPE_PROBLEM,
+                        docId: input.docId,
+                        hidden: true,
+                        structureRevision: input.expectedStructureRevision,
+                        structureLockedAt: { $exists: false },
+                        'managedAuthoring.metadataStatus': 'draft',
+                        'batchImport.identity': input.expectedBatchImportIdentity,
+                        'aclWriteClaim.requestId': claim.requestId,
+                        'aclWriteClaim.actor': claim.actor,
+                        'aclWriteClaim.operation': claim.operation,
+                        'aclWriteClaim.capability': claim.capability,
+                        'aclWriteClaim.state': 'active',
+                    },
+                    { $set: { managedAuthoring: nextManagedAuthoring } },
+                    { returnDocument: 'after' },
+                );
+                if (!updated) throw new ProblemStructureConflictError(input.docId);
+                await OplogModel.add({
+                    type: 'problem.managed.batch-placement',
+                    domainId: input.domainId,
+                    operator: input.actor,
+                    problemId: input.docId,
+                    batchImportIdentity: input.expectedBatchImportIdentity,
+                    trainingId: placement.trainingId,
+                    chapterId: placement.chapterId,
+                    revision: input.expectedStructureRevision,
+                    result: 'success',
+                    time: new Date(),
+                } as any);
+                return updated as ProblemDoc;
+            },
+            { capability: 'publish' },
+        );
     }
 
     /** The only service allowed to confirm metadata, attach training, and expose a managed draft. */

@@ -21,7 +21,16 @@ export function managedProblemPatchStateFilter(current: ProblemDoc) {
 const MANAGED_CONTENT_FIELDS = new Set(['content', 'config', 'data', 'additional_file', 'html']);
 const MANAGED_DRAFT_METADATA_FIELDS = new Set(['title', 'difficulty', 'managedAuthoring']);
 const MANAGED_ARCHIVE_FIELDS = new Set(['archivedAt', 'archivedBy', 'archiveReason']);
-const MANAGED_CANONICAL_FIELDS = new Set(['authoringMode', 'problemKind', 'pid', 'sort', 'tag', 'sourceMeta']);
+const MANAGED_CANONICAL_FIELDS = new Set([
+    'authoringMode',
+    'problemKind',
+    'pid',
+    'sort',
+    'tag',
+    'sourceMeta',
+    'batchImport',
+    'hasBatchImportIdentity',
+]);
 
 /** Classify one generic managed-problem patch before any role capability is considered. */
 export function managedProblemPatchCapability(

@@ -33,6 +33,7 @@ export function problemCreateChangedFields(
         managedAuthoring?: unknown;
         knowledgeNodeIds?: unknown;
         codeEvaluationStatus?: unknown;
+        batchImport?: unknown;
     },
 ): string[] {
     return [
@@ -54,6 +55,7 @@ export function problemCreateChangedFields(
         ...(created.managedAuthoring ? ['managedAuthoring'] : []),
         ...(created.knowledgeNodeIds ? ['knowledgeNodeIds'] : []),
         ...(created.codeEvaluationStatus ? ['codeEvaluationStatus'] : []),
+        ...(created.batchImport ? ['batchImport', 'hasBatchImportIdentity'] : []),
         ...(problemKind !== 'programming' ? ['config'] : []),
     ];
 }

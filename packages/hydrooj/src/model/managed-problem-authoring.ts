@@ -7,15 +7,27 @@ import type { ProblemDoc, TrainingNode } from '../interface';
 import db from '../service/db';
 import * as document from './document';
 import {
+    deriveManagedSourceTags,
+    formatManagedProblemPid,
     isCanonicalManagedSourceTag,
     isManagedAnnualSourceTag,
+    managedPidCounterNamespace,
     MANAGED_FIXED_SOURCE_TAGS,
     MANAGED_SOURCE_TEMPLATES,
+    normalizeManagedSourceMeta,
     type ManagedSourceMeta,
     type ManagedSourceTemplate,
 } from './managed-problem-source';
 
-export { isCanonicalManagedSourceTag, isManagedAnnualSourceTag, MANAGED_SOURCE_TEMPLATES } from './managed-problem-source';
+export {
+    deriveManagedSourceTags,
+    formatManagedProblemPid,
+    isCanonicalManagedSourceTag,
+    isManagedAnnualSourceTag,
+    MANAGED_SOURCE_TEMPLATES,
+    managedPidCounterNamespace,
+    normalizeManagedSourceMeta,
+} from './managed-problem-source';
 export type { ManagedSourceMeta, ManagedSourceTemplate, ManagedSourceTemplateDefinition } from './managed-problem-source';
 
 const logger = new Logger('managed-problem-authoring');
@@ -79,6 +91,14 @@ export interface ManagedProblemDraftInput {
     mindmapNodeIds: unknown;
     pendingTrainingPlacement?: unknown;
     authorUid?: number;
+    batchImport?: unknown;
+}
+
+export interface ManagedProblemBatchImportIdentity {
+    batchId: string;
+    sourceProblemCode: string;
+    identity: string;
+    fingerprint: string;
 }
 
 export interface PreparedManagedProblemDraft {
@@ -90,6 +110,7 @@ export interface PreparedManagedProblemDraft {
     pendingTrainingPlacement?: ManagedTrainingPlacement;
     tags: string[];
     authorUid?: number;
+    batchImport?: ManagedProblemBatchImportIdentity;
 }
 
 export interface PreparedManagedProblemPublication {
@@ -134,6 +155,15 @@ const MANAGED_PROBLEM_PID_INDEX = {
     },
 } as const;
 
+const MANAGED_PROBLEM_BATCH_IMPORT_INDEX = {
+    key: { domainId: 1, docType: 1, 'batchImport.identity': 1 },
+    options: {
+        name: 'problemBatchImportIdentity',
+        unique: true,
+        partialFilterExpression: { docType: document.TYPE_PROBLEM, hasBatchImportIdentity: true },
+    },
+} as const;
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
     const prototype = Object.getPrototypeOf(value);
@@ -148,93 +178,17 @@ function parseInteger(value: unknown, field: string, minimum: number, maximum: n
     return normalized;
 }
 
-/** Parse and canonicalize the only source metadata accepted for managed problems. */
-export function normalizeManagedSourceMeta(input: unknown): ManagedSourceMeta {
-    if (!isPlainObject(input)) throw new ValidationError('sourceMeta');
-    const template = typeof input.template === 'string' ? (input.template.trim() as ManagedSourceTemplate) : ('' as ManagedSourceTemplate);
-    const definition = TEMPLATE_BY_ID.get(template);
-    if (!definition) throw new ValidationError('template');
-    const allowed = new Set<string>(['template', ...definition.fields]);
-    const unknown = Object.keys(input).filter((field) => !allowed.has(field));
-    if (unknown.length) throw new ValidationError('sourceMeta', null, `来源模板不接受字段：${unknown.join(', ')}`);
-
-    const sourceMeta: ManagedSourceMeta = {
-        template,
-        year: parseInteger(input.year, 'year', 2000, 2100),
-    };
-    if (definition.fields.includes('season')) {
-        const season = input.season;
-        if (season !== 'spring' && season !== 'summer' && season !== 'autumn' && season !== 'winter') throw new ValidationError('season');
-        sourceMeta.season = season;
-    }
-    if (definition.fields.includes('level')) {
-        if (input.level !== 'L1' && input.level !== 'L2' && input.level !== 'L3') throw new ValidationError('level');
-        sourceMeta.level = input.level;
-    }
-    if (definition.fields.includes('round')) sourceMeta.round = parseInteger(input.round, 'round', 1, 99);
-    return sourceMeta;
-}
-
-/** System tags have one source of truth and never include the round number. */
-export function deriveManagedSourceTags(sourceMetaInput: unknown): string[] {
-    const sourceMeta = normalizeManagedSourceMeta(sourceMetaInput);
-    const { template, year } = sourceMeta;
-    const fixedTags = [...TEMPLATE_BY_ID.get(template)!.fixedTags];
-    if (template === 'pat_basic' || template === 'pat_advanced') {
-        const season = { spring: '春', summer: '夏', autumn: '秋', winter: '冬' }[sourceMeta.season!];
-        return [...fixedTags, `${year}${season}`];
-    }
-    if (template === 'gplt_national') return [...fixedTags, sourceMeta.level!, `${year}CCCC`];
-    if (template === 'gplt_provincial') return [...fixedTags, sourceMeta.level!, `${year}CCCC-省`];
-    if (template === 'cauc') return [...fixedTags, `${year}校赛`];
-    if (template === 'self') return [...fixedTags, `${year}自命题`];
-    if (template === 'nowcoder_summer') return [...fixedTags, `${year}牛客暑期多校`];
-    if (template === 'hdu_summer') return [...fixedTags, `${year}杭电暑期多校`];
-    return [...fixedTags, `${year}HDU-S`];
-}
-
-export function managedPidCounterNamespace(sourceMetaInput: unknown): string {
-    const sourceMeta = normalizeManagedSourceMeta(sourceMetaInput);
-    if (sourceMeta.template === 'pat_basic') return 'pat-basic';
-    if (sourceMeta.template === 'pat_advanced') return 'pat-advanced';
-    if (sourceMeta.template === 'self') return 'self';
-    if (sourceMeta.template === 'nowcoder_summer') return 'nowcoder';
-    if (sourceMeta.template === 'hdu_summer' || sourceMeta.template === 'hdu_spring') return 'hdu';
-    if (sourceMeta.template === 'gplt_national') return `gplt-${sourceMeta.year}-national`;
-    if (sourceMeta.template === 'gplt_provincial') return `gplt-${sourceMeta.year}-provincial`;
-    return `cauc-${sourceMeta.year}`;
-}
-
-export function formatManagedProblemPid(sourceMetaInput: unknown, sequence: number): string {
-    const sourceMeta = normalizeManagedSourceMeta(sourceMetaInput);
-    if (!Number.isSafeInteger(sequence) || sequence < 1) throw new ValidationError('sequence');
-    if (sourceMeta.template === 'pat_basic') {
-        if (sequence < 3000 || sequence > 3999) throw new ValidationError('sequence');
-        return `P${sequence}`;
-    }
-    if (sourceMeta.template === 'pat_advanced') {
-        if (sequence < 4000 || sequence > 4999) throw new ValidationError('sequence');
-        return `P${sequence}`;
-    }
-    if (sourceMeta.template === 'self') {
-        if (sequence < 5000 || sequence > 5999) throw new ValidationError('sequence');
-        return `P${sequence}`;
-    }
-    if (sourceMeta.template === 'nowcoder_summer') {
-        if (sequence > 9999) throw new ValidationError('sequence');
-        return `NK${String(sequence).padStart(4, '0')}`;
-    }
-    if (sourceMeta.template === 'hdu_summer' || sourceMeta.template === 'hdu_spring') {
-        if (sequence > 9999) throw new ValidationError('sequence');
-        return `HDU${String(sequence).padStart(4, '0')}`;
-    }
-    if (sourceMeta.template === 'cauc') {
-        if (sequence > 9999) throw new ValidationError('sequence');
-        return `CCCCCAUC${sourceMeta.year}${String(sequence).padStart(4, '0')}`;
-    }
-    if (sequence > 999) throw new ValidationError('sequence');
-    const stage = sourceMeta.template === 'gplt_national' ? 'N' : 'P';
-    return `GPLT${sourceMeta.year}${stage}${String(sequence).padStart(3, '0')}`;
+export function normalizeManagedProblemBatchImport(input: unknown): ManagedProblemBatchImportIdentity {
+    if (!isPlainObject(input)) throw new ValidationError('batchImport');
+    const unknown = Object.keys(input).filter((field) => !['batchId', 'sourceProblemCode', 'fingerprint'].includes(field));
+    if (unknown.length) throw new ValidationError('batchImport', null, `批量导入标识不接受字段：${unknown.join(', ')}`);
+    const batchId = typeof input.batchId === 'string' ? input.batchId.trim() : '';
+    const sourceProblemCode = typeof input.sourceProblemCode === 'string' ? input.sourceProblemCode.trim() : '';
+    const fingerprint = typeof input.fingerprint === 'string' ? input.fingerprint.trim().toLowerCase() : '';
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(batchId)) throw new ValidationError('batchId');
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(sourceProblemCode)) throw new ValidationError('sourceProblemCode');
+    if (!/^[a-f0-9]{64}$/.test(fingerprint)) throw new ValidationError('fingerprint');
+    return { batchId, sourceProblemCode, identity: `${batchId}:${sourceProblemCode}`, fingerprint };
 }
 
 /** Atomically reserve one PID. Missing counters are an operator error, never auto-initialized. */
@@ -643,6 +597,7 @@ export async function prepareManagedProblemDraft(domainId: string, input: Manage
     const pendingTrainingPlacement = await validateManagedTrainingPlacement(domainId, sourceMeta.template, input.pendingTrainingPlacement);
     const sourceTags = deriveManagedSourceTags(sourceMeta);
     const authorUid = input.authorUid === undefined ? undefined : parseInteger(input.authorUid, 'authorUid', 1, Number.MAX_SAFE_INTEGER);
+    const batchImport = input.batchImport === undefined ? undefined : normalizeManagedProblemBatchImport(input.batchImport);
     return {
         workingTitle,
         content: input.content,
@@ -652,6 +607,7 @@ export async function prepareManagedProblemDraft(domainId: string, input: Manage
         ...(pendingTrainingPlacement ? { pendingTrainingPlacement } : {}),
         tags: [...new Set([...sourceTags, ...mindmap.tags])],
         ...(authorUid ? { authorUid } : {}),
+        ...(batchImport ? { batchImport } : {}),
     };
 }
 
@@ -713,7 +669,9 @@ export async function ensureManagedProblemAuthoringIndexes(): Promise<void> {
     try {
         await managedPidCountersColl.createIndex({ domainId: 1, namespace: 1 }, { name: 'problem_pid_counter_namespace_uq', unique: true });
         await document.coll.createIndex(MANAGED_PROBLEM_PID_INDEX.key, MANAGED_PROBLEM_PID_INDEX.options);
-        const actual = (await document.coll.listIndexes().toArray()).find((index) => index.name === MANAGED_PROBLEM_PID_INDEX.options.name);
+        await document.coll.createIndex(MANAGED_PROBLEM_BATCH_IMPORT_INDEX.key, MANAGED_PROBLEM_BATCH_IMPORT_INDEX.options);
+        const indexes = await document.coll.listIndexes().toArray();
+        const actual = indexes.find((index) => index.name === MANAGED_PROBLEM_PID_INDEX.options.name);
         if (
             !actual ||
             actual.unique !== true ||
@@ -722,10 +680,20 @@ export async function ensureManagedProblemAuthoringIndexes(): Promise<void> {
         ) {
             throw new Error('Problem PID index is not the required partial unique index');
         }
+        const batchImportIndex = indexes.find((index) => index.name === MANAGED_PROBLEM_BATCH_IMPORT_INDEX.options.name);
+        if (
+            !batchImportIndex ||
+            batchImportIndex.unique !== true ||
+            !isDeepStrictEqual(batchImportIndex.key, MANAGED_PROBLEM_BATCH_IMPORT_INDEX.key) ||
+            !isDeepStrictEqual(batchImportIndex.partialFilterExpression, MANAGED_PROBLEM_BATCH_IMPORT_INDEX.options.partialFilterExpression)
+        ) {
+            throw new Error('Problem batch import identity index is not the required partial unique index');
+        }
         logger.info(
-            'Managed authoring indexes verified counter=%s problem=%s',
+            'Managed authoring indexes verified counter=%s problem=%s batchImport=%s',
             'problem_pid_counter_namespace_uq',
             MANAGED_PROBLEM_PID_INDEX.options.name,
+            MANAGED_PROBLEM_BATCH_IMPORT_INDEX.options.name,
         );
     } catch (error) {
         logger.error('Managed authoring index verification failed error=%o', error);

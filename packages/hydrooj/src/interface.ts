@@ -252,6 +252,15 @@ declare module './model/problem' {
             approvedBy?: number;
             approvedAt?: Date;
         };
+        /** Immutable identity and local-content fingerprint for deterministic contest batch imports. */
+        batchImport?: {
+            batchId: string;
+            sourceProblemCode: string;
+            identity: string;
+            fingerprint: string;
+        };
+        /** Equality-only partial-index discriminator; absent on all non-batch and legacy problems. */
+        hasBatchImportIdentity?: true;
         /** Canonical knowledge selections for dedicated structured problems; `tag` is server-derived from these nodes. */
         knowledgeNodeIds?: ObjectId[];
         /** Explicit lifecycle for function and compile-mode program-fill problems. */

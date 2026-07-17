@@ -161,6 +161,12 @@ beforeEach(() => {
             unique: true,
             partialFilterExpression: { docType: 10, pid: { $type: 'string' } },
         },
+        {
+            name: 'problemBatchImportIdentity',
+            key: { domainId: 1, docType: 1, 'batchImport.identity': 1 },
+            unique: true,
+            partialFilterExpression: { docType: 10, hasBatchImportIdentity: true },
+        },
     ];
 });
 
@@ -324,12 +330,28 @@ describe('P2.14 managed problem source templates', () => {
                     partialFilterExpression: { docType: 10, pid: { $type: 'string' } },
                 },
             },
+            {
+                key: { domainId: 1, docType: 1, 'batchImport.identity': 1 },
+                options: {
+                    name: 'problemBatchImportIdentity',
+                    unique: true,
+                    partialFilterExpression: { docType: 10, hasBatchImportIdentity: true },
+                },
+            },
         ]);
     });
 
     it('fails startup when the Problem PID index is not the required partial unique index', async () => {
         problemIndexDocs[0].unique = false;
         await expectReject(authoring.ensureManagedProblemAuthoringIndexes(), 'Problem PID index is not the required partial unique index');
+    });
+
+    it('fails startup when the batch identity index is missing or has drifted', async () => {
+        problemIndexDocs[1].unique = false;
+        await expectReject(
+            authoring.ensureManagedProblemAuthoringIndexes(),
+            'Problem batch import identity index is not the required partial unique index',
+        );
     });
 
     it('keeps internal authoring state out of public projections', () => {
@@ -611,6 +633,36 @@ describe('P2.14 managed problem training placement', () => {
         });
         expect(prepared.workingTitle).to.equal('线段树练习');
         expect(prepared.tags).to.deep.equal(['PAT乙级', '2026春', '数据结构', '线段树']);
+    });
+
+    it('normalizes a durable batch identity only at the canonical draft boundary', async () => {
+        const nodeId = new ObjectId('64b000000000000000000012');
+        mindmapDocs = [{ _id: nodeId, parentId: null, topic: '模拟', tags: ['模拟'] }];
+        const prepared = await authoring.prepareManagedProblemDraft('system', {
+            workingTitle: '批量题目',
+            content: 'statement',
+            difficulty: 3,
+            sourceMeta: { template: 'nowcoder_summer', year: 2026, round: 1 },
+            mindmapNodeIds: [nodeId.toHexString()],
+            batchImport: { batchId: 'nowcoder-2026-summer-1', sourceProblemCode: 'A', fingerprint: 'A'.repeat(64) },
+        });
+        expect(prepared.batchImport).to.deep.equal({
+            batchId: 'nowcoder-2026-summer-1',
+            sourceProblemCode: 'A',
+            identity: 'nowcoder-2026-summer-1:A',
+            fingerprint: 'a'.repeat(64),
+        });
+        await expectReject(
+            authoring.prepareManagedProblemDraft('system', {
+                workingTitle: '批量题目',
+                content: 'statement',
+                difficulty: 3,
+                sourceMeta: { template: 'nowcoder_summer', year: 2026, round: 1 },
+                mindmapNodeIds: [nodeId.toHexString()],
+                batchImport: { batchId: 'bad id', sourceProblemCode: 'A', fingerprint: 'a'.repeat(64) },
+            }),
+            TestValidationError,
+        );
     });
 
     it('rejects invalid source, empty mindmap, and partial training placement at the canonical draft boundary', async () => {

@@ -158,6 +158,10 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                 async findOne() {
                     return currentDraft;
                 },
+                async findOneAndUpdate(_filter: any, update: any) {
+                    currentDraft = { ...currentDraft, ...(update.$set || {}) };
+                    return currentDraft;
+                },
             },
         };
     }
@@ -209,6 +213,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                     sourceMeta: { template: 'self', year: 2026 },
                     pendingTrainingPlacement: undefined,
                 }),
+                validateManagedTrainingPlacement: async (_domainId: string, _template: string, placement: any) => placement,
             },
             { get: (target, key: string) => target[key] || (() => undefined) },
         );
@@ -358,6 +363,39 @@ describe('managed programming creation boundary', () => {
 });
 
 describe('managed programming publication service seam', () => {
+    it('binds a batch draft to one exact training chapter under the publish claim', async () => {
+        currentDraft = {
+            ...draft,
+            batchImport: { identity: 'fixture:A' },
+            managedAuthoring: { ...draft.managedAuthoring },
+        };
+        const trainingId = new (require('mongodb').ObjectId)('68486d8165edbb11e9ec9036');
+        const result = await ProblemModel.setManagedProgrammingDraftTrainingPlacement({
+            domainId: 'system',
+            docId: 7,
+            trainingId,
+            chapterId: 40,
+            expectedStructureRevision: 9,
+            expectedBatchImportIdentity: 'fixture:A',
+            actor: 2,
+            user: { _id: 2 },
+        });
+
+        expect(result.managedAuthoring.pendingTrainingPlacement).to.deep.equal({ trainingId, chapterId: 40 });
+        expect(oplogs).to.deep.include({
+            type: 'problem.managed.batch-placement',
+            domainId: 'system',
+            operator: 2,
+            problemId: 7,
+            batchImportIdentity: 'fixture:A',
+            trainingId,
+            chapterId: 40,
+            revision: 9,
+            result: 'success',
+            time: oplogs[0].time,
+        });
+    });
+
     it('binds the reviewed revision and reports success only after verifier cleanup and observers finish', async () => {
         let releaseObserver!: () => void;
         observerWork = () => new Promise<void>((resolve) => (releaseObserver = resolve));

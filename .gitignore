@@ -23,7 +23,7 @@ globalConfig.json
 .yarn/sdks
 .yarn/install-state.gz
 .pnp.*
-
+tmp/
 /ecosystems/
 dev/
 .DS_Store

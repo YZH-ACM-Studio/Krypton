@@ -45,7 +45,7 @@ import {
     SolutionNotFoundError,
     ValidationError,
 } from '../error';
-import { ProblemDoc, ProblemStatusDoc, RecordDoc, User } from '../interface';
+import { ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDoc, ProblemStatusDoc, RecordDoc, User } from '../interface';
 import { isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import { normalizeCodeEvaluationDraftCreationConfig } from '../model/code-evaluation-lifecycle';
@@ -118,6 +118,21 @@ async function problemAuthorUsers(pdoc: ProblemDoc, owner: User): Promise<User[]
     return authorUids.map((uid) => authorDict[uid]);
 }
 
+async function problemDataContributorUsers(pdoc: ProblemDoc): Promise<User[]> {
+    const permits = (global.Hydro?.model as any)?.permits;
+    if (typeof permits?.listCompletedDataContributorUids !== 'function') {
+        throw new TypeError('permits.listCompletedDataContributorUids is unavailable');
+    }
+    const uids = await permits.listCompletedDataContributorUids(pdoc.domainId, pdoc.docId);
+    if (!uids.length) return [];
+    const udict = await user.getList(pdoc.domainId, uids);
+    const missing = uids.filter((uid: number) => udict[uid]?._id !== uid);
+    if (missing.length) {
+        logger.warn('Problem data contributor profiles missing domain=%s pid=%d uids=%o', pdoc.domainId, pdoc.docId, missing);
+    }
+    return uids.flatMap((uid: number) => (udict[uid]?._id === uid ? [udict[uid]] : []));
+}
+
 const BASIC_OBJECTIVE_TEMPLATES: Record<BasicObjectiveKind, string> = {
     [BASIC_OBJECTIVE_KIND.single]: 'problem_edit_single.html',
     [BASIC_OBJECTIVE_KIND.multi]: 'problem_edit_multi.html',
@@ -139,7 +154,7 @@ function programmingTagEditorState(pdoc: ProblemDoc, mindmapOptions: Awaited<Ret
         return {
             mode: 'managed' as const,
             sourceTags: classification.sourceTags,
-            selectedNodeIds: (pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String),
+            selectedNodeIds: (pdoc.knowledgeNodeIds || pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String),
         };
     }
     if (Object.hasOwn(pdoc, 'knowledgeNodeIds')) {
@@ -307,10 +322,10 @@ async function assertProblemWriteCapability(handler: Handler, pdoc: ProblemDoc, 
 }
 
 const MANAGED_FILE_WRITE_FIELDS: Record<string, string[]> = {
-    upload_file: ['operation', 'filename', 'type'],
-    rename_files: ['operation', 'files', 'newNames', 'type'],
-    delete_files: ['operation', 'files', 'type'],
-    generate_testdata: ['operation', 'std', 'gen'],
+    upload_file: ['operation', 'filename', 'type', 'activeContainerConfirmation'],
+    rename_files: ['operation', 'files', 'newNames', 'type', 'activeContainerConfirmation'],
+    delete_files: ['operation', 'files', 'type', 'activeContainerConfirmation'],
+    generate_testdata: ['operation', 'std', 'gen', 'activeContainerConfirmation'],
 };
 
 async function assertManagedFileWriteBody(handler: Handler, pdoc: ProblemDoc) {
@@ -369,8 +384,11 @@ function problemAuthoringCapabilities(udoc: User, pdoc: ProblemDoc) {
     return {
         managed: pdoc.authoringMode === 'managed',
         canEditContent: problem.canEditProblemContent(udoc, pdoc),
+        canEditData: problem.canEditProblemData(udoc, pdoc),
+        canEditTags: problem.canEditProblemTags(udoc, pdoc),
         canEditDraftMetadata: problem.canEditProblemMetadata(udoc, pdoc),
         canManageCollaborators: problem.canManageProblemCollaborators(udoc, pdoc),
+        canManageContributions: problem.canManageProblemContributions(udoc, pdoc),
         canManageMaintainers: problem.canManageProblemMaintainers(udoc, pdoc),
         canPublish: problem.canPublishProblem(udoc, pdoc),
         canArchive: problem.canArchiveProblem(udoc, pdoc),
@@ -379,15 +397,143 @@ function problemAuthoringCapabilities(udoc: User, pdoc: ProblemDoc) {
     };
 }
 
-async function requireStableEditableProblem(
+async function requireStableCapabilityProblem(
     udoc: User,
     pdoc: ProblemDoc,
+    capability: 'content' | 'data' | 'tag' | 'contributions',
     projection: any = problem.PROJECTION_PUBLIC,
     rawConfig = false,
 ): Promise<ProblemDoc> {
-    const stable = await problem.getEditableAuthorized(pdoc.domainId, pdoc.docId, udoc, projection, rawConfig);
+    const stable = await problem.getCapabilityAuthorized(pdoc.domainId, pdoc.docId, udoc, capability, projection, rawConfig);
     if (!stable) throw new PermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
     return stable;
+}
+
+const PROBLEM_TAG_WORKSPACE_PROJECTION = [
+    '_id',
+    'domainId',
+    'docType',
+    'docId',
+    'pid',
+    'owner',
+    'title',
+    'difficulty',
+    'tag',
+    'hidden',
+    'content',
+    'html',
+    'problemKind',
+    'codeEvaluationStatus',
+    'structureRevision',
+    'archivedAt',
+    'authoringMode',
+    'sourceMeta',
+    'knowledgeNodeIds',
+    'managedAuthoring.metadataStatus',
+    'managedAuthoring.workingTitle',
+    'managedAuthoring.selectedMindmapNodeIds',
+] as any;
+
+function problemWorkspaceProjection(capability: 'content' | 'data' | 'tag' | 'contributions', canEditTags: boolean) {
+    if (capability === 'content') return problem.PROJECTION_MANAGED_EDITOR;
+    if (capability === 'data') {
+        return canEditTags
+            ? ([
+                  ...problem.PROJECTION_PUBLIC,
+                  'sourceMeta',
+                  'knowledgeNodeIds',
+                  'managedAuthoring.metadataStatus',
+                  'managedAuthoring.workingTitle',
+                  'managedAuthoring.selectedMindmapNodeIds',
+              ] as any)
+            : problem.PROJECTION_PUBLIC;
+    }
+    return PROBLEM_TAG_WORKSPACE_PROJECTION;
+}
+
+const DATA_WRITE_CONFIRMATION_SESSION_KEY = 'problemDataWriteConfirmations';
+const DATA_WRITE_CONFIRMATION_OPERATIONS: ProblemDataWriteOperation[] = ['files-upload', 'files-rename', 'files-delete', 'generate-testdata-request'];
+
+function confirmationStore(handler: Handler): Record<string, ProblemDataWriteConfirmation> {
+    const session = handler.session as any;
+    const stored = session?.[DATA_WRITE_CONFIRMATION_SESSION_KEY];
+    return stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+}
+
+function resolveDataWriteConfirmation(
+    handler: Handler,
+    pdoc: ProblemDoc,
+    operation: ProblemDataWriteOperation,
+    requestId?: string,
+): ProblemDataWriteConfirmation | undefined {
+    if (!requestId) return undefined;
+    const confirmation = confirmationStore(handler)[requestId];
+    const now = Date.now();
+    if (
+        !confirmation ||
+        confirmation.requestId !== requestId ||
+        confirmation.domainId !== pdoc.domainId ||
+        confirmation.pid !== pdoc.docId ||
+        confirmation.actor !== handler.user._id ||
+        confirmation.operation !== operation ||
+        !Number.isSafeInteger(confirmation.issuedAt) ||
+        confirmation.issuedAt > now ||
+        now - confirmation.issuedAt > problem.PROBLEM_DATA_WRITE_CONFIRMATION_TTL_MS
+    ) {
+        logger.warn(
+            'Active-container confirmation rejected domain=%s pid=%d actor=%d operation=%s confirmationRequestId=%s result=invalid-or-expired',
+            pdoc.domainId,
+            pdoc.docId,
+            handler.user._id,
+            operation,
+            requestId,
+        );
+        throw new ValidationError('activeContainerConfirmation', null, '赛中数据修改确认已失效，请刷新页面后重新确认');
+    }
+    return confirmation;
+}
+
+async function dataWriteGuardState(handler: Handler, pdoc: ProblemDoc, udoc: User) {
+    const active = await problem.listActiveDataWriteContainers(pdoc.domainId, pdoc.docId);
+    const facts = problem.activeDataWriteContainerFacts(active);
+    const canOverride = problem.isProblemBankAdmin(udoc);
+    const contributionOnly = !problem.canEditProblemContent(udoc, pdoc);
+    const guardedFacts = canOverride || contributionOnly ? facts : [];
+    const state: any = {
+        active: guardedFacts.map((item) => ({ id: item.id, title: item.title, rule: item.rule, endAt: item.endAt })),
+        canOverride,
+    };
+    if (!guardedFacts.length || !canOverride) return state;
+    if (!handler.session) throw new TypeError('active-container confirmation requires an HTTP session');
+    const issuedAt = Date.now();
+    const retained = Object.values(confirmationStore(handler))
+        .filter(
+            (entry) =>
+                Number.isSafeInteger(entry?.issuedAt) &&
+                entry.issuedAt <= issuedAt &&
+                issuedAt - entry.issuedAt <= problem.PROBLEM_DATA_WRITE_CONFIRMATION_TTL_MS,
+        )
+        .sort((left, right) => right.issuedAt - left.issuedAt)
+        .slice(0, 28);
+    const store = Object.fromEntries(retained.map((entry) => [entry.requestId, entry]));
+    const containerFingerprint = problem.activeDataWriteContainerFingerprint(pdoc.domainId, pdoc.docId, guardedFacts);
+    state.confirmationRequestIds = Object.fromEntries(
+        DATA_WRITE_CONFIRMATION_OPERATIONS.map((operation) => {
+            const requestId = `problem-data-confirm:${nanoid(20)}`;
+            store[requestId] = {
+                requestId,
+                domainId: pdoc.domainId,
+                pid: pdoc.docId,
+                actor: udoc._id,
+                operation,
+                containerFingerprint,
+                issuedAt,
+            };
+            return [operation, requestId];
+        }),
+    );
+    (handler.session as any)[DATA_WRITE_CONFIRMATION_SESSION_KEY] = store;
+    return state;
 }
 
 export interface QueryContext {
@@ -936,15 +1082,17 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             problem.getStatus(this.pdoc.domainId, this.pdoc.docId, this.user._id),
             user.getById(this.pdoc.domainId, this.pdoc.owner),
         ]);
-        const [scnt, dcnt, authorUdocs] = await Promise.all([
+        const [scnt, dcnt, authorUdocs, dataContributorUdocs] = await Promise.all([
             solution.count(this.pdoc.domainId, { parentId: this.pdoc.docId }),
             discussion.count(this.pdoc.domainId, { parentId: this.pdoc.docId }),
             tid ? Promise.resolve(this.udoc ? [this.udoc] : []) : problemAuthorUsers(this.pdoc, this.udoc),
+            tid ? Promise.resolve([]) : problemDataContributorUsers(this.pdoc),
         ]);
         this.response.body = {
             pdoc: this.pdoc,
             udoc: this.udoc,
             authorUdocs,
+            dataContributorUdocs,
             psdoc: tid ? null : this.psdoc,
             title: this.pdoc.title,
             solutionCount: scnt,
@@ -961,7 +1109,11 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                       ? 'correction'
                       : 'none',
             canPreviewSubjective: effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND && problem.canMaintainProblem(this.user, this.pdoc),
-            canEditProblem: this.canEditLoadedProblem,
+            canEditProblem:
+                this.canEditLoadedProblem ||
+                problem.canEditProblemData(this.user, this.pdoc) ||
+                problem.canEditProblemTags(this.user, this.pdoc) ||
+                problem.canManageProblemContributions(this.user, this.pdoc),
         };
         if (this.tdoc && this.tsdoc) {
             const fields = ['attend', 'startAt'];
@@ -1297,7 +1449,22 @@ export class ProblemHackHandler extends ProblemDetailHandler {
 
 export class ProblemManageHandler extends ProblemDetailHandler {
     async prepare() {
-        this.pdoc = await requireStableEditableProblem(this.user, this.pdoc, problem.PROJECTION_MANAGED_EDITOR);
+        const capability = this.canEditLoadedProblem
+            ? 'content'
+            : problem.canEditProblemData(this.user, this.pdoc)
+              ? 'data'
+              : problem.canEditProblemTags(this.user, this.pdoc)
+                ? 'tag'
+                : problem.canManageProblemContributions(this.user, this.pdoc)
+                  ? 'contributions'
+                  : null;
+        if (!capability) throw new PermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
+        this.pdoc = await requireStableCapabilityProblem(
+            this.user,
+            this.pdoc,
+            capability,
+            problemWorkspaceProjection(capability, problem.canEditProblemTags(this.user, this.pdoc)),
+        );
         this.canEditLoadedProblem = problem.canEditProblemContent(this.user, this.pdoc);
         // `_prepare` may have loaded the statement through a contest `tid`.
         // That container access never upgrades the response to editor data.
@@ -1312,29 +1479,35 @@ export class ProblemManageHandler extends ProblemDetailHandler {
 
 export class ProblemEditHandler extends ProblemManageHandler {
     async get() {
-        this.response.body.testdata = sortFiles(this.pdoc.data || []);
-        this.response.body.additional_file = sortFiles(this.pdoc.additional_file || []);
-        this.response.body.statementLangs = this.ctx.i18n.langs(false);
+        const capabilities = problemAuthoringCapabilities(this.user, this.pdoc);
+        if (capabilities.canEditData) {
+            this.response.body.testdata = sortFiles(this.pdoc.data || []);
+            this.response.body.additional_file = sortFiles(this.pdoc.additional_file || []);
+        }
+        if (capabilities.canEditContent) this.response.body.statementLangs = this.ctx.i18n.langs(false);
         const problemKind = effectiveProblemKind(this.pdoc);
         if (problemKind === 'programming') {
-            const canReviewManaged = this.pdoc.authoringMode === 'managed' && problem.canPublishProblem(this.user, this.pdoc);
+            const canReviewManaged = this.pdoc.authoringMode === 'managed' && capabilities.canPublish;
+            const canLoadManagedWorkflow = this.pdoc.authoringMode === 'managed' && (capabilities.canEditContent || canReviewManaged);
             const [programmingMindmapOptions, managedTrainingOptions, managedTrainingPlacements, managedReviewPreview] = await Promise.all([
-                listKnowledgeMindmapOptions(),
-                this.pdoc.authoringMode === 'managed' ? listManagedTrainingOptions(this.pdoc.domainId) : Promise.resolve([]),
-                this.pdoc.authoringMode === 'managed'
-                    ? listManagedProblemTrainingPlacements(this.pdoc.domainId, this.pdoc.docId)
-                    : Promise.resolve([]),
+                capabilities.canEditTags ? listKnowledgeMindmapOptions() : Promise.resolve([]),
+                canLoadManagedWorkflow ? listManagedTrainingOptions(this.pdoc.domainId) : Promise.resolve([]),
+                canLoadManagedWorkflow ? listManagedProblemTrainingPlacements(this.pdoc.domainId, this.pdoc.docId) : Promise.resolve([]),
                 canReviewManaged ? managedProblemReviewPreview(this.pdoc) : Promise.resolve(undefined),
             ]);
             Object.assign(this.response.body, {
-                programmingMindmapOptions,
-                programmingTagState: programmingTagEditorState(this.pdoc, programmingMindmapOptions),
+                ...(capabilities.canEditTags
+                    ? {
+                          programmingMindmapOptions,
+                          programmingTagState: programmingTagEditorState(this.pdoc, programmingMindmapOptions),
+                      }
+                    : {}),
                 ...(this.pdoc.authoringMode === 'managed'
                     ? {
                           managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
-                          managedMindmapOptions: programmingMindmapOptions,
                           managedTrainingOptions,
                           managedTrainingPlacements,
+                          ...(capabilities.canEditTags ? { managedMindmapOptions: programmingMindmapOptions } : {}),
                           ...(managedReviewPreview ? { managedReviewPreview } : {}),
                       }
                     : {}),
@@ -1344,7 +1517,11 @@ export class ProblemEditHandler extends ProblemManageHandler {
         // 编辑器直接从页面数据初始化。此前前端 fetch 文件下载路由读取——
         // 该路由对缺失文件不返回 404（照签跳转链接），新题/无 config 题的
         // 类型编辑永远初始化失败（Rev.12 bug 修复）。
-        const rawPdoc = await requireStableEditableProblem(this.user, this.pdoc, ['config'] as any, true);
+        if (!this.canEditLoadedProblem) {
+            this.response.template = 'problem_edit.html';
+            return;
+        }
+        const rawPdoc = await requireStableCapabilityProblem(this.user, this.pdoc, 'content', ['config'] as any, true);
         if (isDedicatedStructuredEditorKind(problemKind)) {
             const config = parseProblemConfigObject(rawPdoc);
             const editorConfig = structuredProblemConfigForEditor(problemKind, config);
@@ -1396,6 +1573,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
         metadataOnly = false,
         completeCodeEvaluationDraft = false,
     ) {
+        await assertProblemWriteCapability(this, this.pdoc, this.canEditLoadedProblem, 'edit', 'content');
         const domainId = this.pdoc.domainId;
         const problemKind = effectiveProblemKind(this.pdoc);
         const managed = this.pdoc.authoringMode === 'managed';
@@ -1624,7 +1802,7 @@ export class ProblemProgrammingTagPreviewHandler extends ProblemManageHandler {
             }
             const domainId = this.pdoc.domainId;
             await problem.assertProgrammingTagNormalizationUnlocked(domainId, this.pdoc.docId);
-            const live = await requireStableEditableProblem(this.user, this.pdoc, problem.PROJECTION_MANAGED_EDITOR);
+            const live = await requireStableCapabilityProblem(this.user, this.pdoc, 'tag', problem.PROJECTION_MANAGED_EDITOR);
             const preview = await previewProgrammingTagNormalization({
                 domainId,
                 docId: live.docId,
@@ -1847,8 +2025,11 @@ export class ProblemCreateFunctionHandler extends DedicatedStructuredCreateHandl
 
 export class ProblemConfigHandler extends ProblemManageHandler {
     async get() {
-        this.pdoc = await requireStableEditableProblem(this.user, this.pdoc);
+        this.pdoc = await requireStableCapabilityProblem(this.user, this.pdoc, 'data', problem.PROJECTION_MANAGED_EDITOR);
         if (this.pdoc.reference) throw new ProblemIsReferencedError('edit config');
+        this.response.body.pdoc = this.pdoc;
+        this.response.body.problemAuthoringCapabilities = problemAuthoringCapabilities(this.user, this.pdoc);
+        this.response.body.dataWriteGuard = await dataWriteGuardState(this, this.pdoc, this.user);
         this.response.body.testdata = sortFiles(this.pdoc.data || []);
         const configFile = (this.pdoc.data || []).filter((i) => i.name.toLowerCase() === 'config.yaml');
         this.response.body.config = '';
@@ -1879,13 +2060,15 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     @param('sidebar', Types.Boolean)
     async get({}, d = ['testdata', 'additional_file'], sidebar = false) {
         if (this.tdoc) throw new ContestNotEndedError();
-        this.pdoc = await requireStableEditableProblem(this.user, this.pdoc, problem.PROJECTION_MANAGED_EDITOR);
+        this.pdoc = await requireStableCapabilityProblem(this.user, this.pdoc, 'data', problem.PROJECTION_MANAGED_EDITOR);
+        this.canEditLoadedProblem = problem.canEditProblemData(this.user, this.pdoc);
         // The files page shares the editor workspace but does not inherit
         // ProblemManageHandler. Publish the same server-computed capability
         // contract so managed authors, maintainers and administrators do not
         // get different navigation merely because they changed routes.
         this.response.body.pdoc = this.pdoc;
         this.response.body.problemAuthoringCapabilities = problemAuthoringCapabilities(this.user, this.pdoc);
+        this.response.body.dataWriteGuard = await dataWriteGuardState(this, this.pdoc, this.user);
         this.response.body.testdata = sortFiles(this.pdoc.data || []);
         this.response.body.additional_file = sortFiles(this.pdoc.additional_file || []);
         this.response.body.reference = this.pdoc.reference;
@@ -1897,8 +2080,10 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     async post() {
         if (this.args.operation === 'get_links') return;
         await assertManagedFileWriteBody(this, this.pdoc);
+        this.pdoc = await requireStableCapabilityProblem(this.user, this.pdoc, 'data', problem.PROJECTION_MANAGED_EDITOR);
+        this.canEditLoadedProblem = problem.canEditProblemData(this.user, this.pdoc);
         if (this.pdoc.reference) throw new ProblemIsReferencedError('edit files');
-        await assertProblemWriteCapability(this, this.pdoc, this.canEditLoadedProblem, 'files', 'content');
+        await assertProblemWriteCapability(this, this.pdoc, this.canEditLoadedProblem, 'files', 'data');
     }
 
     @post('files', Types.Set)
@@ -1908,7 +2093,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
             throw new ProblemIsReferencedError('download testdata.');
         }
         if (type === 'testdata') {
-            const editable = await problem.getEditableAuthorized(this.pdoc.domainId, this.pdoc.docId, this.user);
+            const editable = await problem.getCapabilityAuthorized(this.pdoc.domainId, this.pdoc.docId, this.user, 'data');
             if (editable) this.pdoc = editable;
             else {
                 if (!this.user.hasPriv(PRIV.PRIV_READ_PROBLEM_DATA)) this.checkPerm(PERM.PERM_READ_PROBLEM_DATA);
@@ -1932,7 +2117,8 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
 
     @post('filename', Types.Filename, true)
     @post('type', Types.Range(['testdata', 'additional_file']), true)
-    async postUploadFile(_domainId: string, filename: string, type = 'testdata') {
+    @post('activeContainerConfirmation', Types.String, true)
+    async postUploadFile(_domainId: string, filename: string, type = 'testdata', activeContainerConfirmation?: string) {
         const domainId = this.pdoc.domainId;
         if (type === 'testdata' && !allowsStructuredTestdata(this.pdoc)) {
             throw new ValidationError('type', null, '此结构化题不接受 testdata 文件写入');
@@ -1992,7 +2178,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
                 throw new FileLimitExceededError('size');
             }
         }
-        await problem.withAuthorizedStructuralWriteClaim(
+        await problem.withAuthorizedDataWriteClaim(
             domainId,
             this.pdoc.docId,
             this.user,
@@ -2006,7 +2192,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
                     }
                 }
             },
-            { capability: 'content' },
+            { activeContainerConfirmation: resolveDataWriteConfirmation(this, this.pdoc, 'files-upload', activeContainerConfirmation) },
         );
         if (type === 'testdata' && [PROGRAM_FILL_KIND, FUNCTION_KIND].includes(this.pdoc.problemKind as any)) {
             const latest = await problem.get(domainId, this.pdoc.docId, ['structureRevision', 'data'] as any, true);
@@ -2027,7 +2213,8 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
     @post('files', Types.ArrayOf(Types.Filename))
     @post('newNames', Types.ArrayOf(Types.Filename))
     @post('type', Types.Range(['testdata', 'additional_file']), true)
-    async postRenameFiles(_domainId: string, files: string[], newNames: string[], type = 'testdata') {
+    @post('activeContainerConfirmation', Types.String, true)
+    async postRenameFiles(_domainId: string, files: string[], newNames: string[], type = 'testdata', activeContainerConfirmation?: string) {
         const domainId = this.pdoc.domainId;
         if (type === 'testdata' && !allowsStructuredTestdata(this.pdoc)) {
             throw new ValidationError('type', null, '此结构化题不接受 testdata 文件写入');
@@ -2041,7 +2228,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
             throw new ValidationError('newNames');
         }
         if (files.length !== newNames.length) throw new ValidationError('files', 'newNames');
-        await problem.withAuthorizedStructuralWriteClaim(
+        await problem.withAuthorizedDataWriteClaim(
             domainId,
             this.pdoc.docId,
             this.user,
@@ -2057,14 +2244,15 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
                     }
                 }
             },
-            { capability: 'content' },
+            { activeContainerConfirmation: resolveDataWriteConfirmation(this, this.pdoc, 'files-rename', activeContainerConfirmation) },
         );
         this.back();
     }
 
     @post('files', Types.ArrayOf(Types.Filename))
     @post('type', Types.Range(['testdata', 'additional_file']), true)
-    async postDeleteFiles(_domainId: string, files: string[], type = 'testdata') {
+    @post('activeContainerConfirmation', Types.String, true)
+    async postDeleteFiles(_domainId: string, files: string[], type = 'testdata', activeContainerConfirmation?: string) {
         const domainId = this.pdoc.domainId;
         if (type === 'testdata' && !allowsStructuredTestdata(this.pdoc)) {
             throw new ValidationError('type', null, '此结构化题不接受 testdata 文件写入');
@@ -2077,7 +2265,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
         ) {
             throw new ValidationError('files');
         }
-        await problem.withAuthorizedStructuralWriteClaim(
+        await problem.withAuthorizedDataWriteClaim(
             domainId,
             this.pdoc.docId,
             this.user,
@@ -2086,17 +2274,19 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
                 type === 'testdata'
                     ? problem.delTestdataWithClaim(claim, files, this.user._id)
                     : problem.delAdditionalFileWithClaim(claim, files, this.user._id),
-            { capability: 'content' },
+            { activeContainerConfirmation: resolveDataWriteConfirmation(this, this.pdoc, 'files-delete', activeContainerConfirmation) },
         );
         this.back();
     }
 
     @post('std', Types.Filename)
     @post('gen', Types.Filename)
-    async postGenerateTestdata(_domainId: string, std: string, gen: string) {
+    @post('activeContainerConfirmation', Types.String, true)
+    async postGenerateTestdata(_domainId: string, std: string, gen: string, activeContainerConfirmation?: string) {
         const domainId = this.pdoc.domainId;
+        const confirmation = resolveDataWriteConfirmation(this, this.pdoc, 'generate-testdata-request', activeContainerConfirmation);
         let enqueueError: unknown;
-        const rid = await problem.withAuthorizedWriteClaim(
+        const rid = await problem.withAuthorizedDataWriteClaim(
             domainId,
             this.pdoc.docId,
             this.user,
@@ -2112,7 +2302,10 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
                     if (current.reference) throw new ProblemIsReferencedError('edit files');
                     if (!current.data?.find((i) => i.name === std)) throw new BadRequestError();
                     if (!current.data?.find((i) => i.name === gen)) throw new BadRequestError();
-                    return await record.add(domainId, this.pdoc.docId, this.user._id, '_', `${gen}\n${std}`, true, { type: 'generate' });
+                    return await record.add(domainId, this.pdoc.docId, this.user._id, '_', `${gen}\n${std}`, true, {
+                        type: 'generate',
+                        dataWriteActiveContainerConfirmation: confirmation,
+                    });
                 } catch (error) {
                     // No ProblemDoc/storage mutation has started. Release the
                     // claim cleanly, then propagate validation/read/queue
@@ -2122,7 +2315,7 @@ export class ProblemFilesHandler extends ProblemDetailHandler {
                     return null;
                 }
             },
-            { capability: 'content' },
+            { activeContainerConfirmation: confirmation, bumpStructureRevision: false },
         );
         if (enqueueError) throw enqueueError;
         this.response.redirect = this.url('record_detail', { rid });
@@ -2142,8 +2335,8 @@ export class ProblemFileDownloadHandler extends ProblemDetailHandler {
             if (!this.pdoc) throw new ProblemNotFoundError();
         }
         if (type === 'testdata') {
-            const editable = await problem.getEditableAuthorized(this.pdoc.domainId, this.pdoc.docId, this.user);
-            if (editable) this.pdoc = editable;
+            const dataAuthorized = await problem.getCapabilityAuthorized(this.pdoc.domainId, this.pdoc.docId, this.user, 'data');
+            if (dataAuthorized) this.pdoc = dataAuthorized;
             else {
                 if (!this.user.hasPriv(PRIV.PRIV_READ_PROBLEM_DATA)) this.checkPerm(PERM.PERM_READ_PROBLEM_DATA);
                 if (this.tdoc && !contest.isDone(this.tdoc)) throw new ContestNotEndedError(this.tdoc.domainId, this.tdoc.docId);

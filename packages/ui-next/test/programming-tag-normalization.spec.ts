@@ -27,7 +27,7 @@ describe('P2.17 programming tag normalization UI contract', () => {
     const handler = read('packages/hydrooj/src/handler/problem.ts');
     expect(edit).not.to.include('id="edit-tag"');
     expect(edit).not.to.include("name={managed ? undefined : 'tag'}");
-    expect(edit).to.include("name={pidEditable ? 'pid' : undefined}");
+    expect(edit).to.include("name={canEditContent && pidEditable ? 'pid' : undefined}");
     expect(edit).to.include("const pidEditable = !managed && programmingTagMode === 'unconverted'");
     expect(handler).to.include("const canonicalFields = ['tag', 'knowledgeNodeIds']");
     expect(handler).to.include('编程题标签只能从知识导图选择并单独确认');
@@ -71,6 +71,8 @@ describe('P2.17 programming tag normalization UI contract', () => {
     expect(edit).to.include('if (tagSelectionDirty) {');
     expect(edit).to.include('知识标签选择尚未确认');
     expect(edit).to.include('setPersistedMindmapNodeIds(normalizedNodeIds)');
-    expect(edit).to.include('dirtyState.dirty || tagSelectionDirty || managedKnowledgeDirty');
+    expect(edit).to.include(
+      "(canEditContent && (dirtyState.dirty || saveState === 'saving')) || tagSelectionDirty || tagOperationState === 'applying'",
+    );
   });
 });

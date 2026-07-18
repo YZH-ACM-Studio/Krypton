@@ -25,11 +25,21 @@ const generateSentinel = {
     },
 };
 const pretestSentinel = { toString: () => '000000000000000000000002' };
+const dataWriteConfirmation = {
+    requestId: 'confirmation-1',
+    domainId: 'system',
+    pid: 7,
+    actor: 42,
+    operation: 'generate-testdata-request',
+    containerFingerprint: 'container-fingerprint',
+    issuedAt: 1_788_000_000_000,
+};
 let currentRecord: any = {
     domainId: 'system',
     pid: 7,
     uid: 42,
     contest: generateSentinel,
+    dataWriteActiveContainerConfirmation: dataWriteConfirmation,
 };
 
 const pdoc = {
@@ -55,13 +65,30 @@ const problemStub = {
         calls.gets.push(args);
         return pdoc;
     },
-    async withAuthorizedWriteClaim(domainId: string, pid: number, user: any, operation: string, work: (claim: any) => Promise<any>) {
-        calls.claims.push({ domainId, pid, user, operation });
+    async withAuthorizedWriteClaim(
+        domainId: string,
+        pid: number,
+        user: any,
+        operation: string,
+        work: (claim: any) => Promise<any>,
+        options: any = {},
+    ) {
+        calls.claims.push({ domainId, pid, user, operation, options });
         if (!claimAllowed) throw new ForbiddenError('revoke won');
         return work({ domainId, pid, actor: user._id, requestId: 'generate-callback' });
     },
     async withAuthorizedStructuralWriteClaim(domainId: string, pid: number, user: any, operation: string, work: (claim: any) => Promise<any>) {
         return problemStub.withAuthorizedWriteClaim(domainId, pid, user, operation, work);
+    },
+    async withAuthorizedDataWriteClaim(
+        domainId: string,
+        pid: number,
+        user: any,
+        operation: string,
+        work: (claim: any) => Promise<any>,
+        options: any = {},
+    ) {
+        return problemStub.withAuthorizedWriteClaim(domainId, pid, user, operation, work, options);
     },
     async addTestdataWithClaim(claim: any, ...args: any[]) {
         calls.add.push({ claim, args });
@@ -165,6 +192,7 @@ beforeEach(() => {
         pid: 7,
         uid: 42,
         contest: generateSentinel,
+        dataWriteActiveContainerConfirmation: dataWriteConfirmation,
     };
 });
 
@@ -177,6 +205,10 @@ describe('generated testdata judge callback authorization', () => {
                 pid: 7,
                 user: actor,
                 operation: 'generate-testdata-callback',
+                options: {
+                    activeContainerConfirmation: dataWriteConfirmation,
+                    confirmationOperation: 'generate-testdata-request',
+                },
             },
         ]);
         expect(calls.add).to.have.length(1);

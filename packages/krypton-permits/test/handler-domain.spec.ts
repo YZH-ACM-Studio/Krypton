@@ -18,10 +18,15 @@ const calls = {
     problemGet: [] as any[],
     maintain: [] as any[],
     manageCollaborators: [] as any[],
+    manageContributions: [] as any[],
     manageMaintainers: [] as any[],
     oplog: [] as any[],
     grant: [] as any[],
     revoke: [] as any[],
+    contributionAssign: [] as any[],
+    contributionList: [] as any[],
+    contributionRevoke: [] as any[],
+    contributionStatus: [] as any[],
     writeClaim: [] as any[],
     userGet: [] as any[],
     userList: [] as any[],
@@ -33,12 +38,14 @@ const pdoc = { domainId: 'system', docId: 42, pid: 42, owner: 1, title: 'P42' };
 let stableProblemResults: any[] = [];
 let maintainResults: boolean[] = [];
 let manageCollaboratorResults: boolean[] = [];
+let manageContributionResults: boolean[] = [];
 let manageMaintainerResults: boolean[] = [];
 let permitRow: any = null;
 let permitFindOneResults: any[] = [];
 let rawProblemResults: any[] = [];
 let permitSourceRows: any[] = [];
 let rosterProvider: () => Promise<any[]> = async () => [];
+let contributionRows: any[] = [];
 
 function rowsMatchingTargets(rows: any[], filter: any) {
     const targetUids = filter.uid?.$in;
@@ -116,6 +123,22 @@ const permitsModel = {
         calls.permitList.push(args);
         return [];
     },
+    async assignContribution(input: any) {
+        calls.contributionAssign.push(input);
+        return input;
+    },
+    async listContributionsForProblem(...args: any[]) {
+        calls.contributionList.push(args);
+        return contributionRows;
+    },
+    async revokeContribution(input: any) {
+        calls.contributionRevoke.push(input);
+        return input;
+    },
+    async setContributionStatus(input: any) {
+        calls.contributionStatus.push(input);
+        return input;
+    },
     async revoke(...args: any[]) {
         calls.revoke.push(args);
         return true;
@@ -183,6 +206,10 @@ const hydroojStub = {
         canManageProblemCollaborators(...args: any[]) {
             calls.manageCollaborators.push(args);
             return manageCollaboratorResults.length ? manageCollaboratorResults.shift() : true;
+        },
+        canManageProblemContributions(...args: any[]) {
+            calls.manageContributions.push(args);
+            return manageContributionResults.length ? manageContributionResults.shift() : true;
         },
         canManageProblemMaintainers(...args: any[]) {
             calls.manageMaintainers.push(args);
@@ -308,6 +335,7 @@ function readCount() {
         calls.contestGet.length +
         calls.permitFind.length +
         calls.permitList.length +
+        calls.contributionList.length +
         calls.problemGet.length +
         calls.userGet.length +
         calls.userList.length
@@ -328,12 +356,14 @@ beforeEach(() => {
     stableProblemResults = [];
     maintainResults = [];
     manageCollaboratorResults = [];
+    manageContributionResults = [];
     manageMaintainerResults = [];
     permitRow = null;
     permitFindOneResults = [];
     rawProblemResults = [];
     permitSourceRows = [];
     rosterProvider = async () => [];
+    contributionRows = [];
 });
 
 describe('permit handler authoritative domain boundary', () => {
@@ -342,6 +372,10 @@ describe('permit handler authoritative domain boundary', () => {
         ['problem_permit_grant GET', (handler) => handler.get(forged, 42)],
         ['problem_permit_grant POST', (handler) => handler.post(forged, 42, 8, undefined, 'verifier', '', undefined)],
         ['problem_permit_revoke POST', (handler) => handler.post(forged, 42, permitId, undefined)],
+        ['problem_contribution GET', (handler) => handler.get(forged, 42)],
+        ['problem_contribution POST', (handler) => handler.post(forged, 42, 8, 'data', '', 'assign-data')],
+        ['problem_contribution_revoke POST', (handler) => handler.post(forged, 42, 8, 'data', 'revoke-data')],
+        ['problem_contribution_status POST', (handler) => handler.post(forged, 42, 'data', 'completed', 'complete-data')],
         ['contest_verifier_add POST', (handler) => handler.post(forged, contestId, 8, 'verifier', '', undefined)],
         ['contest_verifier_remove POST', (handler) => handler.post(forged, contestId, 8, undefined)],
         ['my_verify_inbox GET', (handler) => handler.get(forged)],
@@ -356,6 +390,87 @@ describe('permit handler authoritative domain boundary', () => {
             expect(calls.revoke).to.have.lengthOf(0);
         });
     }
+
+    it('binds contribution assignment and revocation to the exact contributions claim', async () => {
+        const assign = makeHandler('problem_contribution');
+        stableProblemResults = [pdoc];
+        rawProblemResults = [pdoc];
+        await assign.post({ domainId: 'system' }, 42, 8, 'data', 'prepare cases', 'assign-data');
+
+        expect(calls.writeClaim[0]).to.deep.equal([
+            'system',
+            42,
+            assign.user,
+            'contribution-assign',
+            { requestId: 'acl:problem-contribution-assign:system:42:8:data:assign-data', capability: 'contributions' },
+        ]);
+        expect(calls.contributionAssign[0]).to.deep.include({
+            domainId: 'system',
+            pid: 42,
+            uid: 8,
+            scope: 'data',
+            actor: 1,
+            note: 'prepare cases',
+            requestId: 'acl:problem-contribution-assign:system:42:8:data:assign-data',
+            writeClaimRequestId: 'acl:problem-contribution-assign:system:42:8:data:assign-data',
+        });
+
+        const revoke = makeHandler('problem_contribution_revoke');
+        stableProblemResults = [pdoc];
+        rawProblemResults = [pdoc];
+        await revoke.post({ domainId: 'system' }, 42, 8, 'data', 'revoke-data');
+
+        expect(calls.writeClaim[1]).to.deep.equal([
+            'system',
+            42,
+            revoke.user,
+            'contribution-revoke',
+            { requestId: 'acl:problem-contribution-revoke:system:42:8:data:revoke-data', capability: 'contributions' },
+        ]);
+        expect(calls.contributionRevoke[0]).to.deep.include({
+            domainId: 'system',
+            pid: 42,
+            uid: 8,
+            scope: 'data',
+            actor: 1,
+            requestId: 'acl:problem-contribution-revoke:system:42:8:data:revoke-data',
+            writeClaimRequestId: 'acl:problem-contribution-revoke:system:42:8:data:revoke-data',
+        });
+    });
+
+    it('lets an active assignee complete only their own contribution without delegating', async () => {
+        const status = makeHandler('problem_contribution_status');
+        stableProblemResults = [pdoc];
+        contributionRows = [{ domainId: 'system', pid: 42, uid: 1, scope: 'tag', active: true, status: 'pending' }];
+
+        await status.post({ domainId: 'system' }, 42, 'tag', 'completed', 'complete-tag');
+
+        expect(calls.writeClaim[0]).to.deep.equal([
+            'system',
+            42,
+            status.user,
+            'contribution-status',
+            { requestId: 'acl:problem-contribution-status:system:42:1:tag:completed:complete-tag', capability: 'tag' },
+        ]);
+        expect(calls.contributionStatus[0]).to.deep.include({
+            domainId: 'system',
+            pid: 42,
+            uid: 1,
+            scope: 'tag',
+            status: 'completed',
+            actor: 1,
+            requestId: 'acl:problem-contribution-status:system:42:1:tag:completed:complete-tag',
+            writeClaimRequestId: 'acl:problem-contribution-status:system:42:1:tag:completed:complete-tag',
+        });
+
+        const contributor = makeHandler('problem_contribution');
+        stableProblemResults = [pdoc];
+        manageContributionResults = [false];
+        const denied = await capture(() => contributor.post({ domainId: 'system' }, 42, 8, 'data', '', 'delegate-data'));
+        expect(denied?.name).to.equal('PermissionError');
+        expect(calls.contributionAssign).to.deep.equal([]);
+        expect(calls.writeClaim).to.have.length(1);
+    });
 
     it('uses the authoritative handler domain for a legitimate revoke', async () => {
         const handler = makeHandler('problem_permit_revoke');

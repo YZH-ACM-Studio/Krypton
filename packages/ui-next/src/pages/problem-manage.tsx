@@ -19,11 +19,12 @@ import {
   Upload,
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useCallback, useState } from 'react';
+import { type FormEvent, useCallback, useState } from 'react';
 import { AdminPage } from '@/components/admin/admin-page';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
 import { ProblemEditorWorkspace } from '@/components/problem-editor-workspace';
 import { ProblemTestdataFileDialog } from '@/components/problem-testdata-file-dialog';
+import { type ProblemDataWriteOperation, useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -69,7 +70,8 @@ export function ProblemFilesPage() {
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const fileSection =
     typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('section') === 'additional' ? 'additional' : 'testdata';
-  const collaborationEnabled = pdoc.authoringMode !== 'managed' || capabilities.canManageCollaborators === true || capabilities.canPublish === true;
+  const collaborationEnabled =
+    capabilities.canManageCollaborators === true || capabilities.canManageContributions === true || capabilities.canPublish === true;
 
   const [selectedTestdata, setSelectedTestdata] = useState<Set<string>>(new Set());
   const [selectedAdditional, setSelectedAdditional] = useState<Set<string>>(new Set());
@@ -80,6 +82,8 @@ export function ProblemFilesPage() {
   const [previewingTestdataFile, setPreviewingTestdataFile] = useState<R | null>(null);
   const [downloadingType, setDownloadingType] = useState<ProblemFileType | null>(null);
   const [downloadError, setDownloadError] = useState('');
+  const [uploadConfirmationRequestId, setUploadConfirmationRequestId] = useState('');
+  const dataGuard = useProblemDataWriteGuard(data.dataWriteGuard);
   const generatorCandidates = testdata.filter(
     (file) => !file.name.endsWith('.in') && !file.name.endsWith('.out') && !file.name.endsWith('.ans') && file.name !== 'config.yaml',
   );
@@ -119,6 +123,35 @@ export function ProblemFilesPage() {
     [pdoc, problemUrl],
   );
 
+  const guardedSubmit = (event: FormEvent<HTMLFormElement>, action: string, operation: ProblemDataWriteOperation) => {
+    if (!dataGuard.active) return;
+    const form = event.currentTarget;
+    if (new FormData(form).get('activeContainerConfirmation')) return;
+    event.preventDefault();
+    if (dataGuard.blocked) return;
+    void dataGuard.confirm(action, operation).then((confirmation) => {
+      if (typeof confirmation !== 'string') return;
+      const marker = document.createElement('input');
+      marker.type = 'hidden';
+      marker.name = 'activeContainerConfirmation';
+      marker.value = confirmation;
+      form.append(marker);
+      form.requestSubmit();
+    });
+  };
+
+  const toggleUpload = async (type: ProblemFileType) => {
+    if (uploadTarget === type) {
+      setUploadTarget(null);
+      setUploadConfirmationRequestId('');
+      return;
+    }
+    const confirmation = await dataGuard.confirm(`上传${type === 'testdata' ? '测试数据' : '附加文件'}`, 'files-upload');
+    if (!confirmation) return;
+    setUploadConfirmationRequestId(typeof confirmation === 'string' ? confirmation : '');
+    setUploadTarget(type);
+  };
+
   const FileSection = ({
     title,
     files,
@@ -145,7 +178,8 @@ export function ProblemFilesPage() {
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => setUploadTarget((current) => (current === type ? null : type))}
+              disabled={dataGuard.blocked}
+              onClick={() => void toggleUpload(type)}
               aria-expanded={uploadTarget === type}
             >
               <Upload className="mr-1 size-3" />
@@ -167,20 +201,20 @@ export function ProblemFilesPage() {
               </Button>
               {/* Rename */}
               {!reference && (
-                <Button size="sm" variant="outline" onClick={() => startRename(selected, type)}>
+                <Button size="sm" variant="outline" disabled={dataGuard.blocked} onClick={() => startRename(selected, type)}>
                   <Pencil className="mr-1 size-3" />
                   重命名
                 </Button>
               )}
               {/* Delete */}
               {!reference && (
-                <form method="post">
+                <form method="post" onSubmit={(event) => guardedSubmit(event, `删除 ${selected.size} 个文件`, 'files-delete')}>
                   <input type="hidden" name="operation" value="delete_files" />
                   <input type="hidden" name="type" value={type} />
                   {Array.from(selected).map((f) => (
                     <input key={f} type="hidden" name="files" value={f} />
                   ))}
-                  <Button type="submit" size="sm" variant="destructive">
+                  <Button type="submit" size="sm" variant="destructive" disabled={dataGuard.blocked}>
                     <Trash2 className="mr-1 size-3" />
                     删除 ({selected.size})
                   </Button>
@@ -200,7 +234,7 @@ export function ProblemFilesPage() {
           <FileUploader
             endpoint={`${problemUrl}/files`}
             fieldName="file"
-            meta={{ type }}
+            meta={{ type, ...(uploadConfirmationRequestId ? { activeContainerConfirmation: uploadConfirmationRequestId } : {}) }}
             maxFileSize={null}
             maxFiles={null}
             uploadConcurrency={1}
@@ -272,6 +306,8 @@ export function ProblemFilesPage() {
       title={pdoc.title || String(pid)}
       pid={String(pid)}
       fileSection={fileSection}
+      editEnabled={capabilities.canEditContent === true || capabilities.canEditTags === true}
+      dataEnabled={capabilities.canEditData === true}
       collaborationEnabled={collaborationEnabled}
       actions={
         <Button asChild variant="outline" size="sm">
@@ -283,12 +319,17 @@ export function ProblemFilesPage() {
       }
     >
       <div className="space-y-6">
+        {dataGuard.notice}
         {renameKeys.length > 0 ? (
           <section aria-labelledby="rename-heading" className="rounded-2xl border border-primary/30 bg-primary/[0.025] p-5">
             <h2 id="rename-heading" className="mb-4 text-sm font-semibold">
               重命名文件
             </h2>
-            <form method="post" className="space-y-3">
+            <form
+              method="post"
+              className="space-y-3"
+              onSubmit={(event) => guardedSubmit(event, `重命名 ${renameKeys.length} 个文件`, 'files-rename')}
+            >
               <input type="hidden" name="operation" value="rename_files" />
               <input type="hidden" name="type" value={renamingType} />
               {renameKeys.map((oldName) => (
@@ -350,7 +391,7 @@ export function ProblemFilesPage() {
             </header>
             {showGenerate ? (
               <div className="border-t border-border/60 p-5">
-                <form method="post" className="space-y-3">
+                <form method="post" className="space-y-3" onSubmit={(event) => guardedSubmit(event, '生成测试数据', 'generate-testdata-request')}>
                   <input type="hidden" name="operation" value="generate_testdata" />
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-1.5">
@@ -382,7 +423,7 @@ export function ProblemFilesPage() {
                       <p className="text-xs text-muted-foreground">输出答案到 stdout 的程序</p>
                     </div>
                   </div>
-                  <Button type="submit" size="sm">
+                  <Button type="submit" size="sm" disabled={dataGuard.blocked}>
                     <RefreshCw className="mr-1 size-3.5" />
                     生成数据
                   </Button>
@@ -393,8 +434,14 @@ export function ProblemFilesPage() {
         ) : null}
       </div>
       {previewingTestdataFile ? (
-        <ProblemTestdataFileDialog file={previewingTestdataFile} problemUrl={problemUrl} onClose={() => setPreviewingTestdataFile(null)} />
+        <ProblemTestdataFileDialog
+          file={previewingTestdataFile}
+          problemUrl={problemUrl}
+          onClose={() => setPreviewingTestdataFile(null)}
+          confirmWrite={dataGuard.confirm}
+        />
       ) : null}
+      {dataGuard.dialog}
     </ProblemEditorWorkspace>
   );
 }

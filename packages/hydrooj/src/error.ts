@@ -69,6 +69,13 @@ export const ProblemStructureConflictError = Err(
     409,
 );
 export const ProblemTagConflictError = Err('ProblemTagConflictError', UserFacingError, 'Problem {0} tags changed. Reload and try again.', 409);
+export const ProblemContributionConflictError = Err(
+    'ProblemContributionConflictError',
+    UserFacingError,
+    'Problem {0} contribution state changed. Reload and try again.',
+    409,
+);
+export const ProblemDataActiveContainerError = Err('ProblemDataActiveContainerError', UserFacingError, '题目 {0} 正在比赛或考试中使用：{1}。', 409);
 export const ManagedProblemMetadataConflictError = Err(
     'ManagedProblemMetadataConflictError',
     UserFacingError,

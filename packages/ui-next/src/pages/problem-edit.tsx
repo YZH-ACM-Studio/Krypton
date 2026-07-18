@@ -5,13 +5,8 @@
 
 import { AlertCircle, ArrowRight, CheckCircle2, Download, Eye, EyeOff, FileText, Loader2, Lock, Save, ShieldCheck, Tag, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { MarkdownEditor } from '@/components/markdown-renderer';
-import {
-  ManagedKnowledgeSuggestionField,
-  ManagedProgrammingAuthorControl,
-  ManagedProgrammingTrainingControl,
-  ManagedReviewPanel,
-} from '@/components/managed-programming-authority';
+import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
+import { ManagedProgrammingAuthorControl, ManagedProgrammingTrainingControl, ManagedReviewPanel } from '@/components/managed-programming-authority';
 import {
   ManagedProblemTrainingStatus,
   type ManagedTrainingOptionView,
@@ -457,17 +452,18 @@ export function ProblemEditPage() {
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const additionalFiles: R[] = data.additional_file || [];
   const testdataFiles: R[] = data.testdata || pdoc.data || [];
-  const canEditContent = !managed || capabilities.canEditContent === true;
-  const canEditDraftMetadata = !managed || capabilities.canEditDraftMetadata === true;
-  const canPublish = !managed;
-  const canDelete = !managed || capabilities.canDelete === true;
-  const canManageCollaborators = !managed || capabilities.canManageCollaborators === true;
+  const canEditContent = isCreate || capabilities.canEditContent === true;
+  const canEditData = !isCreate && capabilities.canEditData === true;
+  const canEditTags = !isCreate && capabilities.canEditTags === true;
+  const canEditDraftMetadata = isCreate || capabilities.canEditDraftMetadata === true;
+  const canPublish = !isCreate && capabilities.canPublish === true;
+  const canDelete = !isCreate && capabilities.canDelete === true;
+  const canManageCollaborators = !isCreate && capabilities.canManageCollaborators === true;
   const canReviewManaged = managed && !isCreate && capabilities.canPublish === true;
   const collaborationEnabled = !isCreate && (canManageCollaborators || canReviewManaged);
   const requestedSection = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('section');
   const showCollaboration = requestedSection === 'collaboration' && collaborationEnabled;
   const managedMetadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft';
-  const managedKnowledgeEditable = managed && !isCreate && managedMetadataDraft && canEditContent;
   const canSubmitManagedWorkingTitle = isCreate || (managedMetadataDraft && canEditDraftMetadata);
   const filesBase = pdoc.docId ? `${problemUrl}/files` : '';
 
@@ -511,8 +507,7 @@ export function ProblemEditPage() {
   const mindmapSelectionChanged =
     selectedMindmapNodeIds.length !== persistedMindmapNodeIds.length ||
     selectedMindmapNodeIds.some((nodeId, index) => nodeId !== persistedMindmapNodeIds[index]);
-  const tagSelectionDirty = !managed && mindmapSelectionChanged;
-  const managedKnowledgeDirty = managedKnowledgeEditable && mindmapSelectionChanged;
+  const tagSelectionDirty = !isCreate && canEditTags && mindmapSelectionChanged;
   const [tagPreview, setTagPreview] = useState<ProgrammingTagPreview | null>(null);
   const [tagPreviewOpen, setTagPreviewOpen] = useState(false);
   const [tagOperationState, setTagOperationState] = useState<'idle' | 'previewing' | 'applying' | 'saved' | 'error'>('idle');
@@ -535,14 +530,14 @@ export function ProblemEditPage() {
     sourceLevel,
     sourceRound,
     managedAuthors: selectedManagedAuthors.map((author) => author._id),
-    mindmapNodes: isCreate || managedKnowledgeEditable ? selectedMindmapNodeIds : undefined,
+    mindmapNodes: isCreate ? selectedMindmapNodeIds : undefined,
     selectedTrainingId,
     selectedChapterId,
   });
   const previousRevisionKey = useRef(editorRevisionKey);
   const dirtyState = useFormDirtyState(formRef, editorRevisionKey);
   const navigationGuard = useUnsavedChangesGuard(
-    dirtyState.dirty || tagSelectionDirty || managedKnowledgeDirty || saveState === 'saving' || tagOperationState === 'applying',
+    (canEditContent && (dirtyState.dirty || saveState === 'saving')) || tagSelectionDirty || tagOperationState === 'applying',
   );
 
   const searchManagedAuthors = useCallback(
@@ -712,6 +707,11 @@ export function ProblemEditPage() {
       return;
     }
     e.preventDefault();
+    if (!canEditContent) {
+      setSaveError('当前贡献范围不能修改题面或基础信息。');
+      setSaveState('error');
+      return;
+    }
     setSaveError('');
     const contentText = typeof draftContent === 'string' ? draftContent : JSON.stringify(draftContent);
     if (!contentText.trim()) {
@@ -812,16 +812,18 @@ export function ProblemEditPage() {
 
   const actions = (
     <>
-      {!isCreate ? (
+      {!isCreate && canEditData ? (
         <Button type="button" size="sm" variant="outline" onClick={handleDownloadPackage} disabled={downloading}>
           <Download className="mr-1 size-3.5" />
           {downloading ? '打包中…' : '打包下载'}
         </Button>
       ) : null}
-      <Button type="submit" form="programming-problem-form" size="sm" className="gap-1.5" disabled={saveState === 'saving'}>
-        {saveState === 'saving' ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Save className="size-3.5" />}
-        {isCreate ? '创建题目' : '保存修改'}
-      </Button>
+      {canEditContent ? (
+        <Button type="submit" form="programming-problem-form" size="sm" className="gap-1.5" disabled={saveState === 'saving'}>
+          {saveState === 'saving' ? <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" /> : <Save className="size-3.5" />}
+          {isCreate ? '创建题目' : '保存修改'}
+        </Button>
+      ) : null}
     </>
   );
 
@@ -832,8 +834,10 @@ export function ProblemEditPage() {
       title={(managed && pdoc.managedAuthoring?.workingTitle) || pdoc.title || '新建编程题'}
       pid={String(pid)}
       isCreate={isCreate}
+      editEnabled={isCreate || canEditContent || canEditTags}
+      dataEnabled={canEditData}
       collaborationEnabled={collaborationEnabled}
-      status={showCollaboration ? undefined : status}
+      status={showCollaboration || !canEditContent ? undefined : status}
       actions={showCollaboration ? undefined : actions}
     >
       {showCollaboration ? (
@@ -868,7 +872,7 @@ export function ProblemEditPage() {
             ref={formRef}
             method="post"
             onSubmit={handleSave}
-            onChange={markDirty}
+            onChange={canEditContent ? markDirty : undefined}
             inert={saveState === 'saving'}
             aria-busy={saveState === 'saving'}
             className="space-y-6"
@@ -894,17 +898,11 @@ export function ProblemEditPage() {
                     </label>
                     <Input
                       id="edit-title"
-                      name={!managed || canSubmitManagedWorkingTitle ? 'title' : undefined}
-                      defaultValue={
-                        managed && !isCreate
-                          ? managedMetadataDraft
-                            ? pdoc.managedAuthoring?.workingTitle || ''
-                            : pdoc.title || ''
-                          : pdoc.title || ''
-                      }
+                      name={canEditContent && (!managed || canSubmitManagedWorkingTitle) ? 'title' : undefined}
+                      defaultValue={managed && !isCreate && managedMetadataDraft ? pdoc.managedAuthoring?.workingTitle || '' : pdoc.title || ''}
                       placeholder={managed ? '用于审核协作，不会直接作为正式标题发布' : '题目标题'}
-                      readOnly={managed ? !canSubmitManagedWorkingTitle : !isCreate && !canEditDraftMetadata}
-                      required
+                      readOnly={!canEditContent || (managed ? !canSubmitManagedWorkingTitle : !canEditDraftMetadata)}
+                      required={canEditContent}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -913,11 +911,11 @@ export function ProblemEditPage() {
                     </label>
                     <Input
                       id="edit-pid"
-                      name={pidEditable ? 'pid' : undefined}
+                      name={canEditContent && pidEditable ? 'pid' : undefined}
                       defaultValue={typeof pid === 'string' ? pid : ''}
                       placeholder={managed ? '由服务端分配' : programmingTagMode === 'converted' ? '规范化后锁定' : '如 P1001'}
                       pattern="^(?:[a-z0-9]{1,10}-)?[a-zA-Z][a-zA-Z0-9]*$"
-                      readOnly={!pidEditable}
+                      readOnly={!canEditContent || !pidEditable}
                     />
                   </div>
                 </div>
@@ -927,7 +925,7 @@ export function ProblemEditPage() {
                     <label className="text-sm font-medium" htmlFor="edit-difficulty">
                       难度
                     </label>
-                    {managed && !isCreate && !canEditDraftMetadata ? (
+                    {!canEditContent || (managed && !isCreate && !canEditDraftMetadata) ? (
                       <Input
                         id="edit-difficulty"
                         value={DIFFICULTY_OPTIONS.find((option) => Number(option.value) === Number(pdoc.difficulty || 0))?.label || '未评定'}
@@ -949,7 +947,7 @@ export function ProblemEditPage() {
                 </div>
               </div>
 
-              {!managed ? (
+              {!isCreate && canEditTags ? (
                 <div className="border-t border-border/60">
                   <header className="px-5 py-4">
                     <h3 className="flex items-center gap-2 text-sm font-semibold tracking-tight">
@@ -1045,7 +1043,7 @@ export function ProblemEditPage() {
                         getDescription={(node) => node.tags.join(' / ')}
                         placeholder="按完整导图路径搜索，可多选"
                         emptyText="没有可选的带标签节点"
-                        disabled={tagOperationState === 'previewing' || tagOperationState === 'applying'}
+                        disabled={!canEditTags || tagOperationState === 'previewing' || tagOperationState === 'applying'}
                       />
                       <p className="text-xs text-muted-foreground">服务端会重新读取节点与祖先；这里不接受自由标签文本。</p>
                     </div>
@@ -1073,7 +1071,7 @@ export function ProblemEditPage() {
                           !selectedMindmapNodes.length ||
                           tagOperationState === 'previewing' ||
                           tagOperationState === 'applying' ||
-                          (programmingTagMode === 'converted' && !tagSelectionDirty)
+                          (programmingTagMode !== 'unconverted' && !tagSelectionDirty)
                         }
                       >
                         {tagOperationState === 'previewing' ? <Loader2 className="mr-1 size-3.5 animate-spin motion-reduce:animate-none" /> : null}
@@ -1299,12 +1297,14 @@ export function ProblemEditPage() {
                           </div>
                         ))}
                       </div>
-                      <ManagedProblemTrainingStatus
-                        metadataStatus={pdoc.managedAuthoring?.metadataStatus}
-                        pendingPlacement={pdoc.managedAuthoring?.pendingTrainingPlacement}
-                        trainingOptions={trainingOptions}
-                        placements={managedTrainingPlacements}
-                      />
+                      {canEditContent || canReviewManaged ? (
+                        <ManagedProblemTrainingStatus
+                          metadataStatus={pdoc.managedAuthoring?.metadataStatus}
+                          pendingPlacement={pdoc.managedAuthoring?.pendingTrainingPlacement}
+                          trainingOptions={trainingOptions}
+                          placements={managedTrainingPlacements}
+                        />
+                      ) : null}
                       <div className="space-y-3 rounded-xl bg-muted/45 px-4 py-3 md:col-span-2">
                         <div>
                           <p className="text-xs text-muted-foreground">只读来源与赛事标签</p>
@@ -1320,22 +1320,23 @@ export function ProblemEditPage() {
                             )}
                           </div>
                         </div>
-                        <ManagedKnowledgeSuggestionField
-                          editable={managedKnowledgeEditable}
-                          metadataDraft={managedMetadataDraft}
-                          selectedNodeIds={selectedMindmapNodeIds}
-                        >
-                          <MultiSelect
-                            options={mindmapOptions}
-                            value={selectedMindmapNodes}
-                            onChange={setSelectedMindmapNodes}
-                            getKey={(node) => node.id}
-                            getLabel={(node) => node.label}
-                            getDescription={(node) => node.tags.join(' / ')}
-                            placeholder="没有已选节点"
-                            disabled={!managedKnowledgeEditable}
-                          />
-                        </ManagedKnowledgeSuggestionField>
+                        <div>
+                          <p className="text-xs text-muted-foreground">当前知识导图节点</p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {selectedMindmapNodes.length ? (
+                              selectedMindmapNodes.map((node) => (
+                                <Badge key={node.id} variant="outline">
+                                  {node.label}
+                                </Badge>
+                              ))
+                            ) : (
+                              <span className="text-xs text-muted-foreground">尚未选择知识节点</span>
+                            )}
+                          </div>
+                          {canEditTags ? (
+                            <p className="mt-2 text-[11px] text-muted-foreground">知识节点请在上方“标签与知识导图”中预览并确认。</p>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1345,36 +1346,42 @@ export function ProblemEditPage() {
               <div className="border-t border-border/60">
                 <header className="px-5 py-4">
                   <h3 className="text-sm font-semibold tracking-tight">题面正文</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">Markdown 内容；粘贴图片继续使用现有附加文件 API。</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {canEditContent ? 'Markdown 内容；粘贴图片继续使用现有附加文件 API。' : '当前贡献范围仅允许只读查看题面。'}
+                  </p>
                 </header>
                 <div className="p-5">
-                  <MarkdownEditor
-                    name="content"
-                    value={draftContent}
-                    onChange={(value) => {
-                      setDraftContent(value);
-                      markDirty();
-                    }}
-                    minHeight={440}
-                    pasteUpload={
-                      filesBase
-                        ? {
-                            endpoint: filesBase,
-                            meta: { type: 'additional_file' },
-                            makeUrl: (filename) => `file://${filename}`,
-                          }
-                        : undefined
-                    }
-                    previewFileUrl={(filename, original) => {
-                      const queryIndex = original.indexOf('?');
-                      const query = queryIndex >= 0 ? original.slice(queryIndex) : '';
-                      return `${problemUrl}/file/${encodeURIComponent(filename)}${query}`;
-                    }}
-                  />
+                  {canEditContent ? (
+                    <MarkdownEditor
+                      name="content"
+                      value={draftContent}
+                      onChange={(value) => {
+                        setDraftContent(value);
+                        markDirty();
+                      }}
+                      minHeight={440}
+                      pasteUpload={
+                        filesBase
+                          ? {
+                              endpoint: filesBase,
+                              meta: { type: 'additional_file' },
+                              makeUrl: (filename) => `file://${filename}`,
+                            }
+                          : undefined
+                      }
+                      previewFileUrl={(filename, original) => {
+                        const queryIndex = original.indexOf('?');
+                        const query = queryIndex >= 0 ? original.slice(queryIndex) : '';
+                        return `${problemUrl}/file/${encodeURIComponent(filename)}${query}`;
+                      }}
+                    />
+                  ) : (
+                    <MarkdownView content={draftContent} className="prose max-w-none dark:prose-invert" />
+                  )}
                 </div>
               </div>
 
-              {!isCreate ? (
+              {!isCreate && canEditContent ? (
                 <div className="border-t border-border/60">
                   <header className="px-5 py-4">
                     <h3 className="text-sm font-semibold tracking-tight">可见性</h3>
@@ -1442,19 +1449,21 @@ export function ProblemEditPage() {
               </section>
             ) : null}
 
-            <footer className="flex flex-col gap-3 border-t border-border/70 pt-5 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">{saveError ? <p className="text-sm text-destructive">{saveError}</p> : status}</div>
-              <Button type="submit" className="min-h-11 gap-1.5 sm:min-w-36" disabled={saveState === 'saving'}>
-                {saveState === 'saving' ? (
-                  <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-                ) : isCreate ? (
-                  <ArrowRight className="size-4" />
-                ) : (
-                  <Save className="size-4" />
-                )}
-                {isCreate ? '创建并进入工作区' : '保存修改'}
-              </Button>
-            </footer>
+            {canEditContent ? (
+              <footer className="flex flex-col gap-3 border-t border-border/70 pt-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">{saveError ? <p className="text-sm text-destructive">{saveError}</p> : status}</div>
+                <Button type="submit" className="min-h-11 gap-1.5 sm:min-w-36" disabled={saveState === 'saving'}>
+                  {saveState === 'saving' ? (
+                    <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                  ) : isCreate ? (
+                    <ArrowRight className="size-4" />
+                  ) : (
+                    <Save className="size-4" />
+                  )}
+                  {isCreate ? '创建并进入工作区' : '保存修改'}
+                </Button>
+              </footer>
+            ) : null}
           </form>
         </div>
       )}

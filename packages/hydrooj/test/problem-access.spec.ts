@@ -217,16 +217,21 @@ const {
     assertProblemAclDomain,
     assertProblemBankSelection,
     buildProblemBankScope,
+    buildProblemContainerSelectionScope,
     canArchiveProblem,
     canAuthorProblem,
     canBrowseProblemBank,
     canCloneProblem,
     canDeleteProblem,
     canEditProblemContent,
+    canEditProblemData,
     canEditProblemMetadata,
+    canEditProblemTags,
     canManageProblemCollaborators,
+    canManageProblemContributions,
     canManageProblemMaintainers,
     canMaintainProblem,
+    canOpenProblemWorkspace,
     canPublishProblem,
     canViewProblem,
     isProblemBankAdmin,
@@ -255,6 +260,8 @@ function makeUser(kind: UserKind, overrides: Record<string, unknown> = {}) {
         _permitPids: new Set<number>(),
         _authoredPids: new Set<number>(),
         _maintainedPids: new Set<number>(),
+        _dataContributionPids: new Set<number>(),
+        _tagContributionPids: new Set<number>(),
         _aclFencedPids: new Set<number>(),
         _ownsLegacyProblems: false,
         _problemAclDomainId: 'system',
@@ -263,6 +270,30 @@ function makeUser(kind: UserKind, overrides: Record<string, unknown> = {}) {
         hasPriv: (...wanted: number[]) => kind === 'admin' && wanted.includes(PRIV.PRIV_EDIT_SYSTEM),
         ...overrides,
     } as any;
+}
+
+function aclSnapshot({
+    permits = [],
+    authored = [],
+    maintained = [],
+    data = [],
+    tag = [],
+}: {
+    permits?: number[];
+    authored?: number[];
+    maintained?: number[];
+    data?: number[];
+    tag?: number[];
+} = {}) {
+    return {
+        permitPids: new Set(permits),
+        authoredPids: new Set(authored),
+        maintainedPids: new Set(maintained),
+        dataContributionPids: new Set(data),
+        tagContributionPids: new Set(tag),
+        fencedPids: new Set<number>(),
+        ownsLegacyProblems: false,
+    };
 }
 
 function pdoc(docId: number, owner = 7, hidden = true, maintainer: number[] = [], domainId = 'system') {
@@ -306,6 +337,8 @@ beforeEach(() => {
                 permitPids: new Set<number>(),
                 authoredPids: new Set<number>(),
                 maintainedPids: new Set<number>(),
+                dataContributionPids: new Set<number>(),
+                tagContributionPids: new Set<number>(),
                 fencedPids: new Set<number>(),
                 ownsLegacyProblems: false,
             };
@@ -527,6 +560,7 @@ describe('P2.13 managed programming authoring matrix', () => {
             aclMutationLocks: [],
             maintainer: [],
         };
+        (global as any).Hydro.model.permits.loadAclForUser = async () => aclSnapshot({ permits: [100], authored: [100] });
         const contentClaim = await acquire(author, structuredClone(liveProblem), 'author-content', 'metadata-edit', { capability: 'content' });
         expect(contentClaim?.actor).to.equal(42);
         expect(contentClaim?.capability).to.equal('content');
@@ -556,6 +590,72 @@ describe('P2.13 managed programming authoring matrix', () => {
 
         const metadataClaim = await acquire(author, structuredClone(liveProblem), 'author-metadata', 'metadata-edit', { capability: 'metadata' });
         expect(metadataClaim).to.equal(null);
+    });
+});
+
+describe('P2.24 orthogonal problem contribution capabilities', () => {
+    const confirmedManaged = {
+        ...managedPdoc(100, 7, false),
+        managedAuthoring: { ...managedPdoc(100).managedAuthoring, metadataStatus: 'confirmed' },
+    } as any;
+
+    it('keeps one formal author while combining data and tag scopes independently', () => {
+        const author = makeUser('student', { _permitPids: new Set([100]), _authoredPids: new Set([100]) });
+        const data = makeUser('student', { _dataContributionPids: new Set([100]) });
+        const tag = makeUser('student', { _tagContributionPids: new Set([100]) });
+        const both = makeUser('student', {
+            _dataContributionPids: new Set([100]),
+            _tagContributionPids: new Set([100]),
+        });
+
+        expect(canEditProblemContent(author, confirmedManaged)).to.equal(false);
+        expect(canManageProblemContributions(author, confirmedManaged)).to.equal(true);
+        expect(canEditProblemData(author, confirmedManaged)).to.equal(false);
+        expect(canEditProblemTags(author, confirmedManaged)).to.equal(false);
+
+        expect(canEditProblemContent(data, confirmedManaged)).to.equal(false);
+        expect(canEditProblemData(data, confirmedManaged)).to.equal(true);
+        expect(canEditProblemTags(data, confirmedManaged)).to.equal(false);
+        expect(canManageProblemContributions(data, confirmedManaged)).to.equal(false);
+        expect(canViewProblem(data, confirmedManaged)).to.equal(true);
+
+        expect(canEditProblemData(tag, confirmedManaged)).to.equal(false);
+        expect(canEditProblemTags(tag, confirmedManaged)).to.equal(true);
+        expect(canEditProblemData(both, confirmedManaged)).to.equal(true);
+        expect(canEditProblemTags(both, confirmedManaged)).to.equal(true);
+        expect(canOpenProblemWorkspace(both, confirmedManaged)).to.equal(true);
+    });
+
+    it('lets legacy owners and maintainers manage assignments without giving contributors delegation rights', () => {
+        const legacy = pdoc(200, 42, true, [77]);
+        const owner = makeUser('creator');
+        const maintainer = makeUser('student', { _id: 77, _maintainedPids: new Set([200]) });
+        const contributor = makeUser('student', { _id: 88, _dataContributionPids: new Set([200]) });
+
+        expect(canManageProblemContributions(owner, legacy)).to.equal(true);
+        expect(canManageProblemContributions(maintainer, legacy)).to.equal(true);
+        expect(canEditProblemData(contributor, legacy)).to.equal(true);
+        expect(canManageProblemContributions(contributor, legacy)).to.equal(false);
+    });
+
+    it('rejects every field outside each narrow contribution scope', () => {
+        const dataClaim = {
+            domainId: 'system',
+            pid: 100,
+            actor: 42,
+            requestId: 'data-claim',
+            operation: 'files-upload',
+            capability: 'data',
+            state: 'active',
+        } as any;
+        const tagClaim = { ...dataClaim, requestId: 'tag-claim', operation: 'tag-edit', capability: 'tag' };
+        expect(() => (access as any).assertProblemWriteClaimFieldScope(dataClaim, ['config', 'data.0', 'additional_file'])).not.to.throw();
+        expect(() => (access as any).assertProblemWriteClaimFieldScope(dataClaim, ['title'])).to.throw();
+        expect(() =>
+            (access as any).assertProblemWriteClaimFieldScope(tagClaim, ['tag', 'knowledgeNodeIds', 'managedAuthoring.selectedMindmapNodeIds']),
+        ).not.to.throw();
+        expect(() => (access as any).assertProblemWriteClaimFieldScope(tagClaim, ['managedAuthoring.metadataStatus'])).to.throw();
+        expect(() => (access as any).assertProblemWriteClaimFieldScope(tagClaim, ['sourceMeta'])).to.throw();
     });
 });
 
@@ -813,6 +913,7 @@ describe('P2.11 durable global problem write claim', () => {
             aclMutationLocks: [],
             title: 'before',
         };
+        (global as any).Hydro.model.permits.loadAclForUser = async () => aclSnapshot({ permits: [100], maintained: [100] });
         const snapshot = structuredClone(liveProblem);
         const claim = await acquire(user, snapshot, 'files-100', 'files-upload', { now: new Date('2026-07-11T00:00:00.000Z') });
         expect(claim).to.deep.include({
@@ -893,9 +994,11 @@ describe('P2.11 durable global problem write claim', () => {
             aclMutationRevision: 1,
             aclMutationLocks: [{ uid: 42, requestId: 'owner-revoke' }],
         };
+        (global as any).Hydro.model.permits.loadAclForUser = async () => aclSnapshot();
         expect(await acquire(user, stale, 'old-files', 'files-delete')).to.equal(null);
 
         liveProblem = structuredClone(stale);
+        (global as any).Hydro.model.permits.loadAclForUser = async () => aclSnapshot({ permits: [100], maintained: [100] });
         const claim = await acquire(user, stale, 'write-first', 'files-delete');
         expect(claim).not.to.equal(null);
         expect(liveProblem.aclWriteClaim.requestId).to.equal('write-first');
@@ -1147,6 +1250,7 @@ describe('P2.11 durable global problem write claim', () => {
             aclMutationLocks: [],
             content: 'before',
         };
+        (global as any).Hydro.model.permits.loadAclForUser = async () => aclSnapshot({ permits: [100], authored: [100] });
         const claim = await acquire(author, structuredClone(liveProblem), 'managed-knowledge-suggestion', 'metadata-edit', {
             capability: 'content',
         });
@@ -1386,6 +1490,8 @@ describe('P2.11 stable direct-problem reads', () => {
             permitPids: new Set(pids),
             authoredPids: new Set<number>(),
             maintainedPids: new Set<number>(),
+            dataContributionPids: new Set<number>(),
+            tagContributionPids: new Set<number>(),
             fencedPids: new Set<number>(),
             ownsLegacyProblems: false,
         };
@@ -1396,6 +1502,8 @@ describe('P2.11 stable direct-problem reads', () => {
             permitPids: new Set(pids),
             authoredPids: new Set<number>(),
             maintainedPids: new Set(pids),
+            dataContributionPids: new Set<number>(),
+            tagContributionPids: new Set<number>(),
             fencedPids: new Set<number>(),
             ownsLegacyProblems: false,
         };
@@ -1406,6 +1514,8 @@ describe('P2.11 stable direct-problem reads', () => {
             permitPids: new Set(pids),
             authoredPids: new Set(pids),
             maintainedPids: new Set<number>(),
+            dataContributionPids: new Set<number>(),
+            tagContributionPids: new Set<number>(),
             fencedPids: new Set<number>(),
             ownsLegacyProblems: false,
         };
@@ -1768,7 +1878,27 @@ describe('P2.11 problem selection assertion', () => {
                 domainId: 'system',
                 docType: TYPE_PROBLEM,
                 query: {
-                    $and: [buildProblemBankScope(user), { docId: { $in: [20] }, archivedAt: { $exists: false } }],
+                    $and: [buildProblemContainerSelectionScope(user), { docId: { $in: [20] }, archivedAt: { $exists: false } }],
+                },
+            },
+        ]);
+    });
+
+    it('lets contribution ranges browse a problem without granting container placement', async () => {
+        const user = makeUser('student', { _dataContributionPids: new Set([20]), _tagContributionPids: new Set([21]) });
+        expect(buildProblemBankScope(user)).to.deep.equal({
+            $and: [{ docId: { $in: [20, 21] } }, { 'aclMutationLocks.uid': { $ne: 42 } }],
+        });
+        expect(buildProblemContainerSelectionScope(user)).to.deep.equal({ docId: { $in: [] } });
+
+        const error = await captureFailure(() => assertProblemBankSelection('system', [20], user));
+        expect(error?.name).to.equal('PermissionError');
+        expect(countCalls).to.deep.equal([
+            {
+                domainId: 'system',
+                docType: TYPE_PROBLEM,
+                query: {
+                    $and: [buildProblemContainerSelectionScope(user), { docId: { $in: [20] }, archivedAt: { $exists: false } }],
                 },
             },
         ]);
@@ -1879,10 +2009,15 @@ describe('P2.11 ProblemModel public surface', () => {
     });
 
     it('loads publication state before both stable editor and write-claim authorization checks', () => {
+        const capabilityStart = source.indexOf('static async getCapabilityAuthorized(');
+        const capabilityEnd = source.indexOf('\n    /** Sensitive editor read for managed authors', capabilityStart);
+        const capabilitySource = source.slice(capabilityStart, capabilityEnd);
+        expect(capabilitySource).to.include("'authoringMode', 'hidden', 'managedAuthoring'");
+
         const editableStart = source.indexOf('static async getEditableAuthorized(');
         const editableEnd = source.indexOf('\n    static getMulti(', editableStart);
         const editableSource = source.slice(editableStart, editableEnd);
-        expect(editableSource).to.include("'authoringMode', 'hidden', 'managedAuthoring'");
+        expect(editableSource).to.include("getCapabilityAuthorized(domainId, pid, user, 'content', projection, rawConfig)");
 
         const claimStart = source.indexOf('static async beginAuthorizedWriteClaim(');
         const claimEnd = source.indexOf('\n    static async withAuthorizedWriteClaim(', claimStart);

@@ -15,6 +15,8 @@ describe('problem ACL preload', () => {
                     permitPids: new Set([1, 2]),
                     authoredPids: new Set([1]),
                     maintainedPids: new Set([2]),
+                    dataContributionPids: new Set([3]),
+                    tagContributionPids: new Set([4]),
                     fencedPids: new Set([1]),
                     ownsLegacyProblems: true,
                 };
@@ -28,6 +30,8 @@ describe('problem ACL preload', () => {
         expect(user._problemAclLoaded).to.equal(true);
         expect(user._problemAclDomainId).to.equal('system');
         expect([...user._aclFencedPids]).to.deep.equal([1]);
+        expect([...user._dataContributionPids]).to.deep.equal([3]);
+        expect([...user._tagContributionPids]).to.deep.equal([4]);
         expect(user._ownsLegacyProblems).to.equal(true);
     });
 
@@ -37,6 +41,8 @@ describe('problem ACL preload', () => {
             _permitPids: new Set([999]),
             _authoredPids: new Set([999]),
             _maintainedPids: new Set([999]),
+            _dataContributionPids: new Set([999]),
+            _tagContributionPids: new Set([999]),
             _aclFencedPids: new Set(),
             _ownsLegacyProblems: true,
             _problemAclLoaded: true,
@@ -57,6 +63,8 @@ describe('problem ACL preload', () => {
         expect([...user._permitPids]).to.deep.equal([]);
         expect([...user._authoredPids]).to.deep.equal([]);
         expect([...user._maintainedPids]).to.deep.equal([]);
+        expect([...user._dataContributionPids]).to.deep.equal([]);
+        expect([...user._tagContributionPids]).to.deep.equal([]);
         expect([...user._aclFencedPids]).to.deep.equal([]);
         expect(user._ownsLegacyProblems).to.equal(false);
         expect((errors[0] as Error).message).to.equal('database unavailable');
@@ -74,6 +82,8 @@ describe('problem ACL preload', () => {
                     permitPids: new Set(),
                     authoredPids: new Set(),
                     maintainedPids: new Set(),
+                    dataContributionPids: new Set(),
+                    tagContributionPids: new Set(),
                     fencedPids: new Set(),
                 }) as any,
             (error) => errors.push(error),
@@ -90,6 +100,8 @@ describe('problem ACL preload', () => {
             _permitPids: new Set([999]),
             _authoredPids: new Set([999]),
             _maintainedPids: new Set([999]),
+            _dataContributionPids: new Set([999]),
+            _tagContributionPids: new Set([999]),
             _aclFencedPids: new Set([999]),
             _ownsLegacyProblems: true,
             _problemAclLoaded: true,
@@ -115,6 +127,8 @@ describe('problem ACL preload', () => {
         expect([...user._permitPids]).to.deep.equal([]);
         expect([...user._authoredPids]).to.deep.equal([]);
         expect([...user._maintainedPids]).to.deep.equal([]);
+        expect([...user._dataContributionPids]).to.deep.equal([]);
+        expect([...user._tagContributionPids]).to.deep.equal([]);
         expect([...user._aclFencedPids]).to.deep.equal([]);
         expect(user._ownsLegacyProblems).to.equal(false);
         expect(errors[0]).to.be.instanceOf(TypeError);

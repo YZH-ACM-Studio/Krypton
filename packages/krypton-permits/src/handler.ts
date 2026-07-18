@@ -38,7 +38,7 @@ import { permitsColl, permitSourcesColl } from './db';
 import { canonicalActiveFilter } from './legacy-canonical';
 import { permitsModel } from './model';
 import { deriveAclRequestId } from './request-id';
-import type { ContestPermitRole, PermitRole } from './types';
+import type { ContestPermitRole, PermitRole, ProblemContributionScope, ProblemContributionStatus } from './types';
 
 const PROBLEM_ROLES: PermitRole[] = ['verifier', 'author', 'maintainer'];
 const CONTEST_ROLES: ContestPermitRole[] = ['verifier', 'maintainer'];
@@ -387,6 +387,265 @@ class ProblemPermitRevokeHandler extends Handler {
     }
 }
 
+const CONTRIBUTION_SCOPES: ProblemContributionScope[] = ['data', 'tag'];
+const CONTRIBUTION_STATUSES: ProblemContributionStatus[] = ['pending', 'completed'];
+
+function deriveContributionMutationId(requestId: string, operation: string, ...identity: unknown[]): string {
+    return deriveAclRequestId(undefined, operation, ...identity, requestId.trim());
+}
+
+async function auditContributionDenied(handler: Handler, pdoc: any, targetUid: number, scope: string, stage: string, requestId: string) {
+    logger.warn(
+        'Problem contribution denied domain=%s pid=%d actor=%d target=%d scope=%s stage=%s result=denied requestId=%s',
+        pdoc.domainId,
+        pdoc.docId,
+        handler.user._id,
+        targetUid,
+        scope,
+        stage,
+        requestId,
+    );
+    await OplogModel.log(handler as any, 'problem.contribution.denied', {
+        domainId: pdoc.domainId,
+        problemId: pdoc.docId,
+        actor: handler.user._id,
+        targetUid,
+        scope,
+        stage,
+        result: 'denied',
+        requestId,
+    });
+}
+
+class ProblemContributionHandler extends Handler {
+    @param('pid', Types.UnsignedInt)
+    async get(args: { domainId?: unknown }, pid: number) {
+        const domainId = authoritativeDomainId(this, args);
+        const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
+        if (!pdoc) throw new NotFoundError('题目不存在');
+        if (!ProblemModel.canManageProblemContributions(this.user, pdoc)) {
+            throw new PermissionError('无权查看此题目的贡献分工');
+        }
+        const rows = await permitsModel.listContributionsForProblem(domainId, pdoc.docId);
+        const uids = [...new Set(rows.flatMap((row) => [row.uid, row.assignedBy, row.updatedBy]))];
+        const udict = await UserModel.getList(domainId, uids);
+        const confirmed = await ProblemModel.getViewableAuthorized(domainId, pdoc.docId, this.user);
+        if (!confirmed || !ProblemModel.canManageProblemContributions(this.user, confirmed)) {
+            throw new PermissionError('无权查看此题目的贡献分工');
+        }
+        this.response.body = { contributions: rows, udict };
+    }
+
+    @param('pid', Types.UnsignedInt)
+    @param('uid', Types.PositiveInt)
+    @param('scope', Types.String)
+    @param('note', Types.String, true)
+    @param('requestId', Types.String)
+    async post(args: { domainId?: unknown }, pid: number, uid: number, scope: string, note: string, requestId: string) {
+        const domainId = authoritativeDomainId(this, args);
+        if (!CONTRIBUTION_SCOPES.includes(scope as ProblemContributionScope)) {
+            throw new ValidationError('scope', null, 'scope 必须是 data 或 tag');
+        }
+        const target = await UserModel.getById(domainId, uid);
+        if (!target) throw new ValidationError('uid', null, '目标用户不存在');
+        const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
+        if (!pdoc) throw new NotFoundError('题目不存在');
+        const mutationId = deriveContributionMutationId(requestId, 'problem-contribution-assign', domainId, pdoc.docId, uid, scope);
+        if (!ProblemModel.canManageProblemContributions(this.user, pdoc)) {
+            await auditContributionDenied(this, pdoc, uid, scope, 'authorize-assign', mutationId);
+            throw new PermissionError('无权分配此题目的贡献范围');
+        }
+        let deniedInsideClaim = false;
+        await ProblemModel.withAuthorizedWriteClaim(
+            domainId,
+            pdoc.docId,
+            this.user,
+            'contribution-assign',
+            async (claim) => {
+                const current = await ProblemModel.get(domainId, pdoc.docId);
+                if (!current) throw new Error(`problem ${domainId}/${pdoc.docId} disappeared during contribution assign`);
+                if (!ProblemModel.canManageProblemContributions(this.user, current)) {
+                    deniedInsideClaim = true;
+                    return;
+                }
+                await OplogModel.log(this as any, 'problem.contribution.assign', {
+                    problemId: pdoc.docId,
+                    targetUid: uid,
+                    scope,
+                    note: note || '',
+                    requestId: mutationId,
+                    result: 'attempt',
+                });
+                await permitsModel.assignContribution({
+                    domainId,
+                    pid: pdoc.docId,
+                    uid,
+                    scope: scope as ProblemContributionScope,
+                    actor: this.user._id,
+                    note,
+                    requestId: mutationId,
+                    writeClaimRequestId: claim.requestId,
+                });
+                logger.info(
+                    'Problem contribution changed domain=%s pid=%d actor=%d target=%d scope=%s stage=assign result=success requestId=%s',
+                    domainId,
+                    pdoc.docId,
+                    this.user._id,
+                    uid,
+                    scope,
+                    mutationId,
+                );
+            },
+            { requestId: mutationId, capability: 'contributions' },
+        );
+        if (deniedInsideClaim) {
+            await auditContributionDenied(this, pdoc, uid, scope, 'claim-assign', mutationId);
+            throw new PermissionError('无权分配此题目的贡献范围');
+        }
+        const scopeZh = scope === 'data' ? '数据贡献者' : '标签贡献者';
+        try {
+            await MessageModel.send(
+                this.user._id,
+                uid,
+                `[krypton] 你被 ${this.user.uname} 分配为题目 ${pdoc.title} 的${scopeZh}：/p/${pdoc.pid || pdoc.docId}${note ? `\n附言：${note}` : ''}`,
+                MessageModel.FLAG_UNREAD,
+            );
+        } catch (error) {
+            logger.error(
+                'contribution notification failed requestId=%s domain=%s pid=%d uid=%d scope=%s error=%o',
+                mutationId,
+                domainId,
+                pdoc.docId,
+                uid,
+                scope,
+                error,
+            );
+        }
+        this.response.body = { success: true, requestId: mutationId };
+    }
+}
+
+class ProblemContributionRevokeHandler extends Handler {
+    @param('pid', Types.UnsignedInt)
+    @param('uid', Types.PositiveInt)
+    @param('scope', Types.String)
+    @param('requestId', Types.String)
+    async post(args: { domainId?: unknown }, pid: number, uid: number, scope: string, requestId: string) {
+        const domainId = authoritativeDomainId(this, args);
+        if (!CONTRIBUTION_SCOPES.includes(scope as ProblemContributionScope)) throw new ValidationError('scope');
+        const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
+        if (!pdoc) throw new NotFoundError('题目不存在');
+        const mutationId = deriveContributionMutationId(requestId, 'problem-contribution-revoke', domainId, pdoc.docId, uid, scope);
+        if (!ProblemModel.canManageProblemContributions(this.user, pdoc)) {
+            await auditContributionDenied(this, pdoc, uid, scope, 'authorize-revoke', mutationId);
+            throw new PermissionError('无权撤销此题目的贡献范围');
+        }
+        let deniedInsideClaim = false;
+        await ProblemModel.withAuthorizedWriteClaim(
+            domainId,
+            pdoc.docId,
+            this.user,
+            'contribution-revoke',
+            async (claim) => {
+                const current = await ProblemModel.get(domainId, pdoc.docId);
+                if (!current) throw new Error(`problem ${domainId}/${pdoc.docId} disappeared during contribution revoke`);
+                if (!ProblemModel.canManageProblemContributions(this.user, current)) {
+                    deniedInsideClaim = true;
+                    return;
+                }
+                await OplogModel.log(this as any, 'problem.contribution.revoke', {
+                    problemId: pdoc.docId,
+                    targetUid: uid,
+                    scope,
+                    requestId: mutationId,
+                    result: 'attempt',
+                });
+                await permitsModel.revokeContribution({
+                    domainId,
+                    pid: pdoc.docId,
+                    uid,
+                    scope: scope as ProblemContributionScope,
+                    actor: this.user._id,
+                    requestId: mutationId,
+                    writeClaimRequestId: claim.requestId,
+                });
+                logger.info(
+                    'Problem contribution changed domain=%s pid=%d actor=%d target=%d scope=%s stage=revoke result=success requestId=%s',
+                    domainId,
+                    pdoc.docId,
+                    this.user._id,
+                    uid,
+                    scope,
+                    mutationId,
+                );
+            },
+            { requestId: mutationId, capability: 'contributions' },
+        );
+        if (deniedInsideClaim) {
+            await auditContributionDenied(this, pdoc, uid, scope, 'claim-revoke', mutationId);
+            throw new PermissionError('无权撤销此题目的贡献范围');
+        }
+        this.response.body = { success: true, requestId: mutationId };
+    }
+}
+
+class ProblemContributionStatusHandler extends Handler {
+    @param('pid', Types.UnsignedInt)
+    @param('scope', Types.String)
+    @param('status', Types.String)
+    @param('requestId', Types.String)
+    async post(args: { domainId?: unknown }, pid: number, scope: string, status: string, requestId: string) {
+        const domainId = authoritativeDomainId(this, args);
+        if (!CONTRIBUTION_SCOPES.includes(scope as ProblemContributionScope)) throw new ValidationError('scope');
+        if (!CONTRIBUTION_STATUSES.includes(status as ProblemContributionStatus)) throw new ValidationError('status');
+        const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
+        if (!pdoc) throw new NotFoundError('题目不存在');
+        const rows = await permitsModel.listContributionsForProblem(domainId, pdoc.docId);
+        const row = rows.find((item) => item.uid === this.user._id && item.scope === scope && item.active);
+        const mutationId = deriveContributionMutationId(requestId, 'problem-contribution-status', domainId, pdoc.docId, this.user._id, scope, status);
+        if (!row) {
+            await auditContributionDenied(this, pdoc, this.user._id, scope, 'authorize-status', mutationId);
+            throw new PermissionError('当前没有这项贡献任务');
+        }
+        await OplogModel.log(this as any, 'problem.contribution.status', {
+            problemId: pdoc.docId,
+            scope,
+            status,
+            requestId: mutationId,
+            result: 'attempt',
+        });
+        await ProblemModel.withAuthorizedWriteClaim(
+            domainId,
+            pdoc.docId,
+            this.user,
+            'contribution-status',
+            (claim) =>
+                permitsModel.setContributionStatus({
+                    domainId,
+                    pid: pdoc.docId,
+                    uid: this.user._id,
+                    scope: scope as ProblemContributionScope,
+                    status: status as ProblemContributionStatus,
+                    actor: this.user._id,
+                    requestId: mutationId,
+                    writeClaimRequestId: claim.requestId,
+                }),
+            { requestId: mutationId, capability: scope as ProblemContributionScope },
+        );
+        logger.info(
+            'Problem contribution changed domain=%s pid=%d actor=%d target=%d scope=%s stage=%s result=success requestId=%s',
+            domainId,
+            pdoc.docId,
+            this.user._id,
+            this.user._id,
+            scope,
+            status,
+            mutationId,
+        );
+        this.response.body = { success: true, requestId: mutationId };
+    }
+}
+
 class ContestVerifierAddHandler extends Handler {
     @param('tid', Types.ObjectId)
     @param('uid', Types.PositiveInt)
@@ -515,6 +774,9 @@ class MyVerifyInboxHandler extends Handler {
 export function applyHandlers(ctx: Context) {
     ctx.Route('problem_permit_grant', '/p/:pid/permits', ProblemPermitGrantHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_permit_revoke', '/p/:pid/permits/revoke', ProblemPermitRevokeHandler, PERM.PERM_VIEW_PROBLEM);
+    ctx.Route('problem_contribution', '/p/:pid/contributions', ProblemContributionHandler, PERM.PERM_VIEW_PROBLEM);
+    ctx.Route('problem_contribution_revoke', '/p/:pid/contributions/revoke', ProblemContributionRevokeHandler, PERM.PERM_VIEW_PROBLEM);
+    ctx.Route('problem_contribution_status', '/p/:pid/contributions/status', ProblemContributionStatusHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('contest_verifier_add', '/contest/:tid/verifiers', ContestVerifierAddHandler, PERM.PERM_VIEW_CONTEST);
     ctx.Route('contest_verifier_remove', '/contest/:tid/verifiers/remove', ContestVerifierRemoveHandler, PERM.PERM_VIEW_CONTEST);
     // Not /tasks/verify — that would collide with krypton-tasks's

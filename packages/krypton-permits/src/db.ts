@@ -15,11 +15,12 @@
 import { db } from 'hydrooj';
 import type { Collection, ObjectId } from 'mongodb';
 import type { AclMutationFence, PermitSource } from './coordinator';
-import type { PermitDoc } from './types';
+import type { PermitDoc, ProblemContributionDoc } from './types';
 
 export const permitsColl: Collection<PermitDoc> = db.collection('problem.permits');
 export const permitSourcesColl: Collection<PermitSource & { _id: ObjectId }> = db.collection('problem.permitSources');
 export const aclMutationFencesColl: Collection<AclMutationFence & { _id: ObjectId }> = db.collection('problem.aclMutationFences');
+export const contributionsColl: Collection<ProblemContributionDoc> = db.collection('problem.contributions');
 
 interface RequiredIndex {
     name: string;
@@ -86,6 +87,22 @@ const fenceIndexes: RequiredIndex[] = [
     {
         name: 'problem_acl_fences_user',
         key: { domainId: 1, uid: 1, pid: 1 },
+    },
+];
+
+const contributionIndexes: RequiredIndex[] = [
+    {
+        name: 'problem_contributions_identity_uq',
+        key: { domainId: 1, pid: 1, uid: 1, scope: 1 },
+        unique: true,
+    },
+    {
+        name: 'problem_contributions_user_active_status',
+        key: { domainId: 1, uid: 1, active: 1, status: 1, scope: 1, pid: 1 },
+    },
+    {
+        name: 'problem_contributions_problem_scope',
+        key: { domainId: 1, pid: 1, scope: 1, active: 1, status: 1, uid: 1 },
     },
 ];
 
@@ -200,6 +217,7 @@ export async function ensureIndexes(): Promise<void> {
         });
         await createAndVerifyIndexes(permitSourcesColl, sourceIndexes, { allowMissingNamespace: true });
         await createAndVerifyIndexes(aclMutationFencesColl, fenceIndexes, { allowMissingNamespace: true });
+        await createAndVerifyIndexes(contributionsColl, contributionIndexes, { allowMissingNamespace: true });
     })();
     try {
         await indexesPromise;

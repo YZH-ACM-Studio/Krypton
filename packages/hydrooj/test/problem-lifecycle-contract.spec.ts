@@ -373,18 +373,16 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(start).to.be.greaterThan(-1);
         expect(method).to.include("'programming-tag-normalize'");
         expect(method).to.include('const preview = await previewProgrammingTagNormalization({');
-        expect(method.indexOf('preview.fingerprint !== input.previewFingerprint')).to.be.lessThan(method.indexOf('ProblemModel.editWithClaim('));
-        expect(method).to.include('{ tag: preview.nextTags, knowledgeNodeIds: preview.selectedNodeIds }');
-        expect(method).to.include('expectedStructureRevision: current.structureRevision');
+        expect(method.indexOf('preview.fingerprint !== input.previewFingerprint')).to.be.lessThan(method.indexOf('commitProblemWriteClaimUpdate('));
+        expect(method).to.include('tag: preview.nextTags');
+        expect(method).to.include('knowledgeNodeIds: preview.selectedNodeIds');
+        expect(method).to.include("'managedAuthoring.selectedMindmapNodeIds': preview.selectedNodeIds");
+        expect(method).to.include("commitProblemWriteClaimUpdate(claim, tagPatch as Partial<ProblemDoc>, {}, 'tag'");
         expect(method).to.include('expectedTag: current.tag || []');
-        expect(method).to.include("{ capability: 'maintain' }");
+        expect(method).to.include('if (!result) throw new ProblemTagConflictError(input.pid)');
+        expect(method).to.include("{ capability: 'tag' }");
+        expect(method).to.include("type: 'problem.tag.contribution'");
         expect(method).to.include('Programming tag normalization succeeded');
-
-        const editStart = source.indexOf('static async editWithClaim(');
-        const editEnd = source.indexOf('static async editAuthorized(', editStart);
-        const edit = source.slice(editStart, editEnd);
-        expect(edit).to.include("claim.operation === 'programming-tag-normalize'");
-        expect(edit).to.include('写入钩子不能改变用户已确认的标签结果');
     });
 
     it('keeps ordinary programming saves free of hook-injected tag writes', () => {

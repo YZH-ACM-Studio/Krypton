@@ -58,6 +58,7 @@ import { MultiSelect } from '@/components/ui/multi-select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
 import { ProblemTestdataFileDialog } from '@/components/problem-testdata-file-dialog';
+import { type ProblemDataWriteGuardState, useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
 import { useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { COMMON_LANG_OPTIONS as PRESET_LANG_OPTIONS, type LangOption, resolveLangs } from '@/lib/multi-select-presets';
 import { readProblemConfigUploadSuccess } from '@/lib/problem-save-response';
@@ -115,12 +116,14 @@ export function ProblemConfigEditor({
   pdoc,
   files,
   initialYaml,
+  dataWriteGuard,
   embedded = false,
 }: {
   problemUrl: string;
   pdoc: R;
   files: R[];
   initialYaml: string;
+  dataWriteGuard?: ProblemDataWriteGuardState;
   embedded?: boolean;
 }) {
   // --- state ---
@@ -140,6 +143,7 @@ export function ProblemConfigEditor({
   const [mobileTab, setMobileTab] = useState<'files' | 'cases' | 'subtasks'>('files');
   // File being edited in the modal — null = closed.
   const [editingFile, setEditingFile] = useState<R | null>(null);
+  const dataGuard = useProblemDataWriteGuard(dataWriteGuard);
 
   // --- file pool with classification ---
   const fileSet = useMemo(() => new Set(files.map((f) => f.name)), [files]);
@@ -204,6 +208,8 @@ export function ProblemConfigEditor({
 
   // --- save ---
   const handleSave = useCallback(async () => {
+    const confirmation = await dataGuard.confirm('保存评测配置', 'files-upload');
+    if (!confirmation) return;
     const savedVersion = editVersion.current;
     const submittedYaml = currentYaml;
     setSaving(true);
@@ -215,6 +221,7 @@ export function ProblemConfigEditor({
       formData.append('operation', 'upload_file');
       formData.append('type', 'testdata');
       formData.append('filename', 'config.yaml');
+      if (typeof confirmation === 'string') formData.append('activeContainerConfirmation', confirmation);
       formData.append('file', new Blob([submittedYaml], { type: 'text/yaml' }), 'config.yaml');
       const res = await fetch(`${problemUrl}/files`, {
         method: 'POST',
@@ -236,7 +243,7 @@ export function ProblemConfigEditor({
     } finally {
       setSaving(false);
     }
-  }, [currentYaml, problemUrl, yamlText]);
+  }, [currentYaml, dataGuard, problemUrl, yamlText]);
 
   // --- drag handlers ---
   // Activation distance was 4px — that's so small that even an accidental
@@ -398,12 +405,14 @@ export function ProblemConfigEditor({
               OK
             </Badge>
           )}
-          <Button onClick={handleSave} disabled={saving} className="gap-1.5">
+          <Button onClick={handleSave} disabled={saving || dataGuard.blocked} className="gap-1.5">
             <Save className="size-3.5" />
             {saving ? '保存中…' : dirty ? '保存修改' : '保存'}
           </Button>
         </div>
       </div>
+
+      {dataGuard.notice}
 
       {saveError ? (
         <p role="alert" className="shrink-0 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -564,7 +573,10 @@ export function ProblemConfigEditor({
       )}
 
       {/* File edit dialog */}
-      {editingFile ? <ProblemTestdataFileDialog file={editingFile} problemUrl={problemUrl} onClose={() => setEditingFile(null)} /> : null}
+      {editingFile ? (
+        <ProblemTestdataFileDialog file={editingFile} problemUrl={problemUrl} onClose={() => setEditingFile(null)} confirmWrite={dataGuard.confirm} />
+      ) : null}
+      {dataGuard.dialog}
       {navigationGuard.guardDialog}
     </motion.div>
   );

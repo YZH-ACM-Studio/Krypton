@@ -87,8 +87,9 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(edit).to.include('<ManagedReviewPanel');
     expect(bank).to.include('<ManagedPublishProtocolFields');
     expect(bank).to.include('expectedStructureRevision={pdoc.structureRevision}');
-    expect(edit).to.include('const managedKnowledgeEditable = managed && !isCreate && managedMetadataDraft && canEditContent');
-    expect(edit).to.include('<ManagedKnowledgeSuggestionField');
+    expect(edit).to.include('const canEditTags = !isCreate && capabilities.canEditTags === true');
+    expect(edit).to.include('{!isCreate && canEditTags ? (');
+    expect(edit).to.include('requestTagNormalizationPreview');
   });
 
   it('keeps testdata and additional files on refresh-stable views of the existing files route', () => {
@@ -107,10 +108,10 @@ describe('P3.15 programming editor workspace correction', () => {
     for (const name of ['difficulty', 'content', 'hidden', 'lockHidden']) {
       expect(edit).to.include(`name="${name}"`);
     }
-    expect(edit).to.include("name={!managed || canSubmitManagedWorkingTitle ? 'title' : undefined}");
+    expect(edit).to.include("name={canEditContent && (!managed || canSubmitManagedWorkingTitle) ? 'title' : undefined}");
     expect(edit).to.include("const managedMetadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft'");
     expect(edit).to.match(/managedMetadataDraft\s*\? pdoc\.managedAuthoring\?\.workingTitle \|\| ''\s*: pdoc\.title \|\| ''/);
-    expect(edit).to.include("name={pidEditable ? 'pid' : undefined}");
+    expect(edit).to.include("name={canEditContent && pidEditable ? 'pid' : undefined}");
     expect(edit).not.to.include("name={managed ? undefined : 'tag'}");
     expect(edit).not.to.include('id="edit-tag"');
     expect(config).to.include("formData.append('operation', 'upload_file')");
@@ -118,7 +119,7 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(config).to.include("formData.append('filename', 'config.yaml')");
     expect(config).to.include(`fetch(\`${problemUrlExpression}/files\``);
     expect(files).to.include(`endpoint={\`${problemUrlExpression}/files\`}`);
-    expect(files).to.include('meta={{ type }}');
+    expect(files).to.include('meta={{ type, ...(uploadConfirmationRequestId ? { activeContainerConfirmation: uploadConfirmationRequestId } : {}) }}');
     for (const operation of ['rename_files', 'delete_files', 'generate_testdata']) {
       expect(files).to.include(`value="${operation}"`);
     }
@@ -174,7 +175,9 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(edit).to.include("'idle' | 'dirty' | 'saving' | 'saved' | 'error'");
     expect(edit).to.include('useFormDirtyState(formRef, editorRevisionKey)');
     expect(edit).to.include('useUnsavedChangesGuard(');
-    expect(edit).to.include('dirtyState.dirty || tagSelectionDirty || managedKnowledgeDirty');
+    expect(edit).to.include(
+      "(canEditContent && (dirtyState.dirty || saveState === 'saving')) || tagSelectionDirty || tagOperationState === 'applying'",
+    );
     expect(edit).to.include('const editVersion = useRef(0)');
     expect(edit).to.include('if (editVersion.current === savedVersion)');
     expect(edit).to.include('dirtyState.markClean()');

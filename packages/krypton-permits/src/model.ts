@@ -5,6 +5,16 @@
  * fence coordinator in service.ts.
  */
 import { ObjectId, type ObjectId as ObjectIdType } from 'hydrooj';
+import {
+    assignContribution,
+    clearContributionsForProblem,
+    listCompletedDataContributorUids,
+    listContributionsForProblem,
+    listContributionsForUser,
+    loadActiveContributionPids,
+    revokeContribution,
+    setContributionStatus,
+} from './contributions';
 import { permitsColl, permitSourcesColl } from './db';
 import { canonicalActiveFilter, normalizeActiveCanonicalDoc } from './legacy-canonical';
 import { mongoAclRepository } from './repository';
@@ -513,11 +523,14 @@ export async function loadAclForUser(domainId: string, uid: number) {
             permitPids: new Set<number>(),
             authoredPids: new Set<number>(),
             maintainedPids: new Set<number>(),
+            dataContributionPids: new Set<number>(),
+            tagContributionPids: new Set<number>(),
             fencedPids: new Set<number>(),
             ownsLegacyProblems: false,
         };
     }
-    return aclService.loadUserAcl(domainId, uid);
+    const [acl, contributions] = await Promise.all([aclService.loadUserAcl(domainId, uid), loadActiveContributionPids(domainId, uid)]);
+    return { ...acl, ...contributions };
 }
 
 export async function loadPermittedPidsFor(domainId: string, uid: number): Promise<Set<number>> {
@@ -559,13 +572,15 @@ export async function clearForProblem(
 ): Promise<number> {
     const managed = await mongoAclRepository.isManagedProblem(domainId, pid);
     await assertBoundWriteClaimCapability(domainId, pid, opts.writeClaimRequestId, ['hard-delete'], opts.actor, managed);
-    return aclService.clearForProblem(
+    const clearedAcl = await aclService.clearForProblem(
         domainId,
         pid,
         newRequestId('hard-delete-clear-acl', opts.requestId),
         opts.actor || 0,
         opts.writeClaimRequestId,
     );
+    const clearedContributions = await clearContributionsForProblem(domainId, pid);
+    return clearedAcl + clearedContributions;
 }
 
 export async function countByContest(domainId: string, viaContest: ObjectIdType): Promise<number> {
@@ -685,6 +700,12 @@ export const permitsModel = {
     repairAclMutation,
     resumeFence,
     prepareProblemWriteClaim,
+    assignContribution,
+    revokeContribution,
+    setContributionStatus,
+    listContributionsForProblem,
+    listContributionsForUser,
+    listCompletedDataContributorUids,
 };
 
 /**
@@ -707,4 +728,5 @@ export const publicPermitsModel = {
     cleanupManagedDraftCreation,
     countByContest,
     prepareProblemWriteClaim,
+    listCompletedDataContributorUids,
 };

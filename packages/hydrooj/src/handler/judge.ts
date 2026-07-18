@@ -256,7 +256,7 @@ export async function processJudgeFileCallback(rid: ObjectId, filename: string, 
     const udoc = await user.getById(rdoc.domainId, rdoc.uid);
     if (!udoc) throw new ForbiddenError();
     let preflightError: unknown;
-    await problem.withAuthorizedStructuralWriteClaim(
+    await problem.withAuthorizedDataWriteClaim(
         rdoc.domainId,
         rdoc.pid,
         udoc,
@@ -286,7 +286,10 @@ export async function processJudgeFileCallback(rid: ObjectId, filename: string, 
             }
             await problem.addTestdataWithClaim(claim, sanitize(filename), fs.createReadStream(filePath), udoc._id);
         },
-        { capability: 'content' },
+        {
+            activeContainerConfirmation: rdoc.dataWriteActiveContainerConfirmation,
+            confirmationOperation: 'generate-testdata-request',
+        },
     );
     if (preflightError) throw preflightError;
 }

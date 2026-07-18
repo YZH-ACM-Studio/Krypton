@@ -5,7 +5,7 @@ import { effectiveProblemKind, ProblemConfigFile, STATUS_TEXTS } from '@hydrooj/
 import { Logger } from '@hydrooj/utils';
 import { Context } from '../context';
 import { ProblemNotFoundError, ValidationError } from '../error';
-import { JudgeMeta, RecordDoc } from '../interface';
+import { JudgeMeta, ProblemDataWriteConfirmation, RecordDoc } from '../interface';
 import {
     parseProblemConfigObject,
     parseStructuredRegionSubmission,
@@ -235,6 +235,7 @@ export default class RecordModel {
             hackTarget?: ObjectId;
             type: 'judge' | 'rejudge' | 'pretest' | 'hack' | 'generate' | 'manual';
             notify?: boolean;
+            dataWriteActiveContainerConfirmation?: ProblemDataWriteConfirmation;
         } = { type: 'judge' },
     ) {
         const data: RecordDoc = {
@@ -260,6 +261,9 @@ export default class RecordModel {
         if (args.files) data.files = args.files;
         if (args.hackTarget) data.hackTarget = args.hackTarget;
         if (args.notify) data.notify = true;
+        if (args.dataWriteActiveContainerConfirmation) {
+            data.dataWriteActiveContainerConfirmation = { ...args.dataWriteActiveContainerConfirmation };
+        }
         if (args.type === 'manual') {
             if (!args.contest) throw new ValidationError('contest');
             data.lang = '_';

@@ -25,12 +25,59 @@ import type { AclMutationFence, PermitSource, ProblemAclMutationLock } from './c
 
 export const ACTIVE_WRITE_CLAIM_RECOVERY_CONFIRMATION = 'PROCESS_QUIESCED_AND_PARTIAL_WRITE_INSPECTED';
 
+export type ProblemContributionScope = 'data' | 'tag';
+export type ProblemContributionStatus = 'pending' | 'completed';
+export type ProblemContributionAction = 'assigned' | 'completed' | 'reopened' | 'revoked';
+
+export interface ProblemContributionHistoryEntry {
+    action: ProblemContributionAction;
+    result: 'success';
+    actor: number;
+    at: Date;
+    requestId: string;
+    note?: string;
+}
+
+/**
+ * Orthogonal, per-problem contribution capability. These rows never replace
+ * or participate in canonical author/verifier/maintainer role derivation.
+ */
+export interface ProblemContributionDoc {
+    _id: ObjectId;
+    domainId: string;
+    pid: number;
+    uid: number;
+    scope: ProblemContributionScope;
+    active: boolean;
+    status: ProblemContributionStatus;
+    note: string;
+    assignedBy: number;
+    assignedAt: Date;
+    updatedBy: number;
+    updatedAt: Date;
+    firstCompletedAt?: Date;
+    lastCompletedAt?: Date;
+    lastRequestId: string;
+    history: ProblemContributionHistoryEntry[];
+}
+
 export interface ProblemWriteClaimMarker {
     requestId: string;
     actor: number;
     operation: string;
     /** Missing only on pre-P2.13 repair markers; every new claim persists it. */
-    capability?: 'maintain' | 'content' | 'metadata' | 'collaborators' | 'publish' | 'archive' | 'hard-delete' | 'clone';
+    capability?:
+        | 'maintain'
+        | 'content'
+        | 'metadata'
+        | 'collaborators'
+        | 'contributions'
+        | 'data'
+        | 'tag'
+        | 'publish'
+        | 'archive'
+        | 'hard-delete'
+        | 'clone';
     state: 'active' | 'error';
     lastError: string | null;
     createdAt: Date;
@@ -80,6 +127,7 @@ declare module 'hydrooj' {
         'problem.permits': PermitDoc;
         'problem.permitSources': PermitSource & { _id: ObjectId };
         'problem.aclMutationFences': AclMutationFence & { _id: ObjectId };
+        'problem.contributions': ProblemContributionDoc;
     }
 
     interface ProblemDoc {

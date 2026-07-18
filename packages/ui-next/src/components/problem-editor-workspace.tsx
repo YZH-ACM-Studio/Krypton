@@ -22,6 +22,8 @@ export function ProblemEditorWorkspace({
   pid,
   isCreate = false,
   fileSection = 'testdata',
+  editEnabled = true,
+  dataEnabled = true,
   collaborationEnabled = true,
   status,
   actions,
@@ -33,6 +35,8 @@ export function ProblemEditorWorkspace({
   pid: string;
   isCreate?: boolean;
   fileSection?: ProblemEditorFileSection;
+  editEnabled?: boolean;
+  dataEnabled?: boolean;
   collaborationEnabled?: boolean;
   status?: ReactNode;
   actions?: ReactNode;
@@ -42,15 +46,23 @@ export function ProblemEditorWorkspace({
     const editUrl = isCreate ? (typeof window === 'undefined' ? '/problem/create/programming' : window.location.pathname) : `${problemUrl}/edit`;
     const createDisabledReason = '创建题目后可用';
     return [
-      { key: 'edit', label: '题目内容', description: '标题、题号、标签、来源与题面', href: editUrl, icon: FileText },
+      {
+        key: 'edit',
+        label: '题目内容',
+        description: '标题、题号、标签、来源与题面',
+        href: editUrl,
+        icon: FileText,
+        disabled: !editEnabled,
+        disabledReason: '当前角色没有题面或标签权限',
+      },
       {
         key: 'config',
         label: '评测配置',
         description: '语言、时空限制、用例与子任务',
         href: `${problemUrl}/config`,
         icon: Settings2,
-        disabled: isCreate,
-        disabledReason: createDisabledReason,
+        disabled: isCreate || !dataEnabled,
+        disabledReason: isCreate ? createDisabledReason : '当前角色没有评测数据权限',
       },
       {
         key: 'testdata',
@@ -58,8 +70,8 @@ export function ProblemEditorWorkspace({
         description: '输入、输出、生成器与标程',
         href: `${problemUrl}/files?section=testdata`,
         icon: FolderInput,
-        disabled: isCreate,
-        disabledReason: createDisabledReason,
+        disabled: isCreate || !dataEnabled,
+        disabledReason: isCreate ? createDisabledReason : '当前角色没有评测数据权限',
       },
       {
         key: 'additional',
@@ -67,20 +79,20 @@ export function ProblemEditorWorkspace({
         description: '题面图片与选手可下载文件',
         href: `${problemUrl}/files?section=additional`,
         icon: FileArchive,
-        disabled: isCreate,
-        disabledReason: createDisabledReason,
+        disabled: isCreate || !dataEnabled,
+        disabledReason: isCreate ? createDisabledReason : '当前角色没有评测数据权限',
       },
       {
         key: 'collaboration',
         label: '权限与协作',
-        description: '出题人、验题人、维护者与审核发布',
+        description: '出题人、贡献者、验题人、维护者与审核发布',
         href: `${editUrl}?section=collaboration`,
         icon: ShieldCheck,
         disabled: isCreate || !collaborationEnabled,
         disabledReason: isCreate ? createDisabledReason : '当前角色无协作管理权限',
       },
     ];
-  }, [collaborationEnabled, isCreate, problemUrl]);
+  }, [collaborationEnabled, dataEnabled, editEnabled, isCreate, problemUrl]);
 
   const activeKey = page === 'config' ? 'config' : page === 'files' ? fileSection : page;
 

@@ -23,9 +23,13 @@ export function ProblemConfigPage() {
       problemUrl={problemUrl}
       title={pdoc.title || String(pid)}
       pid={String(pid)}
-      collaborationEnabled={pdoc.authoringMode !== 'managed' || capabilities.canManageCollaborators === true || capabilities.canPublish === true}
+      editEnabled={capabilities.canEditContent === true || capabilities.canEditTags === true}
+      dataEnabled={capabilities.canEditData === true}
+      collaborationEnabled={
+        capabilities.canManageCollaborators === true || capabilities.canManageContributions === true || capabilities.canPublish === true
+      }
     >
-      <ProblemConfigEditor problemUrl={problemUrl} pdoc={pdoc} files={testdata} initialYaml={config} embedded />
+      <ProblemConfigEditor problemUrl={problemUrl} pdoc={pdoc} files={testdata} initialYaml={config} dataWriteGuard={data.dataWriteGuard} embedded />
     </ProblemEditorWorkspace>
   );
 }

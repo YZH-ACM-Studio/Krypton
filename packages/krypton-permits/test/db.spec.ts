@@ -116,7 +116,12 @@ describe('krypton-permits indexes', () => {
         const { module, collections } = loadDbModule();
         await module.ensureIndexes();
 
-        expect([...collections.keys()]).to.have.members(['problem.permits', 'problem.permitSources', 'problem.aclMutationFences']);
+        expect([...collections.keys()]).to.have.members([
+            'problem.permits',
+            'problem.permitSources',
+            'problem.aclMutationFences',
+            'problem.contributions',
+        ]);
         const all = [...collections.values()].flatMap((collection) => collection.indexes.slice(1));
         expect(all.every((index) => Boolean(index.name))).to.equal(true);
         expect(all.every((index) => index.partialFilterExpression === undefined)).to.equal(true);
@@ -134,6 +139,11 @@ describe('krypton-permits indexes', () => {
         const fencePair = all.find((index) => index.name === 'problem_acl_fences_pair_uq');
         expect(fencePair).to.deep.include({
             key: { domainId: 1, pid: 1, uid: 1 },
+            unique: true,
+        });
+        const contributionPair = all.find((index) => index.name === 'problem_contributions_identity_uq');
+        expect(contributionPair).to.deep.include({
+            key: { domainId: 1, pid: 1, uid: 1, scope: 1 },
             unique: true,
         });
     });

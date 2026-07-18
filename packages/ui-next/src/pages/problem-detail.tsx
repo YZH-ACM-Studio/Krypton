@@ -617,6 +617,7 @@ export function ProblemDetailPage() {
   const data = bs.page.data;
   const pdoc: R = data.pdoc || {};
   const authorUdocs: R[] = Array.isArray(data.authorUdocs) ? data.authorUdocs : [];
+  const dataContributorUdocs: R[] = Array.isArray(data.dataContributorUdocs) ? data.dataContributorUdocs : [];
   const canEditProblem = data.canEditProblem === true;
   const psdoc: R = data.psdoc || {};
   const config: R = pdoc.config && typeof pdoc.config === 'object' ? pdoc.config : {};
@@ -811,6 +812,9 @@ export function ProblemDetailPage() {
                 {/* Info chips */}
                 <div className="flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border bg-muted/30 px-3 py-2">
                   <InfoChip icon={User} label="出题人" value={<ProblemAuthorText authors={authorUdocs} />} />
+                  {dataContributorUdocs.length ? (
+                    <InfoChip icon={HardDrive} label="数据贡献者" value={<ProblemAuthorText authors={dataContributorUdocs} />} />
+                  ) : null}
                   <InfoChip icon={Send} label="提交" value={nSubmit} />
                   <InfoChip icon={CheckCircle2} label="通过" value={<span className="text-green-600 dark:text-green-400">{nAccept}</span>} />
                   <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} />
@@ -1019,6 +1023,9 @@ export function ProblemDetailPage() {
         <InfoChip icon={Trophy} label="通过率" value={`${rate}%`} />
         {!inContest && pdoc.origStat ? <InfoChip icon={BarChart3} label="赛时通过率" value={origStatChipValue(pdoc.origStat)} /> : null}
         {!inContest ? <InfoChip icon={User} label="出题人" value={<ProblemAuthorText authors={authorUdocs} />} /> : null}
+        {!inContest && dataContributorUdocs.length ? (
+          <InfoChip icon={HardDrive} label="数据贡献者" value={<ProblemAuthorText authors={dataContributorUdocs} />} />
+        ) : null}
         {showExternals && solutionCount > 0 && <InfoChip icon={BookOpen} label="题解" value={solutionCount} />}
         {showExternals && discussionCount > 0 && <InfoChip icon={MessageSquare} label="讨论" value={discussionCount} />}
       </div>

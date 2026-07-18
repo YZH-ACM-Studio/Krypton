@@ -51,6 +51,7 @@ const calls = {
     copy: [] as any[],
     edit: [] as any[],
     get: [] as any[],
+    getCapabilityAuthorized: [] as any[],
     getEditableAuthorized: [] as any[],
     getMaintainableAuthorized: [] as any[],
     getViewableAuthorized: [] as any[],
@@ -84,10 +85,12 @@ let countResult = 0;
 let maintainResult = false;
 let claimAllowed = true;
 let permitResults: any[] = [];
+let completedDataContributorUids: number[] = [];
 let missingUserIds = new Set<number>();
 let managedTrainingPlacementResults: any[] = [];
 let managedPublishResult: any = null;
 let managedPublicationPreviewError: Error | null = null;
+let activeDataWriteContainers: any[] = [];
 const createKinds: string[] = [];
 
 function cursor(docs: any[] = []) {
@@ -152,8 +155,11 @@ const problemStub = {
         calls.maintain.push({ user, pdoc, capability: 'content' });
         return user.canEditContent ?? maintainResult;
     },
+    canEditProblemData: (user: any) => user.canEditData ?? user.canEditContent ?? maintainResult,
+    canEditProblemTags: (user: any) => user.canEditTags ?? user.canEditContent ?? maintainResult,
     canEditProblemMetadata: (user: any) => user.canEditMetadata ?? maintainResult,
     canManageProblemCollaborators: (user: any) => user.canManageCollaborators ?? maintainResult,
+    canManageProblemContributions: (user: any) => user.canManageContributions ?? maintainResult,
     canManageProblemMaintainers: (user: any) => user.canManageMaintainers ?? maintainResult,
     canPublishProblem: (user: any) => user.canPublish ?? maintainResult,
     canArchiveProblem: (user: any) => user.canArchive ?? maintainResult,
@@ -242,6 +248,10 @@ const problemStub = {
         calls.getEditableAuthorized.push(args);
         return maintainableResults.shift() || null;
     },
+    async getCapabilityAuthorized(...args: any[]) {
+        calls.getCapabilityAuthorized.push(args);
+        return maintainableResults.shift() || null;
+    },
     async getViewableAuthorized(...args: any[]) {
         calls.getViewableAuthorized.push(args);
         return getResults.shift() || null;
@@ -272,6 +282,16 @@ const problemStub = {
     ) {
         return problemStub.withAuthorizedWriteClaim(domainId, pid, user, operation, work, options);
     },
+    async withAuthorizedDataWriteClaim(
+        domainId: string,
+        pid: number,
+        user: any,
+        operation: string,
+        work: (claim: any) => Promise<any>,
+        options: any = {},
+    ) {
+        return problemStub.withAuthorizedWriteClaim(domainId, pid, user, operation, work, { ...options, capability: 'data' });
+    },
     async inc(...args: any[]) {
         calls.inc.push(args);
     },
@@ -281,6 +301,17 @@ const problemStub = {
         return cursor(getMultiResults.shift() || []);
     },
     isProblemBankAdmin: (user: any) => user.admin === true,
+    PROBLEM_DATA_WRITE_CONFIRMATION_TTL_MS: 10 * 60 * 1000,
+    activeDataWriteContainerFacts: (items: any[]) =>
+        items.map((item) => ({
+            id: String(item.docId),
+            title: item.title,
+            rule: item.rule,
+            beginAt: item.beginAt,
+            endAt: item.endAt,
+        })),
+    activeDataWriteContainerFingerprint: (_domainId: string, _pid: number, facts: any[]) => `fingerprint:${facts.map((item) => item.id).join(',')}`,
+    listActiveDataWriteContainers: async () => activeDataWriteContainers,
     async random(domainId: string, query: unknown) {
         calls.random.push({ domainId, query });
         return 123;
@@ -563,6 +594,7 @@ function makeHandler(HandlerClass: any, user: Record<string, unknown>) {
         },
         response: { body: {} },
         request: { json: false },
+        session: {},
         domain: { _id: 'system', namespaces: {} },
         UiContext: {},
         args: {},
@@ -608,10 +640,12 @@ beforeEach(() => {
     maintainResult = false;
     claimAllowed = true;
     permitResults = [];
+    completedDataContributorUids = [];
     missingUserIds = new Set();
     managedTrainingPlacementResults = [];
     managedPublishResult = null;
     managedPublicationPreviewError = null;
+    activeDataWriteContainers = [];
     createKinds.length = 0;
     (global as any).Hydro.module.problemSearch = {};
     (global as any).Hydro.model.permits = {
@@ -619,6 +653,7 @@ beforeEach(() => {
             calls.permits.push(args);
             return permitResults;
         },
+        listCompletedDataContributorUids: async () => completedDataContributorUids,
     };
 });
 
@@ -923,6 +958,7 @@ describe('P2.11 authoritative problem route domain', () => {
         handler.request.body = { operation: 'upload_file', filename: '1.in', type: 'testdata' };
 
         await handler._prepare('forged', 7);
+        maintainableResults = [{ ...handler.pdoc }];
         await handler.post();
 
         expect(handler.response.body.canEditProblem).to.equal(true);
@@ -1022,6 +1058,29 @@ describe('P2.11 authoritative problem route domain', () => {
         await handler._prepare('forged', 7);
 
         expect(handler.response.body.authorUdocs).to.deep.equal([]);
+    });
+
+    it('publishes only resolved completed data contributors on the problem detail', async () => {
+        const handler = makeHandler(ProblemDetailHandler, {});
+        completedDataContributorUids = [77, 88];
+        missingUserIds.add(88);
+        getResults = [
+            {
+                domainId: 'system',
+                docId: 7,
+                owner: 42,
+                hidden: false,
+                title: 'Contributed problem',
+                content: 'statement',
+                config: '',
+                additional_file: [],
+                tag: [],
+            },
+        ];
+
+        await handler._prepare('forged', 7);
+
+        expect(handler.response.body.dataContributorUdocs).to.deep.equal([{ _id: 77, uname: 'user-77' }]);
     });
 
     it('opens the creation hub only for a bank administrator or trusted managed creator', async () => {
@@ -1300,6 +1359,7 @@ describe('P2.11 authoritative problem route domain', () => {
     it('edits problem metadata and config/files only in the loaded problem domain', async () => {
         const edit = makeHandler(ProblemEditHandler, {});
         edit.pdoc = { domainId: 'system', docId: 7, pid: 'P7' };
+        edit.canEditLoadedProblem = true;
         await edit.post('forged', 'P7', 'Title', 'Statement', 'P7', false, [], 0, false);
         expect(calls.edit[0][0]).to.equal('system');
         expect(calls.edit[0][3]).to.equal(edit.user);
@@ -1328,12 +1388,12 @@ describe('P2.11 authoritative problem route domain', () => {
         await handler.postDeleteFiles('forged', ['readme.txt'], 'additional_file');
 
         expect(calls.claims.map(({ operation, options }) => ({ operation, capability: options.capability }))).to.deep.equal([
-            { operation: 'files-upload', capability: 'content' },
-            { operation: 'files-upload', capability: 'content' },
-            { operation: 'files-rename', capability: 'content' },
-            { operation: 'files-rename', capability: 'content' },
-            { operation: 'files-delete', capability: 'content' },
-            { operation: 'files-delete', capability: 'content' },
+            { operation: 'files-upload', capability: 'data' },
+            { operation: 'files-upload', capability: 'data' },
+            { operation: 'files-rename', capability: 'data' },
+            { operation: 'files-rename', capability: 'data' },
+            { operation: 'files-delete', capability: 'data' },
+            { operation: 'files-delete', capability: 'data' },
         ]);
         expect(calls.renameFile).to.have.length(6);
         expect(calls.renameFile.every((args) => args[0] === 'system' && args[1] === 7)).to.equal(true);
@@ -1358,6 +1418,8 @@ describe('P2.13 managed programming edit boundary', () => {
             authoringMode: 'managed',
             managedAuthoring: { workingTitle: 'Working title', selectedMindmapNodeIds: ['node-1'], metadataStatus: 'draft' },
         };
+        handler.canEditLoadedProblem = true;
+        handler.user.canEditContent = true;
         return handler;
     }
 
@@ -1613,6 +1675,7 @@ describe('P2.17 programming tag HTTP boundaries', () => {
             problemKind: 'programming',
             structureRevision: 4,
         };
+        handler.canEditLoadedProblem = true;
         handler.request.body = {
             title: 'New',
             content: 'Statement',
@@ -1640,6 +1703,7 @@ describe('P2.17 programming tag HTTP boundaries', () => {
             problemKind: 'programming',
             structureRevision: 4,
         };
+        handler.canEditLoadedProblem = true;
         handler.request.body = { title: 'Title', content: 'Statement', tag: 'forged' };
         const rawTag = await captureFailure(() => handler.post('forged', 'P7', 'Title', 'Statement', undefined, false, ['forged'], [], 2, false, 4));
         expect(rawTag).to.be.instanceOf(GenericError);
@@ -1698,6 +1762,82 @@ describe('P2.17 programming tag HTTP boundaries', () => {
 });
 
 describe('P3.15 files workspace capability contract', () => {
+    it('lets a data-only contributor pass the POST preflight through a fresh data-capability read', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P3101',
+            title: 'Managed problem',
+            authoringMode: 'managed',
+            data: [],
+            additional_file: [],
+        };
+        const handler = makeHandler(ProblemFilesHandler, { canEditContent: false, canEditData: true });
+        handler.pdoc = pdoc;
+        handler.args = { operation: 'upload_file' };
+        handler.request.body = { operation: 'upload_file', filename: '1.in', type: 'testdata' };
+        maintainableResults = [{ ...pdoc }];
+
+        await handler.post();
+
+        expect(calls.getCapabilityAuthorized[0].slice(0, 4)).to.deep.equal(['system', 7, handler.user, 'data']);
+        expect(handler.canEditLoadedProblem).to.equal(true);
+    });
+
+    it('binds an administrator override challenge to the current problem, operation, and active containers', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P3101',
+            title: 'Managed problem',
+            authoringMode: 'managed',
+            data: [{ name: '1.in', size: 1 }],
+            additional_file: [],
+        };
+        const handler = makeHandler(ProblemFilesHandler, { admin: true, canEditData: true });
+        handler.pdoc = pdoc;
+        maintainableResults = [{ ...pdoc }];
+        activeDataWriteContainers = [{ docId: 'contest-1', title: '期中考试', rule: 'exam' }];
+
+        await handler.get({}, ['testdata', 'additional_file'], false);
+
+        const confirmations = handler.response.body.dataWriteGuard.confirmationRequestIds;
+        expect(confirmations).to.have.keys('files-upload', 'files-rename', 'files-delete', 'generate-testdata-request');
+        await handler.postDeleteFiles('forged', ['1.in'], 'testdata', confirmations['files-delete']);
+        expect(calls.claims.at(-1).options.activeContainerConfirmation).to.deep.include({
+            requestId: confirmations['files-delete'],
+            domainId: 'system',
+            pid: 7,
+            actor: 42,
+            operation: 'files-delete',
+            containerFingerprint: 'fingerprint:contest-1',
+        });
+
+        const claimCount = calls.claims.length;
+        const wrongOperation = await captureFailure(() => handler.postDeleteFiles('forged', ['1.in'], 'testdata', confirmations['files-upload']));
+        expect(wrongOperation).to.be.instanceOf(GenericError);
+        expect(calls.claims).to.have.length(claimCount);
+    });
+
+    it('does not present the contribution-only contest guard to an existing content editor', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P3101',
+            title: 'Legacy problem',
+            data: [],
+            additional_file: [],
+        };
+        const handler = makeHandler(ProblemFilesHandler, { canEditContent: true, canEditData: true });
+        handler.pdoc = pdoc;
+        maintainableResults = [{ ...pdoc }];
+        activeDataWriteContainers = [{ docId: 'contest-1', title: '期中考试', rule: 'exam' }];
+
+        await handler.get({}, ['testdata', 'additional_file'], false);
+
+        expect(handler.response.body.dataWriteGuard).to.deep.equal({ active: [], canOverride: false });
+    });
+
     it('publishes the canonical managed capabilities for authors, maintainers, and administrators', async () => {
         const pdoc = {
             domainId: 'system',
@@ -1766,7 +1906,8 @@ describe('P3.15 files workspace capability contract', () => {
                 ...scenario.expected,
             });
             expect(handler.response.body.pdoc.managedAuthoring?.metadataStatus, scenario.role).to.equal('confirmed');
-            expect(calls.getEditableAuthorized.at(-1)?.[3], scenario.role).to.equal(problemStub.PROJECTION_MANAGED_EDITOR);
+            expect(calls.getCapabilityAuthorized.at(-1)?.[3], scenario.role).to.equal('data');
+            expect(calls.getCapabilityAuthorized.at(-1)?.[4], scenario.role).to.equal(problemStub.PROJECTION_MANAGED_EDITOR);
         }
     });
 });
@@ -1908,6 +2049,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             problemKind: 'multi',
             structureRevision: 4,
         };
+        handler.canEditLoadedProblem = true;
         handler.request.body = {
             title: 'Multi',
             content: 'Statement',
@@ -1977,6 +2119,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
                 problemKind: 'multi',
                 structureRevision: 4,
             };
+            handler.canEditLoadedProblem = true;
             handler.request.body = { ...baseBody, ...forged };
             const error = await captureFailure(() =>
                 handler.post(
@@ -2006,6 +2149,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             problemKind: 'multi',
             structureRevision: 4,
         };
+        stale.canEditLoadedProblem = true;
         stale.request.body = { ...baseBody, knowledgeNodeIds: 'stale-node' };
         const staleError = await captureFailure(() =>
             stale.post('forged', 'P7', 'Multi', 'Statement', undefined, false, [], ['stale-node'], 2, false, 4, 'multi', config),
@@ -2026,6 +2170,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             content: 'Original statement',
             difficulty: 2,
         };
+        handler.canEditLoadedProblem = true;
         handler.request.body = {
             title: 'Renamed',
             hidden: 'true',
@@ -2064,6 +2209,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             structureLockedAt: new Date(),
             content: 'Original statement',
         };
+        handler.canEditLoadedProblem = true;
         handler.request.body = {
             title: 'Renamed',
             content: 'Changed statement',
@@ -2108,6 +2254,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             tag: [],
             content: '',
         };
+        handler.canEditLoadedProblem = true;
         maintainableResults = [
             {
                 config: {
@@ -2138,6 +2285,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             tag: [],
             content: '',
         };
+        handler.canEditLoadedProblem = true;
         const region = { id: 'r_abcdefghijkl', startLine: 0, endLine: 1, order: 0, signature: 'int solve()' };
         maintainableResults = [
             {
@@ -2567,15 +2715,17 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
         const pdoc = { domainId: 'system', docId: 7, owner: 42 };
         const manage = makeHandler(ProblemManageHandler, { _id: 42 });
         manage.pdoc = pdoc;
+        manage.canEditLoadedProblem = true;
         maintainableResults = [null];
         const manageError = await captureFailure(() => manage.prepare());
         expect(manageError).to.be.instanceOf(TestPermissionError);
-        expect(calls.getEditableAuthorized[0].slice(0, 2)).to.deep.equal(['system', 7]);
+        expect(calls.getCapabilityAuthorized[0].slice(0, 4)).to.deep.equal(['system', 7, manage.user, 'content']);
 
         const files = makeHandler(ProblemFilesHandler, { _id: 42 });
         files.pdoc = pdoc;
         files.args = { operation: 'upload_file' };
         maintainResult = false;
+        maintainableResults = [null];
         const filesError = await captureFailure(() => files.post());
         expect(filesError).to.be.instanceOf(TestPermissionError);
         expect(calls.renameFile).to.deep.equal([]);
@@ -2586,7 +2736,7 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
         expect(source).not.to.match(/\.own\((?:this\.)?pdoc\b/);
         expect(source).not.to.match(/\.own\(this\.pdoc\b/);
         expect(source).not.to.match(/checkPerm\(PERM\.PERM_EDIT_PROBLEM\)/);
-        expect(source).to.include('problem.getEditableAuthorized(');
+        expect(source).to.include('problem.getCapabilityAuthorized(');
         expect(source).to.include('problem.canEditProblemContent(udoc, pdoc)');
     });
 
@@ -2610,13 +2760,14 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
         handler.tdoc = { docId: 'contest' };
         handler.response.body.pdoc = handler.pdoc;
         maintainResult = true; // request preload still says maintainer
+        handler.canEditLoadedProblem = true;
         maintainableResults = [null]; // stable final read sees completed downgrade
 
         const error = await captureFailure(() => handler.prepare());
 
         expect(error).to.be.instanceOf(TestPermissionError);
-        expect(calls.getEditableAuthorized).to.have.length(1);
-        expect(calls.getEditableAuthorized[0].slice(0, 2)).to.deep.equal(['system', 7]);
+        expect(calls.getCapabilityAuthorized).to.have.length(1);
+        expect(calls.getCapabilityAuthorized[0].slice(0, 4)).to.deep.equal(['system', 7, handler.user, 'content']);
     });
 
     it('loads editor raw config only through the stable maintainer read', async () => {
@@ -2631,16 +2782,18 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
             tag: [],
             content: '',
         };
+        handler.canEditLoadedProblem = true;
         maintainableResults = [{ config: 'type: default\n' }];
 
         await handler.get();
 
         expect(handler.response.body.configRaw).to.equal('type: default\n');
         expect(calls.get).to.deep.equal([]);
-        expect(calls.getEditableAuthorized[0][0]).to.equal('system');
-        expect(calls.getEditableAuthorized[0][1]).to.equal(7);
-        expect(calls.getEditableAuthorized[0][3]).to.deep.equal(['config']);
-        expect(calls.getEditableAuthorized[0][4]).to.equal(true);
+        expect(calls.getCapabilityAuthorized[0][0]).to.equal('system');
+        expect(calls.getCapabilityAuthorized[0][1]).to.equal(7);
+        expect(calls.getCapabilityAuthorized[0][3]).to.equal('content');
+        expect(calls.getCapabilityAuthorized[0][4]).to.deep.equal(['config']);
+        expect(calls.getCapabilityAuthorized[0][5]).to.equal(true);
     });
 
     it('performs no raw config storage read after the stable maintainer read rejects', async () => {
@@ -2764,7 +2917,27 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
         expect(calls.storageSign).to.deep.equal([]);
     });
 
-    it('signs no single testdata link when tid only authorizes the statement', async () => {
+    it('lets a data-only contributor preview or download one testdata file', async () => {
+        const handler = makeHandler(ProblemFileDownloadHandler, { _id: 42, canEditData: true, canEditContent: false });
+        const stable = {
+            domainId: 'system',
+            docId: 7,
+            owner: 9,
+            data: [{ name: 'config.yaml', size: 6 }],
+            additional_file: [],
+        };
+        handler.pdoc = stable;
+        handler.tdoc = { domainId: 'system', docId: 'contest' };
+        maintainableResults = [stable];
+
+        await handler.get({}, 'testdata', 'config.yaml', true, {} as any);
+
+        expect(calls.getCapabilityAuthorized.at(-1)).to.deep.equal(['system', 7, handler.user, 'data']);
+        expect(calls.storageGetMeta).to.deep.equal([['problem/system/7/testdata/config.yaml']]);
+        expect(calls.storageSign).to.have.length(1);
+    });
+
+    it('signs no single testdata link after a data contribution is revoked', async () => {
         const handler = makeHandler(ProblemFileDownloadHandler, { _id: 42 });
         handler.pdoc = { domainId: 'system', docId: 7, owner: 9, data: [], additional_file: [] };
         handler.tdoc = { domainId: 'system', docId: 'contest' };
@@ -2774,6 +2947,7 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
         const error = await captureFailure(() => handler.get({}, 'testdata', 'config.yaml', false, {} as any));
 
         expect(error).to.be.instanceOf(TestPermissionError);
+        expect(calls.getCapabilityAuthorized.at(-1)).to.deep.equal(['system', 7, handler.user, 'data']);
         expect(calls.storageGetMeta).to.deep.equal([]);
         expect(calls.storageSign).to.deep.equal([]);
     });

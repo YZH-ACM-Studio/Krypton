@@ -29,7 +29,8 @@ import { migrationScripts } from './src/migration';
 import { permitsModel, publicPermitsModel } from './src/model';
 import { preloadProblemAcl } from './src/preload';
 
-export { aclMutationFencesColl, permitsColl, permitSourcesColl } from './src/db';
+export * from './src/contributions';
+export { aclMutationFencesColl, contributionsColl, permitsColl, permitSourcesColl } from './src/db';
 export { permitsModel } from './src/model';
 export * from './src/types';
 

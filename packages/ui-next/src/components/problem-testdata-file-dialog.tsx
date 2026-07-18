@@ -1,6 +1,7 @@
 import { Download, FileCode, Save } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { KryptonIDE } from '@/components/krypton-ide';
+import { type ProblemDataWriteConfirmationResult, type ProblemDataWriteOperation } from '@/components/problem-data-write-guard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -31,7 +32,17 @@ function bytesLabel(bytes: number): string {
 
 const MAX_FILE_PREVIEW_BYTES = 1 * 1024 * 1024;
 
-export function ProblemTestdataFileDialog({ file, problemUrl, onClose }: { file: ProblemFile; problemUrl: string; onClose: () => void }) {
+export function ProblemTestdataFileDialog({
+  file,
+  problemUrl,
+  onClose,
+  confirmWrite,
+}: {
+  file: ProblemFile;
+  problemUrl: string;
+  onClose: () => void;
+  confirmWrite?: (action: string, operation: ProblemDataWriteOperation) => Promise<ProblemDataWriteConfirmationResult>;
+}) {
   const filename = String(file.name || '');
   const size = Number(file.size) || 0;
   const tooBig = size > MAX_FILE_PREVIEW_BYTES;
@@ -80,6 +91,8 @@ export function ProblemTestdataFileDialog({ file, problemUrl, onClose }: { file:
 
   const handleSave = useCallback(async () => {
     if (content == null) return;
+    const confirmation = confirmWrite ? await confirmWrite(`保存测试数据文件 ${filename}`, 'files-upload') : true;
+    if (!confirmation) return;
     setSaving(true);
     setSaveMessage(null);
     try {
@@ -87,6 +100,7 @@ export function ProblemTestdataFileDialog({ file, problemUrl, onClose }: { file:
       form.append('operation', 'upload_file');
       form.append('type', 'testdata');
       form.append('filename', filename);
+      if (typeof confirmation === 'string') form.append('activeContainerConfirmation', confirmation);
       form.append('file', new Blob([content], { type: 'text/plain' }), filename);
       const response = await fetch(`${problemUrl}/files`, {
         method: 'POST',
@@ -107,7 +121,7 @@ export function ProblemTestdataFileDialog({ file, problemUrl, onClose }: { file:
     } finally {
       setSaving(false);
     }
-  }, [content, filename, problemUrl]);
+  }, [confirmWrite, content, filename, problemUrl]);
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>

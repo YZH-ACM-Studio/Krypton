@@ -296,11 +296,25 @@ export interface ProblemStatusDoc extends StatusDocBase {
     star?: boolean;
 }
 
+export type ProblemDataWriteOperation = 'files-upload' | 'files-rename' | 'files-delete' | 'generate-testdata-request';
+
+export interface ProblemDataWriteConfirmation {
+    requestId: string;
+    domainId: string;
+    pid: number;
+    actor: number;
+    operation: ProblemDataWriteOperation;
+    containerFingerprint: string;
+    issuedAt: number;
+}
+
 export type RecordDoc = {
     [K in keyof RecordPayload]: K extends 'hackTarget' | 'contest' ? ObjectId : RecordPayload[K];
 } & {
     _id: ObjectId;
     notify?: boolean;
+    /** Short-lived, fact-bound admin confirmation carried to an async generation callback. */
+    dataWriteActiveContainerConfirmation?: ProblemDataWriteConfirmation;
 };
 
 export interface RecordHistoryDoc extends RecordJudgeInfo {

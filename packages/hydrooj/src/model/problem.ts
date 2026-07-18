@@ -1,4 +1,5 @@
 import child from 'child_process';
+import { createHash } from 'crypto';
 import os from 'os';
 import path from 'path';
 import { Readable } from 'stream';
@@ -16,12 +17,14 @@ import {
     NotFoundError,
     PermissionError,
     ProblemIsReferencedError,
+    ProblemContributionConflictError,
+    ProblemDataActiveContainerError,
     ProblemNotFoundError,
     ProblemStructureConflictError,
     ProblemTagConflictError,
     ValidationError,
 } from '../error';
-import type { Document, ProblemDict, ProblemStatusDoc, User } from '../interface';
+import type { Document, ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDict, ProblemStatusDoc, User } from '../interface';
 import { copyProblemStorageFiles } from '../lib/problem-clone';
 import { isProblemConfigFilename, parseProblemConfigObject } from '../lib/problem-config';
 import { normalizeProblemTestdataUpload } from '../lib/problem-testdata-upload';
@@ -57,10 +60,14 @@ import {
     canCloneProblem as canCloneProblemAccess,
     canDeleteProblem as canDeleteProblemAccess,
     canEditProblemContent as canEditProblemContentAccess,
+    canEditProblemData as canEditProblemDataAccess,
     canEditProblemMetadata as canEditProblemMetadataAccess,
+    canEditProblemTags as canEditProblemTagsAccess,
     canManageProblemCollaborators as canManageProblemCollaboratorsAccess,
+    canManageProblemContributions as canManageProblemContributionsAccess,
     canManageProblemMaintainers as canManageProblemMaintainersAccess,
     canMaintainProblem as canMaintainProblemAccess,
+    canOpenProblemWorkspace as canOpenProblemWorkspaceAccess,
     canPublishProblem as canPublishProblemAccess,
     canUseProblemWriteCapability,
     canViewProblem,
@@ -78,8 +85,8 @@ import {
     type ProblemAclUser,
     type ProblemWriteCapability,
     type ProblemWriteClaim,
-    readStableEditableProblem,
     readStableMaintainableProblem,
+    readStableProblemWithCapability,
     readStableViewableProblem,
     readStableViewableProblems,
     refreshProblemAcl as refreshProblemAclAccess,
@@ -124,6 +131,8 @@ import SystemModel from './system';
 
 export interface ProblemDoc extends Document {}
 export type Field = keyof ProblemDoc;
+
+export const PROBLEM_DATA_WRITE_CONFIRMATION_TTL_MS = 10 * 60 * 1000;
 
 export type ManagedProgrammingPublicationFinalizationStage =
     | 'persistence-session-finalization'
@@ -519,6 +528,12 @@ function revisionClaimFilter(claim: ProblemWriteClaim, expectedStructureRevision
     };
 }
 
+function dataRevisionClaimFilter(claim: ProblemWriteClaim, expectedStructureRevision: number) {
+    const filter = revisionClaimFilter(claim, expectedStructureRevision);
+    delete (filter as any).structureLockedAt;
+    return filter;
+}
+
 function findOverrideContent(dir: string, base: string) {
     if (!fs.existsSync(dir)) return null;
     let files = fs.readdirSync(dir);
@@ -570,6 +585,8 @@ interface ProblemCreateHooks {
 const PROJECTION_BASE: Field[] = ['_id', 'domainId', 'docType', 'docId', 'pid', 'owner', 'title'];
 
 export class ProblemModel {
+    static readonly PROBLEM_DATA_WRITE_CONFIRMATION_TTL_MS = PROBLEM_DATA_WRITE_CONFIRMATION_TTL_MS;
+
     static PROJECTION_CONTEST_LIST: Field[] = [...PROJECTION_BASE, 'config'];
 
     static PROJECTION_LIST: Field[] = [
@@ -660,8 +677,24 @@ export class ProblemModel {
         return canEditProblemMetadataAccess(user, pdoc);
     }
 
+    static canEditProblemData(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canEditProblemDataAccess(user, pdoc);
+    }
+
+    static canEditProblemTags(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canEditProblemTagsAccess(user, pdoc);
+    }
+
     static canManageProblemCollaborators(user: ProblemAclUser, pdoc: ProblemDoc) {
         return canManageProblemCollaboratorsAccess(user, pdoc);
+    }
+
+    static canManageProblemContributions(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canManageProblemContributionsAccess(user, pdoc);
+    }
+
+    static canOpenProblemWorkspace(user: ProblemAclUser, pdoc: ProblemDoc) {
+        return canOpenProblemWorkspaceAccess(user, pdoc);
     }
 
     static canManageProblemMaintainers(user: ProblemAclUser, pdoc: ProblemDoc) {
@@ -1628,7 +1661,7 @@ export class ProblemModel {
         return true;
     }
 
-    /** Deny programming-tag preview and normalization once the lifecycle structure is no longer writable. */
+    /** Tag edits are non-structural and remain available after publication. */
     static async assertProgrammingTagNormalizationUnlocked(domainId: string, pid: number): Promise<void> {
         const pdoc = await document.coll.findOne(
             { domainId, docType: document.TYPE_PROBLEM, docId: pid },
@@ -1636,12 +1669,10 @@ export class ProblemModel {
         );
         if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
         const problemKind = pdoc.problemKind === undefined ? 'programming' : parseProblemKind(pdoc.problemKind);
-        if (problemKind !== 'programming' || pdoc.authoringMode === 'managed') {
-            throw new ValidationError('problemKind', null, '只有普通编程题可以规范化历史标签');
+        if (problemKind !== 'programming') {
+            throw new ValidationError('problemKind', null, '只有编程题使用编程题标签编辑器');
         }
-        if (pdoc.archivedAt || pdoc.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, pid))) {
-            throw new ProblemStructureConflictError(pid);
-        }
+        if (pdoc.archivedAt) throw new ValidationError('archivedAt', null, '已归档题目不能修改标签');
     }
 
     static async applyProgrammingTagNormalization(input: {
@@ -1675,8 +1706,10 @@ export class ProblemModel {
                             pid: 1,
                             problemKind: 1,
                             authoringMode: 1,
+                            'managedAuthoring.selectedMindmapNodeIds': 1,
                             tag: 1,
                             knowledgeNodeIds: 1,
+                            hidden: 1,
                             structureRevision: 1,
                             structureLockedAt: 1,
                             archivedAt: 1,
@@ -1685,16 +1718,10 @@ export class ProblemModel {
                 );
                 if (!current) throw new Error(`problem write claim ownership lost before tag normalization: ${claim.requestId}`);
                 const problemKind = current.problemKind === undefined ? 'programming' : parseProblemKind(current.problemKind);
-                if (problemKind !== 'programming' || current.authoringMode === 'managed') {
-                    throw new ValidationError('problemKind', null, '只有普通编程题可以规范化历史标签');
+                if (problemKind !== 'programming') {
+                    throw new ValidationError('problemKind', null, '只有编程题使用编程题标签编辑器');
                 }
-                if (
-                    current.archivedAt ||
-                    current.structureLockedAt ||
-                    (await ProblemModel.materializeStartedContainerLock(input.domainId, input.pid))
-                ) {
-                    throw new ProblemStructureConflictError(input.pid);
-                }
+                if (current.archivedAt) throw new ValidationError('archivedAt', null, '已归档题目不能修改标签');
                 const preview = await previewProgrammingTagNormalization({
                     domainId: input.domainId,
                     docId: input.pid,
@@ -1718,20 +1745,15 @@ export class ProblemModel {
                     );
                     throw new ProblemTagConflictError(input.pid);
                 }
-                let result: ProblemDoc;
-                try {
-                    result = await ProblemModel.editWithClaim(
-                        claim,
-                        { tag: preview.nextTags, knowledgeNodeIds: preview.selectedNodeIds },
-                        {},
-                        { expectedStructureRevision: current.structureRevision, expectedTag: current.tag || [] },
-                    );
-                } catch (error) {
-                    if (!(error instanceof ValidationError)) throw error;
-                    const conflict = new ProblemTagConflictError(input.pid);
-                    Object.defineProperty(conflict, 'cause', { value: error, configurable: true });
-                    throw conflict;
-                }
+                const tagPatch: Record<string, unknown> = {
+                    tag: preview.nextTags,
+                    knowledgeNodeIds: preview.selectedNodeIds,
+                    ...(current.authoringMode === 'managed' ? { 'managedAuthoring.selectedMindmapNodeIds': preview.selectedNodeIds } : {}),
+                };
+                const result = await commitProblemWriteClaimUpdate(claim, tagPatch as Partial<ProblemDoc>, {}, 'tag', {
+                    expectedTag: current.tag || [],
+                });
+                if (!result) throw new ProblemTagConflictError(input.pid);
                 logger.info(
                     'Programming tag normalization succeeded domain=%s pid=%s docId=%d actor=%d stage=commit result=success oldTagCount=%d sourceTagCount=%d selectedNodeCount=%d addedTagCount=%d removedTagCount=%d revision=%s sourceTags=%o addedTags=%o removedTags=%o',
                     input.domainId,
@@ -1748,9 +1770,20 @@ export class ProblemModel {
                     preview.addedTags,
                     preview.removedTags,
                 );
+                await OplogModel.add({
+                    type: 'problem.tag.contribution',
+                    domainId: input.domainId,
+                    operator: input.user._id,
+                    problemId: input.pid,
+                    requestId: claim.requestId,
+                    selectedNodeIds: preview.selectedNodeIds,
+                    result: 'success',
+                    time: new Date(),
+                } as any);
+                bus.emit('problem/edit', result, claim.requestId, { hidden: current.hidden });
                 return { pdoc: result, preview };
             },
-            { capability: 'maintain' },
+            { capability: 'tag' },
         );
     }
 
@@ -2290,11 +2323,12 @@ export class ProblemModel {
         return pdoc;
     }
 
-    /** Sensitive editor read for managed authors and legacy maintainers. */
-    static async getEditableAuthorized(
+    /** Sensitive editor read for one exact workspace capability. */
+    static async getCapabilityAuthorized(
         domainId: string,
         pid: string | number,
         user: User & ProblemAclUser,
+        capability: ProblemWriteCapability,
         projection: Projection<ProblemDoc> = ProblemModel.PROJECTION_PUBLIC,
         rawConfig = false,
     ): Promise<ProblemDoc | null> {
@@ -2323,12 +2357,23 @@ export class ProblemModel {
             return res;
         };
 
-        const pdoc = await readStableEditableProblem(domainId, user, read);
+        const pdoc = await readStableProblemWithCapability(domainId, user, read, capability);
         if (!pdoc) return null;
         for (const field of authorizationFields) {
             if (!requestedFields.has(field)) delete (pdoc as any)[field];
         }
         return pdoc;
+    }
+
+    /** Sensitive editor read for managed authors and legacy maintainers. */
+    static async getEditableAuthorized(
+        domainId: string,
+        pid: string | number,
+        user: User & ProblemAclUser,
+        projection: Projection<ProblemDoc> = ProblemModel.PROJECTION_PUBLIC,
+        rawConfig = false,
+    ): Promise<ProblemDoc | null> {
+        return ProblemModel.getCapabilityAuthorized(domainId, pid, user, 'content', projection, rawConfig);
     }
 
     static getMulti(domainId: string, query: Filter<ProblemDoc>, projection = ProblemModel.PROJECTION_LIST) {
@@ -2570,6 +2615,8 @@ export class ProblemModel {
         } catch (error) {
             if (
                 error instanceof ValidationError ||
+                error instanceof ProblemContributionConflictError ||
+                error instanceof ProblemDataActiveContainerError ||
                 error instanceof ProblemStructureConflictError ||
                 error instanceof ProblemTagConflictError ||
                 error instanceof ProblemIsReferencedError ||
@@ -2654,6 +2701,177 @@ export class ProblemModel {
                 return result;
             },
             options,
+        );
+    }
+
+    static async listActiveDataWriteContainers(domainId: string, pid: number, now = new Date()) {
+        return document
+            .getMulti(domainId, document.TYPE_CONTEST, {
+                pids: pid,
+                rule: { $ne: 'homework' },
+                beginAt: { $lte: now },
+                endAt: { $gt: now },
+            } as any)
+            .project({ docId: 1, title: 1, rule: 1, beginAt: 1, endAt: 1 })
+            .toArray();
+    }
+
+    static activeDataWriteContainerFacts(activeContainers: any[]) {
+        return activeContainers
+            .map((tdoc: any) => ({
+                id: String(tdoc.docId),
+                title: tdoc.title,
+                rule: tdoc.rule,
+                beginAt: tdoc.beginAt,
+                endAt: tdoc.endAt,
+            }))
+            .sort((left, right) => left.id.localeCompare(right.id));
+    }
+
+    static activeDataWriteContainerFingerprint(domainId: string, pid: number, facts: ReturnType<typeof ProblemModel.activeDataWriteContainerFacts>) {
+        const containers = facts.map((item) => ({
+            id: item.id,
+            title: item.title || null,
+            rule: item.rule || null,
+            beginAt: item.beginAt instanceof Date ? item.beginAt.toISOString() : item.beginAt || null,
+            endAt: item.endAt instanceof Date ? item.endAt.toISOString() : item.endAt || null,
+        }));
+        return createHash('sha256').update(JSON.stringify({ domainId, pid, containers })).digest('hex');
+    }
+
+    /**
+     * Evaluation-only write path. Historical contest usage may lock statement
+     * structure, but data maintenance is allowed again once no referenced
+     * contest/exam is currently active.
+     */
+    static async withAuthorizedDataWriteClaim<T>(
+        domainId: string,
+        pid: number,
+        user: ProblemAclUser,
+        operation: string,
+        work: (claim: ProblemWriteClaim) => Promise<T>,
+        options: {
+            requestId?: string;
+            activeContainerConfirmation?: ProblemDataWriteConfirmation;
+            confirmationOperation?: ProblemDataWriteOperation;
+            bumpStructureRevision?: boolean;
+        } = {},
+    ): Promise<T> {
+        return ProblemModel.withAuthorizedWriteClaim(
+            domainId,
+            pid,
+            user,
+            operation,
+            async (claim) => {
+                const current = await document.coll.findOne(
+                    {
+                        domainId,
+                        docType: document.TYPE_PROBLEM,
+                        docId: pid,
+                        'aclWriteClaim.requestId': claim.requestId,
+                        'aclWriteClaim.actor': claim.actor,
+                        'aclWriteClaim.operation': claim.operation,
+                        'aclWriteClaim.capability': 'data',
+                        'aclWriteClaim.state': 'active',
+                    },
+                    {
+                        projection: {
+                            domainId: 1,
+                            docId: 1,
+                            owner: 1,
+                            maintainer: 1,
+                            authoringMode: 1,
+                            hidden: 1,
+                            managedAuthoring: 1,
+                            problemKind: 1,
+                            structureRevision: 1,
+                            archivedAt: 1,
+                        },
+                    },
+                );
+                if (!current) throw new Error(`problem write claim ownership lost before ${operation}: ${claim.requestId}`);
+                if (current.archivedAt) throw new ValidationError('archivedAt', null, '已归档题目不能修改评测数据');
+                const activeContainers = await ProblemModel.listActiveDataWriteContainers(domainId, pid);
+                if (activeContainers.length) {
+                    const facts = ProblemModel.activeDataWriteContainerFacts(activeContainers);
+                    const administrator = ProblemModel.isProblemBankAdmin(user);
+                    const contributionOnly = !ProblemModel.canEditProblemContent(user, current);
+                    if (!administrator && contributionOnly) {
+                        logger.warn(
+                            'Active-container data write rejected domain=%s pid=%d actor=%d operation=%s requestId=%s containers=%o result=denied',
+                            domainId,
+                            pid,
+                            user._id,
+                            operation,
+                            claim.requestId,
+                            facts.map((item) => item.id),
+                        );
+                        throw new ProblemDataActiveContainerError(pid, facts.map((item) => item.title || item.id).join('、'), facts);
+                    }
+                    if (administrator) {
+                        const confirmation = options.activeContainerConfirmation;
+                        const now = Date.now();
+                        const currentFingerprint = ProblemModel.activeDataWriteContainerFingerprint(domainId, pid, facts);
+                        const confirmationValid =
+                            confirmation?.domainId === domainId &&
+                            confirmation.pid === pid &&
+                            confirmation.actor === user._id &&
+                            confirmation.operation === (options.confirmationOperation || operation) &&
+                            confirmation.containerFingerprint === currentFingerprint &&
+                            Number.isSafeInteger(confirmation.issuedAt) &&
+                            confirmation.issuedAt <= now &&
+                            now - confirmation.issuedAt <= PROBLEM_DATA_WRITE_CONFIRMATION_TTL_MS &&
+                            !!confirmation.requestId;
+                        if (!confirmationValid) {
+                            logger.warn(
+                                'Active-container admin confirmation required domain=%s pid=%d actor=%d operation=%s requestId=%s confirmationRequestId=%s containers=%o result=confirmation-required',
+                                domainId,
+                                pid,
+                                user._id,
+                                operation,
+                                claim.requestId,
+                                confirmation?.requestId || '-',
+                                facts.map((item) => item.id),
+                            );
+                            throw new ProblemDataActiveContainerError(pid, facts.map((item) => item.title || item.id).join('、'), facts);
+                        }
+                        await OplogModel.add({
+                            type: 'problem.data.active-container-override',
+                            domainId,
+                            operator: user._id,
+                            problemId: pid,
+                            operation,
+                            requestId: claim.requestId,
+                            confirmationRequestId: confirmation.requestId,
+                            confirmationIssuedAt: new Date(confirmation.issuedAt),
+                            containerFingerprint: currentFingerprint,
+                            containerIds: facts.map((item) => item.id),
+                            result: 'confirmed',
+                            time: new Date(),
+                        } as any);
+                        logger.warn(
+                            'Active-container data write confirmed domain=%s pid=%d actor=%d operation=%s requestId=%s confirmationRequestId=%s containers=%o result=confirmed',
+                            domainId,
+                            pid,
+                            user._id,
+                            operation,
+                            claim.requestId,
+                            confirmation.requestId,
+                            facts.map((item) => item.id),
+                        );
+                    }
+                }
+                const result = await work(claim);
+                if (current.problemKind !== undefined && options.bumpStructureRevision !== false) {
+                    assertStructureRevision(current.structureRevision);
+                    const bumped = await document.coll.updateOne(dataRevisionClaimFilter(claim, current.structureRevision), {
+                        $inc: { structureRevision: 1 },
+                    });
+                    if (bumped.matchedCount !== 1) throw new ProblemStructureConflictError(pid);
+                }
+                return result;
+            },
+            { requestId: options.requestId, capability: 'data' },
         );
     }
 
@@ -3510,7 +3728,7 @@ export class ProblemModel {
             },
         );
         if (!doc) throw new Error(`problem write claim ownership lost before file operation: ${claim.requestId}`);
-        if (doc.authoringMode === 'managed' && !problemWriteCapabilityAllows(claim.capability, 'content')) {
+        if (!problemWriteCapabilityAllows(claim.capability, 'data')) {
             throw new ValidationError('fields', null, `写入凭据 ${claim.capability} 不允许修改托管题文件`);
         }
         if (key === 'data' && doc.problemKind !== undefined) {
@@ -3536,7 +3754,7 @@ export class ProblemModel {
     ): Promise<void> {
         ProblemModel.assertClaimedTestdataWriteClaim(claim, mutation);
         if (current.problemKind === undefined) {
-            const result = await commitProblemWriteClaimUpdate(claim, { data: nextData } as any, {}, 'content', {
+            const result = await commitProblemWriteClaimUpdate(claim, { data: nextData } as any, {}, 'data', {
                 expectedData,
             });
             if (!result) {
@@ -3559,7 +3777,7 @@ export class ProblemModel {
             },
         );
         const result = await document.coll.findOneAndUpdate(
-            { ...revisionClaimFilter(claim, current.structureRevision), ...problemDataSnapshotFilter(expectedData) },
+            { ...dataRevisionClaimFilter(claim, current.structureRevision), ...problemDataSnapshotFilter(expectedData) },
             { $set: { data: nextData } },
             { returnDocument: 'after' },
         );
@@ -3698,7 +3916,7 @@ export class ProblemModel {
         const payload = { name, ...pick(meta, ['size', 'lastModified', 'etag']) } as any;
         const next = current.filter((item) => item.name !== name);
         next.push({ _id: name, ...payload });
-        if (!(await commitProblemWriteClaimUpdate(claim, { additional_file: next } as any, {}, 'content'))) {
+        if (!(await commitProblemWriteClaimUpdate(claim, { additional_file: next } as any, {}, 'data'))) {
             throw new Error(`problem write claim ownership lost after additional-file upload: ${claim.requestId}`);
         }
         await bus.emit('problem/addAdditionalFile', claim.domainId, claim.pid, name, payload, claim);
@@ -3718,7 +3936,7 @@ export class ProblemModel {
         const next = current
             .filter((item) => item.name !== newName)
             .map((item) => (item.name === file ? { ...item, _id: newName, name: newName, lastModified: new Date() } : item));
-        if (!(await commitProblemWriteClaimUpdate(claim, { additional_file: next } as any, {}, 'content'))) {
+        if (!(await commitProblemWriteClaimUpdate(claim, { additional_file: next } as any, {}, 'data'))) {
             throw new Error(`problem write claim ownership lost after additional-file rename: ${claim.requestId}`);
         }
         await bus.emit('problem/renameAdditionalFile', claim.domainId, claim.pid, file, newName, claim);
@@ -3736,7 +3954,7 @@ export class ProblemModel {
                 claim,
                 { additional_file: current.filter((item) => !names.includes(item.name)) } as any,
                 {},
-                'content',
+                'data',
             ))
         ) {
             throw new Error(`problem write claim ownership lost after additional-file delete: ${claim.requestId}`);

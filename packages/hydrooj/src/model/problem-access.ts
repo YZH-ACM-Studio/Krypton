@@ -14,7 +14,8 @@ import { canonicalizeStructuredKnowledgePatch, touchesCanonicalProblemFields } f
  * Request-local problem ACL state populated by krypton-permits.
  *
  * `_permitPids` contains every active role, `_authoredPids` contains managed
- * authors, and `_maintainedPids` contains maintainers. `_aclFencedPids`
+ * authors, `_maintainedPids` contains maintainers, and the two contribution
+ * sets contain only active narrow data/tag assignments. `_aclFencedPids`
  * contains pairs currently undergoing an ACL role mutation for this user and
  * domain. `_ownsLegacyProblems` is an indexed existence fact, not a role.
  * Non-admin callers must never infer an empty ACL from absent state; only
@@ -24,13 +25,26 @@ export type ProblemAclUser = Pick<User, '_id' | 'hasPerm' | 'hasPriv'> & {
     _permitPids?: Set<number>;
     _authoredPids?: Set<number>;
     _maintainedPids?: Set<number>;
+    _dataContributionPids?: Set<number>;
+    _tagContributionPids?: Set<number>;
     _aclFencedPids?: Set<number>;
     _ownsLegacyProblems?: boolean;
     _problemAclDomainId?: string;
     _problemAclLoaded?: boolean;
 };
 
-export type ProblemWriteCapability = 'maintain' | 'content' | 'metadata' | 'collaborators' | 'publish' | 'archive' | 'hard-delete' | 'clone';
+export type ProblemWriteCapability =
+    | 'maintain'
+    | 'content'
+    | 'metadata'
+    | 'collaborators'
+    | 'contributions'
+    | 'data'
+    | 'tag'
+    | 'publish'
+    | 'archive'
+    | 'hard-delete'
+    | 'clone';
 export type ProblemTestdataMutation = 'upload' | 'rename' | 'delete';
 export type ProblemFileListSnapshot = { state: 'missing' } | { state: 'null' } | { state: 'array'; value: NonNullable<ProblemDoc['data']> };
 
@@ -53,6 +67,11 @@ const DENY_ALL_PROBLEMS: Filter<ProblemDoc> = { docId: { $in: [] } };
 const logger = new Logger('problem-access');
 /** Persistent coordination fields that must never cross a problem read boundary. */
 export const PROBLEM_ACL_INTERNAL_FIELDS = new Set(['aclMutationRevision', 'aclMutationLocks', 'aclWriteClaim']);
+const NARROW_CAPABILITY_FIELDS: Partial<Record<ProblemWriteCapability, ReadonlySet<string>>> = {
+    data: new Set(['config', 'data', 'additional_file', 'codeEvaluationStatus']),
+    tag: new Set(['tag', 'knowledgeNodeIds', 'managedAuthoring.selectedMindmapNodeIds']),
+    contributions: new Set(),
+};
 
 function sorted(values?: Set<number>): number[] {
     return Array.from(values || []).sort((a, b) => a - b);
@@ -157,7 +176,9 @@ export function canBrowseProblemBank(user: ProblemAclUser): boolean {
         user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT) ||
         user._ownsLegacyProblems === true ||
         (user._authoredPids?.size || 0) > 0 ||
-        (user._maintainedPids?.size || 0) > 0
+        (user._maintainedPids?.size || 0) > 0 ||
+        (user._dataContributionPids?.size || 0) > 0 ||
+        (user._tagContributionPids?.size || 0) > 0
     );
 }
 
@@ -166,7 +187,7 @@ export function canBrowseProblemBank(user: ProblemAclUser): boolean {
  * The caller supplies the domain to ProblemModel.getMulti/count; permits are
  * likewise preloaded for that current domain.
  */
-export function buildProblemBankScope(user: ProblemAclUser): Filter<ProblemDoc> {
+function buildProblemBankScopeFor(user: ProblemAclUser, includeContributions: boolean): Filter<ProblemDoc> {
     const fenced = sorted(user._aclFencedPids);
     if (user._problemAclLoaded !== true) return { ...DENY_ALL_PROBLEMS };
     const liveLockExclusion: Filter<ProblemDoc> = {
@@ -179,6 +200,11 @@ export function buildProblemBankScope(user: ProblemAclUser): Filter<ProblemDoc> 
 
     const maintained = sorted(new Set(sorted(user._maintainedPids).filter((pid) => !user._aclFencedPids?.has(pid))));
     const authored = sorted(new Set(sorted(user._authoredPids).filter((pid) => !user._aclFencedPids?.has(pid))));
+    const contributed = includeContributions
+        ? sorted(
+              new Set([...sorted(user._dataContributionPids), ...sorted(user._tagContributionPids)].filter((pid) => !user._aclFencedPids?.has(pid))),
+          )
+        : [];
     const authorScopes: Filter<ProblemDoc>[] = [];
     if (user.hasPerm(PERM.PERM_CREATE_PROBLEM) || user._ownsLegacyProblems === true) {
         authorScopes.push({ $and: [{ owner: user._id }, { authoringMode: { $ne: 'managed' } }] });
@@ -194,15 +220,31 @@ export function buildProblemBankScope(user: ProblemAclUser): Filter<ProblemDoc> 
     if (authored.length) {
         authorScopes.push({ $and: [{ docId: { $in: authored } }, { authoringMode: 'managed' }] });
     }
+    if (contributed.length) authorScopes.push({ docId: { $in: contributed } });
     if (!authorScopes.length) return { ...DENY_ALL_PROBLEMS };
     const authorScope: Filter<ProblemDoc> = authorScopes.length === 1 ? authorScopes[0] : { $or: authorScopes };
     return fenced.length ? { $and: [authorScope, { docId: { $nin: fenced } }, liveLockExclusion] } : { $and: [authorScope, liveLockExclusion] };
+}
+
+export function buildProblemBankScope(user: ProblemAclUser): Filter<ProblemDoc> {
+    return buildProblemBankScopeFor(user, true);
+}
+
+/**
+ * Scope for adding new references to contests, training, courses or tasks.
+ * Contribution ranges make a problem visible in the bank but never grant the
+ * separate authority to place it in another container.
+ */
+export function buildProblemContainerSelectionScope(user: ProblemAclUser): Filter<ProblemDoc> {
+    return buildProblemBankScopeFor(user, false);
 }
 
 function denyProblemAcl(user: ProblemAclUser): void {
     user._permitPids = new Set<number>();
     user._authoredPids = new Set<number>();
     user._maintainedPids = new Set<number>();
+    user._dataContributionPids = new Set<number>();
+    user._tagContributionPids = new Set<number>();
     user._aclFencedPids = new Set<number>();
     user._ownsLegacyProblems = false;
     user._problemAclDomainId = undefined;
@@ -222,6 +264,8 @@ export async function refreshProblemAcl(user: ProblemAclUser, authoritativeDomai
             !(loaded?.permitPids instanceof Set) ||
             !(loaded?.authoredPids instanceof Set) ||
             !(loaded?.maintainedPids instanceof Set) ||
+            !(loaded?.dataContributionPids instanceof Set) ||
+            !(loaded?.tagContributionPids instanceof Set) ||
             !(loaded?.fencedPids instanceof Set) ||
             typeof loaded?.ownsLegacyProblems !== 'boolean'
         ) {
@@ -230,6 +274,8 @@ export async function refreshProblemAcl(user: ProblemAclUser, authoritativeDomai
         user._permitPids = loaded.permitPids;
         user._authoredPids = loaded.authoredPids;
         user._maintainedPids = loaded.maintainedPids;
+        user._dataContributionPids = loaded.dataContributionPids;
+        user._tagContributionPids = loaded.tagContributionPids;
         user._aclFencedPids = loaded.fencedPids;
         user._ownsLegacyProblems = loaded.ownsLegacyProblems;
         user._problemAclDomainId = authoritativeDomainId;
@@ -442,11 +488,53 @@ export async function acquireProblemWriteClaim(
         { returnDocument: 'after' },
     );
     if (!result?.aclWriteClaim) return null;
-    return {
+    const claim = {
         domainId: authorizedPdoc.domainId,
         pid: authorizedPdoc.docId,
         ...result.aclWriteClaim,
     } as ProblemWriteClaim;
+    if (!selfRevoke && !isProblemBankAdmin(user)) {
+        try {
+            // Contribution and managed-author roles live outside ProblemDoc.
+            // Re-read them while this global claim blocks revocation, closing
+            // the refresh/acquire race without duplicating ACL state.
+            await refreshProblemAcl(user, authorizedPdoc.domainId);
+            if (!canUseProblemWriteCapability(user, result as ProblemDoc, capability)) {
+                if (!(await clearProblemWriteClaim(claim))) {
+                    throw new Error(`problem write claim ownership lost after final authorization denial: ${claim.requestId}`);
+                }
+                return null;
+            }
+        } catch (error) {
+            const remaining = await inspectProblemWriteClaim(claim.domainId, claim.pid);
+            if (remaining?.requestId === claim.requestId && !(await clearProblemWriteClaim(claim))) {
+                throw new Error(`problem write claim could not be cleared after final authorization failure: ${claim.requestId}`, {
+                    cause: error,
+                });
+            }
+            throw error;
+        }
+    }
+    return claim;
+}
+
+/** Reject every field outside a narrow contribution claim before mutation. */
+export function assertProblemWriteClaimFieldScope(claim: ProblemWriteClaim, fields: string[]): void {
+    const allowed = NARROW_CAPABILITY_FIELDS[claim.capability];
+    if (!allowed) return;
+    const denied = fields.filter((field) => !allowed.has(field) && !allowed.has(field.split('.')[0]));
+    if (denied.length) {
+        logger.warn(
+            'Narrow problem write rejected domain=%s pid=%d actor=%d requestId=%s capability=%s fields=%o result=denied',
+            claim.domainId,
+            claim.pid,
+            claim.actor,
+            claim.requestId,
+            claim.capability,
+            denied,
+        );
+        throw new ValidationError('fields', null, `${claim.capability} 协作权限不能修改字段：${denied.join(', ')}`);
+    }
 }
 
 /** Commit metadata while retaining an already-acquired multi-step claim. */
@@ -455,7 +543,12 @@ export async function commitProblemWriteClaimUpdate(
     $set: Partial<ProblemDoc>,
     $unset: Record<string, unknown> = {},
     requiredCapability: ProblemWriteCapability = claim.capability,
-    options: { expectedStructureRevision?: number; expectedTag?: string[]; expectedData?: ProblemFileListSnapshot } = {},
+    options: {
+        expectedStructureRevision?: number;
+        expectedTag?: string[];
+        expectedData?: ProblemFileListSnapshot;
+        allowHistoricalStructureLock?: boolean;
+    } = {},
 ): Promise<ProblemDoc | null> {
     const requestedFields = [...Object.keys($set || {}), ...Object.keys($unset || {})];
     if (requestedFields.some((key) => PROBLEM_ACL_INTERNAL_FIELDS.has(key.split('.')[0]))) {
@@ -464,13 +557,14 @@ export async function commitProblemWriteClaimUpdate(
     if (!problemWriteCapabilityAllows(claim.capability, requiredCapability)) {
         throw new TypeError(`problem write claim capability ${claim.capability} cannot perform ${requiredCapability}`);
     }
+    assertProblemWriteClaimFieldScope(claim, requestedFields);
     let filter: Filter<ProblemDoc> = {
         ...claimFilter(claim),
         ...(options.expectedStructureRevision === undefined
             ? {}
             : {
                   structureRevision: options.expectedStructureRevision,
-                  structureLockedAt: { $exists: false },
+                  ...(options.allowHistoricalStructureLock ? {} : { structureLockedAt: { $exists: false } }),
               }),
         ...(options.expectedTag === undefined ? {} : { tag: options.expectedTag }),
         ...(options.expectedData === undefined ? {} : problemDataSnapshotFilter(options.expectedData)),
@@ -522,7 +616,7 @@ export async function commitProblemWriteClaimUpdate(
             stage: 'claim-publish',
         });
     }
-    if (current.authoringMode === 'managed') {
+    if (current.authoringMode === 'managed' && !['data', 'tag'].includes(claim.capability)) {
         let guard = managedProblemPatchCapability(current, $set, $unset);
         if (guard.immutableFields.length || guard.publishes || !problemWriteCapabilityAllows(claim.capability, guard.capability)) {
             logger.warn(
@@ -669,9 +763,35 @@ export function canEditProblemMetadata(user: ProblemAclUser, pdoc: ProblemDoc): 
     return pdoc.managedAuthoring?.metadataStatus !== 'confirmed';
 }
 
+/** Testdata, judge configuration and other evaluation-only fields. */
+export function canEditProblemData(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    if (!hasLoadedAclForProblem(user, pdoc) || isAclFenced(user, pdoc.docId)) return false;
+    return canEditProblemContent(user, pdoc) || user._dataContributionPids?.has(pdoc.docId) === true;
+}
+
+/** Mindmap selection plus its canonical materialized tags, and nothing else. */
+export function canEditProblemTags(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    if (!hasLoadedAclForProblem(user, pdoc) || isAclFenced(user, pdoc.docId)) return false;
+    return canEditProblemContent(user, pdoc) || user._tagContributionPids?.has(pdoc.docId) === true;
+}
+
 export function canManageProblemCollaborators(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (pdoc.authoringMode !== 'managed') return canMaintainProblem(user, pdoc);
     return canMaintainProblem(user, pdoc);
+}
+
+export function canManageProblemContributions(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    if (canMaintainProblem(user, pdoc)) return true;
+    return pdoc.authoringMode === 'managed' && canAuthorProblem(user, pdoc);
+}
+
+export function canOpenProblemWorkspace(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    return (
+        canEditProblemContent(user, pdoc) ||
+        canEditProblemData(user, pdoc) ||
+        canEditProblemTags(user, pdoc) ||
+        canManageProblemContributions(user, pdoc)
+    );
 }
 
 export function canManageProblemMaintainers(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
@@ -701,6 +821,9 @@ export function canUseProblemWriteCapability(user: ProblemAclUser, pdoc: Problem
     if (capability === 'content') return canEditProblemContent(user, pdoc);
     if (capability === 'metadata') return canEditProblemMetadata(user, pdoc);
     if (capability === 'collaborators') return canManageProblemCollaborators(user, pdoc);
+    if (capability === 'contributions') return canManageProblemContributions(user, pdoc);
+    if (capability === 'data') return canEditProblemData(user, pdoc);
+    if (capability === 'tag') return canEditProblemTags(user, pdoc);
     if (capability === 'publish') return canPublishProblem(user, pdoc);
     if (capability === 'archive') return canArchiveProblem(user, pdoc);
     if (capability === 'hard-delete') return canDeleteProblem(user, pdoc);
@@ -715,9 +838,10 @@ export function canUseProblemWriteCapability(user: ProblemAclUser, pdoc: Problem
  */
 export function problemWriteCapabilityAllows(granted: ProblemWriteCapability, required: ProblemWriteCapability): boolean {
     if (granted === required) return true;
-    if (granted === 'maintain') return ['content', 'metadata', 'collaborators'].includes(required);
-    if (granted === 'metadata') return required === 'content';
-    if (granted === 'publish') return ['content', 'metadata'].includes(required);
+    if (granted === 'maintain') return ['content', 'metadata', 'collaborators', 'contributions', 'data', 'tag'].includes(required);
+    if (granted === 'content') return ['data', 'tag'].includes(required);
+    if (granted === 'metadata') return ['content', 'data', 'tag'].includes(required);
+    if (granted === 'publish') return ['content', 'metadata', 'data', 'tag'].includes(required);
     return false;
 }
 
@@ -730,9 +854,7 @@ const TESTDATA_CLAIM_OPERATIONS: Record<ProblemTestdataMutation, ReadonlySet<str
 /** Keep physical testdata writers bound to their explicit server operation. */
 export function problemWriteClaimAllowsTestdataMutation(claim: ProblemWriteClaim, mutation: ProblemTestdataMutation): boolean {
     return (
-        claim.state === 'active' &&
-        problemWriteCapabilityAllows(claim.capability, 'content') &&
-        TESTDATA_CLAIM_OPERATIONS[mutation].has(claim.operation)
+        claim.state === 'active' && problemWriteCapabilityAllows(claim.capability, 'data') && TESTDATA_CLAIM_OPERATIONS[mutation].has(claim.operation)
     );
 }
 
@@ -742,6 +864,11 @@ function applyCapabilityIdentityFilter(
     pdoc: ProblemDoc,
     capability: ProblemWriteCapability,
 ): void {
+    if (capability === 'data' && user._dataContributionPids?.has(pdoc.docId) && !canEditProblemContent(user, pdoc)) return;
+    if (capability === 'tag' && user._tagContributionPids?.has(pdoc.docId) && !canEditProblemContent(user, pdoc)) return;
+    if (capability === 'contributions' && pdoc.authoringMode === 'managed' && canAuthorProblem(user, pdoc) && !canMaintainProblem(user, pdoc)) {
+        return;
+    }
     if (pdoc.authoringMode !== 'managed') {
         filter.$or = [{ owner: user._id }, { maintainer: user._id }];
         return;
@@ -765,10 +892,20 @@ export function canViewProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean 
     if (isAclFenced(user, pdoc.docId)) return false;
     if (!pdoc.hidden) return true;
     if (isProblemBankAdmin(user)) return true;
-    if (pdoc.authoringMode === 'managed') return user._permitPids?.has(pdoc.docId) === true;
+    if (pdoc.authoringMode === 'managed') {
+        return (
+            user._permitPids?.has(pdoc.docId) === true ||
+            user._dataContributionPids?.has(pdoc.docId) === true ||
+            user._tagContributionPids?.has(pdoc.docId) === true
+        );
+    }
     if (pdoc.owner === user._id) return true;
     if (user.hasPerm(PERM.PERM_VIEW_PROBLEM_HIDDEN)) return true;
-    return user._permitPids?.has(pdoc.docId) === true;
+    return (
+        user._permitPids?.has(pdoc.docId) === true ||
+        user._dataContributionPids?.has(pdoc.docId) === true ||
+        user._tagContributionPids?.has(pdoc.docId) === true
+    );
 }
 
 /**
@@ -906,11 +1043,12 @@ export async function readStableMaintainableProblem(
     return null;
 }
 
-/** Stable sensitive read for managed authors plus legacy owner/maintainer. */
-export async function readStableEditableProblem(
+/** Stable sensitive read for one exact problem workspace capability. */
+export async function readStableProblemWithCapability(
     authoritativeDomainId: string,
     user: ProblemAclUser,
     read: StableProblemRead,
+    capability: ProblemWriteCapability,
     attempts = 2,
 ): Promise<ProblemDoc | null> {
     if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > 2) {
@@ -921,17 +1059,27 @@ export async function readStableEditableProblem(
         if (!initial || initial.domainId !== authoritativeDomainId) return null;
 
         await refreshProblemAcl(user, authoritativeDomainId);
-        if (!canEditProblemContent(user, initial)) return null;
+        if (!canUseProblemWriteCapability(user, initial, capability)) return null;
 
         const filter: any = problemAclRevisionFilter(authoritativeDomainId, user, initial);
-        if (!isProblemBankAdmin(user)) applyCapabilityIdentityFilter(filter, user, initial, 'content');
+        if (!isProblemBankAdmin(user)) applyCapabilityIdentityFilter(filter, user, initial, capability);
 
         const stable = await read(filter);
         if (!stable) continue;
-        if (!canEditProblemContent(user, stable)) return null;
+        if (!canUseProblemWriteCapability(user, stable, capability)) return null;
         return stripProblemAclInternalFields(stable);
     }
     return null;
+}
+
+/** Stable sensitive read for managed authors plus legacy owner/maintainer. */
+export async function readStableEditableProblem(
+    authoritativeDomainId: string,
+    user: ProblemAclUser,
+    read: StableProblemRead,
+    attempts = 2,
+): Promise<ProblemDoc | null> {
+    return readStableProblemWithCapability(authoritativeDomainId, user, read, 'content', attempts);
 }
 
 /**
@@ -997,7 +1145,7 @@ export async function assertProblemBankSelection(
     if (!added.length) return;
 
     const count = await document.count(domainId, document.TYPE_PROBLEM, {
-        $and: [buildProblemBankScope(user), { docId: { $in: added }, archivedAt: { $exists: false } }],
+        $and: [buildProblemContainerSelectionScope(user), { docId: { $in: added }, archivedAt: { $exists: false } }],
     });
     if (count !== added.length) throw selectionDenied();
 }

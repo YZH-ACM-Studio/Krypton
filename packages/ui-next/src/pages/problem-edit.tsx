@@ -27,6 +27,7 @@ import { replaceRouteTokens } from '@/lib/format';
 import { downloadProblemPackage } from '@/lib/problem-package';
 import { managedSourceFieldViews, managedSourceTagPreview, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
 import { readHydroResponseError, readProblemSaveSuccess } from '@/lib/problem-save-response';
+import { requiresLegacyProgrammingTagNormalization, type ProgrammingTagState } from '@/lib/programming-tag-state';
 
 type R = Record<string, any>;
 
@@ -34,15 +35,6 @@ interface ManagedMindmapOption {
   id: string;
   label: string;
   tags: string[];
-}
-
-interface ProgrammingTagState {
-  mode: 'managed' | 'converted' | 'unconverted';
-  sourceTags: string[];
-  selectedNodeIds: string[];
-  suggestions?: Array<{ tag: string; nodeId: string; label: string }>;
-  ambiguousTags?: Array<{ tag: string; candidates: string[] }>;
-  unknownTags?: string[];
 }
 
 interface ProgrammingTagPreview {
@@ -682,6 +674,7 @@ export function ProblemEditPage() {
   };
   const [programmingTagState, setProgrammingTagState] = useState<ProgrammingTagState>(initialProgrammingTagState);
   const programmingTagMode = isCreate ? 'managed' : programmingTagState.mode;
+  const programmingTagNeedsNormalization = requiresLegacyProgrammingTagNormalization(programmingTagState);
   const pidEditable = !managed && programmingTagMode === 'unconverted';
   const pid = pdoc.pid || pdoc.docId || '';
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
@@ -963,7 +956,9 @@ export function ProblemEditPage() {
       return;
     }
     if (tagSelectionDirty) {
-      const message = '知识标签选择尚未确认；请先在“标签与知识导图”中预览并确认标签变化。';
+      const message = programmingTagNeedsNormalization
+        ? '知识标签选择尚未确认；请先在“标签与知识导图”中预览并确认规范化结果。'
+        : '知识标签选择尚未保存；请先在“标签与知识导图”中保存知识标签。';
       setTagOperationError(message);
       setTagOperationState('error');
       setSaveError(message);
@@ -1195,9 +1190,11 @@ export function ProblemEditPage() {
                       标签与知识导图
                     </h3>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {programmingTagMode === 'unconverted'
+                      {programmingTagNeedsNormalization
                         ? '旧标签只用于给出选择建议；普通保存不会改动它们，只有查看完整增删预览并确认后才会规范化。'
-                        : '来源标签只读保留；知识标签仅由所选节点及其带标签祖先实时派生。'}
+                        : programmingTagMode === 'unconverted'
+                          ? '当前题目没有待迁移的历史知识标签；直接从导图选择并保存即可，来源标签会只读保留。'
+                          : '来源标签只读保留；知识标签仅由所选节点及其带标签祖先实时派生。'}
                     </p>
                   </header>
                   <div className="space-y-5 p-5 pt-0">
@@ -1216,7 +1213,7 @@ export function ProblemEditPage() {
                       </div>
                     </div>
 
-                    {programmingTagMode === 'unconverted' ? (
+                    {programmingTagNeedsNormalization ? (
                       <div className="grid gap-3 lg:grid-cols-3">
                         <div className="rounded-xl border border-border/70 px-4 py-3">
                           <p className="text-xs font-semibold">唯一匹配建议</p>
@@ -1298,10 +1295,14 @@ export function ProblemEditPage() {
                         {tagOperationState === 'saved'
                           ? '标签已按确认内容原子保存'
                           : tagSelectionDirty
-                            ? '节点选择尚未确认'
-                            : programmingTagMode === 'unconverted'
+                            ? programmingTagNeedsNormalization
+                              ? '节点选择尚未确认'
+                              : '节点选择尚未保存'
+                            : programmingTagNeedsNormalization
                               ? '建议选择尚未写入'
-                              : '节点选择与服务器一致'}
+                              : programmingTagMode === 'unconverted'
+                                ? '尚未设置知识标签；请先从上方选择知识点'
+                                : '节点选择与服务器一致'}
                       </span>
                       <Button
                         type="button"
@@ -1311,11 +1312,15 @@ export function ProblemEditPage() {
                           !selectedMindmapNodes.length ||
                           tagOperationState === 'previewing' ||
                           tagOperationState === 'applying' ||
-                          (programmingTagMode !== 'unconverted' && !tagSelectionDirty)
+                          (!programmingTagNeedsNormalization && !tagSelectionDirty)
                         }
                       >
                         {tagOperationState === 'previewing' ? <Loader2 className="mr-1 size-3.5 animate-spin motion-reduce:animate-none" /> : null}
-                        {programmingTagMode === 'unconverted' ? '预览并规范化标签' : '预览标签变更'}
+                        {programmingTagNeedsNormalization
+                          ? '预览并规范化标签'
+                          : programmingTagMode === 'unconverted'
+                            ? '保存知识标签'
+                            : '预览标签变更'}
                       </Button>
                     </div>
                   </div>
@@ -1717,7 +1722,13 @@ export function ProblemEditPage() {
       >
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{programmingTagMode === 'unconverted' ? '确认规范化历史标签' : '确认知识标签变更'}</DialogTitle>
+            <DialogTitle>
+              {programmingTagNeedsNormalization
+                ? '确认规范化历史标签'
+                : programmingTagMode === 'unconverted'
+                  ? '确认保存知识标签'
+                  : '确认知识标签变更'}
+            </DialogTitle>
           </DialogHeader>
           {tagPreview ? (
             <div className="space-y-5">

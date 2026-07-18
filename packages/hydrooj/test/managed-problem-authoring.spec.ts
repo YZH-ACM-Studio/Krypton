@@ -474,6 +474,27 @@ describe('P2.17 legacy programming tag normalization', () => {
         expect(classified.unknownTags).to.deep.equal(['Dijksrta']);
     });
 
+    it('leaves empty and source-only legacy tags without pending knowledge classification', async () => {
+        const options = await authoring.listKnowledgeMindmapOptions();
+        const empty = authoring.classifyLegacyProgrammingTags([], options);
+        const sourceOnly = authoring.classifyLegacyProgrammingTags(['PAT乙级', '2026春'], options);
+
+        expect(empty).to.deep.equal({
+            sourceTags: [],
+            suggestions: [],
+            ambiguousTags: [],
+            unknownTags: [],
+            suggestedNodeIds: [],
+        });
+        expect(sourceOnly).to.deep.equal({
+            sourceTags: ['PAT乙级', '2026春'],
+            suggestions: [],
+            ambiguousTags: [],
+            unknownTags: [],
+            suggestedNodeIds: [],
+        });
+    });
+
     it('previews one explicit atomic replacement with retained source tags and live ancestors', async () => {
         const preview = await authoring.previewProgrammingTagNormalization({
             domainId: 'system',

@@ -27,6 +27,7 @@ const calls = {
     contributionList: [] as any[],
     contributionRevoke: [] as any[],
     contributionStatus: [] as any[],
+    contributionUserList: [] as any[],
     writeClaim: [] as any[],
     userGet: [] as any[],
     userList: [] as any[],
@@ -46,6 +47,8 @@ let rawProblemResults: any[] = [];
 let permitSourceRows: any[] = [];
 let rosterProvider: () => Promise<any[]> = async () => [];
 let contributionRows: any[] = [];
+let contributionAssignFailures: Array<Error | null> = [];
+let userGetResults: any[] = [];
 
 function rowsMatchingTargets(rows: any[], filter: any) {
     const targetUids = filter.uid?.$in;
@@ -125,10 +128,16 @@ const permitsModel = {
     },
     async assignContribution(input: any) {
         calls.contributionAssign.push(input);
+        const failure = contributionAssignFailures.shift();
+        if (failure) throw failure;
         return input;
     },
     async listContributionsForProblem(...args: any[]) {
         calls.contributionList.push(args);
+        return contributionRows;
+    },
+    async listContributionsForUser(...args: any[]) {
+        calls.contributionUserList.push(args);
         return contributionRows;
     },
     async revokeContribution(input: any) {
@@ -199,6 +208,10 @@ const hydroojStub = {
             calls.problemGet.push(args);
             return stableProblemResults.length ? stableProblemResults.shift() : pdoc;
         },
+        async refreshProblemAcl() {
+            return undefined;
+        },
+        assertProblemAclDomain() {},
         canMaintainProblem(...args: any[]) {
             calls.maintain.push(args);
             return maintainResults.length ? maintainResults.shift() : true;
@@ -233,7 +246,7 @@ const hydroojStub = {
     UserModel: {
         async getById(...args: any[]) {
             calls.userGet.push(args);
-            return { _id: args[1] };
+            return userGetResults.length ? userGetResults.shift() : { _id: args[1] };
         },
         async getList(...args: any[]) {
             calls.userList.push(args);
@@ -336,6 +349,7 @@ function readCount() {
         calls.permitFind.length +
         calls.permitList.length +
         calls.contributionList.length +
+        calls.contributionUserList.length +
         calls.problemGet.length +
         calls.userGet.length +
         calls.userList.length
@@ -364,6 +378,8 @@ beforeEach(() => {
     permitSourceRows = [];
     rosterProvider = async () => [];
     contributionRows = [];
+    contributionAssignFailures = [];
+    userGetResults = [];
 });
 
 describe('permit handler authoritative domain boundary', () => {
@@ -375,7 +391,8 @@ describe('permit handler authoritative domain boundary', () => {
         ['problem_contribution GET', (handler) => handler.get(forged, 42)],
         ['problem_contribution POST', (handler) => handler.post(forged, 42, 8, 'data', '', 'assign-data')],
         ['problem_contribution_revoke POST', (handler) => handler.post(forged, 42, 8, 'data', 'revoke-data')],
-        ['problem_contribution_status POST', (handler) => handler.post(forged, 42, 'data', 'completed', 'complete-data')],
+        ['problem_contribution_bulk POST', (handler) => handler.post(forged, [42], '{"42":0}', 8, 'data', '', 'bulk-data')],
+        ['problem_contribution_status POST', (handler) => handler.post(forged, 42, 'data', 'completed', undefined, 'complete-data')],
         ['contest_verifier_add POST', (handler) => handler.post(forged, contestId, 8, 'verifier', '', undefined)],
         ['contest_verifier_remove POST', (handler) => handler.post(forged, contestId, 8, undefined)],
         ['my_verify_inbox GET', (handler) => handler.get(forged)],
@@ -443,7 +460,7 @@ describe('permit handler authoritative domain boundary', () => {
         stableProblemResults = [pdoc];
         contributionRows = [{ domainId: 'system', pid: 42, uid: 1, scope: 'tag', active: true, status: 'pending' }];
 
-        await status.post({ domainId: 'system' }, 42, 'tag', 'completed', 'complete-tag');
+        await status.post({ domainId: 'system' }, 42, 'tag', 'completed', undefined, 'complete-tag');
 
         expect(calls.writeClaim[0]).to.deep.equal([
             'system',
@@ -470,6 +487,126 @@ describe('permit handler authoritative domain boundary', () => {
         expect(denied?.name).to.equal('PermissionError');
         expect(calls.contributionAssign).to.deep.equal([]);
         expect(calls.writeClaim).to.have.length(1);
+    });
+
+    it('preflights every selected problem before a contribution batch writes anything', async () => {
+        const handler = makeHandler('problem_contribution_bulk');
+        rawProblemResults = [
+            { ...pdoc, structureRevision: 2 },
+            { ...pdoc, docId: 43, pid: 'P43', structureRevision: 4 },
+        ];
+        manageContributionResults = [true, false];
+
+        const denied = await capture(() =>
+            handler.post({ domainId: 'system' }, [42, 43], '{"42":2,"43":4}', 8, 'data,tag', 'check both', 'batch-preflight'),
+        );
+
+        expect(denied?.name).to.equal('PermissionError');
+        expect(calls.contributionAssign).to.deep.equal([]);
+        expect(calls.writeClaim).to.deep.equal([]);
+    });
+
+    it('rejects a missing target or stale revision before a batch claim is acquired', async () => {
+        const missingTarget = makeHandler('problem_contribution_bulk');
+        userGetResults = [null];
+        const missingError = await capture(() => missingTarget.post({ domainId: 'system' }, [42], '{"42":0}', 8, 'data', '', 'batch-missing-user'));
+        expect(missingError).to.be.instanceOf(Error);
+        expect(calls.problemGet).to.deep.equal([]);
+        expect(calls.writeClaim).to.deep.equal([]);
+
+        const stale = makeHandler('problem_contribution_bulk');
+        rawProblemResults = [{ ...pdoc, structureRevision: 3 }];
+        const staleError = await capture(() => stale.post({ domainId: 'system' }, [42], '{"42":2}', 8, 'data', '', 'batch-stale'));
+        expect(staleError).to.be.instanceOf(Error);
+        expect(calls.contributionAssign).to.deep.equal([]);
+        expect(calls.writeClaim).to.deep.equal([]);
+    });
+
+    it('derives the same per-scope mutation id when an identical batch request is retried', async () => {
+        const handler = makeHandler('problem_contribution_bulk');
+        const version = { ...pdoc, structureRevision: 2 };
+        rawProblemResults = [version, version, version, version];
+
+        await handler.post({ domainId: 'system' }, [42], '{"42":2}', 8, 'data', '', 'batch-retry');
+        await handler.post({ domainId: 'system' }, [42], '{"42":2}', 8, 'data', '', 'batch-retry');
+
+        expect(calls.contributionAssign).to.have.length(2);
+        expect(calls.contributionAssign[0].requestId).to.equal(calls.contributionAssign[1].requestId);
+        expect(calls.contributionAssign[0].requestId).to.equal('acl:problem-contribution-assign:system:42:8:data:batch-retry');
+    });
+
+    it('returns exact per-problem results when a post-preflight batch write fails', async () => {
+        const handler = makeHandler('problem_contribution_bulk');
+        const p42 = { ...pdoc, structureRevision: 2 };
+        const p43 = { ...pdoc, docId: 43, pid: 'P43', title: 'P43', structureRevision: 4 };
+        rawProblemResults = [p42, p43, p42, p42, p43];
+        contributionAssignFailures = [null, null, new Error('simulated database failure')];
+
+        await handler.post({ domainId: 'system' }, [42, 43], '{"42":2,"43":4}', 8, 'data,tag', 'check both', 'batch-partial');
+
+        expect(handler.response.status).to.equal(500);
+        expect(handler.response.body).to.deep.include({ success: false, requestId: 'batch-partial', succeededPids: [42] });
+        expect(handler.response.body.failed).to.deep.equal([
+            {
+                pid: 43,
+                publicPid: 'P43',
+                completedScopes: [],
+                scope: 'data',
+                message: 'simulated database failure',
+            },
+        ]);
+        expect(calls.contributionAssign.map((input) => [input.pid, input.scope])).to.deep.equal([
+            [42, 'data'],
+            [42, 'tag'],
+            [43, 'data'],
+        ]);
+    });
+
+    it('lets a contribution manager reopen an active completed task but never complete it for someone else', async () => {
+        const handler = makeHandler('problem_contribution_status');
+        stableProblemResults = [pdoc, pdoc];
+        rawProblemResults = [pdoc];
+        contributionRows = [{ domainId: 'system', pid: 42, uid: 8, scope: 'data', active: true, status: 'completed' }];
+
+        await handler.post({ domainId: 'system' }, 42, 'data', 'pending', 8, 'manager-reopen');
+
+        expect(calls.writeClaim[0]).to.deep.equal([
+            'system',
+            42,
+            handler.user,
+            'contribution-status',
+            { requestId: 'acl:problem-contribution-status:system:42:8:data:pending:manager-reopen', capability: 'contributions' },
+        ]);
+        expect(calls.contributionStatus[0]).to.deep.include({ uid: 8, status: 'pending', actor: 1 });
+
+        const denied = await capture(() => handler.post({ domainId: 'system' }, 42, 'data', 'completed', 8, 'manager-complete'));
+        expect(denied?.name).to.equal('PermissionError');
+        expect(calls.contributionStatus).to.have.length(1);
+    });
+
+    it('adds active contribution tasks to the existing inbox without changing permit rows', async () => {
+        const handler = makeHandler('my_verify_inbox');
+        contributionRows = [
+            {
+                _id: 'contribution-1',
+                domainId: 'system',
+                pid: 42,
+                uid: 1,
+                scope: 'tag',
+                active: true,
+                status: 'pending',
+                assignedBy: 8,
+                updatedBy: 8,
+            },
+        ];
+        stableProblemResults = [pdoc];
+
+        await handler.get({ domainId: 'system' });
+
+        expect(handler.response.body.permits).to.deep.equal([]);
+        expect(handler.response.body.contributions).to.deep.equal(contributionRows);
+        expect(handler.response.body.pdict[42]).to.deep.equal(pdoc);
+        expect(handler.response.body.udict[8].uname).to.equal('u8');
     });
 
     it('uses the authoritative handler domain for a legitimate revoke', async () => {

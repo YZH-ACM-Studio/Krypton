@@ -50,6 +50,7 @@ let failVerifierClaimFinalization = false;
 let failFinalAudit = false;
 let observerWork: (...args: any[]) => Promise<void> = async () => undefined;
 let beforeAddHook: ((...args: any[]) => unknown) | null = null;
+let pendingContributionRows: any[] = [];
 
 const problemPath = require.resolve('../src/model/problem.ts');
 const originalLoad = Module._load;
@@ -298,6 +299,7 @@ beforeEach(() => {
     failFinalAudit = false;
     observerWork = async () => undefined;
     beforeAddHook = null;
+    pendingContributionRows = [];
     (global as any).Hydro.model.permits = {
         listForProblem: async () => [
             { role: 'author', uid: 77 },
@@ -307,6 +309,7 @@ beforeEach(() => {
             cleanupCalls.push(args);
             return 1;
         },
+        listPendingContributionsForProblems: async () => pendingContributionRows,
     };
     installClaimSeam();
 });
@@ -363,6 +366,61 @@ describe('managed programming creation boundary', () => {
 });
 
 describe('managed programming publication service seam', () => {
+    it('requires a fresh explicit confirmation when data or tag tasks are pending', async () => {
+        pendingContributionRows = [
+            {
+                domainId: 'system',
+                pid: 7,
+                uid: 42,
+                scope: 'data',
+                active: true,
+                status: 'pending',
+                lastRequestId: 'assign-data',
+            },
+        ];
+
+        const missingConfirmation = await (async () => {
+            try {
+                await publish();
+                return null;
+            } catch (error) {
+                return error;
+            }
+        })();
+        expect(missingConfirmation).to.be.instanceOf(TestMetadataConflictError);
+        expect(publicationCommits).to.deep.equal([]);
+
+        const fingerprint = ProblemModel.pendingProblemContributionFingerprint(pendingContributionRows);
+        const result = await publish({ pendingContributionsConfirmed: true, pendingContributionFingerprint: fingerprint });
+        expect(result.state).to.equal('published');
+    });
+
+    it('rejects a stale pending-task confirmation fingerprint', async () => {
+        pendingContributionRows = [
+            {
+                domainId: 'system',
+                pid: 7,
+                uid: 42,
+                scope: 'tag',
+                active: true,
+                status: 'pending',
+                lastRequestId: 'new-assignment',
+            },
+        ];
+
+        const failure = await (async () => {
+            try {
+                await publish({ pendingContributionsConfirmed: true, pendingContributionFingerprint: 'stale' });
+                return null;
+            } catch (error) {
+                return error;
+            }
+        })();
+
+        expect(failure).to.be.instanceOf(TestMetadataConflictError);
+        expect(publicationCommits).to.deep.equal([]);
+    });
+
     it('binds a batch draft to one exact training chapter under the publish claim', async () => {
         currentDraft = {
             ...draft,

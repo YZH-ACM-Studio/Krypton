@@ -244,6 +244,18 @@ export async function listContributionsForUser(domainId: string, uid: number): P
     return contributionsColl.find({ domainId, uid }).sort({ status: 1, assignedAt: -1 }).toArray();
 }
 
+export async function listPendingContributionsForProblems(domainId: string, pids: number[]): Promise<ProblemContributionDoc[]> {
+    const uniquePids = [...new Set(pids)];
+    if (!uniquePids.length) return [];
+    if (uniquePids.some((pid) => !Number.isSafeInteger(pid) || pid <= 0)) {
+        throw new TypeError('problem contribution pids must be positive integers');
+    }
+    return contributionsColl
+        .find({ domainId, pid: { $in: uniquePids }, active: true, status: 'pending' })
+        .sort({ pid: 1, scope: 1, uid: 1 })
+        .toArray();
+}
+
 export async function loadActiveContributionPids(
     domainId: string,
     uid: number,

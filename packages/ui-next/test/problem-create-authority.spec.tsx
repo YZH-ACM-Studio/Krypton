@@ -146,6 +146,9 @@ describe('managed programming creation authority UI', () => {
           tags: ['自命题', '算法'],
           selectedMindmapNodeIds: ['node-1'],
         }}
+        pendingContributions={[{ uid: 88, scope: 'data' }]}
+        pendingContributionFingerprint="pending-fingerprint"
+        contributionUdict={{ 88: { _id: 88, uname: 'data-user' } }}
       />,
     );
     expect(markup).to.include('管理员审核与发布');
@@ -156,6 +159,10 @@ describe('managed programming creation authority UI', () => {
     expect(markup).to.include('自命题');
     expect(markup).to.include('算法');
     expect(markup).not.to.include('stale-tag');
+    expect(markup).to.include('data-user');
+    expect(markup).to.include('仍有 1 项协作任务待完成');
+    expect(markup).to.include('name="pendingContributionsConfirmed" value="false"');
+    expect(markup).to.include('name="pendingContributionFingerprint" value="pending-fingerprint"');
   });
 
   it('disables managed publication when the server review preview is missing or invalid', () => {

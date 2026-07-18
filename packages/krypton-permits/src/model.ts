@@ -11,6 +11,7 @@ import {
     listCompletedDataContributorUids,
     listContributionsForProblem,
     listContributionsForUser,
+    listPendingContributionsForProblems,
     loadActiveContributionPids,
     revokeContribution,
     setContributionStatus,
@@ -705,6 +706,7 @@ export const permitsModel = {
     setContributionStatus,
     listContributionsForProblem,
     listContributionsForUser,
+    listPendingContributionsForProblems,
     listCompletedDataContributorUids,
 };
 
@@ -729,4 +731,5 @@ export const publicPermitsModel = {
     countByContest,
     prepareProblemWriteClaim,
     listCompletedDataContributorUids,
+    listPendingContributionsForProblems,
 };

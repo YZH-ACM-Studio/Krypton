@@ -389,9 +389,50 @@ class ProblemPermitRevokeHandler extends Handler {
 
 const CONTRIBUTION_SCOPES: ProblemContributionScope[] = ['data', 'tag'];
 const CONTRIBUTION_STATUSES: ProblemContributionStatus[] = ['pending', 'completed'];
+const MAX_CONTRIBUTION_BATCH_SIZE = 100;
 
 function deriveContributionMutationId(requestId: string, operation: string, ...identity: unknown[]): string {
     return deriveAclRequestId(undefined, operation, ...identity, requestId.trim());
+}
+
+function parseContributionScopes(raw: string): ProblemContributionScope[] {
+    const scopes = [
+        ...new Set(
+            raw
+                .split(',')
+                .map((scope) => scope.trim())
+                .filter(Boolean),
+        ),
+    ];
+    if (!scopes.length || scopes.some((scope) => !CONTRIBUTION_SCOPES.includes(scope as ProblemContributionScope))) {
+        throw new ValidationError('scopes', null, 'scopes 必须是 data、tag 或二者');
+    }
+    return scopes as ProblemContributionScope[];
+}
+
+function parseExpectedContributionRevisions(raw: string, pids: number[]): Map<number, number> {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        throw new ValidationError('expectedRevisions', null, 'expectedRevisions 必须是合法 JSON 对象');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new ValidationError('expectedRevisions', null, 'expectedRevisions 必须是题号到 revision 的对象');
+    }
+    const requested = new Set(pids.map(String));
+    const entries = Object.entries(parsed as Record<string, unknown>);
+    if (entries.length !== requested.size || entries.some(([pid]) => !requested.has(pid))) {
+        throw new ValidationError('expectedRevisions', null, 'expectedRevisions 必须与本次题目列表完全一致');
+    }
+    const result = new Map<number, number>();
+    for (const [pid, revision] of entries) {
+        if (!Number.isSafeInteger(revision) || Number(revision) < 0) {
+            throw new ValidationError('expectedRevisions', null, `题目 ${pid} 的 revision 无效`);
+        }
+        result.set(Number(pid), Number(revision));
+    }
+    return result;
 }
 
 async function auditContributionDenied(handler: Handler, pdoc: any, targetUid: number, scope: string, stage: string, requestId: string) {
@@ -589,55 +630,253 @@ class ProblemContributionRevokeHandler extends Handler {
     }
 }
 
+class ProblemContributionBulkHandler extends Handler {
+    @param('pids', Types.NumericArray)
+    @param('expectedRevisions', Types.String)
+    @param('uid', Types.PositiveInt)
+    @param('scopes', Types.String)
+    @param('note', Types.String, true)
+    @param('requestId', Types.String)
+    async post(
+        args: { domainId?: unknown },
+        pids: number[],
+        expectedRevisionsRaw: string,
+        uid: number,
+        scopesRaw: string,
+        note: string,
+        requestId: string,
+    ) {
+        const domainId = authoritativeDomainId(this, args);
+        const batchRequestId = requestId.trim();
+        if (!batchRequestId) throw new ValidationError('requestId', null, 'requestId 不能为空');
+        if (!pids.length || pids.length > MAX_CONTRIBUTION_BATCH_SIZE) {
+            throw new ValidationError('pids', null, `每次必须选择 1-${MAX_CONTRIBUTION_BATCH_SIZE} 道题`);
+        }
+        if (new Set(pids).size !== pids.length || pids.some((pid) => !Number.isSafeInteger(pid) || pid <= 0)) {
+            throw new ValidationError('pids', null, 'pids 必须是互不重复的正整数');
+        }
+        const scopes = parseContributionScopes(scopesRaw);
+        const expectedRevisions = parseExpectedContributionRevisions(expectedRevisionsRaw, pids);
+        const target = await UserModel.getById(domainId, uid);
+        if (!target) throw new ValidationError('uid', null, '目标用户不存在');
+        await ProblemModel.refreshProblemAcl(this.user, domainId);
+        ProblemModel.assertProblemAclDomain(this.user, domainId);
+
+        const preflight: Array<{ pdoc: any; revision: number }> = [];
+        for (const pid of pids) {
+            const pdoc = await ProblemModel.get(domainId, pid);
+            if (!pdoc) throw new NotFoundError(`题目 ${pid} 不存在`);
+            const revision = Number(pdoc.structureRevision ?? 0);
+            if (!Number.isSafeInteger(revision) || revision < 0 || revision !== expectedRevisions.get(pid)) {
+                throw new ValidationError('expectedRevisions', null, `题目 ${pdoc.pid || pid} 已发生变化，请刷新后重试`);
+            }
+            if (!ProblemModel.canManageProblemContributions(this.user, pdoc)) {
+                await auditContributionDenied(this, pdoc, uid, scopes.join(','), 'bulk-preflight', batchRequestId);
+                throw new PermissionError(`无权分配题目 ${pdoc.pid || pid} 的贡献范围`);
+            }
+            preflight.push({ pdoc, revision });
+        }
+
+        const succeededPids: number[] = [];
+        const failed: Array<{
+            pid: number;
+            publicPid: string;
+            completedScopes: ProblemContributionScope[];
+            scope: ProblemContributionScope;
+            message: string;
+        }> = [];
+        const notified: Array<{ pdoc: any; scopes: ProblemContributionScope[] }> = [];
+        for (const { pdoc, revision } of preflight) {
+            const completedScopes: ProblemContributionScope[] = [];
+            for (const scope of scopes) {
+                const mutationId = deriveContributionMutationId(batchRequestId, 'problem-contribution-assign', domainId, pdoc.docId, uid, scope);
+                let rejected: Error | null = null;
+                try {
+                    await ProblemModel.withAuthorizedWriteClaim(
+                        domainId,
+                        pdoc.docId,
+                        this.user,
+                        'contribution-assign',
+                        async (claim) => {
+                            const current = await ProblemModel.get(domainId, pdoc.docId);
+                            if (!current) {
+                                rejected = new Error(`题目 ${pdoc.pid || pdoc.docId} 在写入前已不存在`);
+                                return;
+                            }
+                            if (Number(current.structureRevision ?? 0) !== revision) {
+                                rejected = new Error(`题目 ${current.pid || current.docId} 在预检后发生变化`);
+                                return;
+                            }
+                            if (!ProblemModel.canManageProblemContributions(this.user, current)) {
+                                rejected = new PermissionError(`题目 ${current.pid || current.docId} 的管理权限已变化`);
+                                return;
+                            }
+                            try {
+                                await OplogModel.log(this as any, 'problem.contribution.assign', {
+                                    problemId: current.docId,
+                                    targetUid: uid,
+                                    scope,
+                                    note: note || '',
+                                    requestId: mutationId,
+                                    batchRequestId,
+                                    result: 'attempt',
+                                });
+                                await permitsModel.assignContribution({
+                                    domainId,
+                                    pid: current.docId,
+                                    uid,
+                                    scope,
+                                    actor: this.user._id,
+                                    note,
+                                    requestId: mutationId,
+                                    writeClaimRequestId: claim.requestId,
+                                });
+                            } catch (error) {
+                                rejected = error instanceof Error ? error : new Error(String(error));
+                            }
+                        },
+                        { requestId: mutationId, capability: 'contributions' },
+                    );
+                    if (rejected) throw rejected;
+                    completedScopes.push(scope);
+                    logger.info(
+                        'Problem contribution batch changed domain=%s pid=%d actor=%d target=%d scope=%s result=success requestId=%s batchRequestId=%s',
+                        domainId,
+                        pdoc.docId,
+                        this.user._id,
+                        uid,
+                        scope,
+                        mutationId,
+                        batchRequestId,
+                    );
+                } catch (error) {
+                    const failure = error instanceof Error ? error : new Error(String(error));
+                    logger.error(
+                        'Problem contribution batch failed domain=%s pid=%d actor=%d target=%d scope=%s requestId=%s batchRequestId=%s error=%o',
+                        domainId,
+                        pdoc.docId,
+                        this.user._id,
+                        uid,
+                        scope,
+                        mutationId,
+                        batchRequestId,
+                        failure,
+                    );
+                    failed.push({
+                        pid: pdoc.docId,
+                        publicPid: String(pdoc.pid || pdoc.docId),
+                        completedScopes: [...completedScopes],
+                        scope,
+                        message: failure.message,
+                    });
+                    break;
+                }
+            }
+            if (completedScopes.length) notified.push({ pdoc, scopes: completedScopes });
+            if (completedScopes.length === scopes.length) succeededPids.push(pdoc.docId);
+        }
+
+        if (notified.length) {
+            const scopeLabel = (scope: ProblemContributionScope) => (scope === 'data' ? '数据' : '标签');
+            const lines = notified.map(
+                ({ pdoc, scopes: completed }) => `- ${pdoc.pid || pdoc.docId} ${pdoc.title || '未命名题目'}：${completed.map(scopeLabel).join('、')}`,
+            );
+            try {
+                await MessageModel.send(
+                    this.user._id,
+                    uid,
+                    `[krypton] ${this.user.uname} 为你分配了出题协作任务：\n${lines.join('\n')}${note ? `\n附言：${note}` : ''}`,
+                    MessageModel.FLAG_UNREAD,
+                );
+            } catch (error) {
+                logger.error(
+                    'contribution batch notification failed batchRequestId=%s domain=%s uid=%d pids=%o error=%o',
+                    batchRequestId,
+                    domainId,
+                    uid,
+                    notified.map(({ pdoc }) => pdoc.docId),
+                    error,
+                );
+            }
+        }
+
+        this.response.status = failed.length ? 500 : 200;
+        this.response.body = { success: failed.length === 0, requestId: batchRequestId, succeededPids, failed };
+    }
+}
+
 class ProblemContributionStatusHandler extends Handler {
     @param('pid', Types.UnsignedInt)
     @param('scope', Types.String)
     @param('status', Types.String)
+    @param('uid', Types.PositiveInt, true)
     @param('requestId', Types.String)
-    async post(args: { domainId?: unknown }, pid: number, scope: string, status: string, requestId: string) {
+    async post(args: { domainId?: unknown }, pid: number, scope: string, status: string, uid: number | undefined, requestId: string) {
         const domainId = authoritativeDomainId(this, args);
         if (!CONTRIBUTION_SCOPES.includes(scope as ProblemContributionScope)) throw new ValidationError('scope');
         if (!CONTRIBUTION_STATUSES.includes(status as ProblemContributionStatus)) throw new ValidationError('status');
         const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user);
         if (!pdoc) throw new NotFoundError('题目不存在');
+        const managerAction = status === 'pending';
+        const targetUid = uid ?? this.user._id;
+        if (managerAction && uid === undefined) throw new ValidationError('uid', null, '重开任务必须指定目标用户');
+        if (!managerAction && targetUid !== this.user._id) throw new PermissionError('只能完成自己的贡献任务');
+        if (managerAction && !ProblemModel.canManageProblemContributions(this.user, pdoc)) {
+            throw new PermissionError('无权重开此题目的贡献任务');
+        }
         const rows = await permitsModel.listContributionsForProblem(domainId, pdoc.docId);
-        const row = rows.find((item) => item.uid === this.user._id && item.scope === scope && item.active);
-        const mutationId = deriveContributionMutationId(requestId, 'problem-contribution-status', domainId, pdoc.docId, this.user._id, scope, status);
+        const row = rows.find((item) => item.uid === targetUid && item.scope === scope && item.active);
+        const mutationId = deriveContributionMutationId(requestId, 'problem-contribution-status', domainId, pdoc.docId, targetUid, scope, status);
         if (!row) {
-            await auditContributionDenied(this, pdoc, this.user._id, scope, 'authorize-status', mutationId);
+            await auditContributionDenied(this, pdoc, targetUid, scope, 'authorize-status', mutationId);
             throw new PermissionError('当前没有这项贡献任务');
         }
         await OplogModel.log(this as any, 'problem.contribution.status', {
+            domainId,
             problemId: pdoc.docId,
+            actor: this.user._id,
+            targetUid,
             scope,
             status,
+            stage: status,
             requestId: mutationId,
             result: 'attempt',
         });
+        let deniedInsideClaim = false;
         await ProblemModel.withAuthorizedWriteClaim(
             domainId,
             pdoc.docId,
             this.user,
             'contribution-status',
-            (claim) =>
-                permitsModel.setContributionStatus({
+            async (claim) => {
+                const current = await ProblemModel.get(domainId, pdoc.docId);
+                if (!current || (managerAction && !ProblemModel.canManageProblemContributions(this.user, current))) {
+                    deniedInsideClaim = true;
+                    return;
+                }
+                await permitsModel.setContributionStatus({
                     domainId,
                     pid: pdoc.docId,
-                    uid: this.user._id,
+                    uid: targetUid,
                     scope: scope as ProblemContributionScope,
                     status: status as ProblemContributionStatus,
                     actor: this.user._id,
                     requestId: mutationId,
                     writeClaimRequestId: claim.requestId,
-                }),
-            { requestId: mutationId, capability: scope as ProblemContributionScope },
+                });
+            },
+            { requestId: mutationId, capability: managerAction ? 'contributions' : (scope as ProblemContributionScope) },
         );
+        if (deniedInsideClaim) {
+            await auditContributionDenied(this, pdoc, targetUid, scope, 'claim-status', mutationId);
+            throw new PermissionError('无权更新此题目的贡献任务');
+        }
         logger.info(
             'Problem contribution changed domain=%s pid=%d actor=%d target=%d scope=%s stage=%s result=success requestId=%s',
             domainId,
             pdoc.docId,
             this.user._id,
-            this.user._id,
+            targetUid,
             scope,
             status,
             mutationId,
@@ -747,8 +986,12 @@ class MyVerifyInboxHandler extends Handler {
     async get(args: { domainId?: unknown }) {
         const domainId = authoritativeDomainId(this, args);
         if (!this.user.hasPriv(PRIV.PRIV_USER_PROFILE)) throw new PrivilegeError(PRIV.PRIV_USER_PROFILE);
-        const rows = await permitsModel.listForUser(domainId, this.user._id);
-        const pids = Array.from(new Set(rows.map((r) => r.pid)));
+        const [rows, allContributions] = await Promise.all([
+            permitsModel.listForUser(domainId, this.user._id),
+            permitsModel.listContributionsForUser(domainId, this.user._id),
+        ]);
+        const contributions = allContributions.filter((row) => row.active);
+        const pids = Array.from(new Set([...rows.map((r) => r.pid), ...contributions.map((row) => row.pid)]));
         // Every inbox problem is a direct hidden-problem read. Resolve it at
         // the same durable ACL revision as the refreshed permit snapshot so a
         // concurrent revoke cannot leave an old permitted title in the page.
@@ -757,7 +1000,10 @@ class MyVerifyInboxHandler extends Handler {
             const pdoc = await ProblemModel.getViewableAuthorized(domainId, pid, this.user, ProblemModel.PROJECTION_LIST);
             if (pdoc) fixedPdict[pid] = pdoc;
         }
-        const granterUids = Array.from(new Set(rows.map((r) => r.grantedBy)));
+        const visibleContributions = contributions.filter((row) => fixedPdict[row.pid]);
+        const granterUids = Array.from(
+            new Set([...rows.map((r) => r.grantedBy), ...visibleContributions.flatMap((row) => [row.assignedBy, row.updatedBy])]),
+        );
         const udict = await UserModel.getList(domainId, granterUids);
         // Group contest-tagged permits separately
         const contestIds = Array.from(new Set(rows.map((r) => r.viaContest?.toHexString()).filter(Boolean) as string[]));
@@ -767,7 +1013,7 @@ class MyVerifyInboxHandler extends Handler {
             if (t) tdict[tidHex] = { _id: t._id, title: t.title };
         }
         this.response.template = 'my_verify_inbox.html';
-        this.response.body = { permits: rows, pdict: fixedPdict, udict, tdict };
+        this.response.body = { permits: rows, contributions: visibleContributions, pdict: fixedPdict, udict, tdict };
     }
 }
 
@@ -775,6 +1021,7 @@ export function applyHandlers(ctx: Context) {
     ctx.Route('problem_permit_grant', '/p/:pid/permits', ProblemPermitGrantHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_permit_revoke', '/p/:pid/permits/revoke', ProblemPermitRevokeHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_contribution', '/p/:pid/contributions', ProblemContributionHandler, PERM.PERM_VIEW_PROBLEM);
+    ctx.Route('problem_contribution_bulk', '/problem-contributions/bulk', ProblemContributionBulkHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('problem_contribution_revoke', '/p/:pid/contributions/revoke', ProblemContributionRevokeHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_contribution_status', '/p/:pid/contributions/status', ProblemContributionStatusHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('contest_verifier_add', '/contest/:tid/verifiers', ContestVerifierAddHandler, PERM.PERM_VIEW_CONTEST);

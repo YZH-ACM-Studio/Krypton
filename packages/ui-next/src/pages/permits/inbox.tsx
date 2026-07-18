@@ -27,6 +27,19 @@ interface PermitRow {
   note: string;
 }
 
+interface ContributionRow {
+  _id: string;
+  pid: number;
+  uid: number;
+  scope: 'data' | 'tag';
+  active: boolean;
+  status: 'pending' | 'completed';
+  note?: string;
+  assignedBy: number;
+  assignedAt: string;
+  firstCompletedAt?: string;
+}
+
 interface UserMini {
   _id: number;
   uname: string;
@@ -48,12 +61,15 @@ export function MyVerifyInboxPage() {
   const bs = useBootstrap();
   const data = bs.page.data as {
     permits: PermitRow[];
+    contributions: ContributionRow[];
     pdict: Record<string, ProblemMini>;
     udict: Record<string, UserMini>;
     tdict: Record<string, ContestMini>;
   };
   const direct = (data.permits || []).filter((p) => !p.viaContest);
-  const [revokeError, setRevokeError] = useState('');
+  const contributions = (data.contributions || []).filter((row) => row.active);
+  const [actionError, setActionError] = useState('');
+  const [completing, setCompleting] = useState('');
   // Group contest permits by tid
   const byContest = new Map<string, PermitRow[]>();
   for (const p of data.permits || []) {
@@ -64,7 +80,7 @@ export function MyVerifyInboxPage() {
 
   async function revoke(pid: number, permitId: string) {
     if (!confirm('退出该题目的协作角色？')) return;
-    setRevokeError('');
+    setActionError('');
     const fd = new FormData();
     fd.set('permitId', permitId);
     const r = await fetch(`/p/${pid}/permits/revoke`, { method: 'POST', body: fd, credentials: 'include' });
@@ -76,10 +92,42 @@ export function MyVerifyInboxPage() {
       } catch {
         // The HTTP status remains the explicit error when the response is not JSON.
       }
-      setRevokeError(message);
+      setActionError(message);
       return;
     }
     window.location.reload();
+  }
+
+  async function complete(row: ContributionRow) {
+    const key = `${row.pid}:${row.scope}`;
+    setCompleting(key);
+    setActionError('');
+    const fd = new FormData();
+    fd.set('scope', row.scope);
+    fd.set('status', 'completed');
+    fd.set('requestId', crypto.randomUUID());
+    try {
+      const response = await fetch(`/p/${row.pid}/contributions/status`, {
+        method: 'POST',
+        body: fd,
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        let message = `标记完成失败：HTTP ${response.status}`;
+        try {
+          const body = await response.json();
+          message = body?.error?.message || body?.message || body?.error || message;
+        } catch {
+          // The explicit HTTP status remains visible for non-JSON responses.
+        }
+        throw new Error(message);
+      }
+      window.location.reload();
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : '标记完成失败');
+      setCompleting('');
+    }
   }
 
   return (
@@ -90,21 +138,68 @@ export function MyVerifyInboxPage() {
             <Mail className="size-6 text-primary" />
             我的出题协作
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">逐题分配的出题、验题与维护角色都会出现在这里。</p>
+          <p className="mt-1 text-sm text-muted-foreground">出题角色与数据、标签贡献任务都集中在这里；完成仅记录工作进度。</p>
         </div>
       </div>
 
-      {revokeError ? (
+      {actionError ? (
         <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {revokeError}
+          {actionError}
         </p>
       ) : null}
 
-      {direct.length === 0 && byContest.size === 0 ? (
+      {direct.length === 0 && byContest.size === 0 && contributions.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">还没有任何题目协作邀请</CardContent>
         </Card>
       ) : null}
+
+      {(['data', 'tag'] as const).map((scope) => {
+        const scoped = contributions.filter((row) => row.scope === scope);
+        const pending = scoped.filter((row) => row.status === 'pending');
+        const completed = scoped.filter((row) => row.status === 'completed');
+        if (!scoped.length) return null;
+        const title = scope === 'data' ? '数据贡献任务' : '标签贡献任务';
+        return (
+          <Card key={scope}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">
+                {title} ({pending.length} 待完成 / {completed.length} 已完成)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {pending.length ? (
+                <ul className="divide-y">
+                  {pending.map((row) => (
+                    <ContributionRowItem
+                      key={row._id}
+                      row={row}
+                      pdict={data.pdict}
+                      udict={data.udict}
+                      completing={completing === `${row.pid}:${row.scope}`}
+                      onComplete={() => complete(row)}
+                    />
+                  ))}
+                </ul>
+              ) : (
+                <p className="px-5 py-4 text-xs text-muted-foreground">当前没有待完成任务</p>
+              )}
+              {completed.length ? (
+                <details className="border-t border-border/70">
+                  <summary className="cursor-pointer px-5 py-3 text-xs font-medium text-muted-foreground hover:text-foreground">
+                    查看已完成任务 ({completed.length})
+                  </summary>
+                  <ul className="divide-y border-t border-border/70">
+                    {completed.map((row) => (
+                      <ContributionRowItem key={row._id} row={row} pdict={data.pdict} udict={data.udict} completing={false} />
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </CardContent>
+          </Card>
+        );
+      })}
 
       {direct.length > 0 ? (
         <Card>
@@ -146,6 +241,47 @@ export function MyVerifyInboxPage() {
         );
       })}
     </motion.div>
+  );
+}
+
+function ContributionRowItem({
+  row,
+  pdict,
+  udict,
+  completing,
+  onComplete,
+}: {
+  row: ContributionRow;
+  pdict: Record<string, ProblemMini>;
+  udict: Record<string, UserMini>;
+  completing: boolean;
+  onComplete?: () => void;
+}) {
+  const p = pdict[row.pid] || ({} as ProblemMini);
+  const assigner = udict[row.assignedBy];
+  return (
+    <li className="flex flex-col gap-3 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <a href={`/p/${p.pid || p.docId}/edit`} className="truncate text-sm font-medium hover:text-primary hover:underline">
+          <span className="font-mono text-[11px] text-muted-foreground">{p.pid || p.docId || row.pid}</span>
+          <span className="ml-1.5">{p.title || '题目'}</span>
+        </a>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {assigner ? `${assigner.uname} 分配` : `UID ${row.assignedBy} 分配`} · {new Date(row.assignedAt).toLocaleString('zh-CN')}
+          {row.note ? ` · ${row.note}` : ''}
+        </p>
+        {row.firstCompletedAt ? (
+          <p className="mt-1 text-xs text-muted-foreground">首次完成于 {new Date(row.firstCompletedAt).toLocaleString('zh-CN')}</p>
+        ) : null}
+      </div>
+      {onComplete ? (
+        <Button type="button" size="sm" onClick={onComplete} disabled={completing}>
+          {completing ? '提交中…' : '标记完成'}
+        </Button>
+      ) : (
+        <Badge variant="secondary">已完成</Badge>
+      )}
+    </li>
   );
 }
 

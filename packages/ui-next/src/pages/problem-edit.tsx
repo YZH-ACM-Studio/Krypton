@@ -6,6 +6,7 @@
 import { AlertCircle, ArrowRight, CheckCircle2, Download, Eye, EyeOff, FileText, Loader2, Lock, Save, ShieldCheck, Tag, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
+import { DomainUserSearchOption, type DomainUserOption, domainUserSearchLabel, loadDomainUsers } from '@/components/domain-user-search';
 import { ManagedProgrammingAuthorControl, ManagedProgrammingTrainingControl, ManagedReviewPanel } from '@/components/managed-programming-authority';
 import {
   ManagedProblemTrainingStatus,
@@ -81,50 +82,19 @@ interface PermitRow {
   note: string;
 }
 
-interface UserOption {
-  _id: number;
-  uname?: string;
-  mail?: string;
-  avatarUrl?: string;
-}
-
-async function loadDomainUsers(domainId: string, query: string): Promise<UserOption[]> {
-  const search = query.trim();
-  if (!search) return [];
-  const response = await fetch(`/d/${encodeURIComponent(domainId)}/api/users`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      args: { search, limit: 10, exact: false },
-      projection: ['_id', 'uname', 'mail', 'avatarUrl'],
-    }),
-  });
-  if (!response.ok) throw new Error(await readHydroResponseError(response, '用户搜索失败'));
-  const users = await response.json();
-  if (!Array.isArray(users) || users.some((item) => !Number.isSafeInteger(item?._id) || item._id <= 0)) {
-    throw new Error('用户搜索响应格式错误');
-  }
-  return users;
-}
-
-function userSearchLabel(user: UserOption) {
-  return `${user.uname || `uid:${user._id}`} ${user._id} ${user.mail || ''}`;
-}
-
-function UserSearchOption({ user }: { user: UserOption }) {
-  return (
-    <span className="flex min-w-0 flex-col">
-      <span className="truncate text-sm font-medium">
-        {user.uname || `uid:${user._id}`}
-        <span className="ml-2 font-mono text-[11px] text-muted-foreground">UID {user._id}</span>
-      </span>
-      {user.mail ? <span className="truncate text-[11px] text-muted-foreground">{user.mail}</span> : null}
-    </span>
-  );
+interface ContributionRow {
+  _id: string;
+  pid: number;
+  uid: number;
+  scope: 'data' | 'tag';
+  active: boolean;
+  status: 'pending' | 'completed';
+  note?: string;
+  assignedBy: number;
+  assignedAt: string;
+  updatedBy: number;
+  updatedAt: string;
+  firstCompletedAt?: string;
 }
 
 type PermitRole = PermitRow['role'];
@@ -144,7 +114,7 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
   const [open, setOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<PermitRow | null>(null);
   const [revokeBusy, setRevokeBusy] = useState(false);
-  const [selectedUsers, setSelectedUsers] = useState<UserOption[]>([]);
+  const [selectedUsers, setSelectedUsers] = useState<DomainUserOption[]>([]);
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteError, setInviteError] = useState('');
   const [grantableRoles, setGrantableRoles] = useState<PermitRole[]>([]);
@@ -180,7 +150,7 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
   }, [refresh]);
 
   const searchUsers = useCallback(
-    async (query: string): Promise<UserOption[]> => {
+    async (query: string): Promise<DomainUserOption[]> => {
       setInviteError('');
       try {
         return await loadDomainUsers(bs.domain?.id || 'system', query);
@@ -333,7 +303,7 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
           <form method="post" action={`/p/${apiPid}/permits`} className="space-y-4 p-5" onSubmit={submitInvite}>
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">用户 UID</label>
-              <MultiSelect<UserOption>
+              <MultiSelect<DomainUserOption>
                 value={selectedUsers}
                 onChange={(next) => {
                   setSelectedUsers(next);
@@ -341,14 +311,14 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
                 }}
                 loadOptions={searchUsers}
                 getKey={(u) => String(u._id)}
-                getLabel={userSearchLabel}
+                getLabel={domainUserSearchLabel}
                 renderChip={(u) => (
                   <span className="inline-flex items-center gap-1">
                     <span className="font-medium">{u.uname || `uid:${u._id}`}</span>
                     <span className="font-mono text-[10px] text-muted-foreground">#{u._id}</span>
                   </span>
                 )}
-                renderOption={(u) => <UserSearchOption user={u} />}
+                renderOption={(u) => <DomainUserSearchOption user={u} />}
                 name="uids"
                 placeholder="输入 UID / 用户名 / 邮箱搜索"
                 emptyText="没有找到用户"
@@ -428,6 +398,271 @@ function PermitsPanel({ pid, pdocId, hidden, managed }: { pid: string; pdocId: n
   );
 }
 
+function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; pdocId: number; structureRevision?: number }) {
+  const bs = useBootstrap();
+  const apiPid = String(pdocId || pid);
+  const [rows, setRows] = useState<ContributionRow[]>([]);
+  const [udict, setUdict] = useState<Record<string, { _id: number; uname: string }>>({});
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState('');
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<DomainUserOption[]>([]);
+  const [dataScope, setDataScope] = useState(true);
+  const [tagScope, setTagScope] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<ContributionRow | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoaded(false);
+    setError('');
+    try {
+      const response = await fetch(`/p/${apiPid}/contributions`, { credentials: 'include', headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error(await readHydroResponseError(response, '贡献分工加载失败'));
+      const body = await response.json();
+      if (!Array.isArray(body?.contributions)) throw new Error('贡献分工响应格式错误');
+      setRows(body.contributions);
+      setUdict(body.udict || {});
+    } catch (cause) {
+      console.error('Failed to load problem contributions', cause);
+      setError(cause instanceof Error ? cause.message : '贡献分工加载失败');
+    } finally {
+      setLoaded(true);
+    }
+  }, [apiPid]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const searchUsers = useCallback(
+    async (query: string) => {
+      try {
+        return await loadDomainUsers(bs.domain?.id || 'system', query);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : '用户搜索失败');
+        throw cause;
+      }
+    },
+    [bs.domain?.id],
+  );
+
+  async function assign(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedUser[0] || (!dataScope && !tagScope)) {
+      setError('请选择一个用户和至少一项贡献范围');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    const form = new FormData(event.currentTarget);
+    form.set('pids', String(pdocId));
+    form.set('expectedRevisions', JSON.stringify({ [pdocId]: Number(structureRevision ?? 0) }));
+    form.set('uid', String(selectedUser[0]._id));
+    form.set('scopes', [dataScope ? 'data' : '', tagScope ? 'tag' : ''].filter(Boolean).join(','));
+    form.set('requestId', crypto.randomUUID());
+    try {
+      const response = await fetch('/problem-contributions/bulk', {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        const body = await response
+          .clone()
+          .json()
+          .catch(() => null);
+        if (Array.isArray(body?.failed) && body.failed.length) {
+          throw new Error(
+            `分配未全部完成（requestId: ${body.requestId || '未知'}）：${body.failed
+              .map((failure: R) => `${failure.publicPid || failure.pid} / ${failure.scope}: ${failure.message}`)
+              .join('；')}`,
+          );
+        }
+        throw new Error(await readHydroResponseError(response, '分配贡献任务失败'));
+      }
+      setSelectedUser([]);
+      setDataScope(true);
+      setTagScope(false);
+      setAssignOpen(false);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '分配贡献任务失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function mutate(row: ContributionRow, operation: 'reopen' | 'revoke') {
+    setBusy(true);
+    setError('');
+    const form = new FormData();
+    form.set('uid', String(row.uid));
+    form.set('scope', row.scope);
+    form.set('requestId', crypto.randomUUID());
+    if (operation === 'reopen') form.set('status', 'pending');
+    try {
+      const response = await fetch(operation === 'reopen' ? `/p/${apiPid}/contributions/status` : `/p/${apiPid}/contributions/revoke`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error(await readHydroResponseError(response, operation === 'reopen' ? '重开任务失败' : '撤销贡献范围失败'));
+      setRevokeTarget(null);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : operation === 'reopen' ? '重开任务失败' : '撤销贡献范围失败');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section aria-labelledby="contribution-heading" className="rounded-2xl border border-border/70 bg-card/30">
+      <header className="flex flex-col gap-3 border-b border-border/60 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 id="contribution-heading" className="flex items-center gap-2 text-base font-semibold tracking-tight">
+            <ShieldCheck className="size-4 text-muted-foreground" aria-hidden="true" />
+            数据与标签协作
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">贡献范围彼此独立；完成只记录进度，不会撤销权限或触发发布。</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild type="button" size="sm" variant="ghost">
+            <a href="/permits/inbox">我的出题协作</a>
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => setAssignOpen(true)} disabled={!loaded}>
+            分配贡献任务
+          </Button>
+        </div>
+      </header>
+      <div className="space-y-3 p-5">
+        {error ? (
+          <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            {error}
+          </p>
+        ) : null}
+        {!loaded ? (
+          <p className="text-xs text-muted-foreground">加载中…</p>
+        ) : rows.length === 0 ? (
+          <p className="text-xs text-muted-foreground">还没有数据或标签贡献分工</p>
+        ) : (
+          <ul className="divide-y divide-border/70">
+            {rows.map((row) => (
+              <li key={row._id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{udict[row.uid]?.uname || `uid:${row.uid}`}</span>
+                    <Badge variant="secondary">{row.scope === 'data' ? '数据贡献者' : '标签贡献者'}</Badge>
+                    <Badge variant={row.active && row.status === 'pending' ? 'outline' : 'secondary'}>
+                      {!row.active ? '已撤销' : row.status === 'completed' ? '已完成' : '待完成'}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    由 {udict[row.assignedBy]?.uname || `uid:${row.assignedBy}`} 分配于 {new Date(row.assignedAt).toLocaleString('zh-CN')}
+                    {row.note ? ` · ${row.note}` : ''}
+                  </p>
+                  {row.firstCompletedAt ? (
+                    <p className="mt-1 text-xs text-muted-foreground">首次完成于 {new Date(row.firstCompletedAt).toLocaleString('zh-CN')}</p>
+                  ) : null}
+                </div>
+                {row.active ? (
+                  <div className="flex shrink-0 gap-2">
+                    {row.status === 'completed' ? (
+                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => mutate(row, 'reopen')}>
+                        重开
+                      </Button>
+                    ) : null}
+                    <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setRevokeTarget(row)}>
+                      撤销
+                    </Button>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <Dialog open={assignOpen} onOpenChange={(open) => !busy && setAssignOpen(open)}>
+        <DialogContent className="w-full sm:w-[560px]" onClose={() => !busy && setAssignOpen(false)}>
+          <DialogHeader>
+            <DialogTitle>分配数据 / 标签贡献任务</DialogTitle>
+          </DialogHeader>
+          <form className="space-y-4 p-5" onSubmit={assign}>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">目标用户</label>
+              <MultiSelect<DomainUserOption>
+                value={selectedUser}
+                onChange={(next) => setSelectedUser(next.length ? [next[next.length - 1]] : [])}
+                loadOptions={searchUsers}
+                getKey={(user) => String(user._id)}
+                getLabel={domainUserSearchLabel}
+                renderChip={(user) => `${user.uname || `uid:${user._id}`} · UID ${user._id}`}
+                renderOption={(user) => <DomainUserSearchOption user={user} />}
+                placeholder="输入 UID / 用户名 / 邮箱搜索"
+                emptyText="没有找到用户"
+              />
+            </div>
+            <fieldset className="space-y-2">
+              <legend className="text-xs text-muted-foreground">贡献范围</legend>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={dataScope} onCheckedChange={setDataScope} />
+                数据贡献者
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={tagScope} onCheckedChange={setTagScope} />
+                标签贡献者
+              </label>
+            </fieldset>
+            <div className="space-y-1.5">
+              <label htmlFor="contribution-note" className="text-xs text-muted-foreground">
+                备注（可选，会进入任务箱和站内信）
+              </label>
+              <Input id="contribution-note" name="note" placeholder="例：补齐边界数据并跑一遍验证程序" />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="ghost" disabled={busy} onClick={() => setAssignOpen(false)}>
+                取消
+              </Button>
+              <Button type="submit" disabled={busy || !selectedUser[0] || (!dataScope && !tagScope)}>
+                {busy ? <Loader2 className="mr-1 size-4 animate-spin motion-reduce:animate-none" /> : null}
+                确认分配
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={revokeTarget !== null} onOpenChange={(open) => !open && !busy && setRevokeTarget(null)}>
+        <DialogContent className="w-full sm:w-[460px]" onClose={() => !busy && setRevokeTarget(null)}>
+          <DialogHeader>
+            <DialogTitle>确认撤销贡献范围</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 p-5">
+            <p className="text-sm leading-6 text-muted-foreground">撤销后将立即停止后续写权限；已经记录的首次完成署名仍会保留。</p>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" disabled={busy} onClick={() => setRevokeTarget(null)}>
+                取消
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={busy || !revokeTarget}
+                onClick={() => revokeTarget && mutate(revokeTarget, 'revoke')}
+              >
+                {busy ? <Loader2 className="mr-1 size-4 animate-spin motion-reduce:animate-none" /> : null}
+                确认撤销
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+}
+
 /* ---------- Main edit page ---------- */
 
 export function ProblemEditPage() {
@@ -459,8 +694,9 @@ export function ProblemEditPage() {
   const canPublish = !isCreate && capabilities.canPublish === true;
   const canDelete = !isCreate && capabilities.canDelete === true;
   const canManageCollaborators = !isCreate && capabilities.canManageCollaborators === true;
+  const canManageContributions = !isCreate && capabilities.canManageContributions === true;
   const canReviewManaged = managed && !isCreate && capabilities.canPublish === true;
-  const collaborationEnabled = !isCreate && (canManageCollaborators || canReviewManaged);
+  const collaborationEnabled = !isCreate && (canManageCollaborators || canManageContributions || canReviewManaged);
   const requestedSection = typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get('section');
   const showCollaboration = requestedSection === 'collaboration' && collaborationEnabled;
   const managedMetadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft';
@@ -495,7 +731,7 @@ export function ProblemEditPage() {
   const [sourceSeason, setSourceSeason] = useState(String(pdoc.sourceMeta?.season || 'spring'));
   const [sourceLevel, setSourceLevel] = useState(String(pdoc.sourceMeta?.level || 'L1'));
   const [sourceRound, setSourceRound] = useState(String(pdoc.sourceMeta?.round || 1));
-  const [selectedManagedAuthors, setSelectedManagedAuthors] = useState<UserOption[]>([]);
+  const [selectedManagedAuthors, setSelectedManagedAuthors] = useState<DomainUserOption[]>([]);
   const [managedAuthorSearchError, setManagedAuthorSearchError] = useState('');
   const initialMindmapIds = isCreate ? (pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String) : programmingTagState.selectedNodeIds || [];
   const mindmapOptionsById = new Map(mindmapOptions.map((option) => [option.id, option]));
@@ -541,7 +777,7 @@ export function ProblemEditPage() {
   );
 
   const searchManagedAuthors = useCallback(
-    async (query: string): Promise<UserOption[]> => {
+    async (query: string): Promise<DomainUserOption[]> => {
       setManagedAuthorSearchError('');
       try {
         return await loadDomainUsers(bs.domain?.id || 'system', query);
@@ -843,6 +1079,7 @@ export function ProblemEditPage() {
       {showCollaboration ? (
         <div className="space-y-6">
           {canManageCollaborators ? <PermitsPanel pid={String(pid)} pdocId={pdoc.docId} hidden={!!pdoc.hidden} managed={managed} /> : null}
+          {canManageContributions ? <ContributionsPanel pid={String(pid)} pdocId={pdoc.docId} structureRevision={pdoc.structureRevision} /> : null}
           {canReviewManaged ? (
             <ManagedReviewPanel
               pdoc={pdoc}
@@ -851,6 +1088,9 @@ export function ProblemEditPage() {
               problemsUrl={bs.urls.problems}
               difficultyOptions={DIFFICULTY_OPTIONS}
               reviewPreview={data.managedReviewPreview}
+              pendingContributions={data.managedPendingContributions}
+              pendingContributionFingerprint={data.managedPendingContributionFingerprint}
+              contributionUdict={data.managedContributionUdict}
             />
           ) : null}
         </div>
@@ -1186,7 +1426,7 @@ export function ProblemEditPage() {
                             <span id="managed-author-label" className="text-sm font-medium">
                               代指定出题人（可选）
                             </span>
-                            <MultiSelect<UserOption>
+                            <MultiSelect<DomainUserOption>
                               value={selectedManagedAuthors}
                               onChange={(next) => {
                                 setSelectedManagedAuthors(next);
@@ -1195,14 +1435,14 @@ export function ProblemEditPage() {
                               }}
                               loadOptions={searchManagedAuthors}
                               getKey={(user) => String(user._id)}
-                              getLabel={userSearchLabel}
+                              getLabel={domainUserSearchLabel}
                               renderChip={(user) => (
                                 <span className="inline-flex items-center gap-1">
                                   <span className="font-medium">{user.uname || `uid:${user._id}`}</span>
                                   <span className="font-mono text-[10px] text-muted-foreground">#{user._id}</span>
                                 </span>
                               )}
-                              renderOption={(user) => <UserSearchOption user={user} />}
+                              renderOption={(user) => <DomainUserSearchOption user={user} />}
                               name="authorUid"
                               maxItems={1}
                               placeholder="输入 UID / 用户名 / 邮箱搜索"

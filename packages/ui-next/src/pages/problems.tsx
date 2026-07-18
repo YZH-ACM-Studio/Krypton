@@ -1,16 +1,21 @@
-import { useState } from 'react';
-import { Archive, CheckCircle2, Copy, Eye, EyeOff, LockKeyhole, Pencil, Plus, Search, SlidersHorizontal, Upload, XCircle } from 'lucide-react';
+import { type FormEvent, useState } from 'react';
+import { Archive, CheckCircle2, Copy, Eye, EyeOff, LockKeyhole, Pencil, Plus, Search, SlidersHorizontal, Upload, Users, XCircle } from 'lucide-react';
 import { effectiveProblemKind, type ProblemKind } from '@hydrooj/common';
+import { DomainUserSearchOption, type DomainUserOption, domainUserSearchLabel, loadDomainUsers } from '@/components/domain-user-search';
+import { ManagedPublishProtocolFields } from '@/components/managed-programming-authority';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { MultiSelect } from '@/components/ui/multi-select';
 import { Pagination } from '@/components/ui/pagination';
 import { SimpleSelect } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { managedSourceFieldViews, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
-import { ManagedPublishProtocolFields } from '@/components/managed-programming-authority';
+import { readHydroResponseError } from '@/lib/problem-save-response';
 
 type R = Record<string, any>;
 
@@ -175,12 +180,29 @@ export function ProblemsPage() {
   const problemKinds: Array<{ kind: ProblemKind; slug: string }> = data.problemKinds || [];
   const ownerNames: Record<string, string> = data.ownerNames || {};
   const canManageByDocId: Record<string, boolean> = data.canManageByDocId || {};
+  const canManageContributionsByDocId: Record<string, boolean> = data.canManageContributionsByDocId || {};
   const canCloneByDocId: Record<string, boolean> = data.canCloneByDocId || {};
   const managedReviewableByDocId: Record<string, boolean> = data.managedReviewableByDocId || {};
+  const pendingContributionsByDocId: Record<string, Array<{ uid: number; scope: 'data' | 'tag' }>> = data.pendingContributionsByDocId || {};
+  const pendingContributionFingerprintByDocId: Record<string, string> = data.pendingContributionFingerprintByDocId || {};
+  const contributionUdict: Record<string, { _id: number; uname?: string }> = data.contributionUdict || {};
   const managedSourceTemplates: ManagedSourceTemplateOption[] = data.managedSourceTemplates || [];
   const managedTrainingOptions: R[] = data.managedTrainingOptions || [];
   const psdict: Record<string, R> = data.psdict || {};
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [selectedContributionPids, setSelectedContributionPids] = useState<Set<number>>(new Set());
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchUser, setBatchUser] = useState<DomainUserOption[]>([]);
+  const [batchDataScope, setBatchDataScope] = useState(true);
+  const [batchTagScope, setBatchTagScope] = useState(false);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchMessage, setBatchMessage] = useState('');
+  const [batchError, setBatchError] = useState('');
+  const [publishConfirm, setPublishConfirm] = useState<{
+    form: HTMLFormElement;
+    title: string;
+    pending: Array<{ uid: number; scope: 'data' | 'tag' }>;
+  } | null>(null);
   const filtersActive = Boolean(
     query ||
     filters.kind ||
@@ -202,6 +224,86 @@ export function ProblemsPage() {
     sort: sort === 'default' ? '' : sort,
   });
 
+  function toggleContributionPid(pid: number, selected: boolean) {
+    setSelectedContributionPids((current) => {
+      const next = new Set(current);
+      if (selected) next.add(pid);
+      else next.delete(pid);
+      return next;
+    });
+  }
+
+  async function submitContributionBatch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const selectedPdocs = pdocs.filter((pdoc) => selectedContributionPids.has(Number(pdoc.docId)));
+    if (!selectedPdocs.length || !batchUser[0] || (!batchDataScope && !batchTagScope)) {
+      setBatchError('请选择题目、目标用户和至少一项贡献范围');
+      return;
+    }
+    setBatchBusy(true);
+    setBatchError('');
+    setBatchMessage('');
+    const form = new FormData(event.currentTarget);
+    form.set('pids', selectedPdocs.map((pdoc) => pdoc.docId).join(','));
+    form.set('expectedRevisions', JSON.stringify(Object.fromEntries(selectedPdocs.map((pdoc) => [pdoc.docId, Number(pdoc.structureRevision ?? 0)]))));
+    form.set('uid', String(batchUser[0]._id));
+    form.set('scopes', [batchDataScope ? 'data' : '', batchTagScope ? 'tag' : ''].filter(Boolean).join(','));
+    form.set('requestId', crypto.randomUUID());
+    try {
+      const response = await fetch('/problem-contributions/bulk', {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+      const body = await response
+        .clone()
+        .json()
+        .catch(() => null);
+      if (!response.ok) {
+        if (Array.isArray(body?.failed) && body.failed.length) {
+          throw new Error(
+            `批量分配未全部完成（requestId: ${body.requestId || '未知'}）：${body.failed
+              .map((failure: R) => `${failure.publicPid || failure.pid} / ${failure.scope}: ${failure.message}`)
+              .join('；')}`,
+          );
+        }
+        throw new Error(await readHydroResponseError(response, '批量分配失败'));
+      }
+      setBatchMessage(`已为 ${batchUser[0].uname || `UID ${batchUser[0]._id}`} 分配 ${selectedPdocs.length} 道题。`);
+      setSelectedContributionPids(new Set());
+      setBatchUser([]);
+      setBatchDataScope(true);
+      setBatchTagScope(false);
+      setBatchOpen(false);
+    } catch (cause) {
+      setBatchError(cause instanceof Error ? cause.message : '批量分配失败');
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+  function requestManagedPublish(event: FormEvent<HTMLFormElement>, title: string, pending: Array<{ uid: number; scope: 'data' | 'tag' }>) {
+    const confirmation = event.currentTarget.elements.namedItem('pendingContributionsConfirmed') as HTMLInputElement | null;
+    if (confirmation?.value === 'true') return;
+    event.preventDefault();
+    setPublishConfirm({ form: event.currentTarget, title, pending });
+  }
+
+  function confirmManagedPublish() {
+    if (!publishConfirm) return;
+    const input = publishConfirm.form.elements.namedItem('pendingContributionsConfirmed') as HTMLInputElement | null;
+    if (!input) {
+      setBatchError('发布确认字段缺失，请刷新页面后重试');
+      setPublishConfirm(null);
+      return;
+    }
+    input.value = 'true';
+    const form = publishConfirm.form;
+    setPublishConfirm(null);
+    form.requestSubmit();
+  }
+
   return (
     <main className="w-full min-w-0 space-y-6 overflow-x-clip pb-12">
       <header className="flex flex-col gap-4 border-b border-border/70 pb-5 sm:flex-row sm:items-end sm:justify-between">
@@ -211,6 +313,12 @@ export function ProblemsPage() {
           <p className="text-sm text-muted-foreground">当前条件下共 {pcount} 道题</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {pdocs.some((pdoc) => canManageContributionsByDocId[String(pdoc.docId)]) ? (
+            <Button type="button" variant="outline" onClick={() => setBatchOpen(true)} disabled={selectedContributionPids.size === 0}>
+              <Users className="size-4" />
+              批量分配协作{selectedContributionPids.size ? ` · ${selectedContributionPids.size}` : ''}
+            </Button>
+          ) : null}
           <Button type="button" variant="outline" className="sm:hidden" onClick={() => setMobileFiltersOpen(true)}>
             <SlidersHorizontal className="size-4" />
             筛选{filtersActive ? ' · 已启用' : ''}
@@ -229,6 +337,20 @@ export function ProblemsPage() {
           </Button>
         </div>
       </header>
+
+      {batchMessage ? (
+        <p
+          role="status"
+          className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300"
+        >
+          {batchMessage}
+        </p>
+      ) : null}
+      {batchError ? (
+        <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {batchError}
+        </p>
+      ) : null}
 
       <section aria-label="题库筛选" className="hidden rounded-2xl bg-muted/45 p-4 sm:block">
         <FilterForm
@@ -282,6 +404,7 @@ export function ProblemsPage() {
               const displayPid = String(pdoc.pid || pdoc.docId);
               const kind = effectiveProblemKind(pdoc);
               const canManage = !!canManageByDocId[docId];
+              const canManageContributions = !!canManageContributionsByDocId[docId];
               const canClone = !!canCloneByDocId[docId];
               const canReviewManaged = !!managedReviewableByDocId[docId];
               const detailUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: displayPid });
@@ -291,10 +414,21 @@ export function ProblemsPage() {
               const pendingPlacement = pdoc.managedAuthoring?.pendingTrainingPlacement;
               const pendingTraining = managedTrainingOptions.find((training) => training.id === String(pendingPlacement?.trainingId || ''));
               const pendingChapter = pendingTraining?.chapters?.find((chapter: R) => chapter.id === pendingPlacement?.chapterId);
+              const pendingContributions = pendingContributionsByDocId[docId] || [];
               return (
                 <li key={docId} className="px-4 py-4 sm:px-5">
-                  <div className="grid min-w-0 gap-3 sm:grid-cols-[1.2rem_minmax(0,1fr)_auto] sm:items-center">
+                  <div className="grid min-w-0 gap-3 sm:grid-cols-[1.2rem_1.2rem_minmax(0,1fr)_auto] sm:items-center">
                     <SubmissionStatus status={status} />
+                    {canManageContributions ? (
+                      <Checkbox
+                        size="sm"
+                        checked={selectedContributionPids.has(Number(pdoc.docId))}
+                        onCheckedChange={(checked) => toggleContributionPid(Number(pdoc.docId), checked)}
+                        aria-label={`选择 ${pdoc.title || displayPid} 进行协作分配`}
+                      />
+                    ) : (
+                      <span className="size-3.5" aria-hidden="true" />
+                    )}
                     <div className="min-w-0 space-y-2">
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <Badge variant="secondary" className="font-normal">
@@ -358,18 +492,26 @@ export function ProblemsPage() {
                               </span>
                             ) : null}
                           </div>
+                          {pendingContributions.length ? (
+                            <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-xs text-amber-800 dark:text-amber-300">
+                              <p className="font-medium">仍有 {pendingContributions.length} 项协作任务待完成，发布不会自动完成或撤销这些任务。</p>
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {pendingContributions.map((item, index) => (
+                                  <Badge key={`${item.uid}:${item.scope}:${index}`} variant="outline">
+                                    {contributionUdict[item.uid]?.uname || `UID ${item.uid}`} · {item.scope === 'data' ? '数据' : '标签'}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
                           <form
                             method="post"
                             className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto] sm:items-end"
-                            onSubmit={(event) => {
-                              const action = pdoc.managedAuthoring?.metadataStatus === 'draft' ? '确认元数据并发布' : '重新公开';
-                              if (!window.confirm(`${action}「${pdoc.title || displayPid}」？`)) event.preventDefault();
-                            }}
+                            onSubmit={(event) => requestManagedPublish(event, pdoc.title || displayPid, pendingContributions)}
                           >
-                            <ManagedPublishProtocolFields
-                              docId={pdoc.docId}
-                              expectedStructureRevision={pdoc.structureRevision}
-                            />
+                            <ManagedPublishProtocolFields docId={pdoc.docId} expectedStructureRevision={pdoc.structureRevision} />
+                            <input type="hidden" name="pendingContributionsConfirmed" value="false" />
+                            <input type="hidden" name="pendingContributionFingerprint" value={pendingContributionFingerprintByDocId[docId] || ''} />
                             <label className="space-y-1.5">
                               <span className="text-xs font-medium text-muted-foreground">正式标题</span>
                               <Input
@@ -454,6 +596,95 @@ export function ProblemsPage() {
       </section>
 
       <Pagination current={page} total={ppcount} baseUrl={problemsBaseUrl} />
+
+      <Dialog open={batchOpen} onOpenChange={(open) => !batchBusy && setBatchOpen(open)}>
+        <DialogContent className="w-full sm:w-[580px]" onClose={() => !batchBusy && setBatchOpen(false)}>
+          <DialogHeader>
+            <DialogTitle>批量分配题目协作</DialogTitle>
+          </DialogHeader>
+          <form className="space-y-4 p-5" onSubmit={submitContributionBatch}>
+            <p className="text-sm text-muted-foreground">只处理本页已明确勾选的 {selectedContributionPids.size} 道题。</p>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground">目标用户</label>
+              <MultiSelect<DomainUserOption>
+                value={batchUser}
+                onChange={(next) => setBatchUser(next.length ? [next[next.length - 1]] : [])}
+                loadOptions={async (searchQuery) => {
+                  try {
+                    return await loadDomainUsers(bs.domain?.id || 'system', searchQuery);
+                  } catch (cause) {
+                    setBatchError(cause instanceof Error ? cause.message : '用户搜索失败');
+                    throw cause;
+                  }
+                }}
+                getKey={(user) => String(user._id)}
+                getLabel={domainUserSearchLabel}
+                renderChip={(user) => `${user.uname || `uid:${user._id}`} · UID ${user._id}`}
+                renderOption={(user) => <DomainUserSearchOption user={user} />}
+                placeholder="输入 UID / 用户名 / 邮箱搜索"
+                emptyText="没有找到用户"
+              />
+            </div>
+            <fieldset className="space-y-2">
+              <legend className="text-xs text-muted-foreground">贡献范围</legend>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={batchDataScope} onCheckedChange={setBatchDataScope} />
+                数据贡献者
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={batchTagScope} onCheckedChange={setBatchTagScope} />
+                标签贡献者
+              </label>
+            </fieldset>
+            <div className="space-y-1.5">
+              <label htmlFor="batch-contribution-note" className="text-xs text-muted-foreground">
+                备注（可选）
+              </label>
+              <Input id="batch-contribution-note" name="note" placeholder="会进入任务箱和站内信" />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="ghost" disabled={batchBusy} onClick={() => setBatchOpen(false)}>
+                取消
+              </Button>
+              <Button type="submit" disabled={batchBusy || !selectedContributionPids.size || !batchUser[0] || (!batchDataScope && !batchTagScope)}>
+                {batchBusy ? '分配中…' : '确认分配'}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={publishConfirm !== null} onOpenChange={(open) => !open && setPublishConfirm(null)}>
+        <DialogContent className="w-full sm:w-[520px]" onClose={() => setPublishConfirm(null)}>
+          <DialogHeader>
+            <DialogTitle>确认发布题目</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 p-5">
+            <p className="text-sm leading-6 text-muted-foreground">确认发布「{publishConfirm?.title || '题目'}」？</p>
+            {publishConfirm?.pending.length ? (
+              <div className="rounded-xl border border-amber-500/35 bg-amber-500/[0.06] px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+                <p className="font-medium">下列协作任务仍未完成：</p>
+                <ul className="mt-2 space-y-1 text-xs">
+                  {publishConfirm.pending.map((item, index) => (
+                    <li key={`${item.uid}:${item.scope}:${index}`}>
+                      {contributionUdict[item.uid]?.uname || `UID ${item.uid}`} · {item.scope === 'data' ? '数据贡献' : '标签贡献'}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-xs">继续发布不会完成、撤销或公开这些任务。</p>
+              </div>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setPublishConfirm(null)}>
+                取消
+              </Button>
+              <Button type="button" onClick={confirmManagedPublish}>
+                确认发布
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

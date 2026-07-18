@@ -24,6 +24,9 @@ function matches(row: Stored, filter: Stored): boolean {
         if (expected && typeof expected === 'object' && '$exists' in expected) {
             return Object.hasOwn(row, key) === expected.$exists;
         }
+        if (expected && typeof expected === 'object' && '$in' in expected) {
+            return expected.$in.includes(actual);
+        }
         return actual === expected;
     });
 }
@@ -144,6 +147,26 @@ describe('P2.24 problem contribution lifecycle', () => {
         expect([...loaded.dataContributionPids]).to.deep.equal([7]);
         expect([...loaded.tagContributionPids]).to.deep.equal([7]);
         expect(await contributions.listContributionsForProblem('system', 7)).to.have.length(3);
+    });
+
+    it('lists only active pending tasks for the requested publish set', async () => {
+        await contributions.assignContribution({ ...base, uid: 42, scope: 'data', requestId: 'assign-data' });
+        await contributions.assignContribution({ ...base, uid: 43, scope: 'tag', requestId: 'assign-tag' });
+        activeClaim = { requestId: 'complete-claim', actor: 43, operation: 'contribution-status', capability: 'tag', state: 'active' };
+        await contributions.setContributionStatus({
+            domainId: 'system',
+            pid: 7,
+            uid: 43,
+            scope: 'tag',
+            status: 'completed',
+            actor: 43,
+            requestId: 'complete-tag',
+            writeClaimRequestId: 'complete-claim',
+        });
+
+        const pending = await contributions.listPendingContributionsForProblems('system', [7, 99]);
+
+        expect(pending.map((row) => [row.pid, row.uid, row.scope])).to.deep.equal([[7, 42, 'data']]);
     });
 
     it('preserves first completion and public data credit across revoke and reassignment', async () => {

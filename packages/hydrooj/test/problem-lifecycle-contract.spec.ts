@@ -253,8 +253,8 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const publishStart = source.indexOf('static async publishManagedProgrammingProblem(');
         const publishEnd = source.indexOf('static createProblemByKind(', publishStart);
         const publish = source.slice(publishStart, publishEnd);
-        expect(publish.indexOf('prepareManagedProblemPublication(')).to.be.lessThan(publish.indexOf('await prepareManagedPublish(claim)'));
-        expect(publish.indexOf('await prepareManagedPublish(claim)')).to.be.lessThan(publish.indexOf('commitManagedProblemPublication({'));
+        expect(publish.indexOf('prepareManagedProblemPublication(')).to.be.lessThan(publish.indexOf('await prepareManagedPublish(claim, input)'));
+        expect(publish.indexOf('await prepareManagedPublish(claim, input)')).to.be.lessThan(publish.indexOf('commitManagedProblemPublication({'));
         expect(publish.indexOf('commitManagedProblemPublication({')).to.be.lessThan(publish.indexOf("'managed-publish-verifier-cleanup'"));
         expect(publish).to.include('finalizeManagedPublishAcl(claim, context.verifierUids)');
         expect(publish).to.include("{ capability: 'publish' }");
@@ -262,7 +262,7 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const editStart = source.indexOf('static async editAuthorized(');
         const editEnd = source.indexOf('static async copy(', editStart);
         const edit = source.slice(editStart, editEnd);
-        expect(edit).not.to.include('prepareManagedPublish(claim)');
+        expect(edit).not.to.include('prepareManagedPublish(claim, input)');
 
         const persistence = readFileSync(resolve(root, 'src/model/managed-problem-publication.ts'), 'utf8');
         expect(persistence).to.include('session.withTransaction');
@@ -286,7 +286,7 @@ describe('P2.12 YAGNI lifecycle contract', () => {
 
         for (const field of ['content: 1', 'config: 1', 'data: 1', 'structureRevision: 1']) expect(publish).to.include(field);
         const readiness = publish.indexOf("stage: 'publish-explicit-testpoints'");
-        const permitCheck = publish.indexOf('await prepareManagedPublish(claim)');
+        const permitCheck = publish.indexOf('await prepareManagedPublish(claim, input)');
         const commit = publish.indexOf('commitManagedProblemPublication({');
         expect(readiness).to.be.greaterThan(-1);
         expect(readiness).to.be.lessThan(permitCheck);

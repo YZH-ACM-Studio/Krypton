@@ -133,6 +133,39 @@ async function problemDataContributorUsers(pdoc: ProblemDoc): Promise<User[]> {
     return uids.flatMap((uid: number) => (udict[uid]?._id === uid ? [udict[uid]] : []));
 }
 
+async function pendingProblemContributionReviewFacts(domainId: string, pids: number[]) {
+    const uniquePids = [...new Set(pids)];
+    const rowsByDocId: Record<string, Array<{ uid: number; scope: 'data' | 'tag' }>> = {};
+    const fingerprintByDocId: Record<string, string> = {};
+    if (!uniquePids.length) return { rowsByDocId, fingerprintByDocId, udict: {} as Record<string, User> };
+    const permits = (global.Hydro?.model as any)?.permits;
+    if (typeof permits?.listPendingContributionsForProblems !== 'function') {
+        throw new TypeError('permits.listPendingContributionsForProblems is unavailable');
+    }
+    const rows = await permits.listPendingContributionsForProblems(domainId, uniquePids);
+    if (!Array.isArray(rows)) throw new TypeError('pending contribution service returned a non-array result');
+    for (const row of rows) {
+        if (
+            !uniquePids.includes(row?.pid) ||
+            !Number.isSafeInteger(row?.uid) ||
+            row.uid <= 0 ||
+            !['data', 'tag'].includes(row.scope) ||
+            row.active !== true ||
+            row.status !== 'pending'
+        ) {
+            throw new TypeError('pending contribution service returned malformed facts');
+        }
+        (rowsByDocId[row.pid] ||= []).push({ uid: row.uid, scope: row.scope });
+    }
+    for (const pid of uniquePids) {
+        const problemRows = rows.filter((row: any) => row.pid === pid);
+        if (problemRows.length) fingerprintByDocId[pid] = problem.pendingProblemContributionFingerprint(problemRows);
+    }
+    const uids = [...new Set<number>(rows.map((row: any) => row.uid))];
+    const udict = uids.length ? await user.getList(domainId, uids) : {};
+    return { rowsByDocId, fingerprintByDocId, udict };
+}
+
 const BASIC_OBJECTIVE_TEMPLATES: Record<BasicObjectiveKind, string> = {
     [BASIC_OBJECTIVE_KIND.single]: 'problem_edit_single.html',
     [BASIC_OBJECTIVE_KIND.multi]: 'problem_edit_multi.html',
@@ -702,6 +735,11 @@ export class ProblemMainHandler extends Handler {
                     !pdoc.archivedAt,
             ]),
         );
+        const canManageContributionsByDocId = Object.fromEntries(
+            (quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canManageProblemContributions(this.user, pdoc)]),
+        );
+        const reviewablePids = (quick ? [] : pdocs).filter((pdoc) => managedReviewableByDocId[pdoc.docId]).map((pdoc) => pdoc.docId);
+        const pendingContributionFacts = await pendingProblemContributionReviewFacts(domainId, reviewablePids);
         const managedTrainingOptions =
             !quick && isBankAdmin && pdocs.some((pdoc) => pdoc.managedAuthoring?.pendingTrainingPlacement)
                 ? await listManagedTrainingOptions(domainId)
@@ -751,8 +789,12 @@ export class ProblemMainHandler extends Handler {
                 canReviewManaged: isBankAdmin,
                 ownerNames,
                 canManageByDocId,
+                canManageContributionsByDocId,
                 canCloneByDocId,
                 managedReviewableByDocId,
+                pendingContributionsByDocId: pendingContributionFacts.rowsByDocId,
+                pendingContributionFingerprintByDocId: pendingContributionFacts.fingerprintByDocId,
+                contributionUdict: pendingContributionFacts.udict,
                 managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
                 managedTrainingOptions,
             };
@@ -880,7 +922,17 @@ export class ProblemMainHandler extends Handler {
     @param('formalTitle', Types.Title)
     @param('difficulty', Types.UnsignedInt)
     @param('expectedStructureRevision', Types.PositiveInt)
-    async postManagedPublish(_domainId: string, pid: number, formalTitle: string, difficulty: number, expectedStructureRevision: number) {
+    @param('pendingContributionsConfirmed', Types.Boolean, true)
+    @param('pendingContributionFingerprint', Types.String, true)
+    async postManagedPublish(
+        _domainId: string,
+        pid: number,
+        formalTitle: string,
+        difficulty: number,
+        expectedStructureRevision: number,
+        pendingContributionsConfirmed = false,
+        pendingContributionFingerprint = '',
+    ) {
         const domainId = String(this.domain?._id);
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
@@ -894,6 +946,8 @@ export class ProblemMainHandler extends Handler {
             expectedStructureRevision,
             actor: this.user._id,
             user: this.user,
+            pendingContributionsConfirmed,
+            pendingContributionFingerprint,
         });
         if (result.state === 'committed_with_error') {
             const stageLabels: Record<(typeof result.incompleteStages)[number], string> = {
@@ -1489,12 +1543,14 @@ export class ProblemEditHandler extends ProblemManageHandler {
         if (problemKind === 'programming') {
             const canReviewManaged = this.pdoc.authoringMode === 'managed' && capabilities.canPublish;
             const canLoadManagedWorkflow = this.pdoc.authoringMode === 'managed' && (capabilities.canEditContent || canReviewManaged);
-            const [programmingMindmapOptions, managedTrainingOptions, managedTrainingPlacements, managedReviewPreview] = await Promise.all([
-                capabilities.canEditTags ? listKnowledgeMindmapOptions() : Promise.resolve([]),
-                canLoadManagedWorkflow ? listManagedTrainingOptions(this.pdoc.domainId) : Promise.resolve([]),
-                canLoadManagedWorkflow ? listManagedProblemTrainingPlacements(this.pdoc.domainId, this.pdoc.docId) : Promise.resolve([]),
-                canReviewManaged ? managedProblemReviewPreview(this.pdoc) : Promise.resolve(undefined),
-            ]);
+            const [programmingMindmapOptions, managedTrainingOptions, managedTrainingPlacements, managedReviewPreview, pendingContributionFacts] =
+                await Promise.all([
+                    capabilities.canEditTags ? listKnowledgeMindmapOptions() : Promise.resolve([]),
+                    canLoadManagedWorkflow ? listManagedTrainingOptions(this.pdoc.domainId) : Promise.resolve([]),
+                    canLoadManagedWorkflow ? listManagedProblemTrainingPlacements(this.pdoc.domainId, this.pdoc.docId) : Promise.resolve([]),
+                    canReviewManaged ? managedProblemReviewPreview(this.pdoc) : Promise.resolve(undefined),
+                    canReviewManaged ? pendingProblemContributionReviewFacts(this.pdoc.domainId, [this.pdoc.docId]) : Promise.resolve(undefined),
+                ]);
             Object.assign(this.response.body, {
                 ...(capabilities.canEditTags
                     ? {
@@ -1509,6 +1565,13 @@ export class ProblemEditHandler extends ProblemManageHandler {
                           managedTrainingPlacements,
                           ...(capabilities.canEditTags ? { managedMindmapOptions: programmingMindmapOptions } : {}),
                           ...(managedReviewPreview ? { managedReviewPreview } : {}),
+                          ...(pendingContributionFacts
+                              ? {
+                                    managedPendingContributions: pendingContributionFacts.rowsByDocId[this.pdoc.docId] || [],
+                                    managedPendingContributionFingerprint: pendingContributionFacts.fingerprintByDocId[this.pdoc.docId] || '',
+                                    managedContributionUdict: pendingContributionFacts.udict,
+                                }
+                              : {}),
                       }
                     : {}),
             });

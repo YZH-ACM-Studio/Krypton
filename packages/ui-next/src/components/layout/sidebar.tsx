@@ -67,10 +67,7 @@ function SidebarLink({ item, active, collapsed }: { item: NavItem; active: boole
       {item.badge ? (
         <Badge
           variant="destructive"
-          className={cn(
-            'h-5 min-w-5 justify-center px-1.5 text-[10px] shadow-sm',
-            collapsed ? 'absolute -right-0.5 -top-0.5' : 'ml-auto',
-          )}
+          className={cn('h-5 min-w-5 justify-center px-1.5 text-[10px] shadow-sm', collapsed ? 'absolute -right-0.5 -top-0.5' : 'ml-auto')}
         >
           {item.badge}
         </Badge>
@@ -169,7 +166,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           templates: ['training_main.html', 'training_detail.html', 'training_edit.html', 'training_files.html'],
         },
         { label: '任务', href: '/tasks', icon: ListChecks, templates: ['tasks_center.html', 'tasks_my.html', 'tasks_detail.html'] },
-        { label: '验题', href: '/permits/inbox', icon: ShieldCheck, templates: ['my_verify_inbox.html'] },
+        { label: '协作', href: '/permits/inbox', icon: ShieldCheck, templates: ['my_verify_inbox.html'] },
         {
           label: '讨论',
           href: bs.urls.discussions,
@@ -277,12 +274,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           label: '系统',
           href: bs.urls.manage,
           icon: Wrench,
-          templates: [
-            'manage_dashboard.html',
-            'manage_script.html',
-            'manage_setting.html',
-            'manage_config.html',
-          ],
+          templates: ['manage_dashboard.html', 'manage_script.html', 'manage_setting.html', 'manage_config.html'],
         });
       }
       return {
@@ -327,7 +319,9 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
                   {group.label ? (
                     <>
                       <Separator className={cn('my-3', isCollapsed ? 'mx-auto w-8' : '')} />
-                      {!isCollapsed && <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{group.label}</p>}
+                      {!isCollapsed && (
+                        <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{group.label}</p>
+                      )}
                     </>
                   ) : null}
                   <div className="space-y-1">

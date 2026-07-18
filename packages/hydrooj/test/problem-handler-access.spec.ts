@@ -91,6 +91,7 @@ let managedTrainingPlacementResults: any[] = [];
 let managedPublishResult: any = null;
 let managedPublicationPreviewError: Error | null = null;
 let activeDataWriteContainers: any[] = [];
+let pendingContributionRows: any[] = [];
 const createKinds: string[] = [];
 
 function cursor(docs: any[] = []) {
@@ -160,6 +161,7 @@ const problemStub = {
     canEditProblemMetadata: (user: any) => user.canEditMetadata ?? maintainResult,
     canManageProblemCollaborators: (user: any) => user.canManageCollaborators ?? maintainResult,
     canManageProblemContributions: (user: any) => user.canManageContributions ?? maintainResult,
+    pendingProblemContributionFingerprint: () => 'pending-fingerprint',
     canManageProblemMaintainers: (user: any) => user.canManageMaintainers ?? maintainResult,
     canPublishProblem: (user: any) => user.canPublish ?? maintainResult,
     canArchiveProblem: (user: any) => user.canArchive ?? maintainResult,
@@ -646,6 +648,7 @@ beforeEach(() => {
     managedPublishResult = null;
     managedPublicationPreviewError = null;
     activeDataWriteContainers = [];
+    pendingContributionRows = [];
     createKinds.length = 0;
     (global as any).Hydro.module.problemSearch = {};
     (global as any).Hydro.model.permits = {
@@ -654,6 +657,7 @@ beforeEach(() => {
             return permitResults;
         },
         listCompletedDataContributorUids: async () => completedDataContributorUids,
+        listPendingContributionsForProblems: async () => pendingContributionRows,
     };
 });
 
@@ -795,6 +799,17 @@ describe('P2.11 enumeration entry gates', () => {
     });
 
     it('shows the managed metadata review scope only to administrators', async () => {
+        pendingContributionRows = [
+            {
+                domainId: 'system',
+                pid: 7,
+                uid: 88,
+                scope: 'data',
+                active: true,
+                status: 'pending',
+                lastRequestId: 'assign-88',
+            },
+        ];
         getMultiResults = [
             [{ domainId: 'system', docId: 7, owner: 42, authoringMode: 'managed', hidden: true, managedAuthoring: { metadataStatus: 'draft' } }],
         ];
@@ -808,6 +823,9 @@ describe('P2.11 enumeration entry gates', () => {
         });
         expect(admin.response.body.canReviewManaged).to.equal(true);
         expect(admin.response.body.managedReviewableByDocId[7]).to.equal(true);
+        expect(admin.response.body.pendingContributionsByDocId[7]).to.deep.equal([{ uid: 88, scope: 'data' }]);
+        expect(admin.response.body.pendingContributionFingerprintByDocId[7]).to.equal('pending-fingerprint');
+        expect(admin.response.body.contributionUdict[88].uname).to.equal('user-88');
 
         calls.getMulti.length = 0;
         const author = makeHandler(ProblemMainHandler, { canBrowse: true, admin: false, hasPriv: () => false });
@@ -818,7 +836,7 @@ describe('P2.11 enumeration entry gates', () => {
 
     it('publishes managed drafts only through the administrator review service', async () => {
         const admin = makeHandler(ProblemMainHandler, { canBrowse: true, admin: true });
-        await admin.postManagedPublish('forged', 7, '正式标题', 4, 9);
+        await admin.postManagedPublish('forged', 7, '正式标题', 4, 9, true, 'pending-fingerprint');
         expect(calls.publish).to.have.lengthOf(1);
         expect(calls.publish[0]).to.deep.include({
             domainId: 'system',
@@ -827,6 +845,8 @@ describe('P2.11 enumeration entry gates', () => {
             difficulty: 4,
             expectedStructureRevision: 9,
             actor: 42,
+            pendingContributionsConfirmed: true,
+            pendingContributionFingerprint: 'pending-fingerprint',
         });
 
         const author = makeHandler(ProblemMainHandler, { canBrowse: true, admin: false });
@@ -1598,6 +1618,17 @@ describe('P2.17 programming tag HTTP boundaries', () => {
     });
 
     it('serves the administrator a revision-bound review preview derived from live catalog data', async () => {
+        pendingContributionRows = [
+            {
+                domainId: 'system',
+                pid: 7,
+                uid: 88,
+                scope: 'tag',
+                active: true,
+                status: 'pending',
+                lastRequestId: 'assign-88',
+            },
+        ];
         const pdoc = {
             domainId: 'system',
             docId: 7,
@@ -1631,6 +1662,9 @@ describe('P2.17 programming tag HTTP boundaries', () => {
             selectedMindmapNodeIds: ['node-1'],
         });
         expect(handler.response.body.managedReviewPreview.tags).not.to.include('stale-tag');
+        expect(handler.response.body.managedPendingContributions).to.deep.equal([{ uid: 88, scope: 'tag' }]);
+        expect(handler.response.body.managedPendingContributionFingerprint).to.equal('pending-fingerprint');
+        expect(handler.response.body.managedContributionUdict[88].uname).to.equal('user-88');
     });
 
     it('keeps an invalid managed review preview visible and non-publishable', async () => {

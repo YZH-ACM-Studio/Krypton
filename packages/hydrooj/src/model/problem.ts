@@ -428,9 +428,29 @@ function assertPublishableProblem(input: {
     );
 }
 
-async function prepareManagedPublish(claim: ProblemWriteClaim): Promise<number[]> {
+interface PendingProblemContributionFact {
+    uid: number;
+    scope: 'data' | 'tag';
+    lastRequestId?: string;
+}
+
+function pendingProblemContributionFingerprint(rows: PendingProblemContributionFact[]): string {
+    const facts = rows
+        .map((row) => ({ uid: row.uid, scope: row.scope, lastRequestId: row.lastRequestId || '' }))
+        .sort((a, b) => a.uid - b.uid || a.scope.localeCompare(b.scope) || a.lastRequestId.localeCompare(b.lastRequestId));
+    return createHash('sha256').update(JSON.stringify(facts)).digest('hex');
+}
+
+async function prepareManagedPublish(
+    claim: ProblemWriteClaim,
+    confirmation: { pendingContributionsConfirmed?: boolean; pendingContributionFingerprint?: string },
+): Promise<number[]> {
     const permits = (global.Hydro?.model as any)?.permits;
-    if (typeof permits?.listForProblem !== 'function' || typeof permits?.clearVerifiersForProblem !== 'function') {
+    if (
+        typeof permits?.listForProblem !== 'function' ||
+        typeof permits?.clearVerifiersForProblem !== 'function' ||
+        typeof permits?.listPendingContributionsForProblems !== 'function'
+    ) {
         throw new TypeError('managed publish permit services are unavailable');
     }
     await OplogModel.add({
@@ -443,8 +463,35 @@ async function prepareManagedPublish(claim: ProblemWriteClaim): Promise<number[]
         requestId: claim.requestId,
         time: new Date(),
     } as any);
-    const rows = await permits.listForProblem(claim.domainId, claim.pid);
+    const [rows, pendingContributions] = await Promise.all([
+        permits.listForProblem(claim.domainId, claim.pid),
+        permits.listPendingContributionsForProblems(claim.domainId, [claim.pid]),
+    ]);
     if (!Array.isArray(rows)) throw new TypeError('managed publish permit service returned a non-array result');
+    if (!Array.isArray(pendingContributions)) throw new TypeError('managed publish contribution service returned a non-array result');
+    const malformedPending = pendingContributions.some(
+        (row: any) =>
+            !Number.isSafeInteger(row?.uid) ||
+            row.uid <= 0 ||
+            !['data', 'tag'].includes(row.scope) ||
+            row.pid !== claim.pid ||
+            row.active !== true ||
+            row.status !== 'pending',
+    );
+    if (malformedPending) throw new TypeError(`managed publish pending contribution facts are malformed for ${claim.domainId}/${claim.pid}`);
+    if (pendingContributions.length) {
+        const fingerprint = pendingProblemContributionFingerprint(pendingContributions);
+        if (!confirmation.pendingContributionsConfirmed || confirmation.pendingContributionFingerprint !== fingerprint) {
+            logger.warn(
+                'Managed publish pending contributions require confirmation domain=%s pid=%d actor=%d pending=%d result=denied',
+                claim.domainId,
+                claim.pid,
+                claim.actor,
+                pendingContributions.length,
+            );
+            throw new ManagedProblemMetadataConflictError('仍有数据或标签协作任务未完成，请刷新页面并确认后再发布');
+        }
+    }
     const authorUids = [
         ...new Set<number>(
             rows.filter((row: any) => row?.role === 'author' && Number.isSafeInteger(row.uid) && row.uid > 0).map((row: any) => row.uid),
@@ -586,6 +633,10 @@ const PROJECTION_BASE: Field[] = ['_id', 'domainId', 'docType', 'docId', 'pid', 
 
 export class ProblemModel {
     static readonly PROBLEM_DATA_WRITE_CONFIRMATION_TTL_MS = PROBLEM_DATA_WRITE_CONFIRMATION_TTL_MS;
+
+    static pendingProblemContributionFingerprint(rows: PendingProblemContributionFact[]) {
+        return pendingProblemContributionFingerprint(rows);
+    }
 
     static PROJECTION_CONTEST_LIST: Field[] = [...PROJECTION_BASE, 'config'];
 
@@ -1295,6 +1346,8 @@ export class ProblemModel {
         expectedStructureRevision: number;
         actor: number;
         user: ProblemAclUser;
+        pendingContributionsConfirmed?: boolean;
+        pendingContributionFingerprint?: string;
     }): Promise<ManagedProgrammingPublicationResult> {
         const formalTitle = input.formalTitle.trim();
         if (!formalTitle) throw new ValidationError('formalTitle');
@@ -1426,7 +1479,7 @@ export class ProblemModel {
                         );
                         throw error;
                     }
-                    const verifierUids = await prepareManagedPublish(claim);
+                    const verifierUids = await prepareManagedPublish(claim, input);
                     const approvedAt = new Date();
                     const managedAuthoring: NonNullable<ProblemDoc['managedAuthoring']> = {
                         workingTitle: pdoc.managedAuthoring.workingTitle,

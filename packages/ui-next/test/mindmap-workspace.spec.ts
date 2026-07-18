@@ -59,16 +59,33 @@ describe('P2.16 mindmap workspace contracts', () => {
     expect(workspaceClasses.some((value) => utilityName(value).startsWith('rounded'))).to.equal(false);
     expect(workspaceClasses.some((value) => utilityName(value).startsWith('border'))).to.equal(false);
     expect(workspaceClasses.some((value) => utilityName(value).startsWith('shadow'))).to.equal(false);
-    expect(workspaceClasses).to.include.members([
-      'flex',
-      'h-[calc(100dvh-5.75rem)]',
-      'min-h-[38rem]',
-      'w-full',
-      'min-w-0',
-      'flex-col',
-      'overflow-hidden',
-      'bg-background',
-    ]);
+    expect(workspaceClasses).to.include.members(['flex', 'w-full', 'min-w-0', 'flex-col', 'overflow-hidden']);
+    expect(workspaceClasses).to.include('h-[calc(100dvh-4.5rem)]');
+    expect(workspaceClasses).to.include('sm:h-[calc(100dvh-6rem)]');
+    expect(workspaceClasses).to.include('xl:h-[calc(100dvh-7rem)]');
+    for (const panel of ['outline', 'preview', 'inspector']) {
+      expect(adminPage).to.include(`data-mindmap-panel="${panel}"`);
+      expect(adminPage).to.match(new RegExp(`data-mindmap-panel="${panel}"[\\s\\S]*?rounded-[^\\s'"]+[\\s\\S]*?bg-card[\\s\\S]*?shadow-sm`));
+    }
+    expect(adminPage).to.include('data-mindmap-canvas');
+    expect(adminPage).to.include('aria-label="导图管理工作区"');
+    expect(adminPage).to.include('className="xl:hidden"');
+    expect(adminPage).to.include("'hidden xl:flex xl:flex-col'");
+    expect(adminPage).to.include('xl:grid-cols-');
+    expect(adminPage).not.to.match(/\blg:(?:grid|flex|hidden)/);
+    const outline = read('packages/ui-next/src/pages/mindmap/outline.tsx');
+    const inspector = read('packages/ui-next/src/pages/mindmap/inspector.tsx');
+    expect(outline).to.include('flex h-full min-h-0 flex-col');
+    expect(inspector.match(/h-full min-h-0/g) || []).to.have.lengthOf.at.least(2);
+    expect(adminPage).to.match(/<MiniTabs[\s\S]*?className="h-11"/);
+    expect(canvas).to.match(/className="[^"]*size-10[^"]*"[\s\S]*?aria-label=\{data\.collapsed/);
+
+    const createDialog = adminPage.slice(adminPage.indexOf('function CreateNodeDialog'), adminPage.indexOf('function DeleteNodeDialog'));
+    const deleteDialog = adminPage.slice(adminPage.indexOf('function DeleteNodeDialog'));
+    expect(createDialog).to.include('className="mt-1.5 h-10"');
+    expect(createDialog).to.include('contentClassName="[&_[role=option]]:min-h-10"');
+    expect(createDialog.match(/className="min-h-10"/g) || []).to.have.lengthOf(2);
+    expect(deleteDialog.match(/className="min-h-10"/g) || []).to.have.lengthOf(2);
     expect(resolver).to.include("'admin_mindmap.html': AdminMindmapPage");
     expect(sidebar).to.include("href: '/admin/mindmap'");
     expect(combined).not.to.match(/\b(?:prompt|confirm|alert)\s*\(/);

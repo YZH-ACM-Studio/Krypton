@@ -83,7 +83,7 @@ function SortableTreeRow({
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition, paddingLeft: `${8 + item.depth * 16}px` }}
       className={cn(
-        'group relative flex min-h-11 items-center border-l-2 pr-2 text-sm outline-none transition-colors motion-reduce:!transition-none',
+        'group relative flex min-h-11 items-center border-l-2 pr-2 text-sm outline-none transition-[background-color,border-color,color,opacity] duration-150 ease-out motion-reduce:!transition-none',
         selected ? 'border-l-primary bg-primary/8 text-foreground' : 'border-l-transparent hover:bg-accent/55',
         isDragging && 'z-20 opacity-45',
         dropZone === 'inside' && 'bg-primary/8 ring-1 ring-inset ring-primary/40',
@@ -236,20 +236,21 @@ export function MindmapOutline(props: OutlineProps) {
   const menuNode = menu ? byId.get(menu.nodeId) || null : null;
 
   return (
-    <section className="flex min-h-0 flex-col bg-card/40">
-      <header className="space-y-3 border-b px-3 py-3">
+    <section className="flex h-full min-h-0 flex-col bg-transparent">
+      <header className="space-y-3 px-3 pb-3 pt-4">
         <div>
           <h2 className="text-sm font-semibold">结构大纲</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">拖到节点中部成为子节点，拖到边缘调整顺序</p>
         </div>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索节点、说明或标签" className="h-9 pl-8" />
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索节点、说明或标签" className="h-10 pl-8" />
         </div>
         <div className="flex flex-wrap gap-1" aria-label="节点结构操作">
           <Button
             size="sm"
             variant="ghost"
+            className="min-h-10"
             disabled={!selected || props.busy}
             onClick={() => selected && props.onCreateChild(selected)}
             title="新增子节点"
@@ -259,18 +260,20 @@ export function MindmapOutline(props: OutlineProps) {
           <Button
             size="sm"
             variant="ghost"
+            className="min-h-10"
             disabled={!selected?.parentId || props.busy}
             onClick={() => selected && props.onCreateSibling(selected)}
             title="新增同级节点"
           >
             <MoreHorizontal className="size-3.5" /> 同级
           </Button>
-          <Button size="icon" variant="ghost" disabled={props.busy || currentIndex <= 0} onClick={() => moveSelected('up')} title="上移">
+          <Button className="size-10" size="icon" variant="ghost" disabled={props.busy || currentIndex <= 0} onClick={() => moveSelected('up')} title="上移">
             <ArrowUp className="size-3.5" />
           </Button>
           <Button
             size="icon"
             variant="ghost"
+            className="size-10"
             disabled={props.busy || currentIndex < 0 || currentIndex >= currentSiblings.length - 1}
             onClick={() => moveSelected('down')}
             title="下移"
@@ -280,19 +283,20 @@ export function MindmapOutline(props: OutlineProps) {
           <Button
             size="icon"
             variant="ghost"
+            className="size-10"
             disabled={props.busy || currentIndex <= 0}
             onClick={() => moveSelected('indent')}
             title="缩进为上一节点的子节点"
           >
             <CornerRightDown className="size-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" disabled={props.busy || !canOutdent} onClick={() => moveSelected('outdent')} title="提升一级">
+          <Button className="size-10" size="icon" variant="ghost" disabled={props.busy || !canOutdent} onClick={() => moveSelected('outdent')} title="提升一级">
             <CornerLeftUp className="size-3.5" />
           </Button>
         </div>
       </header>
 
-      <ScrollArea className="min-h-0 flex-1">
+      <ScrollArea className="min-h-0 flex-1 border-t border-border/50">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -330,13 +334,13 @@ export function MindmapOutline(props: OutlineProps) {
 
       {menu && menuNode ? (
         <div
-          className="fixed z-[180] min-w-40 rounded-xl border bg-popover p-1.5 text-sm shadow-xl"
+          className="fixed z-[180] min-w-40 rounded-xl bg-popover p-1.5 text-sm shadow-xl ring-1 ring-border/60"
           style={{ left: Math.min(menu.x, window.innerWidth - 180), top: Math.min(menu.y, window.innerHeight - 150) }}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 hover:bg-accent"
+            className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2 transition-[background-color,color,scale] duration-150 ease-out hover:bg-accent active:scale-[0.96] motion-reduce:transition-none"
             disabled={props.busy}
             onClick={() => {
               setMenu(null);
@@ -348,7 +352,7 @@ export function MindmapOutline(props: OutlineProps) {
           {menuNode.parentId ? (
             <button
               type="button"
-              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 hover:bg-accent"
+              className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2 transition-[background-color,color,scale] duration-150 ease-out hover:bg-accent active:scale-[0.96] motion-reduce:transition-none"
               disabled={props.busy}
               onClick={() => {
                 setMenu(null);
@@ -361,7 +365,7 @@ export function MindmapOutline(props: OutlineProps) {
           {menuNode._id !== props.rootId ? (
             <button
               type="button"
-              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-destructive hover:bg-destructive/10"
+              className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2 text-destructive transition-[background-color,color,scale] duration-150 ease-out hover:bg-destructive/10 active:scale-[0.96] motion-reduce:transition-none"
               disabled={props.busy}
               onClick={() => {
                 setMenu(null);

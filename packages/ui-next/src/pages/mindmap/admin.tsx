@@ -162,36 +162,40 @@ export function AdminMindmapPage() {
 
   return (
     <ReactFlowProvider>
-      <div className="flex h-[calc(100dvh-5.75rem)] min-h-[38rem] w-full min-w-0 flex-col overflow-hidden bg-background">
-        <header className="shrink-0 border-b bg-background px-4 py-3 sm:px-5">
+      <div className="flex h-[calc(100dvh-4.5rem)] min-h-[42rem] w-full min-w-0 flex-col gap-4 overflow-hidden sm:h-[calc(100dvh-6rem)] xl:h-[calc(100dvh-7rem)]">
+        <header className="shrink-0 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <a
                 href="/mindmap"
-                className="grid size-9 shrink-0 place-items-center rounded-xl border bg-card text-muted-foreground hover:bg-accent"
+                className="grid size-10 shrink-0 place-items-center rounded-xl bg-muted/70 text-muted-foreground shadow-sm ring-1 ring-border/60 transition-[background-color,color,box-shadow,scale] duration-150 ease-out hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] motion-reduce:transition-none"
                 aria-label="返回公开导图"
               >
                 <ChevronLeft className="size-4" />
               </a>
-              <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+              <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary" aria-hidden="true">
                 <Network className="size-5" />
               </span>
               <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h1 className="truncate text-lg font-semibold tracking-tight">导图管理</h1>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="truncate text-2xl font-semibold tracking-tight text-balance">导图管理</h1>
                   <Badge variant="outline" className="hidden sm:inline-flex">
                     {snapshot.nodes.length} 节点
                   </Badge>
                 </div>
-                <p className="truncate text-xs text-muted-foreground">结构决定布局；这里不保存任何绝对坐标</p>
+                <p className="mt-0.5 truncate text-sm text-muted-foreground">整理知识结构、预览布局并维护节点信息；绝对位置始终由结构自动计算。</p>
               </div>
             </div>
             <SaveStatus state={saveState} savedAt={savedAt} />
           </div>
-          <div className="mt-3 lg:hidden">
+          <div className="xl:hidden">
             <MiniTabs
               value={mobilePane}
               onValueChange={(value) => setMobilePane(value as MobilePane)}
+              size="md"
+              fullWidth
+              className="h-11"
+              aria-label="导图工作区面板"
               items={[
                 { value: 'outline', label: '大纲' },
                 { value: 'preview', label: '预览' },
@@ -201,7 +205,7 @@ export function AdminMindmapPage() {
           </div>
           {failure ? (
             <div
-              className="mt-3 flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/8 px-3 py-2.5 text-sm text-destructive"
+              className="flex items-start gap-2 rounded-xl bg-destructive/8 px-3 py-2.5 text-sm text-destructive shadow-sm ring-1 ring-destructive/20"
               role="alert"
             >
               <AlertCircle className="mt-0.5 size-4 shrink-0" />
@@ -213,7 +217,7 @@ export function AdminMindmapPage() {
                       <a
                         key={problem.docId}
                         href={mindmapProblemHref(problem)}
-                        className="rounded-md border border-destructive/20 px-2 py-1 text-xs hover:bg-destructive/10"
+                        className="inline-flex min-h-10 items-center rounded-lg px-3 py-1 text-xs ring-1 ring-destructive/20 transition-[background-color,color,scale] duration-150 ease-out hover:bg-destructive/10 active:scale-[0.96] motion-reduce:transition-none"
                       >
                         {problem.pid} · {problem.title}
                       </a>
@@ -224,22 +228,37 @@ export function AdminMindmapPage() {
                 {failure.status === 409 || failure.status >= 500 ? (
                   <button
                     type="button"
-                    className="mt-2 rounded-md border border-destructive/20 px-2 py-1 text-xs hover:bg-destructive/10"
+                    className="mt-2 min-h-10 rounded-lg px-3 py-1 text-xs ring-1 ring-destructive/20 transition-[background-color,color,scale] duration-150 ease-out hover:bg-destructive/10 active:scale-[0.96] motion-reduce:transition-none"
                     onClick={() => window.location.reload()}
                   >
                     刷新最新导图
                   </button>
                 ) : null}
               </div>
-              <button type="button" className="rounded p-1 hover:bg-destructive/10" onClick={() => setFailure(null)} aria-label="关闭错误提示">
+              <button
+                type="button"
+                className="grid size-10 shrink-0 place-items-center rounded-lg transition-[background-color,scale] duration-150 ease-out hover:bg-destructive/10 active:scale-[0.96] motion-reduce:transition-none"
+                onClick={() => setFailure(null)}
+                aria-label="关闭错误提示"
+              >
                 ×
               </button>
             </div>
           ) : null}
         </header>
 
-        <main className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[21rem_minmax(0,1fr)_23rem]">
-          <div className={cn('min-h-0 border-r', mobilePane === 'outline' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col')}>
+        <main
+          aria-label="导图管理工作区"
+          className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[18rem_minmax(18rem,1fr)_20rem] 2xl:grid-cols-[21rem_minmax(0,1fr)_23rem]"
+        >
+          <aside
+            data-mindmap-panel="outline"
+            aria-label="结构大纲"
+            className={cn(
+              'min-h-0 overflow-hidden rounded-[20px] bg-card shadow-sm ring-1 ring-border/60',
+              mobilePane === 'outline' ? 'flex flex-col' : 'hidden xl:flex xl:flex-col',
+            )}
+          >
             <MindmapOutline
               nodes={snapshot.nodes}
               rootId={snapshot.config.rootNodeId}
@@ -254,12 +273,19 @@ export function AdminMindmapPage() {
               onCreateSibling={openCreateSibling}
               onDelete={setDeleteRequest}
             />
-          </div>
+          </aside>
 
-          <section className={cn('relative min-h-0 bg-muted/15', mobilePane === 'preview' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col')}>
-            <div className="flex h-12 shrink-0 items-center justify-between border-b px-4">
+          <section
+            data-mindmap-panel="preview"
+            aria-label="实时预览"
+            className={cn(
+              'relative min-h-0 overflow-hidden rounded-[20px] bg-card shadow-sm ring-1 ring-border/60',
+              mobilePane === 'preview' ? 'flex flex-col' : 'hidden xl:flex xl:flex-col',
+            )}
+          >
+            <div className="flex h-14 shrink-0 items-center justify-between px-4">
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{selected ? selected.topic : '实时预览'}</p>
+                <p className="truncate text-sm font-semibold">{selected ? selected.topic : '实时预览'}</p>
                 <p className="truncate text-[11px] text-muted-foreground">
                   {selected
                     ? nodePath(snapshot.nodes, selected._id)
@@ -268,21 +294,32 @@ export function AdminMindmapPage() {
                     : '选择节点查看路径'}
                 </p>
               </div>
-              <span className="ml-3 shrink-0 text-[11px] text-muted-foreground">不可拖拽</span>
+              <Badge variant="outline" className="ml-3 shrink-0 font-normal text-muted-foreground">
+                自动布局
+              </Badge>
             </div>
-            <div className="min-h-0 flex-1">
-              <MindmapCanvas
-                nodes={snapshot.nodes}
-                config={snapshot.config}
-                selectedId={selectedId}
-                onSelect={selectNode}
-                collapsed={previewCollapsed}
-                onCollapsedChange={setPreviewCollapsed}
-              />
+            <div className="min-h-0 flex-1 p-2 pt-0">
+              <div data-mindmap-canvas className="h-full overflow-hidden rounded-xl bg-muted/20 ring-1 ring-border/50">
+                <MindmapCanvas
+                  nodes={snapshot.nodes}
+                  config={snapshot.config}
+                  selectedId={selectedId}
+                  onSelect={selectNode}
+                  collapsed={previewCollapsed}
+                  onCollapsedChange={setPreviewCollapsed}
+                />
+              </div>
             </div>
           </section>
 
-          <div className={cn('min-h-0 border-l', mobilePane === 'inspector' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col')}>
+          <aside
+            data-mindmap-panel="inspector"
+            aria-label="节点检查器"
+            className={cn(
+              'min-h-0 overflow-hidden rounded-[20px] bg-card shadow-sm ring-1 ring-border/60',
+              mobilePane === 'inspector' ? 'flex flex-col' : 'hidden xl:flex xl:flex-col',
+            )}
+          >
             <MindmapInspector
               node={selected}
               nodes={snapshot.nodes}
@@ -297,7 +334,7 @@ export function AdminMindmapPage() {
               onCreateSibling={openCreateSibling}
               onDelete={setDeleteRequest}
             />
-          </div>
+          </aside>
         </main>
       </div>
 
@@ -376,7 +413,7 @@ function CreateNodeDialog({
               maxLength={100}
               autoFocus
               onChange={(event) => setTopic(event.target.value)}
-              className="mt-1.5"
+              className="mt-1.5 h-10"
             />
           </div>
           <div>
@@ -394,14 +431,21 @@ function CreateNodeDialog({
           </div>
           <div>
             <label className="text-xs font-medium">颜色</label>
-            <SimpleSelect value={color} onValueChange={setColor} options={COLOR_OPTIONS} className="mt-1.5" />
+            <SimpleSelect
+              value={color}
+              onValueChange={setColor}
+              options={COLOR_OPTIONS}
+              className="mt-1.5 min-h-10"
+              contentClassName="[&_[role=option]]:min-h-10"
+            />
           </div>
         </div>
         <div className="flex justify-end gap-2 border-t px-5 py-4">
-          <Button variant="outline" onClick={close} disabled={busy}>
+          <Button className="min-h-10" variant="outline" onClick={close} disabled={busy}>
             取消
           </Button>
           <Button
+            className="min-h-10"
             disabled={busy || !topic.trim()}
             onClick={async () => {
               const created = await onSubmit({ topic, description, color });
@@ -454,10 +498,10 @@ function DeleteNodeDialog({
           )}
         </div>
         <div className="flex justify-end gap-2 border-t px-5 py-4">
-          <Button variant="outline" onClick={onClose} disabled={busy}>
+          <Button className="min-h-10" variant="outline" onClick={onClose} disabled={busy}>
             取消
           </Button>
-          <Button variant="destructive" disabled={busy || blocked} onClick={() => void onConfirm()}>
+          <Button className="min-h-10" variant="destructive" disabled={busy || blocked} onClick={() => void onConfirm()}>
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} 确认删除
           </Button>
         </div>

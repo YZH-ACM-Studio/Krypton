@@ -41,7 +41,7 @@ function MindmapNodeView({ data }: { data: MindmapNodeData }) {
               toggle();
             }}
             onPointerDown={(event) => event.stopPropagation()}
-            className="ml-1.5 inline-flex size-6 shrink-0 items-center justify-center rounded-md hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="-my-2 -mr-2 ml-1.5 inline-flex size-10 shrink-0 items-center justify-center rounded-lg transition-[background-color,scale] duration-150 ease-out hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] motion-reduce:transition-none"
             aria-label={data.collapsed ? '展开子节点' : '收起子节点'}
           >
             {data.collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}

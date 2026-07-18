@@ -53,7 +53,7 @@ export function MindmapInspector({
 }) {
   if (!node) {
     return (
-      <section className="grid min-h-0 place-items-center bg-card/30 px-8 text-center">
+      <section className="grid h-full min-h-0 place-items-center bg-transparent px-8 text-center">
         <div>
           <span className="mx-auto grid size-11 place-items-center rounded-xl bg-muted text-muted-foreground">
             <Link2 className="size-5" />
@@ -203,8 +203,8 @@ function NodeInspectorForm({
   };
 
   return (
-    <section className="flex min-h-0 flex-col bg-card/30">
-      <header className="border-b px-4 py-3">
+    <section className="flex h-full min-h-0 flex-col bg-transparent">
+      <header className="px-4 pb-3 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">节点检查器</p>
@@ -213,30 +213,30 @@ function NodeInspectorForm({
           {dirty ? <Badge className="shrink-0">未保存</Badge> : <Badge variant="outline">已同步</Badge>}
         </div>
         <div className="mt-3 flex flex-wrap gap-1.5">
-          <Button size="sm" variant="outline" onClick={() => onCreateChild(node)} disabled={busy}>
+          <Button size="sm" variant="outline" className="min-h-10" onClick={() => onCreateChild(node)} disabled={busy}>
             <Plus className="size-3.5" /> 子节点
           </Button>
           {node.parentId ? (
-            <Button size="sm" variant="outline" onClick={() => onCreateSibling(node)} disabled={busy}>
+            <Button size="sm" variant="outline" className="min-h-10" onClick={() => onCreateSibling(node)} disabled={busy}>
               <Plus className="size-3.5" /> 同级
             </Button>
           ) : null}
           {node._id !== rootId ? (
-            <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => onDelete(node)} disabled={busy}>
+            <Button size="sm" variant="ghost" className="min-h-10 text-destructive hover:text-destructive" onClick={() => onDelete(node)} disabled={busy}>
               <Trash2 className="size-3.5" /> 删除
             </Button>
           ) : null}
         </div>
       </header>
 
-      <ScrollArea className="min-h-0 flex-1">
+      <ScrollArea className="min-h-0 flex-1 border-t border-border/50">
         <div className="space-y-6 p-4">
           <div className="space-y-3">
             <div>
               <label htmlFor="mindmap-topic" className="text-xs font-medium">
                 名称
               </label>
-              <Input id="mindmap-topic" value={topic} maxLength={100} onChange={(event) => setTopic(event.target.value)} className="mt-1.5" />
+              <Input id="mindmap-topic" value={topic} maxLength={100} onChange={(event) => setTopic(event.target.value)} className="mt-1.5 h-10" />
             </div>
             <div>
               <label htmlFor="mindmap-description" className="text-xs font-medium">
@@ -254,12 +254,18 @@ function NodeInspectorForm({
             </div>
             <div>
               <label className="text-xs font-medium">颜色</label>
-              <SimpleSelect value={color} onValueChange={setColor} options={COLOR_OPTIONS} className="mt-1.5" />
+              <SimpleSelect
+                value={color}
+                onValueChange={setColor}
+                options={COLOR_OPTIONS}
+                className="mt-1.5 min-h-10"
+                contentClassName="[&_[role=option]]:min-h-10"
+              />
             </div>
           </div>
 
           {isRootBranch ? (
-            <div className="rounded-xl border bg-background p-3">
+            <div className="rounded-xl bg-muted/35 p-3 ring-1 ring-border/50">
               <div className="flex items-center gap-2 text-xs font-medium">
                 <ArrowLeftRight className="size-3.5 text-muted-foreground" /> 根分支方向
               </div>
@@ -268,6 +274,7 @@ function NodeInspectorForm({
                 <Button
                   variant={rootSide === 'left' ? 'default' : 'outline'}
                   size="sm"
+                  className="min-h-10"
                   disabled={busy || rootSide === 'left'}
                   onClick={() => onMoveSide(node, 'left')}
                 >
@@ -276,6 +283,7 @@ function NodeInspectorForm({
                 <Button
                   variant={rootSide === 'right' ? 'default' : 'outline'}
                   size="sm"
+                  className="min-h-10"
                   disabled={busy || rootSide === 'right'}
                   onClick={() => onMoveSide(node, 'right')}
                 >
@@ -303,14 +311,14 @@ function NodeInspectorForm({
             ) : null}
             <div className="flex flex-wrap gap-1.5">
               {tags.map((tag) => (
-                <Badge key={tag} variant="secondary" className="gap-1 pr-1">
+                <Badge key={tag} variant="secondary" className="min-h-10 gap-1 pl-3 pr-0">
                   {tag}
                   {referenceCount === 0 ? (
                     <button
                       type="button"
                       onClick={() => setTags((current) => current.filter((value) => value !== tag))}
                       aria-label={`移除标签 ${tag}`}
-                      className="rounded p-0.5 hover:bg-background/60"
+                      className="grid size-10 place-items-center rounded-lg transition-[background-color,scale] duration-150 ease-out hover:bg-background/60 active:scale-[0.96] motion-reduce:transition-none"
                     >
                       <X className="size-3" />
                     </button>
@@ -332,8 +340,9 @@ function NodeInspectorForm({
                     }
                   }}
                   placeholder="输入标签，回车添加"
+                  className="h-10"
                 />
-                <Button type="button" variant="outline" size="icon" onClick={addTag} disabled={!tagDraft.trim()} aria-label="添加标签">
+                <Button className="size-10" type="button" variant="outline" size="icon" onClick={addTag} disabled={!tagDraft.trim()} aria-label="添加标签">
                   <Plus className="size-4" />
                 </Button>
               </div>
@@ -351,7 +360,7 @@ function NodeInspectorForm({
                 value={problemQuery}
                 onChange={(event) => setProblemQuery(event.target.value)}
                 placeholder="搜索 PID 或标题"
-                className="pl-8 pr-9"
+                className="h-10 pl-8 pr-9"
               />
               {searching ? <Loader2 className="absolute right-2.5 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" /> : null}
               {problemQuery.trim() ? (
@@ -364,7 +373,7 @@ function NodeInspectorForm({
                     <button
                       key={problem.docId}
                       type="button"
-                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-accent disabled:opacity-50"
+                      className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-[background-color,color,scale] duration-150 ease-out hover:bg-accent active:scale-[0.96] disabled:opacity-50 motion-reduce:transition-none"
                       disabled={problemIds.includes(problem.pid)}
                       onClick={() => addProblem(problem)}
                     >
@@ -382,7 +391,7 @@ function NodeInspectorForm({
               {problemIds.map((pid) => {
                 const problem = problemOptions.get(pid);
                 return (
-                  <div key={pid} className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2">
+                  <div key={pid} className="flex min-h-11 items-center gap-2 rounded-lg bg-background px-3 py-2 ring-1 ring-border/50">
                     <Link2 className="size-3.5 shrink-0 text-primary" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs font-medium">{problem?.title || pid}</span>
@@ -390,7 +399,7 @@ function NodeInspectorForm({
                     </span>
                     <button
                       type="button"
-                      className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      className="grid size-10 place-items-center rounded-lg text-muted-foreground transition-[background-color,color,scale] duration-150 ease-out hover:bg-destructive/10 hover:text-destructive active:scale-[0.96] motion-reduce:transition-none"
                       onClick={() => setProblemIds((current) => current.filter((value) => value !== pid))}
                       aria-label={`移除手动关联 ${pid}`}
                     >
@@ -442,10 +451,10 @@ function NodeInspectorForm({
           </div>
 
           {node._id !== rootId ? (
-            <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3">
+            <div className="rounded-xl bg-destructive/5 p-3 ring-1 ring-destructive/20">
               <h3 className="text-xs font-medium text-destructive">危险操作</h3>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">只允许删除无子节点、无题目引用的叶子。</p>
-              <Button size="sm" variant="destructive" className="mt-3" disabled={busy} onClick={() => onDelete(node)}>
+              <Button size="sm" variant="destructive" className="mt-3 min-h-10" disabled={busy} onClick={() => onDelete(node)}>
                 <Trash2 className="size-3.5" /> 删除节点
               </Button>
             </div>
@@ -453,9 +462,9 @@ function NodeInspectorForm({
         </div>
       </ScrollArea>
 
-      <footer className="border-t bg-background/90 p-3 backdrop-blur-sm">
+      <footer className="border-t border-border/50 bg-card p-3">
         <Button
-          className="w-full"
+          className="min-h-10 w-full"
           disabled={busy || !dirty || !topic.trim()}
           onClick={() =>
             onSave(node, {

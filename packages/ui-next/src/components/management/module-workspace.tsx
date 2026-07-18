@@ -64,7 +64,7 @@ export function ModuleWorkspace({
   return (
     <AdminPage requiredPriv={requiredPriv} bypassPrivGate={bypassPrivGate} hideSidebar contentClassName="min-w-0">
       <section aria-labelledby={titleId} className="min-w-0 max-w-full space-y-5 overflow-x-clip">
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <header className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div className="min-w-0 space-y-1">
             <p className="text-xs font-medium tracking-wide text-muted-foreground">{moduleTitle}</p>
             <h1 id={titleId} className="text-2xl font-semibold tracking-tight text-balance">
@@ -101,7 +101,7 @@ export function ModuleWorkspace({
         </nav>
 
         {toolbar ? (
-          <section aria-label={toolbarLabel} className="flex min-h-11 flex-wrap items-center gap-2 border-y border-border/70 py-2">
+          <section aria-label={toolbarLabel} className="flex min-h-11 min-w-0 flex-wrap items-center gap-2 border-y border-border/70 py-2">
             {toolbar}
           </section>
         ) : null}

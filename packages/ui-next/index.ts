@@ -6,6 +6,7 @@ import { serializer } from '@hydrooj/framework';
 import type { ViteDevServer } from 'vite';
 import { resolveAnnouncementManagementCapability } from './announcement-capabilities';
 import { resolveRankboardCapabilities } from './rankboard-capabilities';
+import { resolveTaskManagementCapability } from './task-capabilities';
 
 interface ManifestChunk {
   file: string;
@@ -239,6 +240,23 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       );
     },
   });
+  const canManageTasks = resolveTaskManagementCapability({
+    user: context.handler?.user,
+    editSystemPriv: PRIV.PRIV_EDIT_SYSTEM,
+    createTaskPerm: PERM.PERM_CREATE_TASK,
+    manageTasksPerm: PERM.PERM_MANAGE_TASKS,
+    onError(error) {
+      console.error(
+        '[ui-next] task management capability resolution failed:',
+        {
+          domainId: String(domain?._id || ''),
+          uid: Number(context.handler?.user?._id || 0),
+          templateName,
+        },
+        error,
+      );
+    },
+  });
   const problemBankCapability = resolveProblemBankCapability(context.handler?.user, (error) => {
     console.error(
       '[ui-next] problem bank capability resolution failed; denying navigation:',
@@ -290,6 +308,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       canImportRankboard: rankboardCapabilities.canImportRankboard,
       canManageRankboard: rankboardCapabilities.canManageRankboard,
       canManageAnnouncements,
+      canManageTasks,
       impersonation,
     },
     domain: {

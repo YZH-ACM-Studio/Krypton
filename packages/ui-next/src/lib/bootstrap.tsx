@@ -57,6 +57,8 @@ export interface KryptonUser {
   canManageRankboard?: boolean;
   /** 当前域公告维护能力；服务端按 PRIV_EDIT_SYSTEM / PERM_EDIT_DOMAIN 计算。 */
   canManageAnnouncements?: boolean;
+  /** 当前域任务创建/管理能力；仅控制前端入口，路由仍按服务端权限鉴权。 */
+  canManageTasks?: boolean;
   /** 管理员代理身份；只来自服务端 session，普通账号不可自行声明。 */
   impersonation?: {
     actorUid: number;

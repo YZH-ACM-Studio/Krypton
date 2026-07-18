@@ -662,13 +662,19 @@ export function TaskCenterPage() {
             const status = ((a?.status as AssignmentStatus | undefined) || 'not-claimed') as AssignmentStatus | 'not-claimed';
             const claimState = claimStateFor(task, status !== 'not-claimed');
             return (
-              <Card key={task._id} className={cn('transition-shadow hover:shadow-md', !task.isActive && 'opacity-60')}>
-                <CardContent className="space-y-3">
-                  <div className="flex items-start justify-between gap-2">
+              <Card
+                key={task._id}
+                className={cn(
+                  'h-full transition-[box-shadow,opacity] duration-200 ease-out hover:shadow-md motion-reduce:transition-none',
+                  !task.isActive && 'opacity-60',
+                )}
+              >
+                <CardContent className="flex h-full flex-col gap-3">
+                  <div className="flex min-h-10 items-start justify-between gap-2">
                     <h3 className="line-clamp-2 font-semibold">{task.title}</h3>
                     <StatusPill status={status} />
                   </div>
-                  {task.description && <p className="line-clamp-2 text-xs text-muted-foreground">{task.description}</p>}
+                  {task.description ? <p className="line-clamp-2 text-xs text-muted-foreground">{task.description}</p> : null}
                   <div className="flex flex-wrap gap-1.5">
                     <Badge variant="outline" className="gap-1 text-[10px]">
                       <Network className="size-3" />
@@ -689,12 +695,14 @@ export function TaskCenterPage() {
                     ))}
                   </div>
                   <TaskTimeBlock task={task} status={status} assignedAt={a?.assignedAt || null} now={now} compact />
-                  <Button asChild className="w-full" variant={status === 'completed' ? 'outline' : 'default'} size="sm">
-                    <a href={`/tasks/${task._id}`}>
-                      {status === 'not-claimed' ? '查看详情' : '查看进度'}
-                      <ChevronRight className="size-4" />
-                    </a>
-                  </Button>
+                  <div className="mt-auto pt-1">
+                    <Button asChild className="min-h-10 w-full" variant={status === 'completed' ? 'outline' : 'default'} size="sm">
+                      <a href={`/tasks/${task._id}`}>
+                        {status === 'not-claimed' ? '查看详情' : '查看进度'}
+                        <ChevronRight className="size-4" />
+                      </a>
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             );

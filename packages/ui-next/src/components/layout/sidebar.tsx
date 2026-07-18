@@ -208,6 +208,22 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           templates: ['admin_announce_list.html', 'admin_announce_edit.html', 'admin_announce_categories.html'],
         });
       }
+      if (bs.user.canManageTasks) {
+        adminItems.push({
+          label: '任务管理',
+          href: '/admin/tasks',
+          icon: ListChecks,
+          templates: [
+            'admin_tasks.html',
+            'admin_tasks_edit.html',
+            'admin_tasks_assign.html',
+            'admin_tasks_stats.html',
+            'admin_tasks_candidates.html',
+            'admin_tasks_scores.html',
+            'admin_tasks_settings.html',
+          ],
+        });
+      }
       if (bs.user.canImportRankboard || bs.user.canManageRankboard) {
         adminItems.push({
           label: '荣誉管理',

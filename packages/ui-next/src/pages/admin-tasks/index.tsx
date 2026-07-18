@@ -31,16 +31,13 @@ import {
   Tag,
   Target,
   Trash2,
-  Trophy,
   UserCheck,
   Users,
   X,
 } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
-import { PRIV } from '@/lib/perms';
-import { registerAdminNavSection } from '@/lib/admin-nav-registry';
-import { AdminPage } from '@/components/admin/admin-page';
+import { ModuleWorkspace, type ModuleWorkspaceNavItem } from '@/components/management/module-workspace';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -65,31 +62,40 @@ import {
   type TaskPointResult,
 } from '@/components/task-graph';
 
-// ─── Register admin nav ───────────────────────────────────────────────────
+// ─── Shared task-management workspace ─────────────────────────────────────
 
-registerAdminNavSection({
-  key: 'tasks',
-  label: '任务系统',
-  order: 35,
-  requiredPriv: PRIV.PRIV_USER_PROFILE,
-  items: [
-    {
-      key: 'tasks',
-      label: '任务列表',
-      href: '/admin/tasks',
-      icon: ClipboardList,
-      templateNames: [
-        'admin_tasks.html',
-        'admin_tasks_edit.html',
-        'admin_tasks_assign.html',
-        'admin_tasks_stats.html',
-        'admin_tasks_candidates.html',
-      ],
-    },
-    { key: 'scores', label: '比赛分数', href: '/admin/tasks/scores', icon: Trophy, templateNames: ['admin_tasks_scores.html'] },
-    { key: 'settings', label: '系统设置', href: '/admin/tasks/settings', icon: Settings, templateNames: ['admin_tasks_settings.html'] },
-  ],
-});
+const TASK_WORKSPACE_NAV = [
+  {
+    key: 'tasks',
+    label: '任务',
+    href: '/admin/tasks',
+    templateNames: [
+      'admin_tasks.html',
+      'admin_tasks_edit.html',
+      'admin_tasks_assign.html',
+      'admin_tasks_stats.html',
+      'admin_tasks_candidates.html',
+    ],
+  },
+  {
+    key: 'scores',
+    label: '比赛分数',
+    href: '/admin/tasks/scores',
+    templateNames: ['admin_tasks_scores.html'],
+  },
+  {
+    key: 'settings',
+    label: '系统设置',
+    href: '/admin/tasks/settings',
+    templateNames: ['admin_tasks_settings.html'],
+  },
+] satisfies readonly ModuleWorkspaceNavItem[];
+
+const TASK_WORKSPACE_PROPS = {
+  moduleTitle: '任务管理',
+  navItems: TASK_WORKSPACE_NAV,
+  bypassPrivGate: true,
+} as const;
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -268,18 +274,13 @@ export function AdminTasksListPage() {
   }, [data.tasks, query, activeTag]);
 
   return (
-    <AdminPage
-      title="任务管理"
+    <ModuleWorkspace
+      {...TASK_WORKSPACE_PROPS}
+      title="任务"
       description="基于流程图的任务系统：从 START 经过若干任务点到 END，存在一条全亮路径即任务完成。"
       actions={
-        <div className="flex gap-2">
-          <Button asChild variant="outline">
-            <a href="/admin/tasks/scores">
-              <Trophy className="mr-1 size-4" />
-              比赛分数
-            </a>
-          </Button>
-          <Button asChild>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild className="min-h-10">
             <a href="/admin/tasks/create">
               <Plus className="mr-1 size-4" />
               新建任务
@@ -287,42 +288,52 @@ export function AdminTasksListPage() {
           </Button>
         </div>
       }
-    >
-      <Card>
-        <CardContent className="flex flex-wrap items-center gap-3">
-          <Input placeholder="搜索任务标题…" value={query} onChange={(e) => setQuery(e.target.value)} className="max-w-sm" />
-          {data.tagOptions?.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Tag className="size-3.5 text-muted-foreground" />
+      toolbar={
+        <>
+          <Input
+            aria-label="搜索任务标题"
+            placeholder="搜索任务标题…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="h-10 w-full min-w-0 lg:w-auto lg:min-w-[14rem] lg:max-w-sm lg:flex-1"
+          />
+          {data.tagOptions?.length > 0 ? (
+            <div className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-1.5 lg:w-auto lg:flex-1" aria-label="按标签筛选">
+              <Tag className="size-3.5 text-muted-foreground" aria-hidden="true" />
               <button
+                type="button"
                 onClick={() => setActiveTag(null)}
+                aria-pressed={activeTag === null}
                 className={cn(
-                  'rounded-md px-2 py-0.5 text-xs',
-                  activeTag === null ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80',
+                  'min-h-10 rounded-lg px-3 text-xs transition-[background-color,color,scale] duration-150 ease-out active:scale-[0.96] motion-reduce:transition-none',
+                  activeTag === null ? 'bg-foreground text-background shadow-sm' : 'bg-muted text-muted-foreground hover:text-foreground',
                 )}
               >
                 全部
               </button>
-              {data.tagOptions.map((t) => (
+              {data.tagOptions.map((tag) => (
                 <button
-                  key={t}
-                  onClick={() => setActiveTag(t === activeTag ? null : t)}
+                  key={tag}
+                  type="button"
+                  onClick={() => setActiveTag(tag === activeTag ? null : tag)}
+                  aria-pressed={activeTag === tag}
                   className={cn(
-                    'rounded-md px-2 py-0.5 text-xs',
-                    activeTag === t ? 'bg-primary text-primary-foreground' : 'bg-muted hover:bg-muted/80',
+                    'min-h-10 rounded-lg px-3 text-xs transition-[background-color,color,scale] duration-150 ease-out active:scale-[0.96] motion-reduce:transition-none',
+                    activeTag === tag ? 'bg-foreground text-background shadow-sm' : 'bg-muted text-muted-foreground hover:text-foreground',
                   )}
                 >
-                  {t}
+                  {tag}
                 </button>
               ))}
             </div>
-          )}
-        </CardContent>
-      </Card>
-
+          ) : null}
+        </>
+      }
+      toolbarLabel="搜索和筛选任务"
+    >
       <Card>
         <CardContent className="p-0">
-          <Table>
+          <Table className="min-w-[70rem]">
             <TableHeader>
               <TableRow>
                 <TableHead>任务</TableHead>
@@ -420,7 +431,7 @@ export function AdminTasksListPage() {
           </Table>
         </CardContent>
       </Card>
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -527,7 +538,8 @@ export function AdminTasksEditPage() {
   }
 
   return (
-    <AdminPage
+    <ModuleWorkspace
+      {...TASK_WORKSPACE_PROPS}
       title={data.isEdit ? '编辑任务' : '新建任务'}
       actions={
         <Button asChild variant="outline">
@@ -811,7 +823,7 @@ export function AdminTasksEditPage() {
           </CardContent>
         </Card>
       </form>
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -1097,7 +1109,8 @@ export function AdminTasksAssignPage() {
   const [note, setNote] = useState('');
 
   return (
-    <AdminPage
+    <ModuleWorkspace
+      {...TASK_WORKSPACE_PROPS}
       title={`分配 — ${data.task.title}`}
       actions={
         <Button asChild variant="outline">
@@ -1204,7 +1217,7 @@ export function AdminTasksAssignPage() {
           )}
         </CardContent>
       </Card>
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -1235,10 +1248,11 @@ export function AdminTasksStatsPage() {
   const drillStudent = drillIn ? data.studentByUid[String(drillIn.userId)] : null;
 
   return (
-    <AdminPage
+    <ModuleWorkspace
+      {...TASK_WORKSPACE_PROPS}
       title={`统计 — ${data.task.title}`}
       actions={
-        <div className="flex gap-2">
+        <div className="flex max-w-full flex-wrap gap-2">
           {data.task.admissionMode === 'quota' && (
             <Button asChild variant="outline">
               <a href={`/admin/tasks/${data.task._id}/candidates`}>
@@ -1475,7 +1489,7 @@ export function AdminTasksStatsPage() {
           </DialogContent>
         </Dialog>
       )}
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -1536,10 +1550,11 @@ export function AdminTasksCandidatesPage() {
   }
 
   return (
-    <AdminPage
+    <ModuleWorkspace
+      {...TASK_WORKSPACE_PROPS}
       title={`候选池 — ${data.task.title}`}
       actions={
-        <div className="flex items-center gap-2">
+        <div className="flex max-w-full flex-wrap items-center gap-2">
           <Badge
             variant="outline"
             className={cn('gap-1', data.task.quota && data.counts.admitted > data.task.quota && 'border-rose-500 text-rose-700')}
@@ -1737,7 +1752,7 @@ export function AdminTasksCandidatesPage() {
           )}
         </SheetContent>
       </Sheet>
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -1943,7 +1958,11 @@ export function AdminTasksScoresPage() {
   ];
 
   return (
-    <AdminPage title="比赛分数管理" description="录入 PAT / GPLT / CSP 等外部比赛成绩 — 这些分数会被任务点用作完成判定的输入。">
+    <ModuleWorkspace
+      {...TASK_WORKSPACE_PROPS}
+      title="比赛分数"
+      description="录入 PAT / GPLT / CSP 等外部比赛成绩；这些分数会被任务点用作完成判定的输入。"
+    >
       <MiniTabs
         size="md"
         value={data.tab}
@@ -1954,7 +1973,7 @@ export function AdminTasksScoresPage() {
       {data.tab === 'gplt' && <GpltScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
       {data.tab === 'csp' && <CspScoreTab scores={data.scores} udict={data.udict} studentDict={data.studentDict} settings={data.settings} />}
       {data.tab === 'stay' && <StayCountTab events={data.stayEvents || []} schools={data.schools || []} udict={data.udict} />}
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }
 
@@ -2425,7 +2444,11 @@ function StayCountTab({ events, schools, udict }: { events: StayEvent[]; schools
 export function AdminTasksSettingsPage() {
   const data = useBootstrap().page.data as { settings: DomainSettings };
   return (
-    <AdminPage title="任务系统设置" description="配置 PAT / GPLT / CSP 分数录入的上限。这些上限会被任务点的 minScore 校验时强制约束。">
+    <ModuleWorkspace
+      {...TASK_WORKSPACE_PROPS}
+      title="系统设置"
+      description="配置 PAT / GPLT / CSP 分数录入的上限；这些上限会被任务点的 minScore 校验强制约束。"
+    >
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">分数上限</CardTitle>
@@ -2450,6 +2473,6 @@ export function AdminTasksSettingsPage() {
           </form>
         </CardContent>
       </Card>
-    </AdminPage>
+    </ModuleWorkspace>
   );
 }

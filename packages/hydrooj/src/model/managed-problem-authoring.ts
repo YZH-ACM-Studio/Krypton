@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { Logger } from '@hydrooj/utils';
 import { ManagedProblemMetadataConflictError, ValidationError } from '../error';
 import type { ProblemDoc, TrainingNode } from '../interface';
+import type { KnowledgeMindmapOption } from '../lib/problem-tag-canonical';
 import db from '../service/db';
 import * as document from './document';
 import {
@@ -19,6 +20,8 @@ import {
     type ManagedSourceTemplate,
 } from './managed-problem-source';
 
+export { classifyLegacyProgrammingTags } from '../lib/problem-tag-canonical';
+export type { KnowledgeMindmapOption, LegacyProgrammingTagClassification } from '../lib/problem-tag-canonical';
 export {
     deriveManagedSourceTags,
     formatManagedProblemPid,
@@ -32,24 +35,10 @@ export type { ManagedSourceMeta, ManagedSourceTemplate, ManagedSourceTemplateDef
 
 const logger = new Logger('managed-problem-authoring');
 
-export interface KnowledgeMindmapOption {
-    id: string;
-    label: string;
-    tags: string[];
-}
-
 export interface CanonicalProblemTagOption {
     value: string;
     label: string;
     group: '算法知识点' | '来源与赛事';
-}
-
-export interface LegacyProgrammingTagClassification {
-    sourceTags: string[];
-    suggestions: Array<{ tag: string; nodeId: string; label: string }>;
-    suggestedNodeIds: string[];
-    ambiguousTags: Array<{ tag: string; candidates: string[] }>;
-    unknownTags: string[];
 }
 
 export interface ProgrammingTagNormalizationPreview {
@@ -60,6 +49,7 @@ export interface ProgrammingTagNormalizationPreview {
     addedTags: string[];
     removedTags: string[];
     fingerprint: string;
+    mindmapPathVersion?: MindmapPathVersion[];
 }
 
 export type ManagedMindmapOption = KnowledgeMindmapOption;
@@ -128,7 +118,7 @@ interface MindmapNodeRecord {
     updatedAt: Date;
 }
 
-interface MindmapPathVersion {
+export interface MindmapPathVersion {
     id: string;
     parentId: string | null;
     topic: string;
@@ -275,47 +265,6 @@ function requireStoredProblemTags(input: unknown): string[] {
     return [...input];
 }
 
-/** Classify one legacy tag array without selecting or writing any node. */
-export function classifyLegacyProgrammingTags(
-    currentTagsInput: unknown,
-    mindmapOptions: readonly KnowledgeMindmapOption[],
-): LegacyProgrammingTagClassification {
-    const currentTags = requireStoredProblemTags(currentTagsInput);
-    const nodesByTag = new Map<string, KnowledgeMindmapOption[]>();
-    for (const option of mindmapOptions) {
-        for (const tag of option.tags) {
-            const candidates = nodesByTag.get(tag) || [];
-            if (!candidates.some((candidate) => candidate.id === option.id)) candidates.push(option);
-            nodesByTag.set(tag, candidates);
-        }
-    }
-    const sourceTags: string[] = [];
-    const suggestions: LegacyProgrammingTagClassification['suggestions'] = [];
-    const ambiguousTags: LegacyProgrammingTagClassification['ambiguousTags'] = [];
-    const unknownTags: string[] = [];
-    for (const tag of currentTags) {
-        if (isCanonicalManagedSourceTag(tag)) {
-            sourceTags.push(tag);
-            continue;
-        }
-        const candidates = nodesByTag.get(tag) || [];
-        if (candidates.length === 1) {
-            suggestions.push({ tag, nodeId: candidates[0].id, label: candidates[0].label });
-        } else if (candidates.length > 1) {
-            ambiguousTags.push({ tag, candidates: candidates.map((candidate) => candidate.label) });
-        } else {
-            unknownTags.push(tag);
-        }
-    }
-    return {
-        sourceTags,
-        suggestions,
-        suggestedNodeIds: [...new Set(suggestions.map((suggestion) => suggestion.nodeId))],
-        ambiguousTags,
-        unknownTags,
-    };
-}
-
 /** Re-read the live tree and build the exact atomic replacement shown in the confirmation dialog. */
 export async function previewProgrammingTagNormalization(input: {
     domainId: string;
@@ -361,6 +310,7 @@ export async function previewProgrammingTagNormalization(input: {
         addedTags,
         removedTags,
         fingerprint,
+        mindmapPathVersion: knowledge.pathVersion,
     };
 }
 

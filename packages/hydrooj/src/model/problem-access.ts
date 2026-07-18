@@ -545,11 +545,15 @@ export async function commitProblemWriteClaimUpdate(
     requiredCapability: ProblemWriteCapability = claim.capability,
     options: {
         expectedStructureRevision?: number;
+        expectedStructureRevisionAbsent?: boolean;
         expectedTag?: string[];
         expectedData?: ProblemFileListSnapshot;
         allowHistoricalStructureLock?: boolean;
     } = {},
 ): Promise<ProblemDoc | null> {
+    if (options.expectedStructureRevision !== undefined && options.expectedStructureRevisionAbsent) {
+        throw new TypeError('expected structure revision cannot be both present and absent');
+    }
     const requestedFields = [...Object.keys($set || {}), ...Object.keys($unset || {})];
     if (requestedFields.some((key) => PROBLEM_ACL_INTERNAL_FIELDS.has(key.split('.')[0]))) {
         throw new TypeError('ACL mutation fields cannot be written through a problem write claim');
@@ -561,7 +565,12 @@ export async function commitProblemWriteClaimUpdate(
     let filter: Filter<ProblemDoc> = {
         ...claimFilter(claim),
         ...(options.expectedStructureRevision === undefined
-            ? {}
+            ? options.expectedStructureRevisionAbsent
+                ? {
+                      structureRevision: { $exists: false },
+                      ...(options.allowHistoricalStructureLock ? {} : { structureLockedAt: { $exists: false } }),
+                  }
+                : {}
             : {
                   structureRevision: options.expectedStructureRevision,
                   ...(options.allowHistoricalStructureLock ? {} : { structureLockedAt: { $exists: false } }),
@@ -651,7 +660,7 @@ export async function commitProblemWriteClaimUpdate(
     const update: any = {};
     if (Object.keys($set || {}).length) update.$set = $set;
     if (Object.keys($unset || {}).length) update.$unset = $unset;
-    if (options.expectedStructureRevision !== undefined) update.$inc = { structureRevision: 1 };
+    if (options.expectedStructureRevision !== undefined || options.expectedStructureRevisionAbsent) update.$inc = { structureRevision: 1 };
     return document.coll.findOneAndUpdate(filter, update, { returnDocument: 'after' });
 }
 

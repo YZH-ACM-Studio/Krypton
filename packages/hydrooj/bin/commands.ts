@@ -17,6 +17,7 @@ async function main() {
     require('../src/commands/patch').register(cli);
     require('../src/commands/diagnosis').register(cli);
     require('../src/commands/problem-batch-import').register(cli);
+    require('../src/commands/problem-tag-backfill').register(cli);
     cli.help();
     cli.parse(process.argv, { run: false });
     if (!cli.matchedCommand) {

@@ -57,7 +57,11 @@ function matchesGuardedFilter(doc: any, filter: any): boolean {
     ) {
         return false;
     }
-    if (filter.structureRevision !== undefined && doc.structureRevision !== filter.structureRevision) return false;
+    if (filter.structureRevision !== undefined) {
+        if (filter.structureRevision?.$exists !== undefined) {
+            if (Object.hasOwn(doc, 'structureRevision') !== filter.structureRevision.$exists) return false;
+        } else if (doc.structureRevision !== filter.structureRevision) return false;
+    }
     if (Object.hasOwn(filter, 'data') && !matchesDataCondition(doc, filter.data)) return false;
     if (filter.$and?.some((term: any) => Object.hasOwn(term, 'data') && !matchesDataCondition(doc, term.data))) return false;
     if (filter.$expr?.$eq) {
@@ -1203,6 +1207,40 @@ describe('P2.11 durable global problem write claim', () => {
         }
         expect(await commit(claim, { tag: [], knowledgeNodeIds: [] }, {})).to.deep.include({ tag: [], knowledgeNodeIds: [] });
         expect(liveProblem).to.deep.include({ problemKind: 'single', tag: [], knowledgeNodeIds: [] });
+    });
+
+    it('supports a missing revision CAS while bypassing only the explicitly approved historical structure lock', async () => {
+        const admin = makeUser('admin');
+        liveProblem = {
+            ...pdoc(100, 42),
+            docType: TYPE_PROBLEM,
+            problemKind: 'single',
+            tag: [],
+            knowledgeNodeIds: [],
+            structureLockedAt: new Date('2026-07-01T00:00:00.000Z'),
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+        };
+        const claim = await acquire(admin, structuredClone(liveProblem), 'tag-backfill-missing-revision', 'problem-tag-backfill', {
+            capability: 'tag',
+        });
+
+        const blocked = await commit(claim, { tag: [], knowledgeNodeIds: [] }, {}, 'tag', {
+            expectedStructureRevisionAbsent: true,
+            expectedTag: [],
+        });
+        expect(blocked).to.equal(null);
+
+        const result = await commit(claim, { tag: [], knowledgeNodeIds: [] }, {}, 'tag', {
+            expectedStructureRevisionAbsent: true,
+            expectedTag: [],
+            allowHistoricalStructureLock: true,
+        });
+        expect(result?.structureRevision).to.equal(1);
+        expect(guardedUpdateCalls.at(-1)?.filter).to.deep.include({ structureRevision: { $exists: false } });
+        expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('structureLockedAt');
+        expect(guardedUpdateCalls.at(-1)?.update.$inc).to.deep.equal({ structureRevision: 1 });
+        expect(await clear(claim)).to.equal(true);
     });
 
     it('rejects direct managed publication and canonical bypasses at the lowest claim commit primitive', async () => {

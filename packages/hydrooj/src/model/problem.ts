@@ -343,6 +343,14 @@ function touchesProgrammingTagPair($set: Record<string, unknown>, $unset: Record
     );
 }
 
+function normalizedConfigMirror(name: string, value: Readable | Buffer | string, operation: 'upload' | 'rename'): string | undefined {
+    if (!isProblemConfigFilename(name)) return undefined;
+    if (!Buffer.isBuffer(value)) {
+        throw new TypeError(`normalized problem config must be buffered before claimed ${operation}: ${name}`);
+    }
+    return value.toString();
+}
+
 function publishesProblemPatch($set: Record<string, unknown>, $unset: Record<string, unknown> = {}): boolean {
     return $set.hidden === false || Object.keys($unset).some((field) => field === 'hidden' || field.startsWith('hidden.'));
 }
@@ -3804,10 +3812,15 @@ export class ProblemModel {
         nextData: ProblemDoc['data'],
         mutation: ProblemTestdataMutation,
         expectedData: ProblemFileListSnapshot,
+        configMirror?: string,
     ): Promise<void> {
         ProblemModel.assertClaimedTestdataWriteClaim(claim, mutation);
+        const patch = {
+            data: nextData,
+            ...(configMirror === undefined ? {} : { config: configMirror }),
+        } as Partial<ProblemDoc>;
         if (current.problemKind === undefined) {
-            const result = await commitProblemWriteClaimUpdate(claim, { data: nextData } as any, {}, 'data', {
+            const result = await commitProblemWriteClaimUpdate(claim, patch, {}, 'data', {
                 expectedData,
             });
             if (!result) {
@@ -3820,7 +3833,7 @@ export class ProblemModel {
         assertStructureRevision(current.structureRevision);
         assertCodeEvaluationLifecyclePatchWithTrace(
             current,
-            { data: nextData } as any,
+            patch as any,
             {},
             {
                 actor: claim.actor,
@@ -3831,7 +3844,7 @@ export class ProblemModel {
         );
         const result = await document.coll.findOneAndUpdate(
             { ...dataRevisionClaimFilter(claim, current.structureRevision), ...problemDataSnapshotFilter(expectedData) },
-            { $set: { data: nextData } },
+            { $set: patch },
             { returnDocument: 'after' },
         );
         if (!result) {
@@ -3858,6 +3871,7 @@ export class ProblemModel {
         assertCodeEvaluationFileMutationWithTrace(state, { type: 'upload', filename: name }, { actor: claim.actor, stage: 'file-upload' });
         const current = state.data;
         f = await normalizeProblemTestdataUpload(name, f);
+        const configMirror = normalizedConfigMirror(name, f, 'upload');
         await storage.put(`problem/${claim.domainId}/${claim.pid}/testdata/${name}`, f, operator);
         const meta = await storage.getMeta(`problem/${claim.domainId}/${claim.pid}/testdata/${name}`);
         if (!meta) throw new FileUploadError();
@@ -3865,7 +3879,7 @@ export class ProblemModel {
         payload.lastModified ||= new Date();
         const next = current.filter((item) => item.name !== name);
         next.push({ _id: name, ...payload });
-        await ProblemModel.commitClaimedTestdataState(claim, state, next, 'upload', claimed.snapshot);
+        await ProblemModel.commitClaimedTestdataState(claim, state, next, 'upload', claimed.snapshot, configMirror);
         await waitForProblemTestdataObservers(
             {
                 domainId: claim.domainId,
@@ -3893,10 +3907,12 @@ export class ProblemModel {
             { actor: claim.actor, stage: 'file-rename' },
         );
         const current = state.data;
+        let configMirror: string | undefined;
         if (isProblemConfigFilename(newName)) {
             const source = await storage.get(`problem/${claim.domainId}/${claim.pid}/testdata/${file}`);
-            await normalizeProblemTestdataUpload(newName, source);
-        }
+            const normalized = await normalizeProblemTestdataUpload(newName, source);
+            configMirror = normalizedConfigMirror(newName, normalized, 'rename');
+        } else if (isProblemConfigFilename(file)) configMirror = '';
         if (current.some((item) => item.name === newName)) {
             await storage.del([`problem/${claim.domainId}/${claim.pid}/testdata/${newName}`], operator);
         }
@@ -3908,7 +3924,7 @@ export class ProblemModel {
         const next = current
             .filter((item) => item.name !== newName)
             .map((item) => (item.name === file ? { ...item, _id: newName, name: newName, lastModified: new Date() } : item));
-        await ProblemModel.commitClaimedTestdataState(claim, state, next, 'rename', claimed.snapshot);
+        await ProblemModel.commitClaimedTestdataState(claim, state, next, 'rename', claimed.snapshot, configMirror);
         await waitForProblemTestdataObservers(
             {
                 domainId: claim.domainId,
@@ -3942,6 +3958,7 @@ export class ProblemModel {
             current.filter((item) => !names.includes(item.name)),
             'delete',
             claimed.snapshot,
+            names.some(isProblemConfigFilename) ? '' : undefined,
         );
         await waitForProblemTestdataObservers(
             {
@@ -4471,30 +4488,32 @@ export async function apply(ctx: Context) {
     ctx.on('problem/addTestdata', async (domainId, docId, name, _payload, claim?: ProblemWriteClaim) => {
         if (!isProblemConfigFilename(name)) return;
         await assertConfigTestdataEventAllowed(domainId, docId);
+        // Claimed writes commit testdata metadata and the config mirror in one
+        // Mongo mutation before observers run. Re-entering generic edit guards
+        // here would incorrectly reclassify this data write as content.
+        if (claim) return;
         const buf = await storage.get(`problem/${domainId}/${docId}/testdata/${name}`);
         const update = { config: (await streamToBuffer(buf)).toString() };
-        if (claim) await ProblemModel.editWithClaim(claim, update, {}, { skipStructureGuard: true });
-        else await ProblemModel.edit(domainId, docId, update, { skipStructureGuard: true });
+        await ProblemModel.edit(domainId, docId, update, { skipStructureGuard: true });
     });
     ctx.on('problem/delTestdata', async (domainId, docId, names, claim?: ProblemWriteClaim) => {
         if (!names.some(isProblemConfigFilename)) return;
         await assertConfigTestdataEventAllowed(domainId, docId);
-        if (claim) await ProblemModel.editWithClaim(claim, { config: '' }, {}, { skipStructureGuard: true });
-        else await ProblemModel.edit(domainId, docId, { config: '' }, { skipStructureGuard: true });
+        if (claim) return;
+        await ProblemModel.edit(domainId, docId, { config: '' }, { skipStructureGuard: true });
     });
     ctx.on('problem/renameTestdata', async (domainId, docId, file, newName, claim?: ProblemWriteClaim) => {
         if (isProblemConfigFilename(file) || isProblemConfigFilename(newName)) {
             await assertConfigTestdataEventAllowed(domainId, docId);
         }
+        if (claim) return;
         if (isProblemConfigFilename(file)) {
-            if (claim) await ProblemModel.editWithClaim(claim, { config: '' }, {}, { skipStructureGuard: true });
-            else await ProblemModel.edit(domainId, docId, { config: '' }, { skipStructureGuard: true });
+            await ProblemModel.edit(domainId, docId, { config: '' }, { skipStructureGuard: true });
         }
         if (isProblemConfigFilename(newName)) {
             const buf = await storage.get(`problem/${domainId}/${docId}/testdata/${newName}`);
             const update = { config: (await streamToBuffer(buf)).toString() };
-            if (claim) await ProblemModel.editWithClaim(claim, update, {}, { skipStructureGuard: true });
-            else await ProblemModel.edit(domainId, docId, update, { skipStructureGuard: true });
+            await ProblemModel.edit(domainId, docId, update, { skipStructureGuard: true });
         }
     });
 }

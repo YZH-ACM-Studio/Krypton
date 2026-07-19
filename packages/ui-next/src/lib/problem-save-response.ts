@@ -9,15 +9,8 @@ function substituteHydroErrorParams(template: string, params: unknown[]): string
   });
 }
 
-/** Read Hydro's JSON error envelope without leaking untranslated `{0}` placeholders. */
-export async function readHydroResponseError(response: Response, fallback: string): Promise<string> {
-  let raw = '';
-  try {
-    raw = await response.text();
-  } catch (error) {
-    console.error('Failed to read Hydro error response', error);
-    return `${fallback}：HTTP ${response.status}`;
-  }
+/** Format a raw Hydro JSON error envelope for fetch and XHR callers alike. */
+export function formatHydroErrorResponse(raw: string, status: number, fallback: string): string {
   if (raw) {
     try {
       const body = JSON.parse(raw);
@@ -30,7 +23,19 @@ export async function readHydroResponseError(response: Response, fallback: strin
       if (plain && !/^<!doctype\s+html/i.test(plain) && !/^<html/i.test(plain)) return plain.slice(0, 180);
     }
   }
-  return `${fallback}：HTTP ${response.status}`;
+  return `${fallback}：HTTP ${status}`;
+}
+
+/** Read Hydro's JSON error envelope without leaking untranslated `{0}` placeholders. */
+export async function readHydroResponseError(response: Response, fallback: string): Promise<string> {
+  let raw = '';
+  try {
+    raw = await response.text();
+  } catch (error) {
+    console.error('Failed to read Hydro error response', error);
+    return `${fallback}：HTTP ${response.status}`;
+  }
+  return formatHydroErrorResponse(raw, response.status, fallback);
 }
 
 async function readExplicitJsonSuccess(response: Response): Promise<JsonRecord> {

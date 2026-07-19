@@ -19,7 +19,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/cn';
+import { fileUploaderAllowedMetaFields } from '@/lib/file-uploader-meta';
 import { makeInitials } from '@/lib/format';
+import { formatHydroErrorResponse } from '@/lib/problem-save-response';
 
 /* ────────────────────────────────────────────────────────────────── */
 /*  AvatarUpload — pick → square-crop → upload                        */
@@ -536,7 +538,7 @@ export function FileUploader({
       formData: true,
       withCredentials: true,
       headers: { Accept: 'application/json' },
-      allowedMetaFields: true,
+      allowedMetaFields: false,
       getResponseData: (xhr) => {
         const responseText = xhr.responseText || '';
         if (!responseText.trim()) return {};
@@ -549,15 +551,7 @@ export function FileUploader({
       },
       onAfterResponse: (xhr) => {
         if (xhr.status < 400) return;
-        const fallback = `上传失败：HTTP ${xhr.status}`;
-        try {
-          const body = JSON.parse(xhr.responseText);
-          const message = body?.error?.message || body?.message || body?.error;
-          throw new Error(typeof message === 'string' ? message : fallback);
-        } catch (error) {
-          if (error instanceof SyntaxError) throw new Error(fallback);
-          throw error;
-        }
+        throw new Error(formatHydroErrorResponse(xhr.responseText || '', xhr.status, '上传失败'));
       },
     });
     uppy.on('file-added', (file) => {
@@ -629,6 +623,12 @@ export function FileUploader({
             filename: f.name,
             ...(meta || {}),
           });
+          uppy.setFileState(id, {
+            xhrUpload: {
+              ...((uppy.getFile(id) as any).xhrUpload || {}),
+              allowedMetaFields: fileUploaderAllowedMetaFields(meta),
+            },
+          } as any);
         } catch (error) {
           console.error('File rejected before upload', { filename: f.name, error });
           setIngestError(error instanceof Error ? error.message : `${f.name} 无法加入上传队列`);

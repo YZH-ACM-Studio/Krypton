@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { readHydroResponseError } from '@/lib/problem-save-response';
 
 type ProblemFile = Record<string, any>;
 
@@ -109,8 +110,7 @@ export function ProblemTestdataFileDialog({
         credentials: 'same-origin',
       });
       if (!response.ok && !response.redirected) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(typeof data?.error === 'string' ? data.error : `保存失败 (${response.status})`);
+        throw new Error(await readHydroResponseError(response, '保存失败'));
       }
       setOriginalContent(content);
       setSaveMessage('已保存');

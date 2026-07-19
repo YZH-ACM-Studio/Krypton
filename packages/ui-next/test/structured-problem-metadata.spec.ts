@@ -2,7 +2,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
-import { readHydroResponseError, readProblemConfigUploadSuccess, readProblemSaveSuccess } from '../src/lib/problem-save-response.ts';
+import {
+  formatHydroErrorResponse,
+  readHydroResponseError,
+  readProblemConfigUploadSuccess,
+  readProblemSaveSuccess,
+} from '../src/lib/problem-save-response.ts';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 
@@ -186,6 +191,19 @@ describe('P3.16 structured metadata and unsaved-navigation contracts', () => {
   });
 
   it('renders Hydro validation parameters instead of exposing raw placeholders', async () => {
+    expect(
+      formatHydroErrorResponse(
+        JSON.stringify({
+          error: {
+            message: 'Field {0} validation failed. ({2})',
+            params: ['fields', null, '托管题文件操作不接受字段：name'],
+          },
+        }),
+        400,
+        '上传失败',
+      ),
+    ).to.equal('Field fields validation failed. (托管题文件操作不接受字段：name)');
+
     const validation = await readHydroResponseError(
       new Response(
         JSON.stringify({
@@ -203,10 +221,7 @@ describe('P3.16 structured metadata and unsaved-navigation contracts', () => {
     const plain = await readHydroResponseError(new Response('upstream failed', { status: 502 }), '保存失败');
     expect(plain).to.equal('upstream failed');
 
-    const html = await readHydroResponseError(
-      new Response('<!DOCTYPE html><html><body>proxy error</body></html>', { status: 503 }),
-      '保存失败',
-    );
+    const html = await readHydroResponseError(new Response('<!DOCTYPE html><html><body>proxy error</body></html>', { status: 503 }), '保存失败');
     expect(html).to.equal('保存失败：HTTP 503');
   });
 });

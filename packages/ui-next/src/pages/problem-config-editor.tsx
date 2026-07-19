@@ -61,7 +61,7 @@ import { ProblemTestdataFileDialog } from '@/components/problem-testdata-file-di
 import { type ProblemDataWriteGuardState, useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
 import { useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { COMMON_LANG_OPTIONS as PRESET_LANG_OPTIONS, type LangOption, resolveLangs } from '@/lib/multi-select-presets';
-import { readProblemConfigUploadSuccess } from '@/lib/problem-save-response';
+import { readHydroResponseError, readProblemConfigUploadSuccess } from '@/lib/problem-save-response';
 import '@/lib/bootstrap';
 import '@/lib/format';
 import {
@@ -228,11 +228,7 @@ export function ProblemConfigEditor({
         body: formData,
         headers: { Accept: 'application/json' },
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const message = data?.error?.message || data?.message || data?.error;
-        throw new Error(typeof message === 'string' ? message : `保存失败：HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error(await readHydroResponseError(res, '保存失败'));
       await readProblemConfigUploadSuccess(res);
       setSavedYaml(submittedYaml);
       setSaveMsg(editVersion.current === savedVersion ? '已保存' : '提交时版本已保存，当前修改尚未保存');

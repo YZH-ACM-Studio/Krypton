@@ -195,7 +195,7 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(config).to.include('const submittedYaml = currentYaml');
     expect(config).to.include('setSavedYaml(submittedYaml)');
     expect(config).to.include("editVersion.current === savedVersion ? '已保存' : '提交时版本已保存，当前修改尚未保存'");
-    expect(config).to.include('data?.error?.message || data?.message || data?.error');
+    expect(config).to.include("readHydroResponseError(res, '保存失败')");
     expect(config).to.include('role="alert"');
     expect(guard).to.include("window.addEventListener('beforeunload'");
     expect(guard).to.include("document.addEventListener('click', interceptLink, true)");
@@ -212,7 +212,7 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(uploader).to.include('onAfterResponse: (xhr) =>');
     expect(uploader).to.include('shouldRetry: retryOnFailure ? undefined : () => false');
     expect(uploader).to.include('for (const file of result.failed) uppy.removeFile(file.id)');
-    expect(uploader).to.include('body?.error?.message || body?.message || body?.error');
+    expect(uploader).to.include("formatHydroErrorResponse(xhr.responseText || '', xhr.status, '上传失败')");
     expect(uploader).to.include('<button\n        type="button"\n        onDragOver=');
     expect(files).to.include('maxFileSize={null}');
     expect(files).to.include('maxFiles={null}');

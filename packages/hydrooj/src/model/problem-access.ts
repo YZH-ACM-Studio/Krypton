@@ -578,9 +578,15 @@ export async function commitProblemWriteClaimUpdate(
         ...(options.expectedTag === undefined ? {} : { tag: options.expectedTag }),
         ...(options.expectedData === undefined ? {} : problemDataSnapshotFilter(options.expectedData)),
     };
+    // MongoDB rejects projections that contain both a parent path and one of
+    // its children. Claim commits always read several complete coordination
+    // roots below, so collapse caller fields to their top-level roots before
+    // composing the projection (for example managedAuthoring.selected... ->
+    // managedAuthoring).
+    const requestedProjectionRoots = Object.fromEntries(requestedFields.map((field) => [field.split('.')[0], 1]));
     const current = await document.coll.findOne(filter, {
         projection: {
-            ...Object.fromEntries(requestedFields.map((field) => [field, 1])),
+            ...requestedProjectionRoots,
             domainId: 1,
             docId: 1,
             pid: 1,

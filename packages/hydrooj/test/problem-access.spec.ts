@@ -126,6 +126,17 @@ function applyUpdate(target: any, update: any) {
     }
 }
 
+function assertNoProjectionPathCollision(projection: Record<string, unknown> | undefined) {
+    const paths = Object.keys(projection || {});
+    for (const path of paths) {
+        const segments = path.split('.');
+        for (let index = 1; index < segments.length; index++) {
+            const parent = segments.slice(0, index).join('.');
+            if (Object.hasOwn(projection || {}, parent)) throw new Error(`Path collision at ${parent}`);
+        }
+    }
+}
+
 require.cache[documentPath] = {
     id: documentPath,
     filename: documentPath,
@@ -161,6 +172,7 @@ require.cache[documentPath] = {
             },
             async findOne(filter: any, options?: any) {
                 findOneCalls.push({ filter: structuredClone(filter), options: structuredClone(options) });
+                assertNoProjectionPathCollision(options?.projection);
                 return matchesGuardedFilter(liveProblem, filter) ? structuredClone(liveProblem) : null;
             },
         },
@@ -1048,6 +1060,43 @@ describe('P2.11 durable global problem write claim', () => {
         expect(result).to.equal(null);
         expect(liveProblem.tag).to.deep.equal(['L2', 'manual-tag']);
         expect(guardedUpdateCalls.at(-1)?.filter).to.deep.include({ tag: ['L2'] });
+    });
+
+    it('commits canonical tags for a published managed problem without a projection path collision', async () => {
+        const admin = makeUser('admin');
+        liveProblem = {
+            ...managedPdoc(100, 7, false),
+            docType: TYPE_PROBLEM,
+            problemKind: 'programming',
+            managedAuthoring: {
+                ...managedPdoc(100).managedAuthoring,
+                metadataStatus: 'confirmed',
+            },
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+            tag: ['MultiSchool', '牛客暑期多校', '计算几何'],
+            knowledgeNodeIds: ['node-old'],
+        };
+        const claim = await acquire(admin, structuredClone(liveProblem), 'managed-tag-normalize', 'programming-tag-normalize', {
+            capability: 'tag',
+        });
+
+        const result = await commit(
+            claim,
+            {
+                tag: ['MultiSchool', '牛客暑期多校', '动态规划'],
+                knowledgeNodeIds: ['node-new'],
+                'managedAuthoring.selectedMindmapNodeIds': ['node-new'],
+            },
+            {},
+            'tag',
+            { expectedTag: ['MultiSchool', '牛客暑期多校', '计算几何'] },
+        );
+
+        expect(result?.tag).to.deep.equal(['MultiSchool', '牛客暑期多校', '动态规划']);
+        expect(result?.knowledgeNodeIds).to.deep.equal(['node-new']);
+        expect(result?.managedAuthoring.selectedMindmapNodeIds).to.deep.equal(['node-new']);
+        expect(await clear(claim)).to.equal(true);
     });
 
     it('commits legacy testdata metadata under the active claim without inventing a structure revision', async () => {

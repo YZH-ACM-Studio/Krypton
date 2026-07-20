@@ -69,7 +69,7 @@ const logger = new Logger('problem-access');
 export const PROBLEM_ACL_INTERNAL_FIELDS = new Set(['aclMutationRevision', 'aclMutationLocks', 'aclWriteClaim']);
 const NARROW_CAPABILITY_FIELDS: Partial<Record<ProblemWriteCapability, ReadonlySet<string>>> = {
     data: new Set(['config', 'data', 'additional_file', 'codeEvaluationStatus']),
-    tag: new Set(['tag', 'knowledgeNodeIds', 'managedAuthoring.selectedMindmapNodeIds']),
+    tag: new Set(['tag', 'knowledgeMapId', 'knowledgeNodeIds', 'managedAuthoring.selectedMindmapNodeIds']),
     contributions: new Set(),
 };
 
@@ -406,6 +406,10 @@ export async function commitProblemAclGuardedUpdate(
                 codeEvaluationStatus: 1,
                 structureRevision: 1,
                 data: 1,
+                tag: 1,
+                authoringMode: 1,
+                knowledgeMapId: 1,
+                knowledgeNodeIds: 1,
             },
         });
         if (!current) return null;
@@ -598,6 +602,9 @@ export async function commitProblemWriteClaimUpdate(
             hidden: 1,
             codeEvaluationStatus: 1,
             managedAuthoring: 1,
+            tag: 1,
+            knowledgeMapId: 1,
+            knowledgeNodeIds: 1,
             aclWriteClaim: 1,
         },
     });
@@ -662,7 +669,9 @@ export async function commitProblemWriteClaimUpdate(
             } as Filter<ProblemDoc>;
         }
     }
-    await canonicalizeStructuredKnowledgePatch(current, $set, $unset, claim, 'claim-commit');
+    await canonicalizeStructuredKnowledgePatch(current, $set, $unset, claim, 'claim-commit', {
+        allowMapChange: claim.operation === 'programming-tag-normalize',
+    });
     const update: any = {};
     if (Object.keys($set || {}).length) update.$set = $set;
     if (Object.keys($unset || {}).length) update.$unset = $unset;

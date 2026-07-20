@@ -37,6 +37,7 @@ interface HydroMongoOptions {
 
 interface MindmapNodeRecord {
     _id: ObjectId;
+    mapId: ObjectId;
     parentId: ObjectId | null;
     topic: string;
     tags: string[];
@@ -132,8 +133,12 @@ export class MongoProblemBatchFactsRepository implements ProblemBatchFactsReposi
     async getMindmapFacts(nodeIds: string[]) {
         if (!nodeIds.length) return [];
         const nodes = (await this.collection('mindmap.nodes')
-            .find({}, { projection: { _id: 1, parentId: 1, topic: 1, tags: 1 } })
+            .find({}, { projection: { _id: 1, mapId: 1, parentId: 1, topic: 1, tags: 1 } })
             .toArray()) as unknown as MindmapNodeRecord[];
+        const maps = await this.collection('mindmap.maps')
+            .find({ visibility: 'public' }, { projection: { _id: 1, title: 1 } })
+            .toArray();
+        const mapsById = new Map(maps.map((map) => [String(map._id), map]));
         const byId = new Map(nodes.map((node) => [node._id.toHexString(), node]));
         return nodeIds.map((id) => {
             const node = byId.get(id);
@@ -141,7 +146,15 @@ export class MongoProblemBatchFactsRepository implements ProblemBatchFactsReposi
             if (!node || !ownTags.length) {
                 fail(`mindmap node is missing or not selectable: ${id}`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
             }
+            if (!(node.mapId instanceof ObjectId)) fail(`mindmap node has no canonical map: ${id}`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
+            const map = mapsById.get(node.mapId.toHexString());
+            if (!map || typeof map.title !== 'string' || !map.title.trim()) {
+                fail(`mindmap node belongs to a missing or hidden map: ${id}`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
+            }
             const path = mindmapPath(node, byId);
+            if (path.some((part) => !(part.mapId instanceof ObjectId) || !part.mapId.equals(node.mapId))) {
+                fail(`mindmap path crosses maps: ${id}`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
+            }
             const tags: string[] = [];
             for (const part of path) {
                 for (const rawTag of Array.isArray(part.tags) ? part.tags : []) {
@@ -151,6 +164,8 @@ export class MongoProblemBatchFactsRepository implements ProblemBatchFactsReposi
             }
             return {
                 id,
+                mapId: node.mapId.toHexString(),
+                mapTitle: map.title.trim(),
                 topic: path.map((part) => part.topic).join(' / '),
                 tags,
             };
@@ -169,6 +184,8 @@ export class MongoProblemBatchFactsRepository implements ProblemBatchFactsReposi
                         hidden: 1,
                         authoringMode: 1,
                         problemKind: 1,
+                        knowledgeMapId: 1,
+                        knowledgeNodeIds: 1,
                         managedAuthoring: 1,
                         batchImport: 1,
                         hasBatchImportIdentity: 1,

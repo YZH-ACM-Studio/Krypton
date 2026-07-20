@@ -47,6 +47,7 @@ import {
 } from '../error';
 import { ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDoc, ProblemStatusDoc, RecordDoc, User } from '../interface';
 import { isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
+import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import { normalizeCodeEvaluationDraftCreationConfig } from '../model/code-evaluation-lifecycle';
 import * as contest from '../model/contest';
@@ -57,6 +58,7 @@ import * as oplog from '../model/oplog';
 import problem from '../model/problem';
 import {
     classifyLegacyProgrammingTags,
+    listKnowledgeMapsForProblemSelection,
     listKnowledgeMindmapOptions,
     listManagedMindmapOptions,
     listManagedProblemTrainingPlacements,
@@ -181,27 +183,45 @@ function isDedicatedStructuredEditorKind(kind: ReturnType<typeof effectiveProble
     return isBasicObjectiveKind(kind) || [SUBJECTIVE_KIND, PROGRAM_FILL_KIND, FUNCTION_KIND].includes(kind as any);
 }
 
-function programmingTagEditorState(pdoc: ProblemDoc, mindmapOptions: Awaited<ReturnType<typeof listKnowledgeMindmapOptions>>) {
-    const classification = classifyLegacyProgrammingTags(pdoc.tag || [], mindmapOptions);
+function programmingTagEditorState(
+    pdoc: ProblemDoc,
+    maps: Awaited<ReturnType<typeof listKnowledgeMapsForProblemSelection>>,
+    mindmapOptions: Awaited<ReturnType<typeof listKnowledgeMindmapOptions>>,
+) {
+    const knowledgeMapId = pdoc.knowledgeMapId ? String(pdoc.knowledgeMapId) : '';
+    const scopedOptions = mindmapOptions.filter((option) => option.mapId === knowledgeMapId);
+    const classification = classifyLegacyProgrammingTags(pdoc.tag || [], scopedOptions);
+    const knowledgeMapTitle = maps.find((map) => map.id === knowledgeMapId)?.title || '';
+    const selectedNodeIds = resolveProblemKnowledgeNodeIds(pdoc, `problem ${pdoc.domainId}/${pdoc.docId}`);
     if (pdoc.authoringMode === 'managed') {
         return {
             mode: 'managed' as const,
+            knowledgeMapId,
+            knowledgeMapTitle,
             sourceTags: classification.sourceTags,
-            selectedNodeIds: (pdoc.knowledgeNodeIds || pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String),
+            selectedNodeIds,
         };
     }
-    if (Object.hasOwn(pdoc, 'knowledgeNodeIds')) {
+    if (selectedNodeIds.length) {
         return {
             mode: 'converted' as const,
+            knowledgeMapId,
+            knowledgeMapTitle,
             sourceTags: classification.sourceTags,
-            selectedNodeIds: (pdoc.knowledgeNodeIds || []).map(String),
+            selectedNodeIds,
         };
     }
-    return { mode: 'unconverted' as const, ...classification, selectedNodeIds: classification.suggestedNodeIds };
+    return {
+        mode: 'unconverted' as const,
+        knowledgeMapId,
+        knowledgeMapTitle,
+        ...classification,
+        selectedNodeIds: classification.suggestedNodeIds,
+    };
 }
 
 function programmingTagPreviewResponse(preview: Awaited<ReturnType<typeof previewProgrammingTagNormalization>>) {
-    return { ...preview, selectedNodeIds: preview.selectedNodeIds.map(String) };
+    return { ...preview, knowledgeMapId: String(preview.knowledgeMapId), selectedNodeIds: preview.selectedNodeIds.map(String) };
 }
 
 async function managedProblemReviewPreview(pdoc: ProblemDoc) {
@@ -461,6 +481,7 @@ const PROBLEM_TAG_WORKSPACE_PROJECTION = [
     'archivedAt',
     'authoringMode',
     'sourceMeta',
+    'knowledgeMapId',
     'knowledgeNodeIds',
     'managedAuthoring.metadataStatus',
     'managedAuthoring.workingTitle',
@@ -1069,6 +1090,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
     udoc: User;
     psdoc: ProblemStatusDoc;
     protected canEditLoadedProblem = false;
+    protected knowledgeNodeIdsForDetail: string[] = [];
 
     @route('pid', Types.ProblemId, true)
     @query('tid', Types.ObjectId, true)
@@ -1080,6 +1102,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
         if (!this.pdoc) throw new ProblemNotFoundError(domainId, pid);
         if (!tid) {
             this.canEditLoadedProblem = problem.canEditProblemContent(this.user, this.pdoc);
+            this.knowledgeNodeIdsForDetail = resolveProblemKnowledgeNodeIds(this.pdoc, `problem ${domainId}/${this.pdoc.docId}`);
             // `managedAuthoring` is read only to evaluate the author draft
             // capability. Keep the internal workflow state out of hooks and
             // every public problem-detail response.
@@ -1105,6 +1128,8 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             delete this.pdoc.difficulty;
             delete this.pdoc.stats;
             delete this.pdoc.origStat;
+            delete this.pdoc.knowledgeMapId;
+            delete this.pdoc.knowledgeNodeIds;
         }
         let ddoc = this.domain;
         if (this.pdoc.reference) {
@@ -1149,21 +1174,51 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             this.pdoc.config.langs = ['objective', 'submit_answer'].includes(this.pdoc.config.type) ? ['_'] : intersection(baseLangs, ...t);
         }
         await this.ctx.parallel('problem/get', this.pdoc, this);
+        let knowledgeMapVisible = true;
+        if (!tid && this.pdoc.knowledgeMapId && !problem.isProblemBankAdmin(this.user)) {
+            const publicMaps = await listKnowledgeMapsForProblemSelection();
+            knowledgeMapVisible = publicMaps.some((map) => map.id === String(this.pdoc.knowledgeMapId));
+            if (!knowledgeMapVisible) {
+                logger.warn(
+                    'Hidden knowledge map redacted from problem detail domain=%s pid=%d map=%s actor=%d stage=detail result=redacted',
+                    this.pdoc.domainId,
+                    this.pdoc.docId,
+                    this.pdoc.knowledgeMapId,
+                    this.user._id,
+                );
+            }
+        }
         [this.psdoc, this.udoc] = await Promise.all([
             problem.getStatus(this.pdoc.domainId, this.pdoc.docId, this.user._id),
             user.getById(this.pdoc.domainId, this.pdoc.owner),
         ]);
-        const [scnt, dcnt, authorUdocs, dataContributorUdocs] = await Promise.all([
+        const [scnt, dcnt, authorUdocs, dataContributorUdocs, knowledgeMapView] = await Promise.all([
             solution.count(this.pdoc.domainId, { parentId: this.pdoc.docId }),
             discussion.count(this.pdoc.domainId, { parentId: this.pdoc.docId }),
             tid ? Promise.resolve(this.udoc ? [this.udoc] : []) : problemAuthorUsers(this.pdoc, this.udoc),
             tid ? Promise.resolve([]) : problemDataContributorUsers(this.pdoc),
+            !tid && this.pdoc.knowledgeMapId && knowledgeMapVisible
+                ? materializeKnowledgeMindmapTags(this.knowledgeNodeIdsForDetail, {
+                      knowledgeMapId: this.pdoc.knowledgeMapId,
+                      requireMap: true,
+                  }).then((knowledge) => ({
+                      id: String(knowledge.mapId),
+                      title: knowledge.mapTitle,
+                      nodes: knowledge.nodePaths,
+                  }))
+                : Promise.resolve(null),
         ]);
+        const responsePdoc = knowledgeMapVisible ? this.pdoc : { ...this.pdoc };
+        if (!knowledgeMapVisible) {
+            delete responsePdoc.knowledgeMapId;
+            delete responsePdoc.knowledgeNodeIds;
+        }
         this.response.body = {
-            pdoc: this.pdoc,
+            pdoc: responsePdoc,
             udoc: this.udoc,
             authorUdocs,
             dataContributorUdocs,
+            knowledgeMapView,
             psdoc: tid ? null : this.psdoc,
             title: this.pdoc.title,
             solutionCount: scnt,
@@ -1221,7 +1276,7 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 : 'contest_detail_problem'
             : 'problem_detail';
         if (args[2]) {
-            const data = { pdoc: this.pdoc, tdoc: this.tdoc };
+            const data = { pdoc: this.response.body.pdoc, tdoc: this.tdoc };
             this.response.body = {
                 title: this.renderTitle(this.response.body.page_name),
                 fragments: [{ html: await this.renderHTML('partials/problem_description.html', data) }],
@@ -1563,19 +1618,27 @@ export class ProblemEditHandler extends ProblemManageHandler {
         if (problemKind === 'programming') {
             const canReviewManaged = this.pdoc.authoringMode === 'managed' && capabilities.canPublish;
             const canLoadManagedWorkflow = this.pdoc.authoringMode === 'managed' && (capabilities.canEditContent || canReviewManaged);
-            const [programmingMindmapOptions, managedTrainingOptions, managedTrainingPlacements, managedReviewPreview, pendingContributionFacts] =
-                await Promise.all([
-                    capabilities.canEditTags ? listKnowledgeMindmapOptions() : Promise.resolve([]),
-                    canLoadManagedWorkflow ? listManagedTrainingOptions(this.pdoc.domainId) : Promise.resolve([]),
-                    canLoadManagedWorkflow ? listManagedProblemTrainingPlacements(this.pdoc.domainId, this.pdoc.docId) : Promise.resolve([]),
-                    canReviewManaged ? managedProblemReviewPreview(this.pdoc) : Promise.resolve(undefined),
-                    canReviewManaged ? pendingProblemContributionReviewFacts(this.pdoc.domainId, [this.pdoc.docId]) : Promise.resolve(undefined),
-                ]);
+            const [
+                knowledgeMaps,
+                programmingMindmapOptions,
+                managedTrainingOptions,
+                managedTrainingPlacements,
+                managedReviewPreview,
+                pendingContributionFacts,
+            ] = await Promise.all([
+                capabilities.canEditTags ? listKnowledgeMapsForProblemSelection() : Promise.resolve([]),
+                capabilities.canEditTags ? listKnowledgeMindmapOptions() : Promise.resolve([]),
+                canLoadManagedWorkflow ? listManagedTrainingOptions(this.pdoc.domainId) : Promise.resolve([]),
+                canLoadManagedWorkflow ? listManagedProblemTrainingPlacements(this.pdoc.domainId, this.pdoc.docId) : Promise.resolve([]),
+                canReviewManaged ? managedProblemReviewPreview(this.pdoc) : Promise.resolve(undefined),
+                canReviewManaged ? pendingProblemContributionReviewFacts(this.pdoc.domainId, [this.pdoc.docId]) : Promise.resolve(undefined),
+            ]);
             Object.assign(this.response.body, {
                 ...(capabilities.canEditTags
                     ? {
                           programmingMindmapOptions,
-                          programmingTagState: programmingTagEditorState(this.pdoc, programmingMindmapOptions),
+                          knowledgeMaps,
+                          programmingTagState: programmingTagEditorState(this.pdoc, knowledgeMaps, programmingMindmapOptions),
                       }
                     : {}),
                 ...(this.pdoc.authoringMode === 'managed'
@@ -1595,6 +1658,16 @@ export class ProblemEditHandler extends ProblemManageHandler {
                       }
                     : {}),
             });
+        } else if (capabilities.canEditTags) {
+            const [knowledgeMaps, knowledgeMindmapOptions] = await Promise.all([
+                listKnowledgeMapsForProblemSelection(),
+                listKnowledgeMindmapOptions(),
+            ]);
+            Object.assign(this.response.body, {
+                knowledgeMaps,
+                programmingMindmapOptions: knowledgeMindmapOptions,
+                programmingTagState: programmingTagEditorState(this.pdoc, knowledgeMaps, knowledgeMindmapOptions),
+            });
         }
         // 原始 config YAML（本页 gated by ProblemManageHandler）：前端类型
         // 编辑器直接从页面数据初始化。此前前端 fetch 文件下载路由读取——
@@ -1613,7 +1686,12 @@ export class ProblemEditHandler extends ProblemManageHandler {
             }
             this.response.body.editorProblemKind = problemKind;
             this.response.body.structuredConfig = editorConfig;
-            this.response.body.knowledgeMindmapOptions = await listKnowledgeMindmapOptions();
+            const [knowledgeMaps, knowledgeMindmapOptions] = await Promise.all([
+                listKnowledgeMapsForProblemSelection(),
+                listKnowledgeMindmapOptions(),
+            ]);
+            this.response.body.knowledgeMaps = knowledgeMaps;
+            this.response.body.knowledgeMindmapOptions = knowledgeMindmapOptions;
             this.response.body.canUseCustomPid = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
             if ([PROGRAM_FILL_KIND, FUNCTION_KIND].includes(problemKind as any)) {
                 this.response.body.langRange = setting.SETTINGS_BY_KEY.codeLang.range;
@@ -1631,6 +1709,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
     @post('pid', Types.ProblemId, true, (i) => /^(?:[a-z0-9]{1,10}-)?[a-z][a-z0-9]*$/i.test(i))
     @post('hidden', Types.Boolean)
     @post('tag', Types.Content, true, null, parseCategory)
+    @post('knowledgeMapId', Types.String, true)
     @post('knowledgeNodeIds', Types.CommaSeperatedArray, true)
     @post('difficulty', Types.UnsignedInt, (i) => +i <= 10, true)
     @post('lockHidden', Types.Boolean, true)
@@ -1648,6 +1727,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
         newPid: string | number | undefined,
         hidden = false,
         tag: string[] = [],
+        knowledgeMapId: string,
         knowledgeNodeIds: string[] = [],
         difficulty?: number,
         lockHidden?: boolean,
@@ -1711,6 +1791,9 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 try {
                     managedKnowledge = await materializeKnowledgeMindmapTags(knowledgeNodeIds, {
                         required: true,
+                        requireMap: true,
+                        requirePublicMap: true,
+                        knowledgeMapId: this.pdoc.knowledgeMapId,
                         field: 'knowledgeNodeIds',
                     });
                 } catch (error) {
@@ -1726,7 +1809,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
             }
         }
         if (legacyProgramming) {
-            const canonicalFields = ['tag', 'knowledgeNodeIds'].filter((field) => Object.hasOwn(body, field));
+            const canonicalFields = ['tag', 'knowledgeMapId', 'knowledgeNodeIds'].filter((field) => Object.hasOwn(body, field));
             if (canonicalFields.length) {
                 logger.warn(
                     'Programming tag write rejected domain=%s pid=%d actor=%d stage=ordinary-save fields=%o result=denied',
@@ -1737,7 +1820,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 );
                 throw new ValidationError('fields', null, '编程题标签只能从知识导图选择并单独确认');
             }
-            if (Object.hasOwn(this.pdoc, 'knowledgeNodeIds') && Object.hasOwn(body, 'pid')) {
+            if (this.pdoc.knowledgeNodeIds?.length && Object.hasOwn(body, 'pid')) {
                 logger.warn(
                     'Converted programming PID write rejected domain=%s pid=%d actor=%d stage=ordinary-save result=denied',
                     domainId,
@@ -1749,22 +1832,36 @@ export class ProblemEditHandler extends ProblemManageHandler {
         }
         if (dedicatedStructured) {
             if (Object.hasOwn(body, 'tag')) throw new ValidationError('tag', null, '结构化题标签只能从知识导图选择');
-            if (!Object.hasOwn(body, 'knowledgeNodeIds')) throw new ValidationError('knowledgeNodeIds');
+            const hasKnowledgeMap = Object.hasOwn(body, 'knowledgeMapId');
+            const hasKnowledgeNodes = Object.hasOwn(body, 'knowledgeNodeIds');
+            if (hasKnowledgeMap !== hasKnowledgeNodes) {
+                throw new ValidationError('knowledgeNodeIds', null, '所属导图与知识节点必须一起保存');
+            }
             if (Object.hasOwn(body, 'pid') && !this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM)) {
                 throw new ValidationError('pid', null, '只有站点管理员可自定义结构化题编号');
             }
-            try {
-                structuredKnowledge = await materializeKnowledgeMindmapTags(knowledgeNodeIds);
-            } catch (error) {
-                logger.warn(
-                    'Structured knowledge save rejected domain=%s pid=%d kind=%s actor=%d stage=knowledge-materialize error=%o',
-                    domainId,
-                    this.pdoc.docId,
-                    problemKind,
-                    this.user._id,
-                    error,
-                );
-                throw error;
+            if (hasKnowledgeMap) {
+                if (String(this.pdoc.knowledgeMapId || '') !== knowledgeMapId) {
+                    throw new ValidationError('knowledgeMapId', null, '更换所属导图必须单独预览并确认');
+                }
+                try {
+                    structuredKnowledge = await materializeKnowledgeMindmapTags(knowledgeNodeIds, {
+                        required: this.pdoc.codeEvaluationStatus !== 'draft' || completeCodeEvaluationDraft,
+                        knowledgeMapId,
+                        requireMap: true,
+                        requirePublicMap: true,
+                    });
+                } catch (error) {
+                    logger.warn(
+                        'Structured knowledge save rejected domain=%s pid=%d kind=%s actor=%d stage=knowledge-materialize error=%o',
+                        domainId,
+                        this.pdoc.docId,
+                        problemKind,
+                        this.user._id,
+                        error,
+                    );
+                    throw error;
+                }
             }
         }
         if (metadataOnly) {
@@ -1789,9 +1886,14 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 metadata: {
                     title: title || this.pdoc.title,
                     hidden,
-                    tag: structuredKnowledge!.tags,
                     difficulty: difficulty ?? this.pdoc.difficulty ?? 0,
-                    knowledgeNodeIds: structuredKnowledge!.nodeIds,
+                    ...(structuredKnowledge
+                        ? {
+                              tag: structuredKnowledge.tags,
+                              knowledgeMapId: structuredKnowledge.mapId,
+                              knowledgeNodeIds: structuredKnowledge.nodeIds,
+                          }
+                        : {}),
                 },
             });
             const responsePid = this.pdoc.pid || pdoc.docId;
@@ -1815,6 +1917,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 ...(structuredKnowledge
                     ? {
                           tag: structuredKnowledge.tags,
+                          knowledgeMapId: structuredKnowledge.mapId,
                           knowledgeNodeIds: structuredKnowledge.nodeIds,
                       }
                     : {}),
@@ -1891,12 +1994,13 @@ export class ProblemEditHandler extends ProblemManageHandler {
 
 export class ProblemProgrammingTagPreviewHandler extends ProblemManageHandler {
     @route('pid', Types.ProblemId)
+    @post('knowledgeMapId', Types.String)
     @post('knowledgeNodeIds', Types.CommaSeperatedArray)
-    async post(_domainId: string, _pid: string | number, knowledgeNodeIds: string[]) {
+    async post(_domainId: string, _pid: string | number, knowledgeMapId: string, knowledgeNodeIds: string[]) {
         try {
             const bodyFields = Object.keys(this.request.body || {});
-            if (bodyFields.some((field) => field !== 'knowledgeNodeIds')) {
-                throw new ValidationError('fields', null, '标签预览只接受知识导图节点');
+            if (bodyFields.some((field) => !['knowledgeMapId', 'knowledgeNodeIds'].includes(field))) {
+                throw new ValidationError('fields', null, '标签预览只接受所属导图与知识节点');
             }
             const domainId = this.pdoc.domainId;
             await problem.assertProgrammingTagNormalizationUnlocked(domainId, this.pdoc.docId);
@@ -1904,8 +2008,12 @@ export class ProblemProgrammingTagPreviewHandler extends ProblemManageHandler {
             const preview = await previewProgrammingTagNormalization({
                 domainId,
                 docId: live.docId,
+                problemKind: effectiveProblemKind(live),
                 structureRevision: live.structureRevision,
                 currentTags: live.tag || [],
+                currentKnowledgeMapId: live.knowledgeMapId,
+                currentKnowledgeNodeIds: resolveProblemKnowledgeNodeIds(live, `problem ${live.domainId}/${live.docId}`),
+                targetKnowledgeMapId: knowledgeMapId,
                 selectedNodeIds: knowledgeNodeIds,
             });
             logger.info(
@@ -1934,14 +2042,23 @@ export class ProblemProgrammingTagPreviewHandler extends ProblemManageHandler {
 
 export class ProblemProgrammingTagApplyHandler extends ProblemManageHandler {
     @route('pid', Types.ProblemId)
+    @post('knowledgeMapId', Types.String)
     @post('knowledgeNodeIds', Types.CommaSeperatedArray)
     @post('intent', Types.String)
     @post('confirmed', Types.Boolean)
     @post('previewFingerprint', Types.String)
-    async post(_domainId: string, _pid: string | number, knowledgeNodeIds: string[], intent: string, confirmed: boolean, previewFingerprint: string) {
+    async post(
+        _domainId: string,
+        _pid: string | number,
+        knowledgeMapId: string,
+        knowledgeNodeIds: string[],
+        intent: string,
+        confirmed: boolean,
+        previewFingerprint: string,
+    ) {
         try {
             const bodyFields = Object.keys(this.request.body || {});
-            const allowedFields = new Set(['knowledgeNodeIds', 'intent', 'confirmed', 'previewFingerprint']);
+            const allowedFields = new Set(['knowledgeMapId', 'knowledgeNodeIds', 'intent', 'confirmed', 'previewFingerprint']);
             if (bodyFields.some((field) => !allowedFields.has(field))) {
                 throw new ValidationError('fields', null, '标签规范化请求包含未允许字段');
             }
@@ -1952,6 +2069,7 @@ export class ProblemProgrammingTagApplyHandler extends ProblemManageHandler {
                 domainId: this.pdoc.domainId,
                 pid: this.pdoc.docId,
                 user: this.user,
+                targetKnowledgeMapId: knowledgeMapId,
                 selectedNodeIds: knowledgeNodeIds,
                 previewFingerprint,
             });
@@ -1961,6 +2079,8 @@ export class ProblemProgrammingTagApplyHandler extends ProblemManageHandler {
                 structureRevision: result.pdoc.structureRevision,
                 programmingTagState: {
                     mode: 'converted',
+                    knowledgeMapId: String(result.preview.knowledgeMapId),
+                    knowledgeMapTitle: result.preview.knowledgeMapTitle,
                     sourceTags: result.preview.sourceTags,
                     selectedNodeIds: result.preview.selectedNodeIds.map(String),
                 },
@@ -1976,13 +2096,16 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
     abstract problemKind: DedicatedStructuredEditorKind;
 
     async get() {
+        const [knowledgeMaps, knowledgeMindmapOptions] = await Promise.all([listKnowledgeMapsForProblemSelection(), listKnowledgeMindmapOptions()]);
+        const defaultMapId = knowledgeMaps.length === 1 ? knowledgeMaps[0].id : '';
         this.response.template = structuredEditorTemplate(this.problemKind);
         this.response.body = {
             page_name: `problem_create_${this.problemKind}`,
             editorProblemKind: this.problemKind,
             structuredConfig: defaultDedicatedConfig(this.problemKind),
-            pdoc: { hidden: true, problemKind: this.problemKind, knowledgeNodeIds: [] },
-            knowledgeMindmapOptions: await listKnowledgeMindmapOptions(),
+            pdoc: { hidden: true, problemKind: this.problemKind, knowledgeMapId: defaultMapId, knowledgeNodeIds: [] },
+            knowledgeMaps,
+            knowledgeMindmapOptions,
             canUseCustomPid: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
         };
         if ([PROGRAM_FILL_KIND, FUNCTION_KIND].includes(this.problemKind as any)) {
@@ -1994,6 +2117,7 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
     @post('content', Types.Content, true)
     @post('pid', Types.ProblemId, true, (i) => /^(?:[a-z0-9]{1,10}-)?[a-z][a-z0-9]*$/i.test(i))
     @post('difficulty', Types.UnsignedInt, (i) => +i <= 10, true)
+    @post('knowledgeMapId', Types.String)
     @post('knowledgeNodeIds', Types.CommaSeperatedArray, true)
     @post('editorProblemKind', Types.String)
     @post('structuredConfig', Types.Content)
@@ -2004,6 +2128,7 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
         content: string | undefined,
         pid: string | number = '',
         difficulty = 0,
+        knowledgeMapId = '',
         knowledgeNodeIds: string[] = [],
         editorProblemKind = '',
         structuredConfig = '',
@@ -2017,6 +2142,7 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
             'title',
             'content',
             'difficulty',
+            'knowledgeMapId',
             'knowledgeNodeIds',
             'editorProblemKind',
             'structuredConfig',
@@ -2059,7 +2185,12 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
         if (pid && (await problem.get(domainId, pid))) throw new ProblemAlreadyExistError(pid);
         let knowledge: Awaited<ReturnType<typeof materializeKnowledgeMindmapTags>>;
         try {
-            knowledge = await materializeKnowledgeMindmapTags(knowledgeNodeIds);
+            knowledge = await materializeKnowledgeMindmapTags(knowledgeNodeIds, {
+                required: !codeEvaluationDraft,
+                requireMap: true,
+                requirePublicMap: true,
+                knowledgeMapId,
+            });
         } catch (error) {
             logger.warn(
                 'Structured knowledge create rejected domain=%s kind=%s actor=%d stage=knowledge-materialize error=%o',
@@ -2073,6 +2204,7 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
         const docId = await problem.createProblemByKind(this.problemKind, domainId, pid, title, content || '', this.user._id, knowledge.tags, {
             difficulty,
             structuredConfig: persistedConfig,
+            knowledgeMapId: knowledge.mapId,
             knowledgeNodeIds: knowledge.nodeIds,
             ...(codeEvaluationDraft ? { codeEvaluationStatus: 'draft' as const } : {}),
         });
@@ -2702,7 +2834,8 @@ export class ProblemCreateProgrammingHandler extends Handler {
         const canAssignManagedAuthor = problem.isProblemBankAdmin(this.user);
         const managedCreate = this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         if (!canAssignManagedAuthor && !managedCreate) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
-        const [managedMindmapOptions, managedTrainingOptions] = await Promise.all([
+        const [knowledgeMaps, managedMindmapOptions, managedTrainingOptions] = await Promise.all([
+            listKnowledgeMapsForProblemSelection(),
             listManagedMindmapOptions(),
             canAssignManagedAuthor ? listManagedTrainingOptions(String(this.domain?._id)) : Promise.resolve([]),
         ]);
@@ -2715,6 +2848,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
                 hidden: true,
                 problemKind: 'programming',
                 authoringMode: 'managed',
+                knowledgeMapId: knowledgeMaps.length === 1 ? knowledgeMaps[0].id : '',
                 managedAuthoring: { workingTitle: '', selectedMindmapNodeIds: [], metadataStatus: 'draft' },
             },
             canCreateManagedProblem: true,
@@ -2725,6 +2859,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
                 ? MANAGED_SOURCE_TEMPLATES
                 : MANAGED_SOURCE_TEMPLATES.filter((template) => template.id === 'self'),
             managedMindmapOptions,
+            knowledgeMaps,
             managedTrainingOptions,
             problemAuthoringCapabilities: {
                 managed: true,
@@ -2752,6 +2887,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
     @post('season', Types.String, true)
     @post('level', Types.String, true)
     @post('round', Types.String, true)
+    @post('knowledgeMapId', Types.String)
     @post('mindmapNodeIds', Types.CommaSeperatedArray, true)
     @post('trainingId', Types.String, true)
     @post('chapterId', Types.String, true)
@@ -2770,6 +2906,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
         season = '',
         level = '',
         round: string | number = '',
+        knowledgeMapId = '',
         mindmapNodeIds: string[] = [],
         trainingId = '',
         chapterId: string | number = '',
@@ -2819,6 +2956,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
             'level',
             'round',
             'difficulty',
+            'knowledgeMapId',
             'mindmapNodeIds',
             'trainingId',
             'chapterId',
@@ -2855,6 +2993,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
                 content,
                 difficulty: resolvedDifficulty,
                 sourceMeta,
+                knowledgeMapId,
                 mindmapNodeIds,
                 ...(trainingId || chapterId ? { pendingTrainingPlacement: { trainingId, chapterId } } : {}),
                 ...(resolvedAuthorUid ? { authorUid: resolvedAuthorUid } : {}),

@@ -12,6 +12,7 @@ import { createProblemBatchExecutionReport, preflightProblemBatchImport, validat
 (global as any).Hydro ||= { model: {} };
 
 const trainingId = new ObjectId('68486d8165edbb11e9ec9036');
+const knowledgeMapId = new ObjectId('6a50935a53f083fa84681fb7');
 const nodeId = '6a50935a53f083fa84681fb8';
 const actor = { _id: 2, uname: 'root', perm: 1n };
 const author = { _id: 515, uname: '2025多校' };
@@ -21,6 +22,7 @@ const authorPermits: any[] = [];
 const storageObjects = new Map<string, Buffer>();
 const oplogs: any[] = [];
 const calls: string[] = [];
+const managedDraftInputs: any[] = [];
 let nextDocId = 3000;
 let failConfigObserver = false;
 let publicationIncomplete = false;
@@ -38,7 +40,13 @@ const training: any = {
 };
 
 function clone<T>(value: T): T {
-    return structuredClone(value);
+    if (value instanceof ObjectId) return new ObjectId(value.toHexString()) as T;
+    if (value instanceof Date) return new Date(value.getTime()) as T;
+    if (Array.isArray(value)) return value.map((item) => clone(item)) as T;
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clone(item)])) as T;
+    }
+    return value;
 }
 
 function objectIdEqual(left: unknown, right: unknown): boolean {
@@ -108,6 +116,7 @@ const ProblemModelStub = {
     },
     async createManagedProgrammingDraft(domainId: string, input: any, creator: number) {
         calls.push('createManagedProgrammingDraft');
+        managedDraftInputs.push(clone(input));
         counter.value++;
         const docId = nextDocId++;
         const pid = `NK${counter.value}`;
@@ -128,6 +137,8 @@ const ProblemModelStub = {
             authoringMode: 'managed',
             sourceMeta: clone(input.sourceMeta),
             tag: [...sourceTags, '模拟'],
+            knowledgeMapId,
+            knowledgeNodeIds: input.mindmapNodeIds.map((id: string) => new ObjectId(id)),
             structureRevision: 1,
             managedAuthoring: {
                 workingTitle: input.workingTitle,
@@ -238,11 +249,19 @@ const cacheStubs: Array<[string, any]> = [
             normalizeManagedSourceMeta: (source: any) => clone(source),
             deriveManagedSourceTags: () => [...sourceTags],
             async listManagedMindmapOptions() {
-                return [{ id: nodeId, label: '模拟', tags: ['模拟'] }];
+                return [
+                    {
+                        id: nodeId,
+                        mapId: knowledgeMapId.toHexString(),
+                        mapTitle: '算法知识图谱',
+                        label: '模拟',
+                        tags: ['模拟'],
+                    },
+                ];
             },
             async materializeManagedMindmapTags(ids: string[]) {
                 if (ids.length !== 1 || ids[0] !== nodeId) throw new Error('unknown mindmap node');
-                return { nodeIds: [new ObjectId(nodeId)], tags: ['模拟'] };
+                return { mapId: knowledgeMapId, nodeIds: [new ObjectId(nodeId)], tags: ['模拟'] };
             },
         },
     ],
@@ -406,6 +425,7 @@ describe('P2.23 Hydro production batch adapter', () => {
         storageObjects.clear();
         oplogs.length = 0;
         calls.length = 0;
+        managedDraftInputs.length = 0;
         failConfigObserver = false;
         publicationIncomplete = false;
         failOriginalStatisticsAuditOnce = false;
@@ -417,7 +437,12 @@ describe('P2.23 Hydro production batch adapter', () => {
         const batch = await validateProblemBatchManifest(manifestPath);
         const adapter = new HydroProblemBatchImportAdapter();
         const plan = await preflightProblemBatchImport(batch, adapter);
-        expect(plan.facts.problems[0]).to.include({ sourceProblemCode: 'A', pid: 'NK1064', state: 'new' });
+        expect(plan.facts.problems[0]).to.include({
+            sourceProblemCode: 'A',
+            pid: 'NK1064',
+            knowledgeMapId: knowledgeMapId.toHexString(),
+            state: 'new',
+        });
         const report = createProblemBatchExecutionReport(plan, 2);
         const result = await adapter.apply(batch, plan, report, async () => {});
 
@@ -433,6 +458,7 @@ describe('P2.23 Hydro production batch adapter', () => {
             'setManagedProgrammingDraftTrainingPlacement',
         ]);
         expect(problemDocs[0].batchImport.identity).to.equal('fixture-2026-1:A');
+        expect(managedDraftInputs[0].knowledgeMapId).to.equal(knowledgeMapId.toHexString());
         expect(problemDocs[0].managedAuthoring).not.to.have.property('pendingTrainingPlacement');
 
         const mutationCount = calls.filter((call) =>
@@ -444,8 +470,10 @@ describe('P2.23 Hydro production batch adapter', () => {
                 'publishManagedProgrammingProblem',
             ].some((prefix) => call.startsWith(prefix)),
         ).length;
+        delete problemDocs[0].knowledgeNodeIds;
         const resumed = await adapter.apply(batch, plan, report, async () => {});
         expect(resumed).to.deep.equal(result);
+        expect(problemDocs[0].managedAuthoring.selectedMindmapNodeIds.map(String)).to.deep.equal([nodeId]);
         const resumedMutationCount = calls.filter((call) =>
             [
                 'createManagedProgrammingDraft',
@@ -554,6 +582,64 @@ describe('P2.23 Hydro production batch adapter', () => {
             expect.fail('expected identity conflict');
         } catch (error) {
             expect(error).to.have.property('code', 'BATCH_IMPORT_IDENTITY_CONFLICT');
+        }
+    });
+
+    it('rejects every interrupted-draft map or node drift before writing files, training, or publication', async () => {
+        const batch = await validateProblemBatchManifest(manifestPath);
+        const entry = batch.problems[0];
+        await ProblemModelStub.createManagedProgrammingDraft(
+            batch.manifest.domain,
+            {
+                workingTitle: entry.title,
+                content: await fsp.readFile(entry.statementFile.path, 'utf8'),
+                difficulty: entry.difficulty,
+                sourceMeta: batch.manifest.source,
+                knowledgeMapId: knowledgeMapId.toHexString(),
+                mindmapNodeIds: entry.mindmapNodeIds,
+                authorUid: batch.manifest.author.uid,
+                batchImport: {
+                    batchId: batch.manifest.batchId,
+                    sourceProblemCode: entry.sourceProblemCode,
+                    fingerprint: entry.fingerprint,
+                },
+            },
+            batch.manifest.actor,
+        );
+        const adapter = new HydroProblemBatchImportAdapter();
+        const plan = await preflightProblemBatchImport(batch, adapter);
+        const pdoc = problemDocs[0];
+        const originalMapId = pdoc.knowledgeMapId;
+        const originalKnowledgeNodeIds = [...pdoc.knowledgeNodeIds];
+        const originalManagedNodeIds = [...pdoc.managedAuthoring.selectedMindmapNodeIds];
+        const otherMapId = new ObjectId('6a50935a53f083fa84681fc7');
+        const otherNodeId = new ObjectId('6a50935a53f083fa84681fc8');
+        const variants = [
+            () => {
+                pdoc.knowledgeMapId = otherMapId;
+            },
+            () => {
+                pdoc.knowledgeNodeIds = [otherNodeId];
+            },
+            () => {
+                pdoc.managedAuthoring.selectedMindmapNodeIds = [otherNodeId];
+            },
+        ];
+
+        for (const mutate of variants) {
+            pdoc.knowledgeMapId = originalMapId;
+            pdoc.knowledgeNodeIds = [...originalKnowledgeNodeIds];
+            pdoc.managedAuthoring.selectedMindmapNodeIds = [...originalManagedNodeIds];
+            mutate();
+            calls.length = 0;
+            let failure: any;
+            try {
+                await adapter.apply(batch, plan, createProblemBatchExecutionReport(plan, 2), async () => {});
+            } catch (error) {
+                failure = error;
+            }
+            expect(failure).to.have.property('code', 'BATCH_IMPORT_MINDMAP_CONFLICT');
+            expect(calls).to.deep.equal([]);
         }
     });
 

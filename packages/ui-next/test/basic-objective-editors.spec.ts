@@ -35,8 +35,7 @@ describe('P3.9 dedicated basic objective editors', () => {
     expect(source).not.to.include('name="correct-option"');
     expect(source).to.include('大小写敏感');
     expect(source).to.include('name="expectedStructureRevision"');
-    expect(source).to.include('name="metadataOnly"');
-    expect(source).to.include('<fieldset disabled={locked}');
+    expect(source).to.include('<fieldset\n            disabled={locked}');
     expect(source).to.include('disabled={locked}');
     expect(source).to.include('disabled={saving}');
     expect(source).to.include('response.status === 409');

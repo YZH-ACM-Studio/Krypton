@@ -35,11 +35,21 @@ type R = Record<string, any>;
 
 interface ManagedMindmapOption {
   id: string;
+  mapId: string;
+  mapTitle: string;
   label: string;
   tags: string[];
 }
 
+interface KnowledgeMapOption {
+  id: string;
+  title: string;
+  visibility: 'hidden' | 'public';
+}
+
 interface ProgrammingTagPreview {
+  knowledgeMapId: string;
+  knowledgeMapTitle: string;
   sourceTags: string[];
   selectedNodeIds: string[];
   nextTags: string[];
@@ -681,6 +691,7 @@ export function ProblemEditPage() {
   const canAssignManagedTraining = isCreate && data.canAssignManagedTraining === true;
   const initialProgrammingTagState: ProgrammingTagState = data.programmingTagState || {
     mode: 'managed',
+    knowledgeMapId: String(pdoc.knowledgeMapId || ''),
     sourceTags: [],
     selectedNodeIds: (pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String),
   };
@@ -728,6 +739,7 @@ export function ProblemEditPage() {
   const [lockHiddenValue, setLockHiddenValue] = useState(!!pdoc.lockHidden);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const sourceTemplates: ManagedSourceTemplateOption[] = data.managedSourceTemplates || [];
+  const knowledgeMaps: KnowledgeMapOption[] = data.knowledgeMaps || [];
   const mindmapOptions: ManagedMindmapOption[] = data.programmingMindmapOptions || data.managedMindmapOptions || [];
   const trainingOptions: ManagedTrainingOptionView[] = data.managedTrainingOptions || [];
   const managedTrainingPlacements: ManagedTrainingPlacementView[] = data.managedTrainingPlacements || [];
@@ -739,17 +751,24 @@ export function ProblemEditPage() {
   const [sourceRound, setSourceRound] = useState(String(pdoc.sourceMeta?.round || 1));
   const [selectedManagedAuthors, setSelectedManagedAuthors] = useState<DomainUserOption[]>([]);
   const [managedAuthorSearchError, setManagedAuthorSearchError] = useState('');
+  const initialKnowledgeMapId = String(
+    pdoc.knowledgeMapId || programmingTagState.knowledgeMapId || (knowledgeMaps.length === 1 ? knowledgeMaps[0].id : ''),
+  );
+  const [selectedKnowledgeMapId, setSelectedKnowledgeMapId] = useState(initialKnowledgeMapId);
+  const [persistedKnowledgeMapId, setPersistedKnowledgeMapId] = useState(initialKnowledgeMapId);
   const initialMindmapIds = isCreate ? (pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String) : programmingTagState.selectedNodeIds || [];
   const mindmapOptionsById = new Map(mindmapOptions.map((option) => [option.id, option]));
+  const selectedMapMindmapOptions = mindmapOptions.filter((option) => option.mapId === selectedKnowledgeMapId);
   const [selectedMindmapNodes, setSelectedMindmapNodes] = useState<ManagedMindmapOption[]>(
     initialMindmapIds.map((id) => mindmapOptionsById.get(id)).filter((option): option is ManagedMindmapOption => !!option),
   );
   const [persistedMindmapNodeIds, setPersistedMindmapNodeIds] = useState(initialMindmapIds);
   const selectedMindmapNodeIds = selectedMindmapNodes.map((node) => node.id);
+  const knowledgeMapSelectionChanged = selectedKnowledgeMapId !== persistedKnowledgeMapId;
   const mindmapSelectionChanged =
     selectedMindmapNodeIds.length !== persistedMindmapNodeIds.length ||
     selectedMindmapNodeIds.some((nodeId, index) => nodeId !== persistedMindmapNodeIds[index]);
-  const tagSelectionDirty = !isCreate && canEditTags && mindmapSelectionChanged;
+  const tagSelectionDirty = !isCreate && canEditTags && (knowledgeMapSelectionChanged || mindmapSelectionChanged);
   const [tagPreview, setTagPreview] = useState<ProgrammingTagPreview | null>(null);
   const [tagPreviewOpen, setTagPreviewOpen] = useState(false);
   const [tagOperationState, setTagOperationState] = useState<'idle' | 'previewing' | 'applying' | 'saved' | 'error'>('idle');
@@ -772,6 +791,7 @@ export function ProblemEditPage() {
     sourceLevel,
     sourceRound,
     managedAuthors: selectedManagedAuthors.map((author) => author._id),
+    knowledgeMapId: isCreate ? selectedKnowledgeMapId : undefined,
     mindmapNodes: isCreate ? selectedMindmapNodeIds : undefined,
     selectedTrainingId,
     selectedChapterId,
@@ -823,6 +843,19 @@ export function ProblemEditPage() {
     dirtyState.recompute();
   }, [dirtyState.recompute]);
 
+  const selectKnowledgeMap = useCallback(
+    (mapId: string) => {
+      if (mapId === selectedKnowledgeMapId) return;
+      setSelectedKnowledgeMapId(mapId);
+      setSelectedMindmapNodes([]);
+      setTagPreview(null);
+      setTagOperationError('');
+      setTagOperationState('idle');
+      if (isCreate) markDirty();
+    },
+    [isCreate, markDirty, selectedKnowledgeMapId],
+  );
+
   const handleDownloadPackage = useCallback(async () => {
     if (isCreate || !problemUrl) return;
     setDownloading(true);
@@ -854,6 +887,11 @@ export function ProblemEditPage() {
 
   const requestTagNormalizationPreview = async () => {
     setTagOperationError('');
+    if (!selectedKnowledgeMapId) {
+      setTagOperationError('请先选择所属知识导图。');
+      setTagOperationState('error');
+      return;
+    }
     if (!selectedMindmapNodeIds.length) {
       setTagOperationError('请至少选择一个知识导图节点。');
       setTagOperationState('error');
@@ -865,7 +903,10 @@ export function ProblemEditPage() {
         method: 'POST',
         credentials: 'same-origin',
         headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-        body: new URLSearchParams({ knowledgeNodeIds: selectedMindmapNodeIds.join(',') }),
+        body: new URLSearchParams({
+          knowledgeMapId: selectedKnowledgeMapId,
+          knowledgeNodeIds: selectedMindmapNodeIds.join(','),
+        }),
       });
       if (!response.ok) {
         throw new Error(await readHydroResponseError(response, response.status === 409 ? '题目或导图已变化，请刷新后重试' : '标签预览失败'));
@@ -874,6 +915,8 @@ export function ProblemEditPage() {
       const preview = body?.preview as ProgrammingTagPreview | undefined;
       if (
         !preview ||
+        typeof preview.knowledgeMapId !== 'string' ||
+        typeof preview.knowledgeMapTitle !== 'string' ||
         typeof preview.fingerprint !== 'string' ||
         !Array.isArray(preview.selectedNodeIds) ||
         !Array.isArray(preview.nextTags) ||
@@ -903,6 +946,7 @@ export function ProblemEditPage() {
         credentials: 'same-origin',
         headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
         body: new URLSearchParams({
+          knowledgeMapId: tagPreview.knowledgeMapId,
           knowledgeNodeIds: tagPreview.selectedNodeIds.join(','),
           intent: 'normalize',
           confirmed: 'true',
@@ -925,10 +969,18 @@ export function ProblemEditPage() {
         .map((nodeId) => mindmapOptionsById.get(nodeId))
         .filter((option): option is ManagedMindmapOption => !!option);
       setPersistedTags([...tagPreview.nextTags]);
+      setSelectedKnowledgeMapId(tagPreview.knowledgeMapId);
+      setPersistedKnowledgeMapId(tagPreview.knowledgeMapId);
       if (Number.isSafeInteger(body.structureRevision)) setPersistedStructureRevision(body.structureRevision);
       setSelectedMindmapNodes(normalizedNodes);
       setPersistedMindmapNodeIds(normalizedNodeIds);
-      setProgrammingTagState({ mode: 'converted', sourceTags: [...tagPreview.sourceTags], selectedNodeIds: normalizedNodeIds });
+      setProgrammingTagState({
+        mode: 'converted',
+        knowledgeMapId: tagPreview.knowledgeMapId,
+        knowledgeMapTitle: tagPreview.knowledgeMapTitle,
+        sourceTags: [...tagPreview.sourceTags],
+        selectedNodeIds: normalizedNodeIds,
+      });
       setTagPreviewOpen(false);
       setTagPreview(null);
       setTagOperationState('saved');
@@ -1286,25 +1338,43 @@ export function ProblemEditPage() {
                       </div>
                     ) : null}
 
-                    <div className="space-y-1.5">
-                      <label className="text-sm font-medium">算法知识点</label>
-                      <MultiSelect
-                        options={mindmapOptions}
-                        value={selectedMindmapNodes}
-                        onChange={(next) => {
-                          setSelectedMindmapNodes(next);
-                          setTagPreview(null);
-                          setTagOperationError('');
-                          setTagOperationState('idle');
-                        }}
-                        getKey={(node) => node.id}
-                        getLabel={(node) => node.label}
-                        getDescription={(node) => node.tags.join(' / ')}
-                        placeholder="按完整导图路径搜索，可多选"
-                        emptyText="没有可选的带标签节点"
-                        disabled={!canEditTags || tagOperationState === 'previewing' || tagOperationState === 'applying'}
-                      />
-                      <p className="text-xs text-muted-foreground">服务端会重新读取节点与祖先；这里不接受自由标签文本。</p>
+                    <div className="grid gap-4 md:grid-cols-[minmax(12rem,0.45fr)_minmax(0,1fr)]">
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium" htmlFor="programming-knowledge-map">
+                          所属知识导图
+                        </label>
+                        <SimpleSelect
+                          id="programming-knowledge-map"
+                          value={selectedKnowledgeMapId}
+                          onValueChange={selectKnowledgeMap}
+                          options={[
+                            ...(knowledgeMaps.length > 1 ? [{ value: '', label: '请选择所属导图' }] : []),
+                            ...knowledgeMaps.map((map) => ({ value: map.id, label: map.title })),
+                          ]}
+                          disabled={!canEditTags || tagOperationState === 'previewing' || tagOperationState === 'applying'}
+                        />
+                        <p className="text-xs text-muted-foreground">切换导图会清空当前节点选择，并在确认前展示完整增删差异。</p>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-medium">算法知识点</label>
+                        <MultiSelect
+                          options={selectedMapMindmapOptions}
+                          value={selectedMindmapNodes}
+                          onChange={(next) => {
+                            setSelectedMindmapNodes(next);
+                            setTagPreview(null);
+                            setTagOperationError('');
+                            setTagOperationState('idle');
+                          }}
+                          getKey={(node) => node.id}
+                          getLabel={(node) => node.label}
+                          getDescription={(node) => node.tags.join(' / ')}
+                          placeholder="按完整导图路径搜索，可多选"
+                          emptyText="没有可选的带标签节点"
+                          disabled={!selectedKnowledgeMapId || !canEditTags || tagOperationState === 'previewing' || tagOperationState === 'applying'}
+                        />
+                        <p className="text-xs text-muted-foreground">服务端会重新读取节点与祖先；这里不接受自由标签文本。</p>
+                      </div>
                     </div>
 
                     {tagOperationError ? (
@@ -1332,6 +1402,7 @@ export function ProblemEditPage() {
                         onClick={requestTagNormalizationPreview}
                         disabled={
                           !selectedMindmapNodes.length ||
+                          !selectedKnowledgeMapId ||
                           tagOperationState === 'previewing' ||
                           tagOperationState === 'applying' ||
                           (!programmingTagNeedsNormalization && !tagSelectionDirty)
@@ -1488,20 +1559,39 @@ export function ProblemEditPage() {
                         </ManagedProgrammingAuthorControl>
                       </div>
 
-                      <div className="space-y-1.5">
-                        <label className="text-sm font-medium">算法知识点</label>
-                        <MultiSelect
-                          options={mindmapOptions}
-                          value={selectedMindmapNodes}
-                          onChange={setSelectedMindmapNodes}
-                          getKey={(node) => node.id}
-                          getLabel={(node) => node.label}
-                          getDescription={(node) => node.tags.join(' / ')}
-                          name="mindmapNodeIds"
-                          placeholder="从知识导图选择，可多选"
-                          emptyText="没有可选的带标签节点"
-                        />
-                        <p className="text-xs text-muted-foreground">服务端会同时物化每个节点路径上所有带标签的祖先。</p>
+                      <div className="grid gap-4 md:grid-cols-[minmax(12rem,0.45fr)_minmax(0,1fr)]">
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium" htmlFor="managed-knowledge-map">
+                            所属知识导图
+                          </label>
+                          <SimpleSelect
+                            id="managed-knowledge-map"
+                            name="knowledgeMapId"
+                            value={selectedKnowledgeMapId}
+                            onValueChange={selectKnowledgeMap}
+                            options={[
+                              ...(knowledgeMaps.length > 1 ? [{ value: '', label: '请选择所属导图' }] : []),
+                              ...knowledgeMaps.map((map) => ({ value: map.id, label: map.title })),
+                            ]}
+                          />
+                          <p className="text-xs text-muted-foreground">多张公开导图时必须明确选择；切换会清空已选节点。</p>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium">算法知识点</label>
+                          <MultiSelect
+                            options={selectedMapMindmapOptions}
+                            value={selectedMindmapNodes}
+                            onChange={setSelectedMindmapNodes}
+                            getKey={(node) => node.id}
+                            getLabel={(node) => node.label}
+                            getDescription={(node) => node.tags.join(' / ')}
+                            name="mindmapNodeIds"
+                            placeholder="从当前导图选择，可多选"
+                            emptyText="当前导图没有可选的带标签节点"
+                            disabled={!selectedKnowledgeMapId}
+                          />
+                          <p className="text-xs text-muted-foreground">服务端会同时物化每个节点路径上所有带标签的祖先。</p>
+                        </div>
                       </div>
 
                       <ManagedProgrammingTrainingControl allowed={canAssignManagedTraining}>
@@ -1757,6 +1847,19 @@ export function ProblemEditPage() {
               <p className="text-sm leading-6 text-muted-foreground">
                 以下结果由服务器根据当前题目与实时导图计算。确认后会一次写入节点引用与完整派生标签；取消不会修改数据库。
               </p>
+              <div className="grid gap-3 rounded-xl border border-border/70 bg-muted/35 px-4 py-3 text-sm sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+                <div>
+                  <p className="text-xs text-muted-foreground">当前所属导图</p>
+                  <p className="mt-1 font-medium">
+                    {knowledgeMaps.find((map) => map.id === persistedKnowledgeMapId)?.title || programmingTagState.knowledgeMapTitle || '未设置'}
+                  </p>
+                </div>
+                <ArrowRight className="size-4 text-muted-foreground" aria-hidden="true" />
+                <div>
+                  <p className="text-xs text-muted-foreground">确认后所属导图</p>
+                  <p className="mt-1 font-medium">{tagPreview.knowledgeMapTitle}</p>
+                </div>
+              </div>
               <div className="grid gap-3 md:grid-cols-3">
                 {[
                   { label: '保留', tags: tagPreview.retainedTags, tone: 'border-border/70' },

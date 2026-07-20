@@ -31,6 +31,8 @@ import {
 import { sha256 } from '../src/lib/problem-batch-import';
 
 const rootId = '64b000000000000000000001';
+const mapId = '64a000000000000000000001';
+const mapTitle = '算法知识图谱';
 const uniqueId = '64b000000000000000000002';
 const ambiguousAId = '64b000000000000000000003';
 const ambiguousBId = '64b000000000000000000004';
@@ -39,11 +41,11 @@ const missingParentId = '64b000000000000000000099';
 const missingNodeId = '64b000000000000000000098';
 
 const mindmapFacts = normalizeProblemTagBackfillMindmapFacts([
-    { _id: rootId, parentId: null, topic: '算法', tags: ['基础算法'], updatedAt: '2026-07-01T00:00:00.000Z' },
-    { _id: uniqueId, parentId: rootId, topic: '二分', tags: ['二分'], updatedAt: '2026-07-02T00:00:00.000Z' },
-    { _id: ambiguousAId, parentId: rootId, topic: '图论甲', tags: ['共享标签'], updatedAt: '2026-07-03T00:00:00.000Z' },
-    { _id: ambiguousBId, parentId: rootId, topic: '图论乙', tags: ['共享标签'], updatedAt: '2026-07-04T00:00:00.000Z' },
-    { _id: brokenId, parentId: missingParentId, topic: '坏路径', tags: ['坏路径'], updatedAt: '2026-07-05T00:00:00.000Z' },
+    { _id: rootId, mapId, mapTitle, parentId: null, topic: '算法', tags: ['基础算法'], updatedAt: '2026-07-01T00:00:00.000Z' },
+    { _id: uniqueId, mapId, mapTitle, parentId: rootId, topic: '二分', tags: ['二分'], updatedAt: '2026-07-02T00:00:00.000Z' },
+    { _id: ambiguousAId, mapId, mapTitle, parentId: rootId, topic: '图论甲', tags: ['共享标签'], updatedAt: '2026-07-03T00:00:00.000Z' },
+    { _id: ambiguousBId, mapId, mapTitle, parentId: rootId, topic: '图论乙', tags: ['共享标签'], updatedAt: '2026-07-04T00:00:00.000Z' },
+    { _id: brokenId, mapId, mapTitle, parentId: missingParentId, topic: '坏路径', tags: ['坏路径'], updatedAt: '2026-07-05T00:00:00.000Z' },
 ]);
 
 function snapshot(docId: number, patch: Record<string, unknown> = {}, structureRevision: number | null = 3): ProblemTagBackfillProblemSnapshot {
@@ -56,6 +58,7 @@ function snapshot(docId: number, patch: Record<string, unknown> = {}, structureR
         title: `Problem ${docId}`,
         owner: 2,
         tag: ['二分'],
+        knowledgeMapId: mapId,
         hidden: false,
         config: { time: '1s', memory: '256m' },
         data: [{ name: '1.in' }, { name: '1.out' }],
@@ -572,12 +575,12 @@ const { register } = require(${JSON.stringify(require.resolve('../src/commands/p
 const { createProblemTagBackfillSnapshot } = require(${JSON.stringify(require.resolve('../src/lib/problem-tag-backfill.ts'))});
 const factsLib = require(${JSON.stringify(require.resolve('../src/lib/problem-tag-backfill-facts.ts'))});
 const facts = factsLib.normalizeProblemTagBackfillMindmapFacts([
-  { _id: ${JSON.stringify(rootId)}, parentId: null, topic: '算法', tags: ['基础算法'], updatedAt: '2026-07-01T00:00:00.000Z' },
-  { _id: ${JSON.stringify(uniqueId)}, parentId: ${JSON.stringify(rootId)}, topic: '二分', tags: ['二分'], updatedAt: '2026-07-02T00:00:00.000Z' },
+  { _id: ${JSON.stringify(rootId)}, mapId: ${JSON.stringify(mapId)}, mapTitle: ${JSON.stringify(mapTitle)}, parentId: null, topic: '算法', tags: ['基础算法'], updatedAt: '2026-07-01T00:00:00.000Z' },
+  { _id: ${JSON.stringify(uniqueId)}, mapId: ${JSON.stringify(mapId)}, mapTitle: ${JSON.stringify(mapTitle)}, parentId: ${JSON.stringify(rootId)}, topic: '二分', tags: ['二分'], updatedAt: '2026-07-02T00:00:00.000Z' },
 ]);
 const problem = createProblemTagBackfillSnapshot({
   _id: 'fixture', domainId: 'system', docType: 10, docId: 501, pid: 'T501', title: 'CLI fixture', owner: 2,
-  tag: ['二分'], structureRevision: 2, hidden: false, config: {}, data: [], additional_file: [], content: 'statement', html: false,
+  tag: ['二分'], knowledgeMapId: ${JSON.stringify(mapId)}, structureRevision: 2, hidden: false, config: {}, data: [], additional_file: [], content: 'statement', html: false,
 }, 0);
 const mindmapFingerprint = factsLib.problemTagBackfillMindmapFingerprint(facts);
 const adapter = {

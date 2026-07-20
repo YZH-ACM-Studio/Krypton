@@ -51,6 +51,7 @@ export interface ProblemTagBackfillProblemSnapshot {
     pid: string;
     title: string;
     tag: unknown;
+    knowledgeMapId: unknown;
     knowledgeNodeIdsPresent: boolean;
     knowledgeNodeIds: unknown;
     managedNodeIds: unknown;
@@ -196,6 +197,7 @@ function stateFingerprint(snapshot: Omit<ProblemTagBackfillProblemSnapshot, 'sta
             domainId: snapshot.domainId,
             docId: snapshot.docId,
             tag: snapshot.tag,
+            knowledgeMapId: snapshot.knowledgeMapId,
             knowledgeNodeIdsPresent: snapshot.knowledgeNodeIdsPresent,
             knowledgeNodeIds: snapshot.knowledgeNodeIdsPresent ? snapshot.knowledgeNodeIds : null,
             structureRevisionPresent: snapshot.structureRevisionPresent,
@@ -251,6 +253,7 @@ export function createProblemTagBackfillSnapshot(pdoc: Record<string, any>, perm
         pid: typeof pdoc.pid === 'string' ? pdoc.pid : `P${pdoc.docId}`,
         title: typeof pdoc.title === 'string' ? pdoc.title : '[标题字段畸形]',
         tag: pdoc.tag,
+        knowledgeMapId: pdoc.knowledgeMapId,
         knowledgeNodeIdsPresent,
         knowledgeNodeIds: knowledgeNodeIdsPresent ? pdoc.knowledgeNodeIds : null,
         managedNodeIds: pdoc.managedAuthoring?.selectedMindmapNodeIds ?? null,
@@ -319,6 +322,10 @@ async function planOne(
     if (snapshot.authoringModePresent && !['managed', undefined].includes(snapshot.authoringMode as any)) {
         return skippedEntry(snapshot, 'malformed-authoring-mode');
     }
+    const knowledgeMapId = String(snapshot.knowledgeMapId || '');
+    if (!OBJECT_ID.test(knowledgeMapId)) return skippedEntry(snapshot, 'malformed-knowledge-map');
+    const scopedMindmapOptions = mindmapOptions.filter((option) => option.mapId === knowledgeMapId);
+    if (!scopedMindmapOptions.length) return skippedEntry(snapshot, 'missing-knowledge-map');
     if (managed || snapshot.knowledgeNodeIdsPresent) {
         let nodeIds: string[] | null;
         if (managed) {
@@ -364,7 +371,7 @@ async function planOne(
         }
     }
     if (!snapshot.tag.length) return skippedEntry(snapshot, 'empty-tags');
-    const classification = classifyLegacyProgrammingTags(snapshot.tag, mindmapOptions);
+    const classification = classifyLegacyProgrammingTags(snapshot.tag, scopedMindmapOptions);
     const classificationFacts = {
         sourceTags: classification.sourceTags,
         suggestions: classification.suggestions,
@@ -373,7 +380,7 @@ async function planOne(
     };
     if (classification.unknownTags.length) return skippedEntry(snapshot, 'unknown-tags', classificationFacts);
     if (classification.ambiguousTags.length) return skippedEntry(snapshot, 'ambiguous-tags', classificationFacts);
-    const invalidSuggestedPath = mindmapOptions.find((option) => classification.suggestedNodeIds.includes(option.id) && option.pathError);
+    const invalidSuggestedPath = scopedMindmapOptions.find((option) => classification.suggestedNodeIds.includes(option.id) && option.pathError);
     if (invalidSuggestedPath) {
         return skippedEntry(snapshot, 'invalid-mindmap-path', {
             ...classificationFacts,

@@ -130,6 +130,8 @@ const publication = require(modulePath) as typeof import('../src/model/managed-p
 
 function input(withTraining = false): ManagedProblemPublicationCommit {
     const approvedAt = new Date('2026-07-13T10:00:00.000Z');
+    const knowledgeMapId = new ObjectId('64a000000000000000000001');
+    const knowledgeNodeId = new ObjectId('64b000000000000000000011');
     return {
         domainId: 'system',
         docId: 101,
@@ -137,10 +139,12 @@ function input(withTraining = false): ManagedProblemPublicationCommit {
         title: '正式标题',
         difficulty: 4,
         tags: ['PAT乙级', '2026春', '数据结构'],
+        knowledgeMapId,
+        knowledgeNodeIds: [knowledgeNodeId],
         sourceMeta: { template: 'pat_basic', year: 2026, season: 'spring' },
         managedAuthoring: {
             workingTitle: '工作标题',
-            selectedMindmapNodeIds: [new ObjectId('64b000000000000000000011')],
+            selectedMindmapNodeIds: [knowledgeNodeId],
             metadataStatus: 'confirmed',
             approvedBy: 1,
             approvedAt,

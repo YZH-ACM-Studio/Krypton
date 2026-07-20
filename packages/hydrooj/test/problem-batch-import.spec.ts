@@ -31,6 +31,7 @@ const problemRows = [
     ['J', 'Show Hand', 361, 582],
 ] as const;
 const nodeId = '64b000000000000000000011';
+const mapId = '64a000000000000000000001';
 
 async function writeFixture(root: string): Promise<string> {
     const problems = [] as any[];
@@ -117,11 +118,13 @@ function productionFacts(batch: Awaited<ReturnType<typeof validateProblemBatchMa
             targetPids: [],
             replacePids: [],
         },
-        mindmapNodes: [{ id: nodeId, topic: '模拟', tags: ['模拟'] }],
+        knowledgeMaps: [{ id: mapId, title: '算法知识图谱' }],
+        mindmapNodes: [{ id: nodeId, mapId, topic: '模拟', tags: ['模拟'] }],
         problems: batch.problems.map((entry, index) => ({
             sourceProblemCode: entry.sourceProblemCode,
             fingerprint: entry.fingerprint,
             pid: `NK${1064 + index}`,
+            knowledgeMapId: mapId,
             state: 'new',
         })),
         suspectedDuplicates: [],

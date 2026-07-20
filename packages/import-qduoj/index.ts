@@ -8,11 +8,13 @@ import {
     FileTooLargeError,
     fs,
     Handler,
+    param,
     PERM,
     ProblemConfigFile,
     ProblemModel,
     randomstring,
     Schema,
+    Types,
     ValidationError,
     yaml,
     Zip,
@@ -61,7 +63,8 @@ const ProblemSchema = Schema.object({
 });
 
 class ImportQduojHandler extends Handler {
-    async fromFile(domainId: string, zipfile: string) {
+    async fromFile(domainId: string, zipfile: string, knowledgeMapId?: string) {
+        const knowledge = await ProblemModel.resolveProgrammingKnowledgeMap(knowledgeMapId);
         const zip = new Zip.ZipReader(Readable.toWeb(fs.createReadStream(zipfile)));
         const tmp = path.resolve(tmpdir, randomstring(32));
         await extractZip(zip, tmp, {
@@ -95,6 +98,8 @@ class ImportQduojHandler extends Handler {
                 if (!(await isValidPid(pdoc.display_id))) pdoc.display_id = null;
                 const pid = await ProblemModel.add(domainId, pdoc.display_id, pdoc.title, content, this.user._id, pdoc.tags || [], {
                     problemKind: 'programming',
+                    knowledgeMapId: knowledge.mapId,
+                    knowledgeNodeIds: [],
                 });
                 const config: ProblemConfigFile = {
                     time: `${pdoc.time_limit}ms`,
@@ -136,15 +141,16 @@ class ImportQduojHandler extends Handler {
     }
 
     async get() {
-        this.response.body = { type: 'QDUOJ' };
+        this.response.body = { type: 'QDUOJ', knowledgeMaps: await ProblemModel.listKnowledgeMapsForProblemSelection() };
         this.response.template = 'problem_import.html';
     }
 
-    async post({ domainId }) {
+    @param('knowledgeMapId', Types.String, true)
+    async post({ domainId }, knowledgeMapId?: string) {
         const file = this.request.files.file;
         if (!file) throw new ValidationError('file');
         if (file.size > 256 * 1024 * 1024) throw new FileTooLargeError('256m');
-        await this.fromFile(domainId, file.filepath);
+        await this.fromFile(domainId, file.filepath, knowledgeMapId);
         this.response.redirect = this.url('problem_main');
     }
 }

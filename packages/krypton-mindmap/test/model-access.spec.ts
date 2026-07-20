@@ -322,21 +322,23 @@ describe('mindmap problem query scope', () => {
         expect(documentCalls).to.deep.equal([]);
     });
 
-    it('pushes scope into Mongo and reports tag/manual sources without duplicates', async () => {
+    it('pushes scope into Mongo and reports canonical/manual sources without flat-tag inference', async () => {
         const node = makeNode('graph', config.rootNodeId, 10, ['graph']);
+        const child = makeNode('tree', node._id, 20, ['tree']);
         node.problemIds = ['P9'];
-        nodes.push(node);
+        nodes.push(node, child);
         documentResults = [
             {
                 domainId: 'system',
                 docId: 9,
                 pid: 'P9',
                 title: 'Scoped problem',
-                tag: ['graph'],
+                tag: ['same-flat-tag-is-not-the-canonical-source'],
                 nSubmit: 10,
                 nAccept: 5,
                 hidden: false,
                 knowledgeMapId: config._id,
+                knowledgeNodeIds: [child._id],
             },
         ];
         const scope = { owner: 42 };
@@ -346,6 +348,9 @@ describe('mindmap problem query scope', () => {
         expect(documentCalls).to.have.lengthOf(1);
         expect(documentCalls[0].filter.$and[0]).to.deep.equal(scope);
         expect(documentCalls[0].filter.$and[1].knowledgeMapId.equals(config._id)).to.equal(true);
+        const canonicalClauses = documentCalls[0].filter.$and[1].$or;
+        expect(canonicalClauses[0].knowledgeNodeIds.$in.map(String)).to.have.members([String(node._id), String(child._id)]);
+        expect(canonicalClauses[1]['managedAuthoring.selectedMindmapNodeIds'].$in.map(String)).to.have.members([String(node._id), String(child._id)]);
         expect(problems).to.deep.equal([
             {
                 domainId: 'system',
@@ -356,7 +361,7 @@ describe('mindmap problem query scope', () => {
                 nSubmit: 10,
                 nAccept: 5,
                 difficulty: 3,
-                sources: ['tag', 'manual'],
+                sources: ['canonical', 'manual'],
             },
         ]);
     });
@@ -465,6 +470,19 @@ describe('knowledge map lifecycle', () => {
             }),
             MindmapConflictError,
             '逐课解绑',
+        );
+
+        documentResults = [{ docType: 10, domainId: 'system', docId: 99, knowledgeMapId: created._id }];
+        await expectRejected(
+            model.updateKnowledgeMap({
+                domainId: 'system',
+                actor: 2,
+                id: created._id,
+                expectedUpdatedAt: published.updatedAt,
+                patch: { visibility: 'hidden' },
+            }),
+            MindmapConflictError,
+            '逐题更换所属导图',
         );
 
         documentResults = [];

@@ -17,6 +17,7 @@ export interface RemoteAccount {
 export interface VjudgeMount {
     _id: string; //  domainId, or `${domainId}.${namespace}`
     mount: string;
+    knowledgeMapId?: string;
     syncDone: Record<string, number>;
 }
 declare module 'hydrooj' {

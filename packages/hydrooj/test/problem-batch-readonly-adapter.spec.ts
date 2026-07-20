@@ -3,6 +3,7 @@ import { ObjectId } from 'mongodb';
 import { describe, it } from 'node:test';
 import type { ValidatedProblemBatch } from '../src/lib/problem-batch-import';
 import type { ProblemBatchFactsRepository } from '../src/lib/problem-batch-production-facts';
+import { buildProblemBatchProductionFacts } from '../src/lib/problem-batch-production-facts';
 import {
     MongoProblemBatchFactsRepository,
     problemBatchReadonlyInternals,
@@ -10,6 +11,7 @@ import {
 } from '../src/model/problem-batch-readonly-adapter';
 
 const trainingId = '68486d8165edbb11e9ec9036';
+const mapId = new ObjectId('64a000000000000000000001');
 const rootNodeId = new ObjectId('64b000000000000000000010');
 const selectedNodeId = new ObjectId('64b000000000000000000011');
 
@@ -60,8 +62,69 @@ function batch(): ValidatedProblemBatch {
 }
 
 describe('P2.23 read-only production preflight adapter', () => {
+    it('derives one map per problem and permits different maps inside one manifest', async () => {
+        const input = batch();
+        const otherMapId = new ObjectId('64a000000000000000000002');
+        const otherNodeId = new ObjectId('64b000000000000000000012');
+        input.problems.push({
+            ...structuredClone(input.problems[0]),
+            sourceProblemCode: 'B',
+            title: 'Other map problem',
+            mindmapNodeIds: [otherNodeId.toHexString()],
+            fingerprint: '7'.repeat(64),
+        });
+        const repository: ProblemBatchFactsRepository = {
+            getUser: async (_domainId, uid) =>
+                uid === 2 ? { uid, username: 'root', isProblemBankAdmin: true } : { uid, username: 'nowcoder-2026', isProblemBankAdmin: false },
+            getCounter: async () => 1063,
+            getTraining: async () => ({ id: trainingId, title: '牛客暑期多校训练集', dag: [{ _id: 7, title: '往期', requireNids: [], pids: [99] }] }),
+            hasTrainingAnchor: async () => true,
+            getMindmapFacts: async () => [
+                {
+                    id: selectedNodeId.toHexString(),
+                    mapId: mapId.toHexString(),
+                    mapTitle: '算法知识图谱',
+                    topic: '模拟',
+                    tags: ['模拟'],
+                },
+                {
+                    id: otherNodeId.toHexString(),
+                    mapId: otherMapId.toHexString(),
+                    mapTitle: '面向对象知识图谱',
+                    topic: '类',
+                    tags: ['类'],
+                },
+            ],
+            getBatchProblems: async () => [],
+            getActiveProblemPermits: async () => [],
+            getDuplicateProblems: async () => [],
+            getTrainingReplacementAudit: async () => null,
+        };
+
+        const facts = await buildProblemBatchProductionFacts(input, repository);
+
+        expect(facts.knowledgeMaps).to.deep.equal([
+            { id: mapId.toHexString(), title: '算法知识图谱' },
+            { id: otherMapId.toHexString(), title: '面向对象知识图谱' },
+        ]);
+        expect(facts.problems.map((problem) => [problem.sourceProblemCode, problem.knowledgeMapId])).to.deep.equal([
+            ['A', mapId.toHexString()],
+            ['B', otherMapId.toHexString()],
+        ]);
+
+        input.problems[0].mindmapNodeIds = [selectedNodeId.toHexString(), otherNodeId.toHexString()];
+        try {
+            await buildProblemBatchProductionFacts(input, repository);
+            expect.fail('expected cross-map problem selection to be rejected');
+        } catch (error) {
+            expect(error).to.have.property('code', 'BATCH_IMPORT_MINDMAP_CONFLICT');
+            expect(error).to.have.property('message').that.includes('A: mindmap nodes must belong to exactly one knowledge map');
+        }
+    });
+
     it('derives canonical production facts using only Mongo find operations', async () => {
         const operations: string[] = [];
+        let batchProblemProjection: Record<string, number> | undefined;
         const collections = {
             user: {
                 findOne: async (filter: any) => {
@@ -90,9 +153,12 @@ describe('P2.23 read-only production preflight adapter', () => {
                     if (filter.docType === 10 && filter.tag === '牛客暑期多校') return { docId: 99 };
                     return null;
                 },
-                find: (filter: any) => {
+                find: (filter: any, options?: any) => {
                     operations.push('document.find');
-                    if (filter['batchImport.batchId']) return { toArray: async () => [] };
+                    if (filter['batchImport.batchId']) {
+                        batchProblemProjection = options?.projection;
+                        return { toArray: async () => [] };
+                    }
                     if (filter.$or) return { toArray: async () => [] };
                     throw new Error(`unexpected document query: ${JSON.stringify(filter)}`);
                 },
@@ -102,10 +168,16 @@ describe('P2.23 read-only production preflight adapter', () => {
                     operations.push('mindmap.nodes.find');
                     return {
                         toArray: async () => [
-                            { _id: rootNodeId, parentId: null, topic: '算法', tags: ['基础'] },
-                            { _id: selectedNodeId, parentId: rootNodeId, topic: '模拟', tags: ['模拟'] },
+                            { _id: rootNodeId, mapId, parentId: null, topic: '算法', tags: ['基础'] },
+                            { _id: selectedNodeId, mapId, parentId: rootNodeId, topic: '模拟', tags: ['模拟'] },
                         ],
                     };
+                },
+            },
+            'mindmap.maps': {
+                find: () => {
+                    operations.push('mindmap.maps.find');
+                    return { toArray: async () => [{ _id: mapId, title: '算法知识图谱', visibility: 'public' }] };
                 },
             },
         } as const;
@@ -128,14 +200,32 @@ describe('P2.23 read-only production preflight adapter', () => {
 
         expect(facts.counter).to.deep.equal({ namespace: 'nowcoder', value: 1063 });
         expect(facts.training).to.include({ chapterId: 8, chapterState: 'missing' });
-        expect(facts.mindmapNodes).to.deep.equal([{ id: selectedNodeId.toHexString(), topic: '算法 / 模拟', tags: ['基础', '模拟'] }]);
-        expect(facts.problems).to.deep.equal([{ sourceProblemCode: 'A', fingerprint: '2'.repeat(64), pid: 'NK1064', state: 'new' }]);
+        expect(facts.knowledgeMaps).to.deep.equal([{ id: mapId.toHexString(), title: '算法知识图谱' }]);
+        expect(facts.mindmapNodes).to.deep.equal([
+            {
+                id: selectedNodeId.toHexString(),
+                mapId: mapId.toHexString(),
+                topic: '算法 / 模拟',
+                tags: ['基础', '模拟'],
+            },
+        ]);
+        expect(facts.problems).to.deep.equal([
+            {
+                sourceProblemCode: 'A',
+                fingerprint: '2'.repeat(64),
+                pid: 'NK1064',
+                knowledgeMapId: mapId.toHexString(),
+                state: 'new',
+            },
+        ]);
+        expect(batchProblemProjection).to.include({ knowledgeMapId: 1, knowledgeNodeIds: 1, managedAuthoring: 1 });
         expect(operations).to.have.members([
             'user.findOne',
             'user.findOne',
             'problem.pid_counters.findOne',
             'document.findOne',
             'mindmap.nodes.find',
+            'mindmap.maps.find',
             'document.findOne',
             'document.find',
             'document.find',
@@ -182,7 +272,15 @@ describe('P2.23 read-only production preflight adapter', () => {
                 return true;
             },
             async getMindmapFacts() {
-                return [{ id: selectedNodeId.toHexString(), topic: '算法 / 模拟', tags: ['基础', '模拟'] }];
+                return [
+                    {
+                        id: selectedNodeId.toHexString(),
+                        mapId: mapId.toHexString(),
+                        mapTitle: '算法知识图谱',
+                        topic: '算法 / 模拟',
+                        tags: ['基础', '模拟'],
+                    },
+                ];
             },
             async getBatchProblems() {
                 return [];

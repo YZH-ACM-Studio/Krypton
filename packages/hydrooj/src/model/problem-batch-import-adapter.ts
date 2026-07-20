@@ -19,11 +19,13 @@ import {
     type ValidatedProblemBatchEntry,
 } from '../lib/problem-batch-import';
 import {
+    assertProblemBatchMindmapState,
     buildProblemBatchProductionFacts,
     type ProblemBatchFactProblem,
     type ProblemBatchFactsRepository,
     problemBatchDocumentState,
 } from '../lib/problem-batch-production-facts';
+import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import storageService from '../service/storage';
 import * as document from './document';
 import {
@@ -94,8 +96,14 @@ const factsRepository: ProblemBatchFactsRepository = {
             nodeIds.map(async (id) => {
                 const option = byId.get(id);
                 if (!option) fail(`mindmap node is missing or not selectable: ${id}`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
-                const materialized = await materializeManagedMindmapTags([id]);
-                return { id, topic: option.label, tags: materialized.tags };
+                const materialized = await materializeManagedMindmapTags([id], option.mapId);
+                return {
+                    id,
+                    mapId: option.mapId,
+                    mapTitle: option.mapTitle,
+                    topic: option.label,
+                    tags: materialized.tags,
+                };
             }),
         );
     },
@@ -111,6 +119,8 @@ const factsRepository: ProblemBatchFactsRepository = {
                         hidden: 1,
                         authoringMode: 1,
                         problemKind: 1,
+                        knowledgeMapId: 1,
+                        knowledgeNodeIds: 1,
                         managedAuthoring: 1,
                         batchImport: 1,
                         hasBatchImportIdentity: 1,
@@ -177,7 +187,9 @@ async function assertApplyFacts(batch: ValidatedProblemBatch, plan: ProblemBatch
     if (!equal(current.actor, plan.facts.actor) || !equal(current.author, plan.facts.author)) {
         fail('actor or source author changed after preflight');
     }
-    if (!equal(current.mindmapNodes, plan.facts.mindmapNodes)) fail('mindmap selection changed after preflight', 'BATCH_IMPORT_MINDMAP_CONFLICT');
+    if (!equal(current.knowledgeMaps, plan.facts.knowledgeMaps) || !equal(current.mindmapNodes, plan.facts.mindmapNodes)) {
+        fail('mindmap selection changed after preflight', 'BATCH_IMPORT_MINDMAP_CONFLICT');
+    }
     if (
         current.training.id !== plan.facts.training.id ||
         current.training.title !== plan.facts.training.title ||
@@ -330,7 +342,9 @@ async function setOriginalStatistics(
     actorUser: any,
 ): Promise<void> {
     if (!entry.origStat) {
-        if (pdoc.origStat) fail(`${entry.sourceProblemCode}: undeclared original contest statistics exist`, 'BATCH_IMPORT_STAT_CONFLICT', pdoc.origStat);
+        if (pdoc.origStat) {
+            fail(`${entry.sourceProblemCode}: undeclared original contest statistics exist`, 'BATCH_IMPORT_STAT_CONFLICT', pdoc.origStat);
+        }
         return;
     }
     const origStat = entry.origStat;
@@ -467,7 +481,12 @@ async function assertFileSet(batch: ValidatedProblemBatch, entry: ValidatedProbl
     }
 }
 
-async function assertDraftReady(batch: ValidatedProblemBatch, entry: ValidatedProblemBatchEntry, pdoc: ProblemDoc): Promise<void> {
+async function assertDraftReady(
+    batch: ValidatedProblemBatch,
+    entry: ValidatedProblemBatchEntry,
+    pdoc: ProblemDoc,
+    plannedKnowledgeMapId: string,
+): Promise<void> {
     const statement = await fs.readFile(entry.statementFile.path, 'utf8');
     const config = await fs.readFile(entry.configFile.path, 'utf8');
     if (pdoc.content !== statement) fail(`${entry.sourceProblemCode}: statement content conflicts`, 'BATCH_IMPORT_CONTENT_CONFLICT');
@@ -481,15 +500,29 @@ async function assertDraftReady(batch: ValidatedProblemBatch, entry: ValidatedPr
     if (!pdoc.structureRevision || pdoc.structureLockedAt || pdoc.archivedAt) {
         fail(`${entry.sourceProblemCode}: draft structure is not writable`, 'BATCH_IMPORT_STRUCTURE_CONFLICT');
     }
+    assertProblemBatchMindmapState(pdoc, plannedKnowledgeMapId, entry.mindmapNodeIds, entry.sourceProblemCode);
     ProblemModel.assertProblemReadyForUse(pdoc, { actor: batch.manifest.actor, stage: 'batch-import-draft-ready' });
     assertProgrammingTestcasesConfigured(pdoc.config, pdoc.data);
     await loadAuthorPermit(batch.manifest.domain, pdoc.docId, batch.manifest.author.uid);
     await assertFileSet(batch, entry, pdoc);
 }
 
-async function verifyImportedProblem(batch: ValidatedProblemBatch, entry: ValidatedProblemBatchEntry, plannedPid: string) {
+async function verifyImportedProblem(
+    batch: ValidatedProblemBatch,
+    entry: ValidatedProblemBatchEntry,
+    plannedPid: string,
+    plannedKnowledgeMapId: string,
+) {
     const pdoc = await loadIdentityProblem(batch, entry);
     if (!pdoc) fail(`${entry.sourceProblemCode}: imported problem is missing`, 'BATCH_IMPORT_VERIFY_FAILED');
+    let canonicalKnowledgeNodeIds: string[];
+    try {
+        canonicalKnowledgeNodeIds = resolveProblemKnowledgeNodeIds(pdoc, entry.sourceProblemCode).sort();
+    } catch (error) {
+        fail(`${entry.sourceProblemCode}: published problem has invalid canonical knowledge nodes`, 'BATCH_IMPORT_VERIFY_FAILED', {
+            cause: error instanceof Error ? error.message : String(error),
+        });
+    }
     if (
         pdoc.pid !== plannedPid ||
         pdoc.title !== entry.title ||
@@ -501,7 +534,8 @@ async function verifyImportedProblem(batch: ValidatedProblemBatch, entry: Valida
         pdoc.managedAuthoring?.approvedBy !== batch.manifest.actor ||
         !(pdoc.managedAuthoring?.approvedAt instanceof Date) ||
         pdoc.managedAuthoring?.pendingTrainingPlacement !== undefined ||
-        !equal((pdoc.managedAuthoring?.selectedMindmapNodeIds || []).map(String).sort(), [...entry.mindmapNodeIds].sort()) ||
+        String(pdoc.knowledgeMapId || '') !== plannedKnowledgeMapId ||
+        !equal(canonicalKnowledgeNodeIds, [...entry.mindmapNodeIds].sort()) ||
         pdoc.hasBatchImportIdentity !== true ||
         !isDeepStrictEqual(normalizeManagedSourceMeta(pdoc.sourceMeta), normalizeManagedSourceMeta(batch.manifest.source))
     ) {
@@ -523,10 +557,10 @@ async function verifyImportedProblem(batch: ValidatedProblemBatch, entry: Valida
     if ((pdoc as ProblemDoc & { aclWriteClaim?: unknown }).aclWriteClaim) {
         fail(`${entry.sourceProblemCode}: a durable write claim remains`, 'BATCH_IMPORT_VERIFY_FAILED');
     }
-    const knowledge = await materializeManagedMindmapTags(entry.mindmapNodeIds);
+    const knowledge = await materializeManagedMindmapTags(entry.mindmapNodeIds, plannedKnowledgeMapId);
     const expectedTags = [...new Set([...deriveManagedSourceTags(batch.manifest.source), ...knowledge.tags])];
     if (!equal(pdoc.tag, expectedTags)) fail(`${entry.sourceProblemCode}: canonical tags differ from the plan`, 'BATCH_IMPORT_VERIFY_FAILED');
-    await assertDraftReady(batch, entry, pdoc);
+    await assertDraftReady(batch, entry, pdoc, plannedKnowledgeMapId);
     return {
         sourceProblemCode: entry.sourceProblemCode,
         docId: pdoc.docId,
@@ -550,7 +584,7 @@ async function verifyBatch(batch: ValidatedProblemBatch, plan: ProblemBatchImpor
     for (const entry of batch.problems) {
         const planned = plannedByCode.get(entry.sourceProblemCode);
         if (!planned) fail(`${entry.sourceProblemCode}: missing preflight problem plan`, 'BATCH_IMPORT_VERIFY_FAILED');
-        problems.push(await verifyImportedProblem(batch, entry, planned.pid));
+        problems.push(await verifyImportedProblem(batch, entry, planned.pid, planned.knowledgeMapId));
     }
     const training = await document.coll.findOne({
         domainId: batch.manifest.domain,
@@ -625,6 +659,7 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
                         content: statement,
                         difficulty: entry.difficulty,
                         sourceMeta: batch.manifest.source,
+                        knowledgeMapId: planned.knowledgeMapId,
                         mindmapNodeIds: entry.mindmapNodeIds,
                         authorUid: batch.manifest.author.uid,
                         batchImport: {
@@ -648,20 +683,32 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
             } else if (pdoc.pid !== planned.pid) {
                 fail(`${entry.sourceProblemCode}: existing identity PID differs from approved plan`, 'BATCH_IMPORT_PID_CONFLICT');
             }
+            assertProblemBatchMindmapState(pdoc, planned.knowledgeMapId, entry.mindmapNodeIds, entry.sourceProblemCode);
         }
 
         for (const entry of batch.problems) {
             let pdoc = await loadIdentityProblem(batch, entry);
             if (!pdoc) fail(`${entry.sourceProblemCode}: draft disappeared before upload`);
             if (problemBatchDocumentState(pdoc) === 'published') {
-                await verifyImportedProblem(batch, entry, plannedByCode.get(entry.sourceProblemCode)!.pid);
+                await verifyImportedProblem(
+                    batch,
+                    entry,
+                    plannedByCode.get(entry.sourceProblemCode)!.pid,
+                    plannedByCode.get(entry.sourceProblemCode)!.knowledgeMapId,
+                );
                 continue;
             }
+            assertProblemBatchMindmapState(
+                pdoc,
+                plannedByCode.get(entry.sourceProblemCode)!.knowledgeMapId,
+                entry.mindmapNodeIds,
+                entry.sourceProblemCode,
+            );
             await uploadMissingDraftFiles(batch, entry, pdoc, actor);
             pdoc = (await loadIdentityProblem(batch, entry))!;
             await setOriginalStatistics(batch, entry, pdoc, actor);
             pdoc = (await loadIdentityProblem(batch, entry))!;
-            await assertDraftReady(batch, entry, pdoc);
+            await assertDraftReady(batch, entry, pdoc, plannedByCode.get(entry.sourceProblemCode)!.knowledgeMapId);
             await progress({ stage: 'draft-ready', sourceProblemCode: entry.sourceProblemCode, docId: pdoc.docId, pid: pdoc.pid });
         }
 
@@ -689,7 +736,7 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
             let pdoc = await loadIdentityProblem(batch, entry);
             if (!pdoc) fail(`${entry.sourceProblemCode}: draft disappeared before publication`);
             if (problemBatchDocumentState(pdoc) === 'published') continue;
-            await assertDraftReady(batch, entry, pdoc);
+            await assertDraftReady(batch, entry, pdoc, planned.knowledgeMapId);
             if (!Number.isSafeInteger(pdoc.structureRevision)) fail(`${entry.sourceProblemCode}: structure revision is missing`);
             const placement = pdoc.managedAuthoring?.pendingTrainingPlacement;
             if (!placement || String(placement.trainingId) !== batch.manifest.training.id || placement.chapterId !== plan.facts.training.chapterId) {

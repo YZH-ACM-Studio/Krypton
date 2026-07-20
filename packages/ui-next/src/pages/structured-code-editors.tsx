@@ -684,8 +684,10 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           pdoc={pdoc}
           isCreate={isCreate}
           locked={locked}
+          knowledgeMaps={data.knowledgeMaps || []}
           mindmapOptions={(data.knowledgeMindmapOptions || []) as KnowledgeMindmapOption[]}
           canUseCustomPid={data.canUseCustomPid === true}
+          formDirty={dirtyState.dirty}
           onMetadataChange={dirtyState.recompute}
           visibilityLockedReason={codeEvaluationDraft ? '完成题面、私有模板、区域与测试数据映射后，才能解除隐藏。' : undefined}
         >

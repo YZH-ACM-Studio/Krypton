@@ -13,6 +13,7 @@ import {
   History,
   Loader2,
   MessageSquare,
+  Network,
   Send,
   Tag,
   Trophy,
@@ -625,6 +626,7 @@ export function ProblemDetailPage() {
   const nSubmit = pdoc.nSubmit || 0;
   const nAccept = pdoc.nAccept || 0;
   const tags: string[] = pdoc.tag || [];
+  const knowledgeMapView: { id: string; title: string; nodes: Array<{ id: string; label: string }> } | null = data.knowledgeMapView || null;
   const pid = pdoc.pid || pdoc.docId || '';
   const difficulty = pdoc.difficulty;
   const solutionCount = data.solutionCount || 0;
@@ -805,6 +807,20 @@ export function ProblemDetailPage() {
                       ))}
                     </div>
                   )}
+                  {!inContest && knowledgeMapView ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                      <span className="inline-flex items-center gap-1 font-medium text-foreground/80">
+                        <Network className="size-3" aria-hidden="true" />
+                        {knowledgeMapView.title}
+                      </span>
+                      {knowledgeMapView.nodes.map((node) => (
+                        <Badge key={node.id} variant="outline" className="font-normal">
+                          {node.label}
+                        </Badge>
+                      ))}
+                      {!knowledgeMapView.nodes.length ? <span>尚未归类知识节点</span> : null}
+                    </div>
+                  ) : null}
                 </div>
 
                 {showNoTestdataWarning ? <NoTestdataWarning /> : null}
@@ -988,6 +1004,20 @@ export function ProblemDetailPage() {
               ))}
             </div>
           )}
+          {!inContest && knowledgeMapView ? (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1 font-medium text-foreground/80">
+                <Network className="size-3" aria-hidden="true" />
+                {knowledgeMapView.title}
+              </span>
+              {knowledgeMapView.nodes.map((node) => (
+                <Badge key={node.id} variant="outline" className="font-normal">
+                  {node.label}
+                </Badge>
+              ))}
+              {!knowledgeMapView.nodes.length ? <span>尚未归类知识节点</span> : null}
+            </div>
+          ) : null}
         </div>
         <div className="flex shrink-0 gap-2">
           {/* 客观题在下方面板作答，IDE 模式无意义 */}

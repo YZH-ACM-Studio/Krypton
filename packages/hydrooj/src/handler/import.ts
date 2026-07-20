@@ -8,13 +8,15 @@ import { Handler, param, Types } from '../service/server';
 
 class ProblemImportHydroHandler extends Handler {
     async get() {
+        this.response.body = { knowledgeMaps: await problem.listKnowledgeMapsForProblemSelection() };
         this.response.template = 'problem_import.html';
     }
 
     @param('keepUser', Types.Boolean)
     @param('preferredPrefix', Types.String, true)
     @param('hidden', Types.Boolean)
-    async post(domainId: string, keepUser: boolean, preferredPrefix?: string, hidden?: boolean) {
+    @param('knowledgeMapId', Types.String, true)
+    async post(domainId: string, keepUser: boolean, preferredPrefix?: string, hidden?: boolean, knowledgeMapId?: string) {
         if (keepUser) this.checkPriv(PRIV.PRIV_EDIT_SYSTEM);
         if (!this.request.files.file) throw new ValidationError('file');
         if (preferredPrefix && !/^[a-zA-Z]+$/.test(preferredPrefix)) throw new ValidationError('preferredPrefix');
@@ -25,6 +27,7 @@ class ProblemImportHydroHandler extends Handler {
                 operator: keepUser ? null : this.user._id,
                 delSource: true,
                 hidden,
+                knowledgeMapId,
             })
             .catch((e) => MessageModel.send(1, this.user._id, `Import failed: ${e.message}\n${e.stack}`));
         let resolved = false;

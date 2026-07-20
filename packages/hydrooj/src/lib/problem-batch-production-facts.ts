@@ -5,6 +5,7 @@ import {
     normalizeManagedSourceMeta,
 } from '../model/managed-problem-source';
 import { canonicalJson, ProblemBatchImportError, type ProblemBatchProductionFacts, sha256, type ValidatedProblemBatch } from './problem-batch-import';
+import { resolveProblemKnowledgeNodeIds } from './problem-tag-canonical';
 
 export interface ProblemBatchFactUser {
     uid: number;
@@ -25,7 +26,9 @@ export interface ProblemBatchFactProblem {
     hidden?: boolean;
     authoringMode?: string;
     problemKind?: string;
-    managedAuthoring?: { metadataStatus?: string };
+    knowledgeMapId?: unknown;
+    knowledgeNodeIds?: unknown;
+    managedAuthoring?: { metadataStatus?: string; selectedMindmapNodeIds?: unknown };
     batchImport?: { batchId?: string; sourceProblemCode?: string; identity?: string; fingerprint?: string };
     hasBatchImportIdentity?: boolean;
 }
@@ -51,7 +54,7 @@ export interface ProblemBatchFactsRepository {
     getCounter(domainId: string, namespace: string): Promise<number | null>;
     getTraining(domainId: string, trainingId: string): Promise<ProblemBatchFactTraining | null>;
     hasTrainingAnchor(domainId: string, pids: number[], tag: string): Promise<boolean>;
-    getMindmapFacts(nodeIds: string[]): Promise<Array<{ id: string; topic: string; tags: string[] }>>;
+    getMindmapFacts(nodeIds: string[]): Promise<Array<{ id: string; mapId: string; mapTitle: string; topic: string; tags: string[] }>>;
     getBatchProblems(domainId: string, batchId: string): Promise<ProblemBatchFactProblem[]>;
     getActiveProblemPermits(domainId: string, docId: number): Promise<ProblemBatchFactPermit[]>;
     getDuplicateProblems(domainId: string, titles: string[], pids: string[]): Promise<ProblemBatchFactProblem[]>;
@@ -65,6 +68,49 @@ export interface ProblemBatchFactsRepository {
 
 function fail(message: string, code = 'BATCH_IMPORT_PRODUCTION_DRIFT', details?: unknown): never {
     throw new ProblemBatchImportError(message, code, details);
+}
+
+const OBJECT_ID = /^[a-f0-9]{24}$/i;
+
+function canonicalObjectId(value: unknown, field: string): string {
+    let normalized = '';
+    if (typeof value === 'string') normalized = value.trim();
+    else if (value && typeof (value as { toHexString?: unknown }).toHexString === 'function') {
+        try {
+            normalized = String((value as { toHexString(): string }).toHexString()).trim();
+        } catch {
+            fail(`${field} is not a valid ObjectId`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
+        }
+    }
+    if (!OBJECT_ID.test(normalized)) fail(`${field} is not a valid ObjectId`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
+    return normalized.toLowerCase();
+}
+
+function canonicalObjectIdArray(value: unknown, field: string): string[] {
+    if (!Array.isArray(value)) fail(`${field} must be an ObjectId array`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
+    return value.map((item, index) => canonicalObjectId(item, `${field}.${index}`)).sort();
+}
+
+export function assertProblemBatchMindmapState(pdoc: ProblemBatchFactProblem, expectedMapId: string, expectedNodeIds: string[], label: string): void {
+    const mapId = canonicalObjectId(pdoc.knowledgeMapId, `${label}.knowledgeMapId`);
+    const expectedMap = canonicalObjectId(expectedMapId, `${label}.expectedKnowledgeMapId`);
+    const expectedNodes = canonicalObjectIdArray(expectedNodeIds, `${label}.expectedKnowledgeNodeIds`);
+    let knowledgeNodeIds: string[];
+    try {
+        knowledgeNodeIds = canonicalObjectIdArray(resolveProblemKnowledgeNodeIds(pdoc, label), `${label}.canonicalKnowledgeNodeIds`);
+    } catch (error) {
+        fail(`${label}: invalid canonical knowledge-node state`, 'BATCH_IMPORT_MINDMAP_CONFLICT', {
+            cause: error instanceof Error ? error.message : String(error),
+        });
+    }
+    if (mapId !== expectedMap || canonicalJson(knowledgeNodeIds) !== canonicalJson(expectedNodes)) {
+        fail(`${label}: batch problem knowledge map or nodes differ from the manifest`, 'BATCH_IMPORT_MINDMAP_CONFLICT', {
+            expectedMapId: expectedMap,
+            actualMapId: mapId,
+            expectedNodeIds: expectedNodes,
+            actualCanonicalNodeIds: knowledgeNodeIds,
+        });
+    }
 }
 
 function canonicalChapter(chapter: any, index: number) {
@@ -140,8 +186,37 @@ export async function buildProblemBatchProductionFacts(
     const canonicalMindmapNodes = requestedNodeIds.map((id) => {
         const node = mindmapById.get(id);
         if (!node) fail(`mindmap node is missing or not selectable: ${id}`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
-        return node;
+        const mapTitle = typeof node.mapTitle === 'string' ? node.mapTitle.trim() : '';
+        const topic = typeof node.topic === 'string' ? node.topic.trim() : '';
+        if (!mapTitle || !topic || !Array.isArray(node.tags) || node.tags.some((tag) => typeof tag !== 'string')) {
+            fail(`mindmap node fact is malformed: ${id}`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
+        }
+        return {
+            id: canonicalObjectId(node.id, `mindmap.${id}.id`),
+            mapId: canonicalObjectId(node.mapId, `mindmap.${id}.mapId`),
+            mapTitle,
+            topic,
+            tags: [...node.tags],
+        };
     });
+    const knowledgeMapTitles = new Map<string, string>();
+    for (const node of canonicalMindmapNodes) {
+        const previousTitle = knowledgeMapTitles.get(node.mapId);
+        if (previousTitle && previousTitle !== node.mapTitle) {
+            fail(`knowledge map ${node.mapId} has conflicting titles`, 'BATCH_IMPORT_MINDMAP_CONFLICT');
+        }
+        knowledgeMapTitles.set(node.mapId, node.mapTitle);
+    }
+    const knowledgeMaps = [...knowledgeMapTitles].map(([id, title]) => ({ id, title })).sort((left, right) => left.id.localeCompare(right.id));
+    const canonicalNodeById = new Map(canonicalMindmapNodes.map((node) => [node.id, node]));
+    const knowledgeMapByProblem = new Map<string, string>();
+    for (const entry of batch.problems) {
+        const entryMaps = [...new Set(entry.mindmapNodeIds.map((id) => canonicalNodeById.get(id)?.mapId || ''))];
+        if (entryMaps.length !== 1 || !entryMaps[0]) {
+            fail(`${entry.sourceProblemCode}: mindmap nodes must belong to exactly one knowledge map`, 'BATCH_IMPORT_MINDMAP_CONFLICT', entryMaps);
+        }
+        knowledgeMapByProblem.set(entry.sourceProblemCode, entryMaps[0]);
+    }
 
     const chapters = training.dag.map(canonicalChapter);
     const currentMaxChapterId = chapters.length ? Math.max(...chapters.map((chapter) => chapter._id)) : 0;
@@ -192,6 +267,7 @@ export async function buildProblemBatchProductionFacts(
     const problems: ProblemBatchProductionFacts['problems'] = [];
     let sequence = counter;
     for (const entry of batch.problems) {
+        const knowledgeMapId = knowledgeMapByProblem.get(entry.sourceProblemCode)!;
         const pdoc = byCode.get(entry.sourceProblemCode);
         if (pdoc) {
             if (
@@ -204,11 +280,13 @@ export async function buildProblemBatchProductionFacts(
             ) {
                 fail(`${entry.sourceProblemCode}: durable import identity conflicts`, 'BATCH_IMPORT_IDENTITY_CONFLICT', pdoc);
             }
+            assertProblemBatchMindmapState(pdoc, knowledgeMapId, entry.mindmapNodeIds, entry.sourceProblemCode);
             await assertAuthorPermit(repository, batch.manifest.domain, pdoc.docId, batch.manifest.author.uid);
             problems.push({
                 sourceProblemCode: entry.sourceProblemCode,
                 fingerprint: entry.fingerprint,
                 pid: pdoc.pid,
+                knowledgeMapId,
                 state: problemBatchDocumentState(pdoc),
                 docId: pdoc.docId,
             });
@@ -218,6 +296,7 @@ export async function buildProblemBatchProductionFacts(
                 sourceProblemCode: entry.sourceProblemCode,
                 fingerprint: entry.fingerprint,
                 pid: formatManagedProblemPid(sourceMeta, sequence),
+                knowledgeMapId,
                 state: 'new',
             });
         }
@@ -302,7 +381,8 @@ export async function buildProblemBatchProductionFacts(
             targetPids: target?.pids || [],
             replacePids,
         },
-        mindmapNodes: canonicalMindmapNodes,
+        knowledgeMaps,
+        mindmapNodes: canonicalMindmapNodes.map(({ id, mapId, topic, tags }) => ({ id, mapId, topic, tags })),
         problems,
         suspectedDuplicates,
     };

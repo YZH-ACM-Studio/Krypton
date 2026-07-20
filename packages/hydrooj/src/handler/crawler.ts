@@ -127,6 +127,7 @@ class CrawlerProblemHandler extends CrawlerApiHandler {
     @param('problemId', Types.String, true)
     @param('timeLimit', Types.String, true)
     @param('memoryLimit', Types.String, true)
+    @param('knowledgeMapId', Types.String, true)
     async post(
         _args: any,
         title: string,
@@ -138,6 +139,7 @@ class CrawlerProblemHandler extends CrawlerApiHandler {
         problemId: string,
         timeLimit: string,
         memoryLimit: string,
+        knowledgeMapId: string,
     ) {
         this.checkPerm(PERM.PERM_CREATE_PROBLEM);
         const domainId = this.crawlerDomain;
@@ -175,12 +177,15 @@ class CrawlerProblemHandler extends CrawlerApiHandler {
         }
 
         const realPid = (pid || '').trim();
+        const knowledge = await problem.resolveProgrammingKnowledgeMap(knowledgeMapId);
         // Create HIDDEN atomically (no judge testdata yet). Passing meta.hidden
         // avoids a create-visible-then-flip window that would briefly publish +
         // ES-index the problem (and leave it permanently visible if the flip threw).
         const docId = await problem.add(domainId, realPid, t, content, this.user._id, [], {
             hidden: true,
             problemKind: 'programming',
+            knowledgeMapId: knowledge.mapId,
+            knowledgeNodeIds: [],
         });
         try {
             await importColl.insertOne({

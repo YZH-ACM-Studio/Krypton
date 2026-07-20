@@ -25,8 +25,8 @@ export interface StructuredProblemMutationContext {
     operation: string;
 }
 
-function canonicalRoot(field: string): 'problemKind' | 'tag' | 'knowledgeNodeIds' | undefined {
-    for (const root of ['problemKind', 'tag', 'knowledgeNodeIds'] as const) {
+function canonicalRoot(field: string): 'problemKind' | 'tag' | 'knowledgeMapId' | 'knowledgeNodeIds' | undefined {
+    for (const root of ['problemKind', 'tag', 'knowledgeMapId', 'knowledgeNodeIds'] as const) {
         if (field === root || field.startsWith(`${root}.`)) return root;
     }
     return undefined;
@@ -65,12 +65,13 @@ function deny(
  * the validated pair.
  */
 export async function canonicalizeStructuredKnowledgePatch(
-    current: Pick<ProblemDoc, 'problemKind'> & Partial<Pick<ProblemDoc, 'authoringMode' | 'knowledgeNodeIds' | 'tag'>>,
+    current: Pick<ProblemDoc, 'problemKind'> &
+        Partial<Pick<ProblemDoc, 'authoringMode' | 'codeEvaluationStatus' | 'knowledgeMapId' | 'knowledgeNodeIds' | 'tag'>>,
     $set: Partial<ProblemDoc>,
     $unset: Record<string, unknown>,
     context: StructuredProblemMutationContext,
     stage: string,
-    options: { requireKnowledgePair?: boolean } = {},
+    options: { requireKnowledgePair?: boolean; allowMapChange?: boolean; allowEmptyKnowledgeNodes?: boolean } = {},
 ): Promise<boolean> {
     const setFields = Object.keys($set || {});
     const unsetFields = Object.keys($unset || {});
@@ -88,71 +89,88 @@ export async function canonicalizeStructuredKnowledgePatch(
     }
 
     const problemKind = current.problemKind === undefined ? 'programming' : parseProblemKind(current.problemKind);
-    const convertedProgramming =
-        problemKind === 'programming' && current.authoringMode !== 'managed' && Object.hasOwn(current, 'knowledgeNodeIds');
+    const managedProgramming = problemKind === 'programming' && current.authoringMode === 'managed';
+    const convertedProgramming = problemKind === 'programming' && current.authoringMode !== 'managed' && Object.hasOwn(current, 'knowledgeMapId');
     const startsProgrammingConversion =
-        problemKind === 'programming' && current.authoringMode !== 'managed' && Object.hasOwn($set, 'knowledgeNodeIds');
-    if (!DEDICATED_STRUCTURED_PROBLEM_KINDS.has(problemKind) && !convertedProgramming && !startsProgrammingConversion) return false;
+        problemKind === 'programming' &&
+        current.authoringMode !== 'managed' &&
+        Object.hasOwn($set, 'knowledgeMapId') &&
+        Object.hasOwn($set, 'knowledgeNodeIds');
+    if (!DEDICATED_STRUCTURED_PROBLEM_KINDS.has(problemKind) && !managedProgramming && !convertedProgramming && !startsProgrammingConversion) {
+        return false;
+    }
 
     const setsTag = Object.hasOwn($set, 'tag');
+    const setsMap = Object.hasOwn($set, 'knowledgeMapId');
     const setsKnowledge = Object.hasOwn($set, 'knowledgeNodeIds');
     const unsetsTag = Object.hasOwn($unset, 'tag');
+    const unsetsMap = Object.hasOwn($unset, 'knowledgeMapId');
     const unsetsKnowledge = Object.hasOwn($unset, 'knowledgeNodeIds');
-    const touchesKnowledgePair = setsTag || setsKnowledge || unsetsTag || unsetsKnowledge;
+    const touchesKnowledgePair = setsTag || setsMap || setsKnowledge || unsetsTag || unsetsMap || unsetsKnowledge;
     if (!touchesKnowledgePair && !options.requireKnowledgePair) return false;
 
-    if (!setsTag || !setsKnowledge || unsetsTag || unsetsKnowledge) {
+    if (!setsTag || !setsMap || !setsKnowledge || unsetsTag || unsetsMap || unsetsKnowledge) {
         deny(
             context,
             problemKind,
             stage,
-            fields.filter((field) => canonicalRoot(field) === 'tag' || canonicalRoot(field) === 'knowledgeNodeIds'),
+            fields.filter((field) => ['tag', 'knowledgeMapId', 'knowledgeNodeIds'].includes(canonicalRoot(field) || '')),
             'incomplete-knowledge-pair',
             'knowledgeNodeIds',
-            '结构化题标签必须与知识导图节点一起派生保存',
+            '结构化题所属导图、节点与标签必须一起派生保存',
         );
     }
 
-    const knowledge = Array.isArray($set.knowledgeNodeIds) && !$set.knowledgeNodeIds.length
-        ? { nodeIds: [], tags: [] }
-        : await (
-              require('./managed-problem-authoring') as {
-                  materializeKnowledgeMindmapTags(input: unknown): Promise<{ nodeIds: ObjectId[]; tags: string[] }>;
-              }
-          ).materializeKnowledgeMindmapTags($set.knowledgeNodeIds);
-    if (problemKind === 'programming' && !knowledge.nodeIds.length) {
+    if (current.knowledgeMapId && String(current.knowledgeMapId) !== String($set.knowledgeMapId) && options.allowMapChange !== true) {
+        deny(context, problemKind, stage, ['knowledgeMapId'], 'implicit-map-change', 'knowledgeMapId', '更换所属导图必须单独预览并确认');
+    }
+
+    const knowledge = await (
+        require('./managed-problem-authoring') as {
+            materializeKnowledgeMindmapTags(
+                input: unknown,
+                options: { knowledgeMapId: unknown; requireMap: true; requirePublicMap: true },
+            ): Promise<{ mapId: ObjectId; nodeIds: ObjectId[]; tags: string[] }>;
+        }
+    ).materializeKnowledgeMindmapTags($set.knowledgeNodeIds, {
+        knowledgeMapId: $set.knowledgeMapId,
+        requireMap: true,
+        requirePublicMap: true,
+    });
+    if (!knowledge.nodeIds.length && options.allowEmptyKnowledgeNodes !== true && current.codeEvaluationStatus !== 'draft') {
         deny(
             context,
             problemKind,
             stage,
             ['tag', 'knowledgeNodeIds'],
-            'empty-programming-knowledge',
+            'empty-knowledge-selection',
             'knowledgeNodeIds',
-            '编程题标签规范化至少需要一个知识导图节点',
+            '显式标签编辑至少需要一个知识导图节点',
         );
     }
-    const canonicalTags =
-        problemKind === 'programming'
-            ? [
-                  ...new Set([
-                      ...(Array.isArray(current.tag) ? current.tag.filter(isCanonicalManagedSourceTag) : []),
-                      ...knowledge.tags,
-                  ]),
-              ]
-            : knowledge.tags;
+    const preservesMapOnlyProgrammingTags = problemKind === 'programming' && !knowledge.nodeIds.length && options.allowEmptyKnowledgeNodes === true;
+    const canonicalTags = preservesMapOnlyProgrammingTags
+        ? Array.isArray($set.tag)
+            ? [...$set.tag]
+            : []
+        : problemKind === 'programming'
+          ? [...new Set([...(Array.isArray(current.tag) ? current.tag.filter(isCanonicalManagedSourceTag) : []), ...knowledge.tags])]
+          : knowledge.tags;
     if (!Array.isArray($set.tag) || !isDeepStrictEqual($set.tag, canonicalTags)) {
         deny(context, problemKind, stage, ['tag', 'knowledgeNodeIds'], 'tag-mismatch', 'tag', '结构化题标签与知识导图派生结果不一致');
     }
+    $set.knowledgeMapId = knowledge.mapId;
     $set.knowledgeNodeIds = knowledge.nodeIds;
     $set.tag = canonicalTags;
     logger.info(
-        'Structured knowledge write canonicalized domain=%s pid=%d kind=%s actor=%s operation=%s stage=%s nodes=%d tags=%d result=allowed',
+        'Structured knowledge write canonicalized domain=%s pid=%d kind=%s actor=%s operation=%s stage=%s map=%s nodes=%d tags=%d result=allowed',
         context.domainId,
         context.pid,
         problemKind,
         context.actor ?? '-',
         context.operation,
         stage,
+        String(knowledge.mapId),
         knowledge.nodeIds.length,
         canonicalTags.length,
     );

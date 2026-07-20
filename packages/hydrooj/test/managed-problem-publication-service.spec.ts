@@ -23,6 +23,8 @@ const draft = {
     authoringMode: 'managed',
     hidden: true,
     sourceMeta: { template: 'self', year: 2026 },
+    knowledgeMapId: '507f1f77bcf86cd799439010',
+    knowledgeNodeIds: ['node-1'],
     managedAuthoring: { workingTitle: '工作标题', selectedMindmapNodeIds: ['node-1'], metadataStatus: 'draft' },
     content: '# 题面',
     config: { cases: [{ input: '1.in', output: '1.out' }] },
@@ -156,7 +158,14 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                 return 1;
             },
             coll: {
-                async findOne() {
+                async findOne(filter: any, options?: any) {
+                    if (filter?.['aclWriteClaim.operation'] === 'managed-review-publish' && options?.projection) {
+                        return Object.fromEntries(
+                            Object.entries(options.projection)
+                                .filter(([, included]) => included)
+                                .flatMap(([field]) => (Object.hasOwn(currentDraft, field) ? [[field, currentDraft[field]]] : [])),
+                        );
+                    }
                     return currentDraft;
                 },
                 async findOneAndUpdate(_filter: any, update: any) {
@@ -204,16 +213,26 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                     content: input.content,
                     difficulty: input.difficulty,
                     sourceMeta: { template: 'self', year: 2026 },
-                    selectedMindmapNodeIds: ['node-1'],
+                    knowledgeMapId: '507f1f77bcf86cd799439010',
+                    selectedMindmapNodeIds: input.mindmapNodeIds,
                     tags: ['自命题'],
                 }),
-                reserveManagedProblemPid: async () => 'P3107',
-                prepareManagedProblemPublication: async () => ({
-                    selectedMindmapNodeIds: ['node-1'],
-                    tags: ['自命题', '算法'],
-                    sourceMeta: { template: 'self', year: 2026 },
-                    pendingTrainingPlacement: undefined,
+                materializeKnowledgeMindmapTags: async (input: unknown, options: any) => ({
+                    mapId: options.knowledgeMapId || '507f1f77bcf86cd799439010',
+                    nodeIds: Array.isArray(input) ? input : [],
+                    tags: [],
                 }),
+                reserveManagedProblemPid: async () => 'P3107',
+                prepareManagedProblemPublication: async (_domainId: string, pdoc: any) => {
+                    if (pdoc.knowledgeMapId !== draft.knowledgeMapId) throw new TestMetadataConflictError('knowledge map missing');
+                    return {
+                        knowledgeMapId: pdoc.knowledgeMapId,
+                        selectedMindmapNodeIds: ['node-1'],
+                        tags: ['自命题', '算法'],
+                        sourceMeta: { template: 'self', year: 2026 },
+                        pendingTrainingPlacement: undefined,
+                    };
+                },
                 validateManagedTrainingPlacement: async (_domainId: string, _template: string, placement: any) => placement,
             },
             { get: (target, key: string) => target[key] || (() => undefined) },
@@ -466,6 +485,7 @@ describe('managed programming publication service seam', () => {
 
         expect(settled).to.equal(false);
         expect(publicationCommits[0].expectedStructureRevision).to.equal(9);
+        expect(publicationCommits[0].knowledgeMapId).to.equal(draft.knowledgeMapId);
         expect(cleanupCalls).to.have.lengthOf(1);
         releaseObserver();
 

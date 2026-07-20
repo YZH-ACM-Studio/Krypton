@@ -261,6 +261,8 @@ declare module './model/problem' {
         };
         /** Equality-only partial-index discriminator; absent on all non-batch and legacy problems. */
         hasBatchImportIdentity?: true;
+        /** The one knowledge map that owns this problem's canonical knowledge selections. */
+        knowledgeMapId?: ObjectId;
         /** Canonical knowledge selections for dedicated structured problems; `tag` is server-derived from these nodes. */
         knowledgeNodeIds?: ObjectId[];
         /** Explicit lifecycle for function and compile-mode program-fill problems. */

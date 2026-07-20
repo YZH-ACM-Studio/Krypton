@@ -6,6 +6,8 @@ import type { ProblemTagBackfillProblemSnapshot } from './problem-tag-backfill';
 
 export interface ProblemTagBackfillMindmapFact {
     id: string;
+    mapId: string;
+    mapTitle: string;
     parentId: string | null;
     topic: string;
     tags: string[];
@@ -30,16 +32,24 @@ function nodePath(node: ProblemTagBackfillMindmapFact, byId: Map<string, Problem
 export function normalizeProblemTagBackfillMindmapFacts(rows: Array<Record<string, any>>): ProblemTagBackfillMindmapFact[] {
     const facts = rows.map((row) => {
         const id = String(row._id ?? row.id ?? '');
+        const mapId = String(row.mapId ?? '');
         const parentId = row.parentId == null ? null : String(row.parentId);
         const updatedAt = row.updatedAt instanceof Date ? row.updatedAt.toISOString() : typeof row.updatedAt === 'string' ? row.updatedAt : '';
-        if (!/^[a-f0-9]{24}$/i.test(id) || (parentId !== null && !/^[a-f0-9]{24}$/i.test(parentId))) {
+        if (!/^[a-f0-9]{24}$/i.test(id) || !/^[a-f0-9]{24}$/i.test(mapId) || (parentId !== null && !/^[a-f0-9]{24}$/i.test(parentId))) {
             throw new Error(`mindmap node identity is malformed: ${id}`);
         }
-        if (typeof row.topic !== 'string' || !row.topic || !Array.isArray(row.tags) || row.tags.some((tag: unknown) => typeof tag !== 'string')) {
+        if (
+            typeof row.mapTitle !== 'string' ||
+            !row.mapTitle.trim() ||
+            typeof row.topic !== 'string' ||
+            !row.topic ||
+            !Array.isArray(row.tags) ||
+            row.tags.some((tag: unknown) => typeof tag !== 'string')
+        ) {
             throw new Error(`mindmap node fields are malformed: ${id}`);
         }
         if (!updatedAt || Number.isNaN(new Date(updatedAt).getTime())) throw new Error(`mindmap node updatedAt is malformed: ${id}`);
-        return { id, parentId, topic: row.topic, tags: [...row.tags], updatedAt };
+        return { id, mapId, mapTitle: row.mapTitle.trim(), parentId, topic: row.topic, tags: [...row.tags], updatedAt };
     });
     facts.sort((left, right) => left.id.localeCompare(right.id));
     if (new Set(facts.map((fact) => fact.id)).size !== facts.length) throw new Error('mindmap contains duplicate node ids');
@@ -70,6 +80,8 @@ export function knowledgeMindmapOptionsFromFacts(facts: ProblemTagBackfillMindma
             }
             return {
                 id: fact.id,
+                mapId: fact.mapId,
+                mapTitle: fact.mapTitle,
                 label,
                 tags: [...new Set(fact.tags.map((tag) => tag.trim()).filter(Boolean))],
                 ...(pathError ? { pathError } : {}),
@@ -88,13 +100,29 @@ export function previewProblemTagNormalizationFromFacts(
     }
     const selectedNodeIds = [...new Set(selectedNodeIdsInput.map(String))].sort();
     if (!selectedNodeIds.length) throw new Error('knowledgeNodeIds is required');
+    const currentKnowledgeNodeIds = snapshot.knowledgeNodeIdsPresent
+        ? Array.isArray(snapshot.knowledgeNodeIds)
+            ? [...new Set(snapshot.knowledgeNodeIds.map(String))].sort()
+            : null
+        : [];
+    if (!currentKnowledgeNodeIds || currentKnowledgeNodeIds.some((id) => !/^[a-f0-9]{24}$/i.test(id))) {
+        throw new Error('stored problem knowledgeNodeIds is malformed');
+    }
     const byId = new Map(facts.map((fact) => [fact.id, fact]));
+    const knowledgeMapId = String(snapshot.knowledgeMapId || '');
+    if (!/^[a-f0-9]{24}$/i.test(knowledgeMapId)) throw new Error('problem knowledgeMapId is missing or malformed');
+    const mapFacts = facts.filter((fact) => fact.mapId === knowledgeMapId);
+    const mapTitle = mapFacts[0]?.mapTitle;
+    if (!mapTitle || mapFacts.some((fact) => fact.mapTitle !== mapTitle)) throw new Error('problem knowledge map is missing or malformed');
     const tags: string[] = [];
     const pathVersion = new Map<string, ProblemTagBackfillMindmapFact>();
     for (const id of selectedNodeIds) {
         const node = byId.get(id);
-        if (!node || !node.tags.some((tag) => tag.trim())) throw new Error(`mindmap node is missing or not selectable: ${id}`);
+        if (!node || node.mapId !== knowledgeMapId || !node.tags.some((tag) => tag.trim())) {
+            throw new Error(`mindmap node is missing, cross-map or not selectable: ${id}`);
+        }
         for (const part of nodePath(node, byId)) {
+            if (part.mapId !== knowledgeMapId) throw new Error(`mindmap path crosses maps: ${id}`);
             pathVersion.set(part.id, part);
             for (const rawTag of part.tags) {
                 const tag = rawTag.trim();
@@ -115,12 +143,17 @@ export function previewProblemTagNormalizationFromFacts(
             docId: snapshot.docId,
             structureRevision: snapshot.structureRevisionPresent ? snapshot.structureRevision : null,
             currentTags: snapshot.tag,
+            currentKnowledgeMapId: knowledgeMapId,
+            currentKnowledgeNodeIds,
+            targetKnowledgeMapId: knowledgeMapId,
             selectedNodeIds,
             nextTags,
             mindmapPathVersion,
         }),
     );
     return {
+        knowledgeMapId: knowledgeMapId as any,
+        knowledgeMapTitle: mapTitle,
         sourceTags,
         selectedNodeIds: selectedNodeIds as any,
         nextTags,

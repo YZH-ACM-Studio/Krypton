@@ -84,6 +84,7 @@ export interface ProblemBatchPreflightProblem {
     sourceProblemCode: string;
     fingerprint: string;
     pid: string;
+    knowledgeMapId: string;
     state: 'new' | 'draft' | 'published';
     docId?: number;
 }
@@ -106,7 +107,8 @@ export interface ProblemBatchProductionFacts {
         targetPids: number[];
         replacePids: number[];
     };
-    mindmapNodes: Array<{ id: string; topic: string; tags: string[] }>;
+    knowledgeMaps: Array<{ id: string; title: string }>;
+    mindmapNodes: Array<{ id: string; mapId: string; topic: string; tags: string[] }>;
     problems: ProblemBatchPreflightProblem[];
     suspectedDuplicates: Array<{ sourceProblemCode: string; docId: number; pid: string; title: string }>;
 }

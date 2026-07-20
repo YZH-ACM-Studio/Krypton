@@ -58,10 +58,16 @@ export class ReadonlyProblemTagBackfillAdapter implements ProblemTagBackfillPlan
     }
 
     private async loadMindmapFacts(): Promise<ProblemTagBackfillMindmapFact[]> {
-        const rows = await this.collection('mindmap.nodes')
-            .find({}, { projection: { _id: 1, parentId: 1, topic: 1, tags: 1, updatedAt: 1 } })
-            .toArray();
-        return normalizeProblemTagBackfillMindmapFacts(rows);
+        const [rows, maps] = await Promise.all([
+            this.collection('mindmap.nodes')
+                .find({}, { projection: { _id: 1, mapId: 1, parentId: 1, topic: 1, tags: 1, updatedAt: 1 } })
+                .toArray(),
+            this.collection('mindmap.maps')
+                .find({}, { projection: { _id: 1, title: 1 } })
+                .toArray(),
+        ]);
+        const titleById = new Map(maps.map((map) => [String(map._id), map.title]));
+        return normalizeProblemTagBackfillMindmapFacts(rows.map((row) => ({ ...row, mapTitle: titleById.get(String(row.mapId)) })));
     }
 
     async loadPlanFacts(): Promise<ProblemTagBackfillPlanFacts> {
@@ -79,6 +85,7 @@ export class ReadonlyProblemTagBackfillAdapter implements ProblemTagBackfillPlan
                             title: 1,
                             owner: 1,
                             tag: 1,
+                            knowledgeMapId: 1,
                             knowledgeNodeIds: 1,
                             structureRevision: 1,
                             problemKind: 1,

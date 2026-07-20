@@ -7,6 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useBootstrap } from '@/lib/bootstrap';
 
 export function FpsImportPage() {
+  const data = useBootstrap().page.data;
+  const knowledgeMaps: Array<{ id: string; title: string }> = data.knowledgeMaps || [];
+  const defaultMapId = knowledgeMaps.length === 1 ? knowledgeMaps[0].id : '';
   return (
     <motion.div
       className="grid gap-5 lg:grid-cols-[1fr_280px]"
@@ -35,6 +38,26 @@ export function FpsImportPage() {
                   required
                   className="mt-4 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary-foreground"
                 />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="fps-knowledge-map" className="text-sm font-medium">
+                  所属导图
+                </label>
+                <select
+                  id="fps-knowledge-map"
+                  name="knowledgeMapId"
+                  defaultValue={defaultMapId}
+                  required
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">请选择导图</option>
+                  {knowledgeMaps.map((map) => (
+                    <option key={map.id} value={map.id}>
+                      {map.title}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">导入题先保持隐藏，随后逐题选择同图知识节点。</p>
               </div>
               <div className="flex justify-end">
                 <Button type="submit" className="gap-2">

@@ -2,9 +2,17 @@ import { isCanonicalManagedSourceTag } from '../model/managed-problem-source';
 
 export interface KnowledgeMindmapOption {
     id: string;
+    mapId: string;
+    mapTitle: string;
     label: string;
     tags: string[];
     pathError?: string;
+}
+
+export interface KnowledgeMapOption {
+    id: string;
+    title: string;
+    visibility: 'hidden' | 'public';
 }
 
 export interface LegacyProgrammingTagClassification {
@@ -13,6 +21,65 @@ export interface LegacyProgrammingTagClassification {
     suggestedNodeIds: string[];
     ambiguousTags: Array<{ tag: string; candidates: string[] }>;
     unknownTags: string[];
+}
+
+export interface ProblemKnowledgeNodeFields {
+    authoringMode?: unknown;
+    knowledgeNodeIds?: unknown;
+    managedAuthoring?: unknown;
+}
+
+function storedKnowledgeNodeId(value: unknown, field: string): string {
+    let normalized: string;
+    if (typeof value === 'string') normalized = value;
+    else if (value && typeof (value as { toHexString?: unknown }).toHexString === 'function') {
+        normalized = String((value as { toHexString(): string }).toHexString());
+    } else {
+        throw new TypeError(`${field} must be a string or ObjectId`);
+    }
+    if (!normalized || normalized.trim() !== normalized) throw new TypeError(`${field} must be a trimmed non-empty node id`);
+    return normalized;
+}
+
+function storedKnowledgeNodeIds(value: unknown, field: string): string[] {
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) throw new TypeError(`${field} must be an array`);
+    const ids = value.map((nodeId, index) => storedKnowledgeNodeId(nodeId, `${field}[${index}]`));
+    if (new Set(ids).size !== ids.length) throw new TypeError(`${field} must not contain duplicates`);
+    return ids;
+}
+
+function sameNodeIdSet(left: readonly string[], right: readonly string[]): boolean {
+    if (left.length !== right.length) return false;
+    const rightSet = new Set(right);
+    return left.every((nodeId) => rightSet.has(nodeId));
+}
+
+/**
+ * Resolve the canonical knowledge-node selection across the two persisted
+ * programming-problem layouts.
+ *
+ * Managed problems created before the P2.29 migration keep their canonical
+ * selection only in `managedAuthoring.selectedMindmapNodeIds`. New managed
+ * writes mirror that selection to the top-level field. When both copies are
+ * present they must agree; a disagreement is storage corruption, not a reason
+ * to prefer one copy silently.
+ */
+export function resolveProblemKnowledgeNodeIds(pdoc: ProblemKnowledgeNodeFields, label = 'problem'): string[] {
+    const topLevel = storedKnowledgeNodeIds(pdoc.knowledgeNodeIds, `${label}.knowledgeNodeIds`);
+    if (pdoc.authoringMode !== 'managed') return topLevel;
+
+    if (pdoc.managedAuthoring !== undefined && (pdoc.managedAuthoring === null || typeof pdoc.managedAuthoring !== 'object')) {
+        throw new TypeError(`${label}.managedAuthoring must be an object`);
+    }
+    const managed = storedKnowledgeNodeIds(
+        (pdoc.managedAuthoring as { selectedMindmapNodeIds?: unknown } | undefined)?.selectedMindmapNodeIds,
+        `${label}.managedAuthoring.selectedMindmapNodeIds`,
+    );
+    if (topLevel.length && !sameNodeIdSet(topLevel, managed)) {
+        throw new TypeError(`${label} has conflicting managed knowledge-node selections`);
+    }
+    return managed;
 }
 
 function requireStoredProblemTags(input: unknown): string[] {

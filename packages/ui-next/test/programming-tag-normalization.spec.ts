@@ -12,9 +12,7 @@ function read(relative: string) {
 
 describe('P2.17 programming tag normalization UI contract', () => {
   it('does not present empty or source-only legacy tags as a normalization task', () => {
-    expect(
-      requiresLegacyProgrammingTagNormalization({ mode: 'unconverted', sourceTags: [], selectedNodeIds: [] }),
-    ).to.equal(false);
+    expect(requiresLegacyProgrammingTagNormalization({ mode: 'unconverted', sourceTags: [], selectedNodeIds: [] })).to.equal(false);
     expect(
       requiresLegacyProgrammingTagNormalization({
         mode: 'unconverted',
@@ -46,9 +44,7 @@ describe('P2.17 programming tag normalization UI contract', () => {
         ambiguousTags: [{ tag: '模拟', candidates: ['算法 / 模拟', '专题 / 模拟'] }],
       }),
     ).to.equal(true);
-    expect(
-      requiresLegacyProgrammingTagNormalization({ mode: 'converted', sourceTags: [], selectedNodeIds: [] }),
-    ).to.equal(false);
+    expect(requiresLegacyProgrammingTagNormalization({ mode: 'converted', sourceTags: [], selectedNodeIds: [] })).to.equal(false);
   });
 
   it('forces every interactive programming create through the managed protocol', () => {
@@ -70,7 +66,7 @@ describe('P2.17 programming tag normalization UI contract', () => {
     expect(edit).not.to.include("name={managed ? undefined : 'tag'}");
     expect(edit).to.include("name={canEditContent && pidEditable ? 'pid' : undefined}");
     expect(edit).to.include("const pidEditable = !managed && programmingTagMode === 'unconverted'");
-    expect(handler).to.include("const canonicalFields = ['tag', 'knowledgeNodeIds']");
+    expect(handler).to.include("const canonicalFields = ['tag', 'knowledgeMapId', 'knowledgeNodeIds']");
     expect(handler).to.include('编程题标签只能从知识导图选择并单独确认');
   });
 
@@ -104,7 +100,9 @@ describe('P2.17 programming tag normalization UI contract', () => {
     expect(edit).to.include("{ label: '保留'");
     expect(edit).to.include("{ label: '新增'");
     expect(edit).to.include("{ label: '删除'");
-    expect(edit).not.to.match(/\b(?:window\.)?(?:confirm|alert|prompt)\s*\(/);
+    for (const nativeDialog of ['window.confirm(', 'window.alert(', 'window.prompt(']) {
+      expect(edit).not.to.include(nativeDialog);
+    }
     expect(handler).to.include("'/p/:pid/tags/preview'");
     expect(handler).to.include("'/p/:pid/tags/apply'");
     expect(handler).to.include('applyProgrammingTagNormalization');

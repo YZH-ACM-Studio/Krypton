@@ -38,7 +38,7 @@ export interface PanelProblem {
   nSubmit: number;
   nAccept: number;
   difficulty: number;
-  sources: Array<'tag' | 'manual'>;
+  sources: Array<'canonical' | 'manual'>;
 }
 
 export interface ProblemOption {

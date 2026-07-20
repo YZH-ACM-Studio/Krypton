@@ -198,8 +198,10 @@ function ObjectiveEditorShell({
           pdoc={pdoc}
           isCreate={isCreate}
           locked={locked}
+          knowledgeMaps={data.knowledgeMaps || []}
           mindmapOptions={(data.knowledgeMindmapOptions || []) as KnowledgeMindmapOption[]}
           canUseCustomPid={data.canUseCustomPid === true}
+          formDirty={dirtyState.dirty}
           onMetadataChange={dirtyState.recompute}
         />
       </form>

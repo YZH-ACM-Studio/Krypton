@@ -61,11 +61,18 @@ export default class HydroProblemTagBackfillAdapter implements ProblemTagBackfil
     private readonly actorByDomain = new Map<string, any>();
 
     private async loadMindmapFacts() {
-        const rows = await db
-            .collection<Record<string, any>>('mindmap.nodes')
-            .find({}, { projection: { _id: 1, parentId: 1, topic: 1, tags: 1, updatedAt: 1 } })
-            .toArray();
-        return normalizeProblemTagBackfillMindmapFacts(rows);
+        const [rows, maps] = await Promise.all([
+            db
+                .collection<Record<string, any>>('mindmap.nodes')
+                .find({}, { projection: { _id: 1, mapId: 1, parentId: 1, topic: 1, tags: 1, updatedAt: 1 } })
+                .toArray(),
+            db
+                .collection<Record<string, any>>('mindmap.maps')
+                .find({}, { projection: { _id: 1, title: 1 } })
+                .toArray(),
+        ]);
+        const titleById = new Map(maps.map((map) => [String(map._id), map.title]));
+        return normalizeProblemTagBackfillMindmapFacts(rows.map((row) => ({ ...row, mapTitle: titleById.get(String(row.mapId)) })));
     }
 
     private async permitCount(domainId: string, docId: number): Promise<number> {
@@ -84,6 +91,7 @@ export default class HydroProblemTagBackfillAdapter implements ProblemTagBackfil
                     title: 1,
                     owner: 1,
                     tag: 1,
+                    knowledgeMapId: 1,
                     knowledgeNodeIds: 1,
                     structureRevision: 1,
                     problemKind: 1,
@@ -109,6 +117,9 @@ export default class HydroProblemTagBackfillAdapter implements ProblemTagBackfil
             docId: snapshot.docId,
             structureRevision: snapshot.structureRevisionPresent ? Number(snapshot.structureRevision) : undefined,
             currentTags: snapshot.tag,
+            currentKnowledgeMapId: snapshot.knowledgeMapId,
+            currentKnowledgeNodeIds: snapshot.knowledgeNodeIdsPresent ? snapshot.knowledgeNodeIds : [],
+            targetKnowledgeMapId: snapshot.knowledgeMapId,
             selectedNodeIds,
         });
     }
@@ -138,6 +149,7 @@ export default class HydroProblemTagBackfillAdapter implements ProblemTagBackfil
         const nodeIds = Array.isArray(current.knowledgeNodeIds) ? current.knowledgeNodeIds.map(String).sort() : [];
         return (
             current.nonTagFingerprint === entry.snapshot.nonTagFingerprint &&
+            String(current.knowledgeMapId || '') === String(entry.snapshot.knowledgeMapId || '') &&
             current.structureRevisionPresent &&
             current.structureRevision === entry.expectedStructureRevisionAfterApply &&
             isDeepStrictEqual(current.tag, entry.nextTags) &&
@@ -275,7 +287,11 @@ export default class HydroProblemTagBackfillAdapter implements ProblemTagBackfil
                 try {
                     result = await commitProblemWriteClaimUpdate(
                         claim,
-                        { tag: preview.nextTags, knowledgeNodeIds: preview.selectedNodeIds } as any,
+                        {
+                            tag: preview.nextTags,
+                            knowledgeMapId: preview.knowledgeMapId,
+                            knowledgeNodeIds: preview.selectedNodeIds,
+                        } as any,
                         {},
                         'tag',
                         {

@@ -552,8 +552,12 @@ export async function updateKnowledgeMap(
             assertMapTree(current, await listAllNodes(mapId));
         }
         if (input.patch.visibility === 'hidden' && current.visibility === 'public') {
-            const courses = await documentColl.countDocuments({ docType: 40, kind: 'course', mindmapId: mapId });
+            const [courses, problems] = await Promise.all([
+                documentColl.countDocuments({ docType: 40, kind: 'course', mindmapId: mapId }),
+                documentColl.countDocuments({ docType: HYDRO_PROBLEM_DOCTYPE, knowledgeMapId: mapId }),
+            ]);
             if (courses > 0) conflict(`该导图仍被 ${courses} 门课程使用，请先逐课解绑`, 'map-course-referenced');
+            if (problems > 0) conflict(`该导图仍被 ${problems} 道题引用，请先逐题更换所属导图`, 'map-problem-referenced');
         }
         set.visibility = input.patch.visibility;
     }
@@ -901,7 +905,7 @@ export interface PanelProblem extends ProblemSummary {
     nAccept: number;
     /** Heuristic difficulty 1-6 derived from acceptance rate. */
     difficulty: number;
-    sources: Array<'tag' | 'manual'>;
+    sources: Array<'canonical' | 'manual'>;
 }
 
 function difficultyOf(problem: { nSubmit?: number; nAccept?: number }): number {
@@ -925,8 +929,10 @@ export async function listProblemsForNode(
     const mapId = objectId(mapIdValue, 'mapId');
     const node = await getNode(mapId, nodeId);
     if (!node) throw new MindmapRequestError('导图节点不存在');
-    const orClauses: any[] = [];
-    if (node.tags?.length) orClauses.push({ tag: { $in: node.tags } });
+    const allNodes = await listAllNodes(mapId);
+    const subtree = descendantsOf(node._id.toHexString(), allNodes);
+    const subtreeIds = [...subtree].map((id) => new ObjectId(id));
+    const orClauses: any[] = [{ knowledgeNodeIds: { $in: subtreeIds } }, { 'managedAuthoring.selectedMindmapNodeIds': { $in: subtreeIds } }];
     if (node.problemIds?.length) {
         orClauses.push({ pid: { $in: node.problemIds } });
         const numericIds = node.problemIds.map(Number).filter((value) => Number.isSafeInteger(value));
@@ -946,15 +952,24 @@ export async function listProblemsForNode(
                 },
             ],
         })
-        .project({ domainId: 1, pid: 1, docId: 1, title: 1, hidden: 1, tag: 1, nSubmit: 1, nAccept: 1 })
+        .project({
+            domainId: 1,
+            pid: 1,
+            docId: 1,
+            title: 1,
+            hidden: 1,
+            nSubmit: 1,
+            nAccept: 1,
+            knowledgeNodeIds: 1,
+            'managedAuthoring.selectedMindmapNodeIds': 1,
+        })
         .limit(500)
         .toArray();
-    const tagSet = new Set(node.tags || []);
     const manualSet = new Set(node.problemIds || []);
     return docs.map((doc: any) => {
         const pid = String(doc.pid || doc.docId);
-        const sources: Array<'tag' | 'manual'> = [];
-        if (Array.isArray(doc.tag) && doc.tag.some((tag: unknown) => typeof tag === 'string' && tagSet.has(tag))) sources.push('tag');
+        const sources: Array<'canonical' | 'manual'> = [];
+        if (referencedNodeIds(doc).some((id) => subtree.has(id))) sources.push('canonical');
         if (manualSet.has(pid) || manualSet.has(String(doc.docId))) sources.push('manual');
         return {
             ...asProblemSummary(doc),

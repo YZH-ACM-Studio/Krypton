@@ -6,22 +6,24 @@
  * Auth is a per-worker service token on channel `tagger` (NOT a Hydro login).
  * See docs/PLAN-2026-06-08-problem-tagger.md.
  *
- * Blast radius is bounded BY CONSTRUCTION: every write goes through
- * ProblemModel.edit with a patch that can only contain `tag` and/or `title`
- * (which also fires `problem/edit` → Elasticsearch reindex). content / hidden /
- * pid / difficulty / testdata are physically unreachable through these routes.
+ * Blast radius is bounded BY CONSTRUCTION: title-only writes use the normal
+ * authorized edit entrypoint, while knowledge-tag writes use the canonical
+ * map/node preview + fingerprint CAS entrypoint. content / hidden / pid /
+ * difficulty / testdata are physically unreachable through these routes.
  *
  * Endpoints (all require X-Service-Token, channel `tagger`, fixed domain):
- *   GET  /api/tagger/problems  → { domainId, problems: [{docId, pid, title, tag[]}] }  (excludes hidden)
+ *   GET  /api/tagger/problems  → canonical problem summaries (excludes hidden)
  *   GET  /api/tagger/vocab     → { domainId, categories: {cat:[sub...]}, tagCounts: {tag:n} }
- *   GET  /api/tagger/mindmap   → live mindmap node/tag hierarchy
+ *   GET  /api/tagger/mindmap?mapId=... → one public map's live hierarchy
  *   GET  /api/tagger/problem-context?docId=N → one in-scope problem statement
- *   POST /api/tagger/apply     { items:[{docId, tag?, title?, expectedTag?, mindmapOnly?}] } → per-item results
- *   POST /api/tagger/retag     { from:[...], to:string|null, dryRun? } → { from, to, count, affectedDocIds }
+ *   POST /api/tagger/apply     → title-only edits or explicit canonical map/node edits
+ *   POST /api/tagger/retag     → dry-run inventory only; flat tag rewrites are rejected
  */
 import yaml from 'js-yaml';
 import { Context, db, Handler, OplogModel, param, PERM, PermissionError, Types } from 'hydrooj';
+import { ObjectId } from 'mongodb';
 import { requireAuthToken } from '../lib/auth-token';
+import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { Logger } from '../logger';
 import { ProblemTagConflictError } from '../error';
 import * as document from '../model/document';
@@ -31,12 +33,9 @@ import system from '../model/system';
 const CHANNEL = 'tagger';
 const MAX_APPLY_ITEMS = 1000;
 const logger = new Logger('tagger');
-// retag can touch the whole library; cap how many per-problem before/after rows
-// we embed in a single oplog document so it can never approach mongo's 16MB
-// limit. The full affectedDocIds list (compact) is always logged.
-const OPLOG_CHANGE_CAP = 500;
 interface MindmapNodeDocument {
     _id: unknown;
+    mapId: unknown;
     parentId: unknown | null;
     topic: unknown;
     tags: unknown;
@@ -44,17 +43,28 @@ interface MindmapNodeDocument {
 
 interface SerializedMindmapNode {
     id: string;
+    mapId: string;
     parentId: string | null;
     topic: string;
     tags: string[];
 }
 
-const mindmapNodes = db.collection<MindmapNodeDocument>('mindmap.nodes');
+interface KnowledgeMapDocument {
+    _id: ObjectId;
+    title: unknown;
+    visibility: unknown;
+}
 
-function serializeMindmapNode(node: MindmapNodeDocument): SerializedMindmapNode {
+const mindmapNodes = db.collection<MindmapNodeDocument>('mindmap.nodes');
+const knowledgeMaps = db.collection<KnowledgeMapDocument>('mindmap.maps');
+
+function serializeMindmapNode(node: MindmapNodeDocument, expectedMapId: string): SerializedMindmapNode {
     if (node._id === null || node._id === undefined) throw new TypeError('mindmap node id must be present');
     const id = String(node._id);
     if (!id.trim()) throw new TypeError('mindmap node id must be non-empty');
+    if (node.mapId === null || node.mapId === undefined || String(node.mapId) !== expectedMapId) {
+        throw new TypeError(`mindmap node ${id} must belong to requested map ${expectedMapId}`);
+    }
     if (typeof node.topic !== 'string' || !node.topic.trim() || node.topic !== node.topic.trim()) {
         throw new TypeError(`mindmap node ${id} topic must be a trimmed non-empty string`);
     }
@@ -68,57 +78,26 @@ function serializeMindmapNode(node: MindmapNodeDocument): SerializedMindmapNode 
         parentId = String(node.parentId);
         if (!parentId.trim()) throw new TypeError(`mindmap node ${id} parentId must be null or non-empty`);
     }
-    return { id, parentId, topic: node.topic, tags: node.tags as string[] };
+    return { id, mapId: expectedMapId, parentId, topic: node.topic, tags: node.tags as string[] };
 }
 
-async function loadMindmapNodes() {
-    const nodes = await mindmapNodes.find({}, { projection: { _id: 1, parentId: 1, topic: 1, tags: 1 } }).toArray();
-    return nodes.map(serializeMindmapNode);
-}
-
-function buildMindmapTagPolicy(nodes: SerializedMindmapNode[]) {
-    const byId = new Map<string, SerializedMindmapNode>();
-    const nodeIdsByTag = new Map<string, string[]>();
-    for (const node of nodes) {
-        if (byId.has(node.id)) throw new TypeError(`duplicate mindmap node id: ${node.id}`);
-        byId.set(node.id, node);
-        for (const tag of node.tags) nodeIdsByTag.set(tag, [...(nodeIdsByTag.get(tag) || []), node.id]);
+async function loadMindmap(mapIdInput: unknown) {
+    const mapId = canonicalObjectId(mapIdInput, 'mapId');
+    const mapDoc = await knowledgeMaps.findOne(
+        { _id: new ObjectId(mapId), visibility: 'public' },
+        { projection: { _id: 1, title: 1, visibility: 1 } },
+    );
+    if (!mapDoc) return null;
+    if (typeof mapDoc.title !== 'string' || !mapDoc.title.trim() || mapDoc.title !== mapDoc.title.trim()) {
+        throw new TypeError(`knowledge map ${mapId} title must be a trimmed non-empty string`);
     }
-    const roots = nodes.filter((node) => node.parentId === null);
-    if (roots.length !== 1) throw new TypeError(`mindmap must contain exactly one root, found ${roots.length}`);
-
-    const ancestorTagsById = new Map<string, string[]>();
-    const ancestorTags = (nodeId: string): string[] => {
-        const cached = ancestorTagsById.get(nodeId);
-        if (cached) return cached;
-        const node = byId.get(nodeId);
-        if (!node) throw new TypeError(`unknown mindmap node: ${nodeId}`);
-        const path: SerializedMindmapNode[] = [];
-        const seen = new Set([nodeId]);
-        let parentId = node.parentId;
-        while (parentId !== null) {
-            if (seen.has(parentId)) throw new TypeError(`mindmap contains a cycle at ${parentId}`);
-            seen.add(parentId);
-            const parent = byId.get(parentId);
-            if (!parent) throw new TypeError(`mindmap node ${nodeId} has unknown parent ${parentId}`);
-            path.unshift(parent);
-            parentId = parent.parentId;
-        }
-        const tags = [...new Set(path.flatMap((parent) => parent.tags))];
-        ancestorTagsById.set(nodeId, tags);
-        return tags;
-    };
-    for (const node of nodes) ancestorTags(node.id);
-
+    if (mapDoc.visibility !== 'public') throw new TypeError(`knowledge map ${mapId} visibility must be public`);
+    const nodes = await mindmapNodes
+        .find({ mapId: new ObjectId(mapId) }, { projection: { _id: 1, mapId: 1, parentId: 1, topic: 1, tags: 1 } })
+        .toArray();
     return {
-        allowedTags: new Set(nodeIdsByTag.keys()),
-        isHierarchyClosed(tags: string[]) {
-            const current = new Set(tags);
-            return [...current].every((tag) => {
-                const nodeIds = nodeIdsByTag.get(tag);
-                return !nodeIds || nodeIds.some((nodeId) => ancestorTags(nodeId).every((parentTag) => current.has(parentTag)));
-            });
-        },
+        map: { id: mapId, title: mapDoc.title, visibility: 'public' as const },
+        nodes: nodes.map((node) => serializeMindmapNode(node, mapId)),
     };
 }
 
@@ -133,6 +112,8 @@ function denyProblemAcl(user: any) {
         _permitPids: new Set<number>(),
         _authoredPids: new Set<number>(),
         _maintainedPids: new Set<number>(),
+        _dataContributionPids: new Set<number>(),
+        _tagContributionPids: new Set<number>(),
         _aclFencedPids: new Set<number>(),
         _ownsLegacyProblems: false,
         _problemAclDomainId: undefined,
@@ -150,6 +131,8 @@ async function loadTaggerProblemAcl(user: any, domainId: string): Promise<void> 
             !(loaded?.permitPids instanceof Set) ||
             !(loaded?.authoredPids instanceof Set) ||
             !(loaded?.maintainedPids instanceof Set) ||
+            !(loaded?.dataContributionPids instanceof Set) ||
+            !(loaded?.tagContributionPids instanceof Set) ||
             !(loaded?.fencedPids instanceof Set) ||
             typeof loaded?.ownsLegacyProblems !== 'boolean'
         ) {
@@ -159,6 +142,8 @@ async function loadTaggerProblemAcl(user: any, domainId: string): Promise<void> 
             _permitPids: loaded.permitPids,
             _authoredPids: loaded.authoredPids,
             _maintainedPids: loaded.maintainedPids,
+            _dataContributionPids: loaded.dataContributionPids,
+            _tagContributionPids: loaded.tagContributionPids,
             _aclFencedPids: loaded.fencedPids,
             _ownsLegacyProblems: loaded.ownsLegacyProblems,
             _problemAclDomainId: domainId,
@@ -194,6 +179,41 @@ function validateExpectedTags(input: unknown): string[] {
     }
     if (new Set(input).size !== input.length) throw new TypeError('expectedTag entries must be unique');
     return [...input];
+}
+
+function canonicalObjectId(input: unknown, field: string): string {
+    if (typeof input !== 'string' || !ObjectId.isValid(input)) throw new TypeError(`${field} must be a valid ObjectId`);
+    const normalized = new ObjectId(input).toHexString();
+    if (input.toLowerCase() !== normalized) throw new TypeError(`${field} must be a canonical ObjectId`);
+    return normalized;
+}
+
+function canonicalNodeIds(input: unknown, field: string, required: boolean): string[] {
+    if (!Array.isArray(input)) throw new TypeError(`${field} must be an array`);
+    const ids = input.map((value, index) => canonicalObjectId(value, `${field}[${index}]`));
+    if (required && ids.length === 0) throw new TypeError(`${field} must not be empty`);
+    if (new Set(ids).size !== ids.length) throw new TypeError(`${field} must not contain duplicates`);
+    return ids;
+}
+
+function objectIdString(value: unknown, field: string): string {
+    if (value === null || value === undefined) throw new TypeError(`${field} must be present`);
+    return canonicalObjectId(String(value), field);
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+    return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function canonicalProblemFields(pdoc: any) {
+    return {
+        knowledgeMapId: objectIdString(pdoc.knowledgeMapId, `problem ${pdoc.docId} knowledgeMapId`),
+        knowledgeNodeIds: canonicalNodeIds(
+            resolveProblemKnowledgeNodeIds(pdoc, `problem ${pdoc.docId}`),
+            `problem ${pdoc.docId} knowledgeNodeIds`,
+            false,
+        ),
+    };
 }
 
 /** problem.categories is stored as a YAML string OR a plain object; handle both. */
@@ -298,7 +318,18 @@ class TaggerProblemsHandler extends TaggerApiHandler {
         const scope = await this.problemBankScope();
         this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
-        const pdocs = await problem.getMulti(domainId, { $and: [scope, { hidden: { $ne: true } }] }, ['docId', 'pid', 'title', 'tag']).toArray();
+        const pdocs = await problem
+            .getMulti(domainId, { $and: [scope, { hidden: { $ne: true } }] }, [
+                'docId',
+                'pid',
+                'title',
+                'tag',
+                'authoringMode',
+                'managedAuthoring',
+                'knowledgeMapId',
+                'knowledgeNodeIds',
+            ])
+            .toArray();
         this.response.body = {
             domainId,
             problems: pdocs.map((p) => ({
@@ -306,6 +337,7 @@ class TaggerProblemsHandler extends TaggerApiHandler {
                 pid: p.pid || '',
                 title: p.title || '',
                 tag: Array.isArray(p.tag) ? p.tag : [],
+                ...canonicalProblemFields(p),
             })),
         };
     }
@@ -354,7 +386,22 @@ class TaggerAuditHandler extends TaggerApiHandler {
         this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
         const pdocs = await problem
-            .getMulti(domainId, scope, ['docId', 'pid', 'title', 'tag', 'hidden', 'difficulty', 'nSubmit', 'nAccept', 'config', 'data'])
+            .getMulti(domainId, scope, [
+                'docId',
+                'pid',
+                'title',
+                'tag',
+                'hidden',
+                'difficulty',
+                'nSubmit',
+                'nAccept',
+                'config',
+                'data',
+                'authoringMode',
+                'managedAuthoring',
+                'knowledgeMapId',
+                'knowledgeNodeIds',
+            ])
             .toArray();
         this.response.body = {
             domainId,
@@ -372,6 +419,7 @@ class TaggerAuditHandler extends TaggerApiHandler {
                     dataCount: Array.isArray((p as any).data) ? (p as any).data.length : 0,
                     configOk: c.ok,
                     scoreSum: c.scoreSum,
+                    ...canonicalProblemFields(p),
                 };
             }),
         };
@@ -381,13 +429,29 @@ class TaggerAuditHandler extends TaggerApiHandler {
 // ─── GET /api/tagger/mindmap ────────────────────────────────────────────────
 
 class TaggerMindmapHandler extends TaggerApiHandler {
-    async get() {
+    @param('mapId', Types.String)
+    async get(_args: any, mapId: string) {
         await this.problemBankScope();
         this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
+        let canonicalMapId: string;
+        try {
+            canonicalMapId = canonicalObjectId(mapId, 'mapId');
+        } catch {
+            this.response.status = 400;
+            this.response.body = { error: 'bad_mapId' };
+            return;
+        }
+        const loaded = await loadMindmap(canonicalMapId);
+        if (!loaded) {
+            this.response.status = 404;
+            this.response.body = { error: 'mindmap_not_found' };
+            return;
+        }
         this.response.body = {
             domainId,
-            nodes: await loadMindmapNodes(),
+            knowledgeMap: loaded.map,
+            nodes: loaded.nodes,
         };
     }
 }
@@ -401,7 +465,17 @@ class TaggerProblemContextHandler extends TaggerApiHandler {
         this.checkPerm(PERM.PERM_VIEW_PROBLEM);
         const domainId = taggerDomain();
         const docs = await problem
-            .getMulti(domainId, { $and: [scope, { docId, tag: { $in: ['L2', 'PAT甲级'] } }] }, ['docId', 'pid', 'title', 'tag', 'content'])
+            .getMulti(domainId, { $and: [scope, { docId, tag: { $in: ['L2', 'PAT甲级'] } }] }, [
+                'docId',
+                'pid',
+                'title',
+                'tag',
+                'content',
+                'authoringMode',
+                'managedAuthoring',
+                'knowledgeMapId',
+                'knowledgeNodeIds',
+            ])
             .toArray();
         const pdoc = docs[0];
         if (!pdoc) {
@@ -417,6 +491,7 @@ class TaggerProblemContextHandler extends TaggerApiHandler {
                 title: pdoc.title || '',
                 tag: Array.isArray(pdoc.tag) ? pdoc.tag : [],
                 content: pdoc.content,
+                ...canonicalProblemFields(pdoc),
             },
         };
     }
@@ -439,48 +514,68 @@ class TaggerApplyHandler extends TaggerApiHandler {
             return;
         }
         const expectedTags: Array<string[] | undefined> = [];
-        const mindmapOnly: boolean[] = [];
-        const mindmapFinalTags: Array<string[] | undefined> = [];
+        const canonicalEdits: Array<
+            | {
+                  knowledgeMapId: string;
+                  knowledgeNodeIds: string[];
+                  expectedKnowledgeMapId: string;
+                  expectedKnowledgeNodeIds: string[];
+              }
+            | undefined
+        > = [];
         for (let index = 0; index < items.length; index++) {
-            const mindmapValue = items[index]?.mindmapOnly;
-            if (mindmapValue !== undefined && typeof mindmapValue !== 'boolean') {
+            const item = items[index];
+            if (!item || typeof item !== 'object' || Array.isArray(item)) {
                 this.response.status = 400;
-                this.response.body = { error: 'bad_mindmapOnly', index };
+                this.response.body = { error: 'bad_item', index };
                 return;
             }
-            mindmapOnly.push(mindmapValue === true);
-            if (mindmapValue === true) {
-                try {
-                    mindmapFinalTags.push(validateExpectedTags(items[index]?.tag));
-                } catch {
-                    this.response.status = 400;
-                    this.response.body = { error: 'bad_mindmapTag', index };
-                    return;
-                }
-            } else {
-                mindmapFinalTags.push(undefined);
+            if (item.mindmapOnly !== undefined) {
+                this.response.status = 400;
+                this.response.body = { error: 'mindmapOnly_removed', index };
+                return;
             }
-            const value = items[index]?.expectedTag;
+            const value = item.expectedTag;
             if (value === undefined || value === null) {
                 expectedTags.push(undefined);
+            } else {
+                try {
+                    expectedTags.push(validateExpectedTags(value));
+                } catch {
+                    this.response.status = 400;
+                    this.response.body = { error: 'bad_expectedTag', index };
+                    return;
+                }
+            }
+            const canonicalFields = ['knowledgeMapId', 'knowledgeNodeIds', 'expectedKnowledgeMapId', 'expectedKnowledgeNodeIds'];
+            const canonicalCount = canonicalFields.filter((field) => Object.hasOwn(item, field)).length;
+            if (canonicalCount === 0) {
+                canonicalEdits.push(undefined);
                 continue;
             }
+            if (
+                canonicalCount !== canonicalFields.length ||
+                expectedTags[index] === undefined ||
+                Object.hasOwn(item, 'tag') ||
+                Object.hasOwn(item, 'title')
+            ) {
+                this.response.status = 400;
+                this.response.body = { error: 'bad_canonical_edit', index };
+                return;
+            }
             try {
-                expectedTags.push(validateExpectedTags(value));
+                canonicalEdits.push({
+                    knowledgeMapId: canonicalObjectId(item.knowledgeMapId, 'knowledgeMapId'),
+                    knowledgeNodeIds: canonicalNodeIds(item.knowledgeNodeIds, 'knowledgeNodeIds', true),
+                    expectedKnowledgeMapId: canonicalObjectId(item.expectedKnowledgeMapId, 'expectedKnowledgeMapId'),
+                    expectedKnowledgeNodeIds: canonicalNodeIds(item.expectedKnowledgeNodeIds, 'expectedKnowledgeNodeIds', false),
+                });
             } catch {
                 this.response.status = 400;
-                this.response.body = { error: 'bad_expectedTag', index };
+                this.response.body = { error: 'bad_canonical_edit', index };
                 return;
             }
         }
-        for (let index = 0; index < items.length; index++) {
-            if (mindmapOnly[index] && (expectedTags[index] === undefined || items[index]?.tag === undefined || items[index]?.tag === null)) {
-                this.response.status = 400;
-                this.response.body = { error: 'mindmapOnly_requires_tag_and_expectedTag', index };
-                return;
-            }
-        }
-        const mindmapPolicy = mindmapOnly.some(Boolean) ? buildMindmapTagPolicy(await loadMindmapNodes()) : undefined;
         const domainId = taggerDomain();
         const results: any[] = [];
         const changes: any[] = [];
@@ -494,56 +589,101 @@ class TaggerApplyHandler extends TaggerApiHandler {
             const hasTag = item.tag !== undefined && item.tag !== null;
             const hasTitle = typeof item.title === 'string';
             const expectedTag = expectedTags[index];
-            if (!hasTag && !hasTitle) {
+            const canonicalEdit = canonicalEdits[index];
+            if (!hasTag && !hasTitle && !canonicalEdit) {
                 results.push({ docId, ok: false, error: 'nothing_to_change' });
                 continue;
             }
-            const patch: Record<string, any> = {};
-            if (hasTag) patch.tag = mindmapFinalTags[index] || normalizeTags(item.tag);
-            if (hasTitle) {
-                const title = String(item.title).trim();
-                if (!title) {
-                    results.push({ docId, ok: false, error: 'empty_title' });
-                    continue;
-                }
-                patch.title = title;
-            }
-            if (mindmapOnly[index]) {
-                const removedTags = expectedTag!.filter((tag) => !patch.tag.includes(tag));
-                if (removedTags.length) {
-                    results.push({ docId, ok: false, error: 'mindmap_only_cannot_remove_tags' });
-                    continue;
-                }
-                const addedTags = patch.tag.filter((tag: string) => !expectedTag!.includes(tag));
-                if (addedTags.some((tag: string) => !mindmapPolicy!.allowedTags.has(tag))) {
-                    results.push({ docId, ok: false, error: 'tag_not_in_mindmap' });
-                    continue;
-                }
-                if (!mindmapPolicy!.isHierarchyClosed(patch.tag)) {
-                    results.push({ docId, ok: false, error: 'mindmap_parent_missing' });
-                    continue;
-                }
-            }
             try {
-                const old = await problem.get(domainId, docId, ['domainId', 'docId', 'pid', 'owner', 'tag', 'title']);
-                if (!old || !problem.canMaintainProblem(this.user as any, old)) {
+                const old = await problem.get(domainId, docId, [
+                    'domainId',
+                    'docId',
+                    'pid',
+                    'owner',
+                    'tag',
+                    'title',
+                    'problemKind',
+                    'authoringMode',
+                    'managedAuthoring',
+                    'structureRevision',
+                    'knowledgeMapId',
+                    'knowledgeNodeIds',
+                ]);
+                const canEdit =
+                    old && (canonicalEdit ? problem.canEditProblemTags(this.user as any, old) : problem.canMaintainProblem(this.user as any, old));
+                if (!old || !canEdit) {
                     results.push({ docId, ok: false, error: 'not_found' });
                     continue;
                 }
-                await problem.editAuthorized(domainId, docId, patch, this.user as any, {}, expectedTag === undefined ? {} : { expectedTag });
-                changes.push({
-                    docId,
-                    pid: old.pid,
-                    before: { tag: old.tag || [], title: old.title || '' },
-                    after: {
-                        tag: hasTag ? patch.tag : old.tag || [],
-                        title: hasTitle ? patch.title : old.title || '',
-                    },
-                });
+                const currentTags = validateExpectedTags(old.tag || []);
+                if (expectedTag && !sameStrings(currentTags, expectedTag)) {
+                    results.push({ docId, ok: false, error: 'tag_conflict' });
+                    continue;
+                }
+                if (canonicalEdit) {
+                    const currentCanonical = canonicalProblemFields(old);
+                    if (
+                        currentCanonical.knowledgeMapId !== canonicalEdit.expectedKnowledgeMapId ||
+                        !sameStrings(currentCanonical.knowledgeNodeIds, canonicalEdit.expectedKnowledgeNodeIds)
+                    ) {
+                        results.push({ docId, ok: false, error: 'canonical_conflict' });
+                        continue;
+                    }
+                    const preview = await problem.previewProgrammingTagNormalization({
+                        domainId,
+                        docId,
+                        problemKind: old.problemKind,
+                        structureRevision: old.structureRevision,
+                        currentTags,
+                        currentKnowledgeMapId: old.knowledgeMapId,
+                        currentKnowledgeNodeIds: currentCanonical.knowledgeNodeIds,
+                        targetKnowledgeMapId: canonicalEdit.knowledgeMapId,
+                        selectedNodeIds: canonicalEdit.knowledgeNodeIds,
+                    });
+                    const applied = await problem.applyProgrammingTagNormalization({
+                        domainId,
+                        pid: docId,
+                        user: this.user as any,
+                        targetKnowledgeMapId: canonicalEdit.knowledgeMapId,
+                        selectedNodeIds: canonicalEdit.knowledgeNodeIds,
+                        previewFingerprint: preview.fingerprint,
+                    });
+                    changes.push({
+                        docId,
+                        pid: old.pid,
+                        before: { tag: currentTags, ...currentCanonical },
+                        after: {
+                            tag: applied.preview.nextTags,
+                            knowledgeMapId: String(applied.preview.knowledgeMapId),
+                            knowledgeNodeIds: applied.preview.selectedNodeIds.map(String),
+                        },
+                    });
+                } else {
+                    if (hasTag && !sameStrings(normalizeTags(item.tag), currentTags)) {
+                        results.push({ docId, ok: false, error: 'canonical_nodes_required' });
+                        continue;
+                    }
+                    if (!hasTitle) {
+                        results.push({ docId, ok: false, error: 'nothing_to_change' });
+                        continue;
+                    }
+                    const title = String(item.title).trim();
+                    if (!title) {
+                        results.push({ docId, ok: false, error: 'empty_title' });
+                        continue;
+                    }
+                    await problem.editAuthorized(domainId, docId, { title }, this.user as any);
+                    changes.push({
+                        docId,
+                        pid: old.pid,
+                        before: { tag: currentTags, title: old.title || '' },
+                        after: { tag: currentTags, title },
+                    });
+                }
                 results.push({ docId, ok: true });
             } catch (e: any) {
                 if (e instanceof ProblemTagConflictError) {
-                    results.push({ docId, ok: false, error: 'tag_conflict' });
+                    results.push({ docId, ok: false, error: canonicalEdit ? 'canonical_conflict' : 'tag_conflict' });
                     continue;
                 }
                 results.push({ docId, ok: false, error: e?.message || 'edit_failed' });
@@ -561,7 +701,7 @@ class TaggerApplyHandler extends TaggerApiHandler {
     }
 }
 
-// ─── POST /api/tagger/retag (global rename / merge / delete) ──────────────────
+// ─── POST /api/tagger/retag (inventory only) ─────────────────────────────────
 
 class TaggerRetagHandler extends TaggerApiHandler {
     @param('from', Types.Any)
@@ -583,45 +723,22 @@ class TaggerRetagHandler extends TaggerApiHandler {
             return;
         }
         const isDryRun = dryRun === true || dryRun === 'true' || dryRun === 1;
+        if (!isDryRun) {
+            this.response.status = 409;
+            this.response.body = {
+                error: 'canonical_node_selection_required',
+                message: 'Flat tag rewrites are disabled; select a knowledge map and canonical nodes per problem.',
+            };
+            return;
+        }
         const domainId = taggerDomain();
-        const fromSet = new Set(fromTags);
 
         const pdocs = await problem
             .getMulti(domainId, { $and: [scope, { tag: { $in: fromTags }, hidden: { $ne: true } }] }, ['domainId', 'docId', 'pid', 'owner', 'tag'])
             .toArray();
         const affectedDocIds = pdocs.map((p) => p.docId);
 
-        if (isDryRun) {
-            this.response.body = { dryRun: true, from: fromTags, to: toTag, count: affectedDocIds.length, affectedDocIds };
-            return;
-        }
-
-        const changes: any[] = [];
-        let edited = 0;
-        for (const p of pdocs) {
-            const before = Array.isArray(p.tag) ? p.tag : [];
-            const kept = before.filter((t) => !fromSet.has(t));
-            const after = toTag && !kept.includes(toTag) ? [...kept, toTag] : kept;
-            try {
-                await problem.editAuthorized(domainId, p.docId, { tag: after }, this.user as any);
-                changes.push({ docId: p.docId, pid: p.pid, before, after });
-                edited++;
-            } catch (error) {
-                logger.error('Tagger retag edit failed domain=%s docId=%d uid=%d error=%s', domainId, p.docId, Number(this.user?._id) || 0, error);
-                throw error;
-            }
-        }
-        await OplogModel.log(this as any, 'tagger.retag', {
-            worker: this.workerLabel,
-            domainId,
-            from: fromTags,
-            to: toTag,
-            count: edited,
-            affectedDocIds,
-            changes: changes.slice(0, OPLOG_CHANGE_CAP),
-            changesTruncated: changes.length > OPLOG_CHANGE_CAP,
-        });
-        this.response.body = { from: fromTags, to: toTag, count: edited, affectedDocIds };
+        this.response.body = { dryRun: true, from: fromTags, to: toTag, count: affectedDocIds.length, affectedDocIds };
     }
 }
 

@@ -27,6 +27,7 @@ import {
 import type { Document, ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDict, ProblemStatusDoc, User } from '../interface';
 import { copyProblemStorageFiles } from '../lib/problem-clone';
 import { isProblemConfigFilename, parseProblemConfigObject } from '../lib/problem-config';
+import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { normalizeProblemTestdataUpload } from '../lib/problem-testdata-upload';
 import { parseConfig } from '../lib/testdataConfig';
 import bus, { parallelAllSettled } from '../service/bus';
@@ -111,6 +112,7 @@ import {
 import {
     canonicalizeManagedDraftMindmapPatch,
     ensureManagedProblemAuthoringIndexes,
+    listKnowledgeMapsForProblemSelection,
     materializeKnowledgeMindmapTags,
     type ManagedProblemDraftInput,
     prepareManagedProblemDraft,
@@ -349,7 +351,13 @@ function isEditorialPatch($set: Record<string, unknown>, $unset: Record<string, 
 
 function touchesProgrammingTagPair($set: Record<string, unknown>, $unset: Record<string, unknown> = {}) {
     return [...Object.keys($set), ...Object.keys($unset)].some(
-        (field) => field === 'tag' || field.startsWith('tag.') || field === 'knowledgeNodeIds' || field.startsWith('knowledgeNodeIds.'),
+        (field) =>
+            field === 'tag' ||
+            field.startsWith('tag.') ||
+            field === 'knowledgeMapId' ||
+            field.startsWith('knowledgeMapId.') ||
+            field === 'knowledgeNodeIds' ||
+            field.startsWith('knowledgeNodeIds.'),
     );
 }
 
@@ -624,6 +632,7 @@ interface ProblemImportOptions {
     operator?: number;
     delSource?: boolean;
     hidden?: boolean;
+    knowledgeMapId?: unknown;
 }
 
 interface ProblemCreateOptions {
@@ -635,6 +644,7 @@ interface ProblemCreateOptions {
     authoringMode?: 'managed';
     sourceMeta?: ProblemDoc['sourceMeta'];
     managedAuthoring?: ProblemDoc['managedAuthoring'];
+    knowledgeMapId?: ProblemDoc['knowledgeMapId'];
     knowledgeNodeIds?: ProblemDoc['knowledgeNodeIds'];
     codeEvaluationStatus?: 'draft';
     batchImport?: ProblemDoc['batchImport'];
@@ -651,6 +661,19 @@ const PROJECTION_BASE: Field[] = ['_id', 'domainId', 'docType', 'docId', 'pid', 
 
 export class ProblemModel {
     static readonly PROBLEM_DATA_WRITE_CONFIRMATION_TTL_MS = PROBLEM_DATA_WRITE_CONFIRMATION_TTL_MS;
+
+    static listKnowledgeMapsForProblemSelection() {
+        return listKnowledgeMapsForProblemSelection();
+    }
+
+    static resolveProgrammingKnowledgeMap(knowledgeMapId?: unknown) {
+        return materializeKnowledgeMindmapTags([], {
+            allowSolePublicMap: !knowledgeMapId,
+            requireMap: true,
+            requirePublicMap: true,
+            knowledgeMapId,
+        });
+    }
 
     static pendingProblemContributionFingerprint(rows: PendingProblemContributionFact[]) {
         return pendingProblemContributionFingerprint(rows);
@@ -696,6 +719,8 @@ export class ProblemModel {
         'additional_file',
         'reference',
         'maintainer',
+        'knowledgeMapId',
+        'knowledgeNodeIds',
         // 原赛通过率：只进 PUBLIC 不进 LIST——RecordDetailHandler 等以
         // PROJECTION_LIST 取 pdoc 的路径在比赛进行中会原样回传 pdoc，
         // 放进 LIST 会把难度提示漏给赛中考生（对抗审查发现）。
@@ -705,7 +730,7 @@ export class ProblemModel {
     ];
 
     /** Internal fields exposed only after the stable editor ACL read. */
-    static PROJECTION_MANAGED_EDITOR: Field[] = [...ProblemModel.PROJECTION_PUBLIC, 'sourceMeta', 'managedAuthoring', 'knowledgeNodeIds'];
+    static PROJECTION_MANAGED_EDITOR: Field[] = [...ProblemModel.PROJECTION_PUBLIC, 'sourceMeta', 'managedAuthoring'];
 
     /** Internal summary fields for the ACL-scoped problem bank and admin review. */
     static PROJECTION_MANAGED_BANK: Field[] = [...ProblemModel.PROJECTION_LIST, 'sourceMeta', 'managedAuthoring'];
@@ -922,10 +947,19 @@ export class ProblemModel {
             args.batchImport = meta.batchImport;
             args.hasBatchImportIdentity = true;
         }
-        if (problemKind === 'programming' && meta.knowledgeNodeIds !== undefined) {
-            args.knowledgeNodeIds = meta.knowledgeNodeIds;
+        if (problemKind === 'programming') {
+            const knowledge = await materializeKnowledgeMindmapTags(meta.knowledgeNodeIds ?? [], {
+                required: false,
+                requireMap: true,
+                allowSolePublicMap: !meta.knowledgeMapId,
+                requirePublicMap: true,
+                knowledgeMapId: meta.knowledgeMapId,
+            });
+            args.knowledgeMapId = knowledge.mapId;
+            if (meta.knowledgeNodeIds !== undefined) args.knowledgeNodeIds = knowledge.nodeIds;
         }
         if (problemKind !== 'programming') {
+            args.knowledgeMapId = meta.knowledgeMapId;
             args.knowledgeNodeIds = meta.knowledgeNodeIds ?? [];
             try {
                 args.config = (
@@ -940,13 +974,16 @@ export class ProblemModel {
                 throw error;
             }
             await canonicalizeStructuredKnowledgePatch(
-                { problemKind },
+                { problemKind, codeEvaluationStatus },
                 args,
                 {},
                 { domainId, pid: docId, actor: owner, operation: 'create' },
                 'request',
-                { requireKnowledgePair: true },
+                { requireKnowledgePair: true, allowEmptyKnowledgeNodes: codeEvaluationStatus === 'draft' },
             );
+            if (codeEvaluationStatus !== 'draft' && !args.knowledgeNodeIds?.length) {
+                throw new ValidationError('knowledgeNodeIds', null, '完成配置的题目必须选择至少一个知识节点');
+            }
         }
         const managedProgrammingSnapshot =
             problemKind === 'programming' && programmingCreateAuthority === managedProgrammingCreateAuthority ? cloneDeep(args) : null;
@@ -972,13 +1009,19 @@ export class ProblemModel {
         if (args.hidden !== true) throw new ValidationError('hidden', null, '创建钩子不能公开尚未完成创建流程的题目');
         assertCodeEvaluationStatusInvariant(problemKind, args.config, args.codeEvaluationStatus);
         await canonicalizeStructuredKnowledgePatch(
-            { problemKind, tag: originalCreateTags },
+            { problemKind, tag: originalCreateTags, authoringMode: args.authoringMode, codeEvaluationStatus },
             args,
             {},
             { domainId, pid: docId, actor: owner, operation: 'create' },
             'after-hook',
-            { requireKnowledgePair: problemKind !== 'programming' || meta.knowledgeNodeIds !== undefined },
+            {
+                requireKnowledgePair: problemKind !== 'programming' || meta.knowledgeNodeIds !== undefined,
+                allowEmptyKnowledgeNodes: problemKind === 'programming' || codeEvaluationStatus === 'draft',
+            },
         );
+        if (problemKind !== 'programming' && codeEvaluationStatus !== 'draft' && !args.knowledgeNodeIds?.length) {
+            throw new ValidationError('knowledgeNodeIds', null, '完成配置的题目必须选择至少一个知识节点');
+        }
         const result = await document.add(domainId, content, owner, document.TYPE_PROBLEM, docId, null, null, args, {
             onPrepared: (prepared) => hooks.onAllocated?.(docId, prepared._id),
         });
@@ -1007,6 +1050,7 @@ export class ProblemModel {
                         authoringMode: args.authoringMode,
                         sourceMeta: args.sourceMeta,
                         managedAuthoring: args.managedAuthoring,
+                        knowledgeMapId: args.knowledgeMapId,
                         knowledgeNodeIds: args.knowledgeNodeIds,
                         codeEvaluationStatus: args.codeEvaluationStatus,
                         batchImport: args.batchImport,
@@ -1092,6 +1136,8 @@ export class ProblemModel {
                         metadataStatus: 'draft',
                         ...(prepared.pendingTrainingPlacement ? { pendingTrainingPlacement: prepared.pendingTrainingPlacement } : {}),
                     },
+                    knowledgeMapId: prepared.knowledgeMapId,
+                    knowledgeNodeIds: prepared.selectedMindmapNodeIds,
                     ...(prepared.batchImport ? { batchImport: prepared.batchImport } : {}),
                 },
                 {
@@ -1417,6 +1463,7 @@ export class ProblemModel {
                                 archivedAt: 1,
                                 sourceMeta: 1,
                                 managedAuthoring: 1,
+                                knowledgeMapId: 1,
                                 content: 1,
                                 config: 1,
                                 data: 1,
@@ -1515,6 +1562,8 @@ export class ProblemModel {
                             title: formalTitle,
                             difficulty: input.difficulty,
                             tags: prepared.tags,
+                            knowledgeMapId: prepared.knowledgeMapId,
+                            knowledgeNodeIds: prepared.selectedMindmapNodeIds,
                             sourceMeta: prepared.sourceMeta,
                             managedAuthoring,
                             expectedMetadataStatus: pdoc.managedAuthoring.metadataStatus,
@@ -1696,7 +1745,12 @@ export class ProblemModel {
     }
 
     /** Fixed bootstrap-only exception for a fresh system domain. */
-    static createBuiltinWelcomeProblem(content: string) {
+    static async createBuiltinWelcomeProblem(content: string) {
+        const knowledge = await materializeKnowledgeMindmapTags([], {
+            allowSolePublicMap: true,
+            requireMap: true,
+            requirePublicMap: true,
+        });
         return ProblemModel.add(
             'system',
             'P1000',
@@ -1704,7 +1758,7 @@ export class ProblemModel {
             content,
             1,
             ['系统测试'],
-            { problemKind: 'programming' },
+            { problemKind: 'programming', knowledgeMapId: knowledge.mapId, knowledgeNodeIds: [] },
             {},
             managedProgrammingCreateAuthority,
         );
@@ -1732,24 +1786,27 @@ export class ProblemModel {
         return true;
     }
 
-    /** Tag edits are non-structural and remain available after publication. */
+    /** Canonical knowledge edits are non-structural and remain available after publication. */
     static async assertProgrammingTagNormalizationUnlocked(domainId: string, pid: number): Promise<void> {
         const pdoc = await document.coll.findOne(
             { domainId, docType: document.TYPE_PROBLEM, docId: pid },
             { projection: { problemKind: 1, authoringMode: 1, structureLockedAt: 1, archivedAt: 1 } },
         );
         if (!pdoc) throw new ProblemNotFoundError(domainId, pid);
-        const problemKind = pdoc.problemKind === undefined ? 'programming' : parseProblemKind(pdoc.problemKind);
-        if (problemKind !== 'programming') {
-            throw new ValidationError('problemKind', null, '只有编程题使用编程题标签编辑器');
-        }
+        if (pdoc.problemKind !== undefined) parseProblemKind(pdoc.problemKind);
         if (pdoc.archivedAt) throw new ValidationError('archivedAt', null, '已归档题目不能修改标签');
+    }
+
+    /** Shared preview entrypoint for non-UI clients; all canonical rules stay in one model path. */
+    static previewProgrammingTagNormalization(input: Parameters<typeof previewProgrammingTagNormalization>[0]) {
+        return previewProgrammingTagNormalization(input);
     }
 
     static async applyProgrammingTagNormalization(input: {
         domainId: string;
         pid: number;
         user: ProblemAclUser;
+        targetKnowledgeMapId: unknown;
         selectedNodeIds: unknown;
         previewFingerprint: string;
     }) {
@@ -1779,6 +1836,7 @@ export class ProblemModel {
                             authoringMode: 1,
                             'managedAuthoring.selectedMindmapNodeIds': 1,
                             tag: 1,
+                            knowledgeMapId: 1,
                             knowledgeNodeIds: 1,
                             hidden: 1,
                             structureRevision: 1,
@@ -1789,15 +1847,16 @@ export class ProblemModel {
                 );
                 if (!current) throw new Error(`problem write claim ownership lost before tag normalization: ${claim.requestId}`);
                 const problemKind = current.problemKind === undefined ? 'programming' : parseProblemKind(current.problemKind);
-                if (problemKind !== 'programming') {
-                    throw new ValidationError('problemKind', null, '只有编程题使用编程题标签编辑器');
-                }
                 if (current.archivedAt) throw new ValidationError('archivedAt', null, '已归档题目不能修改标签');
                 const preview = await previewProgrammingTagNormalization({
                     domainId: input.domainId,
                     docId: input.pid,
+                    problemKind,
                     structureRevision: current.structureRevision,
                     currentTags: current.tag || [],
+                    currentKnowledgeMapId: current.knowledgeMapId,
+                    currentKnowledgeNodeIds: resolveProblemKnowledgeNodeIds(current, `problem ${input.domainId}/${input.pid}`),
+                    targetKnowledgeMapId: input.targetKnowledgeMapId,
                     selectedNodeIds: input.selectedNodeIds,
                 });
                 if (preview.fingerprint !== input.previewFingerprint) {
@@ -1818,6 +1877,7 @@ export class ProblemModel {
                 }
                 const tagPatch: Record<string, unknown> = {
                     tag: preview.nextTags,
+                    knowledgeMapId: preview.knowledgeMapId,
                     knowledgeNodeIds: preview.selectedNodeIds,
                     ...(current.authoringMode === 'managed' ? { 'managedAuthoring.selectedMindmapNodeIds': preview.selectedNodeIds } : {}),
                 };
@@ -1847,6 +1907,7 @@ export class ProblemModel {
                     operator: input.user._id,
                     problemId: input.pid,
                     requestId: claim.requestId,
+                    knowledgeMapId: preview.knowledgeMapId,
                     selectedNodeIds: preview.selectedNodeIds,
                     result: 'success',
                     time: new Date(),
@@ -2071,7 +2132,9 @@ export class ProblemModel {
         problemKind: ProblemKind;
         content: string;
         config: unknown;
-        metadata?: Partial<Pick<ProblemDoc, 'title' | 'pid' | 'hidden' | 'tag' | 'difficulty' | 'lockHidden' | 'html' | 'knowledgeNodeIds'>>;
+        metadata?: Partial<
+            Pick<ProblemDoc, 'title' | 'pid' | 'hidden' | 'tag' | 'difficulty' | 'lockHidden' | 'html' | 'knowledgeMapId' | 'knowledgeNodeIds'>
+        >;
         completeCodeEvaluationDraft?: boolean;
         activeContainerConfirmation?: ProblemDataWriteConfirmation;
     }): Promise<ProblemDoc> {
@@ -2105,6 +2168,11 @@ export class ProblemModel {
             throw error;
         }
         const completing = input.completeCodeEvaluationDraft === true;
+        const editsKnowledge =
+            !!input.metadata && ['tag', 'knowledgeMapId', 'knowledgeNodeIds'].some((field) => Object.hasOwn(input.metadata!, field));
+        if ((completing || (lifecycle.codeEvaluationStatus !== 'draft' && editsKnowledge)) && !input.metadata?.knowledgeNodeIds?.length) {
+            throw new ValidationError('knowledgeNodeIds', null, '完成配置或显式标签编辑必须选择至少一个知识节点');
+        }
         const $set = {
             ...input.metadata,
             content: input.content,
@@ -2206,10 +2274,14 @@ export class ProblemModel {
         actor: number;
         user: ProblemAclUser;
         problemKind: ProblemKind;
-        metadata: Pick<ProblemDoc, 'title' | 'hidden' | 'tag' | 'difficulty' | 'knowledgeNodeIds'>;
+        metadata: Pick<ProblemDoc, 'title' | 'hidden' | 'difficulty'> & Partial<Pick<ProblemDoc, 'tag' | 'knowledgeMapId' | 'knowledgeNodeIds'>>;
     }): Promise<ProblemDoc> {
         const problemKind = parseProblemKind(input.problemKind);
         if (problemKind === 'programming') throw new ValidationError('problemKind');
+        const editsKnowledge = ['tag', 'knowledgeMapId', 'knowledgeNodeIds'].some((field) => Object.hasOwn(input.metadata, field));
+        if (editsKnowledge && !input.metadata.knowledgeNodeIds?.length) {
+            throw new ValidationError('knowledgeNodeIds', null, '显式标签编辑必须选择至少一个知识节点');
+        }
         const { before, result, auditedFields } = await ProblemModel.editAuthorizedWithSnapshot({
             domainId: input.domainId,
             pid: input.pid,
@@ -2554,6 +2626,7 @@ export class ProblemModel {
                     hidden: 1,
                     authoringMode: 1,
                     tag: 1,
+                    knowledgeMapId: 1,
                     knowledgeNodeIds: 1,
                 },
             },
@@ -2583,7 +2656,13 @@ export class ProblemModel {
                 domainId,
                 _id,
                 [...Object.keys($set), ...Object.keys($unset)].filter(
-                    (field) => field === 'tag' || field.startsWith('tag.') || field === 'knowledgeNodeIds' || field.startsWith('knowledgeNodeIds.'),
+                    (field) =>
+                        field === 'tag' ||
+                        field.startsWith('tag.') ||
+                        field === 'knowledgeMapId' ||
+                        field.startsWith('knowledgeMapId.') ||
+                        field === 'knowledgeNodeIds' ||
+                        field.startsWith('knowledgeNodeIds.'),
                 ),
             );
             throw new ValidationError('tag', null, '未请求标签变更时，写入钩子不能修改编程题标签');
@@ -3163,6 +3242,7 @@ export class ProblemModel {
                     hidden: 1,
                     authoringMode: 1,
                     managedAuthoring: 1,
+                    knowledgeMapId: 1,
                     knowledgeNodeIds: 1,
                 },
             },
@@ -3194,17 +3274,20 @@ export class ProblemModel {
             current.authoringMode !== 'managed' &&
             (current.problemKind === undefined || parseProblemKind(current.problemKind) === 'programming') &&
             !touchesProgrammingTagPair($set as Record<string, unknown>, $unset);
-        const knowledgePairRequired = await canonicalizeStructuredKnowledgePatch(current, $set, $unset, claim, 'request');
+        const knowledgePairRequired = await canonicalizeStructuredKnowledgePatch(current, $set, $unset, claim, 'request', {
+            allowMapChange: claim.operation === 'programming-tag-normalize',
+        });
         const confirmedProgrammingTagPair =
             claim.operation === 'programming-tag-normalize'
                 ? {
                       tags: Array.isArray($set.tag) ? [...$set.tag] : [],
+                      mapId: String($set.knowledgeMapId || ''),
                       nodeIds: Array.isArray($set.knowledgeNodeIds) ? $set.knowledgeNodeIds.map(String) : [],
                   }
                 : null;
         await bus.parallel('problem/before-edit', $set, $unset);
-        const hookTagFields = [...Object.keys($set), ...Object.keys($unset)].filter(
-            (field) => field === 'tag' || field.startsWith('tag.') || field === 'knowledgeNodeIds' || field.startsWith('knowledgeNodeIds.'),
+        const hookTagFields = [...Object.keys($set), ...Object.keys($unset)].filter((field) =>
+            ['tag', 'knowledgeMapId', 'knowledgeNodeIds'].some((root) => field === root || field.startsWith(`${root}.`)),
         );
         if (preserveProgrammingTagPair && hookTagFields.length) {
             logger.warn(
@@ -3221,10 +3304,11 @@ export class ProblemModel {
             confirmedProgrammingTagPair &&
             (!Array.isArray($set.tag) ||
                 !isEqual($set.tag, confirmedProgrammingTagPair.tags) ||
+                String($set.knowledgeMapId || '') !== confirmedProgrammingTagPair.mapId ||
                 !Array.isArray($set.knowledgeNodeIds) ||
                 !isEqual($set.knowledgeNodeIds.map(String), confirmedProgrammingTagPair.nodeIds) ||
-                Object.keys($unset).some(
-                    (field) => field === 'tag' || field.startsWith('tag.') || field === 'knowledgeNodeIds' || field.startsWith('knowledgeNodeIds.'),
+                Object.keys($unset).some((field) =>
+                    ['tag', 'knowledgeMapId', 'knowledgeNodeIds'].some((root) => field === root || field.startsWith(`${root}.`)),
                 ))
         ) {
             logger.warn(
@@ -3262,7 +3346,10 @@ export class ProblemModel {
             }
             managedGuard = finalGuard;
         }
-        await canonicalizeStructuredKnowledgePatch(current, $set, $unset, claim, 'after-hook', { requireKnowledgePair: knowledgePairRequired });
+        await canonicalizeStructuredKnowledgePatch(current, $set, $unset, claim, 'after-hook', {
+            requireKnowledgePair: knowledgePairRequired,
+            allowMapChange: claim.operation === 'programming-tag-normalize',
+        });
         if (current.archivedAt && isStructuralPatch($set as any, $unset)) {
             throw new ValidationError('archivedAt', null, '写入钩子不能修改已归档题目的题面或评测结构');
         }
@@ -3496,7 +3583,7 @@ export class ProblemModel {
         structuredLanguage?: string,
         attribution: { owner?: number; actor?: number; claim?: ProblemWriteClaim } = {},
     ) {
-        const original = await ProblemModel.get(domainId, _id, [...ProblemModel.PROJECTION_PUBLIC, 'knowledgeNodeIds'], true);
+        const original = await ProblemModel.get(domainId, _id, [...ProblemModel.PROJECTION_PUBLIC, 'knowledgeMapId', 'knowledgeNodeIds'], true);
         if (!original) throw new ProblemNotFoundError(domainId, _id);
         const problemKind = original.problemKind === undefined ? 'programming' : parseProblemKind(original.problemKind);
         if (problemKind === 'programming') {
@@ -3534,7 +3621,12 @@ export class ProblemModel {
         let cloneKnowledge: Awaited<ReturnType<typeof materializeKnowledgeMindmapTags>> | null = null;
         if (DEDICATED_STRUCTURED_PROBLEM_KINDS.has(problemKind)) {
             try {
-                cloneKnowledge = await materializeKnowledgeMindmapTags(original.knowledgeNodeIds ?? []);
+                cloneKnowledge = await materializeKnowledgeMindmapTags(original.knowledgeNodeIds ?? [], {
+                    required: true,
+                    knowledgeMapId: original.knowledgeMapId,
+                    requireMap: true,
+                    requirePublicMap: true,
+                });
                 logger.info(
                     'Problem clone knowledge canonicalized domain=%s pid=%d target=%s actor=%s kind=%s nodes=%d tags=%d stage=clone-materialize result=allowed',
                     domainId,
@@ -3586,6 +3678,7 @@ export class ProblemModel {
             {
                 difficulty: original.difficulty,
                 structuredConfig: cloneStructuredConfig,
+                knowledgeMapId: cloneKnowledge?.mapId,
                 knowledgeNodeIds: cloneKnowledge?.nodeIds,
                 ...(cloneIsCodeEvaluation ? { codeEvaluationStatus: 'draft' as const } : {}),
             },
@@ -4302,6 +4395,7 @@ export class ProblemModel {
             options = {};
         }
         const { preferredPrefix, progress, override = false, operator = 1 } = options;
+        const importKnowledge = await ProblemModel.resolveProgrammingKnowledgeMap(options.knowledgeMapId);
         let delSource = options.delSource;
         let problems: string[];
         const ddoc = await DomainModel.get(domainId);
@@ -4477,6 +4571,8 @@ export class ProblemModel {
                               hidden: options.hidden || pdoc.hidden,
                               difficulty: pdoc.difficulty,
                               problemKind: 'programming',
+                              knowledgeMapId: importKnowledge.mapId,
+                              knowledgeNodeIds: [],
                           },
                       );
                 // TODO delete unused file when updating pdoc

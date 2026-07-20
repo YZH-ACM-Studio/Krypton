@@ -48,6 +48,7 @@ export function problemCreateChangedFields(
         authoringMode?: unknown;
         sourceMeta?: unknown;
         managedAuthoring?: unknown;
+        knowledgeMapId?: unknown;
         knowledgeNodeIds?: unknown;
         codeEvaluationStatus?: unknown;
         batchImport?: unknown;
@@ -70,6 +71,7 @@ export function problemCreateChangedFields(
         ...(created.authoringMode ? ['authoringMode'] : []),
         ...(created.sourceMeta ? ['sourceMeta'] : []),
         ...(created.managedAuthoring ? ['managedAuthoring'] : []),
+        ...(created.knowledgeMapId ? ['knowledgeMapId'] : []),
         ...(created.knowledgeNodeIds ? ['knowledgeNodeIds'] : []),
         ...(created.codeEvaluationStatus ? ['codeEvaluationStatus'] : []),
         ...(created.batchImport ? ['batchImport', 'hasBatchImportIdentity'] : []),

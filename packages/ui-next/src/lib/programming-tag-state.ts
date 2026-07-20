@@ -1,5 +1,7 @@
 export interface ProgrammingTagState {
   mode: 'managed' | 'converted' | 'unconverted';
+  knowledgeMapId?: string;
+  knowledgeMapTitle?: string;
   sourceTags: string[];
   selectedNodeIds: string[];
   suggestions?: Array<{ tag: string; nodeId: string; label: string }>;

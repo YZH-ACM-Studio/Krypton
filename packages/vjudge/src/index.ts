@@ -95,10 +95,11 @@ class AccountService {
         }
     }
 
-    async sync(target: string, fromPage = 0, list: string) {
+    async sync(target: string, fromPage = 0, list: string, knowledgeMapId?: string) {
         let page = Math.max(fromPage, 1);
         let pids: string[] = [];
         const [domainId, namespaceId] = target.split('.');
+        const knowledge = await ProblemModel.resolveProgrammingKnowledgeMap(knowledgeMapId);
         do {
             pids = await this.api.listProblem(page, fromPage, list);
             logger.info(`${target}: Syncing page ${page}`);
@@ -117,7 +118,11 @@ class AccountService {
                 try {
                     const res = await this.api.getProblem(pid, meta);
                     if (!res) continue;
-                    const docId = await ProblemModel.add(domainId, targetPid, res.title, res.content, 1, res.tag, { problemKind: 'programming' });
+                    const docId = await ProblemModel.add(domainId, targetPid, res.title, res.content, 1, res.tag, {
+                        problemKind: 'programming',
+                        knowledgeMapId: knowledge.mapId,
+                        knowledgeNodeIds: [],
+                    });
                     if (res.difficulty) await ProblemModel.edit(domainId, docId, { difficulty: res.difficulty });
                     for (const key in res.files) {
                         await ProblemModel.addAdditionalFile(domainId, docId, key, res.files[key]);
@@ -158,7 +163,7 @@ class AccountService {
                 for (const listName of this.problemLists) {
                     for (const mount of mounts) {
                         const from = typeof mount.syncDone?.[listName] === 'number' ? mount.syncDone?.[listName] : 0;
-                        const page = await this.sync(mount._id, from, listName);
+                        const page = await this.sync(mount._id, from, listName, mount.knowledgeMapId);
                         await collMount.updateOne({ _id: mount._id }, { $set: { [`syncDone.${listName}`]: page } });
                         mount.syncDone ||= {};
                         mount.syncDone[listName] = page;

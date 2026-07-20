@@ -38,7 +38,8 @@ describe('P3.16 structured metadata and unsaved-navigation contracts', () => {
     }
     expect(panel).to.include('name="title"');
     expect(panel).to.include('pattern=".*\\S.*"');
-    expect(panel).to.include('name="knowledgeNodeIds"');
+    expect(panel).to.include("name={submitKnowledgeFields ? 'knowledgeNodeIds' : undefined}");
+    expect(panel).to.include('const submitKnowledgeFields = isCreate || knowledgeSelectionChanged');
     expect(panel).to.include('name="difficulty"');
     expect(panel).to.include('onValueChange={onMetadataChange}');
     expect(panel).to.include('name="hidden"');
@@ -138,7 +139,7 @@ describe('P3.16 structured metadata and unsaved-navigation contracts', () => {
     const clone = model.slice(cloneStart, cloneEnd);
 
     expect(guardStart).to.be.greaterThan(-1);
-    expect(guard).to.include('materializeKnowledgeMindmapTags($set.knowledgeNodeIds)');
+    expect(guard).to.include(').materializeKnowledgeMindmapTags($set.knowledgeNodeIds, {');
     expect(guard).to.include("'incomplete-knowledge-pair'");
     expect(guard).to.include("'tag-mismatch'");
     expect(guard).to.include("'problem-kind-mutation'");
@@ -148,8 +149,9 @@ describe('P3.16 structured metadata and unsaved-navigation contracts', () => {
     expect(rawEdit).to.include('requireKnowledgePair: knowledgePairRequired');
     expect(create).to.include('args.knowledgeNodeIds = meta.knowledgeNodeIds ?? []');
     expect(create.match(/canonicalizeStructuredKnowledgePatch\(/g)).to.have.length(2);
-    expect(create).to.include("{ requireKnowledgePair: problemKind !== 'programming' || meta.knowledgeNodeIds !== undefined }");
-    expect(clone).to.include('cloneKnowledge = await materializeKnowledgeMindmapTags(original.knowledgeNodeIds ?? [])');
+    expect(create).to.include("requireKnowledgePair: problemKind !== 'programming' || meta.knowledgeNodeIds !== undefined");
+    expect(create).to.include("allowEmptyKnowledgeNodes: problemKind === 'programming' || codeEvaluationStatus === 'draft'");
+    expect(clone).to.include('cloneKnowledge = await materializeKnowledgeMindmapTags(original.knowledgeNodeIds ?? [], {');
     expect(clone).to.include('cloneKnowledge?.tags ?? original.tag');
     expect(access.match(/canonicalizeStructuredKnowledgePatch\(/g)).to.have.length(2);
     expect(model.match(/assertNoCanonicalProblemPrimitiveMutation\(/g)).to.have.length(3);

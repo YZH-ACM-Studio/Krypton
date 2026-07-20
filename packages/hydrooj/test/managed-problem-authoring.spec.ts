@@ -16,6 +16,7 @@ class TestMetadataConflictError extends Error {
 }
 
 let mindmapDocs: any[] = [];
+let mindmapMaps: any[] = [];
 let trainingDocs: any[] = [];
 let problemDocs: any[] = [];
 let counterValue: number | null = null;
@@ -23,16 +24,61 @@ const counterCalls: any[] = [];
 const indexCalls: any[] = [];
 const problemIndexCalls: any[] = [];
 let problemIndexDocs: any[] = [];
+const primaryMapId = new ObjectId('64a000000000000000000001');
+
+function matchesObjectId(value: unknown, expected: unknown): boolean {
+    if (expected && typeof expected === 'object' && '$in' in (expected as Record<string, unknown>)) {
+        return value instanceof ObjectId && (expected as { $in: ObjectId[] }).$in.some((candidate) => candidate.equals(value));
+    }
+    return value instanceof ObjectId && expected instanceof ObjectId && value.equals(expected);
+}
 
 const collectionStub = (name: string) => {
     if (name === 'mindmap.nodes') {
         return {
-            find() {
+            find(filter: any = {}) {
                 return {
                     async toArray() {
-                        return mindmapDocs.map((node) => ({ ...node, tags: [...node.tags] }));
+                        return mindmapDocs
+                            .filter(
+                                (node) =>
+                                    (!filter.mapId || matchesObjectId(node.mapId, filter.mapId)) &&
+                                    (!filter._id || matchesObjectId(node._id, filter._id)),
+                            )
+                            .map((node) => ({ ...node, tags: [...node.tags] }));
                     },
                 };
+            },
+        };
+    }
+    if (name === 'mindmap.maps') {
+        return {
+            find(filter: any = {}) {
+                let limit = Number.POSITIVE_INFINITY;
+                const cursor = {
+                    sort() {
+                        return cursor;
+                    },
+                    limit(value: number) {
+                        limit = value;
+                        return cursor;
+                    },
+                    async toArray() {
+                        return mindmapMaps
+                            .filter(
+                                (map) =>
+                                    (!filter._id || matchesObjectId(map._id, filter._id)) &&
+                                    (!filter.visibility || map.visibility === filter.visibility),
+                            )
+                            .slice(0, limit)
+                            .map((map) => ({ ...map }));
+                    },
+                };
+                return cursor;
+            },
+            async findOne(filter: any) {
+                const map = mindmapMaps.find((candidate) => matchesObjectId(candidate._id, filter._id));
+                return map ? { ...map } : null;
             },
         };
     }
@@ -148,6 +194,7 @@ async function expectReject(work: Promise<unknown>, error: string | (new (...arg
 
 beforeEach(() => {
     mindmapDocs = [];
+    mindmapMaps = [];
     trainingDocs = [];
     problemDocs = [];
     counterValue = null;
@@ -354,7 +401,7 @@ describe('P2.14 managed problem source templates', () => {
         );
     });
 
-    it('keeps internal authoring state out of public projections', () => {
+    it('keeps private authoring state out of public projections while exposing canonical map references', () => {
         const source = readFileSync(resolve(process.cwd(), 'packages/hydrooj/src/model/problem.ts'), 'utf8');
         const listProjection = source.match(/static PROJECTION_LIST:[\s\S]*?\n {4}\];/)?.[0] || '';
         const publicProjection = source.match(/static PROJECTION_PUBLIC:[\s\S]*?\n {4}\];/)?.[0] || '';
@@ -362,10 +409,9 @@ describe('P2.14 managed problem source templates', () => {
         expect(listProjection).not.to.include("'sourceMeta'");
         expect(publicProjection).not.to.include("'managedAuthoring'");
         expect(publicProjection).not.to.include("'sourceMeta'");
-        expect(publicProjection).not.to.include("'knowledgeNodeIds'");
-        expect(source).to.include(
-            "static PROJECTION_MANAGED_EDITOR: Field[] = [...ProblemModel.PROJECTION_PUBLIC, 'sourceMeta', 'managedAuthoring', 'knowledgeNodeIds']",
-        );
+        expect(publicProjection).to.include("'knowledgeMapId'");
+        expect(publicProjection).to.include("'knowledgeNodeIds'");
+        expect(source).to.include('static PROJECTION_MANAGED_EDITOR: Field[] = [');
     });
 });
 
@@ -375,19 +421,32 @@ describe('P2.14 managed problem mindmap tags', () => {
     const leaf = new ObjectId('64b000000000000000000003');
 
     beforeEach(() => {
+        mindmapMaps = [
+            {
+                _id: primaryMapId,
+                title: '算法知识图谱',
+                rootNodeId: root,
+                visibility: 'public',
+                updatedAt: new Date('2026-07-20T00:00:00.000Z'),
+            },
+        ];
         mindmapDocs = [
-            { _id: root, parentId: null, topic: '数据结构', tags: ['数据结构'] },
-            { _id: parent, parentId: root, topic: '线段树', tags: ['线段树'] },
-            { _id: leaf, parentId: parent, topic: '基础线段树', tags: ['基础线段树'] },
+            { _id: root, mapId: primaryMapId, parentId: null, topic: '数据结构', tags: ['数据结构'] },
+            { _id: parent, mapId: primaryMapId, parentId: root, topic: '线段树', tags: ['线段树'] },
+            { _id: leaf, mapId: primaryMapId, parentId: parent, topic: '基础线段树', tags: ['基础线段树'] },
         ];
     });
 
     it('materializes tagged ancestors from the live tree', async () => {
         const result = await authoring.materializeManagedMindmapTags([leaf.toHexString()]);
         expect(result.nodeIds.map(String)).to.deep.equal([leaf.toHexString()]);
+        expect(result.mapId.equals(primaryMapId)).to.equal(true);
+        expect(result.mapTitle).to.equal('算法知识图谱');
         expect(result.tags).to.deep.equal(['数据结构', '线段树', '基础线段树']);
         expect(await authoring.listManagedMindmapOptions()).to.deep.include({
             id: leaf.toHexString(),
+            mapId: primaryMapId.toHexString(),
+            mapTitle: '算法知识图谱',
             label: '数据结构 / 线段树 / 基础线段树',
             tags: ['基础线段树'],
         });
@@ -396,6 +455,7 @@ describe('P2.14 managed problem mindmap tags', () => {
     it('canonicalizes managed draft suggestions from live node ids before persistence', async () => {
         const current = {
             authoringMode: 'managed' as const,
+            knowledgeMapId: primaryMapId,
             managedAuthoring: {
                 workingTitle: '工作标题',
                 selectedMindmapNodeIds: [parent],
@@ -423,8 +483,15 @@ describe('P2.14 managed problem mindmap tags', () => {
     });
 
     it('allows an empty structured selection without weakening the managed requirement', async () => {
-        expect(await authoring.materializeKnowledgeMindmapTags([])).to.deep.equal({ nodeIds: [], tags: [] });
-        expect(await authoring.materializeKnowledgeMindmapTags([''])).to.deep.equal({ nodeIds: [], tags: [] });
+        const empty = {
+            mapId: primaryMapId,
+            mapTitle: '算法知识图谱',
+            nodeIds: [],
+            nodePaths: [],
+            tags: [],
+        };
+        expect(await authoring.materializeKnowledgeMindmapTags([], { knowledgeMapId: primaryMapId })).to.deep.equal(empty);
+        await expectReject(authoring.materializeKnowledgeMindmapTags([''], { knowledgeMapId: primaryMapId }), 'knowledgeNodeIds');
         await expectReject(authoring.materializeKnowledgeMindmapTags(['not-an-object-id']), 'knowledgeNodeIds');
         await expectReject(authoring.materializeManagedMindmapTags(['']), 'mindmapNodeIds');
     });
@@ -438,7 +505,11 @@ describe('P2.14 managed problem mindmap tags', () => {
         ];
 
         const catalog = await authoring.listCanonicalProblemTagOptions('system');
-        expect(catalog).to.deep.include({ value: '基础线段树', label: '数据结构 / 线段树 / 基础线段树', group: '算法知识点' });
+        expect(catalog).to.deep.include({
+            value: '基础线段树',
+            label: '算法知识图谱 / 数据结构 / 线段树 / 基础线段树',
+            group: '算法知识点',
+        });
         expect(catalog).to.deep.include({ value: 'PAT乙级', label: 'PAT乙级', group: '来源与赛事' });
         expect(catalog).to.deep.include({ value: '2026春', label: '2026春', group: '来源与赛事' });
         expect(catalog).to.deep.include({ value: '2026CCCC', label: '2026CCCC', group: '来源与赛事' });
@@ -455,11 +526,34 @@ describe('P2.17 legacy programming tag normalization', () => {
     const mindmapVersion = new Date('2026-07-16T00:00:00.000Z');
 
     beforeEach(() => {
+        mindmapMaps = [
+            {
+                _id: primaryMapId,
+                title: '算法知识图谱',
+                rootNodeId: root,
+                visibility: 'public',
+                updatedAt: new Date(mindmapVersion.getTime()),
+            },
+        ];
         mindmapDocs = [
-            { _id: root, parentId: null, topic: '算法', tags: ['算法'], updatedAt: new Date(mindmapVersion.getTime()) },
-            { _id: unique, parentId: root, topic: '二分', tags: ['二分'], updatedAt: new Date(mindmapVersion.getTime()) },
-            { _id: duplicateA, parentId: root, topic: '快速幂 A', tags: ['快速幂'], updatedAt: new Date(mindmapVersion.getTime()) },
-            { _id: duplicateB, parentId: root, topic: '快速幂 B', tags: ['快速幂'], updatedAt: new Date(mindmapVersion.getTime()) },
+            { _id: root, mapId: primaryMapId, parentId: null, topic: '算法', tags: ['算法'], updatedAt: new Date(mindmapVersion.getTime()) },
+            { _id: unique, mapId: primaryMapId, parentId: root, topic: '二分', tags: ['二分'], updatedAt: new Date(mindmapVersion.getTime()) },
+            {
+                _id: duplicateA,
+                mapId: primaryMapId,
+                parentId: root,
+                topic: '快速幂 A',
+                tags: ['快速幂'],
+                updatedAt: new Date(mindmapVersion.getTime()),
+            },
+            {
+                _id: duplicateB,
+                mapId: primaryMapId,
+                parentId: root,
+                topic: '快速幂 B',
+                tags: ['快速幂'],
+                updatedAt: new Date(mindmapVersion.getTime()),
+            },
         ];
     });
 
@@ -501,6 +595,9 @@ describe('P2.17 legacy programming tag normalization', () => {
             docId: 17,
             structureRevision: 9,
             currentTags: ['二分', 'PAT乙级', 'Dijksrta'],
+            currentKnowledgeMapId: primaryMapId,
+            currentKnowledgeNodeIds: [unique],
+            targetKnowledgeMapId: primaryMapId,
             selectedNodeIds: [unique.toHexString()],
         });
 
@@ -520,6 +617,9 @@ describe('P2.17 legacy programming tag normalization', () => {
                 docId: 17,
                 structureRevision: 9,
                 currentTags: ['PAT乙级'],
+                currentKnowledgeMapId: primaryMapId,
+                currentKnowledgeNodeIds: [],
+                targetKnowledgeMapId: primaryMapId,
                 selectedNodeIds: [],
             }),
             'knowledgeNodeIds',
@@ -529,6 +629,9 @@ describe('P2.17 legacy programming tag normalization', () => {
             docId: 17,
             structureRevision: 9,
             currentTags: ['PAT乙级'],
+            currentKnowledgeMapId: primaryMapId,
+            currentKnowledgeNodeIds: [],
+            targetKnowledgeMapId: primaryMapId,
             selectedNodeIds: [unique.toHexString()],
         });
         const changed = await authoring.previewProgrammingTagNormalization({
@@ -536,6 +639,9 @@ describe('P2.17 legacy programming tag normalization', () => {
             docId: 17,
             structureRevision: 10,
             currentTags: ['PAT乙级', '2026春'],
+            currentKnowledgeMapId: primaryMapId,
+            currentKnowledgeNodeIds: [],
+            targetKnowledgeMapId: primaryMapId,
             selectedNodeIds: [unique.toHexString()],
         });
         expect(changed.fingerprint).not.to.equal(first.fingerprint);
@@ -545,6 +651,9 @@ describe('P2.17 legacy programming tag normalization', () => {
             docId: 18,
             structureRevision: undefined,
             currentTags: ['PAT乙级'],
+            currentKnowledgeMapId: primaryMapId,
+            currentKnowledgeNodeIds: [],
+            targetKnowledgeMapId: primaryMapId,
             selectedNodeIds: [unique.toHexString()],
         });
         expect(legacy.fingerprint).to.match(/^[a-f0-9]{64}$/);
@@ -557,6 +666,9 @@ describe('P2.17 legacy programming tag normalization', () => {
             docId: 17,
             structureRevision: 9,
             currentTags: ['PAT乙级', '二分'],
+            currentKnowledgeMapId: primaryMapId,
+            currentKnowledgeNodeIds: [unique],
+            targetKnowledgeMapId: primaryMapId,
             selectedNodeIds: [unique.toHexString()],
         });
         mindmapDocs = mindmapDocs.map((node) =>
@@ -567,6 +679,9 @@ describe('P2.17 legacy programming tag normalization', () => {
             docId: 17,
             structureRevision: 9,
             currentTags: ['PAT乙级', '二分'],
+            currentKnowledgeMapId: primaryMapId,
+            currentKnowledgeNodeIds: [unique],
+            targetKnowledgeMapId: primaryMapId,
             selectedNodeIds: [unique.toHexString()],
         });
 
@@ -575,10 +690,138 @@ describe('P2.17 legacy programming tag normalization', () => {
     });
 });
 
-describe('P2.14 managed problem training placement', () => {
-    const trainingId = new ObjectId('64b000000000000000000010');
+describe('P2.29 single-map problem knowledge ownership', () => {
+    const mapA = new ObjectId('64a000000000000000000011');
+    const mapB = new ObjectId('64a000000000000000000012');
+    const rootA = new ObjectId('64b000000000000000000031');
+    const leafA = new ObjectId('64b000000000000000000032');
+    const rootB = new ObjectId('64b000000000000000000033');
+    const leafB = new ObjectId('64b000000000000000000034');
+    const version = new Date('2026-07-20T00:00:00.000Z');
 
     beforeEach(() => {
+        mindmapMaps = [
+            { _id: mapA, title: '算法图', rootNodeId: rootA, visibility: 'public', updatedAt: version },
+            { _id: mapB, title: '面向对象图', rootNodeId: rootB, visibility: 'public', updatedAt: version },
+        ];
+        mindmapDocs = [
+            { _id: rootA, mapId: mapA, parentId: null, topic: '算法', tags: ['基础'], updatedAt: version },
+            { _id: leafA, mapId: mapA, parentId: rootA, topic: '模拟', tags: ['共享标签'], updatedAt: version },
+            { _id: rootB, mapId: mapB, parentId: null, topic: '面向对象', tags: ['OOP'], updatedAt: version },
+            { _id: leafB, mapId: mapB, parentId: rootB, topic: '类', tags: ['共享标签'], updatedAt: version },
+        ];
+    });
+
+    it('requires an explicit map when more than one public map exists and never derives ownership from selected nodes', async () => {
+        await expectReject(authoring.materializeManagedMindmapTags([leafA]), TestValidationError);
+        const materialized = await authoring.materializeKnowledgeMindmapTags([leafA], {
+            knowledgeMapId: mapA,
+            required: true,
+        });
+        expect(materialized.mapId.equals(mapA)).to.equal(true);
+        expect(materialized.mapTitle).to.equal('算法图');
+        expect(materialized.tags).to.deep.equal(['基础', '共享标签']);
+    });
+
+    it('scopes same-name tags by map and rejects cross-map node injection', async () => {
+        const optionsA = await authoring.listKnowledgeMindmapOptions(mapA);
+        const optionsB = await authoring.listKnowledgeMindmapOptions(mapB);
+        expect(optionsA.map((option) => option.mapId)).to.deep.equal([mapA.toHexString(), mapA.toHexString()]);
+        expect(optionsB.map((option) => option.mapId)).to.deep.equal([mapB.toHexString(), mapB.toHexString()]);
+        expect(optionsA.find((option) => option.id === leafA.toHexString())?.label).to.equal('算法 / 模拟');
+        expect(optionsB.find((option) => option.id === leafB.toHexString())?.label).to.equal('面向对象 / 类');
+        await expectReject(authoring.materializeKnowledgeMindmapTags([leafB], { knowledgeMapId: mapA, required: true }), TestMetadataConflictError);
+        await expectReject(
+            authoring.materializeKnowledgeMindmapTags([leafA, 123] as any, { knowledgeMapId: mapA, required: true }),
+            TestValidationError,
+        );
+    });
+
+    it('previews an explicit cross-map replacement with both map identities in its CAS fingerprint', async () => {
+        const preview = await authoring.previewProgrammingTagNormalization({
+            domainId: 'system',
+            docId: 29,
+            problemKind: 'programming',
+            structureRevision: 4,
+            currentTags: ['PAT乙级', '基础', '共享标签'],
+            currentKnowledgeMapId: mapA,
+            currentKnowledgeNodeIds: [leafA],
+            targetKnowledgeMapId: mapB,
+            selectedNodeIds: [leafB],
+        });
+        expect(preview.knowledgeMapId.equals(mapB)).to.equal(true);
+        expect(preview.knowledgeMapTitle).to.equal('面向对象图');
+        expect(preview.nextTags).to.deep.equal(['PAT乙级', 'OOP', '共享标签']);
+        expect(preview.addedTags).to.deep.equal(['OOP']);
+        expect(preview.removedTags).to.deep.equal(['基础']);
+
+        const sameNodesDifferentCurrentMap = await authoring.previewProgrammingTagNormalization({
+            domainId: 'system',
+            docId: 29,
+            problemKind: 'programming',
+            structureRevision: 4,
+            currentTags: ['PAT乙级', '基础', '共享标签'],
+            currentKnowledgeMapId: mapB,
+            currentKnowledgeNodeIds: [leafA],
+            targetKnowledgeMapId: mapB,
+            selectedNodeIds: [leafB],
+        });
+        expect(sameNodesDifferentCurrentMap.fingerprint).not.to.equal(preview.fingerprint);
+
+        const differentCurrentNodes = await authoring.previewProgrammingTagNormalization({
+            domainId: 'system',
+            docId: 29,
+            problemKind: 'programming',
+            structureRevision: 4,
+            currentTags: ['PAT乙级', '基础', '共享标签'],
+            currentKnowledgeMapId: mapA,
+            currentKnowledgeNodeIds: [rootA],
+            targetKnowledgeMapId: mapB,
+            selectedNodeIds: [leafB],
+        });
+        expect(differentCurrentNodes.fingerprint).not.to.equal(preview.fingerprint);
+    });
+
+    it('fails closed when a node path does not terminate at the map root', async () => {
+        mindmapMaps[0].rootNodeId = new ObjectId('64b000000000000000000099');
+        await expectReject(authoring.materializeKnowledgeMindmapTags([leafA], { knowledgeMapId: mapA, required: true }), TestMetadataConflictError);
+    });
+
+    it('rejects a hidden map at every new problem selection and switch boundary', async () => {
+        mindmapMaps[1].visibility = 'hidden';
+        await expectReject(authoring.listKnowledgeMindmapOptions(mapB), TestMetadataConflictError);
+        await expectReject(authoring.materializeManagedMindmapTags([leafB], mapB), TestMetadataConflictError);
+        await expectReject(
+            authoring.previewProgrammingTagNormalization({
+                domainId: 'system',
+                docId: 29,
+                problemKind: 'programming',
+                structureRevision: 4,
+                currentTags: ['PAT乙级', '基础'],
+                currentKnowledgeMapId: mapA,
+                currentKnowledgeNodeIds: [leafA],
+                targetKnowledgeMapId: mapB,
+                selectedNodeIds: [leafB],
+            }),
+            TestMetadataConflictError,
+        );
+    });
+});
+
+describe('P2.14 managed problem training placement', () => {
+    const trainingId = new ObjectId('64b000000000000000000010');
+    const defaultRootId = new ObjectId('64b000000000000000000011');
+
+    beforeEach(() => {
+        mindmapMaps = [
+            {
+                _id: primaryMapId,
+                title: '算法知识图谱',
+                rootNodeId: defaultRootId,
+                visibility: 'public',
+                updatedAt: new Date('2026-07-20T00:00:00.000Z'),
+            },
+        ];
         trainingDocs = [
             {
                 domainId: 'system',
@@ -642,8 +885,8 @@ describe('P2.14 managed problem training placement', () => {
         const root = new ObjectId('64b000000000000000000011');
         const leaf = new ObjectId('64b000000000000000000012');
         mindmapDocs = [
-            { _id: root, parentId: null, topic: '数据结构', tags: ['数据结构'] },
-            { _id: leaf, parentId: root, topic: '线段树', tags: ['线段树'] },
+            { _id: root, mapId: primaryMapId, parentId: null, topic: '数据结构', tags: ['数据结构'] },
+            { _id: leaf, mapId: primaryMapId, parentId: root, topic: '线段树', tags: ['线段树'] },
         ];
         const prepared = await authoring.prepareManagedProblemDraft('system', {
             workingTitle: '  线段树练习  ',
@@ -658,7 +901,8 @@ describe('P2.14 managed problem training placement', () => {
 
     it('normalizes a durable batch identity only at the canonical draft boundary', async () => {
         const nodeId = new ObjectId('64b000000000000000000012');
-        mindmapDocs = [{ _id: nodeId, parentId: null, topic: '模拟', tags: ['模拟'] }];
+        mindmapMaps[0].rootNodeId = nodeId;
+        mindmapDocs = [{ _id: nodeId, mapId: primaryMapId, parentId: null, topic: '模拟', tags: ['模拟'] }];
         const prepared = await authoring.prepareManagedProblemDraft('system', {
             workingTitle: '批量题目',
             content: 'statement',
@@ -686,7 +930,7 @@ describe('P2.14 managed problem training placement', () => {
         );
     });
 
-    it('rejects invalid source, empty mindmap, and partial training placement at the canonical draft boundary', async () => {
+    it('rejects invalid source and partial training placement while allowing an empty draft selection', async () => {
         await expectReject(
             authoring.prepareManagedProblemDraft('system', {
                 workingTitle: '题目',
@@ -697,19 +941,19 @@ describe('P2.14 managed problem training placement', () => {
             }),
             TestValidationError,
         );
-        await expectReject(
-            authoring.prepareManagedProblemDraft('system', {
-                workingTitle: '题目',
-                content: 'statement',
-                difficulty: 4,
-                sourceMeta: { template: 'self', year: 2026 },
-                mindmapNodeIds: [],
-            }),
-            TestValidationError,
-        );
+        const draft = await authoring.prepareManagedProblemDraft('system', {
+            workingTitle: '题目',
+            content: 'statement',
+            difficulty: 4,
+            sourceMeta: { template: 'self', year: 2026 },
+            mindmapNodeIds: [],
+        });
+        expect(draft.knowledgeMapId.equals(primaryMapId)).to.equal(true);
+        expect(draft.selectedMindmapNodeIds).to.deep.equal([]);
 
         const nodeId = new ObjectId('64b000000000000000000012');
-        mindmapDocs = [{ _id: nodeId, parentId: null, topic: '基础', tags: ['基础'] }];
+        mindmapMaps[0].rootNodeId = nodeId;
+        mindmapDocs = [{ _id: nodeId, mapId: primaryMapId, parentId: null, topic: '基础', tags: ['基础'] }];
         await expectReject(
             authoring.prepareManagedProblemDraft('system', {
                 workingTitle: '题目',
@@ -727,12 +971,13 @@ describe('P2.14 managed problem training placement', () => {
         const root = new ObjectId('64b000000000000000000011');
         const leaf = new ObjectId('64b000000000000000000012');
         mindmapDocs = [
-            { _id: root, parentId: null, topic: '数据结构', tags: ['数据结构'] },
-            { _id: leaf, parentId: root, topic: '线段树', tags: ['线段树'] },
+            { _id: root, mapId: primaryMapId, parentId: null, topic: '数据结构', tags: ['数据结构'] },
+            { _id: leaf, mapId: primaryMapId, parentId: root, topic: '线段树', tags: ['线段树'] },
         ];
         const pdoc = {
             docId: 101,
             sourceMeta: { template: 'pat_basic' as const, year: 2026, season: 'spring' as const },
+            knowledgeMapId: primaryMapId,
             managedAuthoring: {
                 workingTitle: '线段树练习',
                 selectedMindmapNodeIds: [leaf],

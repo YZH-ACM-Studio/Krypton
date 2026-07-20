@@ -1,5 +1,6 @@
 import { Readable } from 'stream';
 import decodeHTML from 'decode-html';
+import type { ObjectId } from 'mongodb';
 import xml2js from 'xml2js';
 import {
     _,
@@ -9,6 +10,7 @@ import {
     FileTooLargeError,
     fs,
     Handler,
+    param,
     PERM,
     ProblemConfigFile,
     ProblemModel,
@@ -17,6 +19,7 @@ import {
     Schema,
     SolutionModel,
     SystemModel,
+    Types,
     ValidationError,
     yaml,
     Zip,
@@ -28,10 +31,11 @@ const knownRemoteMapping = {
 
 class FpsProblemImportHandler extends Handler {
     async get() {
+        this.response.body = { knowledgeMaps: await ProblemModel.listKnowledgeMapsForProblemSelection() };
         this.response.template = 'problem_import_fps.html';
     }
 
-    async run(domainId: string, result: any) {
+    async run(domainId: string, result: any, knowledgeMapId: ObjectId) {
         if (!result?.fps) throw new BadRequestError('Selected file is not a valid FPS problemset.');
         for (const p of result.fps.item) {
             const markdown = [p.description?.[0], p.input?.[0], p.output?.[0], p.hint?.[0]].some((i) => i?.includes('[md]'));
@@ -62,7 +66,11 @@ class FpsProblemImportHandler extends Handler {
             const tags = _.filter(p.source, (i: string) => i.trim())
                 .flatMap((i) => i.split(' '))
                 .filter((i) => i);
-            const pid = await ProblemModel.add(domainId, null, title, content, this.user._id, tags, { problemKind: 'programming' });
+            const pid = await ProblemModel.add(domainId, null, title, content, this.user._id, tags, {
+                problemKind: 'programming',
+                knowledgeMapId,
+                knowledgeNodeIds: [],
+            });
             const tasks: Promise<any>[] = [ProblemModel.addTestdata(domainId, pid, 'config.yaml', Buffer.from(yaml.dump(config)))];
             if (!markdown) tasks.push(ProblemModel.edit(domainId, pid, { html: true }));
             const addTestdata = (node: any, index: string, ext: string) => {
@@ -105,9 +113,11 @@ class FpsProblemImportHandler extends Handler {
         }
     }
 
-    async post({ domainId }) {
+    @param('knowledgeMapId', Types.String, true)
+    async post({ domainId }, knowledgeMapId?: string) {
         const file = this.request.files.file;
         if (!file) throw new ValidationError('file');
+        const knowledge = await ProblemModel.resolveProgrammingKnowledgeMap(knowledgeMapId);
         const tasks = [];
         try {
             if (file.size > SystemModel.get('import-fps.limit')) throw new FileTooLargeError();
@@ -135,7 +145,7 @@ class FpsProblemImportHandler extends Handler {
             }
         }
         if (!tasks.length) throw new ValidationError('file', null, 'No valid fps format file found');
-        for (const task of tasks) await this.run(domainId, task);
+        for (const task of tasks) await this.run(domainId, task, knowledge.mapId);
         this.response.redirect = this.url('problem_main');
     }
 }

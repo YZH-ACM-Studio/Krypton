@@ -1,6 +1,7 @@
 import { Logger } from '@hydrooj/utils';
 import { ManagedProblemMetadataConflictError } from '../error';
 import type { ProblemDoc } from '../interface';
+import type { ObjectId } from 'mongodb';
 import db from '../service/db';
 import * as document from './document';
 import type { ManagedSourceMeta, ManagedTrainingPlacement } from './managed-problem-authoring';
@@ -21,6 +22,8 @@ export interface ManagedProblemPublicationCommit {
     title: string;
     difficulty: number;
     tags: string[];
+    knowledgeMapId: ObjectId;
+    knowledgeNodeIds: ObjectId[];
     sourceMeta: ManagedSourceMeta;
     managedAuthoring: NonNullable<ProblemDoc['managedAuthoring']>;
     expectedMetadataStatus: 'draft' | 'confirmed';
@@ -74,6 +77,8 @@ function publicationUpdate(input: ManagedProblemPublicationCommit) {
             title: input.title,
             difficulty: input.difficulty,
             tag: input.tags,
+            knowledgeMapId: input.knowledgeMapId,
+            knowledgeNodeIds: input.knowledgeNodeIds,
             sourceMeta: input.sourceMeta,
             managedAuthoring: input.managedAuthoring,
             hidden: false,
@@ -217,6 +222,8 @@ async function confirmPublished(input: ManagedProblemPublicationCommit): Promise
         title: input.title,
         difficulty: input.difficulty,
         tag: input.tags,
+        knowledgeMapId: input.knowledgeMapId,
+        knowledgeNodeIds: input.knowledgeNodeIds,
         authoringMode: 'managed',
         'managedAuthoring.metadataStatus': 'confirmed',
         'managedAuthoring.approvedBy': input.managedAuthoring.approvedBy,

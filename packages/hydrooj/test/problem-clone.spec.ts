@@ -96,15 +96,62 @@ describe('physical problem storage clone', () => {
         expect(rejection).to.be.lessThan(creation);
     });
 
-    it('keeps trusted programming imports legacy unless canonical node IDs are explicitly supplied', () => {
+    it('requires every trusted programming import to bind one public map while preserving map-only drafts', () => {
         const source = readFileSync(resolve(__dirname, '../src/model/problem.ts'), 'utf8');
         const start = source.indexOf('static async addWithId(');
         const end = source.indexOf('static async createManagedProgrammingDraft', start);
         const method = source.slice(start, end);
 
-        expect(method).to.include("problemKind === 'programming' && meta.knowledgeNodeIds !== undefined");
-        expect(method).to.include('args.knowledgeNodeIds = meta.knowledgeNodeIds');
+        expect(method).to.include("if (problemKind === 'programming') {");
+        expect(method).to.include('knowledgeMapId: meta.knowledgeMapId');
+        expect(method).to.include('allowSolePublicMap: !meta.knowledgeMapId');
+        expect(method).to.include('args.knowledgeMapId = knowledge.mapId');
+        expect(method).to.include('if (meta.knowledgeNodeIds !== undefined) args.knowledgeNodeIds = knowledge.nodeIds');
         expect(method).to.include("requireKnowledgePair: problemKind !== 'programming' || meta.knowledgeNodeIds !== undefined");
         expect(method).not.to.include("if (problemKind === 'programming') args.knowledgeNodeIds = []");
+    });
+
+    it('creates the bootstrap welcome draft with an explicit empty canonical node array', () => {
+        const source = readFileSync(resolve(__dirname, '../src/model/problem.ts'), 'utf8');
+        const start = source.indexOf('static async createBuiltinWelcomeProblem(');
+        const end = source.indexOf('private static async materializeStartedContainerLock', start);
+        const method = source.slice(start, end);
+
+        expect(method).to.include("{ problemKind: 'programming', knowledgeMapId: knowledge.mapId, knowledgeNodeIds: [] }");
+    });
+
+    it('resolves one public map before a Hydro archive import can create any problem', () => {
+        const source = readFileSync(resolve(__dirname, '../src/model/problem.ts'), 'utf8');
+        const start = source.indexOf('static async import(');
+        const end = source.indexOf('static async export(', start);
+        const method = source.slice(start, end);
+
+        const resolution = method.indexOf('resolveProgrammingKnowledgeMap(options.knowledgeMapId)');
+        const extraction = method.indexOf("if (filepath.endsWith('.zip'))");
+        const creation = method.indexOf('knowledgeMapId: importKnowledge.mapId');
+        expect(resolution).to.be.greaterThan(-1);
+        expect(resolution).to.be.lessThan(extraction);
+        expect(creation).to.be.greaterThan(extraction);
+        expect(method).to.include('knowledgeNodeIds: []');
+    });
+
+    it('plumbs an explicit map through every non-interactive programming ingestion path', () => {
+        const directSources = [
+            'packages/hydrooj/src/handler/crawler.ts',
+            'packages/import-hoj/index.ts',
+            'packages/import-qduoj/index.ts',
+            'packages/vjudge/src/index.ts',
+        ].map((filename) => readFileSync(resolve(process.cwd(), filename), 'utf8'));
+
+        for (const source of directSources) {
+            expect(source).to.include('resolveProgrammingKnowledgeMap(');
+            expect(source).to.include('knowledgeMapId: knowledge.mapId');
+            expect(source).to.include('knowledgeNodeIds: []');
+        }
+        const fps = readFileSync(resolve(process.cwd(), 'packages/fps-importer/index.ts'), 'utf8');
+        expect(fps).to.include('resolveProgrammingKnowledgeMap(');
+        expect(fps).to.include('this.run(domainId, task, knowledge.mapId)');
+        expect(fps).to.include('knowledgeMapId,');
+        expect(fps).to.include('knowledgeNodeIds: []');
     });
 });

@@ -707,6 +707,9 @@ export function ProblemStatisticsPage() {
 /* ---------- Problem Import ---------- */
 
 export function ProblemImportPage() {
+  const data = useBootstrap().page.data;
+  const knowledgeMaps: Array<{ id: string; title: string }> = data.knowledgeMaps || [];
+  const defaultMapId = knowledgeMaps.length === 1 ? knowledgeMaps[0].id : '';
   return (
     <AdminPage bypassPrivGate title="导入题目" description="从 Hydro 格式压缩包批量导入题目">
       <Card>
@@ -722,6 +725,20 @@ export function ProblemImportPage() {
                 题号前缀 (可选)
               </label>
               <Input id="prefix" name="preferredPrefix" placeholder="例如 A, P, CF" pattern="[a-zA-Z]*" />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="knowledge-map" className="text-sm font-medium">
+                所属导图
+              </label>
+              <SimpleSelect
+                id="knowledge-map"
+                name="knowledgeMapId"
+                defaultValue={defaultMapId}
+                required
+                placeholder="请选择导图"
+                options={knowledgeMaps.map((map) => ({ value: map.id, label: map.title }))}
+              />
+              <p className="text-xs text-muted-foreground">导入题会先保持隐藏；知识节点可在导入后逐题归类。</p>
             </div>
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 text-sm">

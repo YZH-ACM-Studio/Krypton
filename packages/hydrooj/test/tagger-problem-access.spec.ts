@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import { beforeEach, describe, it } from 'node:test';
 import { ProblemTagConflictError } from '../src/error';
+import { resolveProblemKnowledgeNodeIds } from '../src/lib/problem-tag-canonical';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {} };
@@ -11,6 +12,13 @@ const PERM = {
     PERM_VIEW_PROBLEM: 4n,
     PERM_VIEW_PROBLEM_HIDDEN: 8n,
 };
+
+const MAP_A = '111111111111111111111111';
+const MAP_B = '222222222222222222222222';
+const ROOT_A = 'aaaaaaaaaaaaaaaaaaaaaaaa';
+const NODE_A = 'aaaaaaaaaaaaaaaaaaaaaaab';
+const ROOT_B = 'bbbbbbbbbbbbbbbbbbbbbbbb';
+const NODE_B = 'bbbbbbbbbbbbbbbbbbbbbbbc';
 
 class TestPermissionError extends Error {
     name = 'PermissionError';
@@ -24,6 +32,7 @@ class TestPermissionError extends Error {
 }
 
 const calls = {
+    applies: [] as any[],
     aggregates: [] as any[],
     auth: [] as any[],
     edits: [] as any[],
@@ -34,14 +43,17 @@ const calls = {
     loads: [] as any[],
     maintain: [] as any[],
     mindmapFinds: [] as any[],
+    mindmapLists: [] as any[],
     oplogs: [] as any[],
     refresh: [] as any[],
+    previews: [] as any[],
 };
 let aggregateRows: any[] = [];
 let editError: Error | null = null;
 let getDocs = new Map<number, any>();
 let listDocs: any[] = [];
 let mindmapDocs: any[] = [];
+let mindmapMaps: any[] = [];
 let tokenUser: any;
 let tokenDocDomainId = 'system';
 
@@ -83,6 +95,15 @@ const problemStub = {
             (user.admin || pdoc.owner === user._id || user._maintainedPids.has(pdoc.docId))
         );
     },
+    canEditProblemTags(user: any, pdoc: any) {
+        calls.events.push(`tag:${pdoc.docId}`);
+        return (
+            user._problemAclLoaded === true &&
+            user._problemAclDomainId === pdoc.domainId &&
+            !user._aclFencedPids.has(pdoc.docId) &&
+            (user.admin || pdoc.owner === user._id || user._maintainedPids.has(pdoc.docId) || user._tagContributionPids.has(pdoc.docId))
+        );
+    },
     async edit(domainId: string, docId: number, _patch: unknown) {
         calls.events.push(`raw-edit:${docId}`);
         throw new Error('raw problem.edit is forbidden for tagger writes');
@@ -93,6 +114,23 @@ const problemStub = {
         if (editError) throw editError;
         return { domainId, docId, ...(patch as any), actor };
     },
+    async applyProgrammingTagNormalization(input: any) {
+        calls.applies.push(input);
+        if (editError) throw editError;
+        const current = getDocs.get(input.pid);
+        const preview = await previewProgrammingTagNormalizationStub({
+            domainId: input.domainId,
+            docId: input.pid,
+            currentTags: current?.tag || [],
+            currentKnowledgeMapId: current?.knowledgeMapId,
+            currentKnowledgeNodeIds: resolveProblemKnowledgeNodeIds(current || {}, `problem ${input.pid}`),
+            targetKnowledgeMapId: input.targetKnowledgeMapId,
+            selectedNodeIds: input.selectedNodeIds,
+        });
+        if (preview.fingerprint !== input.previewFingerprint) throw new ProblemTagConflictError(input.pid);
+        return { pdoc: { docId: input.pid }, preview };
+    },
+    previewProgrammingTagNormalization: previewProgrammingTagNormalizationStub,
     async refreshProblemAcl(user: any, domainId: string) {
         calls.refresh.push({ user, domainId });
         const loaded = await (global as any).Hydro.model.permits.loadAclForUser(domainId, user._id);
@@ -100,6 +138,8 @@ const problemStub = {
             _permitPids: loaded.permitPids,
             _authoredPids: loaded.authoredPids,
             _maintainedPids: loaded.maintainedPids,
+            _dataContributionPids: loaded.dataContributionPids,
+            _tagContributionPids: loaded.tagContributionPids,
             _aclFencedPids: loaded.fencedPids,
             _problemAclDomainId: domainId,
             _problemAclLoaded: true,
@@ -114,6 +154,26 @@ const problemStub = {
         return cursor(listDocs);
     },
 };
+
+async function previewProgrammingTagNormalizationStub(input: any) {
+    calls.previews.push(input);
+    const selected = (input.selectedNodeIds || []).map(String);
+    if (selected.includes(NODE_A) && String(input.targetKnowledgeMapId) !== MAP_A) throw new Error('node does not belong to requested map');
+    if (selected.includes(NODE_B) && String(input.targetKnowledgeMapId) !== MAP_B) throw new Error('node does not belong to requested map');
+    const knowledgeTags = selected.includes(NODE_B) ? ['共享标签'] : ['数学'];
+    const sourceTags = (input.currentTags || []).filter((tag: string) => ['L2', 'PAT甲级'].includes(tag));
+    return {
+        knowledgeMapId: { toString: () => String(input.targetKnowledgeMapId) },
+        knowledgeMapTitle: String(input.targetKnowledgeMapId) === MAP_B ? '面向对象' : '算法',
+        selectedNodeIds: selected.map((id: string) => ({ toString: () => id })),
+        sourceTags,
+        nextTags: [...sourceTags, ...knowledgeTags],
+        retainedTags: sourceTags,
+        addedTags: knowledgeTags,
+        removedTags: [],
+        fingerprint: JSON.stringify({ mapId: String(input.targetKnowledgeMapId), selected }),
+    };
+}
 
 const documentStub = {
     TYPE_PROBLEM: 10,
@@ -139,13 +199,30 @@ class TestLogger {
 const hydroojStub = {
     db: {
         collection(name: string) {
-            if (name !== 'mindmap.nodes') throw new Error(`unexpected collection: ${name}`);
-            return {
-                find(query: unknown, options: unknown) {
-                    calls.mindmapFinds.push({ query: structuredClone(query), options: structuredClone(options) });
-                    return cursor(mindmapDocs);
-                },
-            };
+            if (name === 'mindmap.nodes') {
+                return {
+                    find(query: unknown, options: unknown) {
+                        const mapId = String((query as any)?.mapId || '');
+                        calls.mindmapFinds.push({ query: { mapId }, options: structuredClone(options) });
+                        return cursor(mindmapDocs.filter((node) => !mapId || String(node.mapId) === mapId));
+                    },
+                };
+            }
+            if (name === 'mindmap.maps') {
+                return {
+                    async findOne(query: any, options: unknown) {
+                        calls.mindmapLists.push({ query: structuredClone(query), options: structuredClone(options) });
+                        return mindmapMaps.find((map) => map.id === String(query?._id) && map.visibility === query?.visibility)
+                            ? {
+                                  _id: query._id,
+                                  title: mindmapMaps.find((map) => map.id === String(query?._id))!.title,
+                                  visibility: 'public',
+                              }
+                            : null;
+                    },
+                };
+            }
+            throw new Error(`unexpected collection: ${name}`);
         },
     },
     Handler: HandlerStub,
@@ -157,7 +234,7 @@ const hydroojStub = {
     param: noopDecorator,
     PERM,
     PermissionError: TestPermissionError,
-    Types: { Any: () => ({}) },
+    Types: { Any: () => ({}), String: () => ({}) },
 };
 
 async function requireAuthTokenStub(handler: any, channel: string) {
@@ -236,6 +313,8 @@ function installAclLoader(
         permitPids: new Set([7, 9]),
         authoredPids: new Set(),
         maintainedPids: new Set([7]),
+        dataContributionPids: new Set(),
+        tagContributionPids: new Set(),
         fencedPids: new Set([9]),
         ownsLegacyProblems: false,
     }),
@@ -243,7 +322,11 @@ function installAclLoader(
     (global as any).Hydro.model.permits = {
         async loadAclForUser(domainId: string, uid: number) {
             calls.loads.push({ domainId, uid });
-            return load(domainId, uid);
+            return {
+                dataContributionPids: new Set(),
+                tagContributionPids: new Set(),
+                ...(await load(domainId, uid)),
+            };
         },
     };
 }
@@ -264,6 +347,10 @@ beforeEach(() => {
     getDocs = new Map();
     listDocs = [];
     mindmapDocs = [];
+    mindmapMaps = [
+        { id: MAP_A, title: '算法', visibility: 'public' },
+        { id: MAP_B, title: '面向对象', visibility: 'public' },
+    ];
     tokenDocDomainId = 'system';
     tokenUser = makeUser(42, undefined, {
         _permitPids: new Set([999]),
@@ -353,7 +440,13 @@ describe('P2.11 tagger enumeration gates and scopes', () => {
 
             await handler.prepare();
 
-            const error = await captureFailure(() => (routeName === 'tagger_retag' ? handler.post({}, ['old'], 'new', false) : handler.get()));
+            const error = await captureFailure(() =>
+                routeName === 'tagger_retag'
+                    ? handler.post({}, ['old'], 'new', false)
+                    : routeName === 'tagger_mindmap'
+                      ? handler.get({}, MAP_A)
+                      : handler.get(),
+            );
             expect(error).to.be.instanceOf(TestPermissionError);
             expect(error.params).to.deep.equal([PERM.PERM_CREATE_PROBLEM]);
         }
@@ -457,39 +550,98 @@ describe('P2.11 tagger enumeration gates and scopes', () => {
 });
 
 describe('auto tagger read context', () => {
-    it('returns the live mindmap hierarchy through the same tagger permission boundary', async () => {
+    it('reads a legacy managed problem canonical selection in summaries, audits, and statement context', async () => {
+        const managed = {
+            docId: 7,
+            pid: 'P7',
+            title: 'Legacy managed',
+            tag: ['PAT甲级'],
+            hidden: false,
+            content: 'statement',
+            authoringMode: 'managed',
+            managedAuthoring: { selectedMindmapNodeIds: [NODE_A] },
+            knowledgeMapId: MAP_A,
+        };
+        listDocs = [managed];
+
+        const problems = makeHandler('tagger_problems');
+        await problems.prepare();
+        await problems.get();
+        expect(problems.response.body.problems[0].knowledgeNodeIds).to.deep.equal([NODE_A]);
+        expect(calls.getMulti[0].projection).to.include.members(['authoringMode', 'managedAuthoring']);
+
+        const audit = makeHandler('tagger_audit');
+        await audit.prepare();
+        await audit.get();
+        expect(audit.response.body.problems[0].knowledgeNodeIds).to.deep.equal([NODE_A]);
+        expect(calls.getMulti[1].projection).to.include.members(['authoringMode', 'managedAuthoring']);
+
+        const context = makeHandler('tagger_problem_context');
+        await context.prepare();
+        await context.get({}, 7);
+        expect(context.response.body.problem.knowledgeNodeIds).to.deep.equal([NODE_A]);
+        expect(calls.getMulti[2].projection).to.include.members(['authoringMode', 'managedAuthoring']);
+    });
+
+    it('returns only the requested public map even when another map reuses the same flat tag', async () => {
         mindmapDocs = [
-            { _id: { toString: () => 'root' }, parentId: null, topic: '算法', tags: [], order: 0 },
-            { _id: { toString: () => 'math' }, parentId: { toString: () => 'root' }, topic: '数学', tags: ['数学'], order: 1 },
+            { _id: ROOT_A, mapId: MAP_A, parentId: null, topic: '算法', tags: [], order: 0 },
+            { _id: NODE_A, mapId: MAP_A, parentId: ROOT_A, topic: '数学', tags: ['共享标签'], order: 1 },
+            { _id: ROOT_B, mapId: MAP_B, parentId: null, topic: '面向对象', tags: [], order: 0 },
+            { _id: NODE_B, mapId: MAP_B, parentId: ROOT_B, topic: '类', tags: ['共享标签'], order: 1 },
         ];
         const handler = makeHandler('tagger_mindmap');
         await handler.prepare();
 
-        await handler.get();
+        await handler.get({}, MAP_A);
 
         expect(handler.response.body).to.deep.equal({
             domainId: 'system',
+            knowledgeMap: { id: MAP_A, title: '算法', visibility: 'public' },
             nodes: [
-                { id: 'root', parentId: null, topic: '算法', tags: [] },
-                { id: 'math', parentId: 'root', topic: '数学', tags: ['数学'] },
+                { id: ROOT_A, mapId: MAP_A, parentId: null, topic: '算法', tags: [] },
+                { id: NODE_A, mapId: MAP_A, parentId: ROOT_A, topic: '数学', tags: ['共享标签'] },
             ],
         });
         expect(calls.mindmapFinds).to.have.lengthOf(1);
+        expect(String(calls.mindmapFinds[0].query.mapId)).to.equal(MAP_A);
     });
 
-    it('fails fast when a live mindmap node has malformed tag data', async () => {
-        mindmapDocs = [{ _id: { toString: () => 'math' }, parentId: null, topic: '数学', tags: ['数学', 42] }];
+    it('returns 404 for a hidden or unknown map without querying its nodes', async () => {
+        mindmapMaps = [{ id: MAP_A, title: '算法', visibility: 'public' }];
         const handler = makeHandler('tagger_mindmap');
         await handler.prepare();
 
-        const error = await captureFailure(() => handler.get());
+        await handler.get({}, MAP_B);
+
+        expect(handler.response.status).to.equal(404);
+        expect(handler.response.body).to.deep.equal({ error: 'mindmap_not_found' });
+        expect(calls.mindmapFinds).to.deep.equal([]);
+    });
+
+    it('fails fast when a live mindmap node has malformed tag data', async () => {
+        mindmapDocs = [{ _id: NODE_A, mapId: MAP_A, parentId: null, topic: '数学', tags: ['数学', 42] }];
+        const handler = makeHandler('tagger_mindmap');
+        await handler.prepare();
+
+        const error = await captureFailure(() => handler.get({}, MAP_A));
 
         expect(error).to.be.instanceOf(TypeError);
-        expect(error.message).to.match(/mindmap node math tags/i);
+        expect(error.message).to.match(new RegExp(`mindmap node ${NODE_A} tags`, 'i'));
     });
 
     it('loads one problem statement inside the token user problem-bank scope, including hidden authored problems', async () => {
-        listDocs = [{ docId: 7, pid: 'P7', title: '快速幂', tag: ['PAT甲级'], content: '计算 a^b。' }];
+        listDocs = [
+            {
+                docId: 7,
+                pid: 'P7',
+                title: '快速幂',
+                tag: ['PAT甲级'],
+                content: '计算 a^b。',
+                knowledgeMapId: MAP_A,
+                knowledgeNodeIds: [NODE_A],
+            },
+        ];
         const handler = makeHandler('tagger_problem_context');
         await handler.prepare();
 
@@ -514,7 +666,15 @@ describe('auto tagger read context', () => {
         });
         expect(handler.response.body).to.deep.equal({
             domainId: 'system',
-            problem: { docId: 7, pid: 'P7', title: '快速幂', tag: ['PAT甲级'], content: '计算 a^b。' },
+            problem: {
+                docId: 7,
+                pid: 'P7',
+                title: '快速幂',
+                tag: ['PAT甲级'],
+                content: '计算 a^b。',
+                knowledgeMapId: MAP_A,
+                knowledgeNodeIds: [NODE_A],
+            },
         });
     });
 });
@@ -590,22 +750,192 @@ describe('P2.11 tagger mutation gates', () => {
         expect(calls.edits).to.deep.equal([]);
     });
 
-    it('rejects a malformed mindmap-only final tag array without normalizing it', async () => {
+    it('rejects the removed flat-tag compatibility flag before any batch write', async () => {
         const handler = makeHandler('tagger_apply');
         await handler.prepare();
 
         await handler.post({}, [{ docId: 7, expectedTag: ['L2'], tag: 'L2,数学', mindmapOnly: true }]);
 
         expect(handler.response.status).to.equal(400);
-        expect(handler.response.body).to.deep.equal({ error: 'bad_mindmapTag', index: 0 });
+        expect(handler.response.body).to.deep.equal({ error: 'mindmapOnly_removed', index: 0 });
         expect(calls.edits).to.deep.equal([]);
     });
 
-    it('refuses a mindmap-only write that adds a tag outside the live mindmap', async () => {
-        mindmapDocs = [
-            { _id: { toString: () => 'root' }, parentId: null, topic: '算法', tags: [] },
-            { _id: { toString: () => 'math' }, parentId: { toString: () => 'root' }, topic: '数学', tags: ['数学'] },
-        ];
+    it('passes an explicit map and node selection through canonical preview and fingerprint CAS', async () => {
+        getDocs.set(7, {
+            domainId: 'system',
+            docId: 7,
+            owner: 42,
+            pid: 'P7',
+            title: 'old',
+            tag: ['L2'],
+            problemKind: 'programming',
+            structureRevision: 3,
+            knowledgeMapId: MAP_A,
+            knowledgeNodeIds: [],
+        });
+        const handler = makeHandler('tagger_apply');
+        await handler.prepare();
+
+        await handler.post({}, [
+            {
+                docId: 7,
+                expectedTag: ['L2'],
+                expectedKnowledgeMapId: MAP_A,
+                expectedKnowledgeNodeIds: [],
+                knowledgeMapId: MAP_A,
+                knowledgeNodeIds: [NODE_A],
+            },
+        ]);
+
+        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: true }]);
+        expect(calls.edits).to.deep.equal([]);
+        expect(calls.applies).to.have.lengthOf(1);
+        expect(calls.applies[0]).to.include({ domainId: 'system', pid: 7, targetKnowledgeMapId: MAP_A });
+        expect(calls.applies[0].selectedNodeIds).to.deep.equal([NODE_A]);
+        expect(calls.previews).to.have.lengthOf(2);
+        expect(calls.oplogs).to.have.lengthOf(1);
+        expect(calls.oplogs[0][2].changes[0].after).to.deep.equal({
+            tag: ['L2', '数学'],
+            knowledgeMapId: MAP_A,
+            knowledgeNodeIds: [NODE_A],
+        });
+    });
+
+    it('preserves a legacy managed canonical selection through preview and apply', async () => {
+        getDocs.set(7, {
+            domainId: 'system',
+            docId: 7,
+            owner: 42,
+            pid: 'P7',
+            title: 'old',
+            tag: ['L2'],
+            problemKind: 'programming',
+            authoringMode: 'managed',
+            managedAuthoring: { selectedMindmapNodeIds: [NODE_A] },
+            structureRevision: 3,
+            knowledgeMapId: MAP_A,
+        });
+        const handler = makeHandler('tagger_apply');
+        await handler.prepare();
+
+        await handler.post({}, [
+            {
+                docId: 7,
+                expectedTag: ['L2'],
+                expectedKnowledgeMapId: MAP_A,
+                expectedKnowledgeNodeIds: [NODE_A],
+                knowledgeMapId: MAP_A,
+                knowledgeNodeIds: [NODE_A],
+            },
+        ]);
+
+        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: true }]);
+        expect(calls.gets[0].projection).to.include.members(['authoringMode', 'managedAuthoring']);
+        expect(calls.previews).to.have.lengthOf(2);
+        expect(calls.previews.every((preview) => JSON.stringify(preview.currentKnowledgeNodeIds) === JSON.stringify([NODE_A]))).to.equal(true);
+    });
+
+    it('preserves the dedicated tag-contributor capability in the token ACL snapshot', async () => {
+        installAclLoader(async () => ({
+            permitPids: new Set([7]),
+            authoredPids: new Set(),
+            maintainedPids: new Set(),
+            dataContributionPids: new Set(),
+            tagContributionPids: new Set([7]),
+            fencedPids: new Set(),
+            ownsLegacyProblems: false,
+        }));
+        getDocs.set(7, {
+            domainId: 'system',
+            docId: 7,
+            owner: 99,
+            pid: 'P7',
+            title: 'old',
+            tag: ['L2'],
+            knowledgeMapId: MAP_A,
+            knowledgeNodeIds: [],
+        });
+        const handler = makeHandler('tagger_apply');
+        await handler.prepare();
+
+        await handler.post({}, [
+            {
+                docId: 7,
+                expectedTag: ['L2'],
+                expectedKnowledgeMapId: MAP_A,
+                expectedKnowledgeNodeIds: [],
+                knowledgeMapId: MAP_A,
+                knowledgeNodeIds: [NODE_A],
+            },
+        ]);
+
+        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: true }]);
+        expect([...handler.user._tagContributionPids]).to.deep.equal([7]);
+        expect(calls.applies).to.have.lengthOf(1);
+    });
+
+    it('rejects a stale canonical snapshot before preview or write even when flat tags are unchanged', async () => {
+        getDocs.set(7, {
+            domainId: 'system',
+            docId: 7,
+            owner: 42,
+            pid: 'P7',
+            title: 'old',
+            tag: ['L2'],
+            knowledgeMapId: MAP_B,
+            knowledgeNodeIds: [NODE_B],
+        });
+        const handler = makeHandler('tagger_apply');
+        await handler.prepare();
+
+        await handler.post({}, [
+            {
+                docId: 7,
+                expectedTag: ['L2'],
+                expectedKnowledgeMapId: MAP_A,
+                expectedKnowledgeNodeIds: [],
+                knowledgeMapId: MAP_A,
+                knowledgeNodeIds: [NODE_A],
+            },
+        ]);
+
+        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: false, error: 'canonical_conflict' }]);
+        expect(calls.previews).to.deep.equal([]);
+        expect(calls.applies).to.deep.equal([]);
+        expect(calls.edits).to.deep.equal([]);
+    });
+
+    it('rejects a node from another map instead of resolving its duplicate flat tag globally', async () => {
+        getDocs.set(7, {
+            domainId: 'system',
+            docId: 7,
+            owner: 42,
+            pid: 'P7',
+            title: 'old',
+            tag: ['L2'],
+            knowledgeMapId: MAP_A,
+            knowledgeNodeIds: [],
+        });
+        const handler = makeHandler('tagger_apply');
+        await handler.prepare();
+
+        await handler.post({}, [
+            {
+                docId: 7,
+                expectedTag: ['L2'],
+                expectedKnowledgeMapId: MAP_A,
+                expectedKnowledgeNodeIds: [],
+                knowledgeMapId: MAP_A,
+                knowledgeNodeIds: [NODE_B],
+            },
+        ]);
+
+        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: false, error: 'node does not belong to requested map' }]);
+        expect(calls.applies).to.deep.equal([]);
+    });
+
+    it('rejects a changed flat tag request and still permits a title edit carrying an unchanged legacy tag snapshot', async () => {
         getDocs.set(7, {
             domainId: 'system',
             docId: 7,
@@ -617,18 +947,27 @@ describe('P2.11 tagger mutation gates', () => {
         const handler = makeHandler('tagger_apply');
         await handler.prepare();
 
-        await handler.post({}, [{ docId: 7, expectedTag: ['L2'], tag: ['L2', '伪造标签'], mindmapOnly: true }]);
+        await handler.post({}, [
+            { docId: 7, tag: ['L2', '数学'] },
+            { docId: 7, expectedTag: ['L2'], tag: ['L2'], title: 'new' },
+        ]);
 
-        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: false, error: 'tag_not_in_mindmap' }]);
-        expect(calls.edits).to.deep.equal([]);
+        expect(handler.response.body.results).to.deep.equal([
+            { docId: 7, ok: false, error: 'canonical_nodes_required' },
+            { docId: 7, ok: true },
+        ]);
+        expect(calls.edits).to.deep.equal([
+            {
+                domainId: 'system',
+                docId: 7,
+                patch: { title: 'new' },
+                requestedUnset: {},
+                options: {},
+            },
+        ]);
     });
 
-    it('refuses a mindmap-only child tag when its live parent tag is absent', async () => {
-        mindmapDocs = [
-            { _id: { toString: () => 'root' }, parentId: null, topic: '算法', tags: [] },
-            { _id: { toString: () => 'math' }, parentId: { toString: () => 'root' }, topic: '数学', tags: ['数学'] },
-            { _id: { toString: () => 'number' }, parentId: { toString: () => 'math' }, topic: '数论', tags: ['数论'] },
-        ];
+    it('reports a canonical fingerprint race without falling back to a flat tag write', async () => {
         getDocs.set(7, {
             domainId: 'system',
             docId: 7,
@@ -636,74 +975,38 @@ describe('P2.11 tagger mutation gates', () => {
             pid: 'P7',
             title: 'old',
             tag: ['L2'],
-        });
-        const handler = makeHandler('tagger_apply');
-        await handler.prepare();
-
-        await handler.post({}, [{ docId: 7, expectedTag: ['L2'], tag: ['L2', '数论'], mindmapOnly: true }]);
-
-        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: false, error: 'mindmap_parent_missing' }]);
-        expect(calls.edits).to.deep.equal([]);
-    });
-
-    it('passes the analyzed tags into the atomic authorized write and reports its conflict', async () => {
-        getDocs.set(7, {
-            domainId: 'system',
-            docId: 7,
-            owner: 42,
-            pid: 'P7',
-            title: 'old',
-            tag: ['L2'],
+            knowledgeMapId: MAP_A,
+            knowledgeNodeIds: [],
         });
         editError = new ProblemTagConflictError(7);
         const handler = makeHandler('tagger_apply');
         await handler.prepare();
 
-        await handler.post({}, [{ docId: 7, expectedTag: ['L2'], tag: ['L2', '数学'] }]);
-
-        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: false, error: 'tag_conflict' }]);
-        expect(calls.edits).to.deep.equal([
+        await handler.post({}, [
             {
-                domainId: 'system',
                 docId: 7,
-                patch: { tag: ['L2', '数学'] },
-                requestedUnset: {},
-                options: { expectedTag: ['L2'] },
+                expectedTag: ['L2'],
+                expectedKnowledgeMapId: MAP_A,
+                expectedKnowledgeNodeIds: [],
+                knowledgeMapId: MAP_A,
+                knowledgeNodeIds: [NODE_A],
             },
         ]);
+
+        expect(handler.response.body.results).to.deep.equal([{ docId: 7, ok: false, error: 'canonical_conflict' }]);
+        expect(calls.applies).to.have.lengthOf(1);
+        expect(calls.edits).to.deep.equal([]);
     });
 
-    it('uses the atomic authorized edit entrypoint for every retag write', async () => {
-        listDocs = [
-            { domainId: 'system', docId: 7, owner: 99, pid: 'P7', tag: ['old'] },
-            { domainId: 'system', docId: 10, owner: 42, pid: 'P10', tag: ['old'] },
-        ];
-        installAclLoader(async () => ({
-            permitPids: new Set([7]),
-            authoredPids: new Set(),
-            maintainedPids: new Set([7]),
-            fencedPids: new Set(),
-            ownsLegacyProblems: false,
-        }));
+    it('keeps retag dry-run inventory but rejects every live flat-tag rewrite before querying or writing', async () => {
         const handler = makeHandler('tagger_retag');
         await handler.prepare();
 
         await handler.post({}, ['old'], 'new', false);
 
-        expect(calls.events).to.deep.equal(['editAuthorized:7', 'editAuthorized:10']);
-    });
-
-    it('logs and propagates a retag database write failure instead of reporting partial success', async () => {
-        listDocs = [{ domainId: 'system', docId: 7, owner: 42, pid: 'P7', tag: ['old'] }];
-        editError = new Error('mongo write failed');
-        const handler = makeHandler('tagger_retag');
-        await handler.prepare();
-
-        const error = await captureFailure(() => handler.post({}, ['old'], 'new', false));
-
-        expect(error).to.equal(editError);
-        expect(calls.errors).to.have.lengthOf(1);
-        expect(calls.oplogs).to.deep.equal([]);
-        expect(handler.response.body).to.deep.equal({});
+        expect(handler.response.status).to.equal(409);
+        expect(handler.response.body.error).to.equal('canonical_node_selection_required');
+        expect(calls.getMulti).to.deep.equal([]);
+        expect(calls.edits).to.deep.equal([]);
     });
 });

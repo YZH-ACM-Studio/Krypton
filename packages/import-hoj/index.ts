@@ -7,10 +7,12 @@ import {
     extractZip,
     fs,
     Handler,
+    param,
     PERM,
     ProblemConfigFile,
     ProblemModel,
     randomstring,
+    Types,
     ValidationError,
     yaml,
     Zip,
@@ -20,7 +22,8 @@ const tmpdir = path.join(os.tmpdir(), 'hydro', 'import-hoj');
 fs.ensureDirSync(tmpdir);
 
 class ImportHojHandler extends Handler {
-    async fromFile(domainId: string, zipfile: string) {
+    async fromFile(domainId: string, zipfile: string, knowledgeMapId?: string) {
+        const knowledge = await ProblemModel.resolveProgrammingKnowledgeMap(knowledgeMapId);
         const zip = new Zip.ZipReader(Readable.toWeb(fs.createReadStream(zipfile)));
         const tmp = path.resolve(tmpdir, randomstring(32));
         await extractZip(zip, tmp, {
@@ -64,7 +67,7 @@ class ImportHojHandler extends Handler {
                     buildContent(content, 'markdown'),
                     this.user._id,
                     doc.tags || [],
-                    { problemKind: 'programming' },
+                    { problemKind: 'programming', knowledgeMapId: knowledge.mapId, knowledgeNodeIds: [] },
                 );
                 const config: ProblemConfigFile = {
                     time: `${pdoc.timeLimit}ms`,
@@ -119,15 +122,16 @@ class ImportHojHandler extends Handler {
     }
 
     async get() {
-        this.response.body = { type: 'HOJ' };
+        this.response.body = { type: 'HOJ', knowledgeMaps: await ProblemModel.listKnowledgeMapsForProblemSelection() };
         this.response.template = 'problem_import.html';
     }
 
-    async post({ domainId }) {
+    @param('knowledgeMapId', Types.String, true)
+    async post({ domainId }, knowledgeMapId?: string) {
         const file = this.request.files.file;
         if (!file) throw new ValidationError('file');
         if (file.size > 128 * 1024 * 1024) throw new ValidationError('file', 'File too large');
-        await this.fromFile(domainId, file.filepath);
+        await this.fromFile(domainId, file.filepath, knowledgeMapId);
         this.response.redirect = this.url('problem_main');
     }
 }

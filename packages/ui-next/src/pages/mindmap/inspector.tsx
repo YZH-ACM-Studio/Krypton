@@ -203,7 +203,7 @@ function NodeInspectorForm({
   }, [dirty, onDirtyChange]);
   const rootSide = rootId ? resolveRootBranchSides(nodes, rootId).get(node._id) : undefined;
   const isRootBranch = node.parentId === rootId;
-  const tagMatched = associations.filter((problem) => problem.sources.includes('tag'));
+  const canonicallyMatched = associations.filter((problem) => problem.sources.includes('canonical'));
 
   const addTag = () => {
     if (referenceCount > 0) return;
@@ -447,14 +447,14 @@ function NodeInspectorForm({
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-medium">当前标签匹配</h3>
-              <span className="text-[11px] text-muted-foreground">{tagMatched.length} 道</span>
+              <h3 className="text-xs font-medium">当前知识归类</h3>
+              <span className="text-[11px] text-muted-foreground">{canonicallyMatched.length} 道</span>
             </div>
             {associationLoading ? <p className="py-3 text-xs text-muted-foreground">正在读取关联…</p> : null}
             {associationError ? <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">{associationError}</p> : null}
-            {!associationLoading && !associationError && tagMatched.length ? (
+            {!associationLoading && !associationError && canonicallyMatched.length ? (
               <div className="space-y-1.5">
-                {tagMatched.slice(0, 40).map((problem) => (
+                {canonicallyMatched.slice(0, 40).map((problem) => (
                   <a key={problem.docId} href={mindmapProblemHref(problem)} className="flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-accent">
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs font-medium">{problem.title}</span>
@@ -462,7 +462,7 @@ function NodeInspectorForm({
                     </span>
                     <div className="flex gap-1">
                       <Badge variant="outline" className="text-[9px]">
-                        标签
+                        知识节点
                       </Badge>
                       {problem.sources.includes('manual') ? (
                         <Badge variant="outline" className="text-[9px]">
@@ -473,11 +473,13 @@ function NodeInspectorForm({
                     <ExternalLink className="size-3 text-muted-foreground" />
                   </a>
                 ))}
-                {tagMatched.length > 40 ? <p className="px-2 text-[11px] text-muted-foreground">仅显示前 40 道，公开页面仍按完整关联查询。</p> : null}
+                {canonicallyMatched.length > 40 ? (
+                  <p className="px-2 text-[11px] text-muted-foreground">仅显示前 40 道，公开页面仍按完整关联查询。</p>
+                ) : null}
               </div>
             ) : null}
-            {!associationLoading && !associationError && !tagMatched.length ? (
-              <p className="text-xs text-muted-foreground">当前标签没有匹配题目</p>
+            {!associationLoading && !associationError && !canonicallyMatched.length ? (
+              <p className="text-xs text-muted-foreground">当前节点及其子节点尚无归类题目</p>
             ) : null}
           </div>
 

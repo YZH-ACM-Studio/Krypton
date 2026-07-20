@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { expect } from 'chai';
-import { beforeEach, describe, it } from 'node:test';
+import { after, beforeEach, describe, it } from 'node:test';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {} };
@@ -14,6 +14,40 @@ const realUtils = require('@hydrooj/utils');
 const loggerErrorCalls: any[][] = [];
 const loggerWarnCalls: any[][] = [];
 const managedMindmapMaterializations: string[][] = [];
+const knowledgeMapId = '507f1f77bcf86cd799439010';
+const managedAuthoringPath = require.resolve('../src/model/managed-problem-authoring.ts');
+const previousManagedAuthoringCache = require.cache[managedAuthoringPath];
+const managedAuthoringExports = {
+    materializeKnowledgeMindmapTags: async (input: unknown, options: { knowledgeMapId: unknown }) => {
+        const nodeIds = Array.isArray(input) ? input : [];
+        const tags = nodeIds.map(String).flatMap((nodeId) => (nodeId === 'node-new' ? ['动态规划'] : nodeId === 'node-old' ? ['计算几何'] : []));
+        return { mapId: options.knowledgeMapId, nodeIds, tags };
+    },
+    canonicalizeManagedDraftMindmapPatch: async (current: any, $set: any) => {
+        if (current.authoringMode !== 'managed' || !Object.hasOwn($set, 'managedAuthoring')) return null;
+        const ids = $set.managedAuthoring?.selectedMindmapNodeIds;
+        if (!Array.isArray(ids) || !ids.length || ids.map(String).includes('stale-node')) {
+            const error = new Error('stale managed mindmap node');
+            error.name = 'ValidationError';
+            throw error;
+        }
+        const canonical = ids.map(String);
+        managedMindmapMaterializations.push(canonical);
+        $set.managedAuthoring = { ...$set.managedAuthoring, selectedMindmapNodeIds: canonical };
+        return canonical;
+    },
+};
+require.cache[managedAuthoringPath] = {
+    id: managedAuthoringPath,
+    filename: managedAuthoringPath,
+    loaded: true,
+    exports: managedAuthoringExports,
+} as NodeModule;
+
+after(() => {
+    if (previousManagedAuthoringCache) require.cache[managedAuthoringPath] = previousManagedAuthoringCache;
+    else delete require.cache[managedAuthoringPath];
+});
 
 const TYPE_PROBLEM = 10;
 const countCalls: Array<{ domainId: string; docType: number; query: unknown }> = [];
@@ -203,21 +237,7 @@ try {
             };
         }
         if (request === './managed-problem-authoring') {
-            return {
-                canonicalizeManagedDraftMindmapPatch: async (current: any, $set: any) => {
-                    if (current.authoringMode !== 'managed' || !Object.hasOwn($set, 'managedAuthoring')) return null;
-                    const ids = $set.managedAuthoring?.selectedMindmapNodeIds;
-                    if (!Array.isArray(ids) || !ids.length || ids.map(String).includes('stale-node')) {
-                        const error = new Error('stale managed mindmap node');
-                        error.name = 'ValidationError';
-                        throw error;
-                    }
-                    const canonical = ids.map(String);
-                    managedMindmapMaterializations.push(canonical);
-                    $set.managedAuthoring = { ...$set.managedAuthoring, selectedMindmapNodeIds: canonical };
-                    return canonical;
-                },
-            };
+            return managedAuthoringExports;
         }
         return originalLoad.call(this, request, parent, isMain);
     };
@@ -748,6 +768,7 @@ describe('P2.11 linearizable problem metadata writes', () => {
             docType: TYPE_PROBLEM,
             problemKind: 'single',
             tag: [],
+            knowledgeMapId,
             knowledgeNodeIds: [],
             aclMutationRevision: 0,
             aclMutationLocks: [],
@@ -758,6 +779,12 @@ describe('P2.11 linearizable problem metadata writes', () => {
         expect(error).to.have.property('name', 'ValidationError');
         expect(liveProblem.tag).to.deep.equal([]);
         expect(liveProblem.knowledgeNodeIds).to.deep.equal([]);
+        expect(findOneCalls.at(-1)?.options.projection).to.deep.include({
+            tag: 1,
+            authoringMode: 1,
+            knowledgeMapId: 1,
+            knowledgeNodeIds: 1,
+        });
     });
 
     it('rejects a low-level config change that would detach a ready status from compile evaluation', async () => {
@@ -1084,6 +1111,7 @@ describe('P2.11 durable global problem write claim', () => {
             aclMutationRevision: 0,
             aclMutationLocks: [],
             tag: ['MultiSchool', '牛客暑期多校', '计算几何'],
+            knowledgeMapId,
             knowledgeNodeIds: ['node-old'],
         };
         const claim = await acquire(admin, structuredClone(liveProblem), 'managed-tag-normalize', 'programming-tag-normalize', {
@@ -1094,6 +1122,7 @@ describe('P2.11 durable global problem write claim', () => {
             claim,
             {
                 tag: ['MultiSchool', '牛客暑期多校', '动态规划'],
+                knowledgeMapId,
                 knowledgeNodeIds: ['node-new'],
                 'managedAuthoring.selectedMindmapNodeIds': ['node-new'],
             },
@@ -1253,18 +1282,25 @@ describe('P2.11 durable global problem write claim', () => {
             docType: TYPE_PROBLEM,
             problemKind: 'single',
             tag: [],
+            knowledgeMapId,
             knowledgeNodeIds: [],
             aclMutationRevision: 0,
             aclMutationLocks: [],
         };
         const claim = await acquire(user, structuredClone(liveProblem), 'structured-tag', 'metadata-edit');
 
-        for (const patch of [{ tag: ['forged'] }, { knowledgeNodeIds: [] }, { 'tag.0': 'forged' }, { problemKind: 'multi' }]) {
+        for (const patch of [{ tag: ['forged'] }, { knowledgeMapId }, { knowledgeNodeIds: [] }, { 'tag.0': 'forged' }, { problemKind: 'multi' }]) {
             const error = await captureFailure(() => commit(claim, patch as any, {}));
             expect(error).to.have.property('name', 'ValidationError');
         }
-        expect(await commit(claim, { tag: [], knowledgeNodeIds: [] }, {})).to.deep.include({ tag: [], knowledgeNodeIds: [] });
-        expect(liveProblem).to.deep.include({ problemKind: 'single', tag: [], knowledgeNodeIds: [] });
+        const knowledgeNodeIds = ['507f1f77bcf86cd799439011'];
+        expect(await commit(claim, { tag: [], knowledgeMapId, knowledgeNodeIds }, {})).to.deep.include({
+            tag: [],
+            knowledgeMapId,
+            knowledgeNodeIds,
+        });
+        expect(liveProblem).to.deep.include({ problemKind: 'single', tag: [], knowledgeMapId, knowledgeNodeIds });
+        expect(findOneCalls.at(-1)?.options.projection).to.deep.include({ tag: 1, knowledgeMapId: 1, knowledgeNodeIds: 1 });
     });
 
     it('supports a missing revision CAS while bypassing only the explicitly approved historical structure lock', async () => {
@@ -1274,6 +1310,7 @@ describe('P2.11 durable global problem write claim', () => {
             docType: TYPE_PROBLEM,
             problemKind: 'single',
             tag: [],
+            knowledgeMapId,
             knowledgeNodeIds: [],
             structureLockedAt: new Date('2026-07-01T00:00:00.000Z'),
             aclMutationRevision: 0,
@@ -1283,13 +1320,14 @@ describe('P2.11 durable global problem write claim', () => {
             capability: 'tag',
         });
 
-        const blocked = await commit(claim, { tag: [], knowledgeNodeIds: [] }, {}, 'tag', {
+        const knowledgeNodeIds = ['507f1f77bcf86cd799439011'];
+        const blocked = await commit(claim, { tag: [], knowledgeMapId, knowledgeNodeIds }, {}, 'tag', {
             expectedStructureRevisionAbsent: true,
             expectedTag: [],
         });
         expect(blocked).to.equal(null);
 
-        const result = await commit(claim, { tag: [], knowledgeNodeIds: [] }, {}, 'tag', {
+        const result = await commit(claim, { tag: [], knowledgeMapId, knowledgeNodeIds }, {}, 'tag', {
             expectedStructureRevisionAbsent: true,
             expectedTag: [],
             allowHistoricalStructureLock: true,

@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { Logger } from '@hydrooj/utils';
 import { ManagedProblemMetadataConflictError, ValidationError } from '../error';
 import type { ProblemDoc, TrainingNode } from '../interface';
-import type { KnowledgeMindmapOption } from '../lib/problem-tag-canonical';
+import type { KnowledgeMapOption, KnowledgeMindmapOption } from '../lib/problem-tag-canonical';
 import db from '../service/db';
 import * as document from './document';
 import {
@@ -20,7 +20,7 @@ import {
     type ManagedSourceTemplate,
 } from './managed-problem-source';
 
-export { classifyLegacyProgrammingTags } from '../lib/problem-tag-canonical';
+export { classifyLegacyProgrammingTags, resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 export type { KnowledgeMindmapOption, LegacyProgrammingTagClassification } from '../lib/problem-tag-canonical';
 export {
     deriveManagedSourceTags,
@@ -42,6 +42,8 @@ export interface CanonicalProblemTagOption {
 }
 
 export interface ProgrammingTagNormalizationPreview {
+    knowledgeMapId: ObjectId;
+    knowledgeMapTitle: string;
     sourceTags: string[];
     selectedNodeIds: ObjectId[];
     nextTags: string[];
@@ -78,6 +80,7 @@ export interface ManagedProblemDraftInput {
     content: string;
     difficulty: number;
     sourceMeta: unknown;
+    knowledgeMapId?: unknown;
     mindmapNodeIds: unknown;
     pendingTrainingPlacement?: unknown;
     authorUid?: number;
@@ -96,6 +99,7 @@ export interface PreparedManagedProblemDraft {
     content: string;
     difficulty: number;
     sourceMeta: ManagedSourceMeta;
+    knowledgeMapId: ObjectId;
     selectedMindmapNodeIds: ObjectId[];
     pendingTrainingPlacement?: ManagedTrainingPlacement;
     tags: string[];
@@ -105,6 +109,7 @@ export interface PreparedManagedProblemDraft {
 
 export interface PreparedManagedProblemPublication {
     sourceMeta: ManagedSourceMeta;
+    knowledgeMapId: ObjectId;
     selectedMindmapNodeIds: ObjectId[];
     pendingTrainingPlacement?: ManagedTrainingPlacement;
     tags: string[];
@@ -112,9 +117,18 @@ export interface PreparedManagedProblemPublication {
 
 interface MindmapNodeRecord {
     _id: ObjectId;
+    mapId: ObjectId;
     parentId: ObjectId | null;
     topic: string;
     tags: string[];
+    updatedAt: Date;
+}
+
+interface KnowledgeMapRecord {
+    _id: ObjectId;
+    title: string;
+    rootNodeId: ObjectId;
+    visibility: 'hidden' | 'public';
     updatedAt: Date;
 }
 
@@ -134,6 +148,7 @@ interface PidCounterDoc {
 
 const TEMPLATE_BY_ID = new Map(MANAGED_SOURCE_TEMPLATES.map((template) => [template.id, template]));
 const mindmapNodesColl = db.collection<MindmapNodeRecord>('mindmap.nodes');
+const knowledgeMapsColl = db.collection<KnowledgeMapRecord>('mindmap.maps');
 export const managedPidCountersColl = db.collection<PidCounterDoc>('problem.pid_counters');
 
 const MANAGED_PROBLEM_PID_INDEX = {
@@ -210,22 +225,32 @@ export async function reserveManagedProblemPid(domainId: string, sourceMetaInput
 
 function normalizeNodeIds(nodeIds: unknown, required: boolean, field: 'knowledgeNodeIds' | 'mindmapNodeIds'): string[] {
     if (!Array.isArray(nodeIds)) throw new ValidationError(field);
-    const normalized = nodeIds
-        .map((value) => (value instanceof ObjectId ? value.toHexString() : typeof value === 'string' ? value.trim() : ''))
-        .filter(Boolean);
+    const normalized = nodeIds.map((value) => {
+        if (value instanceof ObjectId) return value.toHexString();
+        if (typeof value !== 'string') throw new ValidationError(field);
+        const trimmed = value.trim();
+        if (!trimmed || !ObjectId.isValid(trimmed)) throw new ValidationError(field);
+        return new ObjectId(trimmed).toHexString();
+    });
     if (!normalized.length) {
         if (required) throw new ValidationError(field);
         return [];
     }
-    if (normalized.some((value) => !ObjectId.isValid(value))) throw new ValidationError(field);
     return [...new Set(normalized)].sort();
 }
 
-async function loadMindmapNodes(): Promise<MindmapNodeRecord[]> {
-    return mindmapNodesColl.find({}, { projection: { _id: 1, parentId: 1, topic: 1, tags: 1, updatedAt: 1 } }).toArray();
+function normalizeMapId(value: unknown, field = 'knowledgeMapId'): ObjectId | null {
+    const normalized = value instanceof ObjectId ? value.toHexString() : typeof value === 'string' ? value.trim() : '';
+    if (!normalized) return null;
+    if (!ObjectId.isValid(normalized)) throw new ValidationError(field);
+    return new ObjectId(normalized);
 }
 
-function buildNodePath(node: MindmapNodeRecord, byId: Map<string, MindmapNodeRecord>): MindmapNodeRecord[] {
+async function loadMindmapNodes(mapId: ObjectId): Promise<MindmapNodeRecord[]> {
+    return mindmapNodesColl.find({ mapId }, { projection: { _id: 1, mapId: 1, parentId: 1, topic: 1, tags: 1, updatedAt: 1 } }).toArray();
+}
+
+function buildNodePath(node: MindmapNodeRecord, byId: Map<string, MindmapNodeRecord>, expectedRootNodeId: ObjectId): MindmapNodeRecord[] {
     const path: MindmapNodeRecord[] = [];
     const visited = new Set<string>();
     let current: MindmapNodeRecord | undefined = node;
@@ -238,22 +263,53 @@ function buildNodePath(node: MindmapNodeRecord, byId: Map<string, MindmapNodeRec
         current = byId.get(current.parentId.toHexString());
         if (!current) throw new ManagedProblemMetadataConflictError('导图祖先节点已删除');
     }
-    return path.reverse();
+    path.reverse();
+    if (!path[0]?._id.equals(expectedRootNodeId) || path[0].parentId !== null) {
+        throw new ManagedProblemMetadataConflictError('导图节点不属于该图的唯一根节点');
+    }
+    return path;
 }
 
-export async function listKnowledgeMindmapOptions(): Promise<KnowledgeMindmapOption[]> {
-    const nodes = await loadMindmapNodes();
-    const byId = new Map(nodes.map((node) => [node._id.toHexString(), node]));
-    return nodes
-        .filter((node) => Array.isArray(node.tags) && node.tags.some((tag) => typeof tag === 'string' && tag.trim()))
-        .map((node) => ({
-            id: node._id.toHexString(),
-            label: buildNodePath(node, byId)
-                .map((part) => part.topic)
-                .join(' / '),
-            tags: [...new Set(node.tags.map((tag) => tag.trim()).filter(Boolean))],
-        }))
-        .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
+export async function listKnowledgeMapsForProblemSelection(includeHidden = false): Promise<KnowledgeMapOption[]> {
+    const maps = await knowledgeMapsColl
+        .find(includeHidden ? {} : { visibility: 'public' }, { projection: { _id: 1, title: 1, visibility: 1 } })
+        .sort({ title: 1, _id: 1 })
+        .toArray();
+    return maps.map((map) => ({ id: map._id.toHexString(), title: map.title, visibility: map.visibility }));
+}
+
+export async function listKnowledgeMindmapOptions(mapIdInput?: unknown, includeHidden = false): Promise<KnowledgeMindmapOption[]> {
+    const requestedMapId = normalizeMapId(mapIdInput);
+    const maps = await knowledgeMapsColl
+        .find(
+            {
+                ...(requestedMapId ? { _id: requestedMapId } : {}),
+                ...(includeHidden ? {} : { visibility: 'public' }),
+            },
+            { projection: { _id: 1, title: 1, rootNodeId: 1, visibility: 1 } },
+        )
+        .sort({ title: 1, _id: 1 })
+        .toArray();
+    if (requestedMapId && maps.length !== 1) throw new ManagedProblemMetadataConflictError('所属导图不存在或不可选');
+    const options: KnowledgeMindmapOption[] = [];
+    for (const map of maps) {
+        const nodes = await loadMindmapNodes(map._id);
+        const byId = new Map(nodes.map((node) => [node._id.toHexString(), node]));
+        options.push(
+            ...nodes
+                .filter((node) => Array.isArray(node.tags) && node.tags.some((tag) => typeof tag === 'string' && tag.trim()))
+                .map((node) => ({
+                    id: node._id.toHexString(),
+                    mapId: map._id.toHexString(),
+                    mapTitle: map.title,
+                    label: buildNodePath(node, byId, map.rootNodeId)
+                        .map((part) => part.topic)
+                        .join(' / '),
+                    tags: [...new Set(node.tags.map((tag) => tag.trim()).filter(Boolean))],
+                })),
+        );
+    }
+    return options.sort((left, right) => left.mapTitle.localeCompare(right.mapTitle, 'zh-CN') || left.label.localeCompare(right.label, 'zh-CN'));
 }
 
 export const listManagedMindmapOptions = listKnowledgeMindmapOptions;
@@ -269,20 +325,30 @@ function requireStoredProblemTags(input: unknown): string[] {
 export async function previewProgrammingTagNormalization(input: {
     domainId: string;
     docId: number;
+    problemKind?: unknown;
     structureRevision?: number;
     currentTags: unknown;
+    currentKnowledgeMapId: unknown;
+    currentKnowledgeNodeIds: unknown;
+    targetKnowledgeMapId: unknown;
     selectedNodeIds: unknown;
 }): Promise<ProgrammingTagNormalizationPreview> {
     const currentTags = requireStoredProblemTags(input.currentTags);
+    const currentKnowledgeNodeIds = normalizeNodeIds(input.currentKnowledgeNodeIds ?? [], false, 'knowledgeNodeIds');
     if (input.structureRevision !== undefined && (!Number.isSafeInteger(input.structureRevision) || input.structureRevision < 1)) {
         throw new TypeError('programming problem structureRevision must be a positive integer');
     }
     const knowledge = await materializeKnowledgeMindmapState(input.selectedNodeIds, {
         required: true,
+        knowledgeMapId: input.targetKnowledgeMapId,
+        requireMap: true,
+        requirePublicMap: true,
         field: 'knowledgeNodeIds',
         includePathVersion: true,
     });
-    const sourceTags = currentTags.filter(isCanonicalManagedSourceTag);
+    const currentKnowledgeMapId = normalizeMapId(input.currentKnowledgeMapId);
+    if (!currentKnowledgeMapId) throw new ManagedProblemMetadataConflictError('题目缺少所属导图，请先完成站点迁移');
+    const sourceTags = input.problemKind === undefined || input.problemKind === 'programming' ? currentTags.filter(isCanonicalManagedSourceTag) : [];
     const nextTags = [...new Set([...sourceTags, ...knowledge.tags])];
     const currentSet = new Set(currentTags);
     const nextSet = new Set(nextTags);
@@ -294,8 +360,12 @@ export async function previewProgrammingTagNormalization(input: {
             JSON.stringify({
                 domainId: input.domainId,
                 docId: input.docId,
+                problemKind: input.problemKind ?? 'programming',
                 structureRevision: input.structureRevision ?? null,
                 currentTags,
+                currentKnowledgeMapId: currentKnowledgeMapId.toHexString(),
+                currentKnowledgeNodeIds,
+                targetKnowledgeMapId: knowledge.mapId.toHexString(),
                 selectedNodeIds: knowledge.nodeIds.map(String),
                 nextTags,
                 mindmapPathVersion: knowledge.pathVersion,
@@ -303,6 +373,8 @@ export async function previewProgrammingTagNormalization(input: {
         )
         .digest('hex');
     return {
+        knowledgeMapId: knowledge.mapId,
+        knowledgeMapTitle: knowledge.mapTitle,
         sourceTags,
         selectedNodeIds: knowledge.nodeIds,
         nextTags,
@@ -332,7 +404,7 @@ export async function listCanonicalProblemTagOptions(domainId: string): Promise<
     for (const option of mindmapOptions) {
         for (const tag of option.tags) {
             const paths = knowledgePaths.get(tag) || new Set<string>();
-            paths.add(option.label);
+            paths.add(`${option.mapTitle} / ${option.label}`);
             knowledgePaths.set(tag, paths);
         }
     }
@@ -359,20 +431,64 @@ export async function listCanonicalProblemTagOptions(domainId: string): Promise<
 /** Re-read the live tree and materialize every tagged ancestor of each selection. */
 async function materializeKnowledgeMindmapState(
     nodeIdsInput: unknown,
-    options: { required?: boolean; field?: 'knowledgeNodeIds' | 'mindmapNodeIds'; includePathVersion?: boolean } = {},
-): Promise<{ nodeIds: ObjectId[]; tags: string[]; pathVersion: MindmapPathVersion[] }> {
+    options: {
+        required?: boolean;
+        requireMap?: boolean;
+        allowSolePublicMap?: boolean;
+        requirePublicMap?: boolean;
+        knowledgeMapId?: unknown;
+        field?: 'knowledgeNodeIds' | 'mindmapNodeIds';
+        includePathVersion?: boolean;
+    } = {},
+): Promise<{
+    mapId: ObjectId;
+    mapTitle: string;
+    nodeIds: ObjectId[];
+    nodePaths: Array<{ id: string; label: string }>;
+    tags: string[];
+    pathVersion: MindmapPathVersion[];
+}> {
     const nodeIds = normalizeNodeIds(nodeIdsInput, options.required === true, options.field || 'knowledgeNodeIds');
-    if (!nodeIds.length) return { nodeIds: [], tags: [], pathVersion: [] };
-    const nodes = await loadMindmapNodes();
+    let mapId = normalizeMapId(options.knowledgeMapId);
+    if (!mapId && options.allowSolePublicMap) {
+        const maps = await knowledgeMapsColl
+            .find({ visibility: 'public' }, { projection: { _id: 1 } })
+            .sort({ title: 1, _id: 1 })
+            .limit(2)
+            .toArray();
+        if (maps.length === 1) mapId = maps[0]._id;
+        else if (maps.length > 1) throw new ValidationError('knowledgeMapId', null, '存在多张公开导图，请明确选择所属导图');
+    }
+    if (!mapId) {
+        if (options.requireMap !== false) throw new ValidationError('knowledgeMapId');
+        throw new TypeError('materializeKnowledgeMindmapState requires a knowledge map');
+    }
+    if (nodeIds.length) {
+        const selected = await mindmapNodesColl
+            .find({ _id: { $in: nodeIds.map((id) => new ObjectId(id)) }, mapId }, { projection: { _id: 1, mapId: 1 } })
+            .toArray();
+        if (selected.length !== nodeIds.length) {
+            throw new ManagedProblemMetadataConflictError('所选知识节点已删除或不属于指定导图');
+        }
+    }
+    const map = await knowledgeMapsColl.findOne({ _id: mapId }, { projection: { _id: 1, title: 1, rootNodeId: 1, visibility: 1 } });
+    if (!map) throw new ManagedProblemMetadataConflictError('所属导图已删除');
+    if (options.requirePublicMap && map.visibility !== 'public') {
+        throw new ManagedProblemMetadataConflictError('所属导图当前不可用于题目归类');
+    }
+    const nodes = await loadMindmapNodes(mapId);
     const byId = new Map(nodes.map((node) => [node._id.toHexString(), node]));
     const tags: string[] = [];
+    const nodePaths: Array<{ id: string; label: string }> = [];
     const pathVersion = new Map<string, MindmapPathVersion>();
     for (const id of nodeIds) {
         const node = byId.get(id);
         if (!node || !Array.isArray(node.tags) || !node.tags.some((tag) => typeof tag === 'string' && tag.trim())) {
             throw new ManagedProblemMetadataConflictError(`导图节点 ${id} 已删除或不可选`);
         }
-        for (const pathNode of buildNodePath(node, byId)) {
+        const nodePath = buildNodePath(node, byId, map.rootNodeId);
+        nodePaths.push({ id, label: nodePath.map((part) => part.topic).join(' / ') });
+        for (const pathNode of nodePath) {
             if (options.includePathVersion) {
                 if (!(pathNode.updatedAt instanceof Date) || Number.isNaN(pathNode.updatedAt.getTime())) {
                     throw new TypeError(`mindmap node ${pathNode._id.toHexString()} updatedAt must be a valid date`);
@@ -392,7 +508,10 @@ async function materializeKnowledgeMindmapState(
         }
     }
     return {
+        mapId,
+        mapTitle: map.title,
         nodeIds: nodeIds.map((id) => new ObjectId(id)),
+        nodePaths,
         tags,
         pathVersion: [...pathVersion.values()].sort((left, right) => left.id.localeCompare(right.id)),
     };
@@ -400,19 +519,37 @@ async function materializeKnowledgeMindmapState(
 
 export async function materializeKnowledgeMindmapTags(
     nodeIdsInput: unknown,
-    options: { required?: boolean; field?: 'knowledgeNodeIds' | 'mindmapNodeIds' } = {},
-): Promise<{ nodeIds: ObjectId[]; tags: string[] }> {
-    const { nodeIds, tags } = await materializeKnowledgeMindmapState(nodeIdsInput, options);
-    return { nodeIds, tags };
+    options: {
+        required?: boolean;
+        requireMap?: boolean;
+        allowSolePublicMap?: boolean;
+        requirePublicMap?: boolean;
+        knowledgeMapId?: unknown;
+        field?: 'knowledgeNodeIds' | 'mindmapNodeIds';
+    } = {},
+): Promise<{ mapId: ObjectId; mapTitle: string; nodeIds: ObjectId[]; nodePaths: Array<{ id: string; label: string }>; tags: string[] }> {
+    const { mapId, mapTitle, nodeIds, nodePaths, tags } = await materializeKnowledgeMindmapState(nodeIdsInput, options);
+    return { mapId, mapTitle, nodeIds, nodePaths, tags };
 }
 
-export function materializeManagedMindmapTags(nodeIdsInput: unknown): Promise<{ nodeIds: ObjectId[]; tags: string[] }> {
-    return materializeKnowledgeMindmapTags(nodeIdsInput, { required: true, field: 'mindmapNodeIds' });
+export function materializeManagedMindmapTags(
+    nodeIdsInput: unknown,
+    knowledgeMapId?: unknown,
+    required = true,
+): Promise<{ mapId: ObjectId; mapTitle: string; nodeIds: ObjectId[]; nodePaths: Array<{ id: string; label: string }>; tags: string[] }> {
+    return materializeKnowledgeMindmapTags(nodeIdsInput, {
+        required,
+        requireMap: true,
+        allowSolePublicMap: !knowledgeMapId,
+        requirePublicMap: true,
+        knowledgeMapId,
+        field: 'mindmapNodeIds',
+    });
 }
 
 /** Re-read live mindmap nodes before any managed draft patch reaches Mongo. */
 export async function canonicalizeManagedDraftMindmapPatch(
-    current: Pick<ProblemDoc, 'authoringMode' | 'managedAuthoring'>,
+    current: Pick<ProblemDoc, 'authoringMode' | 'managedAuthoring' | 'knowledgeMapId'>,
     $set: Partial<ProblemDoc>,
 ): Promise<string[] | null> {
     if (current.authoringMode !== 'managed' || !Object.hasOwn($set, 'managedAuthoring')) return null;
@@ -420,7 +557,10 @@ export async function canonicalizeManagedDraftMindmapPatch(
         throw new ValidationError('knowledgeNodeIds', null, '只有托管草稿可以提交知识节点建议');
     }
     const materialized = await materializeKnowledgeMindmapTags($set.managedAuthoring.selectedMindmapNodeIds, {
-        required: true,
+        required: false,
+        requireMap: true,
+        requirePublicMap: true,
+        knowledgeMapId: current.knowledgeMapId,
         field: 'knowledgeNodeIds',
     });
     $set.managedAuthoring = {
@@ -543,7 +683,7 @@ export async function prepareManagedProblemDraft(domainId: string, input: Manage
     if (typeof input.content !== 'string') throw new ValidationError('content');
     const difficulty = parseInteger(input.difficulty, 'difficulty', 1, 10);
     const sourceMeta = normalizeManagedSourceMeta(input.sourceMeta);
-    const mindmap = await materializeManagedMindmapTags(input.mindmapNodeIds);
+    const mindmap = await materializeManagedMindmapTags(input.mindmapNodeIds, input.knowledgeMapId, false);
     const pendingTrainingPlacement = await validateManagedTrainingPlacement(domainId, sourceMeta.template, input.pendingTrainingPlacement);
     const sourceTags = deriveManagedSourceTags(sourceMeta);
     const authorUid = input.authorUid === undefined ? undefined : parseInteger(input.authorUid, 'authorUid', 1, Number.MAX_SAFE_INTEGER);
@@ -553,6 +693,7 @@ export async function prepareManagedProblemDraft(domainId: string, input: Manage
         content: input.content,
         difficulty,
         sourceMeta,
+        knowledgeMapId: mindmap.mapId,
         selectedMindmapNodeIds: mindmap.nodeIds,
         ...(pendingTrainingPlacement ? { pendingTrainingPlacement } : {}),
         tags: [...new Set([...sourceTags, ...mindmap.tags])],
@@ -564,13 +705,13 @@ export async function prepareManagedProblemDraft(domainId: string, input: Manage
 /** Re-read every live catalog dependency immediately before administrator publication. */
 export async function prepareManagedProblemPublication(
     domainId: string,
-    pdoc: Pick<ProblemDoc, 'docId' | 'sourceMeta' | 'managedAuthoring'>,
+    pdoc: Pick<ProblemDoc, 'docId' | 'sourceMeta' | 'managedAuthoring' | 'knowledgeMapId'>,
 ): Promise<PreparedManagedProblemPublication> {
     let sourceMeta: ManagedSourceMeta;
     let mindmap: Awaited<ReturnType<typeof materializeManagedMindmapTags>>;
     try {
         sourceMeta = normalizeManagedSourceMeta(pdoc.sourceMeta);
-        mindmap = await materializeManagedMindmapTags(pdoc.managedAuthoring?.selectedMindmapNodeIds);
+        mindmap = await materializeManagedMindmapTags(pdoc.managedAuthoring?.selectedMindmapNodeIds, pdoc.knowledgeMapId, true);
     } catch (error) {
         if (error instanceof ManagedProblemMetadataConflictError) throw error;
         const conflict = new ManagedProblemMetadataConflictError('来源或算法标签已失效');
@@ -609,6 +750,7 @@ export async function prepareManagedProblemPublication(
     }
     return {
         sourceMeta,
+        knowledgeMapId: mindmap.mapId,
         selectedMindmapNodeIds: mindmap.nodeIds,
         ...(pendingTrainingPlacement ? { pendingTrainingPlacement } : {}),
         tags: [...new Set([...deriveManagedSourceTags(sourceMeta), ...mindmap.tags])],

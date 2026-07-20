@@ -88,11 +88,14 @@ let permitResults: any[] = [];
 let completedDataContributorUids: number[] = [];
 let missingUserIds = new Set<number>();
 let managedTrainingPlacementResults: any[] = [];
+let knowledgeMapResults: any[] = [];
 let managedPublishResult: any = null;
 let managedPublicationPreviewError: Error | null = null;
 let activeDataWriteContainers: any[] = [];
 let pendingContributionRows: any[] = [];
 const createKinds: string[] = [];
+const knowledgeMapId = '64a000000000000000000001';
+const knowledgeMapTitle = '算法知识图谱';
 
 function cursor(docs: any[] = []) {
     const state: { skip: number; limit: number; sort: Record<string, 1 | -1> | null } = {
@@ -193,6 +196,8 @@ const problemStub = {
         return {
             pdoc: { domainId: input.domainId, docId: input.pid, pid: 'P7', structureRevision: 5 },
             preview: {
+                knowledgeMapId: input.targetKnowledgeMapId,
+                knowledgeMapTitle,
                 sourceTags: ['PAT乙级'],
                 selectedNodeIds: input.selectedNodeIds,
             },
@@ -447,8 +452,13 @@ const managedAuthoringStub = {
         { id: 'pat_basic', label: 'PAT 乙级', fields: ['year', 'season'] },
         { id: 'self', label: '自命题', fields: ['year'] },
     ],
-    listKnowledgeMindmapOptions: async () => [{ id: 'node-1', label: '数据结构 / 线段树', tags: ['线段树'] }],
-    listManagedMindmapOptions: async () => [{ id: 'node-1', label: '数据结构 / 线段树', tags: ['线段树'] }],
+    listKnowledgeMapsForProblemSelection: async () => knowledgeMapResults,
+    listKnowledgeMindmapOptions: async () => [
+        { id: 'node-1', mapId: knowledgeMapId, mapTitle: knowledgeMapTitle, label: '数据结构 / 线段树', tags: ['线段树'] },
+    ],
+    listManagedMindmapOptions: async () => [
+        { id: 'node-1', mapId: knowledgeMapId, mapTitle: knowledgeMapTitle, label: '数据结构 / 线段树', tags: ['线段树'] },
+    ],
     listManagedProblemTrainingPlacements: async () => managedTrainingPlacementResults,
     listManagedTrainingOptions: async () => [],
     classifyLegacyProgrammingTags: (tags: string[]) => ({
@@ -458,12 +468,19 @@ const managedAuthoringStub = {
         ambiguousTags: [],
         unknownTags: tags.filter((tag) => !['PAT乙级', '二分'].includes(tag)),
     }),
-    materializeKnowledgeMindmapTags: async (nodeIds: string[], options: { required?: boolean } = {}) => {
+    materializeKnowledgeMindmapTags: async (
+        nodeIds: string[],
+        options: { required?: boolean; knowledgeMapId?: string; requireMap?: boolean } = {},
+    ) => {
         calls.knowledgeMaterializations.push([...nodeIds]);
+        if (options.requireMap && options.knowledgeMapId !== knowledgeMapId) throw new GenericError('knowledge map required');
         if (options.required && !nodeIds.length) throw new GenericError('knowledge node required');
         if (nodeIds.includes('stale-node')) throw new GenericError('stale knowledge node');
         return {
+            mapId: knowledgeMapId,
+            mapTitle: knowledgeMapTitle,
             nodeIds: [...nodeIds],
+            nodePaths: nodeIds.map((nodeId) => ({ nodeId, path: `数据结构 / ${nodeId}` })),
             tags: nodeIds.map((nodeId) => `derived:${nodeId}`),
         };
     },
@@ -476,6 +493,9 @@ const managedAuthoringStub = {
         };
     },
     previewProgrammingTagNormalization: async (input: any) => ({
+        currentKnowledgeMapId: input.currentKnowledgeMapId,
+        knowledgeMapId: input.targetKnowledgeMapId,
+        knowledgeMapTitle,
         sourceTags: (input.currentTags || []).filter((tag: string) => tag === 'PAT乙级'),
         selectedNodeIds: [...input.selectedNodeIds],
         nextTags: ['PAT乙级', ...input.selectedNodeIds.map((nodeId: string) => `derived:${nodeId}`)],
@@ -645,6 +665,7 @@ beforeEach(() => {
     completedDataContributorUids = [];
     missingUserIds = new Set();
     managedTrainingPlacementResults = [];
+    knowledgeMapResults = [{ id: knowledgeMapId, title: knowledgeMapTitle, visibility: 'public' }];
     managedPublishResult = null;
     managedPublicationPreviewError = null;
     activeDataWriteContainers = [];
@@ -930,6 +951,33 @@ describe('P2.11 authoritative problem route domain', () => {
         expect(handler.response.body.canEditProblem).to.equal(false);
     });
 
+    it('redacts a hidden knowledge map from an ordinary problem-detail response', async () => {
+        const handler = makeHandler(ProblemDetailHandler, {});
+        knowledgeMapResults = [];
+        getResults = [
+            {
+                domainId: 'system',
+                docId: 7,
+                owner: 42,
+                hidden: false,
+                title: 'P7',
+                content: 'statement',
+                config: '',
+                additional_file: [],
+                tag: [],
+                knowledgeMapId,
+                knowledgeNodeIds: ['node-1'],
+            },
+        ];
+
+        await handler._prepare('forged', 7);
+
+        expect(handler.pdoc.knowledgeMapId).to.equal(knowledgeMapId);
+        expect(handler.response.body.pdoc).not.to.have.keys('knowledgeMapId', 'knowledgeNodeIds');
+        expect(handler.response.body.knowledgeMapView).to.equal(null);
+        expect(calls.knowledgeMaterializations).to.deep.equal([]);
+    });
+
     it('computes the managed draft edit entry from internal state without exposing that state', async () => {
         const handler = makeHandler(ProblemDetailHandler, { canEditContent: true });
         getResults = [
@@ -954,6 +1002,37 @@ describe('P2.11 authoritative problem route domain', () => {
         expect(handler.response.body.canEditProblem).to.equal(true);
         expect(handler.response.body.pdoc).not.to.have.property('managedAuthoring');
         expect(handler.pdoc).not.to.have.property('managedAuthoring');
+    });
+
+    it('materializes a legacy managed problem detail from its private canonical node selection', async () => {
+        const handler = makeHandler(ProblemDetailHandler, {});
+        permitResults = [{ uid: 77, role: 'author' }];
+        getResults = [
+            {
+                domainId: 'system',
+                docId: 7,
+                owner: 42,
+                hidden: false,
+                title: 'Legacy managed',
+                content: 'statement',
+                config: '',
+                additional_file: [],
+                tag: [],
+                authoringMode: 'managed',
+                managedAuthoring: { selectedMindmapNodeIds: ['node-1'], metadataStatus: 'confirmed' },
+                knowledgeMapId,
+            },
+        ];
+
+        await handler._prepare('forged', 7);
+
+        expect(calls.knowledgeMaterializations).to.deep.equal([['node-1']]);
+        expect(handler.response.body.knowledgeMapView).to.deep.equal({
+            id: knowledgeMapId,
+            title: knowledgeMapTitle,
+            nodes: [{ nodeId: 'node-1', path: '数据结构 / node-1' }],
+        });
+        expect(handler.response.body.pdoc).not.to.have.property('managedAuthoring');
     });
 
     it('carries the stable managed draft content capability into the files preflight', async () => {
@@ -1131,9 +1210,10 @@ describe('P2.11 authoritative problem route domain', () => {
             template: 'self',
             year: '2026',
             difficulty: '2',
+            knowledgeMapId,
             mindmapNodeIds: 'node-1',
         };
-        await handler.post('forged', 'Title', 'Statement', '', false, 2, [], true, 'self', 2026, '', '', 0, ['node-1']);
+        await handler.post('forged', 'Title', 'Statement', '', false, 2, [], true, 'self', 2026, '', '', 0, knowledgeMapId, ['node-1']);
         expect(calls.add[0][0]).to.equal('system');
         expect(createKinds).to.deep.equal(['managed-programming']);
     });
@@ -1149,10 +1229,11 @@ describe('P2.11 authoritative problem route domain', () => {
             template: 'self',
             year: '2026',
             difficulty: '4',
+            knowledgeMapId,
             mindmapNodeIds: 'node-1',
         };
 
-        await handler.post('forged', 'Working title', 'Statement', '', false, 4, [], true, 'self', 2026, '', '', 0, ['node-1']);
+        await handler.post('forged', 'Working title', 'Statement', '', false, 4, [], true, 'self', 2026, '', '', 0, knowledgeMapId, ['node-1']);
 
         expect(createKinds).to.deep.equal(['managed-programming']);
         expect(calls.add[0]).to.deep.equal([
@@ -1162,6 +1243,7 @@ describe('P2.11 authoritative problem route domain', () => {
                 content: 'Statement',
                 difficulty: 4,
                 sourceMeta: { template: 'self', year: 2026 },
+                knowledgeMapId,
                 mindmapNodeIds: ['node-1'],
                 authorUid: 42,
             },
@@ -1179,7 +1261,9 @@ describe('P2.11 authoritative problem route domain', () => {
         ]) {
             handler.request.body = { ...validBody, [field]: value };
             const forged = await captureFailure(() =>
-                handler.post('forged', 'Working title', 'Statement', 'P9999', false, 4, [], true, 'self', 2026, '', '', 0, ['node-1']),
+                handler.post('forged', 'Working title', 'Statement', 'P9999', false, 4, [], true, 'self', 2026, '', '', 0, knowledgeMapId, [
+                    'node-1',
+                ]),
             );
             expect(forged).to.be.instanceOf(GenericError);
         }
@@ -1208,6 +1292,7 @@ describe('P2.11 authoritative problem route domain', () => {
                     '',
                     '',
                     0,
+                    knowledgeMapId,
                     ['node-1'],
                     args.trainingId || '',
                     args.chapterId || '',
@@ -1229,6 +1314,7 @@ describe('P2.11 authoritative problem route domain', () => {
             managed: 'true',
             year: '2026',
             difficulty: '4',
+            knowledgeMapId,
         };
         const trainingId = '64b000000000000000000010';
         const cases = [
@@ -1260,6 +1346,7 @@ describe('P2.11 authoritative problem route domain', () => {
                 '',
                 '',
                 '',
+                knowledgeMapId,
                 [...testCase.args[2]],
                 testCase.args[3],
                 testCase.args[4],
@@ -1270,7 +1357,25 @@ describe('P2.11 authoritative problem route domain', () => {
 
         handler.request.body = { ...commonBody, template: 'self', mindmapNodeIds: 'node-1', trainingId };
         const deniedTraining = await captureFailure(() =>
-            handler.post('forged', 'Working title', 'Statement', '', false, 4, [], true, 'self', 2026, '', '', '', ['node-1'], trainingId, ''),
+            handler.post(
+                'forged',
+                'Working title',
+                'Statement',
+                '',
+                false,
+                4,
+                [],
+                true,
+                'self',
+                2026,
+                '',
+                '',
+                '',
+                knowledgeMapId,
+                ['node-1'],
+                trainingId,
+                '',
+            ),
         );
         expect(deniedTraining).to.be.instanceOf(TestPermissionError);
 
@@ -1296,10 +1401,30 @@ describe('P2.11 authoritative problem route domain', () => {
             template: 'self',
             year: '2026',
             difficulty: '3',
+            knowledgeMapId,
             mindmapNodeIds: 'node-1',
             authorUid: '77',
         };
-        await handler.post('forged', 'Admin draft', 'Statement', '', false, 3, [], true, 'self', 2026, '', '', 0, ['node-1'], undefined, 0, 77);
+        await handler.post(
+            'forged',
+            'Admin draft',
+            'Statement',
+            '',
+            false,
+            3,
+            [],
+            true,
+            'self',
+            2026,
+            '',
+            '',
+            0,
+            knowledgeMapId,
+            ['node-1'],
+            undefined,
+            0,
+            77,
+        );
         expect(calls.add.at(-1)?.[1]).to.deep.include({
             workingTitle: 'Admin draft',
             difficulty: 3,
@@ -1313,7 +1438,26 @@ describe('P2.11 authoritative problem route domain', () => {
         });
         teacher.request.body = { ...handler.request.body };
         const denied = await captureFailure(() =>
-            teacher.post('forged', 'Admin draft', 'Statement', '', false, 3, [], true, 'self', 2026, '', '', 0, ['node-1'], undefined, 0, 77),
+            teacher.post(
+                'forged',
+                'Admin draft',
+                'Statement',
+                '',
+                false,
+                3,
+                [],
+                true,
+                'self',
+                2026,
+                '',
+                '',
+                0,
+                knowledgeMapId,
+                ['node-1'],
+                undefined,
+                0,
+                77,
+            ),
         );
         expect(denied).to.be.instanceOf(TestPermissionError);
     });
@@ -1330,10 +1474,11 @@ describe('P2.11 authoritative problem route domain', () => {
             template: 'self',
             year: '2026',
             difficulty: '3',
+            knowledgeMapId,
             mindmapNodeIds: 'node-1',
         };
 
-        await handler.post('forged', 'Own admin draft', 'Statement', '', false, 3, [], true, 'self', 2026, '', '', 0, ['node-1']);
+        await handler.post('forged', 'Own admin draft', 'Statement', '', false, 3, [], true, 'self', 2026, '', '', 0, knowledgeMapId, ['node-1']);
 
         expect(calls.add.at(-1)?.[1]).to.deep.include({
             workingTitle: 'Own admin draft',
@@ -1353,10 +1498,11 @@ describe('P2.11 authoritative problem route domain', () => {
             managed: 'true',
             template: 'self',
             year: '2026',
+            knowledgeMapId,
             mindmapNodeIds: 'node-1',
         };
 
-        await handler.post('forged', 'Difficulty default', 'Statement', '', false, 0, [], true, 'self', 2026, '', '', 0, ['node-1']);
+        await handler.post('forged', 'Difficulty default', 'Statement', '', false, 0, [], true, 'self', 2026, '', '', 0, knowledgeMapId, ['node-1']);
 
         expect(calls.add.at(-1)?.[1]?.difficulty).to.equal(1);
     });
@@ -1380,7 +1526,7 @@ describe('P2.11 authoritative problem route domain', () => {
         const edit = makeHandler(ProblemEditHandler, {});
         edit.pdoc = { domainId: 'system', docId: 7, pid: 'P7' };
         edit.canEditLoadedProblem = true;
-        await edit.post('forged', 'P7', 'Title', 'Statement', 'P7', false, [], 0, false);
+        await edit.post('forged', 'P7', 'Title', 'Statement', 'P7', false, [], undefined, [], 0, false);
         expect(calls.edit[0][0]).to.equal('system');
         expect(calls.edit[0][3]).to.equal(edit.user);
 
@@ -1436,6 +1582,8 @@ describe('P2.13 managed programming edit boundary', () => {
             problemKind: 'programming',
             structureRevision: 2,
             authoringMode: 'managed',
+            knowledgeMapId,
+            knowledgeNodeIds: ['node-1'],
             managedAuthoring: { workingTitle: 'Working title', selectedMindmapNodeIds: ['node-1'], metadataStatus: 'draft' },
         };
         handler.canEditLoadedProblem = true;
@@ -1447,7 +1595,7 @@ describe('P2.13 managed programming edit boundary', () => {
         const handler = managedHandler();
         handler.request.body = { content: 'New statement', expectedStructureRevision: '2' };
 
-        await handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, undefined, 2);
+        await handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, [], undefined, undefined, 2);
 
         expect(calls.edit).to.have.lengthOf(1);
         expect(calls.edit[0][2]).to.deep.equal({ content: 'New statement', html: false });
@@ -1458,7 +1606,7 @@ describe('P2.13 managed programming edit boundary', () => {
         handler.user.canEditContent = true;
         handler.request.body = { content: 'New statement', knowledgeNodeIds: 'node-1', expectedStructureRevision: '2' };
 
-        await handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], ['node-1'], undefined, undefined, 2);
+        await handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, ['node-1'], undefined, undefined, 2);
 
         expect(calls.knowledgeMaterializations.at(-1)).to.deep.equal(['node-1']);
         expect(calls.edit[0][2]).to.deep.equal({
@@ -1474,7 +1622,7 @@ describe('P2.13 managed programming edit boundary', () => {
         calls.edit.length = 0;
         handler.request.body = { content: 'New statement', knowledgeNodeIds: '', expectedStructureRevision: '2' };
         const empty = await captureFailure(() =>
-            handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], [], undefined, undefined, 2),
+            handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, [], undefined, undefined, 2),
         );
         expect(empty).to.be.instanceOf(GenericError);
         expect(calls.knowledgeMaterializations.at(-1)).to.deep.equal([]);
@@ -1483,7 +1631,7 @@ describe('P2.13 managed programming edit boundary', () => {
         calls.edit.length = 0;
         handler.pdoc.managedAuthoring.metadataStatus = 'confirmed';
         const denied = await captureFailure(() =>
-            handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], ['node-1'], undefined, undefined, 2),
+            handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, ['node-1'], undefined, undefined, 2),
         );
         expect(denied).to.be.instanceOf(GenericError);
         expect(calls.edit).to.deep.equal([]);
@@ -1513,13 +1661,13 @@ describe('P2.13 managed programming edit boundary', () => {
         handler.pdoc.managedAuthoring.metadataStatus = 'confirmed';
         handler.request.body = { content: 'New statement', expectedStructureRevision: '2' };
 
-        await handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, undefined, 2);
+        await handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, [], undefined, undefined, 2);
         expect(calls.edit[0][2]).to.deep.equal({ content: 'New statement', html: false });
 
         calls.edit.length = 0;
         handler.request.body = { content: 'Newer statement', title: 'Working title', expectedStructureRevision: '2' };
         const error = await captureFailure(() =>
-            handler.post('forged', 'P7', 'Working title', 'Newer statement', undefined, false, [], undefined, undefined, 2),
+            handler.post('forged', 'P7', 'Working title', 'Newer statement', undefined, false, [], undefined, [], undefined, undefined, 2),
         );
         expect(error).to.be.instanceOf(GenericError);
         expect(calls.edit).to.deep.equal([]);
@@ -1531,7 +1679,7 @@ describe('P2.13 managed programming edit boundary', () => {
         handler.request.body = { content: 'New statement', title: 'Formal title', pid: 'P7' };
 
         const error = await captureFailure(() =>
-            handler.post('forged', 'P7', 'Formal title', 'New statement', 'P7', false, [], undefined, undefined, 2),
+            handler.post('forged', 'P7', 'Formal title', 'New statement', 'P7', false, [], undefined, [], undefined, undefined, 2),
         );
 
         expect(error).to.be.instanceOf(GenericError);
@@ -1698,6 +1846,70 @@ describe('P2.17 programming tag HTTP boundaries', () => {
         });
     });
 
+    it('keeps a migrated map-only programming problem in first-classification mode', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            title: 'Legacy map-only problem',
+            tag: ['PAT乙级'],
+            problemKind: 'programming',
+            knowledgeMapId,
+            structureRevision: 4,
+            data: [],
+            additional_file: [],
+        };
+        const handler = makeHandler(ProblemEditHandler, { canEditTags: true });
+        handler.pdoc = pdoc;
+        handler.canEditLoadedProblem = false;
+
+        await handler.get();
+
+        expect(handler.response.body.programmingTagState).to.deep.equal({
+            mode: 'unconverted',
+            knowledgeMapId,
+            knowledgeMapTitle,
+            sourceTags: ['PAT乙级'],
+            suggestions: [],
+            suggestedNodeIds: [],
+            ambiguousTags: [],
+            unknownTags: [],
+            selectedNodeIds: [],
+        });
+    });
+
+    it('preserves the current map through the stable tag-only workspace reload', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            title: 'Tag contribution',
+            tag: ['PAT乙级', '二分'],
+            problemKind: 'programming',
+            knowledgeMapId,
+            knowledgeNodeIds: ['node-1'],
+            structureRevision: 4,
+            data: [],
+            additional_file: [],
+        };
+        const handler = makeHandler(ProblemEditHandler, { canEditContent: false, canEditData: false, canEditTags: true });
+        handler.pdoc = pdoc;
+        handler.canEditLoadedProblem = false;
+        maintainableResults = [{ ...pdoc }];
+
+        await handler.prepare();
+        await handler.get();
+
+        expect(calls.getCapabilityAuthorized[0].slice(0, 4)).to.deep.equal(['system', 7, handler.user, 'tag']);
+        expect(calls.getCapabilityAuthorized[0][4]).to.include.members(['knowledgeMapId', 'knowledgeNodeIds']);
+        expect(handler.response.body.programmingTagState).to.deep.include({
+            mode: 'converted',
+            knowledgeMapId,
+            knowledgeMapTitle,
+            selectedNodeIds: ['node-1'],
+        });
+    });
+
     it('preserves an unconverted legacy tag array exactly during an ordinary edit save', async () => {
         const handler = makeHandler(ProblemEditHandler, {});
         handler.pdoc = {
@@ -1720,7 +1932,7 @@ describe('P2.17 programming tag HTTP boundaries', () => {
             expectedStructureRevision: '4',
         };
 
-        await handler.post('forged', 'P7', 'New', 'Statement', 'P7', false, [], [], 2, false, 4);
+        await handler.post('forged', 'P7', 'New', 'Statement', 'P7', false, [], undefined, [], 2, false, 4);
 
         expect(calls.edit).to.have.length(1);
         expect(calls.edit[0][2]).not.to.have.keys('tag', 'knowledgeNodeIds');
@@ -1739,13 +1951,61 @@ describe('P2.17 programming tag HTTP boundaries', () => {
         };
         handler.canEditLoadedProblem = true;
         handler.request.body = { title: 'Title', content: 'Statement', tag: 'forged' };
-        const rawTag = await captureFailure(() => handler.post('forged', 'P7', 'Title', 'Statement', undefined, false, ['forged'], [], 2, false, 4));
+        const rawTag = await captureFailure(() =>
+            handler.post('forged', 'P7', 'Title', 'Statement', undefined, false, ['forged'], undefined, [], 2, false, 4),
+        );
         expect(rawTag).to.be.instanceOf(GenericError);
 
         handler.pdoc.knowledgeNodeIds = ['node-1'];
         handler.request.body = { title: 'Title', content: 'Statement', pid: 'CUSTOM' };
-        const freePid = await captureFailure(() => handler.post('forged', 'P7', 'Title', 'Statement', 'CUSTOM', false, [], [], 2, false, 4));
+        const freePid = await captureFailure(() =>
+            handler.post('forged', 'P7', 'Title', 'Statement', 'CUSTOM', false, [], undefined, [], 2, false, 4),
+        );
         expect(freePid).to.be.instanceOf(GenericError);
+        expect(calls.edit).to.deep.equal([]);
+    });
+
+    it('keeps the PID editable until a map-only programming problem receives a canonical node', async () => {
+        const handler = makeHandler(ProblemEditHandler, {});
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            tag: ['PAT乙级'],
+            problemKind: 'programming',
+            knowledgeMapId,
+            knowledgeNodeIds: [],
+            structureRevision: 4,
+        };
+        handler.canEditLoadedProblem = true;
+        handler.request.body = { title: 'Title', content: 'Statement', pid: 'CUSTOM' };
+
+        await handler.post('forged', 'P7', 'Title', 'Statement', 'CUSTOM', false, [], undefined, [], 2, false, 4);
+
+        expect(calls.edit).to.have.length(1);
+        expect(calls.edit[0][2]).to.deep.include({ pid: 'CUSTOM' });
+    });
+
+    it('rejects an ordinary programming map change before the model write boundary', async () => {
+        const handler = makeHandler(ProblemEditHandler, {});
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            tag: ['PAT乙级'],
+            problemKind: 'programming',
+            knowledgeMapId,
+            knowledgeNodeIds: ['node-1'],
+            structureRevision: 4,
+        };
+        handler.canEditLoadedProblem = true;
+        handler.request.body = { title: 'Title', content: 'Statement', knowledgeMapId: '64a000000000000000000002' };
+
+        const failure = await captureFailure(() =>
+            handler.post('forged', 'P7', 'Title', 'Statement', undefined, false, [], '64a000000000000000000002', [], 2, false, 4),
+        );
+
+        expect(failure).to.be.instanceOf(GenericError);
         expect(calls.edit).to.deep.equal([]);
     });
 
@@ -1760,9 +2020,9 @@ describe('P2.17 programming tag HTTP boundaries', () => {
         };
         const preview = makeHandler(ProblemProgrammingTagPreviewHandler, {});
         preview.pdoc = pdoc;
-        preview.request.body = { knowledgeNodeIds: 'node-1' };
+        preview.request.body = { knowledgeMapId, knowledgeNodeIds: 'node-1' };
         maintainableResults = [{ ...pdoc }];
-        await preview.post('forged', 'P7', ['node-1']);
+        await preview.post('forged', 'P7', knowledgeMapId, ['node-1']);
         expect(calls.tagUnlocks).to.deep.equal([['system', 7]]);
         expect(preview.response.body.preview).to.deep.include({
             selectedNodeIds: ['node-1'],
@@ -1773,23 +2033,27 @@ describe('P2.17 programming tag HTTP boundaries', () => {
         const apply = makeHandler(ProblemProgrammingTagApplyHandler, {});
         apply.pdoc = pdoc;
         apply.request.body = {
+            knowledgeMapId,
             knowledgeNodeIds: 'node-1',
             intent: 'normalize',
             confirmed: 'true',
             previewFingerprint: 'preview-fingerprint',
         };
-        await apply.post('forged', 'P7', ['node-1'], 'normalize', true, 'preview-fingerprint');
+        await apply.post('forged', 'P7', knowledgeMapId, ['node-1'], 'normalize', true, 'preview-fingerprint');
         expect(calls.tagNormalizations).to.have.length(1);
         expect(calls.tagNormalizations[0]).to.deep.include({
             domainId: 'system',
             pid: 7,
+            targetKnowledgeMapId: knowledgeMapId,
             selectedNodeIds: ['node-1'],
             previewFingerprint: 'preview-fingerprint',
         });
         expect(apply.response.body).to.deep.include({ ok: true, structureRevision: 5 });
 
         calls.tagNormalizations.length = 0;
-        const unconfirmed = await captureFailure(() => apply.post('forged', 'P7', ['node-1'], 'normalize', false, 'preview-fingerprint'));
+        const unconfirmed = await captureFailure(() =>
+            apply.post('forged', 'P7', knowledgeMapId, ['node-1'], 'normalize', false, 'preview-fingerprint'),
+        );
         expect(unconfirmed).to.be.instanceOf(GenericError);
         expect(calls.tagNormalizations).to.deep.equal([]);
     });
@@ -1915,6 +2179,7 @@ describe('P3.15 files workspace capability contract', () => {
             undefined,
             true,
             [],
+            undefined,
             [],
             1,
             undefined,
@@ -2015,6 +2280,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             title: 'Single',
             content: 'Statement',
             difficulty: '3',
+            knowledgeMapId,
             knowledgeNodeIds: 'node-1',
             editorProblemKind: 'single',
             structuredConfig: JSON.stringify({ main: { options: ['A text', 'B text'], answerIndex: 1 } }),
@@ -2025,6 +2291,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             'Statement',
             '',
             3,
+            knowledgeMapId,
             ['node-1'],
             'single',
             JSON.stringify({ main: { options: ['A text', 'B text'], answerIndex: 1 } }),
@@ -2036,6 +2303,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
         });
         expect(calls.add[0][5]).to.deep.equal(['derived:node-1']);
         expect(calls.add[0][6].knowledgeNodeIds).to.deep.equal(['node-1']);
+        expect(calls.add[0][6].knowledgeMapId).to.equal(knowledgeMapId);
         expect(handler.response.body.ok).to.equal(true);
         expect(handler.response.body.hidden).to.equal(true);
     });
@@ -2046,12 +2314,23 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             title: 'Single',
             content: 'Statement',
             difficulty: '0',
+            knowledgeMapId,
             knowledgeNodeIds: '',
             editorProblemKind: 'multi',
             structuredConfig: JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
         };
         const error = await captureFailure(() =>
-            handler.post('forged', 'Single', 'Statement', '', 0, [], 'multi', JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } })),
+            handler.post(
+                'forged',
+                'Single',
+                'Statement',
+                '',
+                0,
+                knowledgeMapId,
+                [],
+                'multi',
+                JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
+            ),
         );
         expect(error).to.be.instanceOf(GenericError);
         expect(calls.add).to.deep.equal([]);
@@ -2064,6 +2343,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
                 title: 'Single',
                 content: 'Statement',
                 difficulty: '1',
+                knowledgeMapId,
                 knowledgeNodeIds: 'node-1',
                 editorProblemKind: 'single',
                 structuredConfig: JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
@@ -2076,6 +2356,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
                     'Statement',
                     forged.pid || '',
                     1,
+                    knowledgeMapId,
                     ['node-1'],
                     'single',
                     JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
@@ -2089,6 +2370,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             title: 'Single',
             content: 'Statement',
             difficulty: '1',
+            knowledgeMapId,
             knowledgeNodeIds: 'stale-node',
             editorProblemKind: 'single',
             structuredConfig: JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
@@ -2100,6 +2382,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
                 'Statement',
                 '',
                 1,
+                knowledgeMapId,
                 ['stale-node'],
                 'single',
                 JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
@@ -2118,6 +2401,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             content: 'Statement',
             pid: 'CUSTOM1',
             difficulty: '1',
+            knowledgeMapId,
             knowledgeNodeIds: 'node-1',
             editorProblemKind: 'single',
             structuredConfig: JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
@@ -2129,6 +2413,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             'Statement',
             'CUSTOM1',
             1,
+            knowledgeMapId,
             ['node-1'],
             'single',
             JSON.stringify({ main: { options: ['A', 'B'], answerIndex: 0 } }),
@@ -2143,6 +2428,8 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             docId: 7,
             pid: 'P7',
             problemKind: 'multi',
+            knowledgeMapId,
+            knowledgeNodeIds: ['node-1'],
             structureRevision: 4,
         };
         handler.canEditLoadedProblem = true;
@@ -2151,6 +2438,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             content: 'Statement',
             hidden: 'false',
             difficulty: '2',
+            knowledgeMapId,
             knowledgeNodeIds: 'node-1',
             expectedStructureRevision: '4',
             editorProblemKind: 'multi',
@@ -2166,6 +2454,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             undefined,
             false,
             [],
+            knowledgeMapId,
             ['node-1'],
             2,
             false,
@@ -2186,10 +2475,77 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             title: 'Multi',
             hidden: false,
             tag: ['derived:node-1'],
+            knowledgeMapId,
             knowledgeNodeIds: ['node-1'],
         });
         expect(handler.response.body).to.deep.include({ ok: true, pid: 'P7', problemKind: 'multi' });
         expect(calls.edit).to.deep.equal([]);
+    });
+
+    it('keeps a migrated map-only structured problem maintainable until tags are explicitly edited', async () => {
+        const config = JSON.stringify({ main: { options: ['A', 'B'], answerIndexes: [0], partialCreditPercent: 25 } });
+        const handler = makeHandler(ProblemEditHandler, {});
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            problemKind: 'multi',
+            knowledgeMapId,
+            knowledgeNodeIds: [],
+            structureRevision: 4,
+        };
+        handler.canEditLoadedProblem = true;
+        handler.request.body = {
+            title: 'Map-only legacy',
+            content: 'Corrected statement',
+            hidden: 'false',
+            difficulty: '2',
+            expectedStructureRevision: '4',
+            editorProblemKind: 'multi',
+            structuredConfig: config,
+        };
+
+        await handler.post(
+            'forged',
+            'P7',
+            'Map-only legacy',
+            'Corrected statement',
+            undefined,
+            false,
+            [],
+            undefined,
+            [],
+            2,
+            false,
+            4,
+            'multi',
+            config,
+        );
+
+        expect(calls.structuredSaves).to.have.length(1);
+        expect(calls.structuredSaves[0].metadata).not.to.have.keys('tag', 'knowledgeMapId', 'knowledgeNodeIds');
+    });
+
+    it('preserves map-only legacy tags during a locked structured metadata save', async () => {
+        const handler = makeHandler(ProblemEditHandler, {});
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            title: 'Legacy',
+            problemKind: 'multi',
+            knowledgeMapId,
+            knowledgeNodeIds: [],
+            structureRevision: 5,
+            structureLockedAt: new Date(),
+        };
+        handler.canEditLoadedProblem = true;
+        handler.request.body = { title: 'Renamed legacy', hidden: 'true', difficulty: '3', metadataOnly: 'true' };
+
+        await handler.post('forged', 'P7', 'Renamed legacy', undefined, undefined, true, [], undefined, [], 3, undefined, undefined, '', '', true);
+
+        expect(calls.structuredMetadataSaves).to.have.length(1);
+        expect(calls.structuredMetadataSaves[0].metadata).to.deep.equal({ title: 'Renamed legacy', hidden: true, difficulty: 3 });
     });
 
     it('rejects forged raw tags, non-admin PID edits, and stale knowledge nodes before a structured save', async () => {
@@ -2201,6 +2557,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             content: 'Statement',
             hidden: 'false',
             difficulty: '2',
+            knowledgeMapId,
             knowledgeNodeIds: 'node-1',
             expectedStructureRevision: '4',
             editorProblemKind: 'multi',
@@ -2213,6 +2570,8 @@ describe('P3.9 basic objective HTTP boundaries', () => {
                 docId: 7,
                 pid: 'P7',
                 problemKind: 'multi',
+                knowledgeMapId,
+                knowledgeNodeIds: ['node-1'],
                 structureRevision: 4,
             };
             handler.canEditLoadedProblem = true;
@@ -2226,6 +2585,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
                     forged.pid,
                     false,
                     forged.tag ? [forged.tag] : [],
+                    knowledgeMapId,
                     ['node-1'],
                     2,
                     false,
@@ -2243,12 +2603,14 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             docId: 7,
             pid: 'P7',
             problemKind: 'multi',
+            knowledgeMapId,
+            knowledgeNodeIds: ['node-1'],
             structureRevision: 4,
         };
         stale.canEditLoadedProblem = true;
         stale.request.body = { ...baseBody, knowledgeNodeIds: 'stale-node' };
         const staleError = await captureFailure(() =>
-            stale.post('forged', 'P7', 'Multi', 'Statement', undefined, false, [], ['stale-node'], 2, false, 4, 'multi', config),
+            stale.post('forged', 'P7', 'Multi', 'Statement', undefined, false, [], knowledgeMapId, ['stale-node'], 2, false, 4, 'multi', config),
         );
         expect(staleError).to.be.instanceOf(GenericError);
         expect(calls.structuredSaves).to.deep.equal([]);
@@ -2261,6 +2623,8 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             docId: 7,
             pid: 'P7',
             problemKind: 'multi',
+            knowledgeMapId,
+            knowledgeNodeIds: ['node-1'],
             structureRevision: 5,
             structureLockedAt: new Date(),
             content: 'Original statement',
@@ -2271,10 +2635,27 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             title: 'Renamed',
             hidden: 'true',
             difficulty: '4',
+            knowledgeMapId,
             knowledgeNodeIds: 'node-2',
             metadataOnly: 'true',
         };
-        await handler.post('forged', 'P7', 'Renamed', undefined, undefined, true, [], ['node-2'], 4, undefined, undefined, '', '', true);
+        await handler.post(
+            'forged',
+            'P7',
+            'Renamed',
+            undefined,
+            undefined,
+            true,
+            [],
+            knowledgeMapId,
+            ['node-2'],
+            4,
+            undefined,
+            undefined,
+            '',
+            '',
+            true,
+        );
         expect(calls.structuredMetadataSaves).to.have.length(1);
         expect(calls.structuredMetadataSaves[0]).to.deep.include({
             domainId: 'system',
@@ -2286,6 +2667,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
                 hidden: true,
                 tag: ['derived:node-2'],
                 difficulty: 4,
+                knowledgeMapId,
                 knowledgeNodeIds: ['node-2'],
             },
         });
@@ -2301,6 +2683,8 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             docId: 7,
             pid: 'P7',
             problemKind: 'multi',
+            knowledgeMapId,
+            knowledgeNodeIds: ['node-1'],
             structureRevision: 5,
             structureLockedAt: new Date(),
             content: 'Original statement',
@@ -2310,6 +2694,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             title: 'Renamed',
             content: 'Changed statement',
             hidden: 'true',
+            knowledgeMapId,
             knowledgeNodeIds: 'node-1',
             metadataOnly: 'true',
         };
@@ -2322,6 +2707,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
                 undefined,
                 true,
                 [],
+                knowledgeMapId,
                 ['node-1'],
                 undefined,
                 undefined,
@@ -2345,6 +2731,8 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             pid: 'P7',
             owner: 42,
             problemKind: 'blank',
+            knowledgeMapId,
+            knowledgeNodeIds: ['node-1'],
             data: [],
             additional_file: [],
             tag: [],
@@ -2364,7 +2752,9 @@ describe('P3.9 basic objective HTTP boundaries', () => {
         expect(handler.response.template).to.equal('problem_edit_blank.html');
         expect(handler.response.body.structuredConfig).to.deep.equal({ main: { answer: 'Case' } });
         expect(handler.response.body.structuredConfig).not.to.have.property('answers');
-        expect(handler.response.body.knowledgeMindmapOptions).to.deep.equal([{ id: 'node-1', label: '数据结构 / 线段树', tags: ['线段树'] }]);
+        expect(handler.response.body.knowledgeMindmapOptions).to.deep.equal([
+            { id: 'node-1', mapId: knowledgeMapId, mapTitle: knowledgeMapTitle, label: '数据结构 / 线段树', tags: ['线段树'] },
+        ]);
         expect(handler.response.body.canUseCustomPid).to.equal(false);
     });
 
@@ -2376,6 +2766,8 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             pid: 'P7',
             owner: 42,
             problemKind: 'function',
+            knowledgeMapId,
+            knowledgeNodeIds: ['node-1'],
             data: [],
             additional_file: [],
             tag: [],
@@ -2415,6 +2807,7 @@ describe('P3.10 subjective problem HTTP boundaries', () => {
             title: 'Essay',
             content: 'Explain why.',
             difficulty: '0',
+            knowledgeMapId,
             knowledgeNodeIds: 'node-1',
             editorProblemKind: 'subjective',
             structuredConfig: JSON.stringify({ main: { gradingInstructions: 'Look for invariants.' } }),
@@ -2425,6 +2818,7 @@ describe('P3.10 subjective problem HTTP boundaries', () => {
             'Explain why.',
             '',
             0,
+            knowledgeMapId,
             ['node-1'],
             'subjective',
             JSON.stringify({ main: { gradingInstructions: 'Look for invariants.' } }),
@@ -2474,7 +2868,8 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
             title: 'Program fill',
             content: 'Statement',
             difficulty: '0',
-            knowledgeNodeIds: '',
+            knowledgeMapId,
+            knowledgeNodeIds: 'node-1',
             editorProblemKind: 'program_fill',
             structuredConfig: JSON.stringify({
                 main: { mode: 'text', lang: '', source: 'i++;\nj++;', regions: [{ id: '', startLine: 0, endLine: 1, order: 0 }] },
@@ -2486,7 +2881,8 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
             'Statement',
             '',
             0,
-            [],
+            knowledgeMapId,
+            ['node-1'],
             'program_fill',
             JSON.stringify({
                 main: { mode: 'text', lang: '', source: 'i++;\nj++;', regions: [{ id: '', startLine: 0, endLine: 1, order: 0 }] },
@@ -2496,6 +2892,7 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
         fn.request.body = {
             title: 'Function',
             difficulty: '0',
+            knowledgeMapId,
             knowledgeNodeIds: '',
             editorProblemKind: 'function',
             structuredConfig: JSON.stringify({
@@ -2512,6 +2909,7 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
             undefined,
             '',
             0,
+            knowledgeMapId,
             [],
             'function',
             JSON.stringify({

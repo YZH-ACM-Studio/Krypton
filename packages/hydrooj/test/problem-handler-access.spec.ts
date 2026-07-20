@@ -1846,6 +1846,8 @@ describe('P3.15 files workspace capability contract', () => {
             operation: 'files-delete',
             containerFingerprint: 'fingerprint:contest-1',
         });
+        await handler.postDeleteFiles('forged', ['1.in'], 'testdata', confirmations['files-delete']);
+        expect(calls.claims.at(-1).options.activeContainerConfirmation.requestId).to.equal(confirmations['files-delete']);
 
         const claimCount = calls.claims.length;
         const wrongOperation = await captureFailure(() => handler.postDeleteFiles('forged', ['1.in'], 'testdata', confirmations['files-upload']));
@@ -1870,6 +1872,66 @@ describe('P3.15 files workspace capability contract', () => {
         await handler.get({}, ['testdata', 'additional_file'], false);
 
         expect(handler.response.body.dataWriteGuard).to.deep.equal({ active: [], canOverride: false });
+    });
+
+    it('consumes an active-contest statement confirmation after exactly one save attempt', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            title: 'Statement correction',
+            content: 'old statement',
+            problemKind: 'programming',
+            structureRevision: 4,
+            hidden: true,
+            data: [],
+            additional_file: [],
+        };
+        const handler = makeHandler(ProblemEditHandler, {
+            admin: true,
+            canEditContent: true,
+            canEditData: true,
+            canEditTags: false,
+        });
+        handler.pdoc = pdoc;
+        handler.canEditLoadedProblem = true;
+        handler.request.body = {
+            title: pdoc.title,
+            content: 'corrected statement',
+            hidden: 'true',
+            expectedStructureRevision: '4',
+        };
+        maintainableResults = [{ ...pdoc, config: '' }];
+        activeDataWriteContainers = [{ docId: 'contest-1', title: '期中考试', rule: 'exam' }];
+
+        await handler.get();
+        const requestId = handler.response.body.statementWriteGuard.confirmationRequestIds['statement-edit'];
+        handler.request.body.activeContainerConfirmation = requestId;
+        const args = [
+            'forged',
+            'P7',
+            pdoc.title,
+            'corrected statement',
+            undefined,
+            true,
+            [],
+            [],
+            1,
+            undefined,
+            4,
+            '',
+            '',
+            false,
+            false,
+            requestId,
+        ] as const;
+
+        await handler.post(...args);
+        expect(calls.edit).to.have.length(1);
+        const replay = await captureFailure(() => handler.post(...args));
+        expect(replay).to.be.instanceOf(GenericError);
+        expect(calls.edit).to.have.length(1);
+        expect((handler.session as any).problemDataWriteConfirmations[requestId]).to.equal(undefined);
     });
 
     it('publishes the canonical managed capabilities for authors, maintainers, and administrators', async () => {

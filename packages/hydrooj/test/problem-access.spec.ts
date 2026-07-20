@@ -564,7 +564,7 @@ describe('P2.13 managed programming authoring matrix', () => {
         expect(canCloneProblem(legacyOwner, { ...legacy, problemKind: 'single' })).to.equal(true);
     });
 
-    it('lets an active author acquire only a content write claim without a maintainer mirror', async () => {
+    it('lets an active author acquire draft content and published data claims without a maintainer mirror', async () => {
         const acquire = (access as any).acquireProblemWriteClaim;
         const clear = (access as any).clearProblemWriteClaim;
         const author = makeUser('student', { _permitPids: new Set([100]), _authoredPids: new Set([100]) });
@@ -604,6 +604,15 @@ describe('P2.13 managed programming authoring matrix', () => {
         });
         expect(publishedContentClaim).to.equal(null);
 
+        const publishedDataClaim = await acquire(author, structuredClone(liveProblem), 'author-published-data', 'files-upload', {
+            capability: 'data',
+        });
+        expect(publishedDataClaim?.actor).to.equal(42);
+        expect(publishedDataClaim?.capability).to.equal('data');
+        expect(publishedDataClaim).not.to.have.property('managedAuthorDraftOnly');
+        expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('maintainer');
+        expect(await clear(publishedDataClaim)).to.equal(true);
+
         const metadataClaim = await acquire(author, structuredClone(liveProblem), 'author-metadata', 'metadata-edit', { capability: 'metadata' });
         expect(metadataClaim).to.equal(null);
     });
@@ -626,7 +635,7 @@ describe('P2.24 orthogonal problem contribution capabilities', () => {
 
         expect(canEditProblemContent(author, confirmedManaged)).to.equal(false);
         expect(canManageProblemContributions(author, confirmedManaged)).to.equal(true);
-        expect(canEditProblemData(author, confirmedManaged)).to.equal(false);
+        expect(canEditProblemData(author, confirmedManaged)).to.equal(true);
         expect(canEditProblemTags(author, confirmedManaged)).to.equal(false);
 
         expect(canEditProblemContent(data, confirmedManaged)).to.equal(false);

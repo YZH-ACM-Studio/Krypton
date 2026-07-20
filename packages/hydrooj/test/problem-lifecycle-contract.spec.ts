@@ -29,6 +29,57 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(insert).to.be.greaterThan(lock);
     });
 
+    it('validates and stabilizes only the directly submitted managed draft before skipping its structure lock', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const start = source.indexOf('static async claimStructureLockForSubmission');
+        const end = source.indexOf('private static async editAuthorizedWithSnapshot', start);
+        const claim = source.slice(start, end);
+
+        expect(claim.indexOf('parseProblemKind(snapshot.problemKind)')).to.be.lessThan(
+            claim.indexOf('shouldClaimSubmissionStructureLock(snapshot, lockStructure)'),
+        );
+        expect(claim.indexOf('assertStructureRevision(snapshot.structureRevision)')).to.be.lessThan(
+            claim.indexOf('shouldClaimSubmissionStructureLock(snapshot, lockStructure)'),
+        );
+        expect(claim).to.include("'managedAuthoring.metadataStatus': 'draft'");
+        expect(claim).to.include('aclWriteClaim: { $exists: false }');
+        expect(claim).to.include('structureRevision: snapshot.structureRevision');
+        expect(claim).to.include('const direct = await claimLock(pdoc as ProblemDoc, true)');
+        expect(claim).to.include('if (source) await claimLock(source, false)');
+    });
+
+    it('keeps archived and legacy statement writes behind server-side guards', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const rawStart = source.indexOf('static async edit(');
+        const rawEnd = source.indexOf('static async beginAuthorizedWriteClaim', rawStart);
+        const raw = source.slice(rawStart, rawEnd);
+        const claimedStart = source.indexOf('static async editWithClaim(');
+        const claimedEnd = source.indexOf('/** HTTP/service-token metadata write entrypoint. */', claimedStart);
+        const claimed = source.slice(claimedStart, claimedEnd);
+
+        for (const method of [raw, claimed]) {
+            expect(method.match(/current\.archivedAt && isStructuralPatch/g)).to.have.length(2);
+            const legacyAwareGuard = method.indexOf('editorialPatch && (current.problemKind === undefined || !submissionLockedPatch)');
+            const revisionManagedBranch = method.indexOf('if (current.problemKind !== undefined && structuralPatch');
+            expect(legacyAwareGuard).to.be.greaterThan(-1);
+            expect(revisionManagedBranch).to.be.greaterThan(legacyAwareGuard);
+        }
+        expect(claimed).to.include("'statement-edit'");
+        expect(claimed).to.include("'statement'");
+    });
+
+    it('checks active containers through reverse reference wrappers as well as the source itself', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const start = source.indexOf('static async listActiveDataWriteContainers');
+        const end = source.indexOf('static activeDataWriteContainerFacts', start);
+        const method = source.slice(start, end);
+
+        expect(method).to.include("'reference.domainId': domainId");
+        expect(method).to.include("'reference.pid': pid");
+        expect(method).to.include('targets.map((target) =>');
+        expect(method).to.include('pids: target.docId');
+    });
+
     it('passes the private raw objective config to the judge without exposing it through page reads', () => {
         const source = readFileSync(resolve(root, 'src/model/record.ts'), 'utf8');
         expect(source).to.include('problem.get(domainId, group[0].pid, undefined, true)');
@@ -355,8 +406,8 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const editStart = source.indexOf('static async editWithClaim(');
         const editEnd = source.indexOf('static async editAuthorized(', editStart);
         const edit = source.slice(editStart, editEnd);
-        const structuralStart = edit.indexOf('if (current.problemKind !== undefined && isStructuralPatch');
-        const structuralEnd = edit.indexOf('} else {', structuralStart);
+        const structuralStart = edit.indexOf('if (current.problemKind !== undefined && structuralPatch');
+        const structuralEnd = edit.indexOf('if (!result &&', structuralStart);
         const structural = edit.slice(structuralStart, structuralEnd);
 
         expect(structural).to.include('result = await commitProblemWriteClaimUpdate(');
@@ -405,10 +456,12 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const guardStart = source.indexOf('export function managedProblemPatchCapability(');
         const guardEnd = source.indexOf('interface MindmapNodeRecord', guardStart);
         const guard = source.slice(guardStart, guardEnd);
-        expect(source).to.include("new Set(['authoringMode', 'problemKind', 'pid', 'sort', 'tag', 'sourceMeta'])");
+        for (const field of ['authoringMode', 'problemKind', 'pid', 'sort', 'tag', 'sourceMeta']) {
+            expect(source).to.include(`    '${field}',`);
+        }
         expect(guard).to.include("field.includes('.') || MANAGED_CANONICAL_FIELDS.has(field)");
         expect(guard).to.include("if (requestedFields.includes('title')) immutableFields.push('title')");
         expect(guard).to.include("if (requestedFields.includes('managedAuthoring')) immutableFields.push('managedAuthoring')");
-        expect(guard.indexOf('if (!workingTitleOnly)')).to.be.lessThan(guard.indexOf("immutableFields.push('title')"));
+        expect(guard.indexOf('if (!managedDraftPatch)')).to.be.lessThan(guard.indexOf("immutableFields.push('title')"));
     });
 });

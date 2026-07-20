@@ -2,6 +2,7 @@ import { ArrowLeft, CheckCircle2, CircleDot, ListChecks, Plus, Save, TextCursorI
 import { useMemo, useRef, useState } from 'react';
 import { BASIC_OBJECTIVE_KIND, type BasicObjectiveKind } from '@hydrooj/common';
 import { MarkdownEditor } from '@/components/markdown-renderer';
+import { useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
 import { StructuredProblemMetadataPanel, type KnowledgeMindmapOption } from '@/components/structured-problem-metadata-panel';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Button } from '@/components/ui/button';
@@ -20,7 +21,7 @@ const KIND_META: Record<BasicObjectiveKind, { label: string; icon: typeof Circle
 };
 
 async function responseMessage(response: Response): Promise<string> {
-  if (response.status === 409) return '题目结构已被锁定或已发生变更，请重新载入后克隆新题修改。';
+  if (response.status === 409) return '题目已被其他操作修改，或正在比赛/考试中使用；请重新载入。';
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
     const body = await response.json();
@@ -63,6 +64,7 @@ function ObjectiveEditorShell({
   const configKey = JSON.stringify(config);
   const dirtyState = useFormDirtyState(formRef, configKey);
   const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saving);
+  const statementGuard = useProblemDataWriteGuard(data.statementWriteGuard, 'statement');
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -77,11 +79,19 @@ function ObjectiveEditorShell({
       setError('无法读取当前表单，未发送保存请求。');
       return;
     }
+    const formData = new FormData(form);
+    const statementChanged = !isCreate && String(formData.get('content') || '') !== String(pdoc.content || '');
+    const confirmation = statementChanged ? await statementGuard.confirm('保存题面勘误', 'statement-edit') : true;
+    if (!confirmation) {
+      setError('此题正在比赛或考试中使用，当前角色不能修改题面。');
+      return;
+    }
+    if (typeof confirmation === 'string') formData.set('activeContainerConfirmation', confirmation);
     setSaving(true);
     try {
       const response = await fetch(form.action || window.location.pathname, {
         method: 'POST',
-        body: new URLSearchParams(new FormData(form) as any),
+        body: new URLSearchParams(formData as any),
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       });
@@ -134,9 +144,10 @@ function ObjectiveEditorShell({
             'dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200',
           )}
         >
-          该题已有提交或所属容器已开始，题面和答案结构已锁定；仍可修改标题、标签和可见性。结构调整请克隆为新题。
+          该题已有提交：题面勘误仍可保存，答案与评测结构保持锁定；结构调整请克隆新题。
         </p>
       ) : null}
+      {statementGuard.notice}
       {error ? (
         <p role="alert" className="border-y border-destructive/40 bg-destructive/5 px-3 py-3 text-sm text-destructive">
           {error}
@@ -153,17 +164,11 @@ function ObjectiveEditorShell({
         aria-busy={saving}
         className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]"
       >
-        {locked ? (
-          <input type="hidden" name="metadataOnly" value="true" />
-        ) : (
-          <>
-            <input type="hidden" name="editorProblemKind" value={kind} />
-            <input type="hidden" name="structuredConfig" value={JSON.stringify(config)} />
-            {!isCreate ? <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision || '')} /> : null}
-          </>
-        )}
+        <input type="hidden" name="editorProblemKind" value={kind} />
+        <input type="hidden" name="structuredConfig" value={JSON.stringify(config)} />
+        {!isCreate ? <input type="hidden" name="expectedStructureRevision" value={String(pdoc.structureRevision || '')} /> : null}
 
-        <fieldset disabled={locked} className={cn('min-w-0 space-y-6', locked && 'opacity-60')}>
+        <div className="min-w-0 space-y-6">
           <section className="space-y-4" aria-labelledby="objective-statement-title">
             <div>
               <h2 id="objective-statement-title" className="text-sm font-semibold">
@@ -174,7 +179,11 @@ function ObjectiveEditorShell({
             <MarkdownEditor name="content" value={pdoc.content || ''} minHeight={300} />
           </section>
 
-          <section className="space-y-4 border-t border-border/70 pt-5" aria-labelledby="objective-answer-title">
+          <fieldset
+            disabled={locked}
+            className={cn('space-y-4 border-t border-border/70 pt-5', locked && 'opacity-60')}
+            aria-labelledby="objective-answer-title"
+          >
             <div>
               <h2 id="objective-answer-title" className="text-sm font-semibold">
                 答案设置
@@ -182,8 +191,8 @@ function ObjectiveEditorShell({
               <p className="mt-0.5 text-xs text-muted-foreground">学生端不会收到标准答案或部分分配置。</p>
             </div>
             {children}
-          </section>
-        </fieldset>
+          </fieldset>
+        </div>
 
         <StructuredProblemMetadataPanel
           pdoc={pdoc}
@@ -194,6 +203,7 @@ function ObjectiveEditorShell({
           onMetadataChange={dirtyState.recompute}
         />
       </form>
+      {statementGuard.dialog}
       {navigationGuard.guardDialog}
     </main>
   );

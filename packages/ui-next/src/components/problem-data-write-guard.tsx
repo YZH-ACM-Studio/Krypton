@@ -3,17 +3,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
-type ActiveContainer = { id: string; title?: string; rule?: string; endAt?: string | Date };
-export type ProblemDataWriteOperation = 'files-upload' | 'files-rename' | 'files-delete' | 'generate-testdata-request';
+interface ActiveContainer {
+  id: string;
+  title?: string;
+  rule?: string;
+  endAt?: string | Date;
+}
+export type ProblemDataWriteOperation = 'files-upload' | 'files-rename' | 'files-delete' | 'generate-testdata-request' | 'statement-edit';
 export type ProblemDataWriteConfirmationResult = true | string | false;
 
-export type ProblemDataWriteGuardState = {
+export interface ProblemDataWriteGuardState {
   active?: ActiveContainer[];
   canOverride?: boolean;
   confirmationRequestIds?: Partial<Record<ProblemDataWriteOperation, string>>;
-};
+}
 
-export function useProblemDataWriteGuard(state: ProblemDataWriteGuardState | undefined) {
+export function useProblemDataWriteGuard(state: ProblemDataWriteGuardState | undefined, scope: 'data' | 'statement' = 'data') {
   const active = Array.isArray(state?.active) ? state.active : [];
   const canOverride = state?.canOverride === true;
   const confirmationRequestIds = state?.confirmationRequestIds;
@@ -21,12 +26,15 @@ export function useProblemDataWriteGuard(state: ProblemDataWriteGuardState | und
   const [action, setAction] = useState<{ label: string; operation: ProblemDataWriteOperation } | null>(null);
   const resolver = useRef<((confirmed: ProblemDataWriteConfirmationResult) => void) | null>(null);
 
-  const settle = useCallback((confirmed: boolean) => {
-    const result = confirmed && action ? confirmationRequestIds?.[action.operation] || false : false;
-    resolver.current?.(result);
-    resolver.current = null;
-    setAction(null);
-  }, [action, confirmationRequestIds]);
+  const settle = useCallback(
+    (confirmed: boolean) => {
+      const result = confirmed && action ? confirmationRequestIds?.[action.operation] || false : false;
+      resolver.current?.(result);
+      resolver.current = null;
+      setAction(null);
+    },
+    [action, confirmationRequestIds],
+  );
 
   useEffect(() => () => resolver.current?.(false), []);
 
@@ -54,9 +62,9 @@ export function useProblemDataWriteGuard(state: ProblemDataWriteGuardState | und
         <p className="mt-1 text-xs leading-5 text-muted-foreground">
           {blocked
             ? canOverride
-              ? '赛中数据修改确认已失效，请刷新页面后重试。'
-              : '当前角色不能修改评测数据。'
-            : '系统管理员每次修改前都必须在自定义确认框中明确确认，操作会写入审计日志。'}
+              ? `赛中${scope === 'statement' ? '题面' : '数据'}修改确认已失效，请刷新页面后重试。`
+              : `当前角色不能修改${scope === 'statement' ? '题面' : '评测数据'}。`
+            : `系统管理员每次修改${scope === 'statement' ? '题面' : '评测数据'}前都必须在自定义确认框中明确确认，操作会写入审计日志。`}
         </p>
         <ul className="mt-1 list-inside list-disc text-xs text-muted-foreground">
           {active.map((item) => (
@@ -71,11 +79,11 @@ export function useProblemDataWriteGuard(state: ProblemDataWriteGuardState | und
     <Dialog open onOpenChange={(open) => !open && settle(false)}>
       <DialogContent className="max-w-lg" onClose={() => settle(false)}>
         <DialogHeader>
-          <DialogTitle>确认修改赛中评测数据</DialogTitle>
+          <DialogTitle>确认修改赛中{scope === 'statement' ? '题面' : '评测数据'}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 p-5 text-sm">
           <p>
-            你即将执行“{action.label}”。此题正被 {active.length} 个进行中的比赛或考试引用，修改可能影响当前提交的判定。
+            你即将执行“{action.label}”。此题正被 {active.length} 个进行中的比赛或考试引用，修改可能影响正在答题的学生。
           </p>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => settle(false)}>

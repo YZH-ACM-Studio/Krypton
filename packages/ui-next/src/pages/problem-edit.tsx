@@ -14,6 +14,7 @@ import {
   type ManagedTrainingPlacementView,
 } from '@/components/problem-authoring-state';
 import { ProblemEditorWorkspace } from '@/components/problem-editor-workspace';
+import { useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -708,6 +709,7 @@ export function ProblemEditPage() {
   const [saveError, setSaveError] = useState('');
   const formRef = useRef<HTMLFormElement>(null);
   const editVersion = useRef(0);
+  const statementGuard = useProblemDataWriteGuard(data.statementWriteGuard, 'statement');
 
   const [persistedTags, setPersistedTags] = useState<string[]>(pdoc.tag || []);
   const [persistedStructureRevision, setPersistedStructureRevision] = useState<number | undefined>(pdoc.structureRevision);
@@ -965,9 +967,17 @@ export function ProblemEditPage() {
       setSaveState('error');
       return;
     }
-    setSaveState('saving');
     const form = e.currentTarget;
     const fd = new FormData(form);
+    const persistedContentText = typeof contentValue === 'string' ? contentValue : JSON.stringify(contentValue);
+    const confirmation = !isCreate && contentText !== persistedContentText ? await statementGuard.confirm('保存题面勘误', 'statement-edit') : true;
+    if (!confirmation) {
+      setSaveError('此题正在比赛或考试中使用，当前角色不能修改题面。');
+      setSaveState('error');
+      return;
+    }
+    if (typeof confirmation === 'string') fd.set('activeContainerConfirmation', confirmation);
+    setSaveState('saving');
     const savedVersion = editVersion.current;
     try {
       const editRes = await fetch(form.action || window.location.pathname, {
@@ -1101,6 +1111,7 @@ export function ProblemEditPage() {
               {saveError}
             </p>
           ) : null}
+          {statementGuard.notice}
 
           <form
             id="programming-problem-form"
@@ -1783,6 +1794,7 @@ export function ProblemEditPage() {
           ) : null}
         </DialogContent>
       </Dialog>
+      {statementGuard.dialog}
       {navigationGuard.guardDialog}
     </ProblemEditorWorkspace>
   );

@@ -22,6 +22,23 @@ export const PROBLEM_STRUCTURAL_FIELDS = new Set([
     'managedAuthoring',
 ]);
 
+/** Fields whose evaluation meaning becomes immutable after the first real submission. */
+export const PROBLEM_SUBMISSION_LOCKED_FIELDS = new Set(['config', 'problemKind', 'codeEvaluationStatus', 'data', 'reference', 'managedAuthoring']);
+
+export function shouldClaimSubmissionStructureLock(
+    problem: {
+        problemKind?: ProblemKind;
+        structureLockedAt?: Date;
+        authoringMode?: 'managed';
+        hidden?: boolean;
+        managedAuthoring?: { metadataStatus?: 'draft' | 'confirmed' };
+    },
+    lockStructure: boolean,
+): boolean {
+    if (!lockStructure || problem.problemKind === undefined || problem.structureLockedAt) return false;
+    return problem.authoringMode !== 'managed' || problem.hidden !== true || problem.managedAuthoring?.metadataStatus !== 'draft';
+}
+
 export function problemCreateChangedFields(
     problemKind: ProblemKind,
     created: {

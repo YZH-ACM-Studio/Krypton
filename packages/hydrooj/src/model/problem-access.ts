@@ -781,7 +781,7 @@ export function canEditProblemMetadata(user: ProblemAclUser, pdoc: ProblemDoc): 
 /** Testdata, judge configuration and other evaluation-only fields. */
 export function canEditProblemData(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (!hasLoadedAclForProblem(user, pdoc) || isAclFenced(user, pdoc.docId)) return false;
-    return canEditProblemContent(user, pdoc) || user._dataContributionPids?.has(pdoc.docId) === true;
+    return canMaintainProblem(user, pdoc) || canAuthorProblem(user, pdoc) || user._dataContributionPids?.has(pdoc.docId) === true;
 }
 
 /** Mindmap selection plus its canonical materialized tags, and nothing else. */
@@ -879,7 +879,13 @@ function applyCapabilityIdentityFilter(
     pdoc: ProblemDoc,
     capability: ProblemWriteCapability,
 ): void {
-    if (capability === 'data' && user._dataContributionPids?.has(pdoc.docId) && !canEditProblemContent(user, pdoc)) return;
+    if (
+        capability === 'data' &&
+        !canMaintainProblem(user, pdoc) &&
+        (canAuthorProblem(user, pdoc) || user._dataContributionPids?.has(pdoc.docId) === true)
+    ) {
+        return;
+    }
     if (capability === 'tag' && user._tagContributionPids?.has(pdoc.docId) && !canEditProblemContent(user, pdoc)) return;
     if (capability === 'contributions' && pdoc.authoringMode === 'managed' && canAuthorProblem(user, pdoc) && !canMaintainProblem(user, pdoc)) {
         return;

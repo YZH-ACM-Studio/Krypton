@@ -2,6 +2,7 @@ import { ArrowLeft, Save } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { PROBLEM_KIND_TO_SLUG } from '@hydrooj/common';
 import { MarkdownEditor } from '@/components/markdown-renderer';
+import { useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
 import { StructuredProblemMetadataPanel, type KnowledgeMindmapOption } from '@/components/structured-problem-metadata-panel';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Button } from '@/components/ui/button';
@@ -12,7 +13,7 @@ import { readProblemSaveSuccess } from '@/lib/problem-save-response';
 type R = Record<string, any>;
 
 async function errorMessage(response: Response) {
-  if (response.status === 409) return '题目结构已被锁定或已发生变更，请重新载入后克隆新题修改。';
+  if (response.status === 409) return '题目已被其他操作修改，或正在比赛/考试中使用；请重新载入。';
   const body = await response.json().catch(() => null);
   return body?.error?.message || body?.message || `保存失败（HTTP ${response.status}）`;
 }
@@ -29,6 +30,7 @@ export function SubjectiveProblemEditorPage() {
   const formRef = useRef<HTMLFormElement>(null);
   const dirtyState = useFormDirtyState(formRef, instructions);
   const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saving);
+  const statementGuard = useProblemDataWriteGuard(data.statementWriteGuard, 'statement');
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -38,12 +40,20 @@ export function SubjectiveProblemEditorPage() {
       setError('无法读取当前表单，未发送保存请求。');
       return;
     }
+    const formData = new FormData(form);
+    const statementChanged = !isCreate && String(formData.get('content') || '') !== String(pdoc.content || '');
+    const confirmation = statementChanged ? await statementGuard.confirm('保存题面勘误', 'statement-edit') : true;
+    if (!confirmation) {
+      setError('此题正在比赛或考试中使用，当前角色不能修改题面。');
+      return;
+    }
+    if (typeof confirmation === 'string') formData.set('activeContainerConfirmation', confirmation);
     setSaving(true);
     setError('');
     try {
       const response = await fetch(form.action || window.location.pathname, {
         method: 'POST',
-        body: new URLSearchParams(new FormData(form) as any),
+        body: new URLSearchParams(formData as any),
         credentials: 'same-origin',
         headers: { Accept: 'application/json' },
       });
@@ -85,9 +95,10 @@ export function SubjectiveProblemEditorPage() {
 
       {locked ? (
         <p className="border-y border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">
-          该题结构已锁定；仍可修改标题、标签和可见性。题面或阅卷说明调整请克隆新题。
+          该题已有提交：题面勘误仍可保存，阅卷说明与答案结构保持锁定；结构调整请克隆新题。
         </p>
       ) : null}
+      {statementGuard.notice}
       {error ? (
         <p role="alert" className="border-y border-destructive/40 px-3 py-3 text-sm text-destructive">
           {error}
@@ -104,17 +115,11 @@ export function SubjectiveProblemEditorPage() {
         aria-busy={saving}
         className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]"
       >
-        {locked ? (
-          <input type="hidden" name="metadataOnly" value="true" />
-        ) : (
-          <>
-            <input type="hidden" name="editorProblemKind" value={PROBLEM_KIND_TO_SLUG.subjective} />
-            <input type="hidden" name="structuredConfig" value={JSON.stringify({ main: { gradingInstructions: instructions } })} />
-            {!isCreate ? <input type="hidden" name="expectedStructureRevision" value={pdoc.structureRevision} /> : null}
-          </>
-        )}
+        <input type="hidden" name="editorProblemKind" value={PROBLEM_KIND_TO_SLUG.subjective} />
+        <input type="hidden" name="structuredConfig" value={JSON.stringify({ main: { gradingInstructions: instructions } })} />
+        {!isCreate ? <input type="hidden" name="expectedStructureRevision" value={pdoc.structureRevision} /> : null}
 
-        <fieldset disabled={locked} className={cn('min-w-0 space-y-6', locked && 'opacity-60')}>
+        <div className="min-w-0 space-y-6">
           <section className="space-y-3">
             <div>
               <h2 className="text-sm font-semibold">题面</h2>
@@ -122,7 +127,7 @@ export function SubjectiveProblemEditorPage() {
             </div>
             <MarkdownEditor name="content" value={pdoc.content || ''} minHeight={320} />
           </section>
-          <section className="space-y-2 border-t border-border/70 pt-5">
+          <fieldset disabled={locked} className={cn('space-y-2 border-t border-border/70 pt-5', locked && 'opacity-60')}>
             <h2 className="text-sm font-semibold">阅卷说明</h2>
             <textarea
               value={instructions}
@@ -131,8 +136,8 @@ export function SubjectiveProblemEditorPage() {
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               placeholder="仅阅卷教师可见，例如评分要点、扣分规则。"
             />
-          </section>
-        </fieldset>
+          </fieldset>
+        </div>
 
         <StructuredProblemMetadataPanel
           pdoc={pdoc}
@@ -143,6 +148,7 @@ export function SubjectiveProblemEditorPage() {
           onMetadataChange={dirtyState.recompute}
         />
       </form>
+      {statementGuard.dialog}
       {navigationGuard.guardDialog}
     </main>
   );

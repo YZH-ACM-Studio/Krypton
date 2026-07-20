@@ -500,7 +500,8 @@ function resolveDataWriteConfirmation(
     requestId?: string,
 ): ProblemDataWriteConfirmation | undefined {
     if (!requestId) return undefined;
-    const confirmation = confirmationStore(handler)[requestId];
+    const store = confirmationStore(handler);
+    const confirmation = store[requestId];
     const now = Date.now();
     if (
         !confirmation ||
@@ -521,17 +522,33 @@ function resolveDataWriteConfirmation(
             operation,
             requestId,
         );
-        throw new ValidationError('activeContainerConfirmation', null, '赛中数据修改确认已失效，请刷新页面后重新确认');
+        throw new ValidationError(
+            'activeContainerConfirmation',
+            null,
+            `${operation === 'statement-edit' ? '赛中题面' : '赛中数据'}修改确认已失效，请刷新页面后重新确认`,
+        );
+    }
+    if (operation === 'statement-edit') {
+        const nextStore = { ...store };
+        delete nextStore[requestId];
+        (handler.session as any)[DATA_WRITE_CONFIRMATION_SESSION_KEY] = nextStore;
+        logger.info(
+            'Active-container statement confirmation consumed domain=%s pid=%d actor=%d confirmationRequestId=%s result=consumed',
+            pdoc.domainId,
+            pdoc.docId,
+            handler.user._id,
+            requestId,
+        );
     }
     return confirmation;
 }
 
-async function dataWriteGuardState(handler: Handler, pdoc: ProblemDoc, udoc: User) {
+async function dataWriteGuardState(handler: Handler, pdoc: ProblemDoc, udoc: User, scope: 'data' | 'statement' = 'data') {
     const active = await problem.listActiveDataWriteContainers(pdoc.domainId, pdoc.docId);
     const facts = problem.activeDataWriteContainerFacts(active);
     const canOverride = problem.isProblemBankAdmin(udoc);
     const contributionOnly = !problem.canEditProblemContent(udoc, pdoc);
-    const guardedFacts = canOverride || contributionOnly ? facts : [];
+    const guardedFacts = scope === 'statement' || canOverride || contributionOnly ? facts : [];
     const state: any = {
         active: guardedFacts.map((item) => ({ id: item.id, title: item.title, rule: item.rule, endAt: item.endAt })),
         canOverride,
@@ -551,7 +568,7 @@ async function dataWriteGuardState(handler: Handler, pdoc: ProblemDoc, udoc: Use
     const store = Object.fromEntries(retained.map((entry) => [entry.requestId, entry]));
     const containerFingerprint = problem.activeDataWriteContainerFingerprint(pdoc.domainId, pdoc.docId, guardedFacts);
     state.confirmationRequestIds = Object.fromEntries(
-        DATA_WRITE_CONFIRMATION_OPERATIONS.map((operation) => {
+        (scope === 'statement' ? (['statement-edit'] as ProblemDataWriteOperation[]) : DATA_WRITE_CONFIRMATION_OPERATIONS).map((operation) => {
             const requestId = `problem-data-confirm:${nanoid(20)}`;
             store[requestId] = {
                 requestId,
@@ -1538,7 +1555,10 @@ export class ProblemEditHandler extends ProblemManageHandler {
             this.response.body.testdata = sortFiles(this.pdoc.data || []);
             this.response.body.additional_file = sortFiles(this.pdoc.additional_file || []);
         }
-        if (capabilities.canEditContent) this.response.body.statementLangs = this.ctx.i18n.langs(false);
+        if (capabilities.canEditContent) {
+            this.response.body.statementLangs = this.ctx.i18n.langs(false);
+            this.response.body.statementWriteGuard = await dataWriteGuardState(this, this.pdoc, this.user, 'statement');
+        }
         const problemKind = effectiveProblemKind(this.pdoc);
         if (problemKind === 'programming') {
             const canReviewManaged = this.pdoc.authoringMode === 'managed' && capabilities.canPublish;
@@ -1619,6 +1639,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
     @post('structuredConfig', Types.Content, true)
     @post('metadataOnly', Types.Boolean, true)
     @post('completeCodeEvaluationDraft', Types.Boolean, true)
+    @post('activeContainerConfirmation', Types.String, true)
     async post(
         _domainId: string,
         pid: string | number,
@@ -1635,6 +1656,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
         structuredConfig = '',
         metadataOnly = false,
         completeCodeEvaluationDraft = false,
+        activeContainerConfirmation?: string,
     ) {
         await assertProblemWriteCapability(this, this.pdoc, this.canEditLoadedProblem, 'edit', 'content');
         const domainId = this.pdoc.domainId;
@@ -1660,6 +1682,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 'editorProblemKind',
                 'structuredConfig',
                 'metadataOnly',
+                'activeContainerConfirmation',
             ]);
             const unknownFields = Object.keys(body).filter((field) => !allowed.has(field));
             if (unknownFields.length) {
@@ -1777,6 +1800,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
             return;
         }
         if (content === undefined) throw new ValidationError('content');
+        const statementConfirmation = resolveDataWriteConfirmation(this, this.pdoc, 'statement-edit', activeContainerConfirmation);
         if (newPid === undefined) newPid = this.pdoc.pid || '';
         else if (typeof newPid !== 'string') newPid = `P${newPid}`;
         if (newPid !== this.pdoc.pid && (await problem.get(domainId, newPid))) throw new ProblemAlreadyExistError(newPid);
@@ -1834,6 +1858,7 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 config: parseStructuredConfigInput(structuredConfig),
                 metadata: $update,
                 completeCodeEvaluationDraft,
+                activeContainerConfirmation: statementConfirmation,
             });
             const responsePid = newPid || pdoc.docId;
             this.response.body = {
@@ -1847,7 +1872,17 @@ export class ProblemEditHandler extends ProblemManageHandler {
             return;
         }
         if (editorProblemKind || structuredConfig || completeCodeEvaluationDraft) throw new ValidationError('problemKind');
-        const pdoc = await problem.editAuthorized(domainId, this.pdoc.docId, $update, this.user, {}, { expectedStructureRevision });
+        const pdoc = await problem.editAuthorized(
+            domainId,
+            this.pdoc.docId,
+            $update,
+            this.user,
+            {},
+            {
+                expectedStructureRevision,
+                activeContainerConfirmation: statementConfirmation,
+            },
+        );
         const responsePid = newPid || pdoc.docId;
         this.response.body = { ok: true, pid: responsePid, problemKind };
         this.response.redirect = this.url('problem_detail', { pid: responsePid });

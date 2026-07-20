@@ -100,9 +100,11 @@ import {
     hasStartedProblemContainer,
     normalizeStructuredProblemConfig,
     PROBLEM_STRUCTURAL_FIELDS,
+    PROBLEM_SUBMISSION_LOCKED_FIELDS,
     problemCreateChangedFields,
     problemEditAuditedFields,
     problemReferenceCount,
+    shouldClaimSubmissionStructureLock,
     structuredProblemConfigForEditor,
     structuredProblemUsesTestdata,
 } from './problem-lifecycle';
@@ -335,6 +337,14 @@ function sortable(source: string, namespaces: Record<string, string>) {
 
 function isStructuralPatch($set: Record<string, unknown>, $unset: Record<string, unknown> = {}) {
     return [...Object.keys($set), ...Object.keys($unset)].some((field) => PROBLEM_STRUCTURAL_FIELDS.has(field));
+}
+
+function isSubmissionLockedPatch($set: Record<string, unknown>, $unset: Record<string, unknown> = {}) {
+    return [...Object.keys($set), ...Object.keys($unset)].some((field) => PROBLEM_SUBMISSION_LOCKED_FIELDS.has(field));
+}
+
+function isEditorialPatch($set: Record<string, unknown>, $unset: Record<string, unknown> = {}) {
+    return [...Object.keys($set), ...Object.keys($unset)].some((field) => field === 'content' || field === 'additional_file');
 }
 
 function touchesProgrammingTagPair($set: Record<string, unknown>, $unset: Record<string, unknown> = {}) {
@@ -1860,6 +1870,9 @@ export class ProblemModel {
             reference: 1,
             structureRevision: 1,
             structureLockedAt: 1,
+            authoringMode: 1,
+            hidden: 1,
+            managedAuthoring: 1,
         } as const;
         const pdoc = await document.coll.findOne(
             {
@@ -1884,10 +1897,38 @@ export class ProblemModel {
             if (!source) throw new ProblemNotFoundError(pdoc.reference.domainId, pdoc.reference.pid);
             assertProblemReadyForUseWithTrace(source, { actor, stage: 'record-create-reference' });
         }
-        const claimLock = async (snapshot: ProblemDoc) => {
-            if (!lockStructure || snapshot.problemKind === undefined || snapshot.structureLockedAt) return;
+        const claimLock = async (snapshot: ProblemDoc, allowManagedDraftValidation: boolean): Promise<ProblemDoc> => {
+            if (!lockStructure || snapshot.problemKind === undefined) return snapshot;
             parseProblemKind(snapshot.problemKind);
             assertStructureRevision(snapshot.structureRevision);
+            if (snapshot.structureLockedAt) return snapshot;
+            if (allowManagedDraftValidation && !shouldClaimSubmissionStructureLock(snapshot, lockStructure)) {
+                const stableDraft = (await document.coll.findOne(
+                    {
+                        domainId: snapshot.domainId,
+                        docType: document.TYPE_PROBLEM,
+                        docId: snapshot.docId,
+                        problemKind: snapshot.problemKind,
+                        structureRevision: snapshot.structureRevision,
+                        structureLockedAt: { $exists: false },
+                        aclWriteClaim: { $exists: false },
+                        authoringMode: 'managed',
+                        hidden: true,
+                        'managedAuthoring.metadataStatus': 'draft',
+                    },
+                    { projection },
+                )) as ProblemDoc | null;
+                if (!stableDraft) throw new ProblemStructureConflictError(snapshot.docId);
+                logger.info(
+                    'Managed draft validation kept structure editable domain=%s pid=%s docId=%d revision=%d actor=%s stage=record-create-lock result=skipped',
+                    stableDraft.domainId,
+                    stableDraft.pid || `P${stableDraft.docId}`,
+                    stableDraft.docId,
+                    stableDraft.structureRevision,
+                    actor ?? 'unknown',
+                );
+                return stableDraft;
+            }
             const result = await document.coll.updateOne(
                 {
                     domainId: snapshot.domainId,
@@ -1905,7 +1946,7 @@ export class ProblemModel {
                     $inc: { structureRevision: 1 },
                 },
             );
-            if (result.matchedCount === 1) return;
+            if (result.matchedCount === 1) return snapshot;
             const current = await document.coll.findOne(
                 {
                     domainId: snapshot.domainId,
@@ -1915,10 +1956,11 @@ export class ProblemModel {
                 { projection: { structureLockedAt: 1 } },
             );
             if (!current?.structureLockedAt) throw new ProblemStructureConflictError(snapshot.docId);
+            return snapshot;
         };
-        await claimLock(pdoc as ProblemDoc);
-        if (source) await claimLock(source);
-        return source || (pdoc as ProblemDoc);
+        const direct = await claimLock(pdoc as ProblemDoc, true);
+        if (source) await claimLock(source, false);
+        return source || direct;
     }
 
     private static async editAuthorizedWithSnapshot(input: {
@@ -1929,6 +1971,7 @@ export class ProblemModel {
         $set: Partial<ProblemDoc>;
         expectedProblemKind: ProblemKind;
         expectedStructureRevision?: number;
+        activeContainerConfirmation?: ProblemDataWriteConfirmation;
         validateSnapshot?: (before: ProblemDoc, nextConfig: unknown) => void;
     }): Promise<{ before: ProblemDoc; result: ProblemDoc; auditedFields: string[] }> {
         const auditedFields = problemEditAuditedFields(input.$set as Record<string, unknown>);
@@ -1994,13 +2037,25 @@ export class ProblemModel {
                     data: before.data,
                 });
             }
+            if (input.expectedStructureRevision !== undefined) {
+                assertStructureRevision(input.expectedStructureRevision);
+                if (before.structureRevision !== input.expectedStructureRevision) {
+                    throw new ProblemStructureConflictError(input.pid);
+                }
+            }
+            const effectiveSet = Object.fromEntries(
+                Object.entries(input.$set).filter(([field, value]) => !isEqual(before[field], value)),
+            ) as Partial<ProblemDoc>;
+            if (!Object.keys(effectiveSet).length) return { before, result: before, auditedFields };
             const result = await ProblemModel.editWithClaim(
                 claim,
-                input.$set,
+                effectiveSet,
                 {},
                 {
                     expectedStructureRevision: input.expectedStructureRevision,
                     requireExpectedStructureRevision: true,
+                    activeContainerConfirmation: input.activeContainerConfirmation,
+                    user: input.user,
                 },
             );
             return { before, result, auditedFields };
@@ -2018,6 +2073,7 @@ export class ProblemModel {
         config: unknown;
         metadata?: Partial<Pick<ProblemDoc, 'title' | 'pid' | 'hidden' | 'tag' | 'difficulty' | 'lockHidden' | 'html' | 'knowledgeNodeIds'>>;
         completeCodeEvaluationDraft?: boolean;
+        activeContainerConfirmation?: ProblemDataWriteConfirmation;
     }): Promise<ProblemDoc> {
         const problemKind = parseProblemKind(input.problemKind);
         const lifecycle = await document.coll.findOne(
@@ -2076,6 +2132,7 @@ export class ProblemModel {
                 $set,
                 expectedProblemKind: problemKind,
                 expectedStructureRevision: input.expectedStructureRevision,
+                activeContainerConfirmation: input.activeContainerConfirmation,
                 validateSnapshot: (before, nextConfig) => {
                     if (!codeEvaluation) return;
                     assertCodeEvaluationStatusInvariant(problemKind, nextConfig, before.codeEvaluationStatus);
@@ -2502,6 +2559,9 @@ export class ProblemModel {
             },
         );
         if (!current) throw new ProblemNotFoundError(domainId, _id);
+        if (current.archivedAt && isStructuralPatch($set as any, $unset)) {
+            throw new ValidationError('archivedAt', null, '已归档题目不能修改题面或评测结构');
+        }
         if (current.authoringMode === 'managed') {
             logger.error('Raw managed problem edit rejected domain=%s pid=%d fields=%o', domainId, _id, [
                 ...Object.keys($set),
@@ -2536,6 +2596,9 @@ export class ProblemModel {
         await canonicalizeStructuredKnowledgePatch(current, $set, $unset, rawEditContext, 'after-hook', {
             requireKnowledgePair: knowledgePairRequired,
         });
+        if (current.archivedAt && isStructuralPatch($set as any, $unset)) {
+            throw new ValidationError('archivedAt', null, '写入钩子不能修改已归档题目的题面或评测结构');
+        }
         const publishes = publishesProblemPatch($set as Record<string, unknown>, $unset);
         if (current.archivedAt && publishes) throw new ValidationError('hidden');
         if (publishes) {
@@ -2551,15 +2614,25 @@ export class ProblemModel {
             });
         }
         if ($set.content === current.content) delete $set.content;
+        const structuralPatch = isStructuralPatch($set as any, $unset);
+        const submissionLockedPatch = isSubmissionLockedPatch($set as any, $unset);
+        const editorialPatch = isEditorialPatch($set as any, $unset);
+        if (!options.skipStructureGuard && editorialPatch && (current.problemKind === undefined || !submissionLockedPatch)) {
+            const activeContainers = await ProblemModel.listActiveDataWriteContainers(domainId, _id);
+            if (activeContainers.length) {
+                const facts = ProblemModel.activeDataWriteContainerFacts(activeContainers);
+                throw new ProblemDataActiveContainerError(_id, facts.map((item) => item.title || item.id).join('、'), facts);
+            }
+        }
         let result: ProblemDoc | null;
-        if (current.problemKind !== undefined && isStructuralPatch($set as any, $unset) && !options.skipStructureGuard) {
+        if (current.problemKind !== undefined && structuralPatch && !options.skipStructureGuard) {
             const expectedRevision = options.expectedStructureRevision ?? current.structureRevision;
             assertStructureRevision(expectedRevision);
             parseProblemKind(current.problemKind);
             if ($set.problemKind !== undefined && $set.problemKind !== current.problemKind) {
                 throw new ValidationError('problemKind');
             }
-            if (current.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, _id))) {
+            if (submissionLockedPatch && (current.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, _id)))) {
                 throw new ProblemStructureConflictError(_id);
             }
             result = await document.coll.findOneAndUpdate(
@@ -2568,7 +2641,7 @@ export class ProblemModel {
                     docType: document.TYPE_PROBLEM,
                     docId: _id,
                     structureRevision: expectedRevision,
-                    structureLockedAt: { $exists: false },
+                    ...(submissionLockedPatch ? { structureLockedAt: { $exists: false } } : {}),
                 },
                 {
                     $set,
@@ -2766,31 +2839,53 @@ export class ProblemModel {
     }
 
     static async listActiveDataWriteContainers(domainId: string, pid: number, now = new Date()) {
-        return document
-            .getMulti(domainId, document.TYPE_CONTEST, {
-                pids: pid,
-                rule: { $ne: 'homework' },
-                beginAt: { $lte: now },
-                endAt: { $gt: now },
-            } as any)
-            .project({ docId: 1, title: 1, rule: 1, beginAt: 1, endAt: 1 })
+        const wrappers = await document.coll
+            .find(
+                {
+                    docType: document.TYPE_PROBLEM,
+                    'reference.domainId': domainId,
+                    'reference.pid': pid,
+                },
+                { projection: { domainId: 1, docId: 1 } },
+            )
             .toArray();
+        const targets = [
+            ...new Map([{ domainId, docId: pid }, ...wrappers].map((target) => [`${target.domainId}/${target.docId}`, target])).values(),
+        ];
+        const groups = await Promise.all(
+            targets.map((target) =>
+                document
+                    .getMulti(target.domainId, document.TYPE_CONTEST, {
+                        pids: target.docId,
+                        rule: { $ne: 'homework' },
+                        beginAt: { $lte: now },
+                        endAt: { $gt: now },
+                    } as any)
+                    .project({ domainId: 1, docId: 1, title: 1, rule: 1, beginAt: 1, endAt: 1 })
+                    .toArray(),
+            ),
+        );
+        return groups.flat();
     }
 
     static activeDataWriteContainerFacts(activeContainers: any[]) {
-        return activeContainers
-            .map((tdoc: any) => ({
-                id: String(tdoc.docId),
-                title: tdoc.title,
-                rule: tdoc.rule,
-                beginAt: tdoc.beginAt,
-                endAt: tdoc.endAt,
-            }))
-            .sort((left, right) => left.id.localeCompare(right.id));
+        const facts = activeContainers.map((tdoc: any) => ({
+            domainId: String(tdoc.domainId),
+            id: String(tdoc.docId),
+            title: tdoc.title,
+            rule: tdoc.rule,
+            beginAt: tdoc.beginAt,
+            endAt: tdoc.endAt,
+        }));
+        return [...new Map(facts.map((fact) => [`${fact.domainId}/${fact.id}`, fact])).values()].sort((left, right) => {
+            const domainOrder = left.domainId.localeCompare(right.domainId);
+            return domainOrder || left.id.localeCompare(right.id);
+        });
     }
 
     static activeDataWriteContainerFingerprint(domainId: string, pid: number, facts: ReturnType<typeof ProblemModel.activeDataWriteContainerFacts>) {
         const containers = facts.map((item) => ({
+            domainId: item.domainId,
             id: item.id,
             title: item.title || null,
             rule: item.rule || null,
@@ -2798,6 +2893,86 @@ export class ProblemModel {
             endAt: item.endAt instanceof Date ? item.endAt.toISOString() : item.endAt || null,
         }));
         return createHash('sha256').update(JSON.stringify({ domainId, pid, containers })).digest('hex');
+    }
+
+    static async assertActiveContainerWriteAllowed(
+        current: ProblemDoc,
+        user: ProblemAclUser,
+        operation: ProblemDataWriteOperation,
+        requestId: string,
+        confirmation: ProblemDataWriteConfirmation | undefined,
+        scope: 'data' | 'statement',
+    ): Promise<void> {
+        const activeContainers = await ProblemModel.listActiveDataWriteContainers(current.domainId, current.docId);
+        if (!activeContainers.length) return;
+        const facts = ProblemModel.activeDataWriteContainerFacts(activeContainers);
+        const administrator = ProblemModel.isProblemBankAdmin(user);
+        const establishedDataMaintainer = ProblemModel.canEditProblemContent(user, current) || ProblemModel.canAuthorProblem(user, current);
+        if (!administrator && (scope !== 'data' || !establishedDataMaintainer)) {
+            logger.warn(
+                'Active-container %s write rejected domain=%s pid=%d actor=%d operation=%s requestId=%s containers=%o result=denied',
+                scope,
+                current.domainId,
+                current.docId,
+                user._id,
+                operation,
+                requestId,
+                facts.map((item) => item.id),
+            );
+            throw new ProblemDataActiveContainerError(current.docId, facts.map((item) => item.title || item.id).join('、'), facts);
+        }
+        if (!administrator) return;
+        const now = Date.now();
+        const currentFingerprint = ProblemModel.activeDataWriteContainerFingerprint(current.domainId, current.docId, facts);
+        const confirmationValid =
+            confirmation?.domainId === current.domainId &&
+            confirmation.pid === current.docId &&
+            confirmation.actor === user._id &&
+            confirmation.operation === operation &&
+            confirmation.containerFingerprint === currentFingerprint &&
+            Number.isSafeInteger(confirmation.issuedAt) &&
+            confirmation.issuedAt <= now &&
+            now - confirmation.issuedAt <= PROBLEM_DATA_WRITE_CONFIRMATION_TTL_MS &&
+            !!confirmation.requestId;
+        if (!confirmationValid) {
+            logger.warn(
+                'Active-container admin %s confirmation required domain=%s pid=%d actor=%d operation=%s requestId=%s confirmationRequestId=%s containers=%o result=confirmation-required',
+                scope,
+                current.domainId,
+                current.docId,
+                user._id,
+                operation,
+                requestId,
+                confirmation?.requestId || '-',
+                facts.map((item) => item.id),
+            );
+            throw new ProblemDataActiveContainerError(current.docId, facts.map((item) => item.title || item.id).join('、'), facts);
+        }
+        await OplogModel.add({
+            type: `problem.${scope}.active-container-override`,
+            domainId: current.domainId,
+            operator: user._id,
+            problemId: current.docId,
+            operation,
+            requestId,
+            confirmationRequestId: confirmation.requestId,
+            confirmationIssuedAt: new Date(confirmation.issuedAt),
+            containerFingerprint: currentFingerprint,
+            containerIds: facts.map((item) => item.id),
+            result: 'confirmed',
+            time: new Date(),
+        } as any);
+        logger.warn(
+            'Active-container admin %s write confirmed domain=%s pid=%d actor=%d operation=%s requestId=%s confirmationRequestId=%s containers=%o result=confirmed',
+            scope,
+            current.domainId,
+            current.docId,
+            user._id,
+            operation,
+            requestId,
+            confirmation.requestId,
+            facts.map((item) => item.id),
+        );
     }
 
     /**
@@ -2852,76 +3027,14 @@ export class ProblemModel {
                 );
                 if (!current) throw new Error(`problem write claim ownership lost before ${operation}: ${claim.requestId}`);
                 if (current.archivedAt) throw new ValidationError('archivedAt', null, '已归档题目不能修改评测数据');
-                const activeContainers = await ProblemModel.listActiveDataWriteContainers(domainId, pid);
-                if (activeContainers.length) {
-                    const facts = ProblemModel.activeDataWriteContainerFacts(activeContainers);
-                    const administrator = ProblemModel.isProblemBankAdmin(user);
-                    const contributionOnly = !ProblemModel.canEditProblemContent(user, current);
-                    if (!administrator && contributionOnly) {
-                        logger.warn(
-                            'Active-container data write rejected domain=%s pid=%d actor=%d operation=%s requestId=%s containers=%o result=denied',
-                            domainId,
-                            pid,
-                            user._id,
-                            operation,
-                            claim.requestId,
-                            facts.map((item) => item.id),
-                        );
-                        throw new ProblemDataActiveContainerError(pid, facts.map((item) => item.title || item.id).join('、'), facts);
-                    }
-                    if (administrator) {
-                        const confirmation = options.activeContainerConfirmation;
-                        const now = Date.now();
-                        const currentFingerprint = ProblemModel.activeDataWriteContainerFingerprint(domainId, pid, facts);
-                        const confirmationValid =
-                            confirmation?.domainId === domainId &&
-                            confirmation.pid === pid &&
-                            confirmation.actor === user._id &&
-                            confirmation.operation === (options.confirmationOperation || operation) &&
-                            confirmation.containerFingerprint === currentFingerprint &&
-                            Number.isSafeInteger(confirmation.issuedAt) &&
-                            confirmation.issuedAt <= now &&
-                            now - confirmation.issuedAt <= PROBLEM_DATA_WRITE_CONFIRMATION_TTL_MS &&
-                            !!confirmation.requestId;
-                        if (!confirmationValid) {
-                            logger.warn(
-                                'Active-container admin confirmation required domain=%s pid=%d actor=%d operation=%s requestId=%s confirmationRequestId=%s containers=%o result=confirmation-required',
-                                domainId,
-                                pid,
-                                user._id,
-                                operation,
-                                claim.requestId,
-                                confirmation?.requestId || '-',
-                                facts.map((item) => item.id),
-                            );
-                            throw new ProblemDataActiveContainerError(pid, facts.map((item) => item.title || item.id).join('、'), facts);
-                        }
-                        await OplogModel.add({
-                            type: 'problem.data.active-container-override',
-                            domainId,
-                            operator: user._id,
-                            problemId: pid,
-                            operation,
-                            requestId: claim.requestId,
-                            confirmationRequestId: confirmation.requestId,
-                            confirmationIssuedAt: new Date(confirmation.issuedAt),
-                            containerFingerprint: currentFingerprint,
-                            containerIds: facts.map((item) => item.id),
-                            result: 'confirmed',
-                            time: new Date(),
-                        } as any);
-                        logger.warn(
-                            'Active-container data write confirmed domain=%s pid=%d actor=%d operation=%s requestId=%s confirmationRequestId=%s containers=%o result=confirmed',
-                            domainId,
-                            pid,
-                            user._id,
-                            operation,
-                            claim.requestId,
-                            confirmation.requestId,
-                            facts.map((item) => item.id),
-                        );
-                    }
-                }
+                await ProblemModel.assertActiveContainerWriteAllowed(
+                    current,
+                    user,
+                    options.confirmationOperation || (operation as ProblemDataWriteOperation),
+                    claim.requestId,
+                    options.activeContainerConfirmation,
+                    'data',
+                );
                 const result = await work(claim);
                 if (current.problemKind !== undefined && options.bumpStructureRevision !== false) {
                     assertStructureRevision(current.structureRevision);
@@ -3005,6 +3118,8 @@ export class ProblemModel {
             expectedTag?: string[];
             requireExpectedStructureRevision?: boolean;
             skipStructureGuard?: boolean;
+            activeContainerConfirmation?: ProblemDataWriteConfirmation;
+            user?: ProblemAclUser;
         } = {},
     ): Promise<ProblemDoc> {
         const domainId = claim.domainId;
@@ -3053,6 +3168,9 @@ export class ProblemModel {
             },
         );
         if (!current) throw new Error(`problem write claim ownership lost before edit: ${claim.requestId}`);
+        if (current.archivedAt && isStructuralPatch($set as any, $unset)) {
+            throw new ValidationError('archivedAt', null, '已归档题目不能修改题面或评测结构');
+        }
         let managedGuard: ReturnType<typeof managedProblemPatchCapability> | null = null;
         let confirmedManagedMindmapNodeIds: string[] | null = null;
         if (current.authoringMode === 'managed') {
@@ -3145,6 +3263,9 @@ export class ProblemModel {
             managedGuard = finalGuard;
         }
         await canonicalizeStructuredKnowledgePatch(current, $set, $unset, claim, 'after-hook', { requireKnowledgePair: knowledgePairRequired });
+        if (current.archivedAt && isStructuralPatch($set as any, $unset)) {
+            throw new ValidationError('archivedAt', null, '写入钩子不能修改已归档题目的题面或评测结构');
+        }
         assertCodeEvaluationLifecyclePatchWithTrace(current as ProblemDoc, $set as Record<string, unknown>, $unset, {
             actor: claim.actor,
             operation: claim.operation,
@@ -3166,8 +3287,31 @@ export class ProblemModel {
             });
         }
         if ($set.content === current.content) delete $set.content;
+        const structuralPatch = isStructuralPatch($set as any, $unset);
+        const submissionLockedPatch = isSubmissionLockedPatch($set as any, $unset);
+        const editorialPatch = isEditorialPatch($set as any, $unset);
+        const allowHistoricalStructureLock =
+            current.problemKind !== undefined && structuralPatch && !options.skipStructureGuard && editorialPatch && !submissionLockedPatch;
+        if (!options.skipStructureGuard && editorialPatch && (current.problemKind === undefined || !submissionLockedPatch)) {
+            if (!options.user) {
+                const activeContainers = await ProblemModel.listActiveDataWriteContainers(domainId, _id);
+                if (activeContainers.length) {
+                    const facts = ProblemModel.activeDataWriteContainerFacts(activeContainers);
+                    throw new ProblemDataActiveContainerError(_id, facts.map((item) => item.title || item.id).join('、'), facts);
+                }
+            } else {
+                await ProblemModel.assertActiveContainerWriteAllowed(
+                    current,
+                    options.user,
+                    'statement-edit',
+                    claim.requestId,
+                    options.activeContainerConfirmation,
+                    'statement',
+                );
+            }
+        }
         let result: ProblemDoc | null;
-        if (current.problemKind !== undefined && isStructuralPatch($set as any, $unset) && !options.skipStructureGuard) {
+        if (current.problemKind !== undefined && structuralPatch && !options.skipStructureGuard) {
             if (options.requireExpectedStructureRevision) {
                 assertStructureRevision(options.expectedStructureRevision);
             }
@@ -3177,12 +3321,13 @@ export class ProblemModel {
             if ($set.problemKind !== undefined && $set.problemKind !== current.problemKind) {
                 throw new ValidationError('problemKind');
             }
-            if (current.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, _id))) {
+            if (submissionLockedPatch && (current.structureLockedAt || (await ProblemModel.materializeStartedContainerLock(domainId, _id)))) {
                 throw new ProblemStructureConflictError(_id);
             }
             result = await commitProblemWriteClaimUpdate(claim, $set, $unset, managedGuard?.capability || claim.capability, {
                 expectedStructureRevision: expectedRevision,
                 expectedTag: options.expectedTag,
+                allowHistoricalStructureLock,
             });
         } else {
             result = await commitProblemWriteClaimUpdate(claim, $set, $unset, managedGuard?.capability || claim.capability, {
@@ -3210,7 +3355,7 @@ export class ProblemModel {
             if (
                 live &&
                 options.expectedStructureRevision !== undefined &&
-                (live.structureLockedAt || live.structureRevision !== options.expectedStructureRevision)
+                ((!allowHistoricalStructureLock && live.structureLockedAt) || live.structureRevision !== options.expectedStructureRevision)
             ) {
                 throw new ProblemStructureConflictError(_id);
             }
@@ -3227,7 +3372,11 @@ export class ProblemModel {
         $set: Partial<ProblemDoc>,
         user: ProblemAclUser,
         requestedUnset: Record<string, unknown> = {},
-        options: { expectedStructureRevision?: number; expectedTag?: string[] } = {},
+        options: {
+            expectedStructureRevision?: number;
+            expectedTag?: string[];
+            activeContainerConfirmation?: ProblemDataWriteConfirmation;
+        } = {},
     ): Promise<ProblemDoc> {
         const preliminary = await document.coll.findOne({ domainId, docType: document.TYPE_PROBLEM, docId: _id });
         if (!preliminary) throw new ProblemNotFoundError(domainId, _id);
@@ -3308,6 +3457,7 @@ export class ProblemModel {
                 const result = await ProblemModel.editWithClaim(claim, $set, requestedUnset, {
                     ...options,
                     requireExpectedStructureRevision: true,
+                    user,
                 });
                 if (guard) {
                     const type = guard.publishes ? 'problem.managed.publish' : 'problem.managed.write';

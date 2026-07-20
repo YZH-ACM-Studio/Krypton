@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, Copy, FileCode2, GripVertical, Plus, Save, Trash2 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
+import { useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
 import { StructuredRegionAuthorEditor, type AuthorLineSelection } from '@/components/structured-region-author-editor';
 import { StructuredRegionInputs } from '@/components/structured-region-inputs';
 import { StructuredProblemMetadataPanel, type KnowledgeMindmapOption } from '@/components/structured-problem-metadata-panel';
@@ -36,7 +37,7 @@ interface TestdataFile {
 }
 
 async function responseMessage(response: Response) {
-  if (response.status === 409) return '题目结构已锁定或已被其他窗口修改，请重新载入。';
+  if (response.status === 409) return '题目已被其他操作修改，或正在比赛/考试中使用；请重新载入。';
   const body = await response.json().catch(() => null);
   return body?.error?.message || body?.message || `保存失败（HTTP ${response.status}）`;
 }
@@ -205,6 +206,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
   }, [kind, regions, source]);
   const dirtyState = useFormDirtyState(formRef, JSON.stringify(structuredConfig));
   const navigationGuard = useUnsavedChangesGuard(dirtyState.dirty || saving || cloning);
+  const statementGuard = useProblemDataWriteGuard(data.statementWriteGuard, 'statement');
   const localRegionCounter = useRef(0);
 
   const updateSource = (nextSource: string) => {
@@ -279,6 +281,15 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       const formData = new FormData(form);
       if (!isCreate) formData.set('expectedStructureRevision', String(structureRevision));
       if (completing) formData.set('completeCodeEvaluationDraft', 'true');
+      const statementChanged = !isCreate && String(formData.get('content') || '') !== String(pdoc.content || '');
+      const confirmation = statementChanged ? await statementGuard.confirm('保存题面勘误', 'statement-edit') : true;
+      if (!confirmation) {
+        setError('此题正在比赛或考试中使用，当前角色不能修改题面。');
+        setSaving(false);
+        setSaveAction('save');
+        return;
+      }
+      if (typeof confirmation === 'string') formData.set('activeContainerConfirmation', confirmation);
       const response = await fetch(form.action || window.location.pathname, {
         method: 'POST',
         body: new URLSearchParams(formData as any),
@@ -401,8 +412,11 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
       </header>
 
       {locked ? (
-        <p className="border-y border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">结构已锁定；仅可修改标题、标签和可见性。</p>
+        <p className="border-y border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+          该题已有提交：题面勘误仍可保存，私有模板、作答区域和测试映射保持锁定。
+        </p>
       ) : null}
+      {statementGuard.notice}
       {codeEvaluationDraft ? (
         <p className="border-y border-sky-300 bg-sky-50 px-3 py-3 text-sm text-sky-900 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
           当前是隐藏的代码评测草稿。可以反复保存；“完成配置”会在一个服务端 CAS 中重查模板、区域、测试点与真实文件。
@@ -424,17 +438,11 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
         aria-busy={saving || cloning}
         className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_19rem]"
       >
-        {locked ? (
-          <input type="hidden" name="metadataOnly" value="true" />
-        ) : (
-          <>
-            <input type="hidden" name="editorProblemKind" value={kind} />
-            <input type="hidden" name="structuredConfig" value={JSON.stringify(structuredConfig)} />
-            {draftCreation ? <input type="hidden" name="codeEvaluationDraft" value="true" /> : null}
-          </>
-        )}
+        <input type="hidden" name="editorProblemKind" value={kind} />
+        <input type="hidden" name="structuredConfig" value={JSON.stringify(structuredConfig)} />
+        {draftCreation ? <input type="hidden" name="codeEvaluationDraft" value="true" /> : null}
 
-        <fieldset disabled={locked} className={cn('min-w-0 space-y-6', locked && 'opacity-60')}>
+        <div className="min-w-0 space-y-6">
           {!draftCreation ? (
             <section className="space-y-3">
               <h2 className="text-sm font-semibold">题面</h2>
@@ -442,229 +450,235 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
             </section>
           ) : null}
 
-          {kind === 'program_fill' ? (
-            <section className="space-y-3 border-t border-border/70 pt-5">
-              <h2 className="text-sm font-semibold">评测方式</h2>
-              <SimpleSelect
-                value={mode}
-                onValueChange={(value) => setMode(value as 'text' | 'compile')}
-                disabled={!isCreate}
-                options={[
-                  { value: 'text', label: '文本比对' },
-                  { value: 'compile', label: '拼接编译' },
-                ]}
-              />
-              {!isCreate ? <p className="text-xs text-muted-foreground">评测方式创建后不可切换。</p> : null}
-            </section>
-          ) : null}
-
-          {draftCreation ? (
-            <section className="space-y-4 border-t border-border/70 pt-5">
-              <div className="space-y-1">
-                <h2 className="text-sm font-semibold">先固定评测语言</h2>
-                <p className="text-xs text-muted-foreground">
-                  创建后立即获得真实题号，再在同一工作区上传测试数据并编辑题面与模板。草稿始终隐藏，完成校验前不能提交或加入任何容器。
-                </p>
-              </div>
-              <SimpleSelect value={lang} onValueChange={setLang} options={langOptions.length ? langOptions : [{ value: '', label: '请选择语言' }]} />
-            </section>
-          ) : (
-            <>
+          <fieldset disabled={locked} className={cn('space-y-6', locked && 'opacity-60')}>
+            {kind === 'program_fill' ? (
               <section className="space-y-3 border-t border-border/70 pt-5">
-                <div>
-                  <h2 className="text-sm font-semibold">{compileMode ? '语言与完整模板' : '完整模板'}</h2>
+                <h2 className="text-sm font-semibold">评测方式</h2>
+                <SimpleSelect
+                  value={mode}
+                  onValueChange={(value) => setMode(value as 'text' | 'compile')}
+                  disabled={!isCreate}
+                  options={[
+                    { value: 'text', label: '文本比对' },
+                    { value: 'compile', label: '拼接编译' },
+                  ]}
+                />
+                {!isCreate ? <p className="text-xs text-muted-foreground">评测方式创建后不可切换。</p> : null}
+              </section>
+            ) : null}
+
+            {draftCreation ? (
+              <section className="space-y-4 border-t border-border/70 pt-5">
+                <div className="space-y-1">
+                  <h2 className="text-sm font-semibold">先固定评测语言</h2>
                   <p className="text-xs text-muted-foreground">
-                    {compileMode ? '评测语言创建后不可修改。' : '语言仅用于代码高亮，可以留空或之后调整。'}直接框选完整源码中的
-                    {kind === 'function' ? '一行或多行' : '一整行'}，再设为{kind === 'function' ? '函数区' : '填空区'}
-                    ；所选标准内容只在作者与评测链中可见。
+                    创建后立即获得真实题号，再在同一工作区上传测试数据并编辑题面与模板。草稿始终隐藏，完成校验前不能提交或加入任何容器。
                   </p>
                 </div>
                 <SimpleSelect
                   value={lang}
                   onValueChange={setLang}
-                  disabled={compileMode && !isCreate}
-                  options={
-                    !compileMode
-                      ? [{ value: '', label: '不指定高亮语言' }, ...langOptions]
-                      : langOptions.length
-                        ? langOptions
-                        : [{ value: lang, label: lang || '请选择语言' }]
-                  }
+                  options={langOptions.length ? langOptions : [{ value: '', label: '请选择语言' }]}
                 />
-                <StructuredRegionAuthorEditor
-                  lang={lang}
-                  source={source}
-                  regions={regions.map((region) => ({
-                    key: region.key,
-                    startLine: region.startLine,
-                    endLine: region.endLine,
-                    invalid: region.invalid,
-                  }))}
-                  onSourceChange={updateSource}
-                  onSelectionChange={setSelection}
-                />
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2.5">
-                  <div className="text-xs text-muted-foreground">
-                    {selection ? (
-                      <>
-                        将使用第 {selection.startLine + 1}–{selection.endLine} 行{selection.expanded ? '（已自动扩展到完整行）' : ''}
-                      </>
-                    ) : (
-                      '请先拖动选择至少一行源码'
-                    )}
-                  </div>
-                  <Button type="button" variant="outline" size="sm" disabled={!selection} onClick={addSelectedRegion}>
-                    <Plus className="size-3.5" />
-                    设为{kind === 'function' ? '函数区' : '填空区'}
-                  </Button>
-                </div>
               </section>
-
-              <section className="space-y-3 border-t border-border/70 pt-5">
-                <div>
-                  <h2 className="text-sm font-semibold">作答区域</h2>
-                  <p className="text-xs text-muted-foreground">区域 ID 由服务端生成；拖拽卡片只调整学生作答顺序，不会移动源码。</p>
-                </div>
-                {regions.map((region, index) => (
-                  <div
-                    key={region.key}
-                    className={cn('space-y-3 rounded-lg border p-3', region.invalid && 'border-destructive bg-destructive/5')}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={() => {
-                      if (draggedRegion === null) return;
-                      setRegions((current) => reorderRegions(current, draggedRegion, index));
-                      setDraggedRegion(null);
-                    }}
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        draggable
-                        onDragStart={() => setDraggedRegion(index)}
-                        onDragEnd={() => setDraggedRegion(null)}
-                        className="cursor-grab rounded p-1 text-muted-foreground active:cursor-grabbing"
-                        aria-label={`拖拽调整区域 ${index + 1} 顺序`}
-                      >
-                        <GripVertical className="size-4" />
-                      </button>
-                      <span className="text-sm font-medium">区域 {index + 1}</span>
-                      <span className="font-mono text-xs text-muted-foreground">
-                        第 {region.startLine + 1}–{region.endLine} 行 · {region.id ? region.id : '保存后生成 ID'}
-                      </span>
-                      <div className="ml-auto flex">
-                        <Button type="button" variant="ghost" size="icon" onClick={() => moveRegion(index, -1)} aria-label="上移">
-                          <ArrowUp className="size-4" />
-                        </Button>
-                        <Button type="button" variant="ghost" size="icon" onClick={() => moveRegion(index, 1)} aria-label="下移">
-                          <ArrowDown className="size-4" />
-                        </Button>
-                        <Button type="button" variant="ghost" size="icon" onClick={() => removeRegion(index)} aria-label="删除">
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
-                    </div>
-                    {kind === 'function' ? (
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <label className="space-y-1.5">
-                          <span className="text-xs font-medium">函数签名（必填）</span>
-                          <Input
-                            value={region.signature}
-                            onChange={(event) =>
-                              setRegions((current) => current.map((item, i) => (i === index ? { ...item, signature: event.target.value } : item)))
-                            }
-                            placeholder="例如 int solve(int n)"
-                            className="font-mono"
-                          />
-                        </label>
-                        <label className="space-y-1.5">
-                          <span className="text-xs font-medium">局部要求（可选）</span>
-                          <Input
-                            value={region.description}
-                            onChange={(event) =>
-                              setRegions((current) => current.map((item, i) => (i === index ? { ...item, description: event.target.value } : item)))
-                            }
-                            placeholder="说明输入、输出或约束"
-                          />
-                        </label>
-                      </div>
-                    ) : (
-                      <Input
-                        value={region.prompt}
-                        onChange={(event) =>
-                          setRegions((current) => current.map((item, i) => (i === index ? { ...item, prompt: event.target.value } : item)))
-                        }
-                        placeholder="填写提示（可选）"
-                      />
-                    )}
-                    {region.invalid ? (
-                      <p role="alert" className="text-xs text-destructive">
-                        模板修改已使这个区域坐标失效；请删除后重新框选，系统不会猜测迁移。
-                      </p>
-                    ) : null}
+            ) : (
+              <>
+                <section className="space-y-3 border-t border-border/70 pt-5">
+                  <div>
+                    <h2 className="text-sm font-semibold">{compileMode ? '语言与完整模板' : '完整模板'}</h2>
+                    <p className="text-xs text-muted-foreground">
+                      {compileMode ? '评测语言创建后不可修改。' : '语言仅用于代码高亮，可以留空或之后调整。'}直接框选完整源码中的
+                      {kind === 'function' ? '一行或多行' : '一整行'}，再设为{kind === 'function' ? '函数区' : '填空区'}
+                      ；所选标准内容只在作者与评测链中可见。
+                    </p>
                   </div>
-                ))}
-                {!regions.length ? <p className="text-sm text-muted-foreground">尚未设置作答区域。</p> : null}
-                <div className="border-y border-border/70 py-4">
-                  <p className="mb-3 text-xs font-medium text-muted-foreground">学生输入预览（不展示后台完整模板）</p>
-                  <StructuredRegionInputs
-                    regions={regions.map((region) => ({
-                      id: region.id || region.key,
-                      signature: region.signature,
-                      description: region.description,
-                      prompt: region.prompt,
-                    }))}
-                    values={{}}
-                    onChange={() => {}}
-                    singleLine={kind === 'program_fill'}
-                    skeleton={kind === 'program_fill' ? previewSkeleton : undefined}
-                    readOnly
+                  <SimpleSelect
+                    value={lang}
+                    onValueChange={setLang}
+                    disabled={compileMode && !isCreate}
+                    options={
+                      !compileMode
+                        ? [{ value: '', label: '不指定高亮语言' }, ...langOptions]
+                        : langOptions.length
+                          ? langOptions
+                          : [{ value: lang, label: lang || '请选择语言' }]
+                    }
                   />
-                </div>
-              </section>
-              {compileMode ? (
-                <>
-                  <section className="space-y-3 border-t border-border/70 pt-5">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <h2 className="flex items-center gap-1.5 text-sm font-semibold">
-                          <FileCode2 className="size-4" />
-                          真实测试数据
-                        </h2>
-                        <p className="text-xs text-muted-foreground">可一次选择多个文件；上传直接写入当前题，失败不会创建空文件或默认映射。</p>
-                      </div>
-                      <span className="text-xs text-muted-foreground">结构版本 {structureRevision}</span>
+                  <StructuredRegionAuthorEditor
+                    lang={lang}
+                    source={source}
+                    regions={regions.map((region) => ({
+                      key: region.key,
+                      startLine: region.startLine,
+                      endLine: region.endLine,
+                      invalid: region.invalid,
+                    }))}
+                    onSourceChange={updateSource}
+                    onSelectionChange={setSelection}
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2.5">
+                    <div className="text-xs text-muted-foreground">
+                      {selection ? (
+                        <>
+                          将使用第 {selection.startLine + 1}–{selection.endLine} 行{selection.expanded ? '（已自动扩展到完整行）' : ''}
+                        </>
+                      ) : (
+                        '请先拖动选择至少一行源码'
+                      )}
                     </div>
-                    <FileUploader
-                      endpoint={`/p/${encodeURIComponent(pid)}/files`}
-                      fieldName="file"
-                      meta={{ type: 'testdata' }}
-                      maxFileSize={null}
-                      maxFiles={null}
-                      uploadConcurrency={1}
-                      retryOnFailure={false}
-                      onUploaded={acceptUploadedFile}
-                    />
-                    {testdataFiles.length ? (
-                      <div className="flex flex-wrap gap-1.5" aria-label="已上传测试数据">
-                        {testdataFiles.map((file) => (
-                          <span key={file.name} className="rounded-md border border-border/70 px-2 py-1 font-mono text-xs">
-                            {file.name}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">尚未上传测试数据文件。</p>
-                    )}
-                    <Button asChild variant="ghost" size="sm">
-                      <a href={`/p/${encodeURIComponent(pid)}/files?section=testdata`}>打开完整文件管理</a>
+                    <Button type="button" variant="outline" size="sm" disabled={!selection} onClick={addSelectedRegion}>
+                      <Plus className="size-3.5" />
+                      设为{kind === 'function' ? '函数区' : '填空区'}
                     </Button>
-                  </section>
-                  <CasesEditor cases={cases} files={testdataFiles} onChange={setCases} />
-                </>
-              ) : null}
-            </>
-          )}
-        </fieldset>
+                  </div>
+                </section>
+
+                <section className="space-y-3 border-t border-border/70 pt-5">
+                  <div>
+                    <h2 className="text-sm font-semibold">作答区域</h2>
+                    <p className="text-xs text-muted-foreground">区域 ID 由服务端生成；拖拽卡片只调整学生作答顺序，不会移动源码。</p>
+                  </div>
+                  {regions.map((region, index) => (
+                    <div
+                      key={region.key}
+                      className={cn('space-y-3 rounded-lg border p-3', region.invalid && 'border-destructive bg-destructive/5')}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={() => {
+                        if (draggedRegion === null) return;
+                        setRegions((current) => reorderRegions(current, draggedRegion, index));
+                        setDraggedRegion(null);
+                      }}
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          draggable
+                          onDragStart={() => setDraggedRegion(index)}
+                          onDragEnd={() => setDraggedRegion(null)}
+                          className="cursor-grab rounded p-1 text-muted-foreground active:cursor-grabbing"
+                          aria-label={`拖拽调整区域 ${index + 1} 顺序`}
+                        >
+                          <GripVertical className="size-4" />
+                        </button>
+                        <span className="text-sm font-medium">区域 {index + 1}</span>
+                        <span className="font-mono text-xs text-muted-foreground">
+                          第 {region.startLine + 1}–{region.endLine} 行 · {region.id ? region.id : '保存后生成 ID'}
+                        </span>
+                        <div className="ml-auto flex">
+                          <Button type="button" variant="ghost" size="icon" onClick={() => moveRegion(index, -1)} aria-label="上移">
+                            <ArrowUp className="size-4" />
+                          </Button>
+                          <Button type="button" variant="ghost" size="icon" onClick={() => moveRegion(index, 1)} aria-label="下移">
+                            <ArrowDown className="size-4" />
+                          </Button>
+                          <Button type="button" variant="ghost" size="icon" onClick={() => removeRegion(index)} aria-label="删除">
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
+                      </div>
+                      {kind === 'function' ? (
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-medium">函数签名（必填）</span>
+                            <Input
+                              value={region.signature}
+                              onChange={(event) =>
+                                setRegions((current) => current.map((item, i) => (i === index ? { ...item, signature: event.target.value } : item)))
+                              }
+                              placeholder="例如 int solve(int n)"
+                              className="font-mono"
+                            />
+                          </label>
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-medium">局部要求（可选）</span>
+                            <Input
+                              value={region.description}
+                              onChange={(event) =>
+                                setRegions((current) => current.map((item, i) => (i === index ? { ...item, description: event.target.value } : item)))
+                              }
+                              placeholder="说明输入、输出或约束"
+                            />
+                          </label>
+                        </div>
+                      ) : (
+                        <Input
+                          value={region.prompt}
+                          onChange={(event) =>
+                            setRegions((current) => current.map((item, i) => (i === index ? { ...item, prompt: event.target.value } : item)))
+                          }
+                          placeholder="填写提示（可选）"
+                        />
+                      )}
+                      {region.invalid ? (
+                        <p role="alert" className="text-xs text-destructive">
+                          模板修改已使这个区域坐标失效；请删除后重新框选，系统不会猜测迁移。
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                  {!regions.length ? <p className="text-sm text-muted-foreground">尚未设置作答区域。</p> : null}
+                  <div className="border-y border-border/70 py-4">
+                    <p className="mb-3 text-xs font-medium text-muted-foreground">学生输入预览（不展示后台完整模板）</p>
+                    <StructuredRegionInputs
+                      regions={regions.map((region) => ({
+                        id: region.id || region.key,
+                        signature: region.signature,
+                        description: region.description,
+                        prompt: region.prompt,
+                      }))}
+                      values={{}}
+                      onChange={() => {}}
+                      singleLine={kind === 'program_fill'}
+                      skeleton={kind === 'program_fill' ? previewSkeleton : undefined}
+                      readOnly
+                    />
+                  </div>
+                </section>
+                {compileMode ? (
+                  <>
+                    <section className="space-y-3 border-t border-border/70 pt-5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <h2 className="flex items-center gap-1.5 text-sm font-semibold">
+                            <FileCode2 className="size-4" />
+                            真实测试数据
+                          </h2>
+                          <p className="text-xs text-muted-foreground">可一次选择多个文件；上传直接写入当前题，失败不会创建空文件或默认映射。</p>
+                        </div>
+                        <span className="text-xs text-muted-foreground">结构版本 {structureRevision}</span>
+                      </div>
+                      <FileUploader
+                        endpoint={`/p/${encodeURIComponent(pid)}/files`}
+                        fieldName="file"
+                        meta={{ type: 'testdata' }}
+                        maxFileSize={null}
+                        maxFiles={null}
+                        uploadConcurrency={1}
+                        retryOnFailure={false}
+                        onUploaded={acceptUploadedFile}
+                      />
+                      {testdataFiles.length ? (
+                        <div className="flex flex-wrap gap-1.5" aria-label="已上传测试数据">
+                          {testdataFiles.map((file) => (
+                            <span key={file.name} className="rounded-md border border-border/70 px-2 py-1 font-mono text-xs">
+                              {file.name}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">尚未上传测试数据文件。</p>
+                      )}
+                      <Button asChild variant="ghost" size="sm">
+                        <a href={`/p/${encodeURIComponent(pid)}/files?section=testdata`}>打开完整文件管理</a>
+                      </Button>
+                    </section>
+                    <CasesEditor cases={cases} files={testdataFiles} onChange={setCases} />
+                  </>
+                ) : null}
+              </>
+            )}
+          </fieldset>
+        </div>
 
         <StructuredProblemMetadataPanel
           pdoc={pdoc}
@@ -688,6 +702,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
           ) : null}
         </StructuredProblemMetadataPanel>
       </form>
+      {statementGuard.dialog}
       {navigationGuard.guardDialog}
     </main>
   );

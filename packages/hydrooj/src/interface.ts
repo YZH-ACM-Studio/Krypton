@@ -296,7 +296,7 @@ export interface ProblemStatusDoc extends StatusDocBase {
     star?: boolean;
 }
 
-export type ProblemDataWriteOperation = 'files-upload' | 'files-rename' | 'files-delete' | 'generate-testdata-request';
+export type ProblemDataWriteOperation = 'files-upload' | 'files-rename' | 'files-delete' | 'generate-testdata-request' | 'statement-edit';
 
 export interface ProblemDataWriteConfirmation {
     requestId: string;

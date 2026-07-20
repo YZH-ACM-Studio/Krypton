@@ -148,6 +148,36 @@ describe('P2.12 minimal problem lifecycle', () => {
         expect(lifecycle.PROBLEM_STRUCTURAL_FIELDS.has('managedAuthoring')).to.equal(true);
     });
 
+    it('keeps editorial fields revision-bound without freezing them after historical submissions', () => {
+        expect(lifecycle.PROBLEM_STRUCTURAL_FIELDS.has('content')).to.equal(true);
+        expect(lifecycle.PROBLEM_STRUCTURAL_FIELDS.has('additional_file')).to.equal(true);
+        expect(lifecycle.PROBLEM_SUBMISSION_LOCKED_FIELDS.has('content')).to.equal(false);
+        expect(lifecycle.PROBLEM_SUBMISSION_LOCKED_FIELDS.has('additional_file')).to.equal(false);
+        expect(lifecycle.PROBLEM_SUBMISSION_LOCKED_FIELDS.has('config')).to.equal(true);
+        expect(lifecycle.PROBLEM_SUBMISSION_LOCKED_FIELDS.has('problemKind')).to.equal(true);
+        expect(lifecycle.PROBLEM_SUBMISSION_LOCKED_FIELDS.has('managedAuthoring')).to.equal(true);
+    });
+
+    it('keeps an exact hidden managed draft editable while its author validates submissions', () => {
+        const draft = {
+            problemKind: 'programming' as const,
+            hidden: true,
+            authoringMode: 'managed' as const,
+            managedAuthoring: { metadataStatus: 'draft' as const },
+            structureRevision: 7,
+        };
+
+        expect(lifecycle.shouldClaimSubmissionStructureLock(draft, true)).to.equal(false);
+        expect(lifecycle.shouldClaimSubmissionStructureLock({ ...draft, hidden: false }, true)).to.equal(true);
+        expect(lifecycle.shouldClaimSubmissionStructureLock({ ...draft, managedAuthoring: { metadataStatus: 'confirmed' as const } }, true)).to.equal(
+            true,
+        );
+        expect(lifecycle.shouldClaimSubmissionStructureLock({ ...draft, authoringMode: undefined }, true)).to.equal(true);
+        expect(lifecycle.shouldClaimSubmissionStructureLock({ ...draft, managedAuthoring: undefined }, true)).to.equal(true);
+        expect(lifecycle.shouldClaimSubmissionStructureLock({ ...draft, structureLockedAt: new Date() }, true)).to.equal(false);
+        expect(lifecycle.shouldClaimSubmissionStructureLock(draft, false)).to.equal(false);
+    });
+
     it('accepts explicit flat or subtask programming test points and verifies their files', () => {
         expect(() =>
             lifecycle.assertProgrammingTestcasesConfigured({ cases: [{ input: '1.in', output: '1.out' }] }, [{ name: '1.in' }, { name: '1.out' }]),

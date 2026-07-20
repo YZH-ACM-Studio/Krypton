@@ -1,19 +1,27 @@
 import { Logger } from '@hydrooj/utils';
 import yaml from 'js-yaml';
 import { db, ObjectId, SystemModel } from 'hydrooj';
-import type { MindmapConfig, MindmapNode } from './types';
+import type { KnowledgeMapDoc, MindmapNode } from './types';
 
 const logger = new Logger('mindmap.seed');
 
 export const nodesColl = db.collection<MindmapNode>('mindmap.nodes');
-export const configColl = db.collection<MindmapConfig>('mindmap.config');
+export const mapsColl = db.collection<KnowledgeMapDoc>('mindmap.maps');
 
 let indexesEnsured = false;
 
 export async function ensureIndexes(): Promise<void> {
     if (indexesEnsured) return;
     indexesEnsured = true;
-    await Promise.all([nodesColl.createIndex({ parentId: 1, order: 1 }), nodesColl.createIndex({ tags: 1 })]);
+    await Promise.all([
+        nodesColl.createIndex({ mapId: 1, parentId: 1, order: 1, _id: 1 }),
+        nodesColl.createIndex({ mapId: 1, tags: 1 }),
+        nodesColl.createIndex(
+            { mapId: 1, parentId: 1 },
+            { unique: true, partialFilterExpression: { parentId: null }, name: 'mindmap_one_root_per_map' },
+        ),
+        mapsColl.createIndex({ visibility: 1, title: 1, _id: 1 }),
+    ]);
 }
 
 /**
@@ -68,12 +76,58 @@ function fallbackCategories(): Map<string, string[]> {
     ]);
 }
 
+async function rollbackMapCreation(mapId: ObjectId, cause: unknown, context: string): Promise<never> {
+    const rollbackErrors: unknown[] = [];
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+            await nodesColl.deleteMany({ mapId });
+        } catch (error) {
+            rollbackErrors.push(error);
+        }
+        try {
+            await mapsColl.deleteOne({ _id: mapId });
+        } catch (error) {
+            rollbackErrors.push(error);
+        }
+        try {
+            const [remainingNodes, remainingMap] = await Promise.all([
+                nodesColl.countDocuments({ mapId }),
+                mapsColl.findOne({ _id: mapId }, { projection: { _id: 1 } }),
+            ]);
+            if (remainingNodes === 0 && !remainingMap) throw cause;
+            rollbackErrors.push(
+                new Error(`mindmap ${context} rollback incomplete map=${mapId} remainingNodes=${remainingNodes} remainingMap=${remainingMap ? 'yes' : 'no'}`),
+            );
+        } catch (error) {
+            if (error === cause) throw error;
+            rollbackErrors.push(error);
+        }
+    }
+    throw new AggregateError([cause, ...rollbackErrors], `mindmap ${context} left an unverified partial write map=${mapId}`);
+}
+
 /** Internal: build & insert a fresh tree from the given category map. */
+export async function insertMapWithRoot(map: KnowledgeMapDoc, root: MindmapNode): Promise<void> {
+    if (!root.mapId.equals(map._id) || !root._id.equals(map.rootNodeId) || root.parentId !== null) {
+        throw new Error(`mindmap map/root identity mismatch map=${map._id} root=${root._id}`);
+    }
+    const [existingMap, existingNodes] = await Promise.all([mapsColl.findOne({ _id: map._id }), nodesColl.countDocuments({ mapId: map._id })]);
+    if (existingMap || existingNodes) throw new Error(`mindmap create id collision map=${map._id} nodes=${existingNodes}`);
+    try {
+        await mapsColl.insertOne(map);
+        await nodesColl.insertOne(root);
+    } catch (error) {
+        await rollbackMapCreation(map._id, error, 'create');
+    }
+}
+
 async function buildTreeFromCategories(cats: Map<string, string[]>): Promise<ObjectId> {
     const now = new Date();
+    const mapId = new ObjectId();
     const mk = (parentId: any, topic: string, order: number, tags: string[] = []) =>
         ({
             _id: new ObjectId(),
+            mapId,
             parentId,
             topic,
             tags,
@@ -95,20 +149,21 @@ async function buildTreeFromCategories(cats: Map<string, string[]>): Promise<Obj
         }
     }
 
-    await nodesColl.insertMany(all);
-    await configColl.updateOne(
-        { _id: 'global' as const },
-        {
-            $set: {
-                title: '算法知识图谱',
-                rootNodeId: root._id,
-                layoutDirection: 'RIGHT' as const,
-                updatedAt: now,
-            },
-            $setOnInsert: { _id: 'global' as const },
-        },
-        { upsert: true },
-    );
+    const map: KnowledgeMapDoc = {
+        _id: mapId,
+        title: '算法知识图谱',
+        rootNodeId: root._id,
+        visibility: 'public',
+        layoutDirection: 'RIGHT',
+        createdAt: now,
+        updatedAt: now,
+    };
+    await insertMapWithRoot(map, root);
+    try {
+        if (all.length > 1) await nodesColl.insertMany(all.slice(1));
+    } catch (error) {
+        await rollbackMapCreation(mapId, error, 'seed');
+    }
     return root._id;
 }
 
@@ -117,9 +172,14 @@ async function buildTreeFromCategories(cats: Map<string, string[]>): Promise<Obj
  * Reads categories from the hydrooj `problem.categories` setting (yaml),
  * falling back to a hardcoded structure if that setting is absent.
  */
-export async function seedDefaultTreeIfEmpty(): Promise<void> {
-    const count = await nodesColl.estimatedDocumentCount();
-    if (count > 0) return;
+export async function seedDefaultMapIfEmpty(): Promise<void> {
+    const [nodeCount, mapCount] = await Promise.all([nodesColl.estimatedDocumentCount(), mapsColl.estimatedDocumentCount()]);
+    if (nodeCount > 0 || mapCount > 0) {
+        if (nodeCount === 0 || mapCount === 0) {
+            throw new Error(`mindmap collections disagree nodes=${nodeCount} maps=${mapCount}; explicit migration is required`);
+        }
+        return;
+    }
 
     const cats = readProblemCategories();
     if (cats.size === 0) {
@@ -128,49 +188,4 @@ export async function seedDefaultTreeIfEmpty(): Promise<void> {
         logger.info('seeding mindmap from problem.categories (%d categories)', cats.size);
     }
     await buildTreeFromCategories(cats.size > 0 ? cats : fallbackCategories());
-}
-
-/**
- * Drop all existing mindmap nodes and rebuild the tree from the current
- * `problem.categories` setting. Destructive — any admin-edited
- * `problemIds`/tags/topics on existing nodes are lost. Intended for admin
- * re-sync after editing `problem.categories` in the hydrooj admin UI.
- */
-export async function rebuildFromCategories(): Promise<{ categories: number; leaves: number }> {
-    const cats = readProblemCategories();
-    if (cats.size === 0) {
-        throw new Error('problem.categories is empty or unparseable; refusing to rebuild');
-    }
-    await nodesColl.deleteMany({});
-    await buildTreeFromCategories(cats);
-    let leaves = 0;
-    for (const ls of cats.values()) leaves += ls.length;
-    logger.info('mindmap rebuilt from problem.categories: %d categories, %d leaves', cats.size, leaves);
-    return { categories: cats.size, leaves };
-}
-
-export async function getConfig(): Promise<MindmapConfig> {
-    await seedDefaultTreeIfEmpty();
-    const doc = await configColl.findOne({ _id: 'global' });
-    if (!doc) {
-        return {
-            _id: 'global',
-            title: '算法知识图谱',
-            rootNodeId: null,
-            layoutDirection: 'RIGHT',
-            updatedAt: new Date(),
-        };
-    }
-    return doc;
-}
-
-export async function setConfig(patch: Partial<Omit<MindmapConfig, '_id'>>): Promise<void> {
-    await configColl.updateOne(
-        { _id: 'global' as const },
-        {
-            $set: { ...patch, updatedAt: new Date() },
-            $setOnInsert: { _id: 'global' as const },
-        },
-        { upsert: true },
-    );
 }

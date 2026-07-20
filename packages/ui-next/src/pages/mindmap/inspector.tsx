@@ -8,6 +8,7 @@ import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { loadNodeProblems, mindmapProblemHref, searchMindmapProblems } from './api';
 import { resolveRootBranchSides } from './layout';
+import { mergeMindmapTagDraft } from './tree';
 import type { MindmapNode, PanelProblem, ProblemOption } from './types';
 
 const COLOR_OPTIONS = [
@@ -24,14 +25,12 @@ function sameStrings(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function uniqueStrings(values: string[]): string[] {
-  return values.map((value) => value.trim()).filter((value, index, all) => !!value && all.indexOf(value) === index);
-}
-
 export function MindmapInspector({
+  mapId,
   node,
   nodes,
   rootId,
+  layoutDirection,
   referenceCount,
   busy,
   onSave,
@@ -39,10 +38,13 @@ export function MindmapInspector({
   onCreateChild,
   onCreateSibling,
   onDelete,
+  onDirtyChange,
 }: {
+  mapId: string;
   node: MindmapNode | null;
   nodes: MindmapNode[];
   rootId: string | null;
+  layoutDirection: 'RIGHT' | 'DOWN';
   referenceCount: number;
   busy: boolean;
   onSave: (node: MindmapNode, fields: Record<string, unknown>) => Promise<void>;
@@ -50,6 +52,7 @@ export function MindmapInspector({
   onCreateChild: (node: MindmapNode) => void;
   onCreateSibling: (node: MindmapNode) => void;
   onDelete: (node: MindmapNode) => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   if (!node) {
     return (
@@ -67,9 +70,11 @@ export function MindmapInspector({
   return (
     <NodeInspectorForm
       key={`${node._id}:${node.updatedAt}`}
+      mapId={mapId}
       node={node}
       nodes={nodes}
       rootId={rootId}
+      layoutDirection={layoutDirection}
       referenceCount={referenceCount}
       busy={busy}
       onSave={onSave}
@@ -77,14 +82,17 @@ export function MindmapInspector({
       onCreateChild={onCreateChild}
       onCreateSibling={onCreateSibling}
       onDelete={onDelete}
+      onDirtyChange={onDirtyChange}
     />
   );
 }
 
 function NodeInspectorForm({
+  mapId,
   node,
   nodes,
   rootId,
+  layoutDirection,
   referenceCount,
   busy,
   onSave,
@@ -92,10 +100,13 @@ function NodeInspectorForm({
   onCreateChild,
   onCreateSibling,
   onDelete,
+  onDirtyChange,
 }: {
+  mapId: string;
   node: MindmapNode;
   nodes: MindmapNode[];
   rootId: string | null;
+  layoutDirection: 'RIGHT' | 'DOWN';
   referenceCount: number;
   busy: boolean;
   onSave: (node: MindmapNode, fields: Record<string, unknown>) => Promise<void>;
@@ -103,6 +114,7 @@ function NodeInspectorForm({
   onCreateChild: (node: MindmapNode) => void;
   onCreateSibling: (node: MindmapNode) => void;
   onDelete: (node: MindmapNode) => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const [topic, setTopic] = useState(node.topic);
   const [description, setDescription] = useState(node.description || '');
@@ -123,7 +135,7 @@ function NodeInspectorForm({
     let cancelled = false;
     setAssociationLoading(true);
     setAssociationError(null);
-    void loadNodeProblems(node._id, true)
+    void loadNodeProblems(mapId, node._id, true)
       .then((problems) => {
         if (cancelled) return;
         setAssociations(problems);
@@ -147,7 +159,7 @@ function NodeInspectorForm({
     return () => {
       cancelled = true;
     };
-  }, [node._id]);
+  }, [mapId, node._id]);
 
   useEffect(() => {
     const query = problemQuery.trim();
@@ -161,7 +173,7 @@ function NodeInspectorForm({
     setSearching(true);
     setSearchError(null);
     const timer = window.setTimeout(() => {
-      void searchMindmapProblems(query, controller.signal)
+      void searchMindmapProblems(mapId, query, controller.signal)
         .then(setSearchResults)
         .catch((error) => {
           if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -176,21 +188,26 @@ function NodeInspectorForm({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [problemQuery]);
+  }, [mapId, problemQuery]);
 
+  const effectiveTags = mergeMindmapTagDraft(tags, tagDraft);
   const dirty =
     topic !== node.topic ||
     description !== (node.description || '') ||
     color !== (node.color || 'gray') ||
-    !sameStrings(tags, node.tags) ||
+    !sameStrings(effectiveTags, node.tags) ||
     !sameStrings(problemIds, node.problemIds);
+  useEffect(() => {
+    onDirtyChange(dirty);
+    return () => onDirtyChange(false);
+  }, [dirty, onDirtyChange]);
   const rootSide = rootId ? resolveRootBranchSides(nodes, rootId).get(node._id) : undefined;
   const isRootBranch = node.parentId === rootId;
   const tagMatched = associations.filter((problem) => problem.sources.includes('tag'));
 
   const addTag = () => {
     if (referenceCount > 0) return;
-    const next = uniqueStrings([...tags, ...tagDraft.split(',')]);
+    const next = mergeMindmapTagDraft(tags, tagDraft);
     setTags(next);
     setTagDraft('');
   };
@@ -222,7 +239,13 @@ function NodeInspectorForm({
             </Button>
           ) : null}
           {node._id !== rootId ? (
-            <Button size="sm" variant="ghost" className="min-h-10 text-destructive hover:text-destructive" onClick={() => onDelete(node)} disabled={busy}>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="min-h-10 text-destructive hover:text-destructive"
+              onClick={() => onDelete(node)}
+              disabled={busy}
+            >
               <Trash2 className="size-3.5" /> 删除
             </Button>
           ) : null}
@@ -264,7 +287,7 @@ function NodeInspectorForm({
             </div>
           </div>
 
-          {isRootBranch ? (
+          {layoutDirection === 'RIGHT' && isRootBranch ? (
             <div className="rounded-xl bg-muted/35 p-3 ring-1 ring-border/50">
               <div className="flex items-center gap-2 text-xs font-medium">
                 <ArrowLeftRight className="size-3.5 text-muted-foreground" /> 根分支方向
@@ -342,7 +365,15 @@ function NodeInspectorForm({
                   placeholder="输入标签，回车添加"
                   className="h-10"
                 />
-                <Button className="size-10" type="button" variant="outline" size="icon" onClick={addTag} disabled={!tagDraft.trim()} aria-label="添加标签">
+                <Button
+                  className="size-10"
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={addTag}
+                  disabled={!tagDraft.trim()}
+                  aria-label="添加标签"
+                >
                   <Plus className="size-4" />
                 </Button>
               </div>
@@ -471,7 +502,7 @@ function NodeInspectorForm({
               topic,
               description,
               color,
-              ...(referenceCount === 0 ? { tags } : {}),
+              ...(referenceCount === 0 ? { tags: effectiveTags } : {}),
               problemIds,
             })
           }

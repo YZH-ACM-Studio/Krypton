@@ -1,6 +1,6 @@
 import type { Edge, Node as RFNode } from '@xyflow/react';
 import ELK from 'elkjs/lib/elk.bundled.js';
-import type { MindmapNode } from './types';
+import type { MindmapConfig, MindmapNode } from './types';
 
 const elk = new ELK();
 
@@ -93,14 +93,71 @@ async function layoutHalf(rootId: string, ids: Set<string>, visible: MindmapNode
   });
 }
 
+async function layoutDown(visible: MindmapNode[]) {
+  const nodes = sortMindmapNodes(visible);
+  return await elk.layout({
+    id: 'root',
+    layoutOptions: {
+      ...SHARED_LAYOUT_OPTIONS,
+      'elk.direction': 'DOWN',
+      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+      'elk.layered.crossingMinimization.semiInteractive': 'true',
+    },
+    children: nodes.map((node) => ({ id: node._id, width: NODE_WIDTH, height: NODE_HEIGHT })),
+    edges: nodes
+      .filter((node) => node.parentId)
+      .map((node) => ({ id: `e-${node.parentId}-${node._id}`, sources: [node.parentId as string], targets: [node._id] })),
+  });
+}
+
 export async function computeMindmapLayout(
   raw: MindmapNode[],
   rootId: string | null,
   collapsed: ReadonlySet<string> = new Set(),
+  layoutDirection: MindmapConfig['layoutDirection'] = 'RIGHT',
 ): Promise<LayoutResult> {
   if (!raw.length || !rootId) return { nodes: [], edges: [] };
   const { visible, children } = visibleSubset(raw, collapsed);
   const visibleIds = new Set(visible.map((node) => node._id));
+  if (layoutDirection === 'DOWN') {
+    const layout = await layoutDown(visible);
+    const root = layout.children?.find((entry) => entry.id === rootId);
+    const dx = root?.x || 0;
+    const dy = root?.y || 0;
+    const positions = new Map(
+      (layout.children || []).map((entry) => [entry.id, { x: (entry.x || 0) - dx, y: (entry.y || 0) - dy }]),
+    );
+    return {
+      nodes: visible.map((node) => ({
+        id: node._id,
+        type: 'mindmap',
+        position: positions.get(node._id) || { x: 0, y: 0 },
+        data: {
+          topic: node.topic,
+          color: node.color,
+          isRoot: node._id === rootId,
+          hasChildren: (children[node._id]?.length || 0) > 0,
+          collapsed: collapsed.has(node._id),
+          side: node._id === rootId ? 'root' : 'right',
+        },
+        style: { width: NODE_WIDTH, height: NODE_HEIGHT },
+      })),
+      edges: visible
+        .filter((node) => node.parentId && visibleIds.has(node.parentId))
+        .map(
+          (node) =>
+            ({
+              id: `e-${node.parentId}-${node._id}`,
+              source: node.parentId as string,
+              target: node._id,
+              sourceHandle: 'src-bottom',
+              targetHandle: 'tgt-top',
+              type: 'default',
+              style: { stroke: 'var(--muted-foreground)', strokeWidth: 1.5, opacity: 0.55 },
+            }) satisfies Edge,
+        ),
+    };
+  }
   const rootSides = resolveRootBranchSides(raw, rootId);
   const rootChildren = (children[rootId] || []).filter((id) => visibleIds.has(id));
   const leftBranches = rootChildren.filter((id) => rootSides.get(id) === 'left');

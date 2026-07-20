@@ -30,6 +30,7 @@ class MindmapConflictError extends Error {
 
 interface NodeDocument {
     _id: InstanceType<typeof ObjectId>;
+    mapId: InstanceType<typeof ObjectId>;
     parentId: InstanceType<typeof ObjectId> | null;
     topic: string;
     description?: string;
@@ -42,11 +43,24 @@ interface NodeDocument {
     updatedAt: Date;
 }
 
+interface MapDocument {
+    _id: InstanceType<typeof ObjectId>;
+    title: string;
+    rootNodeId: InstanceType<typeof ObjectId>;
+    visibility: 'hidden' | 'public';
+    layoutDirection: 'RIGHT' | 'DOWN';
+    createdAt: Date;
+    updatedAt: Date;
+}
+
 let nodes: NodeDocument[] = [];
+let maps: MapDocument[] = [];
 let documentResults: any[] = [];
 let config: any;
 const documentCalls: Array<{ filter: any; projection?: any; limit?: number }> = [];
 const logs: Array<{ level: string; args: unknown[] }> = [];
+let failMapDeleteAfterWrite = false;
+let failRootDeleteAfterWrite = false;
 
 function equalValue(left: unknown, right: unknown): boolean {
     if (left instanceof ObjectId && right instanceof ObjectId) return (left as any).equals(right);
@@ -110,11 +124,48 @@ const nodesColl = {
         const index = nodes.findIndex((node) => matchesNode(node, filter));
         if (index < 0) return { deletedCount: 0 };
         nodes.splice(index, 1);
+        if (failRootDeleteAfterWrite) {
+            failRootDeleteAfterWrite = false;
+            throw new Error('simulated root delete acknowledgement loss');
+        }
         return { deletedCount: 1 };
+    },
+    async countDocuments(filter: Record<string, unknown> = {}) {
+        return nodes.filter((node) => matchesNode(node, filter)).length;
     },
     async bulkWrite(operations: any[]) {
         for (const operation of operations) await nodesColl.updateOne(operation.updateOne.filter, operation.updateOne.update);
         return { modifiedCount: operations.length };
+    },
+};
+
+const mapsColl = {
+    find(filter: Record<string, unknown> = {}) {
+        const values = maps.filter((map) => matchesNode(map as any, filter));
+        return nodeCursor(values as any) as any;
+    },
+    async findOne(filter: Record<string, unknown>) {
+        return maps.find((map) => matchesNode(map as any, filter)) || null;
+    },
+    async updateOne(filter: Record<string, unknown>, update: any) {
+        const map = maps.find((entry) => matchesNode(entry as any, filter));
+        if (!map) return { matchedCount: 0, modifiedCount: 0 };
+        if (update.$set) Object.assign(map, update.$set);
+        return { matchedCount: 1, modifiedCount: 1 };
+    },
+    async insertOne(map: MapDocument) {
+        maps.push(map);
+        return { insertedId: map._id };
+    },
+    async deleteOne(filter: Record<string, unknown>) {
+        const index = maps.findIndex((map) => matchesNode(map as any, filter));
+        if (index < 0) return { deletedCount: 0 };
+        maps.splice(index, 1);
+        if (failMapDeleteAfterWrite) {
+            failMapDeleteAfterWrite = false;
+            throw new Error('simulated map delete acknowledgement loss');
+        }
+        return { deletedCount: 1 };
     },
 };
 
@@ -138,6 +189,15 @@ const documentColl = {
         };
         return cursor;
     },
+    async countDocuments(filter: any) {
+        return documentResults.filter((document) => {
+            if (filter.docType !== undefined && document.docType !== filter.docType) return false;
+            if (filter.kind !== undefined && document.kind !== filter.kind) return false;
+            if (filter.knowledgeMapId !== undefined && !equalValue(document.knowledgeMapId, filter.knowledgeMapId)) return false;
+            if (filter.mindmapId !== undefined && !equalValue(document.mindmapId, filter.mindmapId)) return false;
+            return true;
+        }).length;
+    },
 };
 
 const dbStub = {
@@ -149,8 +209,10 @@ const dbStub = {
 
 const mindmapDbStub = {
     nodesColl,
-    async getConfig() {
-        return config;
+    mapsColl,
+    async insertMapWithRoot(map: MapDocument, root: NodeDocument) {
+        maps.push(map);
+        nodes.push(root);
     },
 };
 
@@ -191,10 +253,17 @@ try {
     else delete require.cache[errorPath];
 }
 
-function makeNode(topic: string, parentId: InstanceType<typeof ObjectId> | null, order: number, tags: string[] = []): NodeDocument {
+function makeNode(
+    topic: string,
+    parentId: InstanceType<typeof ObjectId> | null,
+    order: number,
+    tags: string[] = [],
+    mapId: InstanceType<typeof ObjectId> = config?._id,
+): NodeDocument {
     const now = new Date(`2026-07-16T00:00:${String(nodes.length).padStart(2, '0')}.000Z`);
     return {
         _id: new ObjectId(),
+        mapId,
         parentId,
         topic,
         tags,
@@ -207,16 +276,25 @@ function makeNode(topic: string, parentId: InstanceType<typeof ObjectId> | null,
 
 function resetTree() {
     nodes = [];
-    const root = makeNode('root', null, 0);
-    nodes.push(root);
+    maps = [];
+    const mapId = new ObjectId();
+    const root = makeNode('root', null, 0, [], mapId);
     config = {
-        _id: 'global',
+        _id: mapId,
         title: 'Test map',
         rootNodeId: root._id,
+        visibility: 'public',
         layoutDirection: 'RIGHT',
+        createdAt: new Date('2026-07-16T00:00:00.000Z'),
         updatedAt: new Date('2026-07-16T00:00:00.000Z'),
     };
+    maps.push(config);
+    nodes.push(root);
     return root;
+}
+
+function nodeMutationContext() {
+    return { mapId: config._id, expectedMapUpdatedAt: config.updatedAt };
 }
 
 async function expectRejected(promise: Promise<unknown>, ErrorClass: new (...args: any[]) => Error, messageFragment: string): Promise<void> {
@@ -233,12 +311,14 @@ beforeEach(() => {
     documentResults = [];
     documentCalls.length = 0;
     logs.length = 0;
+    failMapDeleteAfterWrite = false;
+    failRootDeleteAfterWrite = false;
     resetTree();
 });
 
 describe('mindmap problem query scope', () => {
     it('rejects an unknown node instead of reporting a successful empty association list', async () => {
-        await expectRejected(model.listProblemsForNode('system', new ObjectId(), {}), MindmapRequestError, '节点不存在');
+        await expectRejected(model.listProblemsForNode('system', config._id, new ObjectId(), {}), MindmapRequestError, '节点不存在');
         expect(documentCalls).to.deep.equal([]);
     });
 
@@ -247,14 +327,25 @@ describe('mindmap problem query scope', () => {
         node.problemIds = ['P9'];
         nodes.push(node);
         documentResults = [
-            { domainId: 'system', docId: 9, pid: 'P9', title: 'Scoped problem', tag: ['graph'], nSubmit: 10, nAccept: 5, hidden: false },
+            {
+                domainId: 'system',
+                docId: 9,
+                pid: 'P9',
+                title: 'Scoped problem',
+                tag: ['graph'],
+                nSubmit: 10,
+                nAccept: 5,
+                hidden: false,
+                knowledgeMapId: config._id,
+            },
         ];
         const scope = { owner: 42 };
 
-        const problems = await model.listProblemsForNode('system', node._id, scope as any);
+        const problems = await model.listProblemsForNode('system', config._id, node._id, scope as any);
 
         expect(documentCalls).to.have.lengthOf(1);
         expect(documentCalls[0].filter.$and[0]).to.deep.equal(scope);
+        expect(documentCalls[0].filter.$and[1].knowledgeMapId.equals(config._id)).to.equal(true);
         expect(problems).to.deep.equal([
             {
                 domainId: 'system',
@@ -273,11 +364,172 @@ describe('mindmap problem query scope', () => {
     it('keeps hidden filtering on public queries and removes it only for the admin option', async () => {
         const node = makeNode('graph', config.rootNodeId, 10, ['graph']);
         nodes.push(node);
-        await model.listProblemsForNode('system', node._id, {});
+        await model.listProblemsForNode('system', config._id, node._id, {});
         expect(documentCalls[0].filter.$and[1].hidden).to.deep.equal({ $ne: true });
         documentCalls.length = 0;
-        await model.listProblemsForNode('system', node._id, {}, { includeHidden: true });
+        await model.listProblemsForNode('system', config._id, node._id, {}, { includeHidden: true });
         expect(documentCalls[0].filter.$and[1]).not.to.have.property('hidden');
+    });
+});
+
+describe('knowledge map lifecycle', () => {
+    it('creates an independent hidden map with exactly one scoped root and only enumerates public maps publicly', async () => {
+        const created = await model.createKnowledgeMap({
+            domainId: 'system',
+            actor: 2,
+            title: ' 面向对象 ',
+            rootTopic: 'root',
+            layoutDirection: 'DOWN',
+        });
+
+        expect(created.title).to.equal('面向对象');
+        expect(created.visibility).to.equal('hidden');
+        expect(created.layoutDirection).to.equal('DOWN');
+        const roots = nodes.filter((node) => node.mapId.equals(created._id) && node.parentId === null);
+        expect(roots).to.have.lengthOf(1);
+        expect(roots[0]._id.equals(created.rootNodeId)).to.equal(true);
+        expect(roots[0].topic).to.equal('root');
+        expect(nodes.find((node) => node._id.equals(config.rootNodeId))!.topic).to.equal('root');
+        expect((await model.listKnowledgeMaps(false)).map((map) => map.title)).to.deep.equal(['Test map']);
+        expect((await model.listKnowledgeMaps(true)).map((map) => map.title)).to.deep.equal(['Test map', '面向对象']);
+    });
+
+    it('rejects cross-map create and move parents and stale map versions before writing', async () => {
+        const other = await model.createKnowledgeMap({ domainId: 'system', actor: 2, title: 'Other', rootTopic: 'Other' });
+        const otherRoot = nodes.find((node) => node._id.equals(other.rootNodeId))!;
+        const currentChild = makeNode('current child', config.rootNodeId, 10);
+        nodes.push(currentChild);
+        const before = nodes.length;
+
+        await expectRejected(
+            model.createNode({
+                domainId: 'system',
+                actor: 2,
+                ...nodeMutationContext(),
+                parentId: otherRoot._id,
+                expectedParentUpdatedAt: otherRoot.updatedAt,
+                topic: 'cross map',
+            }),
+            MindmapConflictError,
+            '另一张导图',
+        );
+        await expectRejected(
+            model.moveNode({
+                domainId: 'system',
+                actor: 2,
+                ...nodeMutationContext(),
+                id: currentChild._id,
+                newParentId: otherRoot._id,
+                targetIndex: 0,
+                expectedUpdatedAt: currentChild.updatedAt,
+                expectedParentUpdatedAt: otherRoot.updatedAt,
+            }),
+            MindmapConflictError,
+            '另一张导图',
+        );
+        await expectRejected(
+            model.createNode({
+                domainId: 'system',
+                actor: 2,
+                mapId: config._id,
+                expectedMapUpdatedAt: new Date('2000-01-01T00:00:00.000Z'),
+                parentId: config.rootNodeId,
+                expectedParentUpdatedAt: nodes[0].updatedAt,
+                topic: 'stale map',
+            }),
+            MindmapConflictError,
+            '其他操作修改',
+        );
+        expect(nodes).to.have.lengthOf(before);
+    });
+
+    it('publishes only a valid tree, blocks hiding a course-bound map, and deletes only an empty hidden map', async () => {
+        const created = await model.createKnowledgeMap({ domainId: 'system', actor: 2, title: 'Course map', rootTopic: 'Course' });
+        const published = await model.updateKnowledgeMap({
+            domainId: 'system',
+            actor: 2,
+            id: created._id,
+            expectedUpdatedAt: created.updatedAt,
+            patch: { visibility: 'public' },
+        });
+        expect(published.visibility).to.equal('public');
+
+        documentResults = [{ docType: 40, kind: 'course', mindmapId: created._id }];
+        await expectRejected(
+            model.updateKnowledgeMap({
+                domainId: 'system',
+                actor: 2,
+                id: created._id,
+                expectedUpdatedAt: published.updatedAt,
+                patch: { visibility: 'hidden' },
+            }),
+            MindmapConflictError,
+            '逐课解绑',
+        );
+
+        documentResults = [];
+        const hidden = await model.updateKnowledgeMap({
+            domainId: 'system',
+            actor: 2,
+            id: created._id,
+            expectedUpdatedAt: published.updatedAt,
+            patch: { visibility: 'hidden' },
+        });
+        documentResults = [{ docType: 10, domainId: 'system', docId: 99, knowledgeMapId: created._id }];
+        await expectRejected(
+            model.deleteKnowledgeMap({ domainId: 'system', actor: 2, id: created._id, expectedUpdatedAt: hidden.updatedAt }),
+            MindmapConflictError,
+            '1 道题',
+        );
+        documentResults = [];
+        await model.deleteKnowledgeMap({ domainId: 'system', actor: 2, id: created._id, expectedUpdatedAt: hidden.updatedAt });
+        expect(maps.some((map) => map._id.equals(created._id))).to.equal(false);
+        expect(nodes.some((node) => node.mapId.equals(created._id))).to.equal(false);
+    });
+
+    it('refuses whole-map deletion when a referenced node has missing or mismatched map ownership', async () => {
+        const created = await model.createKnowledgeMap({ domainId: 'system', actor: 2, title: 'Corrupt refs', rootTopic: 'Root' });
+        documentResults = [{ docType: 10, domainId: 'system', docId: 100, knowledgeNodeIds: [created.rootNodeId] }];
+
+        await expectRejected(
+            model.deleteKnowledgeMap({ domainId: 'system', actor: 2, id: created._id, expectedUpdatedAt: created.updatedAt }),
+            Error,
+            'problem map missing',
+        );
+        expect(maps.some((map) => map._id.equals(created._id))).to.equal(true);
+        expect(nodes.some((node) => node._id.equals(created.rootNodeId))).to.equal(true);
+
+        documentResults[0].knowledgeMapId = new ObjectId();
+        await expectRejected(
+            model.deleteKnowledgeMap({ domainId: 'system', actor: 2, id: created._id, expectedUpdatedAt: created.updatedAt }),
+            Error,
+            'cross-map reference',
+        );
+        expect(maps.some((map) => map._id.equals(created._id))).to.equal(true);
+        expect(nodes.some((node) => node._id.equals(created.rootNodeId))).to.equal(true);
+    });
+
+    it('restores the exact map and root when either delete commits before reporting failure', async () => {
+        for (const failedWrite of ['map', 'root'] as const) {
+            resetTree();
+            const created = await model.createKnowledgeMap({ domainId: 'system', actor: 2, title: `Restore ${failedWrite}`, rootTopic: 'Root' });
+            const originalRoot = nodes.find((node) => node._id.equals(created.rootNodeId))!;
+            failMapDeleteAfterWrite = failedWrite === 'map';
+            failRootDeleteAfterWrite = failedWrite === 'root';
+
+            await expectRejected(
+                model.deleteKnowledgeMap({ domainId: 'system', actor: 2, id: created._id, expectedUpdatedAt: created.updatedAt }),
+                Error,
+                `simulated ${failedWrite} delete acknowledgement loss`,
+            );
+
+            const restoredMap = maps.filter((map) => map._id.equals(created._id));
+            const restoredNodes = nodes.filter((node) => node.mapId.equals(created._id));
+            expect(restoredMap).to.have.lengthOf(1);
+            expect(restoredMap[0]).to.deep.equal(created);
+            expect(restoredNodes).to.have.lengthOf(1);
+            expect(restoredNodes[0]).to.deep.equal(originalRoot);
+        }
     });
 });
 
@@ -290,14 +542,15 @@ describe('mindmap reference safety', () => {
                 domainId: 'course-a',
                 docId: 1,
                 pid: 'C1',
+                knowledgeMapId: config._id,
                 knowledgeNodeIds: [child._id],
                 managedAuthoring: { selectedMindmapNodeIds: [child._id] },
             },
-            { domainId: 'system', docId: 2, pid: 'P2', knowledgeNodeIds: [child._id] },
-            { domainId: 'course-b', docId: 3, pid: 'C3', managedAuthoring: { selectedMindmapNodeIds: [child._id] } },
+            { domainId: 'system', docId: 2, pid: 'P2', knowledgeMapId: config._id, knowledgeNodeIds: [child._id] },
+            { domainId: 'course-b', docId: 3, pid: 'C3', knowledgeMapId: config._id, managedAuthoring: { selectedMindmapNodeIds: [child._id] } },
         ];
 
-        const counts = await model.getNodeReferenceCounts(nodes as any);
+        const counts = await model.getNodeReferenceCounts(config._id, nodes as any);
 
         expect(counts[child._id.toHexString()]).to.equal(3);
         expect(documentCalls[0].filter).not.to.have.property('domainId');
@@ -306,20 +559,47 @@ describe('mindmap reference safety', () => {
     it('fails closed on malformed reference fields instead of making destructive decisions from partial data', async () => {
         const child = makeNode('child', config.rootNodeId, 10, ['child']);
         nodes.push(child);
-        documentResults = [{ domainId: 'system', docId: 4, pid: 'P4', knowledgeNodeIds: child._id }];
+        documentResults = [{ domainId: 'system', docId: 4, pid: 'P4', knowledgeMapId: config._id, knowledgeNodeIds: child._id }];
 
-        await expectRejected(model.getNodeReferenceCounts(nodes as any), Error, 'field malformed');
+        await expectRejected(model.getNodeReferenceCounts(config._id, nodes as any), Error, 'field malformed');
+    });
+
+    it('fails closed when a problem references a node from a different declared map', async () => {
+        const child = makeNode('child', config.rootNodeId, 10, ['child']);
+        nodes.push(child);
+        documentResults = [{ domainId: 'system', docId: 5, pid: 'P5', knowledgeMapId: new ObjectId(), knowledgeNodeIds: [child._id] }];
+
+        await expectRejected(model.getNodeReferenceCounts(config._id, nodes as any), Error, 'cross-map reference');
+    });
+
+    it('fails closed when a same-map problem also names a node outside that map', async () => {
+        const child = makeNode('child', config.rootNodeId, 10, ['child']);
+        nodes.push(child);
+        documentResults = [
+            {
+                domainId: 'system',
+                docId: 6,
+                pid: 'P6',
+                knowledgeMapId: config._id,
+                knowledgeNodeIds: [child._id, new ObjectId()],
+            },
+        ];
+
+        await expectRejected(model.getNodeReferenceCounts(config._id, nodes as any), Error, 'outside its map');
     });
 
     it('locks only tags on a referenced node while allowing descriptive fields', async () => {
         const child = makeNode('child', config.rootNodeId, 10, ['old']);
         nodes.push(child);
-        documentResults = [{ domainId: 'course-a', docId: 1, pid: 'C1', title: 'Referenced', knowledgeNodeIds: [child._id] }];
+        documentResults = [
+            { domainId: 'course-a', docId: 1, pid: 'C1', title: 'Referenced', knowledgeMapId: config._id, knowledgeNodeIds: [child._id] },
+        ];
 
         await expectRejected(
             model.updateNode({
                 domainId: 'system',
                 actor: 1,
+                ...nodeMutationContext(),
                 id: child._id,
                 expectedUpdatedAt: child.updatedAt,
                 patch: { tags: ['new'] },
@@ -331,6 +611,7 @@ describe('mindmap reference safety', () => {
         await model.updateNode({
             domainId: 'system',
             actor: 1,
+            ...nodeMutationContext(),
             id: child._id,
             expectedUpdatedAt: originalVersion,
             patch: { topic: 'renamed' },
@@ -343,9 +624,11 @@ describe('mindmap reference safety', () => {
         nodes.push(parent);
         const child = makeNode('child', parent._id, 10, ['child']);
         nodes.push(child);
-        documentResults = [{ domainId: 'course-a', docId: 5, pid: 'C5', title: 'Descendant reference', knowledgeNodeIds: [child._id] }];
+        documentResults = [
+            { domainId: 'course-a', docId: 5, pid: 'C5', title: 'Descendant reference', knowledgeMapId: config._id, knowledgeNodeIds: [child._id] },
+        ];
 
-        const counts = await model.getNodeReferenceCounts(nodes as any);
+        const counts = await model.getNodeReferenceCounts(config._id, nodes as any);
 
         expect(counts[config.rootNodeId.toHexString()]).to.equal(1);
         expect(counts[parent._id.toHexString()]).to.equal(1);
@@ -354,6 +637,7 @@ describe('mindmap reference safety', () => {
             model.updateNode({
                 domainId: 'system',
                 actor: 1,
+                ...nodeMutationContext(),
                 id: parent._id,
                 expectedUpdatedAt: parent.updatedAt,
                 patch: { tags: ['parent-new'] },
@@ -371,12 +655,15 @@ describe('mindmap reference safety', () => {
         nodes.push(newParent);
         const child = makeNode('child', oldParent._id, 10, ['leaf']);
         nodes.push(child);
-        documentResults = [{ domainId: 'course-a', docId: 7, pid: 'C7', title: 'Cross-domain ref', knowledgeNodeIds: [child._id] }];
+        documentResults = [
+            { domainId: 'course-a', docId: 7, pid: 'C7', title: 'Cross-domain ref', knowledgeMapId: config._id, knowledgeNodeIds: [child._id] },
+        ];
 
         try {
             await model.moveNode({
                 domainId: 'system',
                 actor: 1,
+                ...nodeMutationContext(),
                 id: child._id,
                 newParentId: newParent._id,
                 targetIndex: 0,
@@ -401,6 +688,7 @@ describe('mindmap reference safety', () => {
         const moved = await model.moveNode({
             domainId: 'system',
             actor: 1,
+            ...nodeMutationContext(),
             id: child._id,
             newParentId: newParent._id,
             targetIndex: 0,
@@ -423,6 +711,7 @@ describe('mindmap reference safety', () => {
                 domainId: 'system',
                 docId: 8,
                 pid: 'P8',
+                knowledgeMapId: config._id,
                 knowledgeNodeIds: [moving._id, oldAnchor._id],
                 managedAuthoring: { selectedMindmapNodeIds: [newAnchor._id] },
             },
@@ -431,6 +720,7 @@ describe('mindmap reference safety', () => {
         const moved = await model.moveNode({
             domainId: 'system',
             actor: 1,
+            ...nodeMutationContext(),
             id: moving._id,
             newParentId: newParent._id,
             targetIndex: 1,
@@ -445,11 +735,12 @@ describe('mindmap reference safety', () => {
         const first = makeNode('first', config.rootNodeId, 10, ['first']);
         const second = makeNode('second', config.rootNodeId, 20, ['second']);
         nodes.push(first, second);
-        documentResults = [{ domainId: 'system', docId: 1, pid: 'P1', knowledgeNodeIds: [second._id] }];
+        documentResults = [{ domainId: 'system', docId: 1, pid: 'P1', knowledgeMapId: config._id, knowledgeNodeIds: [second._id] }];
 
         const moved = await model.moveNode({
             domainId: 'system',
             actor: 1,
+            ...nodeMutationContext(),
             id: second._id,
             newParentId: config.rootNodeId,
             targetIndex: 0,
@@ -471,6 +762,7 @@ describe('mindmap reference safety', () => {
         const moved = await model.moveNode({
             domainId: 'system',
             actor: 1,
+            ...nodeMutationContext(),
             id: second._id,
             newParentId: config.rootNodeId,
             targetIndex: 0,
@@ -494,6 +786,7 @@ describe('mindmap structural mutations', () => {
         const created = await model.createNode({
             domainId: 'system',
             actor: 1,
+            ...nodeMutationContext(),
             parentId: root._id,
             expectedParentUpdatedAt,
             topic: 'new branch',
@@ -507,7 +800,7 @@ describe('mindmap structural mutations', () => {
         expect(root.updatedAt.getTime()).not.to.equal(expectedParentUpdatedAt.getTime());
         expect(logs).to.have.lengthOf(1);
         expect(logs[0].level).to.equal('info');
-        expect(String(logs[0].args[0])).to.include('domain=%s actor=%d node=%s operation=create');
+        expect(String(logs[0].args[0])).to.include('domain=%s actor=%d map=%s node=%s operation=create');
         expect(String(logs[0].args[0])).to.include('result=success');
     });
 
@@ -518,6 +811,7 @@ describe('mindmap structural mutations', () => {
             model.createNode({
                 domainId: 'system',
                 actor: 1,
+                ...nodeMutationContext(),
                 parentId: root._id,
                 expectedParentUpdatedAt: new Date('2000-01-01T00:00:00.000Z'),
                 topic: 'stale',
@@ -541,6 +835,7 @@ describe('mindmap structural mutations', () => {
             model.moveNode({
                 domainId: 'system',
                 actor: 1,
+                ...nodeMutationContext(),
                 id: parent._id,
                 newParentId: new ObjectId(),
                 targetIndex: 0,
@@ -554,6 +849,7 @@ describe('mindmap structural mutations', () => {
             model.moveNode({
                 domainId: 'system',
                 actor: 1,
+                ...nodeMutationContext(),
                 id: parent._id,
                 newParentId: parent._id,
                 targetIndex: 0,
@@ -568,6 +864,7 @@ describe('mindmap structural mutations', () => {
             model.moveNode({
                 domainId: 'system',
                 actor: 1,
+                ...nodeMutationContext(),
                 id: parent._id,
                 newParentId: child._id,
                 targetIndex: 0,
@@ -581,6 +878,7 @@ describe('mindmap structural mutations', () => {
             model.moveNode({
                 domainId: 'system',
                 actor: 1,
+                ...nodeMutationContext(),
                 id: root._id,
                 newParentId: child._id,
                 targetIndex: 0,
@@ -595,6 +893,7 @@ describe('mindmap structural mutations', () => {
             model.moveNode({
                 domainId: 'system',
                 actor: 1,
+                ...nodeMutationContext(),
                 id: child._id,
                 newParentId: parent._id,
                 targetIndex: 0,
@@ -611,6 +910,7 @@ describe('mindmap structural mutations', () => {
             model.moveNode({
                 domainId: 'system',
                 actor: 1,
+                ...nodeMutationContext(),
                 id: parent._id,
                 newParentId: root._id,
                 targetIndex: 0,
@@ -629,30 +929,42 @@ describe('mindmap structural mutations', () => {
         const child = makeNode('child', parent._id, 10);
         nodes.push(child);
         await expectRejected(
-            model.deleteNode({ domainId: 'system', actor: 1, id: parent._id, expectedUpdatedAt: parent.updatedAt }),
+            model.deleteNode({ domainId: 'system', actor: 1, ...nodeMutationContext(), id: parent._id, expectedUpdatedAt: parent.updatedAt }),
             MindmapConflictError,
             '叶子',
         );
 
-        documentResults = [{ domainId: 'course-a', docId: 3, pid: 'C3', knowledgeNodeIds: [child._id] }];
+        documentResults = [{ domainId: 'course-a', docId: 3, pid: 'C3', knowledgeMapId: config._id, knowledgeNodeIds: [child._id] }];
         await expectRejected(
-            model.deleteNode({ domainId: 'system', actor: 1, id: child._id, expectedUpdatedAt: child.updatedAt }),
+            model.deleteNode({ domainId: 'system', actor: 1, ...nodeMutationContext(), id: child._id, expectedUpdatedAt: child.updatedAt }),
             MindmapConflictError,
             '仍被题目引用',
         );
         documentResults = [];
-        await model.deleteNode({ domainId: 'system', actor: 1, id: child._id, expectedUpdatedAt: child.updatedAt });
+        await model.deleteNode({ domainId: 'system', actor: 1, ...nodeMutationContext(), id: child._id, expectedUpdatedAt: child.updatedAt });
         expect(nodes.some((node) => node._id.equals(child._id))).to.equal(false);
+    });
+
+    it('ignores malformed cross-map parent links when deciding whether a scoped node is a leaf', async () => {
+        const leaf = makeNode('current leaf', config.rootNodeId, 10);
+        const foreign = makeNode('foreign child', leaf._id, 10, [], new ObjectId());
+        nodes.push(leaf, foreign);
+
+        await model.deleteNode({ domainId: 'system', actor: 1, ...nodeMutationContext(), id: leaf._id, expectedUpdatedAt: leaf.updatedAt });
+
+        expect(nodes.some((node) => node._id.equals(leaf._id))).to.equal(false);
+        expect(nodes.some((node) => node._id.equals(foreign._id))).to.equal(true);
     });
 
     it('validates and canonicalizes every manual problem association server-side', async () => {
         const child = makeNode('child', config.rootNodeId, 10);
         nodes.push(child);
-        documentResults = [{ domainId: 'course-a', docId: 4, pid: 'C4' }];
+        documentResults = [{ domainId: 'course-a', docId: 4, pid: 'C4', knowledgeMapId: config._id }];
         await expectRejected(
             model.updateNode({
                 domainId: 'system',
                 actor: 1,
+                ...nodeMutationContext(),
                 id: child._id,
                 expectedUpdatedAt: child.updatedAt,
                 patch: { problemIds: ['missing'] },
@@ -662,10 +974,25 @@ describe('mindmap structural mutations', () => {
         );
         expect(documentCalls[0].filter).to.include({ domainId: 'system' });
 
-        documentResults = [{ domainId: 'system', docId: 9, pid: 'P9' }];
+        documentResults = [{ domainId: 'system', docId: 8, pid: 'P8', knowledgeMapId: new ObjectId() }];
+        await expectRejected(
+            model.updateNode({
+                domainId: 'system',
+                actor: 1,
+                ...nodeMutationContext(),
+                id: child._id,
+                expectedUpdatedAt: child.updatedAt,
+                patch: { problemIds: ['P8'] },
+            }),
+            MindmapRequestError,
+            '另一张导图',
+        );
+
+        documentResults = [{ domainId: 'system', docId: 9, pid: 'P9', knowledgeMapId: config._id }];
         const updated = await model.updateNode({
             domainId: 'system',
             actor: 1,
+            ...nodeMutationContext(),
             id: child._id,
             expectedUpdatedAt: child.updatedAt,
             patch: { problemIds: ['9'] },
@@ -682,6 +1009,7 @@ describe('mindmap structural mutations', () => {
         const updated = await model.updateNode({
             domainId: 'system',
             actor: 1,
+            ...nodeMutationContext(),
             id: child._id,
             expectedUpdatedAt: previous,
             patch: { topic: 'next' },
@@ -697,6 +1025,7 @@ describe('mindmap structural mutations', () => {
             model.updateNode({
                 domainId: 'system',
                 actor: 1,
+                ...nodeMutationContext(),
                 id: child._id,
                 expectedUpdatedAt: new Date('2000-01-01T00:00:00.000Z'),
                 patch: { topic: 'lost update' },

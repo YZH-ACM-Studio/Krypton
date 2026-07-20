@@ -6,9 +6,10 @@ import { describe, it } from 'node:test';
 import type { MindmapNode } from '../src/pages/mindmap/types.ts';
 
 const require = createRequire(import.meta.url);
-const { mindmapProblemHref, MindmapApiError, mutateMindmap } = require('../src/pages/mindmap/api.ts') as typeof import('../src/pages/mindmap/api');
+const { mindmapProblemHref, MindmapApiError, mutateKnowledgeMap, mutateMindmap } =
+  require('../src/pages/mindmap/api.ts') as typeof import('../src/pages/mindmap/api');
 const { computeMindmapLayout, resolveRootBranchSides } = require('../src/pages/mindmap/layout.ts') as typeof import('../src/pages/mindmap/layout');
-const { flattenMindmapTree, planDrop } = require('../src/pages/mindmap/tree.ts') as typeof import('../src/pages/mindmap/tree');
+const { flattenMindmapTree, mergeMindmapTagDraft, planDrop } = require('../src/pages/mindmap/tree.ts') as typeof import('../src/pages/mindmap/tree');
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const version = '2026-07-16T00:00:00.000Z';
@@ -20,6 +21,7 @@ function read(relativePath: string): string {
 function makeNode(id: string, parentId: string | null, order: number, extra: Partial<MindmapNode> = {}): MindmapNode {
   return {
     _id: id,
+    mapId: 'map-a',
     parentId,
     topic: id,
     tags: [],
@@ -31,7 +33,7 @@ function makeNode(id: string, parentId: string | null, order: number, extra: Par
   };
 }
 
-describe('P2.16 mindmap workspace contracts', () => {
+describe('P2.16 and P2.28 mindmap workspace contracts', () => {
   it('keeps the public page read-only and registers a separate administrator template', () => {
     const publicPage = read('packages/ui-next/src/pages/mindmap/index.tsx');
     const adminPage = read('packages/ui-next/src/pages/mindmap/admin.tsx');
@@ -47,10 +49,16 @@ describe('P2.16 mindmap workspace contracts', () => {
 
     expect(publicPage).not.to.include('canEdit');
     expect(publicPage).not.to.include('编辑模式');
+    expect(publicPage).to.include('ariaLabel="切换知识导图"');
+    expect(publicPage).to.include('/mindmap?map=');
     expect(canvas).to.include('nodesDraggable={false}');
     expect(adminPage).to.include('<MindmapOutline');
     expect(adminPage).to.include('<MindmapCanvas');
     expect(adminPage).to.include('<MindmapInspector');
+    expect(adminPage).to.include('mutateKnowledgeMap');
+    expect(adminPage).to.include('expectedMapUpdatedAt: config.updatedAt');
+    expect(adminPage).to.include('<UnsavedMapActionDialog');
+    expect(adminPage).to.include('放弃未保存的节点修改');
     expect(adminPage).to.include("type MobilePane = 'outline' | 'preview' | 'inspector'");
     const workspaceMatch = adminPage.match(/<ReactFlowProvider>\s*<div className="([^"]+)"/);
     expect(workspaceMatch, 'mindmap admin workspace root').not.to.equal(null);
@@ -81,7 +89,7 @@ describe('P2.16 mindmap workspace contracts', () => {
     expect(canvas).to.match(/className="[^"]*size-10[^"]*"[\s\S]*?aria-label=\{data\.collapsed/);
 
     const createDialog = adminPage.slice(adminPage.indexOf('function CreateNodeDialog'), adminPage.indexOf('function DeleteNodeDialog'));
-    const deleteDialog = adminPage.slice(adminPage.indexOf('function DeleteNodeDialog'));
+    const deleteDialog = adminPage.slice(adminPage.indexOf('function DeleteNodeDialog'), adminPage.indexOf('function CreateMapDialog'));
     expect(createDialog).to.include('className="mt-1.5 h-10"');
     expect(createDialog).to.include('contentClassName="[&_[role=option]]:min-h-10"');
     expect(createDialog.match(/className="min-h-10"/g) || []).to.have.lengthOf(2);
@@ -125,7 +133,14 @@ describe('P2.16 mindmap workspace contracts', () => {
     expect(planDrop(nodes, 'a', 'b', 'after')).to.deep.equal({ newParentId: 'root', targetIndex: 1 });
   });
 
-  it('lays out a production-shaped 273-node tree deterministically while ignoring absolute position fields', async () => {
+  it('treats uncommitted tag input as an effective value that map switching must protect', () => {
+    expect(mergeMindmapTagDraft(['图论'], ' 最短路, 图论 ')).to.deep.equal(['图论', '最短路']);
+    const inspector = read('packages/ui-next/src/pages/mindmap/inspector.tsx');
+    expect(inspector).to.include('!sameStrings(effectiveTags, node.tags)');
+    expect(inspector).to.include('{ tags: effectiveTags }');
+  });
+
+  it('keeps the production-shaped 274-node layout stable after adding map scope and ignores absolute positions', async () => {
     const nodes: MindmapNode[] = [makeNode('root', null, 0)];
     for (let branch = 0; branch < 8; branch += 1) {
       const branchId = `branch-${branch}`;
@@ -133,11 +148,11 @@ describe('P2.16 mindmap workspace contracts', () => {
       for (let group = 0; group < 8; group += 1) {
         const groupId = `${branchId}-group-${group}`;
         nodes.push(makeNode(groupId, branchId, group));
-        const leaves = group === 0 ? 4 : 3;
+        const leaves = group === 0 ? (branch === 0 ? 5 : 4) : 3;
         for (let leaf = 0; leaf < leaves; leaf += 1) nodes.push(makeNode(`${groupId}-leaf-${leaf}`, groupId, leaf));
       }
     }
-    expect(nodes).to.have.lengthOf(273);
+    expect(nodes).to.have.lengthOf(274);
     for (const [index, node] of nodes.entries()) {
       (node as MindmapNode & { position?: { x: number; y: number } }).position = { x: index * 100, y: -index };
     }
@@ -145,12 +160,37 @@ describe('P2.16 mindmap workspace contracts', () => {
     const first = await computeMindmapLayout(nodes, 'root');
     for (const node of nodes) {
       (node as MindmapNode & { position?: { x: number; y: number } }).position = { x: -999, y: 999 };
+      node.mapId = 'map-b';
     }
     const second = await computeMindmapLayout(nodes, 'root');
     const compact = (layout: typeof first) => layout.nodes.map((node) => ({ id: node.id, position: node.position }));
 
-    expect(first.nodes).to.have.lengthOf(273);
+    expect(first.nodes).to.have.lengthOf(274);
     expect(compact(second)).to.deep.equal(compact(first));
+  });
+
+  it('preserves the established RIGHT layout and renders DOWN maps as a vertical tree', async () => {
+    const nodes = [
+      makeNode('root', null, 0),
+      makeNode('left', 'root', 10, { layoutSide: 'left' }),
+      makeNode('right', 'root', 20, { layoutSide: 'right' }),
+      makeNode('leaf', 'left', 10),
+    ];
+
+    const established = await computeMindmapLayout(nodes, 'root');
+    const explicitRight = await computeMindmapLayout(nodes, 'root', new Set(), 'RIGHT');
+    expect(explicitRight).to.deep.equal(established);
+
+    const down = await computeMindmapLayout(nodes, 'root', new Set(), 'DOWN');
+    const positions = new Map(down.nodes.map((node) => [node.id, node.position]));
+    expect(positions.get('left')!.y).to.be.greaterThan(positions.get('root')!.y);
+    expect(positions.get('right')!.y).to.be.greaterThan(positions.get('root')!.y);
+    expect(positions.get('leaf')!.y).to.be.greaterThan(positions.get('left')!.y);
+    expect(positions.get('left')!.x).not.to.equal(positions.get('right')!.x);
+    expect(down.edges.every((edge) => edge.sourceHandle === 'src-bottom' && edge.targetHandle === 'tgt-top')).to.equal(true);
+
+    const inspector = read('packages/ui-next/src/pages/mindmap/inspector.tsx');
+    expect(inspector).to.include("layoutDirection === 'RIGHT' && isRootBranch");
   });
 
   it('builds domain-aware problem links for global reference errors', () => {
@@ -184,6 +224,46 @@ describe('P2.16 mindmap workspace contracts', () => {
       expect((failure as InstanceType<typeof MindmapApiError>).details).to.deep.equal({
         reason: 'inherited-tags-change',
         problems: [{ domainId: 'course-a', docId: 7, pid: 'C7', title: '受影响题目', hidden: true }],
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  it('posts map lifecycle mutations and validates the returned scoped snapshot', async () => {
+    const previousFetch = globalThis.fetch;
+    let request: { url: string; body: string } | null = null;
+    globalThis.fetch = async (input, init) => {
+      request = { url: String(input), body: String(init?.body || '') };
+      return new Response(
+        JSON.stringify({
+          nodes: [],
+          config: {
+            _id: 'map-b',
+            title: '面向对象',
+            rootNodeId: 'root-b',
+            visibility: 'hidden',
+            layoutDirection: 'RIGHT',
+            createdAt: version,
+            updatedAt: version,
+          },
+          maps: [],
+          referenceCounts: {},
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    };
+    try {
+      const snapshot = await mutateKnowledgeMap('create', { title: '面向对象', rootTopic: '面向对象', layoutDirection: 'RIGHT' });
+      expect(snapshot.config?._id).to.equal('map-b');
+      expect(request).not.to.equal(null);
+      expect(request!.url).to.equal('/admin/mindmap/maps');
+      const form = new URLSearchParams(request!.body);
+      expect(form.get('operation')).to.equal('create');
+      expect(JSON.parse(form.get('payload') || '{}')).to.deep.equal({
+        title: '面向对象',
+        rootTopic: '面向对象',
+        layoutDirection: 'RIGHT',
       });
     } finally {
       globalThis.fetch = previousFetch;

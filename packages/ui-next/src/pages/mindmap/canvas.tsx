@@ -24,6 +24,7 @@ function MindmapNodeView({ data }: { data: MindmapNodeData }) {
     <>
       <Handle type="target" id="tgt-left" position={Position.Left} style={{ opacity: 0 }} />
       <Handle type="target" id="tgt-right" position={Position.Right} style={{ opacity: 0 }} />
+      <Handle type="target" id="tgt-top" position={Position.Top} style={{ opacity: 0 }} />
       <div
         className={cn(
           'flex h-full w-full items-center justify-center rounded-xl border px-3 py-2 text-sm shadow-sm transition-[box-shadow,border-color] duration-200 motion-reduce:transition-none',
@@ -50,6 +51,7 @@ function MindmapNodeView({ data }: { data: MindmapNodeData }) {
       </div>
       <Handle type="source" id="src-left" position={Position.Left} style={{ opacity: 0 }} />
       <Handle type="source" id="src-right" position={Position.Right} style={{ opacity: 0 }} />
+      <Handle type="source" id="src-bottom" position={Position.Bottom} style={{ opacity: 0 }} />
     </>
   );
 }
@@ -109,7 +111,7 @@ export function MindmapCanvas({
   useEffect(() => {
     let cancelled = false;
     setLayoutError(null);
-    void computeMindmapLayout(nodes, config.rootNodeId, collapsed)
+    void computeMindmapLayout(nodes, config.rootNodeId, collapsed, config.layoutDirection)
       .then((layout) => {
         if (cancelled) return;
         setFlowNodes(
@@ -133,7 +135,7 @@ export function MindmapCanvas({
     return () => {
       cancelled = true;
     };
-  }, [nodes, config.rootNodeId, collapsed, toggleCollapse, fitView]);
+  }, [nodes, config.rootNodeId, config.layoutDirection, collapsed, toggleCollapse, fitView]);
 
   const nodeTypes = useMemo(() => NODE_TYPES, []);
   return (

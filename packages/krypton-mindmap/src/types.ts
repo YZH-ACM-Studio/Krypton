@@ -1,14 +1,9 @@
 import type { ObjectId } from 'mongodb';
 
-/**
- * MindmapNode — one node in the single global mindmap. Tree is implicit via
- * parentId; root node has parentId = null and config.rootNodeId points at it.
- *
- * Layout is derived from the tree and sibling order. Root branches may select
- * a relative side, but absolute x/y coordinates are deliberately unsupported.
- */
+/** A node belongs to exactly one knowledge map. */
 export interface MindmapNode {
     _id: ObjectId;
+    mapId: ObjectId;
     parentId: ObjectId | null;
     topic: string;
     description?: string;
@@ -26,14 +21,13 @@ export interface MindmapNode {
     updatedAt: Date;
 }
 
-/**
- * MindmapConfig — singleton document with `_id: 'global'`. Holds the title,
- * the rootNodeId, and the layout direction.
- */
-export interface MindmapConfig {
-    _id: 'global';
+/** First-class reusable knowledge map. */
+export interface KnowledgeMapDoc {
+    _id: ObjectId;
     title: string;
-    rootNodeId: ObjectId | null;
+    rootNodeId: ObjectId;
+    visibility: 'hidden' | 'public';
     layoutDirection: 'RIGHT' | 'DOWN';
+    createdAt: Date;
     updatedAt: Date;
 }

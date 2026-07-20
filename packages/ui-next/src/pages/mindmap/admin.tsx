@@ -1,5 +1,5 @@
 import { ReactFlowProvider } from '@xyflow/react';
-import { AlertCircle, Check, ChevronLeft, Circle, Loader2, Network, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, Check, ChevronLeft, Circle, Eye, EyeOff, Loader2, Network, Plus, Settings2, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,15 +10,16 @@ import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
-import { mindmapProblemHref, MindmapApiError, mutateMindmap } from './api';
+import { mindmapProblemHref, MindmapApiError, mutateKnowledgeMap, mutateMindmap } from './api';
 import { initialCollapsedNodes, MindmapCanvas } from './canvas';
 import { MindmapInspector } from './inspector';
 import { MindmapOutline } from './outline';
 import { childrenByParent, nodePath, siblingIndex, type PlannedMove } from './tree';
-import type { MindmapNode, MindmapSnapshot, ProblemOption } from './types';
+import type { KnowledgeMap, MindmapNode, MindmapSnapshot, ProblemOption } from './types';
 
 type SaveState = 'saved' | 'saving' | 'failed';
 type MobilePane = 'outline' | 'preview' | 'inspector';
+type PendingMapAction = { kind: 'switch'; mapId: string } | { kind: 'create' };
 
 interface OperationFailure {
   message: string;
@@ -36,21 +37,40 @@ const COLOR_OPTIONS = [
   { value: 'purple', label: '紫色' },
 ];
 
+const LAYOUT_OPTIONS = [
+  { value: 'RIGHT', label: '中心向左右展开' },
+  { value: 'DOWN', label: '从上向下展开' },
+];
+
+type KnowledgeMapWithUsage = KnowledgeMap & {
+  usage?: { nodes: number; problems: number; courses: number };
+};
+
 export function AdminMindmapPage() {
   const bootstrap = useBootstrap();
   const initial = bootstrap.page.data as MindmapSnapshot;
   const [snapshot, setSnapshot] = useState(initial);
-  const [selectedId, setSelectedId] = useState<string | null>(initial.config.rootNodeId);
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(initial.config.rootNodeId ? [initial.config.rootNodeId] : []));
+  const [selectedId, setSelectedId] = useState<string | null>(initial.config?.rootNodeId || null);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(initial.config?.rootNodeId ? [initial.config.rootNodeId] : []));
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [failure, setFailure] = useState<OperationFailure | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [mobilePane, setMobilePane] = useState<MobilePane>('outline');
   const [createRequest, setCreateRequest] = useState<{ parent: MindmapNode; kind: 'child' | 'sibling' } | null>(null);
   const [deleteRequest, setDeleteRequest] = useState<MindmapNode | null>(null);
-  const [previewCollapsed, setPreviewCollapsed] = useState<Set<string>>(() => initialCollapsedNodes(initial.nodes, initial.config.rootNodeId));
+  const [previewCollapsed, setPreviewCollapsed] = useState<Set<string>>(() =>
+    initialCollapsedNodes(initial.nodes, initial.config?.rootNodeId || null),
+  );
+  const [inspectorDirty, setInspectorDirty] = useState(false);
+  const [inspectorResetVersion, setInspectorResetVersion] = useState(0);
+  const [pendingMapAction, setPendingMapAction] = useState<PendingMapAction | null>(null);
+  const [createMapOpen, setCreateMapOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [deleteMapOpen, setDeleteMapOpen] = useState(false);
   const mutationInFlight = useRef(false);
 
+  const config = snapshot.config;
+  const activeMap = config ? snapshot.maps.find((map) => map._id === config._id) || config : null;
   const byId = useMemo(() => new Map(snapshot.nodes.map((node) => [node._id, node])), [snapshot.nodes]);
   const byParent = useMemo(() => childrenByParent(snapshot.nodes), [snapshot.nodes]);
   const selected = selectedId ? byId.get(selectedId) || null : null;
@@ -73,28 +93,96 @@ export function AdminMindmapPage() {
     setExpanded(next);
   };
 
+  const recordFailure = (error: unknown, fallback: string) => {
+    const apiError = error instanceof MindmapApiError ? error : new MindmapApiError(error instanceof Error ? error.message : fallback, 500);
+    setFailure({ message: apiError.message, problems: apiError.details?.problems || [], status: apiError.status });
+    setSaveState('failed');
+  };
+
+  const applySnapshot = (next: MindmapSnapshot) => {
+    const rootId = next.config?.rootNodeId || null;
+    setSnapshot(next);
+    setSelectedId(rootId);
+    setExpanded(new Set(rootId ? [rootId] : []));
+    setPreviewCollapsed(initialCollapsedNodes(next.nodes, rootId));
+    setInspectorDirty(false);
+    const href = next.config ? `/admin/mindmap?map=${encodeURIComponent(next.config._id)}` : '/admin/mindmap';
+    window.history.replaceState(null, '', href);
+  };
+
   const runMutation = async (
     operation: 'create' | 'update' | 'move' | 'delete',
     payload: Record<string, unknown>,
   ): Promise<MindmapSnapshot | null> => {
+    if (!config) {
+      setFailure({ message: '请先创建一张导图', problems: [], status: 409 });
+      setSaveState('failed');
+      return null;
+    }
     if (mutationInFlight.current) return null;
     mutationInFlight.current = true;
     setSaveState('saving');
     setFailure(null);
     try {
-      const next = await mutateMindmap(operation, payload);
+      const next = await mutateMindmap(operation, {
+        ...payload,
+        mapId: config._id,
+        expectedMapUpdatedAt: config.updatedAt,
+      });
       setSnapshot(next);
       setSaveState('saved');
       setSavedAt(new Date());
       return next;
     } catch (error) {
-      const apiError = error instanceof MindmapApiError ? error : new MindmapApiError(error instanceof Error ? error.message : '导图操作失败', 500);
-      setFailure({ message: apiError.message, problems: apiError.details?.problems || [], status: apiError.status });
-      setSaveState('failed');
+      recordFailure(error, '节点操作失败');
       return null;
     } finally {
       mutationInFlight.current = false;
     }
+  };
+
+  const runMapMutation = async (operation: 'create' | 'update' | 'delete', payload: Record<string, unknown>): Promise<MindmapSnapshot | null> => {
+    if (mutationInFlight.current) return null;
+    mutationInFlight.current = true;
+    setSaveState('saving');
+    setFailure(null);
+    try {
+      const next = await mutateKnowledgeMap(operation, payload);
+      if (operation === 'update') {
+        setSnapshot(next);
+        if (next.config) window.history.replaceState(null, '', `/admin/mindmap?map=${encodeURIComponent(next.config._id)}`);
+      } else {
+        applySnapshot(next);
+      }
+      setSaveState('saved');
+      setSavedAt(new Date());
+      return next;
+    } catch (error) {
+      recordFailure(error, '导图操作失败');
+      return null;
+    } finally {
+      mutationInFlight.current = false;
+    }
+  };
+
+  const performMapAction = (action: PendingMapAction) => {
+    setPendingMapAction(null);
+    if (action.kind === 'create' && inspectorDirty) setInspectorResetVersion((version) => version + 1);
+    setInspectorDirty(false);
+    if (action.kind === 'create') {
+      setCreateMapOpen(true);
+      return;
+    }
+    window.location.assign(`/admin/mindmap?map=${encodeURIComponent(action.mapId)}`);
+  };
+
+  const requestMapAction = (action: PendingMapAction) => {
+    if (action.kind === 'switch' && action.mapId === config?._id) return;
+    if (inspectorDirty) {
+      setPendingMapAction(action);
+      return;
+    }
+    performMapAction(action);
   };
 
   const performMove = async (node: MindmapNode, move: PlannedMove, layoutSide?: 'left' | 'right') => {
@@ -151,7 +239,7 @@ export function AdminMindmapPage() {
     const next = await runMutation('delete', { id: deleteRequest._id, expectedUpdatedAt: deleteRequest.updatedAt });
     if (!next) return;
     setDeleteRequest(null);
-    setSelectedId(parentId && next.nodes.some((node) => node._id === parentId) ? parentId : next.config.rootNodeId);
+    setSelectedId(parentId && next.nodes.some((node) => node._id === parentId) ? parentId : next.config?.rootNodeId || null);
   };
 
   const moveSide = (node: MindmapNode, side: 'left' | 'right') => {
@@ -182,11 +270,46 @@ export function AdminMindmapPage() {
                   <Badge variant="outline" className="hidden sm:inline-flex">
                     {snapshot.nodes.length} 节点
                   </Badge>
+                  {config ? (
+                    <Badge variant={config.visibility === 'public' ? 'default' : 'outline'} className="gap-1">
+                      {config.visibility === 'public' ? <Eye className="size-3" /> : <EyeOff className="size-3" />}
+                      {config.visibility === 'public' ? '已公开' : '隐藏中'}
+                    </Badge>
+                  ) : null}
                 </div>
-                <p className="mt-0.5 truncate text-sm text-muted-foreground">整理知识结构、预览布局并维护节点信息；绝对位置始终由结构自动计算。</p>
+                <p className="mt-0.5 truncate text-sm text-muted-foreground">每张导图独立维护结构与题目标签；节点位置始终由结构自动计算。</p>
               </div>
             </div>
             <SaveStatus state={saveState} savedAt={savedAt} />
+          </div>
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-card/80 p-2 shadow-sm ring-1 ring-border/60 backdrop-blur">
+            <div className="min-w-[15rem] flex-1 sm:max-w-md">
+              <SimpleSelect
+                ariaLabel="切换知识导图"
+                value={config?._id || ''}
+                disabled={!snapshot.maps.length || busy}
+                onValueChange={(mapId) => requestMapAction({ kind: 'switch', mapId })}
+                options={snapshot.maps.map((map) => ({
+                  value: map._id,
+                  label: `${map.title} · ${map.visibility === 'public' ? '已公开' : '隐藏'}`,
+                }))}
+                placeholder="尚未创建导图"
+                className="h-10 rounded-xl border-0 bg-muted/55 shadow-none"
+              />
+            </div>
+            <Button className="min-h-10 rounded-xl" variant="outline" disabled={busy} onClick={() => requestMapAction({ kind: 'create' })}>
+              <Plus className="size-4" /> 新建导图
+            </Button>
+            <Button className="min-h-10 rounded-xl" variant="outline" disabled={busy || !config} onClick={() => setSettingsOpen(true)}>
+              <Settings2 className="size-4" /> 导图设置
+            </Button>
+            {config?.visibility === 'public' ? (
+              <Button className="min-h-10 rounded-xl" variant="ghost" asChild>
+                <a href={`/mindmap?map=${encodeURIComponent(config._id)}`}>
+                  <Eye className="size-4" /> 查看公开页
+                </a>
+              </Button>
+            ) : null}
           </div>
           <div className="xl:hidden">
             <MiniTabs
@@ -247,95 +370,116 @@ export function AdminMindmapPage() {
           ) : null}
         </header>
 
-        <main
-          aria-label="导图管理工作区"
-          className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[18rem_minmax(18rem,1fr)_20rem] 2xl:grid-cols-[21rem_minmax(0,1fr)_23rem]"
-        >
-          <aside
-            data-mindmap-panel="outline"
-            aria-label="结构大纲"
-            className={cn(
-              'min-h-0 overflow-hidden rounded-[20px] bg-card shadow-sm ring-1 ring-border/60',
-              mobilePane === 'outline' ? 'flex flex-col' : 'hidden xl:flex xl:flex-col',
-            )}
+        {config ? (
+          <main
+            aria-label="导图管理工作区"
+            className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-[18rem_minmax(18rem,1fr)_20rem] 2xl:grid-cols-[21rem_minmax(0,1fr)_23rem]"
           >
-            <MindmapOutline
-              nodes={snapshot.nodes}
-              rootId={snapshot.config.rootNodeId}
-              selectedId={selectedId}
-              expanded={expanded}
-              referenceCounts={snapshot.referenceCounts}
-              busy={busy}
-              onSelect={(id) => selectNode(id)}
-              onExpandedChange={setExpanded}
-              onMove={(node, move) => void performMove(node, move)}
-              onCreateChild={openCreateChild}
-              onCreateSibling={openCreateSibling}
-              onDelete={setDeleteRequest}
-            />
-          </aside>
+            <aside
+              data-mindmap-panel="outline"
+              aria-label="结构大纲"
+              className={cn(
+                'min-h-0 overflow-hidden rounded-[20px] bg-card shadow-sm ring-1 ring-border/60',
+                mobilePane === 'outline' ? 'flex flex-col' : 'hidden xl:flex xl:flex-col',
+              )}
+            >
+              <MindmapOutline
+                nodes={snapshot.nodes}
+                rootId={config.rootNodeId}
+                selectedId={selectedId}
+                expanded={expanded}
+                referenceCounts={snapshot.referenceCounts}
+                busy={busy}
+                onSelect={(id) => selectNode(id)}
+                onExpandedChange={setExpanded}
+                onMove={(node, move) => void performMove(node, move)}
+                onCreateChild={openCreateChild}
+                onCreateSibling={openCreateSibling}
+                onDelete={setDeleteRequest}
+              />
+            </aside>
 
-          <section
-            data-mindmap-panel="preview"
-            aria-label="实时预览"
-            className={cn(
-              'relative min-h-0 overflow-hidden rounded-[20px] bg-card shadow-sm ring-1 ring-border/60',
-              mobilePane === 'preview' ? 'flex flex-col' : 'hidden xl:flex xl:flex-col',
-            )}
-          >
-            <div className="flex h-14 shrink-0 items-center justify-between px-4">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold">{selected ? selected.topic : '实时预览'}</p>
-                <p className="truncate text-[11px] text-muted-foreground">
-                  {selected
-                    ? nodePath(snapshot.nodes, selected._id)
-                        .map((node) => node.topic)
-                        .join(' / ')
-                    : '选择节点查看路径'}
-                </p>
+            <section
+              data-mindmap-panel="preview"
+              aria-label="实时预览"
+              className={cn(
+                'relative min-h-0 overflow-hidden rounded-[20px] bg-card shadow-sm ring-1 ring-border/60',
+                mobilePane === 'preview' ? 'flex flex-col' : 'hidden xl:flex xl:flex-col',
+              )}
+            >
+              <div className="flex h-14 shrink-0 items-center justify-between px-4">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">{selected ? selected.topic : '实时预览'}</p>
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {selected
+                      ? nodePath(snapshot.nodes, selected._id)
+                          .map((node) => node.topic)
+                          .join(' / ')
+                      : '选择节点查看路径'}
+                  </p>
+                </div>
+                <Badge variant="outline" className="ml-3 shrink-0 font-normal text-muted-foreground">
+                  自动布局
+                </Badge>
               </div>
-              <Badge variant="outline" className="ml-3 shrink-0 font-normal text-muted-foreground">
-                自动布局
-              </Badge>
-            </div>
-            <div className="min-h-0 flex-1 p-2 pt-0">
-              <div data-mindmap-canvas className="h-full overflow-hidden rounded-xl bg-muted/20 ring-1 ring-border/50">
-                <MindmapCanvas
-                  nodes={snapshot.nodes}
-                  config={snapshot.config}
-                  selectedId={selectedId}
-                  onSelect={selectNode}
-                  collapsed={previewCollapsed}
-                  onCollapsedChange={setPreviewCollapsed}
-                />
+              <div className="min-h-0 flex-1 p-2 pt-0">
+                <div data-mindmap-canvas className="h-full overflow-hidden rounded-xl bg-muted/20 ring-1 ring-border/50">
+                  <MindmapCanvas
+                    nodes={snapshot.nodes}
+                    config={config}
+                    selectedId={selectedId}
+                    onSelect={selectNode}
+                    collapsed={previewCollapsed}
+                    onCollapsedChange={setPreviewCollapsed}
+                  />
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
 
-          <aside
-            data-mindmap-panel="inspector"
-            aria-label="节点检查器"
-            className={cn(
-              'min-h-0 overflow-hidden rounded-[20px] bg-card shadow-sm ring-1 ring-border/60',
-              mobilePane === 'inspector' ? 'flex flex-col' : 'hidden xl:flex xl:flex-col',
-            )}
-          >
-            <MindmapInspector
-              node={selected}
-              nodes={snapshot.nodes}
-              rootId={snapshot.config.rootNodeId}
-              referenceCount={selected ? snapshot.referenceCounts[selected._id] || 0 : 0}
-              busy={busy}
-              onSave={async (node, fields) => {
-                await runMutation('update', { id: node._id, expectedUpdatedAt: node.updatedAt, fields });
-              }}
-              onMoveSide={moveSide}
-              onCreateChild={openCreateChild}
-              onCreateSibling={openCreateSibling}
-              onDelete={setDeleteRequest}
-            />
-          </aside>
-        </main>
+            <aside
+              data-mindmap-panel="inspector"
+              aria-label="节点检查器"
+              className={cn(
+                'min-h-0 overflow-hidden rounded-[20px] bg-card shadow-sm ring-1 ring-border/60',
+                mobilePane === 'inspector' ? 'flex flex-col' : 'hidden xl:flex xl:flex-col',
+              )}
+            >
+              <MindmapInspector
+                key={`${config._id}:${inspectorResetVersion}`}
+                mapId={config._id}
+                node={selected}
+                nodes={snapshot.nodes}
+                rootId={config.rootNodeId}
+                layoutDirection={config.layoutDirection}
+                referenceCount={selected ? snapshot.referenceCounts[selected._id] || 0 : 0}
+                busy={busy}
+                onSave={async (node, fields) => {
+                  await runMutation('update', { id: node._id, expectedUpdatedAt: node.updatedAt, fields });
+                }}
+                onMoveSide={moveSide}
+                onCreateChild={openCreateChild}
+                onCreateSibling={openCreateSibling}
+                onDelete={setDeleteRequest}
+                onDirtyChange={setInspectorDirty}
+              />
+            </aside>
+          </main>
+        ) : (
+          <main className="grid min-h-0 flex-1 place-items-center rounded-[28px] bg-card/80 p-8 text-center shadow-sm ring-1 ring-border/60">
+            <div className="max-w-md">
+              <span className="mx-auto grid size-14 place-items-center rounded-2xl bg-primary/10 text-primary">
+                <Network className="size-7" />
+              </span>
+              <h2 className="mt-5 text-xl font-semibold tracking-tight">创建第一张知识导图</h2>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                新导图默认隐藏，只包含一个根节点。整理完成并通过结构校验后，再从设置中公开。
+              </p>
+              <Button className="mt-5 min-h-11 rounded-xl" onClick={() => setCreateMapOpen(true)}>
+                <Plus className="size-4" /> 新建导图
+              </Button>
+            </div>
+          </main>
+        )}
       </div>
 
       <CreateNodeDialog request={createRequest} busy={busy} onClose={() => setCreateRequest(null)} onSubmit={createNode} />
@@ -346,6 +490,49 @@ export function AdminMindmapPage() {
         busy={busy}
         onClose={() => setDeleteRequest(null)}
         onConfirm={deleteNode}
+      />
+      <CreateMapDialog
+        open={createMapOpen}
+        busy={busy}
+        onClose={() => setCreateMapOpen(false)}
+        onSubmit={async (input) => {
+          const next = await runMapMutation('create', input);
+          if (next) setCreateMapOpen(false);
+          return !!next;
+        }}
+      />
+      <MapSettingsDialog
+        map={activeMap}
+        open={settingsOpen}
+        busy={busy}
+        onClose={() => setSettingsOpen(false)}
+        onDelete={() => {
+          setSettingsOpen(false);
+          setDeleteMapOpen(true);
+        }}
+        onSubmit={async (fields) => {
+          if (!config) return false;
+          const next = await runMapMutation('update', { id: config._id, expectedUpdatedAt: config.updatedAt, fields });
+          if (next) setSettingsOpen(false);
+          return !!next;
+        }}
+      />
+      <DeleteMapDialog
+        map={activeMap}
+        open={deleteMapOpen}
+        busy={busy}
+        dirty={inspectorDirty}
+        onClose={() => setDeleteMapOpen(false)}
+        onConfirm={async () => {
+          if (!config) return;
+          const next = await runMapMutation('delete', { id: config._id, expectedUpdatedAt: config.updatedAt });
+          if (next) setDeleteMapOpen(false);
+        }}
+      />
+      <UnsavedMapActionDialog
+        action={pendingMapAction}
+        onClose={() => setPendingMapAction(null)}
+        onDiscard={() => pendingMapAction && performMapAction(pendingMapAction)}
       />
     </ReactFlowProvider>
   );
@@ -503,6 +690,292 @@ function DeleteNodeDialog({
           </Button>
           <Button className="min-h-10" variant="destructive" disabled={busy || blocked} onClick={() => void onConfirm()}>
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} 确认删除
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CreateMapDialog({
+  open,
+  busy,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (input: { title: string; rootTopic: string; layoutDirection: 'RIGHT' | 'DOWN' }) => Promise<boolean>;
+}) {
+  const [title, setTitle] = useState('');
+  const [rootTopic, setRootTopic] = useState('');
+  const [layoutDirection, setLayoutDirection] = useState<'RIGHT' | 'DOWN'>('RIGHT');
+  const close = () => {
+    if (busy) return;
+    setTitle('');
+    setRootTopic('');
+    setLayoutDirection('RIGHT');
+    onClose();
+  };
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && close()}>
+      <DialogContent className="w-full sm:w-[540px]" onClose={busy ? undefined : close}>
+        <DialogHeader>
+          <DialogTitle>新建知识导图</DialogTitle>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">新导图默认隐藏，创建后可逐步整理节点，再单独公开。</p>
+        </DialogHeader>
+        <div className="space-y-4 overflow-y-auto p-5">
+          <div>
+            <label htmlFor="create-map-title" className="text-xs font-medium">
+              导图名称
+            </label>
+            <Input
+              id="create-map-title"
+              value={title}
+              maxLength={100}
+              autoFocus
+              onChange={(event) => setTitle(event.target.value)}
+              className="mt-1.5 h-10"
+              placeholder="例如：面向对象程序设计"
+            />
+          </div>
+          <div>
+            <label htmlFor="create-map-root" className="text-xs font-medium">
+              根节点主题
+            </label>
+            <Input
+              id="create-map-root"
+              value={rootTopic}
+              maxLength={100}
+              onChange={(event) => setRootTopic(event.target.value)}
+              className="mt-1.5 h-10"
+              placeholder="例如：面向对象"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium">布局方向</label>
+            <SimpleSelect
+              value={layoutDirection}
+              onValueChange={(value) => setLayoutDirection(value as 'RIGHT' | 'DOWN')}
+              options={LAYOUT_OPTIONS}
+              className="mt-1.5 min-h-10"
+            />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t px-5 py-4">
+          <Button className="min-h-10" variant="outline" onClick={close} disabled={busy}>
+            取消
+          </Button>
+          <Button
+            className="min-h-10"
+            disabled={busy || !title.trim() || !rootTopic.trim()}
+            onClick={async () => {
+              const created = await onSubmit({ title, rootTopic, layoutDirection });
+              if (created) {
+                setTitle('');
+                setRootTopic('');
+                setLayoutDirection('RIGHT');
+              }
+            }}
+          >
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} 创建导图
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function MapSettingsDialog({
+  map,
+  open,
+  busy,
+  onClose,
+  onDelete,
+  onSubmit,
+}: {
+  map: KnowledgeMapWithUsage | null;
+  open: boolean;
+  busy: boolean;
+  onClose: () => void;
+  onDelete: () => void;
+  onSubmit: (fields: { title: string; layoutDirection: 'RIGHT' | 'DOWN'; visibility: 'hidden' | 'public' }) => Promise<boolean>;
+}) {
+  const [title, setTitle] = useState('');
+  const [layoutDirection, setLayoutDirection] = useState<'RIGHT' | 'DOWN'>('RIGHT');
+  const [visibility, setVisibility] = useState<'hidden' | 'public'>('hidden');
+
+  useEffect(() => {
+    if (!open || !map) return;
+    setTitle(map.title);
+    setLayoutDirection(map.layoutDirection);
+    setVisibility(map.visibility);
+  }, [map, open]);
+
+  const dirty = !!map && (title.trim() !== map.title || layoutDirection !== map.layoutDirection || visibility !== map.visibility);
+  return (
+    <Dialog open={open && !!map} onOpenChange={(nextOpen) => !nextOpen && !busy && onClose()}>
+      <DialogContent className="w-full sm:w-[560px]" onClose={busy ? undefined : onClose}>
+        <DialogHeader>
+          <DialogTitle>导图设置</DialogTitle>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">公开状态控制学生可见性；根节点名称直接在右侧节点检查器中编辑。</p>
+        </DialogHeader>
+        <div className="space-y-4 overflow-y-auto p-5">
+          <div>
+            <label htmlFor="map-settings-title" className="text-xs font-medium">
+              导图名称
+            </label>
+            <Input
+              id="map-settings-title"
+              value={title}
+              maxLength={100}
+              autoFocus
+              onChange={(event) => setTitle(event.target.value)}
+              className="mt-1.5 h-10"
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="text-xs font-medium">布局方向</label>
+              <SimpleSelect
+                value={layoutDirection}
+                onValueChange={(value) => setLayoutDirection(value as 'RIGHT' | 'DOWN')}
+                options={LAYOUT_OPTIONS}
+                className="mt-1.5 min-h-10"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium">可见性</label>
+              <SimpleSelect
+                value={visibility}
+                onValueChange={(value) => setVisibility(value as 'hidden' | 'public')}
+                options={[
+                  { value: 'hidden', label: '隐藏，仅管理员可见' },
+                  { value: 'public', label: '公开，学生可见' },
+                ]}
+                className="mt-1.5 min-h-10"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 rounded-2xl bg-muted/45 p-3 text-center">
+            <MapUsageMetric label="节点" value={map?.usage?.nodes} />
+            <MapUsageMetric label="题目" value={map?.usage?.problems} />
+            <MapUsageMetric label="课程" value={map?.usage?.courses} />
+          </div>
+          {visibility === 'public' && map?.visibility === 'hidden' ? (
+            <p className="rounded-xl bg-blue-500/10 p-3 text-xs leading-5 text-blue-800 ring-1 ring-blue-500/20 dark:text-blue-200">
+              发布时服务器会验证根节点、父子关系与整棵树的可达性；校验失败不会改变公开状态。
+            </p>
+          ) : null}
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 p-3">
+            <div>
+              <p className="text-sm font-medium text-destructive">删除整张导图</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">仅隐藏、只剩根节点且没有题目或课程引用时可用。</p>
+            </div>
+            <Button className="min-h-10 shrink-0" variant="destructive" disabled={busy} onClick={onDelete}>
+              <Trash2 className="size-4" /> 删除
+            </Button>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t px-5 py-4">
+          <Button className="min-h-10" variant="outline" onClick={onClose} disabled={busy}>
+            取消
+          </Button>
+          <Button
+            className="min-h-10"
+            disabled={busy || !dirty || !title.trim()}
+            onClick={() => void onSubmit({ title: title.trim(), layoutDirection, visibility })}
+          >
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} 保存设置
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function MapUsageMetric({ label, value }: { label: string; value: number | undefined }) {
+  return (
+    <div>
+      <p className="text-base font-semibold tabular-nums">{value ?? '—'}</p>
+      <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
+function DeleteMapDialog({
+  map,
+  open,
+  busy,
+  dirty,
+  onClose,
+  onConfirm,
+}: {
+  map: KnowledgeMapWithUsage | null;
+  open: boolean;
+  busy: boolean;
+  dirty: boolean;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  const reasons: string[] = [];
+  if (!map?.usage) reasons.push('无法确认节点与引用统计，请刷新后重试');
+  if (map?.visibility === 'public') reasons.push('导图仍处于公开状态');
+  if (map?.usage && map.usage.nodes !== 1) reasons.push(`仍有 ${Math.max(0, map.usage.nodes - 1)} 个非根节点`);
+  if (map?.usage?.problems) reasons.push(`仍被 ${map.usage.problems} 道题引用`);
+  if (map?.usage?.courses) reasons.push(`仍被 ${map.usage.courses} 门课程引用`);
+  if (dirty) reasons.push('节点检查器仍有未保存内容');
+  const blocked = reasons.length > 0;
+  return (
+    <Dialog open={open && !!map} onOpenChange={(nextOpen) => !nextOpen && !busy && onClose()}>
+      <DialogContent className="w-full sm:w-[500px]" onClose={busy ? undefined : onClose}>
+        <DialogHeader>
+          <DialogTitle>删除「{map?.title}」？</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 p-5 text-sm">
+          {blocked ? (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-amber-900 dark:text-amber-100">
+              <p className="font-medium">当前不能删除</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">
+                {reasons.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="leading-6 text-muted-foreground">将永久删除这张隐藏导图及其根节点。该操作无法撤销，也不会删除任何题目或课程。</p>
+          )}
+        </div>
+        <div className="flex justify-end gap-2 border-t px-5 py-4">
+          <Button className="min-h-10" variant="outline" onClick={onClose} disabled={busy}>
+            取消
+          </Button>
+          <Button className="min-h-10" variant="destructive" disabled={busy || blocked} onClick={() => void onConfirm()}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} 永久删除
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function UnsavedMapActionDialog({ action, onClose, onDiscard }: { action: PendingMapAction | null; onClose: () => void; onDiscard: () => void }) {
+  return (
+    <Dialog open={!!action} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="w-full sm:w-[470px]" onClose={onClose}>
+        <DialogHeader>
+          <DialogTitle>放弃未保存的节点修改？</DialogTitle>
+        </DialogHeader>
+        <div className="p-5 text-sm leading-6 text-muted-foreground">
+          {action?.kind === 'switch' ? '切换导图' : '新建导图'}会清除右侧检查器中尚未保存的内容。已保存的导图和节点不会受影响。
+        </div>
+        <div className="flex justify-end gap-2 border-t px-5 py-4">
+          <Button className="min-h-10" variant="outline" onClick={onClose}>
+            留在当前导图
+          </Button>
+          <Button className="min-h-10" variant="destructive" onClick={onDiscard}>
+            放弃并继续
           </Button>
         </div>
       </DialogContent>

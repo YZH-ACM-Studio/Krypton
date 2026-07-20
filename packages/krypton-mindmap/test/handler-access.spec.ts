@@ -18,14 +18,19 @@ const calls = {
     assertDomain: [] as any[],
     buildScope: [] as any[],
     canBrowse: [] as any[],
+    createMap: [] as any[],
     createNode: [] as any[],
+    deleteMap: [] as any[],
     deleteNode: [] as any[],
+    getMap: [] as any[],
+    getMapUsage: [] as any[],
     getReferenceCounts: [] as any[],
     listProblems: [] as any[],
     loggerError: [] as any[],
     loggerWarn: [] as any[],
     moveNode: [] as any[],
     searchProblems: [] as any[],
+    updateMap: [] as any[],
     updateNode: [] as any[],
 };
 let browseAllowed = false;
@@ -33,6 +38,7 @@ let assertFailure: Error | null = null;
 let browseFailure: Error | null = null;
 let scopeFailure: Error | null = null;
 let canonicalScope: Record<string, unknown> = {};
+let bootstrapMaps: any[] = [];
 let bootstrapNodes: any[] = [];
 let mutationFailure:
     | (Error & {
@@ -86,26 +92,38 @@ const sensitiveProblems = [
 ];
 
 const modelStub = {
+    async createKnowledgeMap(...args: any[]) {
+        calls.createMap.push(args);
+        if (mutationFailure) throw mutationFailure;
+        return bootstrapMaps[0];
+    },
     async createNode(...args: any[]) {
         calls.createNode.push(args);
         if (mutationFailure) throw mutationFailure;
         return {};
     },
+    async deleteKnowledgeMap(...args: any[]) {
+        calls.deleteMap.push(args);
+        if (mutationFailure) throw mutationFailure;
+    },
     async deleteNode(...args: any[]) {
         calls.deleteNode.push(args);
         if (mutationFailure) throw mutationFailure;
     },
-    getConfig: async () => ({
-        title: '公开知识导图',
-        rootNodeId: bootstrapNodes[0]?._id || null,
-        layoutDirection: 'RIGHT',
-        updatedAt: new Date('2026-07-16T00:00:00.000Z'),
-    }),
+    async getKnowledgeMap(id: any) {
+        calls.getMap.push(id);
+        return bootstrapMaps.find((map) => map._id.equals(id)) || null;
+    },
+    async getKnowledgeMapUsage(...args: any[]) {
+        calls.getMapUsage.push(args);
+        return { nodes: bootstrapNodes.length, problems: 0, courses: 0 };
+    },
     async getNodeReferenceCounts(...args: any[]) {
         calls.getReferenceCounts.push(args);
         return Object.fromEntries(bootstrapNodes.map((node) => [node._id.toHexString(), 0]));
     },
-    listAllNodes: async () => bootstrapNodes,
+    listAllNodes: async (mapId: any) => bootstrapNodes.filter((node) => node.mapId.equals(mapId)),
+    listKnowledgeMaps: async (includeHidden = false) => bootstrapMaps.filter((map) => includeHidden || map.visibility === 'public'),
     async listProblemsForNode(...args: any[]) {
         calls.listProblems.push(args);
         return sensitiveProblems;
@@ -122,12 +140,18 @@ const modelStub = {
         calls.updateNode.push(args);
         if (mutationFailure) throw mutationFailure;
     },
+    async updateKnowledgeMap(...args: any[]) {
+        calls.updateMap.push(args);
+        if (mutationFailure) throw mutationFailure;
+        return bootstrapMaps[0];
+    },
 };
 
 const hydroojStub = {
     ...framework,
     ForbiddenError: framework.ForbiddenError,
     Handler: framework.Handler,
+    NotFoundError: framework.NotFoundError,
     ObjectId,
     param: framework.param,
     PRIV: { PRIV_EDIT_SYSTEM: 1 },
@@ -182,6 +206,7 @@ async function dispatchProblemsApi(user = makeUser(), argsDomainId = 'system', a
     const HandlerClass = routes.get('mindmap_api_problems');
     expect(HandlerClass, 'missing mindmap_api_problems route').to.be.a('function');
     const nodeId = new ObjectId();
+    const mapId = bootstrapMaps[0]._id as InstanceType<typeof ObjectId>;
     const request = {
         method: 'get',
         host: 'example.test',
@@ -191,8 +216,8 @@ async function dispatchProblemsApi(user = makeUser(), argsDomainId = 'system', a
         cookies: {},
         body: {},
         files: {},
-        query: { nodeId: nodeId.toHexString() },
-        querystring: `nodeId=${nodeId.toHexString()}`,
+        query: { mapId: mapId.toHexString(), nodeId: nodeId.toHexString() },
+        querystring: `mapId=${mapId.toHexString()}&nodeId=${nodeId.toHexString()}`,
         path: '/api/mindmap/problems',
         originalPath: '/api/mindmap/problems',
         params: {},
@@ -209,7 +234,7 @@ async function dispatchProblemsApi(user = makeUser(), argsDomainId = 'system', a
         attachment() {},
         addHeader() {},
     };
-    const args = { domainId: argsDomainId, nodeId: nodeId.toHexString() };
+    const args = { domainId: argsDomainId, mapId: mapId.toHexString(), nodeId: nodeId.toHexString() };
     const koaContext: any = {
         method: 'GET',
         params: {},
@@ -252,10 +277,10 @@ async function dispatchProblemsApi(user = makeUser(), argsDomainId = 'system', a
         },
     };
     await (framework.WebService.prototype as any).handleHttp.call(service, koaContext, HandlerClass, () => {}, savedContext);
-    return { nodeId, response };
+    return { mapId, nodeId, response };
 }
 
-async function dispatchMindmapPage(user = makeUser(), authoritativeDomainId = 'system') {
+async function dispatchMindmapPage(user = makeUser(), authoritativeDomainId = 'system', requestedMapId?: string) {
     const HandlerClass = routes.get('mindmap_main');
     expect(HandlerClass, 'missing mindmap_main route').to.be.a('function');
     const request = {
@@ -267,8 +292,8 @@ async function dispatchMindmapPage(user = makeUser(), authoritativeDomainId = 's
         cookies: {},
         body: {},
         files: {},
-        query: {},
-        querystring: '',
+        query: requestedMapId ? { map: requestedMapId } : {},
+        querystring: requestedMapId ? `map=${requestedMapId}` : '',
         path: '/mindmap',
         originalPath: '/mindmap',
         params: {},
@@ -285,7 +310,7 @@ async function dispatchMindmapPage(user = makeUser(), authoritativeDomainId = 's
         attachment() {},
         addHeader() {},
     };
-    const args = { domainId: authoritativeDomainId };
+    const args = { domainId: authoritativeDomainId, ...(requestedMapId ? { map: requestedMapId } : {}) };
     const koaContext: any = {
         method: 'GET',
         params: {},
@@ -444,9 +469,23 @@ beforeEach(() => {
     scopeFailure = null;
     canonicalScope = {};
     mutationFailure = null;
+    const mapId = new ObjectId();
+    const rootId = new ObjectId();
+    bootstrapMaps = [
+        {
+            _id: mapId,
+            title: '公开知识导图',
+            rootNodeId: rootId,
+            visibility: 'public',
+            layoutDirection: 'RIGHT',
+            createdAt: new Date('2026-07-16T00:00:00.000Z'),
+            updatedAt: new Date('2026-07-16T00:00:00.000Z'),
+        },
+    ];
     bootstrapNodes = [
         {
-            _id: new ObjectId(),
+            _id: rootId,
+            mapId,
             parentId: null,
             topic: '公开根节点',
             description: '公开说明',
@@ -470,6 +509,8 @@ describe('mindmap page bootstrap metadata boundary', () => {
             title: '公开知识导图',
             layoutDirection: 'RIGHT',
         });
+        expect(response.body.config._id).to.equal(bootstrapMaps[0]._id.toHexString());
+        expect(response.body.maps).to.have.lengthOf(1);
         expect(response.body.nodes).to.have.lengthOf(1);
         expect(response.body.nodes[0]).to.include({
             topic: '公开根节点',
@@ -523,6 +564,22 @@ describe('mindmap page bootstrap metadata boundary', () => {
         expectNoProblemDisclosure(response.body);
         expect(calls.loggerError).to.have.lengthOf(1);
     });
+
+    it('never exposes or silently substitutes an explicitly requested hidden map', async () => {
+        const hiddenId = new ObjectId();
+        bootstrapMaps.push({
+            ...bootstrapMaps[0],
+            _id: hiddenId,
+            rootNodeId: new ObjectId(),
+            title: '隐藏导图',
+            visibility: 'hidden',
+        });
+
+        const { response } = await dispatchMindmapPage(makeUser(), 'system', hiddenId.toHexString());
+
+        expect(response.status).to.equal(404);
+        expectNoProblemDisclosure(response.body);
+    });
 });
 
 describe('mindmap problem enumeration HTTP boundary', () => {
@@ -540,12 +597,12 @@ describe('mindmap problem enumeration HTTP boundary', () => {
         browseAllowed = true;
         canonicalScope = { $or: [{ owner: 42 }, { docId: { $in: [7] } }] };
 
-        const { nodeId, response } = await dispatchProblemsApi();
+        const { mapId, nodeId, response } = await dispatchProblemsApi();
 
         expect(response.status).to.equal(200);
         expect(calls.buildScope).to.have.lengthOf(1);
         expect(calls.listProblems).to.have.lengthOf(1);
-        expect(calls.listProblems[0]).to.deep.equal(['system', nodeId, canonicalScope]);
+        expect(calls.listProblems[0]).to.deep.equal(['system', mapId, nodeId, canonicalScope]);
         expect(response.body).to.deep.equal({ problems: sensitiveProblems });
     });
 
@@ -553,11 +610,11 @@ describe('mindmap problem enumeration HTTP boundary', () => {
         browseAllowed = true;
         canonicalScope = { owner: 42 };
 
-        const { nodeId, response } = await dispatchProblemsApi(makeUser(), 'evil', 'system');
+        const { mapId, nodeId, response } = await dispatchProblemsApi(makeUser(), 'evil', 'system');
 
         expect(response.status).to.equal(200);
         expect(calls.assertDomain[0][1]).to.equal('system');
-        expect(calls.listProblems[0]).to.deep.equal(['system', nodeId, canonicalScope]);
+        expect(calls.listProblems[0]).to.deep.equal(['system', mapId, nodeId, canonicalScope]);
     });
 
     it('fails closed when the capability wrapper throws', async () => {
@@ -586,18 +643,19 @@ describe('mindmap problem enumeration HTTP boundary', () => {
 describe('mindmap administrator HTTP boundary', () => {
     it('gates the page, search, association API, and writes with PRIV_EDIT_SYSTEM', async () => {
         const nodeId = bootstrapNodes[0]._id.toHexString();
+        const mapId = bootstrapMaps[0]._id.toHexString();
         const page = await dispatchAdminRoute({ route: 'admin_mindmap', path: '/admin/mindmap', json: false });
         const search = await dispatchAdminRoute({
             route: 'admin_mindmap_problem_search',
             path: '/api/mindmap/admin/problems',
-            args: { q: 'P1' },
-            query: { q: 'P1' },
+            args: { mapId, q: 'P1' },
+            query: { mapId, q: 'P1' },
         });
         const associations = await dispatchAdminRoute({
             route: 'admin_mindmap_node_problems',
             path: '/api/mindmap/admin/node-problems',
-            args: { nodeId },
-            query: { nodeId },
+            args: { mapId, nodeId },
+            query: { mapId, nodeId },
         });
         const write = await dispatchAdminRoute({
             route: 'admin_mindmap_nodes',
@@ -606,12 +664,19 @@ describe('mindmap administrator HTTP boundary', () => {
             args: { operation: 'delete', payload: JSON.stringify({ id: nodeId, expectedUpdatedAt: '2026-07-16T00:00:00.000Z' }) },
             body: { operation: 'delete', payload: JSON.stringify({ id: nodeId, expectedUpdatedAt: '2026-07-16T00:00:00.000Z' }) },
         });
+        const mapWrite = await dispatchAdminRoute({
+            route: 'admin_mindmap_maps',
+            method: 'POST',
+            path: '/admin/mindmap/maps',
+            args: { operation: 'create', payload: JSON.stringify({ title: 'Map', rootTopic: 'Root' }) },
+            body: { operation: 'create', payload: JSON.stringify({ title: 'Map', rootTopic: 'Root' }) },
+        });
 
-        expect([page.status, search.status, associations.status, write.status]).to.deep.equal([403, 403, 403, 403]);
+        expect([page.status, search.status, associations.status, write.status, mapWrite.status]).to.deep.equal([403, 403, 403, 403, 403]);
         expect(calls.searchProblems).to.deep.equal([]);
         expect(calls.listProblems).to.deep.equal([]);
         expect(calls.deleteNode).to.deep.equal([]);
-        expect(calls.loggerWarn).to.have.lengthOf(4);
+        expect(calls.loggerWarn).to.have.lengthOf(5);
         for (const warning of calls.loggerWarn) expect(warning.join(' ')).to.include('result=forbidden');
     });
 
@@ -626,6 +691,8 @@ describe('mindmap administrator HTTP boundary', () => {
         expect(response.status).to.equal(200);
         expect(response.template).to.equal('admin_mindmap.html');
         expect(response.body.nodes[0]).to.include({ topic: '公开根节点', parentId: null });
+        expect(response.body.nodes[0].mapId).to.equal(bootstrapMaps[0]._id.toHexString());
+        expect(response.body.maps[0].usage).to.deep.equal({ nodes: 1, problems: 0, courses: 0 });
         expect(response.body.nodes[0]._id).to.equal(bootstrapNodes[0]._id.toHexString());
         expect(response.body.referenceCounts).to.deep.equal({ [bootstrapNodes[0]._id.toHexString()]: 0 });
         expect(calls.getReferenceCounts).to.have.lengthOf(1);
@@ -633,31 +700,37 @@ describe('mindmap administrator HTTP boundary', () => {
 
     it('uses the authoritative domain for administrator problem search and association queries', async () => {
         const nodeId = bootstrapNodes[0]._id.toHexString();
+        const mapId = bootstrapMaps[0]._id.toHexString();
         const search = await dispatchAdminRoute({
             route: 'admin_mindmap_problem_search',
             path: '/api/mindmap/admin/problems',
             user: makeAdminUser(),
             authoritativeDomainId: 'course-a',
-            args: { q: 'graph' },
-            query: { q: 'graph' },
+            args: { mapId, q: 'graph' },
+            query: { mapId, q: 'graph' },
         });
         const associations = await dispatchAdminRoute({
             route: 'admin_mindmap_node_problems',
             path: '/api/mindmap/admin/node-problems',
             user: makeAdminUser(),
             authoritativeDomainId: 'course-a',
-            args: { nodeId },
-            query: { nodeId },
+            args: { mapId, nodeId },
+            query: { mapId, nodeId },
         });
 
         expect(search.status, JSON.stringify(search.body)).to.equal(200);
         expect(associations.status, JSON.stringify(associations.body)).to.equal(200);
-        expect(calls.searchProblems[0]).to.deep.equal(['course-a', 'graph']);
-        expect(calls.listProblems[0]).to.deep.equal(['course-a', new ObjectId(nodeId), {}, { includeHidden: true }]);
+        expect(calls.searchProblems[0]).to.deep.equal(['course-a', new ObjectId(mapId), 'graph']);
+        expect(calls.listProblems[0]).to.deep.equal(['course-a', new ObjectId(mapId), new ObjectId(nodeId), {}, { includeHidden: true }]);
     });
 
     it('rejects legacy write fields and removed operations before calling the model', async () => {
-        const base = { id: bootstrapNodes[0]._id.toHexString(), expectedUpdatedAt: '2026-07-16T00:00:00.000Z' };
+        const base = {
+            mapId: bootstrapMaps[0]._id.toHexString(),
+            expectedMapUpdatedAt: '2026-07-16T00:00:00.000Z',
+            id: bootstrapNodes[0]._id.toHexString(),
+            expectedUpdatedAt: '2026-07-16T00:00:00.000Z',
+        };
         const legacy = await dispatchAdminRoute({
             route: 'admin_mindmap_nodes',
             method: 'POST',
@@ -685,6 +758,8 @@ describe('mindmap administrator HTTP boundary', () => {
     it('parses a strict mutation envelope and returns a complete fresh snapshot', async () => {
         const parent = bootstrapNodes[0];
         const payload = {
+            mapId: bootstrapMaps[0]._id.toHexString(),
+            expectedMapUpdatedAt: bootstrapMaps[0].updatedAt.toISOString(),
             parentId: parent._id.toHexString(),
             expectedParentUpdatedAt: parent.updatedAt.toISOString(),
             topic: '新节点',
@@ -709,8 +784,39 @@ describe('mindmap administrator HTTP boundary', () => {
         expect(response.body.referenceCounts).to.have.property(parent._id.toHexString(), 0);
         expect(calls.createNode).to.have.lengthOf(1);
         expect(calls.createNode[0][0]).to.deep.include({ domainId: 'course-a', actor: 42, topic: '新节点', color: 'sky' });
+        expect(calls.createNode[0][0].mapId).to.equal(bootstrapMaps[0]._id.toHexString());
+        expect(calls.createNode[0][0].expectedMapUpdatedAt).to.deep.equal(bootstrapMaps[0].updatedAt);
         expect(calls.createNode[0][0].parentId).to.equal(parent._id.toHexString());
         expect(calls.createNode[0][0].expectedParentUpdatedAt).to.deep.equal(parent.updatedAt);
+    });
+
+    it('creates maps through a strict administrator-only map envelope', async () => {
+        const payload = { title: '面向对象', rootTopic: 'OOP', layoutDirection: 'DOWN' };
+        const response = await dispatchAdminRoute({
+            route: 'admin_mindmap_maps',
+            method: 'POST',
+            path: '/admin/mindmap/maps',
+            user: makeAdminUser(),
+            authoritativeDomainId: 'course-a',
+            args: { operation: 'create', payload: JSON.stringify(payload) },
+            body: { operation: 'create', payload: JSON.stringify(payload) },
+        });
+
+        expect(response.status, JSON.stringify(response.body)).to.equal(200);
+        expect(calls.createMap).to.have.lengthOf(1);
+        expect(calls.createMap[0][0]).to.deep.equal({ domainId: 'course-a', actor: 42, ...payload });
+        expect(response.body.maps).to.have.lengthOf(1);
+
+        const forged = await dispatchAdminRoute({
+            route: 'admin_mindmap_maps',
+            method: 'POST',
+            path: '/admin/mindmap/maps',
+            user: makeAdminUser(),
+            args: { operation: 'create', payload: JSON.stringify(payload) },
+            body: { operation: 'create', payload: JSON.stringify(payload), visibility: 'public' },
+        });
+        expect(forged.status, JSON.stringify(forged.body)).to.equal(400);
+        expect(calls.createMap).to.have.lengthOf(1);
     });
 
     it('logs a blocked mutation with domain, actor, operation, node, result, and affected count', async () => {
@@ -737,6 +843,8 @@ describe('mindmap administrator HTTP boundary', () => {
             ],
         });
         const payload = {
+            mapId: bootstrapMaps[0]._id.toHexString(),
+            expectedMapUpdatedAt: bootstrapMaps[0].updatedAt.toISOString(),
             id: node._id.toHexString(),
             newParentId: node._id.toHexString(),
             targetIndex: 0,
@@ -758,6 +866,7 @@ describe('mindmap administrator HTTP boundary', () => {
         const serialized = calls.loggerWarn[0].join(' ');
         expect(serialized).to.include('domain=%s');
         expect(serialized).to.include('actor=%d');
+        expect(serialized).to.include('map=%s');
         expect(serialized).to.include('operation=%s');
         expect(serialized).to.include('node=%s');
         expect(serialized).to.include('fromParent=%s');

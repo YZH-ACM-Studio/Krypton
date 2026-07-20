@@ -7,11 +7,12 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { MiniTabs } from '@/components/ui/mini-tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { loadNodeProblems, mindmapProblemHref, MindmapApiError } from './api';
 import { MindmapCanvas } from './canvas';
-import type { MindmapConfig, MindmapNode, PanelProblem } from './types';
+import type { KnowledgeMap, MindmapNode, PanelProblem } from './types';
 
 function difficultyStyle(value: number): string {
   if (value <= 1) return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200';
@@ -132,7 +133,7 @@ function ProblemPanel({
 
 export function MindmapPage() {
   const bootstrap = useBootstrap();
-  const data = bootstrap.page.data as { nodes: MindmapNode[]; config: MindmapConfig };
+  const data = bootstrap.page.data as { nodes: MindmapNode[]; config: KnowledgeMap | null; maps: KnowledgeMap[] };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [problems, setProblems] = useState<PanelProblem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -140,10 +141,11 @@ export function MindmapPage() {
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<'pid' | 'difficulty' | 'accept'>('pid');
   const selected = selectedId ? data.nodes.find((node) => node._id === selectedId) || null : null;
+  const currentMapId = data.config?._id || null;
 
   useEffect(() => {
     setQuery('');
-    if (!selectedId) {
+    if (!selectedId || !currentMapId) {
       setProblems([]);
       setProblemError(null);
       return;
@@ -151,7 +153,7 @@ export function MindmapPage() {
     let cancelled = false;
     setLoading(true);
     setProblemError(null);
-    void loadNodeProblems(selectedId, false)
+    void loadNodeProblems(currentMapId, selectedId, false)
       .then((items) => {
         if (!cancelled) setProblems(items);
       })
@@ -168,7 +170,7 @@ export function MindmapPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedId]);
+  }, [currentMapId, selectedId]);
 
   const visibleProblems = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -181,23 +183,47 @@ export function MindmapPage() {
     return result;
   }, [problems, query, sort]);
 
+  if (!data.config) {
+    return (
+      <div className="grid min-h-[32rem] place-items-center rounded-2xl border border-dashed bg-muted/15 px-6 text-center">
+        <div>
+          <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-muted text-muted-foreground">
+            <Network className="size-5" />
+          </span>
+          <h1 className="mt-4 text-lg font-semibold">暂无公开知识导图</h1>
+          <p className="mt-1 text-sm text-muted-foreground">管理员发布导图后会在这里显示。</p>
+        </div>
+      </div>
+    );
+  }
+
+  const config = data.config;
+
   return (
     <ReactFlowProvider>
       <div className="flex h-[calc(100dvh-6rem)] min-h-[34rem] gap-3">
         <section className="relative min-w-0 flex-1 overflow-hidden rounded-2xl border bg-background shadow-sm">
-          <header className="absolute inset-x-0 top-0 z-10 flex items-center justify-between border-b bg-background/90 px-4 py-3 backdrop-blur-sm">
+          <header className="absolute inset-x-0 top-0 z-10 flex h-16 items-center justify-between gap-3 border-b bg-background/90 px-4 backdrop-blur-sm">
             <div className="flex min-w-0 items-center gap-2">
               <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
                 <Network className="size-4" />
               </span>
               <div className="min-w-0">
-                <h1 className="truncate text-sm font-semibold">{data.config.title}</h1>
+                <h1 className="truncate text-sm font-semibold">{config.title}</h1>
                 <p className="text-xs text-muted-foreground">{data.nodes.length} 个知识节点</p>
               </div>
             </div>
+            <SimpleSelect
+              value={config._id}
+              onValueChange={(mapId) => window.location.assign(`/mindmap?map=${encodeURIComponent(mapId)}`)}
+              options={data.maps.map((map) => ({ value: map._id, label: map.title }))}
+              ariaLabel="切换知识导图"
+              className="min-h-10 w-40 max-w-[48%] sm:w-56"
+              contentClassName="[&_[role=option]]:min-h-10"
+            />
           </header>
-          <div className="h-full pt-14">
-            <MindmapCanvas nodes={data.nodes} config={data.config} selectedId={selectedId} onSelect={setSelectedId} />
+          <div className="h-full pt-16">
+            <MindmapCanvas nodes={data.nodes} config={config} selectedId={selectedId} onSelect={setSelectedId} />
           </div>
           {selected ? (
             <div className="absolute inset-x-3 bottom-3 top-[42%] z-20 flex lg:hidden">

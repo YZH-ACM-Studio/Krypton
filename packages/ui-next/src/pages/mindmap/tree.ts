@@ -7,6 +7,10 @@ export interface FlatMindmapNode {
   hasChildren: boolean;
 }
 
+export function mergeMindmapTagDraft(tags: string[], draft: string): string[] {
+  return [...tags, ...draft.split(',')].map((value) => value.trim()).filter((value, index, all) => !!value && all.indexOf(value) === index);
+}
+
 export function childrenByParent(nodes: MindmapNode[]): Map<string | null, MindmapNode[]> {
   const result = new Map<string | null, MindmapNode[]>();
   for (const node of nodes) {

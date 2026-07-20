@@ -4,20 +4,25 @@
  */
 import { Logger } from '@hydrooj/utils';
 import type { Context } from 'hydrooj';
-import { ForbiddenError, Handler, ObjectId, param, PRIV, PrivilegeError, ProblemModel, Types } from 'hydrooj';
+import { ForbiddenError, Handler, NotFoundError, ObjectId, param, PRIV, PrivilegeError, ProblemModel, Types } from 'hydrooj';
 import { MindmapRequestError } from './error';
 import {
     createNode,
+    createKnowledgeMap,
+    deleteKnowledgeMap,
     deleteNode,
-    getConfig,
+    getKnowledgeMap,
+    getKnowledgeMapUsage,
     getNodeReferenceCounts,
     listAllNodes,
+    listKnowledgeMaps,
     listProblemsForNode,
     moveNode,
     searchProblemsForAdmin,
+    updateKnowledgeMap,
     updateNode,
 } from './model';
-import type { MindmapConfig, MindmapNode } from './types';
+import type { KnowledgeMapDoc, MindmapNode } from './types';
 
 const logger = new Logger('krypton-mindmap.handler');
 
@@ -40,24 +45,33 @@ function serializeNode(node: MindmapNode) {
     return {
         ...node,
         _id: node._id.toHexString(),
+        mapId: node.mapId.toHexString(),
         parentId: node.parentId ? node.parentId.toHexString() : null,
         ...(node.createdAt ? { createdAt: new Date(node.createdAt).toISOString() } : {}),
         ...(node.updatedAt ? { updatedAt: new Date(node.updatedAt).toISOString() } : {}),
     };
 }
 
-function serializeConfig(config: MindmapConfig) {
+function serializeMap(config: KnowledgeMapDoc) {
     return {
         ...config,
+        _id: config._id.toHexString(),
         rootNodeId: config.rootNodeId ? config.rootNodeId.toHexString() : null,
+        ...(config.createdAt ? { createdAt: new Date(config.createdAt).toISOString() } : {}),
         ...(config.updatedAt ? { updatedAt: new Date(config.updatedAt).toISOString() } : {}),
     };
 }
 
-async function adminSnapshot() {
-    const [nodes, config] = await Promise.all([listAllNodes(), getConfig()]);
-    const referenceCounts = await getNodeReferenceCounts(nodes);
-    return { nodes: nodes.map(serializeNode), config: serializeConfig(config), referenceCounts };
+async function adminSnapshot(requestedMapId?: ObjectId | string) {
+    const maps = await listKnowledgeMaps(true);
+    const requested = requestedMapId ? String(requestedMapId) : null;
+    const config = requested ? maps.find((map) => map._id.toHexString() === requested) : maps[0];
+    if (requested && !config) throw new NotFoundError('mindmap', requested);
+    const serializedMaps = await Promise.all(maps.map(async (map) => ({ ...serializeMap(map), usage: await getKnowledgeMapUsage(map._id) })));
+    if (!config) return { nodes: [], config: null, maps: serializedMaps, referenceCounts: {} };
+    const nodes = await listAllNodes(config._id);
+    const referenceCounts = await getNodeReferenceCounts(config._id, nodes);
+    return { nodes: nodes.map(serializeNode), config: serializeMap(config), maps: serializedMaps, referenceCounts };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -98,9 +112,13 @@ function assertOnlyKeys(value: Record<string, unknown>, allowed: readonly string
 
 class MindmapPage extends Handler {
     noCheckPermView = true;
-    async get() {
+    @param('map', Types.ObjectId, true)
+    async get(_args: unknown, mapId?: ObjectId) {
         const exposeProblemMetadata = canExposeProblemMetadata(this.user as any, String(this.domain?._id || ''));
-        const [nodes, config] = await Promise.all([listAllNodes(), getConfig()]);
+        const maps = await listKnowledgeMaps(false);
+        const config = mapId ? maps.find((map) => map._id.equals(mapId)) : maps[0];
+        if (mapId && !config) throw new NotFoundError('mindmap', String(mapId));
+        const nodes = config ? await listAllNodes(config._id) : [];
         this.response.template = 'mindmap_main.html';
         this.response.body = {
             nodes: nodes.map((node) => ({
@@ -111,20 +129,24 @@ class MindmapPage extends Handler {
                 problemIds: [],
                 ...(exposeProblemMetadata ? {} : { tags: [] }),
             })),
-            config: serializeConfig(config),
+            config: config ? serializeMap(config) : null,
+            maps: maps.map(serializeMap),
         };
     }
 }
 
 class ProblemsApi extends Handler {
     noCheckPermView = true;
+    @param('mapId', Types.ObjectId)
     @param('nodeId', Types.ObjectId)
-    async get(_args: { domainId: string }, nodeId: ObjectId) {
+    async get(_args: { domainId: string }, mapId: ObjectId, nodeId: ObjectId) {
         const domainId = String(this.domain?._id);
         ProblemModel.assertProblemAclDomain(this.user as any, domainId);
         if (!ProblemModel.canBrowseProblemBank(this.user as any)) throw new ForbiddenError();
+        const map = await getKnowledgeMap(mapId);
+        if (!map || map.visibility !== 'public') throw new NotFoundError('mindmap', String(mapId));
         const scope = ProblemModel.buildProblemBankScope(this.user as any);
-        const problems = await listProblemsForNode(domainId, nodeId, scope);
+        const problems = await listProblemsForNode(domainId, mapId, nodeId, scope);
         this.response.body = { problems };
     }
 }
@@ -144,23 +166,28 @@ class AdminBase extends Handler {
 }
 
 class AdminMindmapPage extends AdminBase {
-    async get() {
+    @param('map', Types.ObjectId, true)
+    async get(_args: unknown, mapId?: ObjectId) {
         this.response.template = 'admin_mindmap.html';
-        this.response.body = await adminSnapshot();
+        this.response.body = await adminSnapshot(mapId);
     }
 }
 
 class AdminProblemSearchApi extends AdminBase {
+    @param('mapId', Types.ObjectId)
     @param('q', Types.String, true)
-    async get(_args: unknown, q = '') {
-        this.response.body = { problems: await searchProblemsForAdmin(String(this.domain?._id), q) };
+    async get(_args: unknown, mapId: ObjectId, q = '') {
+        if (!(await getKnowledgeMap(mapId))) throw new NotFoundError('mindmap', String(mapId));
+        this.response.body = { problems: await searchProblemsForAdmin(String(this.domain?._id), mapId, q) };
     }
 }
 
 class AdminNodeProblemsApi extends AdminBase {
+    @param('mapId', Types.ObjectId)
     @param('nodeId', Types.ObjectId)
-    async get(_args: unknown, nodeId: ObjectId) {
-        const problems = await listProblemsForNode(String(this.domain?._id), nodeId, {}, { includeHidden: true });
+    async get(_args: unknown, mapId: ObjectId, nodeId: ObjectId) {
+        if (!(await getKnowledgeMap(mapId))) throw new NotFoundError('mindmap', String(mapId));
+        const problems = await listProblemsForNode(String(this.domain?._id), mapId, nodeId, {}, { includeHidden: true });
         this.response.body = { problems };
     }
 }
@@ -176,11 +203,19 @@ class AdminMutateNodes extends AdminBase {
             const legacyFields = Object.keys(rawBody).filter((key) => !['operation', 'payload', '_csrf'].includes(key));
             if (legacyFields.length) throw new MindmapRequestError(`旧版写入字段已停用：${legacyFields.join('、')}`);
             payload = parsePayload(payloadJson);
+            const mapId = requiredString(payload, 'mapId');
+            const expectedMapUpdatedAt = requiredDate(payload, 'expectedMapUpdatedAt');
             if (operation === 'create') {
-                assertOnlyKeys(payload, ['parentId', 'expectedParentUpdatedAt', 'topic', 'description', 'color', 'tags', 'problemIds'], '创建请求');
+                assertOnlyKeys(
+                    payload,
+                    ['mapId', 'expectedMapUpdatedAt', 'parentId', 'expectedParentUpdatedAt', 'topic', 'description', 'color', 'tags', 'problemIds'],
+                    '创建请求',
+                );
                 await createNode({
                     domainId,
                     actor,
+                    mapId,
+                    expectedMapUpdatedAt,
                     parentId: requiredString(payload, 'parentId'),
                     expectedParentUpdatedAt: requiredDate(payload, 'expectedParentUpdatedAt'),
                     topic: payload.topic,
@@ -190,11 +225,13 @@ class AdminMutateNodes extends AdminBase {
                     problemIds: payload.problemIds,
                 });
             } else if (operation === 'update') {
-                assertOnlyKeys(payload, ['id', 'expectedUpdatedAt', 'fields'], '更新请求');
+                assertOnlyKeys(payload, ['mapId', 'expectedMapUpdatedAt', 'id', 'expectedUpdatedAt', 'fields'], '更新请求');
                 if (!isPlainObject(payload.fields)) throw new MindmapRequestError('fields 必须是对象');
                 await updateNode({
                     domainId,
                     actor,
+                    mapId,
+                    expectedMapUpdatedAt,
                     id: requiredString(payload, 'id'),
                     expectedUpdatedAt: requiredDate(payload, 'expectedUpdatedAt'),
                     patch: payload.fields,
@@ -202,7 +239,16 @@ class AdminMutateNodes extends AdminBase {
             } else if (operation === 'move') {
                 assertOnlyKeys(
                     payload,
-                    ['id', 'newParentId', 'targetIndex', 'layoutSide', 'expectedUpdatedAt', 'expectedParentUpdatedAt'],
+                    [
+                        'mapId',
+                        'expectedMapUpdatedAt',
+                        'id',
+                        'newParentId',
+                        'targetIndex',
+                        'layoutSide',
+                        'expectedUpdatedAt',
+                        'expectedParentUpdatedAt',
+                    ],
                     '移动请求',
                 );
                 if (!Number.isSafeInteger(payload.targetIndex) || Number(payload.targetIndex) < 0) throw new MindmapRequestError('targetIndex 无效');
@@ -212,6 +258,8 @@ class AdminMutateNodes extends AdminBase {
                 await moveNode({
                     domainId,
                     actor,
+                    mapId,
+                    expectedMapUpdatedAt,
                     id: requiredString(payload, 'id'),
                     newParentId: requiredString(payload, 'newParentId'),
                     targetIndex: Number(payload.targetIndex),
@@ -220,10 +268,12 @@ class AdminMutateNodes extends AdminBase {
                     expectedParentUpdatedAt: requiredDate(payload, 'expectedParentUpdatedAt'),
                 });
             } else if (operation === 'delete') {
-                assertOnlyKeys(payload, ['id', 'expectedUpdatedAt'], '删除请求');
+                assertOnlyKeys(payload, ['mapId', 'expectedMapUpdatedAt', 'id', 'expectedUpdatedAt'], '删除请求');
                 await deleteNode({
                     domainId,
                     actor,
+                    mapId,
+                    expectedMapUpdatedAt,
                     id: requiredString(payload, 'id'),
                     expectedUpdatedAt: requiredDate(payload, 'expectedUpdatedAt'),
                 });
@@ -231,7 +281,7 @@ class AdminMutateNodes extends AdminBase {
                 throw new MindmapRequestError(`未知操作：${operation}`);
             }
             committed = true;
-            this.response.body = { ok: true, ...(await adminSnapshot()) };
+            this.response.body = { ok: true, ...(await adminSnapshot(requiredString(payload, 'mapId'))) };
         } catch (error: any) {
             const code = typeof error?.code === 'number' ? error.code : 500;
             const affectedProblems = Array.isArray(error?.params?.[1]?.problems) ? error.params[1].problems.length : 0;
@@ -241,14 +291,13 @@ class AdminMutateNodes extends AdminBase {
             const fromIndex = String(mutationContext.fromIndex ?? '-');
             const toIndex = String(mutationContext.toIndex ?? payload.targetIndex ?? '-');
             const expectedUpdatedAt = String(mutationContext.expectedUpdatedAt ?? payload.expectedUpdatedAt ?? '-');
-            const expectedParentUpdatedAt = String(
-                mutationContext.expectedParentUpdatedAt ?? payload.expectedParentUpdatedAt ?? '-',
-            );
+            const expectedParentUpdatedAt = String(mutationContext.expectedParentUpdatedAt ?? payload.expectedParentUpdatedAt ?? '-');
             const format =
-                'Mindmap mutation failed domain=%s actor=%d operation=%s node=%s fromParent=%s toParent=%s fromIndex=%s toIndex=%s expectedUpdatedAt=%s expectedParentUpdatedAt=%s result=error committed=%s code=%d affectedProblems=%d error=%s';
+                'Mindmap mutation failed domain=%s actor=%d map=%s operation=%s node=%s fromParent=%s toParent=%s fromIndex=%s toIndex=%s expectedUpdatedAt=%s expectedParentUpdatedAt=%s result=error committed=%s code=%d affectedProblems=%d error=%s';
             const values = [
                 domainId,
                 actor,
+                String(payload.mapId || '-'),
                 operation,
                 String(payload.id || '-'),
                 fromParent,
@@ -289,6 +338,76 @@ class AdminMutateNodes extends AdminBase {
     }
 }
 
+class AdminMutateMaps extends AdminBase {
+    private async mutate(operation: 'create' | 'update' | 'delete', payloadJson?: string) {
+        const domainId = String(this.domain?._id);
+        const actor = Number(this.user._id);
+        let payload: Record<string, unknown> = {};
+        try {
+            const rawBody = (this.request.body || {}) as Record<string, unknown>;
+            const legacyFields = Object.keys(rawBody).filter((key) => !['operation', 'payload', '_csrf'].includes(key));
+            if (legacyFields.length) throw new MindmapRequestError(`旧版导图写入字段已停用：${legacyFields.join('、')}`);
+            payload = parsePayload(payloadJson);
+            let selectedMapId: string | undefined;
+            if (operation === 'create') {
+                assertOnlyKeys(payload, ['title', 'rootTopic', 'layoutDirection'], '创建导图请求');
+                const created = await createKnowledgeMap({
+                    domainId,
+                    actor,
+                    title: payload.title,
+                    rootTopic: payload.rootTopic,
+                    layoutDirection: payload.layoutDirection,
+                });
+                selectedMapId = created._id.toHexString();
+            } else if (operation === 'update') {
+                assertOnlyKeys(payload, ['id', 'expectedUpdatedAt', 'fields'], '更新导图请求');
+                if (!isPlainObject(payload.fields)) throw new MindmapRequestError('fields 必须是对象');
+                const updated = await updateKnowledgeMap({
+                    domainId,
+                    actor,
+                    id: requiredString(payload, 'id'),
+                    expectedUpdatedAt: requiredDate(payload, 'expectedUpdatedAt'),
+                    patch: payload.fields,
+                });
+                selectedMapId = updated._id.toHexString();
+            } else if (operation === 'delete') {
+                assertOnlyKeys(payload, ['id', 'expectedUpdatedAt'], '删除导图请求');
+                await deleteKnowledgeMap({
+                    domainId,
+                    actor,
+                    id: requiredString(payload, 'id'),
+                    expectedUpdatedAt: requiredDate(payload, 'expectedUpdatedAt'),
+                });
+            } else {
+                throw new MindmapRequestError(`未知导图操作：${operation}`);
+            }
+            this.response.body = { ok: true, ...(await adminSnapshot(selectedMapId)) };
+        } catch (error: any) {
+            const code = typeof error?.code === 'number' ? error.code : 500;
+            const format = 'Mindmap map mutation failed domain=%s actor=%d map=%s operation=%s result=error code=%d error=%s';
+            const values = [domainId, actor, String(payload.id || '-'), operation, code, error?.stack || error?.message || String(error)] as const;
+            if (code < 500) logger.warn(format, ...values);
+            else logger.error(format, ...values);
+            throw error;
+        }
+    }
+
+    @param('payload', Types.String, true)
+    async postCreate(_ctx: unknown, payload?: string) {
+        await this.mutate('create', payload);
+    }
+
+    @param('payload', Types.String, true)
+    async postUpdate(_ctx: unknown, payload?: string) {
+        await this.mutate('update', payload);
+    }
+
+    @param('payload', Types.String, true)
+    async postDelete(_ctx: unknown, payload?: string) {
+        await this.mutate('delete', payload);
+    }
+}
+
 /** P2.2 remains a permanent explicit tombstone. */
 class AdminRebuildGoneHandler extends Handler {
     async post() {
@@ -307,5 +426,6 @@ export function applyHandlers(ctx: Context) {
     ctx.Route('admin_mindmap_problem_search', '/api/mindmap/admin/problems', AdminProblemSearchApi);
     ctx.Route('admin_mindmap_node_problems', '/api/mindmap/admin/node-problems', AdminNodeProblemsApi);
     ctx.Route('admin_mindmap_nodes', '/admin/mindmap/nodes', AdminMutateNodes);
+    ctx.Route('admin_mindmap_maps', '/admin/mindmap/maps', AdminMutateMaps);
     ctx.Route('admin_mindmap_rebuild', '/admin/mindmap/rebuild', AdminRebuildGoneHandler);
 }

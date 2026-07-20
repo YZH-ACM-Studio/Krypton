@@ -1,21 +1,100 @@
 import type { ClientStructuredCodeSegment } from '@hydrooj/common';
-import { useRef } from 'react';
+import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { bracketMatching, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { EditorState } from '@codemirror/state';
+import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view';
+import { useEffect, useRef } from 'react';
 import { Input } from '@/components/ui/input';
+import { structuredCodeLanguageExtension } from '@/lib/structured-code-language';
+
+function StructuredRegionCodeEditor({
+  value,
+  onChange,
+  lang,
+  readOnly,
+  label,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  lang: string;
+  readOnly: boolean;
+  label: string;
+}) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const viewRef = useRef<EditorView | null>(null);
+  const onChangeRef = useRef(onChange);
+  const syncingRef = useRef(false);
+  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    if (!hostRef.current) return;
+    const state = EditorState.create({
+      doc: value,
+      extensions: [
+        lineNumbers(),
+        history(),
+        bracketMatching(),
+        closeBrackets(),
+        highlightActiveLine(),
+        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        keymap.of([indentWithTab, ...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
+        structuredCodeLanguageExtension(lang),
+        EditorState.readOnly.of(readOnly),
+        EditorView.editable.of(!readOnly),
+        EditorView.lineWrapping,
+        EditorView.contentAttributes.of({ 'aria-label': label }),
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged && !syncingRef.current) onChangeRef.current(update.state.doc.toString());
+        }),
+        EditorView.theme({
+          '&': { minHeight: '8rem', fontSize: '13px' },
+          '.cm-scroller': {
+            minHeight: '8rem',
+            maxHeight: '24rem',
+            overflow: 'auto',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+          },
+          '.cm-content, .cm-gutter': { minHeight: '8rem' },
+          '.cm-content': { padding: '10px 0' },
+        }),
+      ],
+    });
+    const view = new EditorView({ state, parent: hostRef.current });
+    viewRef.current = view;
+    return () => {
+      view.destroy();
+      viewRef.current = null;
+    };
+  }, [label, lang, readOnly]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view || view.state.doc.toString() === value) return;
+    syncingRef.current = true;
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
+    syncingRef.current = false;
+  }, [value]);
+
+  return <div ref={hostRef} className="overflow-hidden rounded-lg border bg-background" />;
+}
 
 export function StructuredRegionInputs({
   surface,
   values,
   onChange,
+  lang = '',
   singleLine = false,
   readOnly = false,
 }: {
   surface: ClientStructuredCodeSegment[];
   values: Record<string, string>;
   onChange: (id: string, value: string) => void;
+  lang?: string;
   singleLine?: boolean;
   readOnly?: boolean;
 }) {
-  const controls = useRef(new Map<string, HTMLInputElement | HTMLTextAreaElement>());
+  const controls = useRef(new Map<string, HTMLInputElement>());
   const regions = surface.filter((segment) => segment.type === 'region');
   const regionIds = regions.map((region) => region.id);
   if (!Array.isArray(surface)) throw new TypeError('structured code surface must be an array');
@@ -68,20 +147,12 @@ export function StructuredRegionInputs({
                     spellCheck={false}
                   />
                 ) : (
-                  <textarea
-                    ref={(element) => {
-                      if (element) controls.current.set(segment.id, element);
-                      else controls.current.delete(segment.id);
-                    }}
+                  <StructuredRegionCodeEditor
                     value={values[segment.id] || ''}
-                    onChange={(event) => onChange(segment.id, event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Tab' && (event.metaKey || event.ctrlKey)) moveFocus(event, segment.id);
-                    }}
-                    disabled={readOnly}
-                    rows={5}
-                    spellCheck={false}
-                    className="min-h-28 w-full min-w-[22rem] resize-y rounded-lg border bg-background p-3 font-mono text-sm leading-6 focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60"
+                    onChange={(value) => onChange(segment.id, value)}
+                    lang={lang}
+                    readOnly={readOnly}
+                    label={`${label}代码编辑器`}
                   />
                 )}
               </label>

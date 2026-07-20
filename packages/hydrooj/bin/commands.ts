@@ -19,6 +19,7 @@ async function main() {
     require('../src/commands/problem-batch-import').register(cli);
     require('../src/commands/problem-tag-backfill').register(cli);
     require('../src/commands/mindmap-migrate-multi').register(cli);
+    require('../src/commands/function-3049-migration').register(cli);
     cli.help();
     cli.parse(process.argv, { run: false });
     if (!cli.matchedCommand) {

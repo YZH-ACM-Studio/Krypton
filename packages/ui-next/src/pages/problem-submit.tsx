@@ -236,7 +236,13 @@ export function ProblemSubmitPage() {
         {/* Editor in simple mode */}
         {isStructuredAnswer ? (
           <div className="border-y border-border/70 py-5">
-            <StructuredRegionInputs surface={surface} values={regionValues} onChange={updateRegion} singleLine={singleLineRegion} />
+            <StructuredRegionInputs
+              surface={surface}
+              values={regionValues}
+              onChange={updateRegion}
+              lang={config.template?.lang || lang}
+              singleLine={singleLineRegion}
+            />
           </div>
         ) : (
           <div className="rounded-md border overflow-hidden" style={{ height: 'calc(100vh - 220px)', minHeight: 480 }}>

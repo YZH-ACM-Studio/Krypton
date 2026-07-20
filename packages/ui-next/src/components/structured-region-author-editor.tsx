@@ -1,15 +1,10 @@
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { cpp } from '@codemirror/lang-cpp';
-import { go } from '@codemirror/lang-go';
-import { java } from '@codemirror/lang-java';
-import { javascript } from '@codemirror/lang-javascript';
-import { python } from '@codemirror/lang-python';
-import { rust } from '@codemirror/lang-rust';
 import { bracketMatching, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language';
-import { Compartment, EditorState, type Extension } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import { Decoration, EditorView, highlightActiveLine, keymap, lineNumbers, type ViewUpdate } from '@codemirror/view';
 import { useEffect, useMemo, useRef } from 'react';
+import { structuredCodeLanguageExtension } from '@/lib/structured-code-language';
 import { mapStructuredLineRanges, type StructuredLineRange } from '@/lib/structured-code-ranges';
 
 export type AuthorLineRange = StructuredLineRange;
@@ -18,17 +13,6 @@ export interface AuthorLineSelection {
   startLine: number;
   endLine: number;
   expanded: boolean;
-}
-
-function languageExtension(lang: string): Extension {
-  const base = lang.toLowerCase().split('.')[0];
-  if (['c', 'cc', 'cpp'].includes(base)) return cpp();
-  if (['py', 'python'].includes(base)) return python();
-  if (base === 'java') return java();
-  if (['js', 'javascript', 'ts', 'typescript'].includes(base)) return javascript({ typescript: ['ts', 'typescript'].includes(base) });
-  if (base === 'go') return go();
-  if (['rs', 'rust'].includes(base)) return rust();
-  return [];
 }
 
 function selectedWholeLines(state: EditorState): AuthorLineSelection | null {
@@ -123,7 +107,7 @@ export function StructuredRegionAuthorEditor({
         highlightActiveLine(),
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         keymap.of([indentWithTab, ...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap]),
-        language.of(languageExtension(lang)),
+        language.of(structuredCodeLanguageExtension(lang)),
         EditorView.lineWrapping,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) sourceChangeRef.current(update.state.doc.toString(), mapAuthorLineRanges(update, rangeSnapshot));

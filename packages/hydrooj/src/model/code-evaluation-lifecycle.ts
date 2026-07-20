@@ -95,7 +95,7 @@ function normalizeOptionalLanguage(value: unknown): string | undefined {
 function expectedMode(kind: ProblemKind): 'compile' | 'function' {
     if (kind === 'program_fill') return 'compile';
     if (kind === 'function') return 'function';
-    throw new ValidationError('problemKind', null, '只有编译型程序填空和函数题使用代码评测草稿');
+    throw new ValidationError('problemKind', null, '只有编译型程序填空和代码实现题使用代码评测草稿');
 }
 
 export function normalizeCodeEvaluationCreationStatus(value: unknown): 'draft' | undefined {
@@ -234,7 +234,7 @@ export function normalizeCodeEvaluationDraftConfig(kindInput: ProblemKind, value
     const kind = parseProblemKind(kindInput);
     const config = normalizeStructuredCodeConfig(kind, value, currentConfigInput);
     if (!isCodeEvaluationProblem(kind, config)) {
-        throw new ValidationError('mode', null, '只有编译型程序填空和函数题使用代码评测草稿');
+        throw new ValidationError('mode', null, '只有编译型程序填空和代码实现题使用代码评测草稿');
     }
     return config;
 }

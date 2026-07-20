@@ -55,8 +55,8 @@ const KIND_META: Record<
     icon: Binary,
   },
   function: {
-    label: '函数题',
-    description: '编写一个或多个函数，拼接模板后评测',
+    label: '代码实现题',
+    description: '在公开代码骨架中完成函数、类或指定代码区域',
     group: '代码评测',
     icon: Braces,
   },

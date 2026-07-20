@@ -163,6 +163,49 @@ describe('P3.21 shared structured-code workspace', () => {
   });
 });
 
+describe('P3.22 code implementation authoring and student contract', () => {
+  it('uses the product name while preserving the internal function kind and routes', () => {
+    const hub = read('packages/ui-next/src/pages/problem-create-hub.tsx');
+    const bank = read('packages/ui-next/src/pages/problems.tsx');
+    const paper = read('packages/ui-next/src/components/paper/paper-shell.tsx');
+    const workspace = read('packages/ui-next/src/pages/structured-code-editors.tsx');
+    expect(hub).to.include('function: {');
+    expect(hub).to.include("label: '代码实现题'");
+    expect(hub).to.include('在公开代码骨架中完成函数、类或指定代码区域');
+    expect(bank).to.include("function: '代码实现题'");
+    expect(paper).to.include("function: '代码实现题'");
+    expect(paper).to.include("function: '码'");
+    expect(paper).not.to.include("function: '函'");
+    expect(workspace).to.include("kind: 'program_fill' | 'function'");
+    expect(workspace).to.include('代码实现题');
+  });
+
+  it('renders every multi-line region as a real empty CodeMirror editor in the safe continuous surface', () => {
+    const inputs = read('packages/ui-next/src/components/structured-region-inputs.tsx');
+    const submit = read('packages/ui-next/src/pages/problem-submit.tsx');
+    const exam = read('packages/ui-next/src/pages/exam-mode/paper.tsx');
+    expect(inputs).to.include('function StructuredRegionCodeEditor(');
+    expect(inputs).to.include('new EditorView');
+    expect(inputs).to.include('EditorState.readOnly.of(readOnly)');
+    expect(inputs).to.include('structuredCodeLanguageExtension(lang)');
+    expect(inputs).to.include("value={values[segment.id] || ''}");
+    expect(inputs).not.to.include('<textarea');
+    expect(submit).to.include('lang={config.template?.lang || lang}');
+    expect(exam).to.include("lang={pdoc.config.template.lang || ''}");
+  });
+
+  it('keeps only optional title and description and makes source position the only order', () => {
+    const workspace = read('packages/ui-next/src/pages/structured-code-editors.tsx');
+    const lifecycle = read('packages/hydrooj/src/model/code-evaluation-lifecycle.ts');
+    expect(workspace).to.include('作答区标题（可选）');
+    expect(workspace).to.include('局部要求（可选）');
+    expect(workspace).not.to.include('函数签名');
+    expect(lifecycle).to.include("['id', 'startLine', 'endLine', 'title', 'description']");
+    expect(lifecycle).not.to.include('allowEmptySignature');
+    expect(lifecycle).not.to.include('region.order');
+  });
+});
+
 describe('P3.23 program-fill authoring and student contract', () => {
   it('supports any number of strict single-line regions in both fixed modes', () => {
     const workspace = read('packages/ui-next/src/pages/structured-code-editors.tsx');

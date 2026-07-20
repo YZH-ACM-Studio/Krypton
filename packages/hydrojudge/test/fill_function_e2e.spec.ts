@@ -106,7 +106,7 @@ const { judge } = require(fillFunctionPath) as typeof import('../src/judge/fill_
 
 class LocalCompileError extends Error {}
 
-async function runSubmission(regionCode: Record<string, string>) {
+async function runConfiguredSubmission(baseConfig: Record<string, any>, regionCode: Record<string, string>) {
     const folder = await mkdtemp(join(tmpdir(), 'krypton-fill-function-'));
     const firstInput = join(folder, '1.in');
     const firstOutput = join(folder, '1.out');
@@ -114,31 +114,8 @@ async function runSubmission(regionCode: Record<string, string>) {
     const secondOutput = join(folder, '2.out');
     await Promise.all([writeFile(firstInput, '1\n'), writeFile(firstOutput, '2\n'), writeFile(secondInput, '2\n'), writeFile(secondOutput, '4\n')]);
     let result: any;
-    const source = [
-        '#include <iostream>',
-        'int main() {',
-        'int value = 0;',
-        'std::cin >> value;',
-        'int doubled = value * 2;',
-        'int answer = doubled;',
-        'std::cout << answer;',
-        '}',
-    ].join('\n');
-    const regionIds = ['r_abcdefghijkl', 'r_mnopqrstuvwx', 'r_yzABCDEFGHIJ'];
     const config = {
-        type: 'program_fill',
-        mode: 'compile',
-        template: {
-            lang: 'cc.cc17',
-            source,
-            sourceHash: problemConfig.templateSourceHash(source),
-            publicRanges: [],
-            regions: regionIds.map((id, index) => ({ id, startLine: index + 4, endLine: index + 5 })),
-        },
-        cases: [
-            { input: '1.in', output: '1.out' },
-            { input: '2.in', output: '2.out' },
-        ],
+        ...baseConfig,
         count: 2,
         checker_type: 'default',
         detail: 'full',
@@ -202,6 +179,131 @@ async function runSubmission(regionCode: Record<string, string>) {
     return result;
 }
 
+async function runSubmission(regionCode: Record<string, string>) {
+    const source = [
+        '#include <iostream>',
+        'int main() {',
+        'int value = 0;',
+        'std::cin >> value;',
+        'int doubled = value * 2;',
+        'int answer = doubled;',
+        'std::cout << answer;',
+        '}',
+    ].join('\n');
+    const regionIds = ['r_abcdefghijkl', 'r_mnopqrstuvwx', 'r_yzABCDEFGHIJ'];
+    return runConfiguredSubmission(
+        {
+            type: 'program_fill',
+            mode: 'compile',
+            template: {
+                lang: 'cc.cc17',
+                source,
+                sourceHash: problemConfig.templateSourceHash(source),
+                publicRanges: [],
+                regions: regionIds.map((id, index) => ({ id, startLine: index + 4, endLine: index + 5 })),
+            },
+            cases: [
+                { input: '1.in', output: '1.out' },
+                { input: '2.in', output: '2.out' },
+            ],
+        },
+        regionCode,
+    );
+}
+
+const functionFixtures = [
+    {
+        name: 'function body',
+        source: [
+            '#include <iostream>',
+            'int twice(int x) {',
+            '  return x * 2;',
+            '}',
+            'int main() { int x; std::cin >> x; std::cout << twice(x); }',
+        ].join('\n'),
+        publicRanges: [
+            { startLine: 0, endLine: 2 },
+            { startLine: 3, endLine: 4 },
+        ],
+        regions: [{ id: 'r_bodyabcdefgh', startLine: 2, endLine: 3, title: '函数体' }],
+        answers: { r_bodyabcdefgh: '  return x * 2;' },
+    },
+    {
+        name: 'complete function',
+        source: [
+            '#include <iostream>',
+            'int twice(int x) {',
+            '  return x * 2;',
+            '}',
+            'int main() { int x; std::cin >> x; std::cout << twice(x); }',
+        ].join('\n'),
+        publicRanges: [{ startLine: 0, endLine: 1 }],
+        regions: [{ id: 'r_fullabcdefgh', startLine: 1, endLine: 4, title: '完整函数' }],
+        answers: { r_fullabcdefgh: ['int twice(int x) {', '  return x * 2;', '}'].join('\n') },
+    },
+    {
+        name: 'class definition',
+        source: [
+            '#include <iostream>',
+            'class Doubler {',
+            'public:',
+            '  int run(int x) const {',
+            '    return x * 2;',
+            '  }',
+            '};',
+            'int main() { int x; std::cin >> x; std::cout << Doubler{}.run(x); }',
+        ].join('\n'),
+        publicRanges: [{ startLine: 0, endLine: 1 }],
+        regions: [{ id: 'r_classabcdefg', startLine: 1, endLine: 7, title: '类定义' }],
+        answers: {
+            r_classabcdefg: ['class Doubler {', 'public:', '  int run(int x) const {', '    return x * 2;', '  }', '};'].join('\n'),
+        },
+    },
+    {
+        name: 'multiple regions',
+        source: [
+            '#include <iostream>',
+            'int identity(int x) {',
+            '  return x;',
+            '}',
+            'int twice(int x) {',
+            '  return identity(x) * 2;',
+            '}',
+            'int main() { int x; std::cin >> x; std::cout << twice(x); }',
+        ].join('\n'),
+        publicRanges: [{ startLine: 0, endLine: 1 }],
+        regions: [
+            { id: 'r_firstabcdefg', startLine: 1, endLine: 4, title: '辅助函数' },
+            { id: 'r_secondabcdef', startLine: 4, endLine: 7, description: '完成主逻辑' },
+        ],
+        answers: {
+            r_firstabcdefg: ['int identity(int x) {', '  return x;', '}'].join('\n'),
+            r_secondabcdef: ['int twice(int x) {', '  return identity(x) * 2;', '}'].join('\n'),
+        },
+    },
+] as const;
+
+async function runFunctionFixture(fixture: (typeof functionFixtures)[number], answers: Record<string, string>) {
+    return runConfiguredSubmission(
+        {
+            type: 'function',
+            langs: ['cc.cc17'],
+            template: {
+                lang: 'cc.cc17',
+                source: fixture.source,
+                sourceHash: problemConfig.templateSourceHash(fixture.source),
+                publicRanges: fixture.publicRanges,
+                regions: fixture.regions,
+            },
+            cases: [
+                { input: '1.in', output: '1.out' },
+                { input: '2.in', output: '2.out' },
+            ],
+        },
+        answers,
+    );
+}
+
 describe('program-fill compile-mode real compiler and testdata integration', () => {
     const ids = ['r_abcdefghijkl', 'r_mnopqrstuvwx', 'r_yzABCDEFGHIJ'];
 
@@ -227,6 +329,30 @@ describe('program-fill compile-mode real compiler and testdata integration', () 
                 [ids[2]]: 'std::cout << answer;',
             }),
         ).to.deep.include({ status: STATUS.STATUS_WRONG_ANSWER, score: 50 });
+    });
+});
+
+describe('P3.22 code implementation real compiler fixtures', () => {
+    it('accepts a function body, a complete function, a class definition, and multiple source-ordered regions', async () => {
+        for (const fixture of functionFixtures) {
+            expect(await runFunctionFixture(fixture, fixture.answers)).to.deep.include({ status: STATUS.STATUS_ACCEPTED, score: 100 }, fixture.name);
+        }
+    });
+
+    it('maps wrong and non-compiling multi-region implementations to WA and CE', async () => {
+        const fixture = functionFixtures[3];
+        expect(
+            await runFunctionFixture(fixture, {
+                ...fixture.answers,
+                r_secondabcdef: ['int twice(int x) {', '  return identity(x);', '}'].join('\n'),
+            }),
+        ).to.deep.include({ status: STATUS.STATUS_WRONG_ANSWER, score: 0 });
+        expect(
+            await runFunctionFixture(fixture, {
+                ...fixture.answers,
+                r_secondabcdef: 'int twice(int x) { return ; }',
+            }),
+        ).to.deep.include({ status: STATUS.STATUS_COMPILE_ERROR, score: 0 });
     });
 });
 

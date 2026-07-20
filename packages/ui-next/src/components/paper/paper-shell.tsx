@@ -43,7 +43,7 @@ export const KIND_LABELS: Record<QuestionKind, string> = {
   program_fill_text: '程序填空（文本）',
   program_fill_compile: '程序填空（编译）',
   subjective: '主观题',
-  function: '函数题',
+  function: '代码实现题',
   default: '编程',
   submit_answer: '提交答案',
 };
@@ -56,7 +56,7 @@ const KIND_SHORT: Record<QuestionKind, string> = {
   program_fill_text: '文',
   program_fill_compile: '编',
   subjective: '主',
-  function: '函',
+  function: '码',
   default: '编',
   submit_answer: '答',
 };

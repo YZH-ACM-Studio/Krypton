@@ -70,7 +70,7 @@ describe('managed programming creation authority UI', () => {
     );
     expect(markup).to.include('编程题');
     expect(markup).to.include('单选题');
-    expect(markup).to.include('函数题');
+    expect(markup).to.include('代码实现题');
   });
 
   it('fails visibly when the server route mapping is inconsistent', () => {

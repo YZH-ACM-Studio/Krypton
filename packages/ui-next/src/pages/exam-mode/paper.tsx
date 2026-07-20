@@ -645,6 +645,7 @@ function CellEditor({
           surface={pdoc.config.template.surface}
           values={draft.regionContents || {}}
           onChange={onRegionChange}
+          lang={pdoc.config.template.lang || ''}
           readOnly={isLocked}
           singleLine={cell.kind === 'program_fill_text' || cell.kind === 'program_fill_compile'}
         />

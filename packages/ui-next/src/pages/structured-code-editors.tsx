@@ -482,7 +482,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
         <div className="min-w-0 flex-1">
           <p className="text-xs text-muted-foreground">代码评测单题编辑器</p>
           <h1 className="truncate text-2xl font-semibold tracking-tight">
-            {isCreate ? `新建${kind === 'program_fill' ? '程序填空题' : '函数题'}` : `编辑 ${pdoc.title || '题目'}`}
+            {isCreate ? `新建${kind === 'program_fill' ? '程序填空题' : '代码实现题'}` : `编辑 ${pdoc.title || '题目'}`}
           </h1>
         </div>
         {codeEvaluationDraft && !locked ? (
@@ -601,7 +601,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                     <h2 className="text-sm font-semibold">{compileMode ? '语言与完整模板' : '完整模板'}</h2>
                     <p className="text-xs text-muted-foreground">
                       {compileMode ? '评测语言创建后不可修改。' : '语言仅用于代码高亮，可以留空或之后调整。'}直接框选完整源码中的
-                      {kind === 'function' ? '一行或多行' : '一整行'}，再设为{kind === 'function' ? '函数区' : '填空区'}
+                      {kind === 'function' ? '一行或多行' : '一整行'}，再设为{kind === 'function' ? '作答区' : '填空区'}
                       ；所选标准内容只在作者与评测链中可见。
                     </p>
                   </div>
@@ -676,6 +676,7 @@ function StructuredCodeEditor({ kind }: { kind: 'program_fill' | 'function' }) {
                           surface={previewSurface}
                           values={{}}
                           onChange={() => {}}
+                          lang={lang}
                           singleLine={kind === 'program_fill'}
                           readOnly
                         />

@@ -28,7 +28,7 @@ const KIND_LABEL: Record<ProblemKind, string> = {
   blank: '填空题',
   subjective: '主观题',
   program_fill: '程序填空题',
-  function: '函数题',
+  function: '代码实现题',
 };
 
 interface BankFilters {

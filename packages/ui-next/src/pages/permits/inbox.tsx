@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useBootstrap } from '@/lib/bootstrap';
+import { createRequestId } from '@/lib/request-id';
 
 interface PermitRow {
   _id: string;
@@ -102,11 +103,11 @@ export function MyVerifyInboxPage() {
     const key = `${row.pid}:${row.scope}`;
     setCompleting(key);
     setActionError('');
-    const fd = new FormData();
-    fd.set('scope', row.scope);
-    fd.set('status', 'completed');
-    fd.set('requestId', crypto.randomUUID());
     try {
+      const fd = new FormData();
+      fd.set('scope', row.scope);
+      fd.set('status', 'completed');
+      fd.set('requestId', createRequestId());
       const response = await fetch(`/p/${row.pid}/contributions/status`, {
         method: 'POST',
         body: fd,

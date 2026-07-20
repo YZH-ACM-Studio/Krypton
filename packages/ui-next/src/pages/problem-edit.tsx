@@ -29,6 +29,7 @@ import { downloadProblemPackage } from '@/lib/problem-package';
 import { managedSourceFieldViews, managedSourceTagPreview, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
 import { readHydroResponseError, readProblemSaveSuccess } from '@/lib/problem-save-response';
 import { requiresLegacyProgrammingTagNormalization, type ProgrammingTagState } from '@/lib/programming-tag-state';
+import { createRequestId } from '@/lib/request-id';
 
 type R = Record<string, any>;
 
@@ -447,13 +448,13 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
     }
     setBusy(true);
     setError('');
-    const form = new FormData(event.currentTarget);
-    form.set('pids', String(pdocId));
-    form.set('expectedRevisions', JSON.stringify({ [pdocId]: Number(structureRevision ?? 0) }));
-    form.set('uid', String(selectedUser[0]._id));
-    form.set('scopes', [dataScope ? 'data' : '', tagScope ? 'tag' : ''].filter(Boolean).join(','));
-    form.set('requestId', crypto.randomUUID());
     try {
+      const form = new FormData(event.currentTarget);
+      form.set('pids', String(pdocId));
+      form.set('expectedRevisions', JSON.stringify({ [pdocId]: Number(structureRevision ?? 0) }));
+      form.set('uid', String(selectedUser[0]._id));
+      form.set('scopes', [dataScope ? 'data' : '', tagScope ? 'tag' : ''].filter(Boolean).join(','));
+      form.set('requestId', createRequestId());
       const response = await fetch('/problem-contributions/bulk', {
         method: 'POST',
         body: form,
@@ -489,12 +490,12 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
   async function mutate(row: ContributionRow, operation: 'reopen' | 'revoke') {
     setBusy(true);
     setError('');
-    const form = new FormData();
-    form.set('uid', String(row.uid));
-    form.set('scope', row.scope);
-    form.set('requestId', crypto.randomUUID());
-    if (operation === 'reopen') form.set('status', 'pending');
     try {
+      const form = new FormData();
+      form.set('uid', String(row.uid));
+      form.set('scope', row.scope);
+      form.set('requestId', createRequestId());
+      if (operation === 'reopen') form.set('status', 'pending');
       const response = await fetch(operation === 'reopen' ? `/p/${apiPid}/contributions/status` : `/p/${apiPid}/contributions/revoke`, {
         method: 'POST',
         body: form,
@@ -584,6 +585,11 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
             <DialogTitle>分配数据 / 标签贡献任务</DialogTitle>
           </DialogHeader>
           <form className="space-y-4 p-5" onSubmit={assign}>
+            {error ? (
+              <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">目标用户</label>
               <MultiSelect<DomainUserOption>
@@ -635,6 +641,11 @@ function ContributionsPanel({ pid, pdocId, structureRevision }: { pid: string; p
           </DialogHeader>
           <div className="space-y-4 p-5">
             <p className="text-sm leading-6 text-muted-foreground">撤销后将立即停止后续写权限；已经记录的首次完成署名仍会保留。</p>
+            {error ? (
+              <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" disabled={busy} onClick={() => setRevokeTarget(null)}>
                 取消

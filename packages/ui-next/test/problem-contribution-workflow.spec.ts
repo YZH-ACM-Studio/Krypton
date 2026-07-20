@@ -5,6 +5,54 @@ import { describe, it } from 'node:test';
 const read = (path: string) => readFileSync(path, 'utf8');
 
 describe('P2.25 contribution assignment and task UI', () => {
+  it('uses HTTP-compatible request IDs inside each mutation cleanup boundary', () => {
+    const problems = read('packages/ui-next/src/pages/problems.tsx');
+    const edit = read('packages/ui-next/src/pages/problem-edit.tsx');
+    const inbox = read('packages/ui-next/src/pages/permits/inbox.tsx');
+    const finallyGuardedSections = [
+      problems.slice(problems.indexOf('async function submitContributionBatch'), problems.indexOf('function requestManagedPublish')),
+      edit.slice(edit.indexOf('async function assign'), edit.indexOf('async function mutate')),
+      edit.slice(edit.indexOf('async function mutate'), edit.indexOf('\n\n  return (', edit.indexOf('async function mutate'))),
+    ];
+    const reloadGuardedSection = inbox.slice(
+      inbox.indexOf('async function complete'),
+      inbox.indexOf('\n\n  return (', inbox.indexOf('async function complete')),
+    );
+
+    for (const section of finallyGuardedSections) {
+      expect(section).not.to.equal('');
+      expect(section).not.to.include('crypto.randomUUID');
+      expect(section).to.include('createRequestId()');
+      expect(section.indexOf('try {')).to.be.lessThan(section.indexOf('createRequestId()'));
+      expect(section.indexOf('finally {')).to.be.greaterThan(section.indexOf('createRequestId()'));
+    }
+
+    expect(reloadGuardedSection).not.to.include('crypto.randomUUID');
+    expect(reloadGuardedSection.indexOf('try {')).to.be.lessThan(reloadGuardedSection.indexOf('createRequestId()'));
+    expect(reloadGuardedSection.indexOf('catch (cause)')).to.be.greaterThan(reloadGuardedSection.indexOf('createRequestId()'));
+    const failureBranch = reloadGuardedSection.slice(reloadGuardedSection.indexOf('catch (cause)'));
+    expect(failureBranch).to.include("setCompleting('')");
+    expect(failureBranch).not.to.include('finally {');
+  });
+
+  it('surfaces contribution mutation errors inside active dialogs', () => {
+    const problems = read('packages/ui-next/src/pages/problems.tsx');
+    const edit = read('packages/ui-next/src/pages/problem-edit.tsx');
+    const batchDialog = problems.slice(problems.indexOf('<Dialog open={batchOpen}'), problems.indexOf('<Dialog open={publishConfirm'));
+    const assignDialog = edit.slice(edit.indexOf('<Dialog open={assignOpen}'), edit.indexOf('<Dialog open={revokeTarget'));
+    const revokeDialog = edit.slice(
+      edit.indexOf('<Dialog open={revokeTarget'),
+      edit.indexOf('</section>', edit.indexOf('<Dialog open={revokeTarget')),
+    );
+
+    expect(batchDialog).to.include('role="alert"');
+    expect(batchDialog).to.include('{batchError}');
+    expect(assignDialog).to.include('role="alert"');
+    expect(assignDialog).to.include('{error}');
+    expect(revokeDialog).to.include('role="alert"');
+    expect(revokeDialog).to.include('{error}');
+  });
+
   it('uses explicit current-page selection and one bounded batch request', () => {
     const source = read('packages/ui-next/src/pages/problems.tsx');
     expect(source).to.include('selectedContributionPids');

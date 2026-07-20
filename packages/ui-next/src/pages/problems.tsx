@@ -16,6 +16,7 @@ import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { managedSourceFieldViews, type ManagedSourceTemplateOption } from '@/lib/managed-problem-source';
 import { readHydroResponseError } from '@/lib/problem-save-response';
+import { createRequestId } from '@/lib/request-id';
 
 type R = Record<string, any>;
 
@@ -243,13 +244,16 @@ export function ProblemsPage() {
     setBatchBusy(true);
     setBatchError('');
     setBatchMessage('');
-    const form = new FormData(event.currentTarget);
-    form.set('pids', selectedPdocs.map((pdoc) => pdoc.docId).join(','));
-    form.set('expectedRevisions', JSON.stringify(Object.fromEntries(selectedPdocs.map((pdoc) => [pdoc.docId, Number(pdoc.structureRevision ?? 0)]))));
-    form.set('uid', String(batchUser[0]._id));
-    form.set('scopes', [batchDataScope ? 'data' : '', batchTagScope ? 'tag' : ''].filter(Boolean).join(','));
-    form.set('requestId', crypto.randomUUID());
     try {
+      const form = new FormData(event.currentTarget);
+      form.set('pids', selectedPdocs.map((pdoc) => pdoc.docId).join(','));
+      form.set(
+        'expectedRevisions',
+        JSON.stringify(Object.fromEntries(selectedPdocs.map((pdoc) => [pdoc.docId, Number(pdoc.structureRevision ?? 0)]))),
+      );
+      form.set('uid', String(batchUser[0]._id));
+      form.set('scopes', [batchDataScope ? 'data' : '', batchTagScope ? 'tag' : ''].filter(Boolean).join(','));
+      form.set('requestId', createRequestId());
       const response = await fetch('/problem-contributions/bulk', {
         method: 'POST',
         body: form,
@@ -604,6 +608,11 @@ export function ProblemsPage() {
           </DialogHeader>
           <form className="space-y-4 p-5" onSubmit={submitContributionBatch}>
             <p className="text-sm text-muted-foreground">只处理本页已明确勾选的 {selectedContributionPids.size} 道题。</p>
+            {batchError ? (
+              <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                {batchError}
+              </p>
+            ) : null}
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">目标用户</label>
               <MultiSelect<DomainUserOption>

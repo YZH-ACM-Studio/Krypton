@@ -3025,6 +3025,43 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
         expect(calls.recordAdd).to.have.length(1);
         expect(calls.recordAdd[0][3]).to.equal('_');
     });
+
+    it('uses the same exact inline region payload for direct, contest, exam, OI, and homework submissions', async () => {
+        const regionIds = ['r_abcdefghijkl', 'r_mnopqrstuvwx', 'r_yzABCDEFGHIJ'];
+        const code = JSON.stringify({
+            [regionIds[0]]: 'first();',
+            [regionIds[1]]: 'second();',
+            [regionIds[2]]: 'third();',
+        });
+        const contexts = [
+            { name: 'direct' },
+            { name: 'contest', rule: 'acm', tid: 'contest' },
+            { name: 'exam', rule: 'exam', tid: 'exam' },
+            { name: 'OI', rule: 'oi', tid: 'oi' },
+            { name: 'homework', rule: 'homework', tid: 'homework' },
+        ];
+
+        for (const context of contexts) {
+            const handler = makeHandler(ProblemSubmitHandler, {});
+            handler.pdoc = {
+                domainId: 'system',
+                docId: 7,
+                problemKind: 'program_fill',
+                config: {
+                    type: 'program_fill',
+                    mode: 'text',
+                    template: { surface: regionIds.map((id) => ({ type: 'region', id })) },
+                },
+            };
+            if (context.tid) handler.tdoc = { docId: context.tid, rule: context.rule };
+            const before = calls.recordAdd.length;
+            await handler.post('forged', 'forged-lang', code, false, [], context.tid as any);
+            expect(calls.recordAdd, context.name).to.have.length(before + 1);
+            expect(calls.recordAdd.at(-1)[3], context.name).to.equal('_');
+            expect(calls.recordAdd.at(-1)[4], context.name).to.equal(code);
+            expect(calls.recordAdd.at(-1)[6], context.name).to.deep.include({ contest: context.tid, type: 'judge' });
+        }
+    });
 });
 
 describe('P2.11 scoped Mongo search', () => {

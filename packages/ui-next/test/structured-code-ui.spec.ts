@@ -234,4 +234,42 @@ describe('P3.23 program-fill authoring and student contract', () => {
     expect(submit).not.to.include('template.source');
     expect(exam).not.to.include('template.source');
   });
+
+  it('keeps inline blanks single-line, source-ordered, keyboard reachable, and narrow-screen scrollable', () => {
+    const inputs = read('packages/ui-next/src/components/structured-region-inputs.tsx');
+    expect(inputs).to.include("const regions = surface.filter((segment) => segment.type === 'region')");
+    expect(inputs).to.include('const regionIds = regions.map((region) => region.id)');
+    expect(inputs).to.include('index + (event.shiftKey ? -1 : 1)');
+    expect(inputs).to.include('event.preventDefault()');
+    expect(inputs).to.include('target.focus()');
+    expect(inputs).to.include("event.target.value.replace(/[\\r\\n]/g, '')");
+    expect(inputs).to.include('className="h-9 min-h-9 min-w-[18rem] font-mono"');
+    expect(inputs).to.include('overflow-x-auto');
+  });
+
+  it('reuses the same student surface for direct, contest/OI/homework, exam, training, and course entry points', () => {
+    const direct = read('packages/ui-next/src/pages/problem-submit.tsx');
+    const exam = read('packages/ui-next/src/pages/exam-mode/paper.tsx');
+    const handler = read('packages/hydrooj/src/handler/problem.ts');
+    const training = read('packages/ui-next/src/pages/training.tsx');
+    const course = read('packages/ui-next/src/pages/course/detail.tsx');
+    expect(direct).to.include('<StructuredRegionInputs');
+    expect(exam).to.include('<StructuredRegionInputs');
+    expect(handler).to.include("this.response.template = 'problem_submit.html'");
+    expect(handler).to.include("'contest_detail_problem_submit'");
+    expect(handler).to.include("'homework_detail_problem_submit'");
+    expect(training).to.include('bs.urls.problemDetail');
+    expect(course).to.match(/href=\{`\/p\/\$\{problem\.pid \|\| pid\}`\}/);
+    expect(training).not.to.include('template.source');
+    expect(course).not.to.include('template.source');
+  });
+
+  it('invalidates stale local region caches and never carries hidden old keys into an update', () => {
+    const submit = read('packages/ui-next/src/pages/problem-submit.tsx');
+    expect(submit).to.include('parseStructuredRegionDraft(saved, regionIds, singleLineRegion)');
+    expect(submit).to.include('createEmptyStructuredRegionDraft(regionIds)');
+    expect(submit).to.match(/const structureKey = isStructuredAnswer \? `:\$\{Number\(pdoc\.structureRevision\) \|\| 0\}` : ''/);
+    expect(submit).to.include('Object.fromEntries(regionIds.map((currentId) =>');
+    expect(submit).not.to.include('{ ...regionValues, [id]: value }');
+  });
 });

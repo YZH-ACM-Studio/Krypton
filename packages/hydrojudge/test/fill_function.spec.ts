@@ -152,6 +152,14 @@ describe('program-fill text judge integration', () => {
             STATUS.STATUS_WRONG_ANSWER,
             STATUS.STATUS_ACCEPTED,
         ]);
+
+        const none = textContext({
+            [ids[0]]: 'TOTAL += VALUE;',
+            [ids[1]]: 'TOTAL *= 3;',
+            [ids[2]]: 'std::cout << 0;',
+        });
+        await judge(none.ctx);
+        expect(none.ended[0]).to.deep.include({ status: STATUS.STATUS_WRONG_ANSWER, score: 0 });
     });
 
     it('rejects missing, extra, and multi-line answers before grading', async () => {

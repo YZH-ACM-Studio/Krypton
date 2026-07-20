@@ -180,6 +180,88 @@ describe('canonical text program-fill', () => {
             expect(payload).not.to.include(secret);
         }
     });
+
+    it('supports one or three inline blanks while omitting every unmarked driver and helper line', () => {
+        const oneBlankSource = ['#include <iostream>', 'int main() {', 'int value = 0;', 'hidden_helper(value);', '}'].join('\n');
+        const oneBlank = clientProblemConfig({
+            type: 'program_fill',
+            mode: 'compile',
+            langs: ['cc.cc17'],
+            template: {
+                lang: 'cc.cc17',
+                source: oneBlankSource,
+                sourceHash: templateSourceHash(oneBlankSource),
+                publicRanges: [
+                    { startLine: 1, endLine: 2 },
+                    { startLine: 4, endLine: 5 },
+                ],
+                regions: [{ id: FIRST_ID, startLine: 2, endLine: 3, prompt: '初始化' }],
+            },
+            cases: [{ input: '1.in', output: '1.out' }],
+        });
+        expect(oneBlank.template.surface).to.deep.equal([
+            { type: 'code', code: 'int main() {' },
+            { type: 'region', id: FIRST_ID, prompt: '初始化' },
+            { type: 'code', code: '}' },
+        ]);
+
+        const threeBlankSource = [
+            'private_driver();',
+            'begin();',
+            'first();',
+            'private_gap_one();',
+            'middle();',
+            'second();',
+            'private_gap_two();',
+            'third();',
+            'end();',
+        ].join('\n');
+        const threeBlank = clientProblemConfig({
+            type: 'program_fill',
+            mode: 'text',
+            template: {
+                source: threeBlankSource,
+                sourceHash: templateSourceHash(threeBlankSource),
+                publicRanges: [
+                    { startLine: 1, endLine: 2 },
+                    { startLine: 4, endLine: 5 },
+                    { startLine: 8, endLine: 9 },
+                ],
+                regions: [
+                    { id: FIRST_ID, startLine: 2, endLine: 3 },
+                    { id: SECOND_ID, startLine: 5, endLine: 6 },
+                    { id: THIRD_ID, startLine: 7, endLine: 8 },
+                ],
+            },
+        });
+        expect(threeBlank.template.surface).to.deep.equal([
+            { type: 'code', code: 'begin();' },
+            { type: 'region', id: FIRST_ID },
+            { type: 'code', code: 'middle();' },
+            { type: 'region', id: SECOND_ID },
+            { type: 'region', id: THIRD_ID },
+            { type: 'code', code: 'end();' },
+        ]);
+        const payload = JSON.stringify({ oneBlank, threeBlank });
+        for (const secret of [
+            '#include <iostream>',
+            'int value = 0',
+            'hidden_helper',
+            'private_driver',
+            'private_gap_one',
+            'private_gap_two',
+            'first();',
+            'second();',
+            'third();',
+            'sourceHash',
+            'startLine',
+            'endLine',
+            '1.in',
+            '1.out',
+        ]) {
+            expect(payload).not.to.include(secret);
+        }
+    });
 });
 
 describe('whole-line structured templates', () => {

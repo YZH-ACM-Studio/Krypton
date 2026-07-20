@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button';
 import { SimpleSelect } from '@/components/ui/select';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
+import { createEmptyStructuredRegionDraft, parseStructuredRegionDraft } from '@/lib/structured-region-draft';
 
 type R = Record<string, any>;
 
@@ -39,7 +40,8 @@ export function ProblemSubmitPage() {
   const isStructuredAnswer = ['program_fill', 'function'].includes(config.type) && ['program_fill', 'function'].includes(String(pdoc.problemKind));
   const textProgramFill = config.type === 'program_fill' && config.mode === 'text';
   const surface: ClientStructuredCodeSegment[] = Array.isArray(config.template?.surface) ? config.template.surface : [];
-  const regions = surface.filter((segment) => segment.type === 'region');
+  const regions = useMemo(() => surface.filter((segment) => segment.type === 'region'), [surface]);
+  const regionIds = useMemo(() => regions.map((region) => region.id), [regions]);
   const singleLineRegion = pdoc.problemKind === 'program_fill';
 
   // Alphabetic letter when entering via contest
@@ -49,7 +51,8 @@ export function ProblemSubmitPage() {
   const title = contestLetter ? `${contestLetter}. ${baseTitle}` : baseTitle;
 
   // Code state — KryptonIDE in simple mode is controlled via value/onValueChange.
-  const cacheKey = `krypton:submit:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pid}${tid ? `:${tid}` : ''}`;
+  const structureKey = isStructuredAnswer ? `:${Number(pdoc.structureRevision) || 0}` : '';
+  const cacheKey = `krypton:submit:${bs.user?.id || 0}/${bs.domain?.id || 'default'}/${pid}${tid ? `:${tid}` : ''}${structureKey}`;
   const langKey = `krypton:submit-lang:${pid}${tid ? `:${tid}` : ''}`;
   const availableLangs = useMemo(() => Object.keys(langRange), [langRange]);
   const [lang, setLang] = useState<string>(() => {
@@ -65,23 +68,23 @@ export function ProblemSubmitPage() {
   const [code, setCode] = useState<string>(() => {
     try {
       const saved = localStorage.getItem(cacheKey);
-      if (saved) return saved;
+      if (saved) {
+        if (!isStructuredAnswer) return saved;
+        const restored = parseStructuredRegionDraft(saved, regionIds, singleLineRegion);
+        if (restored) return JSON.stringify(restored);
+      }
     } catch {
       /* */
     }
-    return isStructuredAnswer ? JSON.stringify(Object.fromEntries(regions.map((region: R) => [region.id, '']))) : '';
+    return isStructuredAnswer ? JSON.stringify(createEmptyStructuredRegionDraft(regionIds)) : '';
   });
   const regionValues = useMemo(() => {
     if (!isStructuredAnswer) return {};
-    try {
-      const parsed = JSON.parse(code);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
-  }, [code, isStructuredAnswer]);
+    return parseStructuredRegionDraft(code, regionIds, singleLineRegion) || createEmptyStructuredRegionDraft(regionIds);
+  }, [code, isStructuredAnswer, regionIds, singleLineRegion]);
   const updateRegion = (id: string, value: string) => {
-    setCode(JSON.stringify({ ...regionValues, [id]: value }));
+    if (!regionIds.includes(id)) throw new Error(`structured region ${id} is not part of the current problem`);
+    setCode(JSON.stringify(Object.fromEntries(regionIds.map((currentId) => [currentId, currentId === id ? value : regionValues[currentId] || '']))));
   };
 
   // Persist code (debounced) + lang (immediate)

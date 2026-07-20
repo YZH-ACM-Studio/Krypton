@@ -110,9 +110,12 @@ function productionFacts(batch: Awaited<ReturnType<typeof validateProblemBatchMa
             chapterId: 8,
             chapterTitle: '2026年牛客-第1场',
             chapterState: 'missing',
+            chapterMode: 'create-front',
+            chapterPosition: 0,
             currentMaxChapterId: 7,
             nonTargetDagFingerprint: 'f'.repeat(64),
             targetPids: [],
+            replacePids: [],
         },
         mindmapNodes: [{ id: nodeId, topic: '模拟', tags: ['模拟'] }],
         problems: batch.problems.map((entry, index) => ({
@@ -234,9 +237,12 @@ const adapter = {
         chapterId: 8,
         chapterTitle: batch.manifest.training.chapterTitle,
         chapterState: 'missing',
+        chapterMode: 'create-front',
+        chapterPosition: 0,
         currentMaxChapterId: 7,
         nonTargetDagFingerprint: 'f'.repeat(64),
         targetPids: [],
+        replacePids: [],
       },
       mindmapNodes: [{ id: ${JSON.stringify(nodeId)}, topic: '模拟', tags: ['模拟'] }],
       problems: batch.problems.map((entry, index) => ({
@@ -273,6 +279,45 @@ Promise.resolve(cli.runMatchedCommand()).catch((error) => {
         expect(summary.totalCases).to.equal(173);
         expect(batch.problems[0].testdataFiles[0].name).to.equal('1.in');
         expect(batch.problems[0].configFile.name).to.equal('config.yaml');
+    });
+
+    it('accepts an explicit source-code selection without inventing unavailable contest statistics', async () => {
+        const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+        manifest.batchId = 'pat-advanced-2021-spring';
+        manifest.source = { template: 'pat_advanced', year: 2021, season: 'spring' };
+        manifest.training.chapterId = 47;
+        manifest.training.replacePids = [2678];
+        manifest.selection = {
+            field: 'sourceProblemCode',
+            operator: 'in',
+            value: manifest.problems.map((problem: any) => problem.sourceProblemCode),
+            source: 'user-provided complete problem list',
+        };
+        for (const problem of manifest.problems) delete problem.origStat;
+        const explicitPath = path.join(root, 'explicit-no-stat.json');
+        await fsp.writeFile(explicitPath, JSON.stringify(manifest));
+
+        const batch = await validateProblemBatchManifest(explicitPath);
+        expect(batch.manifest.training).to.include({ chapterId: 47 });
+        expect(batch.manifest.training.replacePids).to.deep.equal([2678]);
+        expect(batch.problems.every((problem) => problem.origStat === undefined)).to.equal(true);
+        expect(problemBatchValidationSummary(batch).problems[0]).to.include({ accepted: null, submitted: null });
+
+        manifest.training.replacePids = [];
+        const emptyReplacementPath = path.join(root, 'explicit-empty-replacement.json');
+        await fsp.writeFile(emptyReplacementPath, JSON.stringify(manifest));
+        await expectReject(validateProblemBatchManifest(emptyReplacementPath), 'training.replacePids must be non-empty');
+        manifest.training.replacePids = [2678];
+
+        manifest.selection.value.push('missing-code');
+        const incompletePath = path.join(root, 'explicit-incomplete-selection.json');
+        await fsp.writeFile(incompletePath, JSON.stringify(manifest));
+        await expectReject(validateProblemBatchManifest(incompletePath), 'selection.value must exactly match');
+
+        manifest.selection = { field: 'accepted', operator: '>=', value: 0, source: 'invalid fixture' };
+        const invalidPath = path.join(root, 'accepted-without-stat.json');
+        await fsp.writeFile(invalidPath, JSON.stringify(manifest));
+        await expectReject(validateProblemBatchManifest(invalidPath), 'does not satisfy the declared selection rule');
     });
 
     it('rejects undeclared fields, traversal, missing assets, and config drift before loading runtime', async () => {

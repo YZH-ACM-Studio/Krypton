@@ -70,6 +70,12 @@ interface ProblemBatchChapterAuditInput {
     chapterTitle: string;
     batchId: string;
     actor: number;
+    mode?: 'create-front' | 'replace-existing';
+    replacePids?: number[];
+}
+
+function problemBatchChapterAuditAction(input: ProblemBatchChapterAuditInput) {
+    return input.mode === 'replace-existing' ? 'replace-members' : 'create';
 }
 
 function problemBatchChapterAuditIdentity(input: ProblemBatchChapterAuditInput) {
@@ -88,7 +94,8 @@ function assertProblemBatchChapterAuditRecord(record: any, input: ProblemBatchCh
         record.chapterId !== input.chapterId ||
         record.chapterTitle !== input.chapterTitle ||
         record.batchId !== input.batchId ||
-        record.action !== 'create' ||
+        record.action !== problemBatchChapterAuditAction(input) ||
+        (input.mode === 'replace-existing' && JSON.stringify(record.replacePids) !== JSON.stringify(input.replacePids || [])) ||
         record.result !== 'success'
     ) {
         throw new Error(`problem batch chapter audit is missing or conflicting: ${input.domainId}/${input.trainingId}/${input.chapterId}`);
@@ -118,7 +125,8 @@ async function ensureProblemBatchChapterAudit(input: ProblemBatchChapterAuditInp
             chapterId: input.chapterId,
             chapterTitle: input.chapterTitle,
             batchId: input.batchId,
-            action: 'create',
+            action: problemBatchChapterAuditAction(input),
+            ...(input.mode === 'replace-existing' ? { replacePids: [...(input.replacePids || [])] } : {}),
             result: 'success',
             time: new Date(),
         } as any);
@@ -160,7 +168,12 @@ export async function ensureProblemBatchChapter(input: {
     expectedCurrentMaxChapterId: number;
     batchId: string;
     user: ProblemAclUser;
-}): Promise<{ chapterId: number; created: boolean }> {
+    mode?: 'create-front' | 'replace-existing';
+    chapterPosition?: number;
+    replacePids?: number[];
+    expectedCurrentPids?: number[];
+    replaceMembers?: boolean;
+}): Promise<{ chapterId: number; created: boolean; replaced?: boolean }> {
     if (!isProblemBankAdmin(input.user)) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
     if (!Number.isSafeInteger(input.chapterId) || input.chapterId < 1) throw new TypeError('problem batch chapter id must be positive');
     if (!Number.isSafeInteger(input.expectedCurrentMaxChapterId) || input.expectedCurrentMaxChapterId < 0) {
@@ -177,6 +190,69 @@ export async function ensureProblemBatchChapter(input: {
     });
     if (!training || training.title !== trainingTitle || !Array.isArray(training.dag)) {
         throw new Error(`problem batch training identity changed: ${input.domainId}/${input.trainingId}`);
+    }
+    if (input.mode === 'replace-existing') {
+        if (
+            !Number.isSafeInteger(input.chapterPosition) ||
+            input.chapterPosition! < 0 ||
+            !Array.isArray(input.replacePids) ||
+            input.replacePids.length === 0 ||
+            !Array.isArray(input.expectedCurrentPids) ||
+            typeof input.replaceMembers !== 'boolean'
+        ) {
+            throw new TypeError('historical problem batch chapter facts are required');
+        }
+        const chapter = training.dag[input.chapterPosition!];
+        if (
+            !chapter ||
+            chapter._id !== input.chapterId ||
+            chapter.title !== chapterTitle ||
+            !Array.isArray(chapter.requireNids) ||
+            chapter.requireNids.length !== 0 ||
+            !Array.isArray(chapter.pids) ||
+            JSON.stringify(chapter.pids.map(Number)) !== JSON.stringify(input.expectedCurrentPids)
+        ) {
+            throw new Error(`historical problem batch chapter identity conflicts: ${input.domainId}/${input.trainingId}/${input.chapterId}`);
+        }
+        let replaced = false;
+        if (input.replaceMembers && JSON.stringify(chapter.pids.map(Number)) === JSON.stringify(input.replacePids)) {
+            const nextDag = training.dag.map((candidate, index) => (index === input.chapterPosition ? { ...candidate, pids: [] } : candidate));
+            const result = await document.coll.updateOne(
+                {
+                    _id: training._id,
+                    domainId: input.domainId,
+                    docType: document.TYPE_TRAINING,
+                    docId: input.trainingId,
+                    title: trainingTitle,
+                    dag: training.dag,
+                },
+                { $set: { dag: nextDag } },
+            );
+            if (result.modifiedCount !== 1) {
+                throw new Error(`historical problem batch chapter CAS failed: ${input.domainId}/${input.trainingId}/${input.chapterId}`);
+            }
+            replaced = true;
+        }
+        await ensureProblemBatchChapterAudit({
+            domainId: input.domainId,
+            trainingId: input.trainingId,
+            chapterId: input.chapterId,
+            chapterTitle,
+            batchId: input.batchId,
+            actor: input.user._id,
+            mode: 'replace-existing',
+            replacePids: input.replacePids,
+        });
+        logger.info(
+            'Historical problem batch chapter prepared domain=%s training=%s chapter=%d actor=%d batchId=%s replaced=%s stage=training-ready result=success',
+            input.domainId,
+            input.trainingId,
+            input.chapterId,
+            input.user._id,
+            input.batchId,
+            replaced,
+        );
+        return { chapterId: input.chapterId, created: false, replaced };
     }
     const matches = training.dag.filter((chapter) => chapter?._id === input.chapterId || chapter?.title === chapterTitle);
     if (matches.length) {

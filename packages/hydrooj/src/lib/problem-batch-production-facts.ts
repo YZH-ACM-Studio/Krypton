@@ -35,6 +35,17 @@ export interface ProblemBatchFactPermit {
     role: string;
 }
 
+export interface ProblemBatchFactChapterAudit {
+    operator: number;
+    trainingId: string;
+    chapterId: number;
+    chapterTitle: string;
+    batchId: string;
+    action: string;
+    replacePids: number[];
+    result: string;
+}
+
 export interface ProblemBatchFactsRepository {
     getUser(domainId: string, uid: number): Promise<ProblemBatchFactUser | null>;
     getCounter(domainId: string, namespace: string): Promise<number | null>;
@@ -44,6 +55,12 @@ export interface ProblemBatchFactsRepository {
     getBatchProblems(domainId: string, batchId: string): Promise<ProblemBatchFactProblem[]>;
     getActiveProblemPermits(domainId: string, docId: number): Promise<ProblemBatchFactPermit[]>;
     getDuplicateProblems(domainId: string, titles: string[], pids: string[]): Promise<ProblemBatchFactProblem[]>;
+    getTrainingReplacementAudit(
+        domainId: string,
+        batchId: string,
+        trainingId: string,
+        chapterId: number,
+    ): Promise<ProblemBatchFactChapterAudit | null>;
 }
 
 function fail(message: string, code = 'BATCH_IMPORT_PRODUCTION_DRIFT', details?: unknown): never {
@@ -128,14 +145,30 @@ export async function buildProblemBatchProductionFacts(
 
     const chapters = training.dag.map(canonicalChapter);
     const currentMaxChapterId = chapters.length ? Math.max(...chapters.map((chapter) => chapter._id)) : 0;
-    const targetMatches = chapters.filter((chapter) => chapter.title === batch.manifest.training.chapterTitle);
+    const replaceExisting = batch.manifest.training.chapterId !== undefined;
+    const targetMatches = chapters.filter((chapter) =>
+        replaceExisting
+            ? chapter._id === batch.manifest.training.chapterId || chapter.title === batch.manifest.training.chapterTitle
+            : chapter.title === batch.manifest.training.chapterTitle,
+    );
     if (targetMatches.length > 1) fail(`training chapter title is ambiguous: ${batch.manifest.training.chapterTitle}`);
     const target = targetMatches[0];
-    if (target && (chapters[0] !== target || target.requireNids.length !== 0)) {
+    if (replaceExisting) {
+        if (
+            !target ||
+            target._id !== batch.manifest.training.chapterId ||
+            target.title !== batch.manifest.training.chapterTitle ||
+            target.requireNids.length !== 0
+        ) {
+            fail(`historical batch chapter identity conflicts: ${batch.manifest.training.chapterTitle}`);
+        }
+    } else if (target && (chapters[0] !== target || target.requireNids.length !== 0)) {
         fail(`existing batch chapter is not the exact first chapter: ${batch.manifest.training.chapterTitle}`);
     }
-    const chapterId = target?._id || currentMaxChapterId + 1;
+    const chapterId = replaceExisting ? batch.manifest.training.chapterId! : target?._id || currentMaxChapterId + 1;
     if (!Number.isSafeInteger(chapterId) || chapterId < 1) fail('planned training chapter id is invalid');
+    const chapterPosition = target ? chapters.indexOf(target) : 0;
+    const replacePids = replaceExisting ? [...batch.manifest.training.replacePids!] : [];
     const nonTargetDag = chapters.filter((chapter) => chapter !== target);
     const trainingPids = [...new Set(chapters.flatMap((chapter) => chapter.pids))];
     if (!trainingPids.length || !(await repository.hasTrainingAnchor(batch.manifest.domain, trainingPids, template.trainingAnchorTag))) {
@@ -190,6 +223,49 @@ export async function buildProblemBatchProductionFacts(
         }
     }
 
+    if (replaceExisting) {
+        const publishedPrefix: number[] = [];
+        let sawUnpublished = false;
+        for (const problem of problems) {
+            if (problem.state === 'published') {
+                if (sawUnpublished || !Number.isSafeInteger(problem.docId)) {
+                    fail('published historical batch problems no longer form the exact manifest prefix');
+                }
+                publishedPrefix.push(problem.docId!);
+            } else {
+                sawUnpublished = true;
+            }
+        }
+        const targetPids = target!.pids;
+        let confirmedReplacement = false;
+        if (!publishedPrefix.length && !targetPids.length) {
+            const audit = await repository.getTrainingReplacementAudit(
+                batch.manifest.domain,
+                batch.manifest.batchId,
+                batch.manifest.training.id,
+                chapterId,
+            );
+            confirmedReplacement =
+                !!audit &&
+                audit.operator === batch.manifest.actor &&
+                audit.trainingId === batch.manifest.training.id &&
+                audit.chapterId === chapterId &&
+                audit.chapterTitle === batch.manifest.training.chapterTitle &&
+                audit.batchId === batch.manifest.batchId &&
+                audit.action === 'replace-members' &&
+                canonicalJson(audit.replacePids) === canonicalJson(replacePids) &&
+                audit.result === 'success';
+            if (!confirmedReplacement) {
+                fail('historical batch chapter is empty without the matching successful replacement audit');
+            }
+        }
+        const allowedBeforePublication =
+            !publishedPrefix.length && (canonicalJson(targetPids) === canonicalJson(replacePids) || confirmedReplacement);
+        if (!allowedBeforePublication && canonicalJson(targetPids) !== canonicalJson(publishedPrefix)) {
+            fail('historical batch chapter members differ from both the approved replacement and published manifest prefix');
+        }
+    }
+
     const duplicateDocs = await repository.getDuplicateProblems(
         batch.manifest.domain,
         batch.problems.map((entry) => entry.title),
@@ -219,9 +295,12 @@ export async function buildProblemBatchProductionFacts(
             chapterId,
             chapterTitle: batch.manifest.training.chapterTitle,
             chapterState: target ? 'existing' : 'missing',
+            chapterMode: replaceExisting ? 'replace-existing' : 'create-front',
+            chapterPosition,
             currentMaxChapterId,
             nonTargetDagFingerprint: sha256(canonicalJson(nonTargetDag)),
             targetPids: target?.pids || [],
+            replacePids,
         },
         mindmapNodes: canonicalMindmapNodes,
         problems,

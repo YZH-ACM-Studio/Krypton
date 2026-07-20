@@ -137,6 +137,24 @@ const factsRepository: ProblemBatchFactsRepository = {
             )
             .toArray()) as ProblemBatchFactProblem[];
     },
+    async getTrainingReplacementAudit(domainId, batchId, trainingId, chapterId) {
+        const record = await OplogModel.coll.findOne({
+            type: 'training.chapter.batch-import',
+            domainId,
+            requestId: `problem-batch:${batchId}:training:${trainingId}:chapter:${chapterId}`,
+        });
+        if (!record) return null;
+        return {
+            operator: Number(record.operator),
+            trainingId: String(record.trainingId),
+            chapterId: Number(record.chapterId),
+            chapterTitle: String(record.chapterTitle),
+            batchId: String(record.batchId),
+            action: String(record.action),
+            replacePids: Array.isArray(record.replacePids) ? record.replacePids.map(Number) : [],
+            result: String(record.result),
+        };
+    },
 };
 
 function buildProductionFacts(batch: ValidatedProblemBatch): Promise<ProblemBatchProductionFacts> {
@@ -165,6 +183,9 @@ async function assertApplyFacts(batch: ValidatedProblemBatch, plan: ProblemBatch
         current.training.title !== plan.facts.training.title ||
         current.training.chapterId !== plan.facts.training.chapterId ||
         current.training.chapterTitle !== plan.facts.training.chapterTitle ||
+        current.training.chapterMode !== plan.facts.training.chapterMode ||
+        current.training.chapterPosition !== plan.facts.training.chapterPosition ||
+        !equal(current.training.replacePids, plan.facts.training.replacePids) ||
         current.training.nonTargetDagFingerprint !== plan.facts.training.nonTargetDagFingerprint
     ) {
         fail('training facts changed after preflight');
@@ -204,8 +225,14 @@ async function assertApplyFacts(batch: ValidatedProblemBatch, plan: ProblemBatch
     if (publishedPrefixPids.length && current.training.chapterState !== 'existing') {
         fail('published batch problems exist but the target chapter is missing');
     }
-    if (current.training.chapterState === 'existing' && !equal(current.training.targetPids, publishedPrefixPids)) {
-        fail('batch chapter members differ from the exact published manifest prefix');
+    if (current.training.chapterState === 'existing') {
+        const awaitingHistoricalReplacement =
+            current.training.chapterMode === 'replace-existing' &&
+            !publishedPrefixPids.length &&
+            (equal(current.training.targetPids, current.training.replacePids) || !current.training.targetPids.length);
+        if (!awaitingHistoricalReplacement && !equal(current.training.targetPids, publishedPrefixPids)) {
+            fail('batch chapter members differ from the exact published manifest prefix');
+        }
     }
     return current;
 }
@@ -302,10 +329,15 @@ async function setOriginalStatistics(
     pdoc: ProblemDoc,
     actorUser: any,
 ): Promise<void> {
+    if (!entry.origStat) {
+        if (pdoc.origStat) fail(`${entry.sourceProblemCode}: undeclared original contest statistics exist`, 'BATCH_IMPORT_STAT_CONFLICT', pdoc.origStat);
+        return;
+    }
+    const origStat = entry.origStat;
     if (pdoc.origStat) {
         if (
-            pdoc.origStat.accepted !== entry.origStat.accepted ||
-            pdoc.origStat.submitted !== entry.origStat.submitted ||
+            pdoc.origStat.accepted !== origStat.accepted ||
+            pdoc.origStat.submitted !== origStat.submitted ||
             pdoc.origStat.updatedBy !== batch.manifest.actor ||
             !(pdoc.origStat.updatedAt instanceof Date)
         ) {
@@ -319,8 +351,8 @@ async function setOriginalStatistics(
         pdoc.docId,
         {
             origStat: {
-                accepted: entry.origStat.accepted,
-                submitted: entry.origStat.submitted,
+                accepted: origStat.accepted,
+                submitted: origStat.submitted,
                 updatedBy: batch.manifest.actor,
                 updatedAt: new Date(),
             },
@@ -339,6 +371,7 @@ function originalStatisticsAuditIdentity(batch: ValidatedProblemBatch, entry: Va
 }
 
 function assertOriginalStatisticsAuditRecord(record: any, batch: ValidatedProblemBatch, entry: ValidatedProblemBatchEntry, pdoc: ProblemDoc): void {
+    if (!entry.origStat) fail(`${entry.sourceProblemCode}: original statistics audit is not declared by the manifest`);
     if (
         !record ||
         record.operator !== batch.manifest.actor ||
@@ -358,6 +391,7 @@ async function findOriginalStatisticsAudit(batch: ValidatedProblemBatch, entry: 
 }
 
 async function ensureOriginalStatisticsAudit(batch: ValidatedProblemBatch, entry: ValidatedProblemBatchEntry, pdoc: ProblemDoc): Promise<void> {
+    if (!entry.origStat) return;
     const existing = await findOriginalStatisticsAudit(batch, entry);
     if (existing) {
         assertOriginalStatisticsAuditRecord(existing, batch, entry, pdoc);
@@ -401,6 +435,7 @@ async function ensureOriginalStatisticsAudit(batch: ValidatedProblemBatch, entry
 }
 
 async function assertOriginalStatisticsAudit(batch: ValidatedProblemBatch, entry: ValidatedProblemBatchEntry, pdoc: ProblemDoc): Promise<void> {
+    if (!entry.origStat) return;
     assertOriginalStatisticsAuditRecord(await findOriginalStatisticsAudit(batch, entry), batch, entry, pdoc);
 }
 
@@ -472,13 +507,17 @@ async function verifyImportedProblem(batch: ValidatedProblemBatch, entry: Valida
     ) {
         fail(`${entry.sourceProblemCode}: published problem metadata differs from the plan`, 'BATCH_IMPORT_VERIFY_FAILED');
     }
-    if (
-        pdoc.origStat?.accepted !== entry.origStat.accepted ||
-        pdoc.origStat?.submitted !== entry.origStat.submitted ||
-        pdoc.origStat?.updatedBy !== batch.manifest.actor ||
-        !(pdoc.origStat?.updatedAt instanceof Date)
-    ) {
-        fail(`${entry.sourceProblemCode}: original contest statistics differ from the plan`, 'BATCH_IMPORT_VERIFY_FAILED');
+    if (entry.origStat) {
+        if (
+            pdoc.origStat?.accepted !== entry.origStat.accepted ||
+            pdoc.origStat?.submitted !== entry.origStat.submitted ||
+            pdoc.origStat?.updatedBy !== batch.manifest.actor ||
+            !(pdoc.origStat?.updatedAt instanceof Date)
+        ) {
+            fail(`${entry.sourceProblemCode}: original contest statistics differ from the plan`, 'BATCH_IMPORT_VERIFY_FAILED');
+        }
+    } else if (pdoc.origStat) {
+        fail(`${entry.sourceProblemCode}: undeclared original contest statistics exist`, 'BATCH_IMPORT_VERIFY_FAILED');
     }
     await assertOriginalStatisticsAudit(batch, entry, pdoc);
     if ((pdoc as ProblemDoc & { aclWriteClaim?: unknown }).aclWriteClaim) {
@@ -523,8 +562,8 @@ async function verifyBatch(batch: ValidatedProblemBatch, plan: ProblemBatchImpor
     const chapter = Array.isArray(training?.dag)
         ? training.dag.find((candidate) => candidate?._id === plan.facts.training.chapterId && candidate?.title === plan.facts.training.chapterTitle)
         : null;
-    if (!training || !chapter || training.dag[0] !== chapter) {
-        fail('final training chapter is missing or no longer first', 'BATCH_IMPORT_VERIFY_FAILED');
+    if (!training || !chapter || training.dag[plan.facts.training.chapterPosition] !== chapter) {
+        fail('final training chapter is missing or changed position', 'BATCH_IMPORT_VERIFY_FAILED');
     }
     await TrainingModel.assertProblemBatchChapterAudit({
         domainId: batch.manifest.domain,
@@ -533,6 +572,8 @@ async function verifyBatch(batch: ValidatedProblemBatch, plan: ProblemBatchImpor
         chapterTitle: plan.facts.training.chapterTitle,
         batchId: batch.manifest.batchId,
         actor: batch.manifest.actor,
+        mode: plan.facts.training.chapterMode,
+        replacePids: plan.facts.training.replacePids,
     });
     const expectedPids = problems.map((problem) => problem.docId);
     const actualPids = Array.isArray(chapter.pids) ? chapter.pids.map(Number) : [];
@@ -624,7 +665,7 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
             await progress({ stage: 'draft-ready', sourceProblemCode: entry.sourceProblemCode, docId: pdoc.docId, pid: pdoc.pid });
         }
 
-        await assertApplyFacts(batch, plan);
+        const current = await assertApplyFacts(batch, plan);
         const chapter = await TrainingModel.ensureProblemBatchChapter({
             domainId: batch.manifest.domain,
             trainingId: new ObjectId(batch.manifest.training.id),
@@ -634,8 +675,14 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
             expectedCurrentMaxChapterId: plan.facts.training.currentMaxChapterId,
             batchId: batch.manifest.batchId,
             user: actor,
+            mode: plan.facts.training.chapterMode,
+            chapterPosition: plan.facts.training.chapterPosition,
+            replacePids: plan.facts.training.replacePids,
+            expectedCurrentPids: current.training.targetPids,
+            replaceMembers:
+                plan.facts.training.chapterMode === 'replace-existing' && !current.problems.some((problem) => problem.state === 'published'),
         });
-        await progress({ stage: 'training-ready', note: chapter.created ? 'created' : 'existing' });
+        await progress({ stage: 'training-ready', note: chapter.created ? 'created' : chapter.replaced ? 'replaced-existing-members' : 'existing' });
 
         for (const entry of batch.problems) {
             const planned = plannedByCode.get(entry.sourceProblemCode)!;

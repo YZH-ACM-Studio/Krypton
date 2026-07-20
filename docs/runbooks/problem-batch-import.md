@@ -25,9 +25,9 @@ config/<code>.yaml
 - `schemaVersion: 1`、稳定且唯一的 `batchId`、`domain`、管理员 `actor`；
 - 已注册的来源模板及其 `year/round/season/level`；
 - 专用来源账号的 `author.uid` 和精确 `author.username`；官方来源账号不得是 root、UID 2、actor 或其他题库管理员；
-- 已存在训练的精确 `id/title` 与本场 `chapterTitle`；
-- 明确的筛选字段、运算符、阈值和证据来源；
-- 每题的稳定 `sourceProblemCode`、标题、难度、导图节点 ID、赛时 `accepted/submitted`；
+- 已存在训练的精确 `id/title` 与本场 `chapterTitle`；历史回填还须声明既有 `chapterId` 和要精确替换的 `replacePids`；
+- 明确的通过量筛选，或用户给出的完整 `sourceProblemCode in [...]` 清单及证据来源；
+- 每题的稳定 `sourceProblemCode`、标题、难度、导图节点 ID；只有材料真实提供赛时数据时才写 `accepted/submitted`，不得用 `0/0` 代替未知；
 - Markdown、图片/附件、testdata 文件完整清单、可选 checker 和显式 `cases`。
 
 manifest 不接受 PID。PID 只能由 `preflight` 根据当时的服务端 counter 生成。题面中的图片必须使用 Hydro `file://<target>`，声明的资源目标必须与引用一一对应；样例必须使用成对的 ``inputN`` / ``outputN`` fenced block。
@@ -42,7 +42,7 @@ hydrooj problem:batch-import validate /absolute/path/to/batch.json
 
 `validate` 不初始化 Hydro runtime、不访问数据库，只读取本地 manifest 和文件。成功时 stdout 只有一条 JSON，包含批次指纹、逐题文件/资源/测试点统计；失败时非零退出并在 stderr 输出结构化错误。
 
-必须在继续前人工核对：题目筛选、标题/难度、导图节点、图片、赛时统计、checker、逐题 cases 数和总 cases 数。任何歧义必须写入该题的 `ambiguities` 并明确设为 `confirmed: true`；未确认项不能 apply。
+必须在继续前人工核对：题目筛选、标题/难度、导图节点、图片、可用的赛时统计、checker、逐题 cases 数和总 cases 数。任何歧义必须写入该题的 `ambiguities` 并明确设为 `confirmed: true`；未确认项不能 apply。
 
 ## 3. 生产只读预检
 
@@ -58,7 +58,7 @@ cd /opt/Krypton
 - actor、专用来源账号 UID/用户名；
 - 来源 counter 与逐题计划 PID；
 - 导图节点及物化标签；
-- 训练 ID/标题、来源锚点、目标章节 ID/顺序；
+- 训练 ID/标题、来源锚点、目标章节 ID/绝对顺序；历史回填同时核对待替换成员；
 - `batchId + sourceProblemCode` 的既有导入身份与内容指纹；
 - 精确标题或计划 PID 命中的 legacy 疑似重复。
 
@@ -91,7 +91,7 @@ cd /opt/Krypton
 
 缺少或不匹配 fingerprint、token、actor，或 counter/账号/导图/训练/已有题状态发生漂移，命令都会在写入前非零退出。
 
-执行顺序是：全批 hidden managed drafts → 题面/资源/testdata/checker/config/origStat → 全批 readiness 检查 → 创建或复用精确的首章节 → 逐题走 canonical publication。没有跨整批的大事务，也没有后台恢复器；持久 import identity、本地 execution report 和幂等阶段用于显式续跑。不会自动创建训练，也不会自动删除失败草稿。
+执行顺序是：全批 hidden managed drafts → 题面/资源/testdata/checker/config/可选 origStat → 全批 readiness 检查 → 创建最新首章节，或以 CAS 清除 manifest 明确声明的历史占位成员并保持章节绝对位置 → 逐题走 canonical publication。没有跨整批的大事务，也没有后台恢复器；持久 import identity、本地 execution report 和幂等阶段用于显式续跑。不会自动创建训练，也不会自动删除失败草稿。
 
 ## 5. Verify、失败与续跑
 
@@ -102,7 +102,7 @@ cd /opt/Krypton
   --report /absolute/path/to/batch.execution.json
 ```
 
-`verify` 逐题读取并核对：作者唯一 active author permit、PID、来源、系统/导图标签、题面、资源和 testdata SHA-256、解析后的 config/cases、origStat 审计、hidden/metadataStatus，以及训练首章节顺序、成员次序和章节创建审计。origStat 与章节审计使用稳定 `requestId`；业务写已成功但审计写失败时，续跑只补齐缺失审计，不重复改统计或章节，审计内容冲突则停止。
+`verify` 逐题读取并核对：作者唯一 active author permit、PID、来源、系统/导图标签、题面、资源和 testdata SHA-256、解析后的 config/cases、origStat 审计、hidden/metadataStatus，以及训练章节绝对位置、成员次序和章节审计。origStat 与章节审计使用稳定 `requestId`；origStat 或最新首章节创建在业务写已成功但审计响应丢失时可续跑补齐。历史章节已经清空却没有同一批次、章节、操作者和 `replacePids` 的成功审计时必须 fail closed，禁止凭“存在草稿且章节为空”猜测为已执行；该极小窗口需保留现场并人工处置。
 
 进程中断或任一步失败时：
 

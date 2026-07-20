@@ -197,6 +197,39 @@ export class MongoProblemBatchFactsRepository implements ProblemBatchFactsReposi
             )
             .toArray()) as unknown as ProblemBatchFactProblem[];
     }
+
+    async getTrainingReplacementAudit(domainId: string, batchId: string, trainingId: string, chapterId: number) {
+        const record = await this.collection('oplog').findOne(
+            {
+                type: 'training.chapter.batch-import',
+                domainId,
+                requestId: `problem-batch:${batchId}:training:${trainingId}:chapter:${chapterId}`,
+            },
+            {
+                projection: {
+                    operator: 1,
+                    trainingId: 1,
+                    chapterId: 1,
+                    chapterTitle: 1,
+                    batchId: 1,
+                    action: 1,
+                    replacePids: 1,
+                    result: 1,
+                },
+            },
+        );
+        if (!record) return null;
+        return {
+            operator: Number(record.operator),
+            trainingId: String(record.trainingId),
+            chapterId: Number(record.chapterId),
+            chapterTitle: String(record.chapterTitle),
+            batchId: String(record.batchId),
+            action: String(record.action),
+            replacePids: Array.isArray(record.replacePids) ? record.replacePids.map(Number) : [],
+            result: String(record.result),
+        };
+    }
 }
 
 export class ReadonlyProblemBatchImportAdapter implements ProblemBatchImportAdapter {

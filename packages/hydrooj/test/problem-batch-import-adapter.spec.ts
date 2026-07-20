@@ -25,6 +25,7 @@ let nextDocId = 3000;
 let failConfigObserver = false;
 let publicationIncomplete = false;
 let failOriginalStatisticsAuditOnce = false;
+let clearHistoricalChapterAfterDraftReady = false;
 
 const anchorProblem = { domainId: 'system', docType: 10, docId: 99, tag: ['牛客暑期多校'] };
 const training: any = {
@@ -175,6 +176,12 @@ const ProblemModelStub = {
     },
     assertProblemReadyForUse(pdoc: any) {
         if (!pdoc.config || !pdoc.data.length) throw new Error('problem is not ready');
+        if (clearHistoricalChapterAfterDraftReady) {
+            const chapter = training.dag.find((candidate: any) => candidate._id === 47);
+            if (!chapter) throw new Error('fixture historical chapter is missing');
+            chapter.pids = [];
+            clearHistoricalChapterAfterDraftReady = false;
+        }
     },
     async setManagedProgrammingDraftTrainingPlacement(input: any) {
         calls.push('setManagedProgrammingDraftTrainingPlacement');
@@ -267,7 +274,13 @@ const cacheStubs: Array<[string, any]> = [
             async ensureProblemBatchChapter(input: any) {
                 calls.push('ensureProblemBatchChapter');
                 const existing = training.dag.find((chapter: any) => chapter._id === input.chapterId || chapter.title === input.chapterTitle);
-                if (existing) return { chapterId: input.chapterId, created: false };
+                if (existing) {
+                    if (input.mode === 'replace-existing' && JSON.stringify(existing.pids) === JSON.stringify(input.replacePids)) {
+                        existing.pids = [];
+                        return { chapterId: input.chapterId, created: false, replaced: true };
+                    }
+                    return { chapterId: input.chapterId, created: false, replaced: false };
+                }
                 training.dag.unshift({ _id: input.chapterId, title: input.chapterTitle, requireNids: [], pids: [] });
                 return { chapterId: input.chapterId, created: true };
             },
@@ -383,6 +396,7 @@ describe('P2.23 Hydro production batch adapter', () => {
         failConfigObserver = false;
         publicationIncomplete = false;
         failOriginalStatisticsAuditOnce = false;
+        clearHistoricalChapterAfterDraftReady = false;
         training.dag = [{ _id: 1, title: '2025年牛客-第10场', requireNids: [], pids: [99] }];
     });
 
@@ -429,6 +443,81 @@ describe('P2.23 Hydro production batch adapter', () => {
             ].some((prefix) => call.startsWith(prefix)),
         ).length;
         expect(resumedMutationCount).to.equal(mutationCount);
+    });
+
+    it('replaces an exact historical placeholder in place and omits unavailable contest statistics', async () => {
+        const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+        manifest.batchId = 'fixture-historical-2021-spring';
+        manifest.training = {
+            id: trainingId.toHexString(),
+            title: training.title,
+            chapterTitle: '2021春-',
+            chapterId: 47,
+            replacePids: [99],
+        };
+        manifest.selection = { field: 'sourceProblemCode', operator: 'in', value: ['A'], source: 'user-provided complete list' };
+        delete manifest.problems[0].origStat;
+        const historicalPath = path.join(root, 'historical.json');
+        await fsp.writeFile(historicalPath, JSON.stringify(manifest));
+        training.dag = [
+            { _id: 50, title: '2021冬-', requireNids: [], pids: [98] },
+            { _id: 47, title: '2021春-', requireNids: [], pids: [99] },
+        ];
+
+        const batch = await validateProblemBatchManifest(historicalPath);
+        const adapter = new HydroProblemBatchImportAdapter();
+        const plan = await preflightProblemBatchImport(batch, adapter);
+        expect(plan.facts.training).to.include({
+            chapterId: 47,
+            chapterMode: 'replace-existing',
+            chapterPosition: 1,
+        });
+        expect(plan.facts.training.replacePids).to.deep.equal([99]);
+
+        const result = await adapter.apply(batch, plan, createProblemBatchExecutionReport(plan, 2), async () => {});
+
+        expect(result.training).to.include({ chapterId: 47 });
+        expect(training.dag.map((chapter: any) => chapter._id)).to.deep.equal([50, 47]);
+        expect(training.dag[1].pids).to.deep.equal([3000]);
+        expect(problemDocs[0]).not.to.have.property('origStat');
+        expect(calls).not.to.include('editAuthorized:origStat');
+        expect(oplogs.filter((entry) => entry.type === 'realpass.batch-import')).to.have.length(0);
+    });
+
+    it('rejects an externally emptied historical chapter without a matching replacement audit', async () => {
+        const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+        manifest.batchId = 'fixture-historical-external-clear';
+        manifest.training = {
+            id: trainingId.toHexString(),
+            title: training.title,
+            chapterTitle: '2021春-',
+            chapterId: 47,
+            replacePids: [98],
+        };
+        manifest.selection = { field: 'sourceProblemCode', operator: 'in', value: ['A'], source: 'user-provided complete list' };
+        delete manifest.problems[0].origStat;
+        const historicalPath = path.join(root, 'historical-external-clear.json');
+        await fsp.writeFile(historicalPath, JSON.stringify(manifest));
+        training.dag = [
+            { _id: 50, title: '2021冬-', requireNids: [], pids: [99] },
+            { _id: 47, title: '2021春-', requireNids: [], pids: [98] },
+        ];
+
+        const batch = await validateProblemBatchManifest(historicalPath);
+        const adapter = new HydroProblemBatchImportAdapter();
+        const plan = await preflightProblemBatchImport(batch, adapter);
+        clearHistoricalChapterAfterDraftReady = true;
+
+        try {
+            await adapter.apply(batch, plan, createProblemBatchExecutionReport(plan, 2), async () => {});
+            expect.fail('expected unaudited historical chapter clear to fail');
+        } catch (error) {
+            expect(error).to.have.property('message').that.includes('without the matching successful replacement audit');
+        }
+        expect(calls).not.to.include('ensureProblemBatchChapter');
+        expect(calls).not.to.include('publishManagedProgrammingProblem');
+        expect(training.dag[1].pids).to.deep.equal([]);
+        expect(problemDocs[0].hidden).to.equal(true);
     });
 
     it('fails preflight on an existing identity with a different content fingerprint', async () => {

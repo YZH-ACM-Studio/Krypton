@@ -23,8 +23,18 @@ export interface ProblemBatchManifest {
         level?: string;
     };
     author: { uid: number; username: string };
-    training: { id: string; title: string; chapterTitle: string };
-    selection: { field: 'accepted'; operator: '>' | '>=' | '='; value: number; source: string };
+    training: {
+        id: string;
+        title: string;
+        chapterTitle: string;
+        /** Historical backfill only: reuse this exact chapter instead of creating a new front chapter. */
+        chapterId?: number;
+        /** Exact current members that the approved apply will replace. */
+        replacePids?: number[];
+    };
+    selection:
+        | { field: 'accepted'; operator: '>' | '>=' | '='; value: number; source: string }
+        | { field: 'sourceProblemCode'; operator: 'in'; value: string[]; source: string };
     problems: ProblemBatchManifestEntry[];
 }
 
@@ -33,7 +43,7 @@ export interface ProblemBatchManifestEntry {
     title: string;
     difficulty: number;
     mindmapNodeIds: string[];
-    origStat: { accepted: number; submitted: number };
+    origStat?: { accepted: number; submitted: number };
     statement: string;
     assets: Array<{ source: string; target: string }>;
     testdata: {
@@ -89,9 +99,12 @@ export interface ProblemBatchProductionFacts {
         chapterId: number;
         chapterTitle: string;
         chapterState: 'missing' | 'existing';
+        chapterMode: 'create-front' | 'replace-existing';
+        chapterPosition: number;
         currentMaxChapterId: number;
         nonTargetDagFingerprint: string;
         targetPids: number[];
+        replacePids: number[];
     };
     mindmapNodes: Array<{ id: string; topic: string; tags: string[] }>;
     problems: ProblemBatchPreflightProblem[];
@@ -261,6 +274,8 @@ function sampleIds(statement: string, kind: 'input' | 'output'): string[] {
 }
 
 function selectionMatches(entry: ProblemBatchManifestEntry, selection: ProblemBatchManifest['selection']): boolean {
+    if (selection.field === 'sourceProblemCode') return selection.value.includes(entry.sourceProblemCode);
+    if (!entry.origStat) return false;
     const actual = entry.origStat.accepted;
     if (selection.operator === '>') return actual > selection.value;
     if (selection.operator === '>=') return actual >= selection.value;
@@ -294,24 +309,52 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
     };
 
     invariant(isPlainObject(raw.training), 'training must be an object');
-    assertKeys(raw.training, ['id', 'title', 'chapterTitle'], 'training');
-    const training = {
+    assertKeys(raw.training, ['id', 'title', 'chapterTitle', 'chapterId', 'replacePids'], 'training');
+    const training: ProblemBatchManifest['training'] = {
         id: nonEmptyString(raw.training.id, 'training.id', 24),
         title: nonEmptyString(raw.training.title, 'training.title', 128),
         chapterTitle: nonEmptyString(raw.training.chapterTitle, 'training.chapterTitle', 128),
     };
     invariant(OBJECT_ID.test(training.id), 'training.id must be one ObjectId');
+    const hasChapterId = raw.training.chapterId !== undefined;
+    const hasReplacePids = raw.training.replacePids !== undefined;
+    invariant(hasChapterId === hasReplacePids, 'training.chapterId and training.replacePids must be provided together');
+    if (hasChapterId) {
+        training.chapterId = integer(raw.training.chapterId, 'training.chapterId', 1);
+        invariant(Array.isArray(raw.training.replacePids), 'training.replacePids must be an array');
+        invariant(raw.training.replacePids.length > 0, 'training.replacePids must be non-empty');
+        training.replacePids = raw.training.replacePids.map((pid, index) => integer(pid, `training.replacePids[${index}]`, 1));
+        invariant(new Set(training.replacePids).size === training.replacePids.length, 'training.replacePids contains duplicates');
+    }
 
     invariant(isPlainObject(raw.selection), 'selection must be an object');
     assertKeys(raw.selection, ['field', 'operator', 'value', 'source'], 'selection');
-    invariant(raw.selection.field === 'accepted', 'selection.field must be accepted');
-    invariant(['>', '>=', '='].includes(String(raw.selection.operator)), 'selection.operator is unsupported');
-    const selection: ProblemBatchManifest['selection'] = {
-        field: 'accepted',
-        operator: raw.selection.operator as '>' | '>=' | '=',
-        value: integer(raw.selection.value, 'selection.value', 0),
-        source: nonEmptyString(raw.selection.source, 'selection.source', 512),
-    };
+    let selection: ProblemBatchManifest['selection'];
+    if (raw.selection.field === 'accepted') {
+        invariant(['>', '>=', '='].includes(String(raw.selection.operator)), 'selection.operator is unsupported');
+        selection = {
+            field: 'accepted',
+            operator: raw.selection.operator as '>' | '>=' | '=',
+            value: integer(raw.selection.value, 'selection.value', 0),
+            source: nonEmptyString(raw.selection.source, 'selection.source', 512),
+        };
+    } else {
+        invariant(raw.selection.field === 'sourceProblemCode', 'selection.field is unsupported');
+        invariant(raw.selection.operator === 'in', 'selection.operator is unsupported');
+        invariant(Array.isArray(raw.selection.value) && raw.selection.value.length > 0, 'selection.value must be a non-empty array');
+        const value = raw.selection.value.map((code, index) => {
+            const normalized = nonEmptyString(code, `selection.value[${index}]`, 32);
+            invariant(SOURCE_CODE.test(normalized), `selection.value[${index}] contains unsupported characters`);
+            return normalized;
+        });
+        invariant(new Set(value).size === value.length, 'selection.value contains duplicates');
+        selection = {
+            field: 'sourceProblemCode',
+            operator: 'in',
+            value,
+            source: nonEmptyString(raw.selection.source, 'selection.source', 512),
+        };
+    }
 
     invariant(Array.isArray(raw.problems) && raw.problems.length > 0, 'problems must be a non-empty array');
     const seenCodes = new Set<string>();
@@ -337,13 +380,16 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
                 }),
             ),
         ].sort();
-        invariant(isPlainObject(candidate.origStat), `${field}.origStat must be an object`);
-        assertKeys(candidate.origStat, ['accepted', 'submitted'], `${field}.origStat`);
-        const origStat = {
-            accepted: integer(candidate.origStat.accepted, `${field}.origStat.accepted`, 0),
-            submitted: integer(candidate.origStat.submitted, `${field}.origStat.submitted`, 0),
-        };
-        invariant(origStat.accepted <= origStat.submitted, `${field}.origStat accepted exceeds submitted`);
+        let origStat: ProblemBatchManifestEntry['origStat'];
+        if (candidate.origStat !== undefined) {
+            invariant(isPlainObject(candidate.origStat), `${field}.origStat must be an object`);
+            assertKeys(candidate.origStat, ['accepted', 'submitted'], `${field}.origStat`);
+            origStat = {
+                accepted: integer(candidate.origStat.accepted, `${field}.origStat.accepted`, 0),
+                submitted: integer(candidate.origStat.submitted, `${field}.origStat.submitted`, 0),
+            };
+            invariant(origStat.accepted <= origStat.submitted, `${field}.origStat accepted exceeds submitted`);
+        }
 
         invariant(Array.isArray(candidate.assets), `${field}.assets must be an array`);
         const assetTargets = new Set<string>();
@@ -393,7 +439,7 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
             title: nonEmptyString(candidate.title, `${field}.title`, 256),
             difficulty: integer(candidate.difficulty, `${field}.difficulty`, 1, 10),
             mindmapNodeIds,
-            origStat,
+            ...(origStat ? { origStat } : {}),
             statement: nonEmptyString(candidate.statement, `${field}.statement`, 1024),
             assets,
             testdata: {
@@ -408,6 +454,12 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
         invariant(selectionMatches(entry, selection), `${field} does not satisfy the declared selection rule`);
         return entry;
     });
+
+    if (selection.field === 'sourceProblemCode') {
+        const selected = [...selection.value].sort();
+        const declared = problems.map((problem) => problem.sourceProblemCode).sort();
+        invariant(canonicalJson(selected) === canonicalJson(declared), 'selection.value must exactly match the declared problem codes');
+    }
 
     return { schemaVersion: 1, batchId, domain, actor, source, author, training, selection, problems };
 }
@@ -739,8 +791,8 @@ export function problemBatchValidationSummary(batch: ValidatedProblemBatch) {
             cases: entry.testdata.cases.length,
             testdataFiles: entry.testdataFiles.length + 1,
             assets: entry.assetFiles.length,
-            accepted: entry.origStat.accepted,
-            submitted: entry.origStat.submitted,
+            accepted: entry.origStat?.accepted ?? null,
+            submitted: entry.origStat?.submitted ?? null,
             ambiguities: entry.ambiguities || [],
         })),
         totalCases: batch.totalCases,

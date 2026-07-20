@@ -33,7 +33,8 @@ require.cache[documentPath] = {
             async updateOne(filter: any, update: any) {
                 updateCalls++;
                 if (filter.dag !== training.dag || filter.title !== training.title) return { modifiedCount: 0 };
-                training.dag.unshift(...update.$push.dag.$each);
+                if (update.$set?.dag) training.dag = update.$set.dag;
+                else training.dag.unshift(...update.$push.dag.$each);
                 return { modifiedCount: 1 };
             },
         },
@@ -179,5 +180,65 @@ describe('P2.23 canonical training chapter boundary', () => {
         await expectReject(TrainingModel.ensureProblemBatchChapter(input({ expectedCurrentMaxChapterId: 38 })), 'chapter counter changed');
         training.dag.unshift({ _id: 40, title: 'conflicting title', requireNids: [], pids: [] });
         await expectReject(TrainingModel.ensureProblemBatchChapter(input()), 'chapter identity conflicts');
+    });
+
+    it('replaces only the approved members of one exact historical chapter and preserves its position', async () => {
+        training.dag.push({ _id: 47, title: '2021春-', requireNids: [], pids: [2678] });
+        const historical = input({
+            chapterId: 47,
+            chapterTitle: '2021春-',
+            mode: 'replace-existing',
+            chapterPosition: 2,
+            replacePids: [2678],
+            expectedCurrentPids: [2678],
+            replaceMembers: true,
+        });
+
+        const result = await TrainingModel.ensureProblemBatchChapter(historical);
+
+        expect(result).to.deep.equal({ chapterId: 47, created: false, replaced: true });
+        expect(training.dag.map((chapter: any) => chapter._id)).to.deep.equal([39, 2, 47]);
+        expect(training.dag[2].pids).to.deep.equal([]);
+        expect(oplogs[0]).to.include({ action: 'replace-members', chapterId: 47, batchId: '2026-nowcoder-summer-multi-1' });
+        expect(oplogs[0].replacePids).to.deep.equal([2678]);
+
+        updateCalls = 0;
+        const resumed = await TrainingModel.ensureProblemBatchChapter({ ...historical, expectedCurrentPids: [] });
+        expect(resumed).to.deep.equal({ chapterId: 47, created: false, replaced: false });
+        expect(updateCalls).to.equal(0);
+        expect(oplogs).to.have.length(1);
+    });
+
+    it('rejects historical chapter position or member drift before writing', async () => {
+        training.dag.push({ _id: 47, title: '2021春-', requireNids: [], pids: [2678] });
+        await expectReject(
+            TrainingModel.ensureProblemBatchChapter(
+                input({
+                    chapterId: 47,
+                    chapterTitle: '2021春-',
+                    mode: 'replace-existing',
+                    chapterPosition: 1,
+                    replacePids: [2678],
+                    expectedCurrentPids: [2678],
+                    replaceMembers: true,
+                }),
+            ),
+            'historical problem batch chapter identity conflicts',
+        );
+        await expectReject(
+            TrainingModel.ensureProblemBatchChapter(
+                input({
+                    chapterId: 47,
+                    chapterTitle: '2021春-',
+                    mode: 'replace-existing',
+                    chapterPosition: 2,
+                    replacePids: [2678],
+                    expectedCurrentPids: [999],
+                    replaceMembers: true,
+                }),
+            ),
+            'historical problem batch chapter identity conflicts',
+        );
+        expect(updateCalls).to.equal(0);
     });
 });

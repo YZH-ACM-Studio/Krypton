@@ -193,6 +193,9 @@ describe('P2.23 read-only production preflight adapter', () => {
             async getDuplicateProblems() {
                 return [];
             },
+            async getTrainingReplacementAudit() {
+                return null;
+            },
         } satisfies ProblemBatchFactsRepository;
 
         try {

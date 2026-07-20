@@ -1,10 +1,11 @@
-import { ArrowLeft, ClipboardPlus, Download, FileText, ListTree, Plus, Save, Trash2 } from 'lucide-react';
+import { ArrowLeft, ClipboardPlus, Download, FileText, ListTree, Network, Plus, Save, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { ProblemPicker } from '@/components/problem-picker';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { SimpleSelect } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { FileUploader } from '@/components/uploader';
 import { useBootstrap } from '@/lib/bootstrap';
@@ -48,6 +49,7 @@ export function CourseEditPage() {
     canManageFiles: boolean;
     canCreateQuiz: boolean;
     files: CourseRecord[];
+    mindmaps: Array<{ _id: string; title: string; visibility: 'public' }>;
   };
   const isEdit = data.page_name === 'course_edit';
   const course = data.tdoc || {};
@@ -57,6 +59,7 @@ export function CourseEditPage() {
     parsedChapters.length ? parsedChapters : [{ _id: 1, title: '第一章', content: '', pids: [], tids: '' }],
   );
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set((course.courseGroupIds || []).map(String)));
+  const [selectedMindmapId, setSelectedMindmapId] = useState(String(course.mindmapId || ''));
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState('');
   const [outlineOpen, setOutlineOpen] = useState(false);
@@ -358,6 +361,28 @@ export function CourseEditPage() {
               <span className="text-xs font-medium">学期</span>
               <Input name="term" defaultValue={course.term || ''} className="min-h-11" placeholder="如 2026 秋" />
             </label>
+            <section id="course-mindmap-settings" className="scroll-mt-24 space-y-1.5" aria-labelledby="course-mindmap-title">
+              <span id="course-mindmap-title" className="flex items-center gap-1.5 text-xs font-medium">
+                <Network className="size-3.5 text-muted-foreground" />
+                知识导图
+              </span>
+              <SimpleSelect
+                name="mindmapId"
+                value={selectedMindmapId}
+                onValueChange={(value) => {
+                  setSelectedMindmapId(value);
+                  markDirty();
+                }}
+                options={[
+                  { value: '', label: '不绑定知识导图' },
+                  ...(data.mindmaps || []).map((map) => ({ value: map._id, label: `${map.title} · 已公开` })),
+                ]}
+                ariaLabel="选择课程知识导图"
+                className="min-h-11"
+                contentClassName="[&_[role=option]]:min-h-10"
+              />
+              <p className="text-xs leading-relaxed text-muted-foreground">仅用于课程知识导图视图；章节仍可包含其它导图或尚未归类的题目。</p>
+            </section>
             <label className="block space-y-1.5">
               <span className="text-xs font-medium">课程简介</span>
               <MarkdownEditor name="content" value={course.content || ''} minHeight={180} />

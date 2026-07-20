@@ -1,13 +1,15 @@
-import { ArrowLeft, BookOpen, CheckCircle2, ClipboardPlus, Download, FileText, ListTree, Pencil, Trophy } from 'lucide-react';
+import { ArrowLeft, BookOpen, CheckCircle2, ClipboardPlus, Download, FileText, ListTree, Network, Pencil, Trophy } from 'lucide-react';
 import { useState } from 'react';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { Button } from '@/components/ui/button';
+import { MiniTabs } from '@/components/ui/mini-tabs';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { ChapterOutline } from './chapter-outline';
 import { useChapterQuery } from './chapter-query';
-import type { CourseChapter, CourseRecord } from './types';
+import { CourseMindmapView } from './mindmap';
+import type { CourseChapter, CourseMindmapData, CourseRecord } from './types';
 
 function ProblemList({ chapter, problems }: { chapter: CourseChapter; problems: Record<string, CourseRecord> }) {
   if (!chapter.pids.length) return null;
@@ -84,12 +86,15 @@ export function CourseDetailPage() {
     canDownloadFiles: boolean;
     tsdoc?: CourseRecord;
     files: CourseRecord[];
+    view: 'overview' | 'mindmap';
+    courseMindmap: CourseMindmapData | null;
   };
   const course = data.tdoc || {};
   const tid = String(course.docId || course._id);
   const chapters = data.chapters || [];
   const { activeId, selectChapter } = useChapterQuery(chapters);
   const activeChapter = chapters.find((chapter) => chapter._id === activeId) || chapters[0];
+  const activeView = data.view === 'mindmap' ? 'mindmap' : 'overview';
   const [outlineOpen, setOutlineOpen] = useState(false);
 
   const selectFromMobile = (chapterId: number) => {
@@ -112,13 +117,19 @@ export function CourseDetailPage() {
           </p>
           <h1 className="mt-1 truncate text-2xl font-semibold tracking-tight">{course.title}</h1>
         </div>
-        <Button type="button" variant="outline" className="min-h-11 gap-1.5 lg:hidden" onClick={() => setOutlineOpen(true)}>
-          <ListTree className="size-4" />
-          章节
-        </Button>
+        {activeView === 'overview' && chapters.length ? (
+          <Button type="button" variant="outline" className="min-h-11 gap-1.5 lg:hidden" onClick={() => setOutlineOpen(true)}>
+            <ListTree className="size-4" />
+            章节
+          </Button>
+        ) : null}
         {data.canManage ? (
           <Button asChild variant="outline" className="min-h-11 gap-1.5">
-            <a href={`/course/${tid}/edit?chapter=${activeChapter?._id || ''}`}>
+            <a
+              href={
+                activeView === 'mindmap' ? `/course/${tid}/edit#course-mindmap-settings` : `/course/${tid}/edit?chapter=${activeChapter?._id || ''}`
+              }
+            >
               <Pencil className="size-4" />
               编辑
             </a>
@@ -139,7 +150,19 @@ export function CourseDetailPage() {
         ) : null}
       </header>
 
-      {!chapters.length ? (
+      <MiniTabs
+        value={activeView}
+        size="md"
+        aria-label="课程视图"
+        items={[
+          { value: 'overview', label: '课程内容', icon: BookOpen, href: `/course/${tid}` },
+          { value: 'mindmap', label: '知识导图', icon: Network, href: `/course/${tid}?view=mindmap` },
+        ]}
+      />
+
+      {activeView === 'mindmap' ? (
+        <CourseMindmapView tid={tid} data={data.courseMindmap || null} canManage={data.canManage} />
+      ) : !chapters.length ? (
         <section className="border-y border-border/70 py-16 text-center">
           <BookOpen className="mx-auto size-6 text-muted-foreground" />
           <h2 className="mt-3 text-sm font-semibold">课程还没有章节</h2>

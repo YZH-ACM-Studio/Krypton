@@ -29,6 +29,7 @@ function MindmapNodeView({ data }: { data: MindmapNodeData }) {
         className={cn(
           'flex h-full w-full items-center justify-center rounded-xl border px-3 py-2 text-sm shadow-sm transition-[box-shadow,border-color] duration-200 motion-reduce:transition-none',
           COLOR_STYLES[data.color || 'gray'] || COLOR_STYLES.gray,
+          data.dimmed && !data.selected && 'opacity-35 grayscale-[0.35]',
           data.selected && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
           data.isRoot && 'border-primary/60 bg-primary/10 font-semibold shadow-md',
         )}
@@ -71,6 +72,7 @@ export function MindmapCanvas({
   onSelect,
   collapsed: controlledCollapsed,
   onCollapsedChange,
+  emphasizedIds,
 }: {
   nodes: MindmapNode[];
   config: MindmapConfig;
@@ -78,6 +80,7 @@ export function MindmapCanvas({
   onSelect: (id: string | null) => void;
   collapsed?: Set<string>;
   onCollapsedChange?: (value: Set<string>) => void;
+  emphasizedIds?: ReadonlySet<string>;
 }) {
   const [internalCollapsed, setInternalCollapsed] = useState(() => initialCollapsedNodes(nodes, config.rootNodeId));
   const collapsed = controlledCollapsed || internalCollapsed;
@@ -117,7 +120,12 @@ export function MindmapCanvas({
         setFlowNodes(
           layout.nodes.map((node) => ({
             ...node,
-            data: { ...node.data, selected: node.id === selectedIdRef.current, onToggleCollapse: () => toggleCollapse(node.id) },
+            data: {
+              ...node.data,
+              selected: node.id === selectedIdRef.current,
+              dimmed: emphasizedIds ? !emphasizedIds.has(node.id) : false,
+              onToggleCollapse: () => toggleCollapse(node.id),
+            },
           })),
         );
         setFlowEdges(layout.edges);
@@ -135,7 +143,7 @@ export function MindmapCanvas({
     return () => {
       cancelled = true;
     };
-  }, [nodes, config.rootNodeId, config.layoutDirection, collapsed, toggleCollapse, fitView]);
+  }, [nodes, config.rootNodeId, config.layoutDirection, collapsed, toggleCollapse, fitView, emphasizedIds]);
 
   const nodeTypes = useMemo(() => NODE_TYPES, []);
   return (

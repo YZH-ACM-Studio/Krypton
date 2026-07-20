@@ -415,6 +415,19 @@ export async function getKnowledgeMap(id: ObjectId | string): Promise<KnowledgeM
     return await mapsColl.findOne({ _id: objectId(id, 'mapId') });
 }
 
+export async function getPublicKnowledgeMap(id: ObjectId | string): Promise<KnowledgeMapDoc | null> {
+    const map = await getKnowledgeMap(id);
+    return map?.visibility === 'public' ? map : null;
+}
+
+export async function getPublicKnowledgeMapSnapshot(id: ObjectId | string): Promise<{ config: KnowledgeMapDoc; nodes: MindmapNode[] } | null> {
+    const config = await getPublicKnowledgeMap(id);
+    if (!config) return null;
+    const nodes = await listAllNodes(config._id);
+    assertMapTree(config, nodes);
+    return { config, nodes };
+}
+
 export async function getKnowledgeMapUsage(id: ObjectId | string): Promise<KnowledgeMapUsage> {
     const mapId = objectId(id, 'mapId');
     const [nodeCount, problemCount, courseCount] = await Promise.all([

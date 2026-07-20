@@ -59,8 +59,8 @@ export function add(
     });
 }
 
-export function edit(domainId: string, tid: ObjectId, $set: Partial<TrainingDoc>) {
-    return document.set(domainId, document.TYPE_TRAINING, tid, $set);
+export function edit(domainId: string, tid: ObjectId, $set: Partial<TrainingDoc>, $unset: Partial<Record<keyof TrainingDoc, 1>> = {}) {
+    return document.set(domainId, document.TYPE_TRAINING, tid, $set, $unset as any);
 }
 
 interface ProblemBatchChapterAuditInput {

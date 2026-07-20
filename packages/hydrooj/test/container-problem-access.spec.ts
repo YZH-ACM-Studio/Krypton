@@ -5,10 +5,24 @@ const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {} };
 let boundGroupIds: string[] = [];
 let boundGroupError: Error | null = null;
+let publicMindmaps: any[] = [];
+const publicMindmapSnapshots = new Map<string, any>();
 (global as any).Hydro.model.userbind = {
     async findStudentByUserId() {
         if (boundGroupError) throw boundGroupError;
         return { groupIds: boundGroupIds };
+    },
+};
+(global as any).Hydro.model.mindmap = {
+    async getPublicMap(id: unknown) {
+        return publicMindmaps.find((map) => String(map._id) === String(id)) || null;
+    },
+    async getPublicSnapshot(id: unknown) {
+        calls.mindmapSnapshots.push(String(id));
+        return publicMindmapSnapshots.get(String(id)) || null;
+    },
+    async listPublicMaps() {
+        return publicMindmaps;
     },
 };
 
@@ -66,6 +80,7 @@ const calls = {
     storagePuts: [] as any[],
     storageSigns: [] as any[],
     trainingQueries: [] as any[],
+    mindmapSnapshots: [] as string[],
 };
 let denySelection = false;
 let currentContainer: any;
@@ -348,6 +363,7 @@ beforeEach(() => {
     calls.storagePuts.length = 0;
     calls.storageSigns.length = 0;
     calls.trainingQueries.length = 0;
+    calls.mindmapSnapshots.length = 0;
     denySelection = false;
     problemDocs.clear();
     currentContainer = null;
@@ -355,6 +371,212 @@ beforeEach(() => {
     trainingRows = [];
     boundGroupIds = [];
     boundGroupError = null;
+    publicMindmaps = [];
+    publicMindmapSnapshots.clear();
+});
+
+const MAP_A = '64b000000000000000000001';
+const MAP_B = '64b000000000000000000002';
+const ROOT_A = '64b000000000000000000011';
+const NODE_A = '64b000000000000000000012';
+const NOW = new Date('2026-07-20T12:00:00.000Z');
+
+function publicMap(id = MAP_A) {
+    return {
+        _id: id,
+        title: id === MAP_A ? '算法' : '面向对象',
+        rootNodeId: id === MAP_A ? ROOT_A : '64b000000000000000000021',
+        visibility: 'public',
+        layoutDirection: 'RIGHT',
+        createdAt: NOW,
+        updatedAt: NOW,
+    };
+}
+
+function publicSnapshot() {
+    return {
+        config: publicMap(),
+        nodes: [
+            {
+                _id: ROOT_A,
+                mapId: MAP_A,
+                parentId: null,
+                topic: '算法',
+                tags: ['internal-root'],
+                problemIds: ['SECRET'],
+                order: 0,
+                createdAt: NOW,
+                updatedAt: NOW,
+            },
+            {
+                _id: NODE_A,
+                mapId: MAP_A,
+                parentId: ROOT_A,
+                topic: '模拟',
+                tags: ['simulation'],
+                problemIds: ['SECRET'],
+                order: 1,
+                createdAt: NOW,
+                updatedAt: NOW,
+            },
+        ],
+    };
+}
+
+describe('P3.20 course mindmap binding and projection', () => {
+    it('returns an explicit unbound state and fails when a persisted binding is unavailable', async () => {
+        currentContainer = {
+            domainId: 'system',
+            docId: 'course',
+            owner: 7,
+            kind: 'course',
+            title: 'Course',
+            content: '',
+            description: '',
+            courseGroupIds: [],
+            dag: [],
+        };
+        const unbound = makeHandler(courseRoutes.course_detail);
+        await unbound.get('forged-domain', 'course', 'mindmap');
+        expect(unbound.response.body.view).to.equal('mindmap');
+        expect(unbound.response.body.courseMindmap).to.equal(null);
+        expect(calls.mindmapSnapshots).to.deep.equal([]);
+
+        currentContainer = { ...currentContainer, mindmapId: MAP_A };
+        const unavailable = makeHandler(courseRoutes.course_detail);
+        const error = await captureFailure(() => unavailable.get('forged-domain', 'course', 'mindmap'));
+        expect(error).to.be.instanceOf(TypeError);
+        expect(error?.message).to.include('unavailable public mindmap');
+        expect(calls.mindmapSnapshots).to.deep.equal([MAP_A]);
+    });
+
+    it('does not load a bound mindmap during the ordinary chapter view', async () => {
+        publicMindmaps = [publicMap()];
+        publicMindmapSnapshots.set(MAP_A, publicSnapshot());
+        currentContainer = {
+            domainId: 'system',
+            docId: 'course',
+            owner: 7,
+            kind: 'course',
+            title: 'Course',
+            content: '',
+            description: '',
+            courseGroupIds: [],
+            mindmapId: MAP_A,
+            dag: [],
+        };
+        const handler = makeHandler(courseRoutes.course_detail);
+        await handler.get('forged-domain', 'course');
+        expect(handler.response.body.view).to.equal('overview');
+        expect(handler.response.body.courseMindmap).to.equal(null);
+        expect(calls.mindmapSnapshots).to.deep.equal([]);
+    });
+
+    it('projects only visible in-course problems with direct nodes from the bound map', async () => {
+        publicMindmaps = [publicMap()];
+        publicMindmapSnapshots.set(MAP_A, publicSnapshot());
+        problemDocs.set(11, {
+            domainId: 'system',
+            docId: 11,
+            pid: 'P11',
+            owner: 7,
+            title: 'Visible',
+            hidden: false,
+            knowledgeMapId: MAP_A,
+            knowledgeNodeIds: [NODE_A],
+        });
+        problemDocs.set(12, {
+            domainId: 'system',
+            docId: 12,
+            pid: 'P12',
+            owner: 7,
+            title: 'Other map',
+            hidden: false,
+            knowledgeMapId: MAP_B,
+            knowledgeNodeIds: ['64b000000000000000000022'],
+        });
+        problemDocs.set(13, {
+            domainId: 'system',
+            docId: 13,
+            pid: 'P13',
+            owner: 7,
+            title: 'Hidden',
+            hidden: true,
+            knowledgeMapId: MAP_A,
+            knowledgeNodeIds: [NODE_A],
+        });
+        currentContainer = {
+            domainId: 'system',
+            docId: 'course',
+            owner: 7,
+            kind: 'course',
+            title: 'Course',
+            content: '',
+            description: '',
+            courseGroupIds: [],
+            mindmapId: MAP_A,
+            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [11, 12, 13], tids: [] }],
+        };
+        const handler = makeHandler(courseRoutes.course_detail);
+        await handler.get('forged-domain', 'course', 'mindmap');
+        const view = handler.response.body.courseMindmap;
+        expect(handler.response.body.view).to.equal('mindmap');
+        expect(view.usedNodeIds).to.deep.equal([NODE_A]);
+        expect(view.problems).to.deep.equal([
+            {
+                domainId: 'system',
+                docId: 11,
+                pid: 'P11',
+                title: 'Visible',
+                nodeIds: [NODE_A],
+                chapters: [{ id: 1, title: '第一章' }],
+            },
+        ]);
+        expect(view.nodes.every((node: any) => node.tags.length === 0 && node.problemIds.length === 0)).to.equal(true);
+        expect(JSON.stringify(view)).not.to.include('managedAuthoring');
+        expect(handler.response.body.tdoc).to.deep.equal({ docId: 'course', title: 'Course', term: '' });
+        expect(handler.response.body.chapters).to.deep.equal([]);
+        expect(handler.response.body.pdict).to.deep.equal({});
+        expect(handler.response.body.psdict).to.deep.equal({});
+        expect(handler.response.body.cdict).to.deep.equal({});
+        expect(JSON.stringify(handler.response.body)).not.to.include('P13');
+        expect(calls.getListViewableAuthorized).to.have.length(1);
+        expect(calls.mindmapSnapshots).to.deep.equal([MAP_A]);
+    });
+
+    it('lists public maps for settings and validates bindings before any course write', async () => {
+        publicMindmaps = [publicMap()];
+        const editor = makeHandler(courseRoutes.course_create);
+        await editor.get('forged-domain');
+        expect(editor.response.body.mindmaps).to.deep.equal([{ _id: MAP_A, title: '算法', visibility: 'public' }]);
+
+        await editor.post('forged-domain', null, 'Course', '', JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]), '', '', [], MAP_A);
+        expect(calls.add.at(-1)[7].mindmapId.toHexString()).to.equal(MAP_A);
+
+        calls.add.length = 0;
+        const rejected = await captureFailure(() =>
+            editor.post('forged-domain', null, 'Course', '', JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]), '', '', [], MAP_B),
+        );
+        expect(rejected?.name).to.equal('ValidationError');
+        expect(calls.add).to.have.length(0);
+    });
+
+    it('unsets an existing binding without changing chapter semantics', async () => {
+        const editor = makeHandler(courseRoutes.course_edit);
+        editor.tdoc = {
+            docId: 'course',
+            kind: 'course',
+            title: 'Course',
+            content: '',
+            description: '',
+            courseGroupIds: [],
+            mindmapId: MAP_A,
+            dag: [{ _id: 1, title: '第一章', requireNids: [], pids: [], tids: [] }],
+        };
+        await editor.post('forged-domain', 'course', 'Course', '', JSON.stringify([{ _id: 1, title: '第一章', pids: [], tids: [] }]), '', '', [], '');
+        expect(calls.edit.at(-1)[2].dag[0].title).to.equal('第一章');
+        expect(calls.edit.at(-1)[3]).to.deep.equal({ mindmapId: 1 });
+    });
 });
 
 describe('P3.8 course workspace capabilities', () => {

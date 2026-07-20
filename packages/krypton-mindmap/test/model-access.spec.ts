@@ -378,6 +378,15 @@ describe('mindmap problem query scope', () => {
 });
 
 describe('knowledge map lifecycle', () => {
+    it('exposes a validated snapshot only while the map is public', async () => {
+        const snapshot = await model.getPublicKnowledgeMapSnapshot(config._id);
+        expect(snapshot?.config._id.equals(config._id)).to.equal(true);
+        expect(snapshot?.nodes.map((node) => node._id.toHexString())).to.deep.equal([config.rootNodeId.toHexString()]);
+        config.visibility = 'hidden';
+        expect(await model.getPublicKnowledgeMap(config._id)).to.equal(null);
+        expect(await model.getPublicKnowledgeMapSnapshot(config._id)).to.equal(null);
+    });
+
     it('creates an independent hidden map with exactly one scoped root and only enumerates public maps publicly', async () => {
         const created = await model.createKnowledgeMap({
             domainId: 'system',

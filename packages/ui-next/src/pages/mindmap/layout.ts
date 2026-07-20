@@ -12,6 +12,7 @@ export interface MindmapNodeData extends Record<string, unknown> {
   color?: string;
   isRoot?: boolean;
   selected?: boolean;
+  dimmed?: boolean;
   hasChildren?: boolean;
   collapsed?: boolean;
   side?: 'left' | 'right' | 'root';
@@ -124,9 +125,7 @@ export async function computeMindmapLayout(
     const root = layout.children?.find((entry) => entry.id === rootId);
     const dx = root?.x || 0;
     const dy = root?.y || 0;
-    const positions = new Map(
-      (layout.children || []).map((entry) => [entry.id, { x: (entry.x || 0) - dx, y: (entry.y || 0) - dy }]),
-    );
+    const positions = new Map((layout.children || []).map((entry) => [entry.id, { x: (entry.x || 0) - dx, y: (entry.y || 0) - dy }]));
     return {
       nodes: visible.map((node) => ({
         id: node._id,

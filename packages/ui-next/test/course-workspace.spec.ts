@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
 import { resolveChapterId, withChapterQuery } from '../src/pages/course/chapter-query.ts';
+import { problemsForCourseMindmapNode } from '../src/pages/course/mindmap-state.ts';
 
 const root = resolve(import.meta.dirname, '..');
 
@@ -94,5 +95,51 @@ describe('P3.8 course workspace', () => {
     expect(fallback).to.include('name="fromCourse"');
     expect(fallback).to.include('name="participantScopeMode"');
     expect(fallback).to.include('name="participantGroupIds"');
+  });
+
+  it('binds one public mindmap and keeps ordinary chapter requests lazy', () => {
+    const handler = readFileSync(resolve(root, '../hydrooj/src/handler/course.ts'), 'utf8');
+    const editor = readFileSync(resolve(root, 'src/pages/course/editor.tsx'), 'utf8');
+    const detail = readFileSync(resolve(root, 'src/pages/course/detail.tsx'), 'utf8');
+    const mindmap = readFileSync(resolve(root, 'src/pages/course/mindmap.tsx'), 'utf8');
+    expect(handler).to.include("activeView === 'mindmap' && tdoc.mindmapId");
+    expect(handler).to.include('buildCourseMindmapView');
+    expect(handler).to.include('getListViewableAuthorized');
+    expect(handler).to.include('resolveProblemKnowledgeNodeIds');
+    expect(editor).to.include('name="mindmapId"');
+    expect(editor).to.include('不绑定知识导图');
+    expect(editor).to.include('已公开');
+    expect(detail).to.match(/\/course\/\$\{tid\}\?view=mindmap/);
+    expect(detail).to.include('<CourseMindmapView');
+    expect(mindmap).to.include('collapsed={collapsed}');
+    expect(mindmap).to.include('emphasizedIds={emphasizedIds}');
+    expect(mindmap).to.match(/\?chapter=\$\{encodeURIComponent/);
+    expect(mindmap).not.to.include('fetch(');
+    expect(mindmap).not.to.include('loadNodeProblems');
+  });
+
+  it('lists a problem only on nodes directly selected by that problem', () => {
+    const problems = [
+      {
+        domainId: 'system',
+        docId: 11,
+        pid: 'P11',
+        title: '模拟',
+        nodeIds: ['node-a', 'node-b'],
+        chapters: [{ id: 1, title: '第一章' }],
+      },
+      {
+        domainId: 'system',
+        docId: 12,
+        pid: 'P12',
+        title: '其它',
+        nodeIds: ['node-c'],
+        chapters: [{ id: 2, title: '第二章' }],
+      },
+    ];
+    expect(problemsForCourseMindmapNode(problems, 'node-a').map((problem) => problem.docId)).to.deep.equal([11]);
+    expect(problemsForCourseMindmapNode(problems, 'node-b').map((problem) => problem.docId)).to.deep.equal([11]);
+    expect(problemsForCourseMindmapNode(problems, 'ancestor')).to.deep.equal([]);
+    expect(problemsForCourseMindmapNode(problems, null)).to.deep.equal([]);
   });
 });

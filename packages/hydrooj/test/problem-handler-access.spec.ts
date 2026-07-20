@@ -513,7 +513,9 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             parseProblemConfigObject: (pdoc: any) => (pdoc?.config && typeof pdoc.config === 'object' ? pdoc.config : null),
             parseStructuredRegionSubmission: (kind: string, template: any, rawCode: string) => {
                 const parsed = JSON.parse(rawCode);
-                const expected = template.regions.map((region: any) => region.id).sort();
+                const expected = (template.regions || template.surface.filter((segment: any) => segment.type === 'region'))
+                    .map((region: any) => region.id)
+                    .sort();
                 const actual = Object.keys(parsed).sort();
                 if (
                     expected.join('\0') !== actual.join('\0') ||
@@ -538,6 +540,8 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                               mode: kind === 'function' ? 'function' : config.mode,
                               lang: config.template.lang,
                               source: config.template.source,
+                              sourceHash: config.template.sourceHash,
+                              publicRanges: config.template.publicRanges,
                               regions: config.template.regions,
                               ...(config.mode === 'compile' || kind === 'function' ? { cases: config.cases } : {}),
                           },
@@ -2774,12 +2778,12 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             content: '',
         };
         handler.canEditLoadedProblem = true;
-        const region = { id: 'r_abcdefghijkl', startLine: 0, endLine: 1, order: 0, signature: 'int solve()' };
+        const region = { id: 'r_abcdefghijkl', startLine: 0, endLine: 1, title: 'solve' };
         maintainableResults = [
             {
                 config: {
                     type: 'function',
-                    template: { lang: 'cc.cc17', source: 'int solve();', sourceHash: 'hash', regions: [region] },
+                    template: { lang: 'cc.cc17', source: 'int solve();', sourceHash: 'hash', publicRanges: [], regions: [region] },
                     cases: [{ input: '1.in', output: '1.out' }],
                 },
             },
@@ -2793,6 +2797,8 @@ describe('P3.9 basic objective HTTP boundaries', () => {
                 mode: 'function',
                 lang: 'cc.cc17',
                 source: 'int solve();',
+                sourceHash: 'hash',
+                publicRanges: [],
                 regions: [region],
                 cases: [{ input: '1.in', output: '1.out' }],
             },
@@ -2872,7 +2878,14 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
             knowledgeNodeIds: 'node-1',
             editorProblemKind: 'program_fill',
             structuredConfig: JSON.stringify({
-                main: { mode: 'text', lang: '', source: 'i++;\nj++;', regions: [{ id: '', startLine: 0, endLine: 1, order: 0 }] },
+                main: {
+                    mode: 'text',
+                    lang: '',
+                    source: 'i++;\nj++;',
+                    sourceHash: '76415f90b91e424dfdba1668d49484c225c431e8e6431158ce78c2ea8640ba8e',
+                    publicRanges: [{ startLine: 1, endLine: 2 }],
+                    regions: [{ id: '', startLine: 0, endLine: 1 }],
+                },
             }),
         };
         await programFill.post(
@@ -2885,7 +2898,14 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
             ['node-1'],
             'program_fill',
             JSON.stringify({
-                main: { mode: 'text', lang: '', source: 'i++;\nj++;', regions: [{ id: '', startLine: 0, endLine: 1, order: 0 }] },
+                main: {
+                    mode: 'text',
+                    lang: '',
+                    source: 'i++;\nj++;',
+                    sourceHash: '76415f90b91e424dfdba1668d49484c225c431e8e6431158ce78c2ea8640ba8e',
+                    publicRanges: [{ startLine: 1, endLine: 2 }],
+                    regions: [{ id: '', startLine: 0, endLine: 1 }],
+                },
             }),
         );
         const fn = makeHandler(ProblemCreateFunctionHandler, {});
@@ -2938,7 +2958,13 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
             config: {
                 type: 'function',
                 langs: ['cpp'],
-                template: { lang: 'cpp', regions: [{ id: 'r_abcdefghijkl' }, { id: 'r_mnopqrstuvwx' }] },
+                template: {
+                    lang: 'cpp',
+                    surface: [
+                        { type: 'region', id: 'r_abcdefghijkl' },
+                        { type: 'region', id: 'r_mnopqrstuvwx' },
+                    ],
+                },
             },
         };
         await handler.post('forged', 'forged-lang', JSON.stringify({ r_abcdefghijkl: 'body', r_mnopqrstuvwx: 'body' }), false, [], undefined);
@@ -2961,7 +2987,7 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
                 type: 'program_fill',
                 mode: 'compile',
                 langs: ['cpp'],
-                template: { lang: 'cpp', regions: [{ id: 'r_abcdefghijkl' }] },
+                template: { lang: 'cpp', surface: [{ type: 'region', id: 'r_abcdefghijkl' }] },
             },
         };
         const error = await captureFailure(() => handler.post('forged', 'cpp', JSON.stringify({ r_abcdefghijkl: 'i++\nj++' }), false, [], undefined));
@@ -2978,7 +3004,12 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
             config: {
                 type: 'program_fill',
                 mode: 'text',
-                template: { regions: [{ id: 'r_abcdefghijkl' }, { id: 'r_mnopqrstuvwx' }] },
+                template: {
+                    surface: [
+                        { type: 'region', id: 'r_abcdefghijkl' },
+                        { type: 'region', id: 'r_mnopqrstuvwx' },
+                    ],
+                },
             },
         };
         for (const code of [

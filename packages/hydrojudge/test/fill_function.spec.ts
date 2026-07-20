@@ -52,13 +52,12 @@ function context(overrides: Record<string, unknown> = {}) {
                     lang: 'cc.cc17',
                     source: 'int main() {\nreturn 0;\n}',
                     sourceHash: problemConfig.templateSourceHash('int main() {\nreturn 0;\n}'),
+                    publicRanges: [],
                     regions: [
                         {
                             id: REGION_ID,
                             startLine: 1,
                             endLine: 2,
-                            order: 0,
-                            signature: 'int main()',
                         },
                     ],
                 },
@@ -89,7 +88,8 @@ function textContext(answers: Record<string, string>) {
             template: {
                 source,
                 sourceHash: problemConfig.templateSourceHash(source),
-                regions: ids.map((id, index) => ({ id, startLine: index + 1, endLine: index + 2, order: index })),
+                publicRanges: [],
+                regions: ids.map((id, index) => ({ id, startLine: index + 1, endLine: index + 2 })),
             },
         },
         lang: '_',

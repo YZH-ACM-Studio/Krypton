@@ -10,6 +10,7 @@
  *
  * Server provides: tdoc, pdict, cells, broadcasts, scoreboard, allowSubmitByKind, etc.
  */
+import type { ClientStructuredCodeSegment } from '@hydrooj/common';
 import { Lock, PanelLeftClose, PanelLeftOpen, Save, Send } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ExamDetailShell, type ExamSection, useExamSection } from '@/components/layout/exam-shell';
@@ -48,8 +49,7 @@ interface PdocLike {
     answers?: Record<string, any>;
     template?: {
       lang?: string;
-      regions: Array<{ id: string; signature?: string; description?: string; prompt?: string }>;
-      skeleton?: Array<{ code: string } | { regionId: string }>;
+      surface: ClientStructuredCodeSegment[];
     };
     langs?: string[];
     options?: Record<string, string[]>;
@@ -98,7 +98,10 @@ function parseSavedRegionContents(pdoc: PdocLike | undefined, rawCode: unknown):
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`题目 ${pdoc.docId} 的 region 草稿格式错误`);
   }
-  const expected = (pdoc.config.template?.regions || []).map((region) => region.id).sort();
+  const expected = (pdoc.config.template?.surface || [])
+    .filter((segment): segment is Extract<ClientStructuredCodeSegment, { type: 'region' }> => segment.type === 'region')
+    .map((region) => region.id)
+    .sort();
   const actual = Object.keys(parsed).sort();
   if (expected.length !== actual.length || expected.some((id, index) => id !== actual[index])) {
     throw new Error(`题目 ${pdoc.docId} 的 region 草稿与当前模板不匹配`);
@@ -333,7 +336,9 @@ function ProblemsSection({
     if (type === 'objective') {
       body.answers = JSON.stringify(draft.answers);
     } else if (['program_fill', 'function'].includes(type)) {
-      const regions = pdoc.config.template?.regions || [];
+      const regions = (pdoc.config.template?.surface || []).filter(
+        (segment): segment is Extract<ClientStructuredCodeSegment, { type: 'region' }> => segment.type === 'region',
+      );
       body.code = JSON.stringify(Object.fromEntries(regions.map((region) => [region.id, draft.regionContents?.[region.id] || ''])));
       body.lang = type === 'program_fill' && pdoc.config.mode === 'text' ? '_' : draft.lang || pdoc.config?.template?.lang || 'cpp';
     } else if (type === 'default' || type === 'submit_answer') {
@@ -637,12 +642,11 @@ function CellEditor({
       )}
       {!cell.questionKey && STRUCTURED_REGION_KINDS.includes(cell.kind) && pdoc.config.template && (
         <StructuredRegionInputs
-          regions={pdoc.config.template.regions}
+          surface={pdoc.config.template.surface}
           values={draft.regionContents || {}}
           onChange={onRegionChange}
           readOnly={isLocked}
           singleLine={cell.kind === 'program_fill_text' || cell.kind === 'program_fill_compile'}
-          skeleton={pdoc.config.type === 'program_fill' ? pdoc.config.template.skeleton : undefined}
         />
       )}
       {!cell.questionKey && STRUCTURED_REGION_KINDS.includes(cell.kind) && !pdoc.config.template && (

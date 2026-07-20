@@ -1,5 +1,5 @@
 import type { ProblemKind } from '@hydrooj/common';
-import { parseProblemKind } from '@hydrooj/common';
+import { compareStructuredCodeRegions, parseProblemKind } from '@hydrooj/common';
 import { ValidationError } from '../error';
 import { parseProblemConfigObject, validateCompiledStructuredConfig, validateStructuredCodeJudgeConfig } from '../lib/problem-config';
 import db from '../service/db';
@@ -116,7 +116,7 @@ function assertNoSecondaryStatement(value: unknown, path = 'config'): void {
     }
     if (!isPlainObject(value)) return;
     for (const [key, child] of Object.entries(value)) {
-        const regionStudentText = ['prompt', 'description'].includes(key) && /\.regions\[\d+\]$/.test(path);
+        const regionStudentText = ['title', 'prompt', 'description'].includes(key) && /\.regions\[\d+\]$/.test(path);
         if (FORBIDDEN_STATEMENT_FIELDS.has(key) && !regionStudentText) {
             throw new ValidationError('config', null, `题面只能存放在 content，禁止字段 ${path}.${key}`);
         }
@@ -293,7 +293,9 @@ export function structuredProblemConfigForEditor(kind: ProblemKind, configInput:
                 mode: kind === 'function' ? 'function' : config.mode,
                 lang: template.lang || config.langs?.[0] || '',
                 source: template.source || '',
-                regions: Array.isArray(template.regions) ? [...template.regions].sort((a, b) => Number(a.order) - Number(b.order)) : [],
+                sourceHash: template.sourceHash || '',
+                publicRanges: Array.isArray(template.publicRanges) ? template.publicRanges : [],
+                regions: Array.isArray(template.regions) ? [...template.regions].sort(compareStructuredCodeRegions) : [],
                 ...(kind === 'function' || config.mode === 'compile' ? { cases: Array.isArray(config.cases) ? config.cases : [] } : {}),
             },
         };

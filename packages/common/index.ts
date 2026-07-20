@@ -4,5 +4,6 @@ export * from './objective';
 export * from './permission';
 export * from './problem-kind';
 export * from './status';
+export * from './structured-code';
 export * from './subtask';
 export * from './types';

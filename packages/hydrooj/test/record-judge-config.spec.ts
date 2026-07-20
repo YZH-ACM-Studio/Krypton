@@ -232,13 +232,12 @@ describe('record judge problem config', () => {
                 lang: 'cc.cc17',
                 source: 'int solve() { return 1; }',
                 sourceHash: templateSourceHash('int solve() { return 1; }'),
+                publicRanges: [],
                 regions: [
                     {
                         id: REGION_ID,
                         startLine: 0,
                         endLine: 1,
-                        order: 0,
-                        signature: 'int solve()',
                     },
                 ],
             },
@@ -270,9 +269,10 @@ describe('record judge problem config', () => {
             template: {
                 source,
                 sourceHash: templateSourceHash(source),
+                publicRanges: [],
                 regions: [
-                    { id: REGION_ID, startLine: 1, endLine: 2, order: 1 },
-                    { id: secondRegionId, startLine: 2, endLine: 3, order: 0 },
+                    { id: REGION_ID, startLine: 1, endLine: 2 },
+                    { id: secondRegionId, startLine: 2, endLine: 3 },
                 ],
             },
         };
@@ -296,7 +296,8 @@ describe('record judge problem config', () => {
             template: {
                 source,
                 sourceHash: templateSourceHash(source),
-                regions: [{ id: REGION_ID, startLine: 0, endLine: 1, order: 0 }],
+                publicRanges: [],
+                regions: [{ id: REGION_ID, startLine: 0, endLine: 1 }],
             },
         };
 
@@ -319,13 +320,12 @@ describe('record judge problem config', () => {
                 lang: 'cc.cc17',
                 source: 'int solve() { return 1; }',
                 sourceHash: templateSourceHash('int solve() { return 1; }'),
+                publicRanges: [],
                 regions: [
                     {
                         id: REGION_ID,
                         startLine: 0,
                         endLine: 1,
-                        order: 0,
-                        signature: 'int solve()',
                     },
                 ],
             },
@@ -357,7 +357,8 @@ describe('record judge problem config', () => {
                 lang: 'cc.cc17',
                 source,
                 sourceHash: templateSourceHash(source),
-                regions: [{ id: REGION_ID, startLine: 0, endLine: 1, order: 0, signature: 'int solve()' }],
+                publicRanges: [],
+                regions: [{ id: REGION_ID, startLine: 0, endLine: 1 }],
             },
             cases: [{ input: '1.in', output: '1.out' }],
         };
@@ -389,7 +390,8 @@ describe('record judge problem config', () => {
                 lang: 'cc.cc17',
                 source,
                 sourceHash: templateSourceHash(source),
-                regions: [{ id: REGION_ID, startLine: 0, endLine: 1, order: 0, signature: 'int solve()' }],
+                publicRanges: [],
+                regions: [{ id: REGION_ID, startLine: 0, endLine: 1 }],
             },
             cases: [{ input: '1.in', output: '1.out' }],
         };
@@ -429,7 +431,8 @@ describe('record judge problem config', () => {
                 lang: 'cc.cc17',
                 source,
                 sourceHash: templateSourceHash(source),
-                regions: [{ id: REGION_ID, startLine: 0, endLine: 1, order: 0, signature: 'int solve()' }],
+                publicRanges: [],
+                regions: [{ id: REGION_ID, startLine: 0, endLine: 1 }],
             },
             cases: [{ input: '1.in', output: '1.out' }],
         };
@@ -491,7 +494,8 @@ describe('record judge problem config', () => {
                 lang: 'cc.cc17',
                 source,
                 sourceHash: templateSourceHash(source),
-                regions: [{ id: REGION_ID, startLine: 0, endLine: 1, order: 0, signature: 'int solve()' }],
+                publicRanges: [],
+                regions: [{ id: REGION_ID, startLine: 0, endLine: 1 }],
             },
             cases: [{ input: '1.in', output: '1.out' }],
         };

@@ -25,8 +25,8 @@ describe('P3.18 function problem wiring', () => {
         expect(lifecycle).to.match(/do id = `r_\$\{nanoid\(16\)\}`/);
         expect(lifecycle).to.include('sourceHash: templateSourceHash(source)');
         expect(lifecycle).to.include('ID 不属于当前题目');
-        expect(lifecycle).to.include('坐标不可直接改写，请删除后重新框选');
-        expect(lifecycle).to.include('已因模板修改失效，请删除后重新框选');
+        expect(lifecycle).to.include('源码摘要与本次提交内容不一致');
+        expect(lifecycle).to.include('compareStructuredCodeRegions');
     });
 
     it('revalidates the current locked template and exact payload before Record insertion', () => {
@@ -48,13 +48,13 @@ describe('P3.18 function problem wiring', () => {
         expect(adapter).to.include('await defaultJudge(ctx)');
     });
 
-    it('serializes only ordered ids, signatures, and descriptions to students', () => {
+    it('serializes only the safe ordered surface to students', () => {
         const config = read('packages/hydrooj/src/lib/problem-config.ts');
         const start = config.indexOf('export function clientProblemConfig');
         const end = config.indexOf('// ─── Structured-code whole-line regions', start);
         const serializer = config.slice(start, end);
-        expect(serializer).to.include('signature: region.signature');
-        expect(serializer).to.include('description: region.description');
+        expect(serializer).to.include('buildClientStructuredCodeSurface(config.template)');
+        expect(serializer).to.include('surface:');
         expect(serializer).not.to.include('region.startLine');
         expect(serializer).not.to.include('region.endLine');
         expect(serializer).not.to.include('config.cases');

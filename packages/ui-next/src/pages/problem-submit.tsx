@@ -9,6 +9,7 @@
  * still bounce to /:pid for the full info bar, but the actual code
  * editor lives here with full-height real estate.
  */
+import type { ClientStructuredCodeSegment } from '@hydrooj/common';
 import { ChevronRight, Loader2, Send } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -37,7 +38,8 @@ export function ProblemSubmitPage() {
   const submitUrl = `${problemUrl}/submit${contestQS}`;
   const isStructuredAnswer = ['program_fill', 'function'].includes(config.type) && ['program_fill', 'function'].includes(String(pdoc.problemKind));
   const textProgramFill = config.type === 'program_fill' && config.mode === 'text';
-  const regions = Array.isArray(config.template?.regions) ? config.template.regions : [];
+  const surface: ClientStructuredCodeSegment[] = Array.isArray(config.template?.surface) ? config.template.surface : [];
+  const regions = surface.filter((segment) => segment.type === 'region');
   const singleLineRegion = pdoc.problemKind === 'program_fill';
 
   // Alphabetic letter when entering via contest
@@ -234,13 +236,7 @@ export function ProblemSubmitPage() {
         {/* Editor in simple mode */}
         {isStructuredAnswer ? (
           <div className="border-y border-border/70 py-5">
-            <StructuredRegionInputs
-              regions={regions}
-              values={regionValues}
-              onChange={updateRegion}
-              singleLine={singleLineRegion}
-              skeleton={singleLineRegion ? config.template?.skeleton : undefined}
-            />
+            <StructuredRegionInputs surface={surface} values={regionValues} onChange={updateRegion} singleLine={singleLineRegion} />
           </div>
         ) : (
           <div className="rounded-md border overflow-hidden" style={{ height: 'calc(100vh - 220px)', minHeight: 480 }}>

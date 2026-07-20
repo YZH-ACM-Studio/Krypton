@@ -28,9 +28,14 @@ function functionTemplate() {
         lang: 'cc.cc17',
         source,
         sourceHash: templateSourceHash(source),
+        publicRanges: [
+            { startLine: 0, endLine: 1 },
+            { startLine: 2, endLine: 4 },
+            { startLine: 5, endLine: 6 },
+        ],
         regions: [
-            { id: FIRST_ID, startLine: 1, endLine: 2, order: 1, signature: 'int first()' },
-            { id: SECOND_ID, startLine: 4, endLine: 5, order: 0, signature: 'int second()', description: 'Return two.' },
+            { id: FIRST_ID, startLine: 1, endLine: 2, title: 'First implementation' },
+            { id: SECOND_ID, startLine: 4, endLine: 5, title: 'Second implementation', description: 'Return two.' },
         ],
     };
 }
@@ -65,7 +70,7 @@ describe('objective config helpers', () => {
 });
 
 describe('function client config', () => {
-    it('returns only ordered ids, signatures, and descriptions', () => {
+    it('returns only the ordered safe code surface', () => {
         const client = clientProblemConfig({
             type: 'function',
             langs: ['cc.cc17'],
@@ -77,9 +82,12 @@ describe('function client config', () => {
             langs: ['cc.cc17'],
             template: {
                 lang: 'cc.cc17',
-                regions: [
-                    { id: SECOND_ID, signature: 'int second()', description: 'Return two.' },
-                    { id: FIRST_ID, signature: 'int first()' },
+                surface: [
+                    { type: 'code', code: 'int first() {' },
+                    { type: 'region', id: FIRST_ID, title: 'First implementation' },
+                    { type: 'code', code: '}\nint second() {' },
+                    { type: 'region', id: SECOND_ID, title: 'Second implementation', description: 'Return two.' },
+                    { type: 'code', code: '}' },
                 ],
             },
         });
@@ -97,9 +105,12 @@ describe('function client config', () => {
             },
             ['1.in', '1.out'],
         );
-        expect(parsed.template?.regions).to.deep.equal([
-            { id: SECOND_ID, signature: 'int second()', description: 'Return two.' },
-            { id: FIRST_ID, signature: 'int first()' },
+        expect(parsed.template?.surface).to.deep.equal([
+            { type: 'code', code: 'int first() {' },
+            { type: 'region', id: FIRST_ID, title: 'First implementation' },
+            { type: 'code', code: '}\nint second() {' },
+            { type: 'region', id: SECOND_ID, title: 'Second implementation', description: 'Return two.' },
+            { type: 'code', code: '}' },
         ]);
         expect(JSON.stringify(parsed)).not.to.include('return 0');
     });
@@ -121,10 +132,14 @@ describe('canonical text program-fill', () => {
         template: {
             source,
             sourceHash: templateSourceHash(source),
+            publicRanges: [
+                { startLine: 0, endLine: 1 },
+                { startLine: 2, endLine: 3 },
+            ],
             regions: [
-                { id: FIRST_ID, startLine: 1, endLine: 2, order: 2, prompt: '累加' },
-                { id: SECOND_ID, startLine: 3, endLine: 4, order: 0 },
-                { id: THIRD_ID, startLine: 4, endLine: 5, order: 1 },
+                { id: FIRST_ID, startLine: 1, endLine: 2, prompt: '累加' },
+                { id: SECOND_ID, startLine: 3, endLine: 4 },
+                { id: THIRD_ID, startLine: 4, endLine: 5 },
             ],
         },
     };
@@ -136,7 +151,7 @@ describe('canonical text program-fill', () => {
         );
         expect(grade.correctCount).to.equal(2);
         expect(grade.score).to.equal((100 * 2) / 3);
-        expect(grade.regions.map((region) => region.correct)).to.deep.equal([true, false, true]);
+        expect(grade.regions.map((region) => region.correct)).to.deep.equal([true, true, false]);
 
         const none = gradeProgramFillTextSubmission(
             config,
@@ -151,13 +166,14 @@ describe('canonical text program-fill', () => {
         expect(all).to.include({ correctCount: 3, score: 100 });
     });
 
-    it('serializes a public inline skeleton without answer lines or coordinates', () => {
+    it('serializes explicit public lines and regions without private lines or coordinates', () => {
         const client = clientProblemConfig(config);
-        expect(client).to.have.nested.property('template.skeleton');
-        expect(client.template.skeleton.filter((line: any) => line.regionId).map((line: any) => line.regionId)).to.deep.equal([
-            FIRST_ID,
-            SECOND_ID,
-            THIRD_ID,
+        expect(client.template.surface).to.deep.equal([
+            { type: 'code', code: 'for (int i = 0; i < n; i++) {' },
+            { type: 'region', id: FIRST_ID, prompt: '累加' },
+            { type: 'code', code: '}' },
+            { type: 'region', id: SECOND_ID },
+            { type: 'region', id: THIRD_ID },
         ]);
         const payload = JSON.stringify(client);
         for (const secret of ['total += i', 'std::cout << total', 'return 0', 'sourceHash', 'startLine', 'endLine']) {
@@ -167,18 +183,35 @@ describe('canonical text program-fill', () => {
 });
 
 describe('whole-line structured templates', () => {
-    it('validates canonical ids, bounds, order, signatures, and source hash', () => {
+    it('validates canonical ids, bounds, source order, and source hash', () => {
         expect(() => validateStructuredCodeTemplate(functionTemplate(), 'function')).not.to.throw();
         expect(() => validateStructuredCodeTemplate({ ...functionTemplate(), sourceHash: 'forged' }, 'function')).to.throw(/hash mismatch/);
         expect(() =>
-            validateStructuredCodeTemplate(
-                { ...functionTemplate(), regions: functionTemplate().regions.map((region) => ({ ...region, order: 0 })) },
-                'function',
-            ),
-        ).to.throw(/duplicate region order/);
+            validateStructuredCodeTemplate({ ...functionTemplate(), regions: [...functionTemplate().regions].reverse() }, 'function'),
+        ).to.throw(/canonical source order/);
+    });
+
+    it('defaults every unmarked line to private and rejects CRLF or public-answer overlap', () => {
+        const base = functionTemplate();
+        const client = clientProblemConfig({
+            type: 'function',
+            langs: ['cc.cc17'],
+            template: { ...base, publicRanges: [] },
+            cases: [{ input: '1.in', output: '1.out' }],
+        });
+        expect(client.template.surface).to.deep.equal([
+            { type: 'region', id: FIRST_ID, title: 'First implementation' },
+            { type: 'region', id: SECOND_ID, title: 'Second implementation', description: 'Return two.' },
+        ]);
+        const payload = JSON.stringify(client);
+        for (const privateValue of ['int first()', 'int second()', 'return 0', 'sourceHash', 'startLine', 'endLine', 'hiddenLineCount']) {
+            expect(payload).not.to.include(privateValue);
+        }
+        const crlfSource = base.source.replace(/\n/g, '\r\n');
         expect(() =>
-            validateStructuredCodeTemplate({ ...functionTemplate(), regions: [{ ...functionTemplate().regions[0], signature: '' }] }, 'function'),
-        ).to.throw(/signature is required/);
+            validateStructuredCodeTemplate({ ...base, source: crlfSource, sourceHash: templateSourceHash(crlfSource) }, 'function'),
+        ).to.throw(/LF line endings/);
+        expect(() => validateStructuredCodeTemplate({ ...base, publicRanges: [{ startLine: 0, endLine: 2 }] }, 'function')).to.throw(/overlap/);
     });
 
     it('rejects overlap, nesting, duplicate ids, and out-of-bounds ranges', () => {
@@ -187,10 +220,7 @@ describe('whole-line structured templates', () => {
             validateStructuredCodeTemplate(
                 {
                     ...base,
-                    regions: [
-                        { ...base.regions[0], endLine: 5, order: 0 },
-                        { ...base.regions[1], order: 1 },
-                    ],
+                    regions: [{ ...base.regions[0], endLine: 5 }, base.regions[1]],
                 },
                 'function',
             ),
@@ -199,16 +229,13 @@ describe('whole-line structured templates', () => {
             validateStructuredCodeTemplate(
                 {
                     ...base,
-                    regions: [
-                        { ...base.regions[0], order: 0 },
-                        { ...base.regions[1], id: FIRST_ID, order: 1 },
-                    ],
+                    regions: [base.regions[0], { ...base.regions[1], id: FIRST_ID }],
                 },
                 'function',
             ),
         ).to.throw(/duplicate region id/);
         expect(() =>
-            validateStructuredCodeTemplate({ ...base, regions: [{ ...base.regions[0], startLine: 99, endLine: 100, order: 0 }] }, 'function'),
+            validateStructuredCodeTemplate({ ...base, regions: [{ ...base.regions[0], startLine: 99, endLine: 100 }] }, 'function'),
         ).to.throw(/out of bounds/);
     });
 
@@ -254,9 +281,10 @@ describe('structured judge config', () => {
                 lang: 'cc.cc17',
                 source,
                 sourceHash: templateSourceHash(source),
+                publicRanges: [],
                 regions: [
-                    { id: FIRST_ID, startLine: 0, endLine: 1, order: 1 },
-                    { id: SECOND_ID, startLine: 1, endLine: 2, order: 0 },
+                    { id: FIRST_ID, startLine: 0, endLine: 1 },
+                    { id: SECOND_ID, startLine: 1, endLine: 2 },
                 ],
             },
             cases: [{ input: '1.in', output: '1.out' }],
@@ -271,7 +299,7 @@ describe('structured judge config', () => {
                     ...config.template,
                     source: 'a\nb',
                     sourceHash: templateSourceHash('a\nb'),
-                    regions: [{ id: FIRST_ID, startLine: 0, endLine: 2, order: 0 }],
+                    regions: [{ id: FIRST_ID, startLine: 0, endLine: 2 }],
                 },
             }),
         ).to.throw(/exactly one line/);

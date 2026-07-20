@@ -132,7 +132,8 @@ async function runSubmission(regionCode: Record<string, string>) {
             lang: 'cc.cc17',
             source,
             sourceHash: problemConfig.templateSourceHash(source),
-            regions: regionIds.map((id, index) => ({ id, startLine: index + 4, endLine: index + 5, order: index })),
+            publicRanges: [],
+            regions: regionIds.map((id, index) => ({ id, startLine: index + 4, endLine: index + 5 })),
         },
         cases: [
             { input: '1.in', output: '1.out' },

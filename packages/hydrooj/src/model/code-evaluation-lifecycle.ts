@@ -1,5 +1,5 @@
-import type { ProblemKind, StructuredCodeRegion, StructuredCodeTemplate } from '@hydrooj/common';
-import { parseProblemKind } from '@hydrooj/common';
+import type { ProblemKind, StructuredCodeRange, StructuredCodeRegion, StructuredCodeTemplate } from '@hydrooj/common';
+import { compareStructuredCodeRegions, parseProblemKind } from '@hydrooj/common';
 import { nanoid } from 'nanoid';
 import { ValidationError } from '../error';
 import {
@@ -115,12 +115,6 @@ export function normalizeCodeEvaluationDraftCreationConfig(kindInput: ProblemKin
     return { main: { mode, lang: normalizeLanguage(value.main.lang) } };
 }
 
-function sourceRegion(source: string, region: Pick<StructuredCodeRegion, 'startLine' | 'endLine'>): string | null {
-    const lines = source.split('\n');
-    if (region.startLine < 0 || region.endLine <= region.startLine || region.endLine > lines.length) return null;
-    return lines.slice(region.startLine, region.endLine).join('\n');
-}
-
 function nextRegionId(existing: Set<string>): string {
     let id = '';
     do id = `r_${nanoid(16)}`;
@@ -134,14 +128,36 @@ export function normalizeStructuredCodeConfig(kindInput: ProblemKind, value: unk
     if (!isPlainObject(value)) throw new ValidationError('structuredConfig');
     assertExactKeys(value, ['main'], 'structuredConfig');
     if (!isPlainObject(value.main)) throw new ValidationError('structuredConfig', null, 'main 必须是对象');
-    assertExactKeys(value.main, ['mode', 'lang', 'source', 'regions', 'cases'], 'structuredConfig.main');
+    assertExactKeys(value.main, ['mode', 'lang', 'source', 'sourceHash', 'publicRanges', 'regions', 'cases'], 'structuredConfig.main');
     const mode = kind === 'function' ? 'function' : value.main.mode === 'text' || value.main.mode === 'compile' ? value.main.mode : undefined;
     if (!mode) throw new ValidationError('mode', null, '程序填空模式必须是 text 或 compile');
     if (kind === 'function' && value.main.mode !== 'function') throw new ValidationError('mode', null, '评测方式必须是 function');
     const lang = mode === 'text' ? normalizeOptionalLanguage(value.main.lang) : normalizeLanguage(value.main.lang);
+    const initialDraftShell = !['source', 'sourceHash', 'publicRanges', 'regions', 'cases'].some((field) =>
+        Object.hasOwn(value.main as Record<string, unknown>, field),
+    );
+    if (!initialDraftShell) {
+        const missing = ['source', 'sourceHash', 'publicRanges', 'regions'].find(
+            (field) => !Object.hasOwn(value.main as Record<string, unknown>, field),
+        );
+        if (missing) throw new ValidationError(missing, null, `完整代码模板缺少字段：${missing}`);
+    }
     const sourceInput = value.main.source === undefined ? '' : value.main.source;
     if (typeof sourceInput !== 'string') throw new ValidationError('source', null, '私有模板必须是文本');
     const source = sourceInput.replace(/\r\n?/g, '\n');
+    if (!initialDraftShell && (typeof value.main.sourceHash !== 'string' || value.main.sourceHash !== templateSourceHash(source))) {
+        throw new ValidationError('sourceHash', null, '源码摘要与本次提交内容不一致，请重新载入后再保存');
+    }
+    const rawPublicRanges = value.main.publicRanges === undefined ? [] : value.main.publicRanges;
+    if (!Array.isArray(rawPublicRanges)) throw new ValidationError('publicRanges', null, '公开区必须是数组');
+    const publicRanges = rawPublicRanges.map((item, index): StructuredCodeRange => {
+        if (!isPlainObject(item)) throw new ValidationError('publicRanges', null, `公开区 ${index + 1} 格式错误`);
+        assertExactKeys(item, ['startLine', 'endLine'], `publicRanges[${index}]`);
+        if (!Number.isSafeInteger(item.startLine) || !Number.isSafeInteger(item.endLine)) {
+            throw new ValidationError('publicRanges', null, `公开区 ${index + 1} 的行范围无效`);
+        }
+        return { startLine: Number(item.startLine), endLine: Number(item.endLine) };
+    });
     const rawRegions = value.main.regions === undefined ? [] : value.main.regions;
     if (!Array.isArray(rawRegions)) throw new ValidationError('regions');
     const currentConfig = parseProblemConfigObject({ config: currentConfigInput });
@@ -154,9 +170,7 @@ export function normalizeStructuredCodeConfig(kindInput: ProblemKind, value: unk
         if (!isPlainObject(item)) throw new ValidationError('regions', null, `区域 ${index + 1} 格式错误`);
         assertExactKeys(
             item,
-            kind === 'function'
-                ? ['id', 'startLine', 'endLine', 'order', 'signature', 'description']
-                : ['id', 'startLine', 'endLine', 'order', 'prompt'],
+            kind === 'function' ? ['id', 'startLine', 'endLine', 'title', 'description'] : ['id', 'startLine', 'endLine', 'prompt'],
             `regions[${index}]`,
         );
         const submittedId = item.id === undefined ? '' : item.id;
@@ -166,39 +180,28 @@ export function normalizeStructuredCodeConfig(kindInput: ProblemKind, value: unk
         }
         const existing = submittedId ? currentRegions.get(submittedId) : undefined;
         if (submittedId && !existing) throw new ValidationError('regions', null, `区域 ${index + 1} ID 不属于当前题目`);
-        if (!Number.isSafeInteger(item.startLine) || !Number.isSafeInteger(item.endLine) || !Number.isSafeInteger(item.order)) {
-            throw new ValidationError('regions', null, `区域 ${index + 1} 的行范围或顺序无效`);
+        if (!Number.isSafeInteger(item.startLine) || !Number.isSafeInteger(item.endLine)) {
+            throw new ValidationError('regions', null, `区域 ${index + 1} 的行范围无效`);
         }
         const startLine = Number(item.startLine);
         const endLine = Number(item.endLine);
-        const order = Number(item.order);
-        if (existing && (existing.startLine !== startLine || existing.endLine !== endLine)) {
-            throw new ValidationError('regions', null, `区域 ${index + 1} 坐标不可直接改写，请删除后重新框选`);
-        }
-        if (existing && currentTemplate && currentTemplate.source !== source) {
-            const before = sourceRegion(currentTemplate.source, existing);
-            const after = sourceRegion(source, { startLine, endLine });
-            if (before === null || after === null || before !== after) {
-                throw new ValidationError('regions', null, `区域 ${index + 1} 已因模板修改失效，请删除后重新框选`);
-            }
-        }
         const id = existing?.id || nextRegionId(allocatedIds);
         if (kind === 'function') {
-            if (item.signature !== undefined && typeof item.signature !== 'string') {
-                throw new ValidationError('regions', null, `区域 ${index + 1} 函数签名必须是文本`);
+            if (item.title !== undefined && typeof item.title !== 'string') {
+                throw new ValidationError('regions', null, `区域 ${index + 1} 标题必须是文本`);
             }
             if (item.description !== undefined && typeof item.description !== 'string') {
                 throw new ValidationError('regions', null, `区域 ${index + 1} 说明必须是文本`);
             }
-            const signature = typeof item.signature === 'string' ? item.signature.trim() : '';
+            const title = typeof item.title === 'string' ? item.title.trim() : '';
             const description = typeof item.description === 'string' ? item.description.trim() : '';
-            return { id, startLine, endLine, order, signature, ...(description ? { description } : {}) };
+            return { id, startLine, endLine, ...(title ? { title } : {}), ...(description ? { description } : {}) };
         }
         if (item.prompt !== undefined && typeof item.prompt !== 'string') {
             throw new ValidationError('regions', null, `区域 ${index + 1} 提示必须是文本`);
         }
         const prompt = typeof item.prompt === 'string' ? item.prompt.trim() : '';
-        return { id, startLine, endLine, order, ...(prompt ? { prompt } : {}) };
+        return { id, startLine, endLine, ...(prompt ? { prompt } : {}) };
     });
     if (new Set(regions.map((region) => region.id)).size !== regions.length) throw new ValidationError('regions', null, '区域 ID 不能重复');
     if (mode === 'text' && Object.hasOwn(value.main, 'cases')) {
@@ -209,10 +212,11 @@ export function normalizeStructuredCodeConfig(kindInput: ProblemKind, value: unk
         ...(lang ? { lang } : {}),
         source,
         sourceHash: templateSourceHash(source),
-        regions: [...regions].sort((a, b) => a.order - b.order),
+        publicRanges,
+        regions: [...regions].sort(compareStructuredCodeRegions),
     } as StructuredCodeTemplate;
     try {
-        validateStructuredCodeTemplate(template, kind as 'program_fill' | 'function', { allowEmpty: true, allowEmptySignature: true });
+        validateStructuredCodeTemplate(template, kind as 'program_fill' | 'function', { allowEmpty: true });
     } catch (error: any) {
         throw new ValidationError('regions', null, error.message);
     }

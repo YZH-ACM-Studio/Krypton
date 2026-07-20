@@ -15,6 +15,14 @@
 - 节点创建、移动、排序、删除、引用保护和题目搜索必须显式限定 `mapId`；发现 Problem 的 `knowledgeMapId` 与节点归属不一致时 fail closed。
 - 课程仅通过可选 `TrainingDoc.mindmapId` 引用一张公开导图，不拥有或复制导图节点。课程可继续引用其它导图或无节点题；课程导图视图只能投影课程章节内、当前用户可见且 canonical 节点直接属于该图的题目。
 
+## 结构化代码单源码协议
+
+- `StructuredCodeTemplate.source` 是唯一完整源码；`publicRanges` 是显式公开整行区间，`regions` 是原位作答区，剩余行默认私有。公开区和作答区必须互斥，禁止把未标记行自动公开。
+- region 顺序只按 `(startLine,endLine,id)` 由服务端派生，不接受或持久化独立 `order`；代码实现题 region 只有可选 `title/description`，不恢复必填函数签名。
+- 学生响应只能由共享 serializer 生成按源码顺序的公开 code block 与 region descriptor；不得下发完整 `source`、`sourceHash`、原始坐标、标准答案、cases、私有行或隐藏数量。
+- 作者端源码变更只使用 CodeMirror change mapping 更新整行区间；整体删除、交叠或无法确定的映射必须显式失效并阻止保存，不得靠附近文本或旧 anchor 猜测恢复。
+- P3.21/P3.22/P3.23 是不可拆部署单元；生产唯一旧函数草稿只能经过备份、只读 plan、确认、精确迁移和 verify 后切换，不维护旧协议双读双写。
+
 ## 赛事题目批量导入触发规则
 
 ### 何时自动触发

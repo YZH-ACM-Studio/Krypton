@@ -105,34 +105,45 @@ describe('P3.17 code evaluation draft workspace', () => {
   });
 });
 
-describe('P3.18 function authoring and student contract', () => {
-  it('uses a whole-line CodeMirror selector with explicit expansion and region highlighting', () => {
+describe('P3.21 shared structured-code workspace', () => {
+  it('uses a full-height whole-line CodeMirror selector with accessible source states', () => {
     const editor = read('packages/ui-next/src/components/structured-region-author-editor.tsx');
     const workspace = read('packages/ui-next/src/pages/structured-code-editors.tsx');
     expect(editor).to.include('function selectedWholeLines(');
     expect(editor).to.include('startLine: start.number - 1');
     expect(editor).to.include('endLine: end.number');
-    expect(editor).to.include('krypton-region-line-invalid');
-    expect(workspace).to.include('已自动扩展到完整行');
-    expect(workspace).to.include("设为{kind === 'function' ? '函数区' : '填空区'}");
+    expect(editor).to.include("height: '100%'");
+    expect(editor).to.include("'.cm-gutters': { minHeight: '100%' }");
+    expect(editor).to.include('krypton-structured-line-public');
+    expect(editor).to.include('krypton-structured-line-answer');
+    expect(editor).to.match(/return `\$\{marker\} \$\{lineNo\}`/);
+    expect(workspace).to.include('已扩展为完整行');
+    expect(workspace).to.include('公开给学生');
+    expect(workspace).to.include('设为私有');
   });
 
-  it('never lets authors type region ids and reorders answers without moving source', () => {
+  it('keeps server ids opaque and derives region order only from source position', () => {
     const workspace = read('packages/ui-next/src/pages/structured-code-editors.tsx');
     expect(workspace).to.include("id: '',");
     expect(workspace).to.include('保存后生成 ID');
     expect(workspace).not.to.match(/<Input\s+value=\{region\.id\}/);
-    expect(workspace).to.include('draggable');
-    expect(workspace).to.include('reorderRegions(current, draggedRegion, index)');
-    expect(workspace).to.include('函数签名（必填）');
+    expect(workspace).not.to.include('draggable');
+    expect(workspace).not.to.include('reorderRegions');
+    expect(workspace).not.to.include('region.order');
+    expect(workspace).to.include('作答区标题（可选）');
     expect(workspace).to.include('局部要求（可选）');
   });
 
-  it('marks edited source anchors invalid and blocks completion until reselected', () => {
+  it('maps ranges through CodeMirror changes and blocks invalid or overlapping results', () => {
+    const editor = read('packages/ui-next/src/components/structured-region-author-editor.tsx');
+    const ranges = read('packages/ui-next/src/lib/structured-code-ranges.ts');
     const workspace = read('packages/ui-next/src/pages/structured-code-editors.tsx');
-    expect(workspace).to.include('currentSelection === null || currentSelection !== region.anchor');
+    expect(editor).to.include('export function mapAuthorLineRanges');
+    expect(ranges).to.include('changes.mapPos');
+    expect(workspace).to.include('conflicted.add');
     expect(workspace).to.include('请删除后重新框选，系统不会猜测迁移');
     expect(workspace).to.include('disabled={saving || completionBlocked}');
+    expect(workspace).to.include("sourceHash: sha256Text(source.replace(/\\r\\n?/g, '\\n'))");
   });
 
   it('shares the same safe region inputs across direct, contest, homework, exam, training, and course references', () => {
@@ -142,17 +153,20 @@ describe('P3.18 function authoring and student contract', () => {
     expect(submit).to.include('<StructuredRegionInputs');
     expect(submit).to.include('const tid = tdoc?.docId');
     expect(exam).to.include('<StructuredRegionInputs');
-    expect(inputs).to.include('region.signature || region.prompt');
-    expect(inputs).to.include('region.description');
+    expect(inputs).to.match(/segment\.title \|\| segment\.prompt \|\| `作答区 \$\{regionIndex \+ 1\}`/);
+    expect(inputs).to.include('segment.description');
+    expect(inputs).to.include('aria-label="连续代码作答区"');
+    expect(submit).to.include('surface={surface}');
+    expect(exam).to.include('surface={pdoc.config.template.surface}');
     expect(submit).not.to.include('template.source');
     expect(exam).not.to.include('template.source');
   });
 });
 
-describe('P3.19 program-fill authoring and student contract', () => {
+describe('P3.23 program-fill authoring and student contract', () => {
   it('supports any number of strict single-line regions in both fixed modes', () => {
     const workspace = read('packages/ui-next/src/pages/structured-code-editors.tsx');
-    expect(workspace).to.include('selection.endLine !== selection.startLine + 1');
+    expect(workspace).to.include('target.endLine !== target.startLine + 1');
     expect(workspace).not.to.include('只能设置一个区域');
     expect(workspace).to.include("mode: kind === 'program_fill' ? mode : 'function'");
     expect(workspace).to.include('...(compileMode ? { cases } : {})');
@@ -160,23 +174,20 @@ describe('P3.19 program-fill authoring and student contract', () => {
     expect(workspace).not.to.include('标准答案（单行）');
   });
 
-  it('renders the server-safe inline skeleton through the shared student component', () => {
+  it('renders the server-safe continuous surface through the shared student component', () => {
     const inputs = read('packages/ui-next/src/components/structured-region-inputs.tsx');
     const submit = read('packages/ui-next/src/pages/problem-submit.tsx');
     const exam = read('packages/ui-next/src/pages/exam-mode/paper.tsx');
-    expect(inputs).to.include('program_fill: public skeleton does not match region descriptors');
-    expect(inputs).to.include('aria-label="程序填空代码骨架"');
-    expect(inputs).to.include("'regionId' in line");
+    expect(inputs).to.include('structured code surface contains duplicate region ids');
+    expect(inputs).to.include('aria-label="连续代码作答区"');
+    expect(inputs).to.include("segment.type === 'code'");
     expect(inputs).to.include('overflow-x-auto');
-    expect(inputs).to.include('min-w-[36rem]');
-    expect(inputs).to.include('className="sr-only"');
     expect(inputs).to.include('autoComplete="off"');
-    expect(inputs).to.include('const orderedRegionIds = regions.map((region) => region.id)');
-    expect(inputs).to.include('regionOrder + (event.shiftKey ? -1 : 1)');
-    expect(inputs).to.include('tabIndex={regionOrder === 0 ? 0 : -1}');
+    expect(inputs).to.include('const regionIds = regions.map((region) => region.id)');
+    expect(inputs).to.include('index + (event.shiftKey ? -1 : 1)');
     expect(inputs).to.include('target.focus()');
-    expect(submit).to.include('skeleton={singleLineRegion ? config.template?.skeleton : undefined}');
-    expect(exam).to.include("skeleton={pdoc.config.type === 'program_fill' ? pdoc.config.template.skeleton : undefined}");
+    expect(submit).to.include('surface={surface}');
+    expect(exam).to.include('surface={pdoc.config.template.surface}');
     expect(submit).not.to.include('template.source');
     expect(exam).not.to.include('template.source');
   });

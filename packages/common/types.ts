@@ -93,10 +93,20 @@ export interface ObjectiveBlankMain {
 export interface StructuredCodeTemplate {
     /** Required for function and compile program-fill; optional text syntax hint otherwise. */
     lang?: string;
+    /** Complete private canonical source. Never include this field in student payloads. */
     source: string;
+    /** Explicit whole-line ranges that are safe to show to students. */
+    publicRanges: StructuredCodeRange[];
     regions: StructuredCodeRegion[];
     /** SHA-256 of `source` at save time. Used for draft staleness detection. */
     sourceHash: string;
+}
+
+export interface StructuredCodeRange {
+    /** Zero-based, inclusive whole-line boundary. */
+    startLine: number;
+    /** Zero-based, exclusive whole-line boundary. */
+    endLine: number;
 }
 
 export interface StructuredCodeRegion {
@@ -106,15 +116,28 @@ export interface StructuredCodeRegion {
     startLine: number;
     /** Zero-based, exclusive whole-line boundary. */
     endLine: number;
-    /** Student answer order, independent from source position. */
-    order: number;
-    /** Required student-visible function signature for function problems. */
-    signature?: string;
-    /** Optional student-visible function requirement. */
+    /** Optional student-visible title for a code implementation region. */
+    title?: string;
+    /** Optional student-visible implementation requirement. */
     description?: string;
     /** Optional student-visible hint for program-fill problems. */
     prompt?: string;
 }
+
+export interface ClientStructuredCodeBlock {
+    type: 'code';
+    code: string;
+}
+
+export interface ClientStructuredCodeRegion {
+    type: 'region';
+    id: string;
+    title?: string;
+    description?: string;
+    prompt?: string;
+}
+
+export type ClientStructuredCodeSegment = ClientStructuredCodeBlock | ClientStructuredCodeRegion;
 
 export interface TestCaseConfig {
     input: string;

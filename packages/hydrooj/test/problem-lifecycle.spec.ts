@@ -79,6 +79,7 @@ require.cache[errorPath] = {
 delete require.cache[lifecyclePath];
 
 const lifecycle = require(lifecyclePath) as typeof import('../src/model/problem-lifecycle');
+const { templateSourceHash } = require('../src/lib/problem-config') as typeof import('../src/lib/problem-config');
 
 beforeEach(() => {
     counts.clear();
@@ -276,14 +277,20 @@ describe('P2.12 minimal problem lifecycle', () => {
     });
 
     it('normalizes text and compile program-fill modes without sharing schemas', () => {
+        const textSource = ['for (;;) {', 'i++;', 'j++;', '}'].join('\n');
         const text = lifecycle.normalizeStructuredProblemConfig('program_fill', {
             main: {
                 mode: 'text',
                 lang: '',
-                source: ['for (;;) {', 'i++;', 'j++;', '}'].join('\n'),
+                source: textSource,
+                sourceHash: templateSourceHash(textSource),
+                publicRanges: [
+                    { startLine: 0, endLine: 1 },
+                    { startLine: 3, endLine: 4 },
+                ],
                 regions: [
-                    { id: '', startLine: 1, endLine: 2, order: 1 },
-                    { id: '', startLine: 2, endLine: 3, order: 0, prompt: '第二空' },
+                    { id: '', startLine: 1, endLine: 2 },
+                    { id: '', startLine: 2, endLine: 3, prompt: '第二空' },
                 ],
             },
         });
@@ -298,20 +305,25 @@ describe('P2.12 minimal problem lifecycle', () => {
                     mode: 'text',
                     lang: '',
                     source: 'i++;\nj++;',
-                    regions: [{ id: '', startLine: 0, endLine: 2, order: 0 }],
+                    sourceHash: templateSourceHash('i++;\nj++;'),
+                    publicRanges: [],
+                    regions: [{ id: '', startLine: 0, endLine: 2 }],
                 },
             }),
         ).to.throw(TestValidationError);
 
+        const compiledSource = ['int main() {', 'i++;', '}'].join('\n');
         const compiled = lifecycle.normalizeStructuredProblemConfig('program_fill', {
             main: {
                 mode: 'compile',
                 lang: 'cc.cc17',
-                source: ['int main() {', 'i++;', '}'].join('\n'),
-                regions: [
-                    { id: '', startLine: 1, endLine: 2, order: 1, prompt: '填写一行' },
-                    { id: '', startLine: 2, endLine: 3, order: 0 },
+                source: compiledSource,
+                sourceHash: templateSourceHash(compiledSource),
+                publicRanges: [
+                    { startLine: 0, endLine: 1 },
+                    { startLine: 2, endLine: 3 },
                 ],
+                regions: [{ id: '', startLine: 1, endLine: 2, prompt: '填写一行' }],
                 cases: [{ input: '1.in', output: '1.out' }],
             },
         });
@@ -340,21 +352,24 @@ describe('P2.12 minimal problem lifecycle', () => {
     });
 
     it('normalizes function problems with multiple multi-line regions', () => {
+        const functionSource = ['int first() {', '  return 1;', '}', 'int second() {', '  return 2;', '}'].join('\n');
         const compiled = lifecycle.normalizeStructuredProblemConfig('function', {
             main: {
                 mode: 'function',
                 lang: 'cc.cc17',
-                source: ['int first() {', '  return 1;', '}', 'int second() {', '  return 2;', '}'].join('\n'),
+                source: functionSource,
+                sourceHash: templateSourceHash(functionSource),
+                publicRanges: [],
                 regions: [
-                    { id: '', startLine: 0, endLine: 3, order: 1, signature: 'int first()' },
-                    { id: '', startLine: 3, endLine: 6, order: 0, signature: 'int second()', description: '第二个函数' },
+                    { id: '', startLine: 0, endLine: 3, title: 'first' },
+                    { id: '', startLine: 3, endLine: 6, title: 'second', description: '第二个函数' },
                 ],
                 cases: [{ input: '1.in', output: '1.out' }],
             },
         });
         expect(compiled).to.include({ type: 'function', score: 100 });
         expect(compiled).to.have.nested.property('template.regions').with.length(2);
-        expect(compiled).to.have.nested.property('template.regions[0].description', '第二个函数');
+        expect(compiled).to.have.nested.property('template.regions[1].description', '第二个函数');
         expect(lifecycle.structuredProblemUsesTestdata('function', compiled)).to.equal(true);
     });
 
@@ -364,7 +379,9 @@ describe('P2.12 minimal problem lifecycle', () => {
                 mode: 'function',
                 lang: 'cc.cc17',
                 source: 'int solve() { return 1; }',
-                regions: [{ id: '', startLine: 0, endLine: 1, order: 0, signature: 'int solve()' }],
+                sourceHash: templateSourceHash('int solve() { return 1; }'),
+                publicRanges: [],
+                regions: [{ id: '', startLine: 0, endLine: 1, title: 'solve' }],
                 cases: [{ input: '1.in', output: '1.out' }],
             },
         });

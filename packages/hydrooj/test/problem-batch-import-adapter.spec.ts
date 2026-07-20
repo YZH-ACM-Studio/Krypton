@@ -145,12 +145,25 @@ const ProblemModelStub = {
         authorPermits.push({ domainId, pid: docId, uid: 888, role: 'verifier', active: true });
         return { docId, pid, documentId: new ObjectId() };
     },
-    async withAuthorizedStructuralWriteClaim(domainId: string, docId: number, _user: any, operation: string, callback: any) {
-        calls.push('withAuthorizedStructuralWriteClaim');
-        return callback({ domainId, pid: docId, actor: 2, operation, capability: 'content', state: 'active', requestId: `claim-${docId}` });
+    async withAuthorizedDataWriteClaim(domainId: string, docId: number, _user: any, operation: string, callback: any, options: any) {
+        calls.push('withAuthorizedDataWriteClaim');
+        const result = await callback({
+            domainId,
+            pid: docId,
+            actor: 2,
+            operation,
+            capability: 'data',
+            state: 'active',
+            requestId: options.requestId,
+        });
+        problemDocs.find((doc) => doc.docId === docId).structureRevision++;
+        return result;
     },
     async addTestdataWithClaim(claim: any, name: string, stream: AsyncIterable<Buffer | string>) {
         calls.push(`addTestdataWithClaim:${name}`);
+        if (claim.operation !== 'files-upload' || claim.capability !== 'data') {
+            throw new TypeError(`fixture rejected testdata claim operation=${claim.operation} capability=${claim.capability}`);
+        }
         const body = await streamBuffer(stream);
         const pdoc = problemForClaim(claim);
         storageObjects.set(`problem/${claim.domainId}/${claim.pid}/testdata/${name}`, body);
@@ -414,7 +427,7 @@ describe('P2.23 Hydro production batch adapter', () => {
         expect(calls.indexOf('addTestdataWithClaim:config.yaml')).to.be.lessThan(calls.indexOf('ensureProblemBatchChapter'));
         expect(calls.indexOf('ensureProblemBatchChapter')).to.be.lessThan(calls.indexOf('publishManagedProgrammingProblem'));
         expect(calls).to.include.members([
-            'withAuthorizedStructuralWriteClaim',
+            'withAuthorizedDataWriteClaim',
             'addAdditionalFileWithClaim:figure.png',
             'editAuthorized:origStat',
             'setManagedProgrammingDraftTrainingPlacement',

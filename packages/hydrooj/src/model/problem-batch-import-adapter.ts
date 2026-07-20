@@ -303,11 +303,11 @@ async function uploadMissingDraftFiles(
     if (!uploadTestdata.length && !uploadAssets.length) return;
     const config = uploadTestdata.find((file) => file.name === entry.configFile.name);
     const ordinaryTestdata = uploadTestdata.filter((file) => file !== config);
-    await ProblemModel.withAuthorizedStructuralWriteClaim(
+    await ProblemModel.withAuthorizedDataWriteClaim(
         batch.manifest.domain,
         pdoc.docId,
         actorUser,
-        `managed-batch-upload:${batch.manifest.batchId}:${entry.sourceProblemCode}`,
+        'files-upload',
         async (claim) => {
             for (const file of ordinaryTestdata) {
                 await ProblemModel.addTestdataWithClaim(claim, file.name, createReadStream(file.path), batch.manifest.actor);
@@ -319,7 +319,7 @@ async function uploadMissingDraftFiles(
                 await ProblemModel.addTestdataWithClaim(claim, config.name, createReadStream(config.path), batch.manifest.actor);
             }
         },
-        { capability: 'content' },
+        { requestId: `problem-batch-upload:${batch.manifest.batchId}:${entry.sourceProblemCode}` },
     );
 }
 

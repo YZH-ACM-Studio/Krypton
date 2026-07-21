@@ -378,6 +378,12 @@ export interface Tdoc extends Document {
     allowPrint?: boolean;
     keepScoreboardHidden?: boolean;
 
+    // ── Krypton: per-contest ACM participation identity ────────────────
+    /** Missing is intentionally equivalent to `individual` for every legacy contest. */
+    participationMode?: 'individual' | 'team';
+    /** CAS revision used only when changing participationMode. */
+    participationRevision?: number;
+
     // For contest
     lockAt?: Date;
     unlocked?: boolean;
@@ -850,6 +856,7 @@ declare module './service/db' {
         opcount: OpCountDoc;
         schedule: Schedule;
         'contest.balloon': ContestBalloonDoc;
+        'contest.teams': import('./model/contest-team').ContestTeamDoc;
         lock: LockDoc;
     }
 }
@@ -866,6 +873,7 @@ export interface Model {
     blacklist: typeof import('./model/blacklist').default;
     builtin: typeof import('./model/builtin');
     contest: typeof import('./model/contest');
+    contestTeam: Omit<typeof import('./model/contest-team'), 'apply'>;
     discussion: typeof import('./model/discussion');
     document: Omit<typeof import('./model/document'), 'apply'>;
     domain: typeof import('./model/domain').default;

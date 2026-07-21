@@ -18,6 +18,7 @@ import type {
     User,
 } from '../interface';
 import type { DocType } from '../model/document';
+import type { ContestTeamDoc } from '../model/contest-team';
 
 export type Disposable = () => void;
 export type VoidReturn = Promise<any> | any;
@@ -107,6 +108,12 @@ export interface EventMap {
     'contest/add': (payload: Partial<Tdoc>, id: ObjectId) => VoidReturn;
     'contest/before-edit': (tdoc: Tdoc, $set: Partial<Tdoc>) => VoidReturn;
     'contest/edit': (payload: Tdoc, domainId?: string, tid?: ObjectId, res?: any) => VoidReturn;
+    'contest/team-role-change': (payload: {
+        before: ContestTeamDoc;
+        after: ContestTeamDoc;
+        actorUid: number;
+        emergency: boolean;
+    }) => VoidReturn;
     'contest/list': (query: Filter<Tdoc>, handler: any) => VoidReturn;
     'contest/scoreboard': (tdoc: Tdoc, rows: ScoreboardRow[], udict: BaseUserDict, pdict: ProblemDict) => VoidReturn;
     'contest/balloon': (domainId: string, tid: ObjectId, bdoc: ContestBalloonDoc) => VoidReturn;

@@ -2,7 +2,14 @@ import { sumBy } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
 import { Counter, formatSeconds, getAlphabeticId, sleep, Time } from '@hydrooj/utils/lib/utils';
 import { Context } from '../context';
-import { ContestAlreadyAttendedError, ContestNotFoundError, ContestScoreboardHiddenError, ValidationError } from '../error';
+import {
+    ContestAlreadyAttendedError,
+    ContestNotFoundError,
+    ContestScoreboardHiddenError,
+    ContestTeamConflictError,
+    PermissionError,
+    ValidationError,
+} from '../error';
 import {
     BaseUserDict,
     ContestPrintDoc,
@@ -21,9 +28,16 @@ import bus from '../service/bus';
 import db from '../service/db';
 import type { Handler } from '../service/server';
 import { Optional } from '../typeutils';
-import { PERM, STATUS, STATUS_SHORT_TEXTS } from './builtin';
+import { PERM, PRIV, STATUS, STATUS_SHORT_TEXTS } from './builtin';
+import {
+    getParticipationMode,
+    normalizeParticipationConfig,
+    planParticipationModeTransition,
+    teamModeClearConfirmation,
+} from './contest-participation';
 import * as document from './document';
 import MessageModel from './message';
+import * as oplog from './oplog';
 import problem, { ProblemModel } from './problem';
 import RecordModel from './record';
 import UserModel, { User } from './user';
@@ -189,6 +203,20 @@ export function isInLockoutWindow(tdoc: Tdoc, now: Date = new Date()): boolean {
 export function hasParticipantScope(tdoc: Tdoc): boolean {
     return tdoc.participantScopeMode === 'schools' || tdoc.participantScopeMode === 'groups';
 }
+
+export interface ContestEditOptions {
+    actor?: User;
+    expectedParticipationRevision?: number;
+    teamModeClearConfirmation?: string;
+    now?: Date;
+}
+
+export {
+    getParticipationMode,
+    normalizeParticipationConfig,
+    planParticipationModeTransition,
+    teamModeClearConfirmation,
+} from './contest-participation';
 
 export function buildContestRule<T>(def: Optional<ContestRule<T>, 'applyProjection'>): ContestRule<T>;
 export function buildContestRule<T>(def: Partial<ContestRule<T>>, baseRule: ContestRule<T>): ContestRule<T>;
@@ -966,6 +994,58 @@ export const RULES: ContestRules = {
 };
 
 const collBalloon = db.collection('contest.balloon');
+const collTeam = db.collection('contest.teams');
+
+async function auditParticipationModeChange(
+    domainId: string,
+    tid: ObjectId,
+    actorUid: number,
+    previousMode: 'individual' | 'team',
+    nextMode: 'individual' | 'team',
+    fromRevision: number,
+    result: 'success' | 'rejected',
+    reason?: string,
+) {
+    await oplog.add({
+        type: 'contest.team.mode-change',
+        domainId,
+        operator: actorUid,
+        contestId: tid,
+        operation: 'mode-change',
+        previousMode,
+        nextMode,
+        fromRevision,
+        toRevision: result === 'success' ? fromRevision + 1 : fromRevision,
+        result,
+        reason,
+        time: new Date(),
+    });
+}
+
+async function auditRejectedParticipationModeChange(
+    domainId: string,
+    tid: ObjectId,
+    actorUid: number,
+    previousMode: 'individual' | 'team',
+    nextMode: 'individual' | 'team',
+    fromRevision: number,
+    error: any,
+) {
+    try {
+        await auditParticipationModeChange(
+            domainId,
+            tid,
+            actorUid,
+            previousMode,
+            nextMode,
+            fromRevision,
+            'rejected',
+            String(error?.params?.[0] || error?.code || error?.name || 'Error'),
+        );
+    } catch (auditError) {
+        console.error('[contest-team] failed to audit rejected mode change', { domainId, tid, actorUid }, auditError);
+    }
+}
 
 function _getStatusJournal(tsdoc) {
     return tsdoc.journal.sort((a, b) => a.rid.getTimestamp() - b.rid.getTimestamp());
@@ -985,7 +1065,9 @@ export async function add(
 ) {
     if (!RULES[rule]) throw new ValidationError('rule');
     if (beginAt >= endAt) throw new ValidationError('beginAt', 'endAt');
-    Object.assign(data, {
+    const prepared = normalizeParticipationConfig({
+        ...data,
+        domainId,
         content,
         owner,
         title,
@@ -994,31 +1076,160 @@ export async function add(
         endAt,
         pids,
         attend: 0,
+        rated,
     });
-    RULES[rule].check(data);
-    await bus.parallel('contest/before-add', data);
+    if (prepared.participationMode) prepared.participationRevision = 1;
+    Object.assign(data, prepared);
+    RULES[rule].check(prepared);
+    await bus.parallel('contest/before-add', prepared);
     const docId = await document.add(domainId, content, owner, document.TYPE_CONTEST, null, null, null, {
         assign: [],
-        ...data,
+        ...prepared,
         title,
         rule,
         beginAt,
         endAt,
         pids,
         attend: 0,
-        rated,
+        rated: prepared.rated,
     });
-    await bus.parallel('contest/add', data, docId);
+    await bus.parallel('contest/add', prepared, docId);
     return docId;
 }
 
-export async function edit(domainId: string, tid: ObjectId, $set: Partial<Tdoc>) {
+export async function edit(domainId: string, tid: ObjectId, $set: Partial<Tdoc>, options: ContestEditOptions = {}) {
     if ($set.rule && !RULES[$set.rule]) throw new ValidationError('rule');
-    const tdoc = await document.get(domainId, document.TYPE_CONTEST, tid);
-    if (!tdoc) throw new ContestNotFoundError(domainId, tid);
-    await bus.parallel('contest/before-edit', tdoc, $set);
-    RULES[$set.rule || tdoc.rule].check(Object.assign(tdoc, $set));
-    const res = await document.set(domainId, document.TYPE_CONTEST, tid, $set);
+    const current = await document.get(domainId, document.TYPE_CONTEST, tid);
+    if (!current) throw new ContestNotFoundError(domainId, tid);
+    const previousMode = getParticipationMode(current);
+    const next = normalizeParticipationConfig({ ...current, ...$set });
+    const nextMode = getParticipationMode(next);
+    if (previousMode === 'individual' && nextMode === 'individual' && current.participationMode === undefined) {
+        delete $set.participationMode;
+    }
+    if (nextMode === 'team') {
+        Object.assign($set, {
+            participationMode: 'team',
+            vigilEnabled: true,
+            entryMode: 'client_required',
+            rated: false,
+        } satisfies Partial<Tdoc>);
+    }
+
+    const modeChanged = previousMode !== nextMode;
+    let activeTeamCount = 0;
+    let expectedRevision = current.participationRevision ?? 0;
+    let clearActiveTeams = false;
+    if (modeChanged) {
+        const authorized =
+            options.actor &&
+            (options.actor.own(current, PERM.PERM_EDIT_CONTEST_SELF) ||
+                options.actor.hasPerm(PERM.PERM_EDIT_CONTEST) ||
+                options.actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM));
+        if (!authorized) {
+            const error = new PermissionError(PERM.PERM_EDIT_CONTEST);
+            if (options.actor) {
+                await auditRejectedParticipationModeChange(domainId, tid, options.actor._id, previousMode, nextMode, expectedRevision, error);
+            }
+            throw error;
+        }
+        const recordCount = await RecordModel.coll.countDocuments({ domainId, contest: tid });
+        activeTeamCount = await collTeam.countDocuments({ domainId, contestId: tid, active: true });
+        let transition;
+        try {
+            transition = planParticipationModeTransition({
+                tid,
+                current,
+                next,
+                now: options.now || new Date(),
+                recordCount,
+                activeTeamCount,
+                expectedRevision: options.expectedParticipationRevision,
+                clearConfirmation: options.teamModeClearConfirmation,
+            });
+        } catch (error) {
+            await auditRejectedParticipationModeChange(domainId, tid, options.actor._id, previousMode, nextMode, expectedRevision, error);
+            throw error;
+        }
+        expectedRevision = transition.currentRevision;
+        clearActiveTeams = transition.clearActiveTeams;
+        $set.participationRevision = transition.nextRevision;
+    }
+
+    await bus.parallel('contest/before-edit', current, $set);
+    RULES[next.rule].check(next);
+    let res: Tdoc;
+    if (modeChanged) {
+        const revisionFilter: any =
+            expectedRevision === 0
+                ? { $or: [{ participationRevision: 0 }, { participationRevision: { $exists: false } }] }
+                : { participationRevision: expectedRevision };
+        const storedModeFilter =
+            current.participationMode === undefined ? { participationMode: { $exists: false } } : { participationMode: current.participationMode };
+        await bus.parallel('document/set', domainId, document.TYPE_CONTEST, tid, $set, undefined);
+        // Production Mongo is a standalone node, so multi-document transactions are unavailable.
+        // CAS the contest first: an individual mode immediately closes every team capability;
+        // then synchronously deactivate and verify all teams before reporting success.
+        try {
+            const finalNow = options.now || new Date();
+            const finalBeginAt = $set.beginAt || current.beginAt;
+            if (finalNow >= current.beginAt || finalNow >= finalBeginAt) throw new ContestTeamConflictError('contest_started');
+            const finalRecordCount = await RecordModel.coll.countDocuments({ domainId, contest: tid });
+            if (finalRecordCount > 0) throw new ContestTeamConflictError('contest_has_records');
+            res = await document.coll.findOneAndUpdate(
+                {
+                    domainId,
+                    docType: document.TYPE_CONTEST,
+                    docId: tid,
+                    rule: current.rule,
+                    beginAt: current.beginAt,
+                    ...storedModeFilter,
+                    ...revisionFilter,
+                },
+                { $set },
+                { returnDocument: 'after' },
+            );
+            if (!res) throw new ContestTeamConflictError('participation_revision_mismatch');
+            if (clearActiveTeams) {
+                const changedAt = options.now || new Date();
+                let cleanupCount = 0;
+                const cleanup = await collTeam.updateMany(
+                    { domainId, contestId: tid, active: true },
+                    {
+                        $set: {
+                            active: false,
+                            updatedAt: changedAt,
+                            deactivatedAt: changedAt,
+                            deactivatedBy: options.actor._id,
+                            deactivationReason: 'participation_mode_changed',
+                        },
+                        $inc: { revision: 1 },
+                    },
+                );
+                cleanupCount = cleanup.modifiedCount;
+                const remaining = await collTeam.countDocuments({ domainId, contestId: tid, active: true });
+                if (remaining > 0) throw new ContestTeamConflictError('team_cleanup_incomplete');
+                await oplog.add({
+                    type: 'contest.team.mode-clear',
+                    operation: 'mode-clear',
+                    domainId,
+                    operator: options.actor._id,
+                    contestId: tid,
+                    fromRevision: expectedRevision,
+                    toRevision: expectedRevision + 1,
+                    deactivatedTeams: cleanupCount,
+                    result: 'success',
+                    time: changedAt,
+                });
+            }
+        } catch (error) {
+            await auditRejectedParticipationModeChange(domainId, tid, options.actor._id, previousMode, nextMode, expectedRevision, error);
+            throw error;
+        }
+        await auditParticipationModeChange(domainId, tid, options.actor._id, previousMode, nextMode, expectedRevision, 'success');
+    } else {
+        res = await document.set(domainId, document.TYPE_CONTEST, tid, $set);
+    }
     // `contest/edit` payload enriched (Krypton): now includes domainId,
     // tid, and the *post*-mutation tdoc so listeners (vigilguard's Vigil
     // push, etc.) can act on the new state without re-fetching. Legacy
@@ -1351,6 +1562,10 @@ global.Hydro.model.contest = {
     RULES,
     PrintTaskStatus,
     buildContestRule,
+    getParticipationMode,
+    normalizeParticipationConfig,
+    planParticipationModeTransition,
+    teamModeClearConfirmation,
     add,
     getListStatus,
     getMultiStatus,

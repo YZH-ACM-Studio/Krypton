@@ -28,6 +28,7 @@ import {
 import { FileInfo, ScoreboardConfig, Tdoc } from '../interface';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
+import * as contestTeam from '../model/contest-team';
 import * as discussion from '../model/discussion';
 import * as document from '../model/document';
 import { assertHomeworkAccess } from '../model/homework-access';
@@ -609,6 +610,8 @@ export class ContestEditHandler extends Handler {
         let ts = Date.now();
         ts = ts - (ts % (15 * Time.minute)) + 15 * Time.minute;
         const beginAt = moment(this.tdoc?.beginAt || new Date(ts)).tz(this.user.timeZone);
+        const activeTeamCount = tid ? await contestTeam.countActiveTeams(authoritativeDomainId, tid) : 0;
+        const participationRevision = this.tdoc?.participationRevision ?? 0;
 
         // Hydrate the school + user-group catalog when krypton-userbind is
         // loaded, so the participant-scope picker in the editor doesn't
@@ -636,6 +639,10 @@ export class ContestEditHandler extends Handler {
             scopeSchools,
             scopeGroups,
             canAutoHideProblems: this.user.hasPerm(PERM.PERM_EDIT_PROBLEM),
+            activeTeamCount,
+            participationRevision,
+            teamModeClearConfirmation:
+                tid && activeTeamCount > 0 ? contest.teamModeClearConfirmation(tid, participationRevision) : '',
         };
     }
 
@@ -683,6 +690,9 @@ export class ContestEditHandler extends Handler {
     @param('participantScopeMode', Types.Range(['none', 'schools', 'groups']), true)
     @param('participantSchoolIds', Types.CommaSeperatedArray, true)
     @param('participantGroupIds', Types.CommaSeperatedArray, true)
+    @param('participationMode', Types.Range(['individual', 'team']), true)
+    @param('participationRevision', Types.UnsignedInt, true)
+    @param('teamModeClearConfirmation', Types.String, true)
     async postUpdate(
         _domainId: string,
         tid: ObjectId,
@@ -726,6 +736,9 @@ export class ContestEditHandler extends Handler {
         participantScopeMode: 'none' | 'schools' | 'groups' = 'none',
         participantSchoolIds: string[] = [],
         participantGroupIds: string[] = [],
+        participationMode: 'individual' | 'team' = null,
+        participationRevision: number = null,
+        teamModeClearConfirmation = '',
     ) {
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
@@ -741,17 +754,40 @@ export class ContestEditHandler extends Handler {
         if (lockAt && contestDuration) throw new ValidationError('lockAt', 'duration');
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, this.tdoc?.pids);
         if (autoHide) await assertCanPublishAutoHiddenProblems(authoritativeDomainId, pids, this.user);
+        const effectiveParticipationMode = participationMode || (this.tdoc ? contest.getParticipationMode(this.tdoc) : 'individual');
+
+        // Normalize the shared client-entry contract before the first write so
+        // a participation-mode change can never leave a half-configured team contest.
+        if (effectiveParticipationMode === 'team') {
+            vigilEnabled = true;
+            entryMode = 'client_required';
+            rated = false;
+        } else if (entryMode === 'client_required') vigilEnabled = true;
+        else if (!vigilEnabled) entryMode = 'open';
+
         if (tid) {
-            await contest.edit(authoritativeDomainId, tid, {
-                title,
-                content,
-                rule,
-                beginAt,
-                endAt,
-                pids,
-                rated,
-                duration: contestDuration,
-            });
+            await contest.edit(
+                authoritativeDomainId,
+                tid,
+                {
+                    title,
+                    content,
+                    rule,
+                    beginAt,
+                    endAt,
+                    pids,
+                    rated,
+                    duration: contestDuration,
+                    participationMode: effectiveParticipationMode,
+                    vigilEnabled,
+                    entryMode,
+                },
+                {
+                    actor: this.user,
+                    expectedParticipationRevision: participationRevision ?? (this.tdoc.participationRevision || 0),
+                    teamModeClearConfirmation,
+                },
+            );
             if (
                 this.tdoc.beginAt !== beginAt ||
                 this.tdoc.endAt !== endAt ||
@@ -764,6 +800,9 @@ export class ContestEditHandler extends Handler {
         } else {
             tid = await contest.add(authoritativeDomainId, title, content, this.user._id, rule, beginAt, endAt, pids, rated, {
                 duration: contestDuration,
+                participationMode: effectiveParticipationMode,
+                vigilEnabled,
+                entryMode,
             });
         }
         const task = {

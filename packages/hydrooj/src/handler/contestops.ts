@@ -95,6 +95,13 @@ class ContestCloneHandler extends ContestApiHandler {
             end,
             Array.isArray(src.pids) ? src.pids : [],
             false,
+            src.participationMode
+                ? {
+                    participationMode: contest.getParticipationMode(src),
+                    vigilEnabled: src.vigilEnabled,
+                    entryMode: src.entryMode,
+                }
+                : {},
         );
         await OplogModel.log(this as any, 'contest.clone', {
             worker: this.workerLabel,

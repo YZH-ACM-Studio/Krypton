@@ -3,7 +3,7 @@
  * clarification, print.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
@@ -336,6 +336,14 @@ export function ContestEditPage() {
   const [beginDate, setBeginDate] = useState(formatDateInput(initialBeginAt));
   const [beginTime, setBeginTime] = useState(formatTimeInput(initialBeginAt));
   const [duration, setDuration] = useState(String(data.duration || 2));
+  const [rule, setRule] = useState(String(tdoc.rule || 'acm'));
+  const initialParticipationMode: 'individual' | 'team' = tdoc.participationMode === 'team' ? 'team' : 'individual';
+  const [participationMode, setParticipationMode] = useState<'individual' | 'team'>(initialParticipationMode);
+  const [rated, setRated] = useState(defaultRated);
+  const [modeClearOpen, setModeClearOpen] = useState(false);
+  const [modeClearConfirmed, setModeClearConfirmed] = useState(false);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const primarySubmitRef = useRef<HTMLButtonElement | null>(null);
   const [permission, setPermission] = useState(() => {
     if (tdoc.assign?.length) return 'assign';
     if (tdoc._code || tdoc.code) return 'invite';
@@ -427,6 +435,13 @@ export function ContestEditPage() {
     if (!networkLockdownMode && networkFailurePolicy !== 'off') setNetworkFailurePolicy('off');
     if (networkLockdownMode && networkFailurePolicy === 'off') setNetworkFailurePolicy('strict');
   }, [networkLockdownMode, networkFailurePolicy]);
+  useEffect(() => {
+    if (participationMode !== 'team') return;
+    if (rule !== 'acm') setRule('acm');
+    if (!vigilEnabled) setVigilEnabled(true);
+    if (entryMode !== 'client_required') setEntryMode('client_required');
+    if (rated) setRated(false);
+  }, [participationMode, rule, vigilEnabled, entryMode, rated]);
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -442,7 +457,28 @@ export function ContestEditPage() {
       <ContestManagementChrome tdoc={tdoc} active="edit">
         <Card>
           <CardContent className="p-6">
-            <form method="post" className="space-y-4">
+            <form
+              ref={formRef}
+              method="post"
+              className="space-y-4"
+              onSubmit={(event) => {
+                const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+                const isPrimaryUpdate =
+                  !submitter || (submitter.name === 'operation' && submitter.value === 'update' && !submitter.hasAttribute('formaction'));
+                if (
+                  isPrimaryUpdate &&
+                  initialParticipationMode === 'team' &&
+                  participationMode === 'individual' &&
+                  Number(data.activeTeamCount || 0) > 0 &&
+                  !modeClearConfirmed
+                ) {
+                  event.preventDefault();
+                  setModeClearOpen(true);
+                }
+              }}
+            >
+              <input type="hidden" name="participationRevision" value={Number(data.participationRevision || 0)} />
+              <input type="hidden" name="teamModeClearConfirmation" value={modeClearConfirmed ? String(data.teamModeClearConfirmation || '') : ''} />
               <MiniTabsNav
                 items={[
                   { value: 'basic', label: '基本信息' },
@@ -464,19 +500,40 @@ export function ContestEditPage() {
                   <Input id="title" name="title" defaultValue={tdoc.title || ''} required />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label htmlFor="rule" className="text-sm font-medium">
-                    赛制
-                  </label>
-                  <SimpleSelect
-                    id="rule"
-                    name="rule"
-                    defaultValue={tdoc.rule || ''}
-                    options={Object.entries(rules).map(([k, v]) => ({
-                      value: k,
-                      label: v as string,
-                    }))}
-                  />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <label htmlFor="rule" className="text-sm font-medium">
+                      赛制
+                    </label>
+                    <SimpleSelect
+                      id="rule"
+                      name="rule"
+                      value={rule}
+                      disabled={participationMode === 'team'}
+                      onValueChange={setRule}
+                      options={Object.entries(rules).map(([k, v]) => ({
+                        value: k,
+                        label: v as string,
+                      }))}
+                    />
+                    {participationMode === 'team' ? <input type="hidden" name="rule" value="acm" /> : null}
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium">参赛身份</label>
+                    <SimpleSelect
+                      name="participationMode"
+                      value={participationMode}
+                      onValueChange={(value) => {
+                        setParticipationMode(value as 'individual' | 'team');
+                        setModeClearConfirmed(false);
+                      }}
+                      options={[
+                        { value: 'individual', label: '个人 ACM / 普通比赛' },
+                        { value: 'team', label: '1–3 人团队 ACM' },
+                      ]}
+                    />
+                    <p className="text-[11px] text-muted-foreground">团队模式固定为 ACM，强制通过 Vigil Client 进入且不计个人 Rating。</p>
+                  </div>
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -702,7 +759,7 @@ export function ContestEditPage() {
               {/* ─── Tab 4: 客户端与反作弊 (Krypton) ─── */}
               <div className="space-y-4" hidden={activeTab !== 'vigil'}>
                 <label className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={vigilEnabled} onCheckedChange={(v) => setVigilEnabled(!!v)} />
+                  <Checkbox checked={vigilEnabled} disabled={participationMode === 'team'} onCheckedChange={(v) => setVigilEnabled(!!v)} />
                   启用 Vigil 反作弊
                   <span className="ml-auto text-[11px] text-muted-foreground">开启后比赛的会话会被推送到 Vigil Server</span>
                 </label>
@@ -715,6 +772,7 @@ export function ContestEditPage() {
                         <label className="text-sm font-medium">进入模式</label>
                         <SimpleSelect
                           value={entryMode}
+                          disabled={participationMode === 'team'}
                           onValueChange={(v) => setEntryMode(v as any)}
                           options={[
                             { value: 'open', label: '普通网页可进入（Vigil 可选）' },
@@ -921,9 +979,10 @@ export function ContestEditPage() {
 
                 <div className="flex flex-wrap gap-4">
                   <label className="flex items-center gap-2 text-sm">
-                    <Checkbox name="rated" value="true" defaultChecked={defaultRated} />
+                    <Checkbox name="rated" value="true" checked={rated} disabled={participationMode === 'team'} onCheckedChange={setRated} />
                     计入 Rating
                   </label>
+                  {participationMode === 'team' ? <input type="hidden" name="rated" value="false" /> : null}
                   <label className="flex items-center gap-2 text-sm">
                     <Checkbox name="autoHide" value="true" defaultChecked={defaultAutoHide} disabled={!canAutoHideProblems} />
                     比赛中自动隐藏题目（赛后自动公开）
@@ -944,7 +1003,7 @@ export function ContestEditPage() {
               </div>
 
               <div className="flex items-center gap-3">
-                <Button type="submit" name="operation" value="update">
+                <Button ref={primarySubmitRef} type="submit" name="operation" value="update">
                   <Save className="mr-1 size-4" />
                   {isEdit ? '保存修改' : '创建比赛'}
                 </Button>
@@ -974,6 +1033,39 @@ export function ContestEditPage() {
             </form>
           </CardContent>
         </Card>
+        <Dialog open={modeClearOpen} onOpenChange={setModeClearOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>停用本场全部队伍？</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 text-sm text-muted-foreground">
+              <p>
+                当前有 <strong className="text-foreground">{Number(data.activeTeamCount || 0)}</strong> 支有效队伍。切回个人模式会停用这些队伍；
+                操作不会删除历史文档，但之后需要重新组队才能再次启用团队赛。
+              </p>
+              <p>只有比赛尚未开始且没有任何提交时允许执行。</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setModeClearOpen(false)}>
+                取消
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => {
+                  setModeClearConfirmed(true);
+                  setModeClearOpen(false);
+                  window.setTimeout(() => {
+                    if (!formRef.current || !primarySubmitRef.current) throw new Error('Contest update submitter is unavailable.');
+                    formRef.current.requestSubmit(primarySubmitRef.current);
+                  }, 0);
+                }}
+              >
+                停用队伍并保存
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </ContestManagementChrome>
     </motion.div>
   );

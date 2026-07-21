@@ -132,6 +132,36 @@ export async function closeSessionOnVigil(ojContestId: string, sessionId: string
     }
 }
 
+export interface VigilTeamRoleChangePayload {
+    domainId: string;
+    contestId: string;
+    teamId: string;
+    teamRevision: number;
+    affectedUids: number[];
+    actorUid: number;
+}
+
+/**
+ * Refresh active Vigil clients after the OJ roster has already committed.
+ * Unlike background contest sync, this call intentionally throws so the
+ * administrator sees a post-commit warning. Submission authority remains
+ * governed by the newly committed OJ roster regardless of push outcome.
+ */
+export async function notifyTeamRoleChangeOnVigil(payload: VigilTeamRoleChangePayload): Promise<void> {
+    await fetchWithRetry(`${baseUrl()}/api/integrations/oj/team-role-change`, {
+        method: 'POST',
+        body: payload,
+        retries: 1,
+    });
+    logger.info(
+        'refreshed Vigil team roles contest=%s team=%s revision=%d affected=%d',
+        payload.contestId,
+        payload.teamId,
+        payload.teamRevision,
+        payload.affectedUids.length,
+    );
+}
+
 export interface RecordingDeleteScope {
     cid: string;
     ojUserId?: number;
@@ -179,6 +209,9 @@ export interface VigilAccessVerification {
     ojContestId?: string;
     /** Machine fingerprint Vigil recorded at session-open time. */
     machineId?: string;
+    /** Versioned Client↔Server team-policy protocol snapshot. */
+    clientProtocolVersion?: number;
+    clientVersion?: string;
     /**
      * True when this session is for a Vigil-created temporary user
      * (proctor approval path, see DESIGN §9). The OJ-side checks combine

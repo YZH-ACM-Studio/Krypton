@@ -238,6 +238,8 @@ export default class RecordModel {
             hackTarget?: ObjectId;
             type: 'judge' | 'rejudge' | 'pretest' | 'hack' | 'generate' | 'manual';
             notify?: boolean;
+            /** Hydro session key for the authoritative Vigil team-session gate. */
+            vigilSessionKey?: string;
             dataWriteActiveContainerConfirmation?: ProblemDataWriteConfirmation;
         } = { type: 'judge' },
     ) {
@@ -321,7 +323,7 @@ export default class RecordModel {
         ) {
             const resolver = global.Hydro?.model?.contest?.resolveTeamSubmissionCapability;
             if (typeof resolver !== 'function') throw new Error('Contest submission capability resolver is unavailable.');
-            const capability = await resolver(domainId, contestContext, uid);
+            const capability = await resolver(domainId, contestContext, uid, { vigilSessionKey: args.vigilSessionKey });
             if (capability.mode === 'team') {
                 if (!(capability.teamId instanceof ObjectId)) throw new ValidationError('contestTeamId');
                 data.contestTeamId = capability.teamId;

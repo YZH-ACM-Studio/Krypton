@@ -16,7 +16,12 @@ import { escapeRegExp } from 'lodash';
 import { ObjectId } from 'mongodb';
 import { Context, Handler, NotFoundError, OplogModel, param, PRIV, requireServiceToken, Types, UserModel, ValidationError } from 'hydrooj';
 import * as contestModel from '../model/contest';
+import * as contestTeam from '../model/contest-team';
 import * as document from '../model/document';
+import {
+    buildVigilContestRoleResolution,
+    type VigilContestRoleResolution,
+} from '../model/vigil-contest-role';
 import system from '../model/system';
 import db from '../service/db';
 import { executeRecordingDelete, previewRecordingDelete } from '../service/vigil-bridge';
@@ -46,16 +51,44 @@ function clientSessionKeyFromHydroSession(session: any): string {
     return session?.sessionId || session?._id || session?.sid || '';
 }
 
-async function persistVigilClientSession(handler: Handler, result: any, vigilSessionId: string) {
+async function persistVigilClientSession(
+    handler: Handler,
+    result: any,
+    vigilSessionId: string,
+    role: VigilContestRoleResolution,
+) {
     const sidValue = clientSessionKeyFromHydroSession((handler as any).session);
     if (!sidValue || !result?.ojContestId) return;
     const clientSessionsColl = (db as any).collection('vigil.client_sessions');
     const now = new Date();
     const contestId = new ObjectId(result.ojContestId);
-    await clientSessionsColl.deleteMany({
-        sid: sidValue,
-        vigilSessionId: { $ne: vigilSessionId },
-    });
+    if (role.participationMode === 'team') {
+        const attached = await clientSessionsColl.updateOne(
+            {
+                vigilSessionId,
+                domainId: result.ojDomainId || 'system',
+                contestId,
+                uid: result.ojUserId,
+                active: true,
+                participationMode: 'team',
+            },
+            {
+                $set: {
+                    sid: sidValue,
+                    machineId: result.machineId || '',
+                    clientProtocolVersion: result.clientProtocolVersion || 0,
+                    clientVersion: result.clientVersion || '',
+                    updatedAt: now,
+                    expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
+                },
+            },
+        );
+        if (attached.matchedCount !== 1) {
+            throw new Error(`Vigil team session was not activated before token exchange: ${vigilSessionId}`);
+        }
+        return;
+    }
+    await clientSessionsColl.deleteMany({ sid: sidValue, vigilSessionId: { $ne: vigilSessionId } });
     await clientSessionsColl.updateOne(
         { vigilSessionId },
         {
@@ -68,6 +101,10 @@ async function persistVigilClientSession(handler: Handler, result: any, vigilSes
                 machineId: result.machineId || '',
                 isTemporary: !!result.isTemporary,
                 scopeOverride: !!result.scopeOverride,
+                active: true,
+                participationMode: 'individual',
+                clientProtocolVersion: result.clientProtocolVersion || 0,
+                clientVersion: result.clientVersion || '',
                 updatedAt: now,
                 // Expire 12h from now — generous upper bound for multi-day
                 // events; Vigil close hooks and the TTL sweep handle earlier
@@ -80,6 +117,100 @@ async function persistVigilClientSession(handler: Handler, result: any, vigilSes
         },
         { upsert: true },
     );
+}
+
+export async function resolveVigilContestRole(
+    domainId: string,
+    contestId: string,
+    uid: number,
+): Promise<VigilContestRoleResolution> {
+    if (!ObjectId.isValid(contestId) || !Number.isSafeInteger(uid) || uid <= 0) throw new ValidationError('contestId');
+    const tid = new ObjectId(contestId);
+    const tdoc = await contestModel.get(domainId, tid);
+    if (!tdoc) throw new NotFoundError('Contest');
+    if (contestModel.getParticipationMode(tdoc) !== 'team') {
+        return buildVigilContestRoleResolution(tdoc, null, uid);
+    }
+    if (tdoc.rule !== 'acm' || !tdoc.vigilEnabled || tdoc.entryMode !== 'client_required' || tdoc.rated) {
+        throw new ValidationError('participationMode');
+    }
+    try {
+        await contestTeam.assertContestTeamEligibility(domainId, tdoc, uid);
+    } catch (error: any) {
+        return buildVigilContestRoleResolution(tdoc, null, uid, error?.message || 'ineligible');
+    }
+    const team = await contestTeam.getTeamByMember(domainId, tid, uid);
+    return buildVigilContestRoleResolution(tdoc, team, uid);
+}
+
+async function activateVigilClientSession(
+    sessionId: string,
+    domainId: string,
+    contestId: string,
+    uid: number,
+    machineId: string,
+    clientProtocolVersion: number,
+    clientVersion: string,
+    role: VigilContestRoleResolution,
+) {
+    const coll = (db as any).collection('vigil.client_sessions');
+    const tid = new ObjectId(contestId);
+    const now = new Date();
+    if (role.participationMode === 'team') {
+        await coll.updateMany(
+            {
+                domainId,
+                contestId: tid,
+                uid,
+                participationMode: 'team',
+                active: true,
+                vigilSessionId: { $ne: sessionId },
+            },
+            { $set: { active: false, updatedAt: now, expiresAt: now } },
+        );
+    }
+    await coll.updateOne(
+        { vigilSessionId: sessionId },
+        {
+            $set: {
+                vigilSessionId: sessionId,
+                domainId,
+                contestId: tid,
+                uid,
+                machineId,
+                active: true,
+                participationMode: role.participationMode,
+                teamId: role.teamId ? new ObjectId(role.teamId) : null,
+                teamRole: role.role,
+                teamRevision: role.teamRevision ?? null,
+                capabilities: role.capabilities || null,
+                clientProtocolVersion,
+                clientVersion,
+                isTemporary: false,
+                scopeOverride: false,
+                updatedAt: now,
+                expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
+            },
+            $setOnInsert: {
+                sid: `vigil:${sessionId}`,
+                createdAt: now,
+            },
+        },
+        { upsert: true },
+    );
+}
+
+function roleAccessError(role: VigilContestRoleResolution, clientProtocolVersion: number): { status: number; error: string } | null {
+    if (!role.eligible) return { status: 403, error: role.reason || 'team_role_ineligible' };
+    if (role.participationMode === 'team' && clientProtocolVersion < role.minClientProtocolVersion) {
+        return { status: 426, error: `client_protocol_${clientProtocolVersion}_requires_${role.minClientProtocolVersion}` };
+    }
+    return null;
+}
+
+async function resolveVerifiedTokenRole(result: any): Promise<VigilContestRoleResolution> {
+    if (!result?.ojContestId || !result?.ojUserId) throw new ValidationError('ojContestId');
+    return await resolveVigilContestRole(result.ojDomainId || 'system', result.ojContestId, result.ojUserId);
 }
 
 async function ensureVigilContestParticipation(domainId: string, contestId: string | undefined, uid: number) {
@@ -187,6 +318,32 @@ class VigilApiHandler extends Handler {
     }
 }
 
+// ─── POST /api/vigil/resolve-contest-role ────────────────────────────────
+
+class VigilResolveContestRoleHandler extends VigilApiHandler {
+    @param('domainId', Types.String)
+    @param('contestId', Types.String)
+    @param('uid', Types.Int)
+    @param('machineId', Types.String, true)
+    @param('sessionId', Types.String, true)
+    async post(_args: any, domainId: string, contestId: string, uid: number, machineId = '', sessionId = '') {
+        const role = await resolveVigilContestRole(domainId, contestId, uid);
+        await OplogModel.log(this as any, 'vigil.contest_role_resolved', {
+            domainId,
+            contestId,
+            uid,
+            machineId,
+            sessionId,
+            participationMode: role.participationMode,
+            teamId: role.teamId,
+            role: role.role,
+            teamRevision: role.teamRevision,
+            eligible: role.eligible,
+        });
+        this.response.body = role;
+    }
+}
+
 // ─── POST /api/vigil/lookup-student ───────────────────────────────────────
 
 class VigilLookupStudentHandler extends VigilApiHandler {
@@ -270,14 +427,50 @@ class VigilLookupStudentHandler extends VigilApiHandler {
 class VigilNotifySessionOpenedHandler extends VigilApiHandler {
     @param('sessionId', Types.String)
     @param('ojUserId', Types.Int)
+    @param('domainId', Types.String)
     @param('tid', Types.String)
     @param('machineId', Types.String)
-    async post(_args: any, sessionId: string, ojUserId: number, tid: string, machineId: string) {
+    @param('clientProtocolVersion', Types.Int, true)
+    @param('clientVersion', Types.String, true)
+    async post(
+        _args: any,
+        sessionId: string,
+        ojUserId: number,
+        domainId: string,
+        tid: string,
+        machineId: string,
+        clientProtocolVersion = 0,
+        clientVersion = '',
+    ) {
+        const role = await resolveVigilContestRole(domainId, tid, ojUserId);
+        const denied = roleAccessError(role, clientProtocolVersion);
+        if (denied) {
+            this.response.status = denied.status;
+            this.response.body = denied;
+            return;
+        }
+        await activateVigilClientSession(
+            sessionId,
+            domainId,
+            tid,
+            ojUserId,
+            machineId,
+            clientProtocolVersion,
+            clientVersion,
+            role,
+        );
         await OplogModel.log(this as any, 'vigil.session_opened', {
             sessionId,
             ojUserId,
+            domainId,
             tid,
             machineId,
+            clientProtocolVersion,
+            clientVersion,
+            participationMode: role.participationMode,
+            teamId: role.teamId,
+            role: role.role,
+            teamRevision: role.teamRevision,
         });
         // Persist last-seen machine id on the user doc for convenience.
         try {
@@ -285,7 +478,7 @@ class VigilNotifySessionOpenedHandler extends VigilApiHandler {
         } catch {
             /* best-effort */
         }
-        this.response.body = { ok: true };
+        this.response.body = { ok: true, role };
     }
 }
 
@@ -446,6 +639,20 @@ class VigilExchangeAccessTokenHandler extends Handler {
             this.response.body = { error: 'invalid token' };
             return;
         }
+        let role: VigilContestRoleResolution;
+        try {
+            role = await resolveVerifiedTokenRole(result);
+        } catch (error: any) {
+            this.response.status = 403;
+            this.response.body = { error: 'role_resolution_failed', message: error?.message || String(error) };
+            return;
+        }
+        const roleDenied = roleAccessError(role, result.clientProtocolVersion || 0);
+        if (roleDenied) {
+            this.response.status = roleDenied.status;
+            this.response.body = roleDenied;
+            return;
+        }
         const scopeCheck = await verifyVigilParticipantScope(
             result.ojDomainId || 'system',
             result.ojContestId,
@@ -486,23 +693,28 @@ class VigilExchangeAccessTokenHandler extends Handler {
             });
             return;
         }
-        // Set the user session.
-        this.session.uid = result.ojUserId;
+        // Bind the Hydro session only after the OJ-side Vigil session row is
+        // verified. A failed write must not leave an authenticated cookie.
         this.session.sessionId = randomBytes(16).toString('hex');
         this.session.examSessionId = sessionId;
         this.session.examContestId = result.ojContestId;
         try {
-            await persistVigilClientSession(this, result, sessionId);
+            await persistVigilClientSession(this, result, sessionId, role);
         } catch (e: any) {
             await OplogModel.log(this as any, 'vigilguard.write_fail', {
                 sessionId,
                 ojContestId: result.ojContestId,
                 error: e?.message || String(e),
             });
+            this.response.status = 503;
+            this.response.body = { error: 'client_session_bind_failed', message: 'OJ 无法绑定当前 Vigil 会话，请重新登录。' };
+            return;
         }
+        this.session.uid = result.ojUserId;
         this.response.body = {
             ok: true,
             redirect: result.ojContestId ? `/exam-mode/${result.ojContestId}` : '/exam-mode',
+            role,
         };
     }
 }
@@ -567,6 +779,22 @@ class VigilExamModeLaunchHandler extends Handler {
             renderError('会话已过期或无效', '此考试启动链接已失效。请联系考务重新发起登录。');
             return;
         }
+        let role: VigilContestRoleResolution;
+        try {
+            role = await resolveVerifiedTokenRole(result);
+        } catch (error: any) {
+            renderError('无法确认比赛角色', error?.message || String(error), 403);
+            return;
+        }
+        const roleDenied = roleAccessError(role, result.clientProtocolVersion || 0);
+        if (roleDenied) {
+            renderError(
+                roleDenied.status === 426 ? '客户端版本过低' : '无权进入团队比赛',
+                roleDenied.error,
+                roleDenied.status,
+            );
+            return;
+        }
         const scopeCheck = await verifyVigilParticipantScope(
             result.ojDomainId || 'system',
             result.ojContestId,
@@ -603,8 +831,7 @@ class VigilExamModeLaunchHandler extends Handler {
             return;
         }
 
-        // Bootstrap an OJ session for the user the token was issued for.
-        this.session.uid = result.ojUserId;
+        // Bootstrap an OJ session only after its Vigil binding succeeds.
         this.session.sessionId = randomBytes(16).toString('hex');
         this.session.examSessionId = sessionId;
         this.session.examContestId = result.ojContestId;
@@ -614,23 +841,21 @@ class VigilExamModeLaunchHandler extends Handler {
         // access gate read to decide "does this sid have a client session
         // for this contest?". Single-contest binding per DESIGN §8.1.
         //
-        // Errors are swallowed: if the collection write fails, the user
-        // still gets a working session, they just won't pass the
-        // contest-access gate; the operator will see a `vigilguard.write_fail`
-        // entry in Oplog and the Qt Client can retry.
         try {
-            await persistVigilClientSession(this, result, sessionId);
+            await persistVigilClientSession(this, result, sessionId, role);
         } catch (e: any) {
             await OplogModel.log(this as any, 'vigilguard.write_fail', {
                 sessionId,
                 ojContestId: result.ojContestId,
                 error: e?.message || String(e),
             });
+            renderError('无法绑定客户端会话', 'OJ 无法绑定当前 Vigil 会话，请重新登录。', 503);
+            return;
         }
+        this.session.uid = result.ojUserId;
 
         // 302 to the real exam-mode page. Falling back to /exam-mode (the
-        // home list) is defensive — should never trigger with a valid token.
-        this.response.redirect = result.ojContestId ? `/exam-mode/${result.ojContestId}` : '/exam-mode';
+        this.response.redirect = `/exam-mode/${result.ojContestId}`;
     }
 }
 
@@ -1075,6 +1300,7 @@ export async function apply(ctx: Context) {
     ctx.Route('admin_vigil_exam_detail', '/admin/vigil/exams/:examId', VigilAdminExamDetailHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('admin_vigil_resolve_contests', '/api/admin/vigil/resolve-contests', VigilResolveContestsHandler, PRIV.PRIV_EDIT_SYSTEM);
     ctx.Route('vigil_lookup_student', '/api/vigil/lookup-student', VigilLookupStudentHandler);
+    ctx.Route('vigil_resolve_contest_role', '/api/vigil/resolve-contest-role', VigilResolveContestRoleHandler);
     ctx.Route('vigil_notify_session_opened', '/api/vigil/notify-session-opened', VigilNotifySessionOpenedHandler);
     ctx.Route('vigil_notify_session_closed', '/api/vigil/notify-session-closed', VigilNotifySessionClosedHandler);
     ctx.Route('vigil_student_finish', '/api/vigil/student-finish', VigilStudentFinishHandler);

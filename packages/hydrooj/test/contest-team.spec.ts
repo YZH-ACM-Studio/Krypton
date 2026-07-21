@@ -27,6 +27,8 @@ const docs: any[] = [];
 const invites: any[] = [];
 const audit: any[] = [];
 const events: any[] = [];
+const vigilRoleRefreshes: any[] = [];
+const vigilRoleNotifies: any[] = [];
 const indexes: any[] = [];
 const users = new Map<number, any>();
 const userReads = new Map<number, number>();
@@ -37,6 +39,7 @@ let failNextInviteUpdateMany = false;
 let teamCasBarrierRemaining = 0;
 let releaseTeamCasBarrier: (() => void) | null = null;
 let teamCasBarrier = Promise.resolve();
+let activeVigilSessionChanges = 0;
 
 function armTeamCasBarrier(participants: number) {
     teamCasBarrierRemaining = participants;
@@ -274,6 +277,9 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
         }
         if (request === '../service/bus') return { __esModule: true, default: { broadcast: async (...args: any[]) => events.push(args) } };
         if (request === '../service/db') return { __esModule: true, default: dbStub };
+        if (request === '../service/vigil-bridge') {
+            return { notifyTeamRoleChangeOnVigil: async (payload: any) => vigilRoleNotifies.push(payload) };
+        }
         if (request === './builtin') return { PERM, PRIV };
         if (request === './contest') return contestStub;
         if (request === './oplog') return { add: async (entry: any) => audit.push(entry) };
@@ -323,6 +329,8 @@ beforeEach(() => {
     invites.length = 0;
     audit.length = 0;
     events.length = 0;
+    vigilRoleRefreshes.length = 0;
+    vigilRoleNotifies.length = 0;
     indexes.length = 0;
     users.clear();
     userReads.clear();
@@ -332,6 +340,13 @@ beforeEach(() => {
     teamCasBarrierRemaining = 0;
     releaseTeamCasBarrier = null;
     teamCasBarrier = Promise.resolve();
+    activeVigilSessionChanges = 0;
+    (global as any).Hydro.model.vigilguard = {
+        refreshActiveTeamSessionRoles: async (before: any, after: any) => {
+            vigilRoleRefreshes.push({ before, after });
+            return { updated: activeVigilSessionChanges, invalidated: 0 };
+        },
+    };
     for (const uid of [10, 11, 12, 13, 99]) users.set(uid, { _id: uid, hasPerm: () => true });
     currentContest = {
         domainId: 'system',
@@ -750,6 +765,33 @@ describe('P1.11 canonical contest team lifecycle', () => {
         expect(events).to.have.length(1);
         expect(events[0][0]).to.equal('contest/team-role-change');
         expect(audit.some((entry) => entry.type === 'contest.team.emergency-update' && entry.result === 'success')).to.equal(true);
+    });
+
+    it('refreshes active Vigil roles for a captain change before the contest starts', async () => {
+        const team = await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(99, true) },
+            { name: 'Prestart clients', memberUids: [10, 11], captainUid: 10, managementMode: 'admin' },
+        );
+        activeVigilSessionChanges = 2;
+
+        const updated = await teamModel.updateTeam(
+            'system',
+            currentContest.docId,
+            team.teamId,
+            { user: actor(99, true) },
+            { expectedRevision: team.revision, captainUid: 11 },
+        );
+
+        expect(vigilRoleRefreshes).to.have.length(1);
+        expect(vigilRoleNotifies).to.have.length(1);
+        expect(vigilRoleNotifies[0]).to.include({
+            domainId: 'system',
+            teamRevision: updated.revision,
+            actorUid: 99,
+        });
+        expect(vigilRoleNotifies[0].affectedUids).to.deep.equal([10, 11]);
     });
 
     it('registers only equality-partial unique indexes', async () => {

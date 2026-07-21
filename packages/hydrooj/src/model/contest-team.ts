@@ -4,6 +4,7 @@ import { ContestTeamConflictError, NotAssignedError, PermissionError, UserNotFou
 import type { Tdoc } from '../interface';
 import bus from '../service/bus';
 import db from '../service/db';
+import { notifyTeamRoleChangeOnVigil } from '../service/vigil-bridge';
 import { PERM, PRIV } from './builtin';
 import * as contest from './contest';
 import * as oplog from './oplog';
@@ -31,6 +32,8 @@ export interface ContestTeamDoc {
     deactivatedAt?: Date;
     deactivatedBy?: number;
     deactivationReason?: 'participation_mode_changed' | 'team_closed';
+    /** Request-local warning; never persisted. */
+    vigilRoleSyncWarning?: string;
 }
 
 export interface ContestTeamActor {
@@ -526,6 +529,7 @@ export async function updateTeam(
         () => syncPendingInvitesAfterTeamMutation(outcome.updated, actor.user._id, actor.now || new Date()),
     );
     if (outcome.roleChanged) {
+        await refreshTeamRoleSessionsAfterCommit(outcome.before, outcome.updated, actor.user._id);
         await runPostCommitStep('publish-role-change', outcome.updated, actor.user._id, async () =>
             bus.broadcast('contest/team-role-change', {
                 before: outcome.before,
@@ -536,6 +540,40 @@ export async function updateTeam(
         );
     }
     return outcome.updated;
+}
+
+async function refreshTeamRoleSessionsAfterCommit(
+    before: ContestTeamDoc,
+    after: ContestTeamDoc,
+    actorUid: number,
+): Promise<void> {
+    try {
+        const refreshRoles = (global as any).Hydro?.model?.vigilguard?.refreshActiveTeamSessionRoles;
+        if (typeof refreshRoles !== 'function') throw new Error('Vigil team-session role refresh service is unavailable.');
+        const refreshed = await refreshRoles(before, after);
+        if ((refreshed.updated || 0) + (refreshed.invalidated || 0) === 0) return;
+        await notifyTeamRoleChangeOnVigil({
+            domainId: after.domainId,
+            contestId: after.contestId.toHexString(),
+            teamId: after.teamId.toHexString(),
+            teamRevision: after.revision,
+            affectedUids: Array.from(new Set([...before.memberUids, ...after.memberUids])),
+            actorUid,
+        });
+    } catch (error: any) {
+        after.vigilRoleSyncWarning = error?.message || String(error);
+        console.error(
+            '[contest-team] roster committed but Vigil role refresh failed',
+            {
+                domainId: after.domainId,
+                contestId: after.contestId,
+                teamId: after.teamId,
+                teamRevision: after.revision,
+                actorUid,
+            },
+            error,
+        );
+    }
 }
 
 async function runPostCommitStep(
@@ -946,6 +984,7 @@ export async function acceptInvite(domainId: string, contestId: ObjectId, invite
     await runPostCommitStep('sync-invitations', outcome.updated, actor.user._id, () =>
         syncPendingInvitesAfterTeamMutation(outcome.updated, actor.user._id, outcome.committedAt, outcome.invite.inviteId),
     );
+    await refreshTeamRoleSessionsAfterCommit(outcome.before, outcome.updated, actor.user._id);
     await runPostCommitStep('publish-role-change', outcome.updated, actor.user._id, async () =>
         bus.broadcast('contest/team-role-change', {
             before: outcome.before,

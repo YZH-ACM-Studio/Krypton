@@ -229,11 +229,15 @@ export interface TeamSubmissionCapability {
     teamId?: ObjectId;
     captainUid?: number;
     memberUids?: number[];
-    /** P1.15 attaches the active Vigil-session assertion at this same resolver boundary. */
-    vigilSessionCheck: 'not_applicable' | 'reserved';
+    vigilSessionCheck: 'not_applicable' | 'verified';
 }
 
-export async function resolveTeamSubmissionCapability(domainId: string, tid: ObjectId, uid: number): Promise<TeamSubmissionCapability> {
+export async function resolveTeamSubmissionCapability(
+    domainId: string,
+    tid: ObjectId,
+    uid: number,
+    options: { vigilSessionKey?: string } = {},
+): Promise<TeamSubmissionCapability> {
     if (!(tid instanceof ObjectId) || !Number.isSafeInteger(uid) || uid <= 0) throw new ValidationError('contestTeamId');
     const tdoc = await get(domainId, tid);
     if (getParticipationMode(tdoc) !== 'team') {
@@ -253,13 +257,17 @@ export async function resolveTeamSubmissionCapability(domainId: string, tid: Obj
         const eligibility = global.Hydro?.model?.contestTeam?.assertContestTeamEligibility;
         if (typeof eligibility !== 'function') throw new Error('Contest team eligibility service is unavailable.');
         await eligibility(domainId, tdoc, uid);
+        const assertVigilSession = (global as any).Hydro?.model?.vigilguard?.assertActiveTeamSubmissionSession;
+        if (typeof assertVigilSession !== 'function') throw new Error('Vigil team-session authorization service is unavailable.');
+        if (!options.vigilSessionKey) throw new ContestTeamConflictError('active_vigil_captain_session_required');
+        await assertVigilSession(options.vigilSessionKey, domainId, tid, uid, team.teamId);
         return {
             mode: 'team',
             contestId: tid,
             teamId: team.teamId,
             captainUid: team.captainUid,
             memberUids: [...team.memberUids],
-            vigilSessionCheck: 'reserved',
+            vigilSessionCheck: 'verified',
         };
     } catch (error: any) {
         logger.warn(

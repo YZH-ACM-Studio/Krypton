@@ -535,15 +535,25 @@ describe('record judge problem config', () => {
         const contestId = new ObjectId();
         const teamId = new ObjectId();
         const calls: any[] = [];
-        (global as any).Hydro.model.contest.resolveTeamSubmissionCapability = async (domainId: string, tid: ObjectId, uid: number) => {
-            calls.push({ domainId, tid, uid });
-            return { mode: 'team', contestId: tid, teamId, captainUid: uid, memberUids: [uid], vigilSessionCheck: 'reserved' };
+        (global as any).Hydro.model.contest.resolveTeamSubmissionCapability = async (
+            domainId: string,
+            tid: ObjectId,
+            uid: number,
+            options: { vigilSessionKey?: string },
+        ) => {
+            calls.push({ domainId, tid, uid, options });
+            return { mode: 'team', contestId: tid, teamId, captainUid: uid, memberUids: [uid], vigilSessionCheck: 'verified' };
         };
 
-        await recordModel.add('system', 7, 42, 'cc', 'int main() {}', false, { contest: contestId, type: 'judge' });
+        await recordModel.add('system', 7, 42, 'cc', 'int main() {}', false, {
+            contest: contestId,
+            type: 'judge',
+            vigilSessionKey: 'hydro-session-42',
+        });
 
         expect(calls).to.have.length(1);
         expect(calls[0]).to.include({ domainId: 'system', uid: 42 });
+        expect(calls[0].options).to.deep.equal({ vigilSessionKey: 'hydro-session-42' });
         expect(calls[0].tid.equals(contestId)).to.equal(true);
         expect(insertedRecords).to.have.length(1);
         expect(insertedRecords[0].contest.equals(contestId)).to.equal(true);
@@ -561,7 +571,7 @@ describe('record judge problem config', () => {
             teamId,
             captainUid: 42,
             memberUids: [42],
-            vigilSessionCheck: 'reserved',
+            vigilSessionCheck: 'verified',
         });
 
         await recordModel.add('system', 7, 42, 'cc', 'int main() {}', false, {

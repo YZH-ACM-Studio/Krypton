@@ -22,6 +22,7 @@ import system from 'hydrooj/src/model/system';
 import { ensureIndexes } from './src/db';
 import { applyHandlers } from './src/handler';
 import {
+    assertActiveTeamSubmissionSession,
     clientSessionKeyFromSession,
     currentClientSession,
     deleteClientSessionByVigilSessionId,
@@ -29,12 +30,14 @@ import {
     hitsParticipantScope,
     isValidClientSessionForContest,
     listActiveSessionsForContest,
+    refreshActiveTeamSessionRoles,
 } from './src/helpers';
 import { getBrowserLockoutDecision, invalidateLockoutCache, vigilGuardLockoutLayer } from './src/lockout';
 import { migrationScripts } from './src/migration';
 
 export * from './src/types';
 export {
+    assertActiveTeamSubmissionSession,
     clientSessionKeyFromSession,
     currentClientSession,
     deleteClientSessionByVigilSessionId,
@@ -44,6 +47,7 @@ export {
     invalidateLockoutCache,
     isValidClientSessionForContest,
     listActiveSessionsForContest,
+    refreshActiveTeamSessionRoles,
 };
 
 /**
@@ -53,12 +57,14 @@ export {
  * import dependency on this plugin.
  */
 export const vigilGuardModel = {
+    assertActiveTeamSubmissionSession,
     hitsParticipantScope,
     currentClientSession,
     clientSessionKeyFromSession,
     deleteClientSessionByVigilSessionId,
     isValidClientSessionForContest,
     listActiveSessionsForContest,
+    refreshActiveTeamSessionRoles,
     effectiveContestAccess,
     getBrowserLockoutDecision,
     invalidateLockoutCache,

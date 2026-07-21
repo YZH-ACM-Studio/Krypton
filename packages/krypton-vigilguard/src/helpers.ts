@@ -83,8 +83,103 @@ export async function currentClientSession(sid: string): Promise<ClientSessionDo
     if (!sid) return null;
     const doc = await clientSessionsColl.findOne({ sid });
     if (!doc) return null;
+    if (doc.active === false) return null;
     if (doc.expiresAt && doc.expiresAt.getTime() < Date.now()) return null;
     return doc;
+}
+
+export async function assertActiveTeamSubmissionSession(
+    sid: string,
+    domainId: string,
+    contestId: ObjectId,
+    uid: number,
+    teamId: ObjectId,
+): Promise<ClientSessionDoc> {
+    const session = await currentClientSession(sid);
+    if (
+        !session ||
+        session.domainId !== domainId ||
+        session.uid !== uid ||
+        !session.contestId.equals(contestId) ||
+        session.participationMode !== 'team' ||
+        session.teamRole !== 'captain' ||
+        !session.teamId?.equals(teamId) ||
+        session.capabilities?.canSubmit !== true
+    ) {
+        throw new Error('An active captain Vigil session is required for team submission.');
+    }
+    return session;
+}
+
+export async function refreshActiveTeamSessionRoles(
+    before: { domainId: string; contestId: ObjectId; teamId: ObjectId; memberUids: number[] },
+    after: {
+        teamId: ObjectId;
+        memberUids: number[];
+        captainUid: number;
+        revision: number;
+        active: boolean;
+    },
+): Promise<{ updated: number; invalidated: number }> {
+    const now = new Date();
+    const remaining = after.active ? new Set(after.memberUids) : new Set<number>();
+    const removed = before.memberUids.filter((uid) => !remaining.has(uid));
+    let invalidated = 0;
+    if (removed.length) {
+        const result = await clientSessionsColl.updateMany(
+            {
+                domainId: before.domainId,
+                contestId: before.contestId,
+                teamId: before.teamId,
+                participationMode: 'team',
+                active: true,
+                uid: { $in: removed },
+            },
+            {
+                $set: {
+                    active: false,
+                    teamRole: 'none',
+                    teamRevision: after.revision,
+                    capabilities: null,
+                    updatedAt: now,
+                    expiresAt: now,
+                },
+            },
+        );
+        invalidated = result.modifiedCount || 0;
+    }
+    let updated = 0;
+    for (const uid of remaining) {
+        const captain = uid === after.captainUid;
+        const result = await clientSessionsColl.updateMany(
+            {
+                domainId: before.domainId,
+                contestId: before.contestId,
+                teamId: before.teamId,
+                participationMode: 'team',
+                active: true,
+                uid,
+            },
+            {
+                $set: {
+                    teamRole: captain ? 'captain' : 'member',
+                    teamRevision: after.revision,
+                    capabilities: {
+                        canBrowseProblems: true,
+                        canViewTeamRecords: true,
+                        canEditCode: captain,
+                        canRun: captain,
+                        canSubmit: captain,
+                        canUseVirtualPrint: captain,
+                        canMinimize: captain,
+                    },
+                    updatedAt: now,
+                },
+            },
+        );
+        updated += result.modifiedCount || 0;
+    }
+    return { updated, invalidated };
 }
 
 export async function deleteClientSessionByVigilSessionId(vigilSessionId: string): Promise<number> {
@@ -115,6 +210,7 @@ export async function listActiveSessionsForContest(domainId: string, contestId: 
         .find({
             domainId,
             contestId,
+            active: { $ne: false },
             expiresAt: { $gt: new Date() },
         })
         .toArray();

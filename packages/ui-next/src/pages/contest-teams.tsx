@@ -193,6 +193,16 @@ export function ContestTeamsPage() {
         </div>
       </header>
 
+      {data.vigilRoleSyncWarning ? (
+        <div className="flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm" role="alert">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-600" />
+          <div>
+            <p className="font-medium">队伍已保存，但客户端角色刷新失败</p>
+            <p className="mt-1 text-muted-foreground">OJ 提交权限已经按新队伍生效；请让受影响客户端重新连接，或检查 Vigil Server 后再次调整。</p>
+          </div>
+        </div>
+      ) : null}
+
       {capabilities.started ? (
         <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />

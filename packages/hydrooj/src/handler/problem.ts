@@ -1484,7 +1484,19 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             lang,
             code,
             true,
-            pretest ? { input, type: 'pretest', contestContext: tid } : { contest: tid, files, type: isSubjective ? 'manual' : 'judge' },
+            pretest
+                ? {
+                    input,
+                    type: 'pretest',
+                    contestContext: tid,
+                    vigilSessionKey: (global as any).Hydro?.model?.vigilguard?.clientSessionKeyFromSession?.(this.session),
+                }
+                : {
+                    contest: tid,
+                    files,
+                    type: isSubjective ? 'manual' : 'judge',
+                    vigilSessionKey: (global as any).Hydro?.model?.vigilguard?.clientSessionKeyFromSession?.(this.session),
+                },
         );
         if (!pretest) {
             const updates: Promise<unknown>[] = [
@@ -1567,6 +1579,7 @@ export class ProblemHackHandler extends ProblemDetailHandler {
             type: 'hack',
             hackTarget: this.rdoc._id,
             files: { hack: `${id}#input.txt` },
+            vigilSessionKey: (global as any).Hydro?.model?.vigilguard?.clientSessionKeyFromSession?.(this.session),
         });
         this.response.body = { rid };
         this.response.redirect = this.url('record_detail', { rid });

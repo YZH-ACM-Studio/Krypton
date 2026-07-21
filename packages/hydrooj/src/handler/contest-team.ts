@@ -71,8 +71,8 @@ export class ContestTeamsHandler extends Handler {
         return String(this.domain?._id);
     }
 
-    private redirectToTeams(tid: ObjectId) {
-        this.response.redirect = this.url('contest_teams', { tid });
+    private redirectToTeams(tid: ObjectId, vigilRoleSyncWarning = false) {
+        this.response.redirect = `${this.url('contest_teams', { tid })}${vigilRoleSyncWarning ? '?vigilRoleSyncWarning=1' : ''}`;
     }
 
     private actor(emergencyConfirmation = ''): contestTeam.ContestTeamActor {
@@ -132,7 +132,8 @@ export class ContestTeamsHandler extends Handler {
     @param('page', Types.PositiveInt, true)
     @param('search', Types.String, true)
     @param('teamSearch', Types.String, true)
-    async get(_domainId: string, tid: ObjectId, page = 1, search = '', teamSearch = '') {
+    @param('vigilRoleSyncWarning', Types.Boolean, true)
+    async get(_domainId: string, tid: ObjectId, page = 1, search = '', teamSearch = '', vigilRoleSyncWarning = false) {
         if (this.request.json && search) {
             this.response.body = { users: await this.searchEligibleUsers(tid, search) };
             return;
@@ -209,6 +210,7 @@ export class ContestTeamsHandler extends Handler {
             teamPageCount,
             teamCount,
             teamSearch: teamSearch.trim(),
+            vigilRoleSyncWarning: this.canManage && vigilRoleSyncWarning,
         };
     }
 
@@ -374,13 +376,13 @@ export class ContestTeamsHandler extends Handler {
         if (started && (name !== null || description !== null || managementMode !== null)) {
             throw new ValidationError('contestStartedImmutableFields');
         }
-        await contestTeam.updateTeam(this.domainId(), tid, teamId, this.actor(emergencyConfirmation), {
+        const updated = await contestTeam.updateTeam(this.domainId(), tid, teamId, this.actor(emergencyConfirmation), {
             expectedRevision,
             memberUids: parseMemberUids(memberUids),
             captainUid,
             ...(started ? {} : { name, description, managementMode }),
         });
-        this.redirectToTeams(tid);
+        this.redirectToTeams(tid, !!updated.vigilRoleSyncWarning);
     }
 
     @param('tid', Types.ObjectId)

@@ -15,6 +15,7 @@ export const clientSessionsColl = (db as any).collection('vigil.client_sessions'
     findOne: (...args: any[]) => Promise<ClientSessionDoc | null>;
     find: (...args: any[]) => { toArray: () => Promise<ClientSessionDoc[]> };
     deleteOne: (...args: any[]) => Promise<{ deletedCount?: number }>;
+    updateMany: (...args: any[]) => Promise<{ modifiedCount?: number }>;
 };
 
 let indexesEnsured = false;
@@ -33,6 +34,16 @@ export async function ensureIndexes(): Promise<void> {
         clientSessionsColl.createIndex({ domainId: 1, contestId: 1 }),
         // Per-user lookup for force-close-all-sessions-for-user style admin tools.
         clientSessionsColl.createIndex({ uid: 1 }),
+        // Team ACM has exactly one authoritative client session per user and
+        // contest. Individual/legacy sessions keep their existing semantics.
+        clientSessionsColl.createIndex(
+            { domainId: 1, contestId: 1, uid: 1 },
+            {
+                unique: true,
+                name: 'oneActiveTeamClientSession',
+                partialFilterExpression: { participationMode: 'team', active: true },
+            },
+        ),
         // TTL: drop 24h after expiresAt. Wall-clock TTL with a 24h grace
         // keeps the row around for late audit reads without bloating storage.
         clientSessionsColl.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 24 * 60 * 60 }),

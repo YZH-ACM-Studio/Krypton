@@ -28,6 +28,23 @@ export interface ClientSessionDoc {
     contestId: ObjectId;
     uid: number;
     machineId: string;
+    /** False once another device takes authority for the same team user. */
+    active?: boolean;
+    participationMode?: 'individual' | 'team';
+    teamId?: ObjectId | null;
+    teamRole?: 'captain' | 'member' | 'individual' | 'none';
+    teamRevision?: number | null;
+    capabilities?: {
+        canBrowseProblems: boolean;
+        canViewTeamRecords: boolean;
+        canEditCode: boolean;
+        canRun: boolean;
+        canSubmit: boolean;
+        canUseVirtualPrint: boolean;
+        canMinimize: boolean;
+    } | null;
+    clientProtocolVersion?: number;
+    clientVersion?: string;
     /** True if this session is bound to a temporary user account. */
     isTemporary: boolean;
     /**
@@ -39,4 +56,5 @@ export interface ClientSessionDoc {
     createdAt: Date;
     /** Wall-clock expiry; TTL index drops the doc 24h after this. */
     expiresAt: Date;
+    updatedAt?: Date;
 }

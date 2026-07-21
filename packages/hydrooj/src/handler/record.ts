@@ -29,11 +29,19 @@ import { buildProjection, Time } from '../utils';
 import { ContestDetailBaseHandler } from './contest';
 import { postJudge } from './judge';
 
-async function canAccessCurrentTeamRecord(domainId: string, rdoc: RecordDoc, uid: number): Promise<boolean> {
-    if (!(rdoc.contest instanceof ObjectId) || !(rdoc.contestTeamId instanceof ObjectId)) return false;
-    if ([record.RECORD_GENERATE, record.RECORD_PRETEST].some((sentinel) => sentinel.equals(rdoc.contest))) return false;
+async function getCurrentTeamForRecord(
+    domainId: string,
+    rdoc: RecordDoc,
+    uid: number,
+): Promise<contestTeam.ContestTeamDoc | null> {
+    if (!(rdoc.contest instanceof ObjectId) || !(rdoc.contestTeamId instanceof ObjectId)) return null;
+    if ([record.RECORD_GENERATE, record.RECORD_PRETEST].some((sentinel) => sentinel.equals(rdoc.contest))) return null;
     const team = await contestTeam.getTeam(domainId, rdoc.contest, rdoc.contestTeamId);
-    return !!team?.memberUids.includes(uid);
+    return team?.memberUids.includes(uid) ? team : null;
+}
+
+async function canAccessCurrentTeamRecord(domainId: string, rdoc: RecordDoc, uid: number): Promise<boolean> {
+    return !!(await getCurrentTeamForRecord(domainId, rdoc, uid));
 }
 
 export class RecordListHandler extends ContestDetailBaseHandler {
@@ -247,6 +255,7 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
     @param('rev', Types.ObjectId, true)
     async get(domainId: string, rid: ObjectId, download = false, rev?: ObjectId) {
         let rdoc = this.rdoc;
+        let currentRecordTeam: contestTeam.ContestTeamDoc | null = null;
         const allRev = await record.collHistory.find({ rid }).project({ _id: 1, judgeAt: 1 }).sort({ _id: -1 }).toArray();
         const allRevs: Record<string, Date> = Object.fromEntries(allRev.map((i) => [i._id.toString(), i.judgeAt]));
         if (rev && allRevs[rev.toString()]) {
@@ -258,6 +267,10 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         } else if (rdoc.contest) {
             this.tdoc ||= await contest.get(domainId, rdoc.contest);
             const teamContestRecord = contest.getParticipationMode(this.tdoc) === 'team';
+            if (teamContestRecord) {
+                currentRecordTeam = await getCurrentTeamForRecord(domainId, rdoc, this.user._id);
+                this.teamRecordAccess = !!currentRecordTeam;
+            }
             let canView = this.user.own(this.tdoc);
             canView ||= contest.canShowRecord.call(this, this.tdoc);
             canView ||= contest.canShowSelfRecord.call(this, this.tdoc, true) && (teamContestRecord ? this.teamRecordAccess : rdoc.uid === this.user._id);
@@ -289,6 +302,16 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             canViewCode ||= this.user.own(this.tdoc);
             if (contest.getParticipationMode(this.tdoc) !== 'team' && this.tdoc.allowViewCode && contest.isDone(this.tdoc)) {
                 canViewCode ||= this.tsdoc?.attend;
+            }
+        }
+        if (download && this.tdoc && contest.getParticipationMode(this.tdoc) === 'team' && this.teamRecordAccess) {
+            if (
+                !currentRecordTeam ||
+                currentRecordTeam.captainUid !== this.user._id ||
+                !(rdoc.contestTeamId instanceof ObjectId) ||
+                !currentRecordTeam.teamId.equals(rdoc.contestTeamId)
+            ) {
+                throw new PermissionError(PERM.PERM_READ_RECORD_CODE);
             }
         }
         if (!pdoc) throw new PermissionError(PERM.PERM_VIEW_PROBLEM_HIDDEN);
@@ -557,6 +580,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
     async onTeamRoleChange(payload: { after: contestTeam.ContestTeamDoc }) {
         if (!this.teamId || !this.tid) return;
         if (!payload.after.teamId.equals(this.teamId) || payload.after.contestId.toHexString() !== this.tid) return;
+        this.send({ teamRoleChanged: true, teamRevision: payload.after.revision });
         if (!payload.after.active || !payload.after.memberUids.includes(this.user._id)) this.close(4003, 'Team record access revoked');
     }
 
@@ -630,6 +654,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
     async onTeamRoleChange(payload: { before: contestTeam.ContestTeamDoc; after: contestTeam.ContestTeamDoc }) {
         if (!this.teamRecordAccess || !this.recordTeamId || !this.recordContestId) return;
         if (!payload.after.teamId.equals(this.recordTeamId) || !payload.after.contestId.equals(this.recordContestId)) return;
+        this.send({ teamRoleChanged: true, teamRevision: payload.after.revision });
         if (!payload.after.active || !payload.after.memberUids.includes(this.user._id)) this.close(4003, 'Team record access revoked');
     }
 

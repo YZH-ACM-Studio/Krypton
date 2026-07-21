@@ -120,12 +120,14 @@ export function ObjectiveAnswerPanel({
   storageKey,
   signedIn,
   previewOnly = false,
+  reloadOnConflict = false,
 }: {
   questions: ObjectiveClientQuestion[];
   submitUrl: string;
   storageKey: string;
   signedIn: boolean;
   previewOnly?: boolean;
+  reloadOnConflict?: boolean;
 }) {
   const [answers, setAnswers] = useState<AnswerMap>(() => loadDraft(storageKey));
   const [submitting, setSubmitting] = useState(false);
@@ -189,6 +191,11 @@ export function ObjectiveAnswerPanel({
         credentials: 'same-origin',
       });
       const data = await res.json().catch(() => null);
+      if (res.status === 409 && reloadOnConflict) {
+        setSubmitting(false);
+        window.location.reload();
+        return;
+      }
       if (!res.ok || data?.error) {
         throw new Error(data?.error?.message || `提交失败（HTTP ${res.status}）`);
       }

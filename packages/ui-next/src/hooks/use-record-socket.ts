@@ -13,31 +13,55 @@
 import { useEffect, useRef } from 'react';
 
 export type Rdoc = Record<string, any>;
+export type RecordSocketPath = '/record-conn' | '/record-detail-conn' | '/exam-mode/team-role-conn';
 
 export interface UseRecordSocketOptions {
   /** WS endpoint base path, default `/record-conn`. */
-  path?: '/record-conn' | '/record-detail-conn';
+  path?: RecordSocketPath;
   /** Query params to attach to the WS URL (tid, pid, uidOrName, rid, status, …). */
   filters?: Record<string, string | number | boolean | undefined>;
   /** Called whenever a new rdoc snapshot arrives. */
   onRdoc: (rdoc: Rdoc) => void;
   /** Optional error callback for diagnostics. */
   onError?: (e: any) => void;
+  /** Team roster/captain revision changed; callers must refresh server capabilities. */
+  onTeamRoleChange?: (revision: number | null) => void;
   /** Disable connection entirely (e.g. when user is signed out). */
   disabled?: boolean;
 }
 
-export function useRecordSocket({ path = '/record-conn', filters, onRdoc, onError, disabled }: UseRecordSocketOptions) {
+export function dispatchRecordSocketPayload(
+  payload: any,
+  onRdoc: (rdoc: Rdoc) => void,
+  onTeamRoleChange?: (revision: number | null) => void,
+) {
+  if (payload?.teamRoleChanged === true) {
+    const revision = Number(payload.teamRevision);
+    onTeamRoleChange?.(Number.isSafeInteger(revision) && revision >= 0 ? revision : null);
+    return;
+  }
+  if (payload?.rdoc) onRdoc(payload.rdoc);
+}
+
+export function isTerminalRecordSocketClose(path: RecordSocketPath, code: number): boolean {
+  return path === '/exam-mode/team-role-conn' && code === 4003;
+}
+
+export function useRecordSocket({ path = '/record-conn', filters, onRdoc, onError, onTeamRoleChange, disabled }: UseRecordSocketOptions) {
   // Latest callbacks captured in refs so re-renders don't re-open the
   // socket merely because the closure changed.
   const onRdocRef = useRef(onRdoc);
   const onErrorRef = useRef(onError);
+  const onTeamRoleChangeRef = useRef(onTeamRoleChange);
   useEffect(() => {
     onRdocRef.current = onRdoc;
   }, [onRdoc]);
   useEffect(() => {
     onErrorRef.current = onError;
   }, [onError]);
+  useEffect(() => {
+    onTeamRoleChangeRef.current = onTeamRoleChange;
+  }, [onTeamRoleChange]);
 
   // Stringify filters into a stable dep so React knows when to reconnect.
   const filterKey = stableFilterKey(filters);
@@ -48,6 +72,7 @@ export function useRecordSocket({ path = '/record-conn', filters, onRdoc, onErro
 
     let ws: WebSocket | null = null;
     let closed = false;
+    let teamInvalidated = false;
     let retryMs = 1000;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -74,15 +99,19 @@ export function useRecordSocket({ path = '/record-conn', filters, onRdoc, onErro
         } catch {
           return;
         }
-        if (payload && payload.rdoc) {
-          onRdocRef.current(payload.rdoc);
-        }
+        if (payload?.teamRoleChanged === true) teamInvalidated = true;
+        dispatchRecordSocketPayload(payload, onRdocRef.current, onTeamRoleChangeRef.current);
       };
       ws.onerror = (err) => {
         onErrorRef.current?.(err);
       };
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         if (closed) return;
+        if (isTerminalRecordSocketClose(path, event.code)) {
+          closed = true;
+          if (!teamInvalidated) onTeamRoleChangeRef.current?.(null);
+          return;
+        }
         scheduleRetry();
       };
     };

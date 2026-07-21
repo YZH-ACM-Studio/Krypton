@@ -272,7 +272,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                 ValidationError: TestValidationError,
             };
         }
-        if (request === '../service/bus') return { __esModule: true, default: { parallel: async (...args: any[]) => events.push(args) } };
+        if (request === '../service/bus') return { __esModule: true, default: { broadcast: async (...args: any[]) => events.push(args) } };
         if (request === '../service/db') return { __esModule: true, default: dbStub };
         if (request === './builtin') return { PERM, PRIV };
         if (request === './contest') return contestStub;
@@ -618,6 +618,10 @@ describe('P1.11 canonical contest team lifecycle', () => {
             },
         );
         expect(stopped.active).to.equal(false);
+        expect(events).to.have.length(1);
+        expect(events[0][0]).to.equal('contest/team-role-change');
+        expect(events[0][1].before.active).to.equal(true);
+        expect(events[0][1].after.active).to.equal(false);
 
         const adminTeam = await teamModel.createTeam(
             'system',
@@ -655,6 +659,9 @@ describe('P1.11 canonical contest team lifecycle', () => {
             },
         );
         expect(adminStopped.active).to.equal(false);
+        expect(events).to.have.length(2);
+        expect(events[1][1].before.active).to.equal(true);
+        expect(events[1][1].after.active).to.equal(false);
     });
 
     it('allows an admin-managed captain to edit display info but not roster', async () => {
@@ -757,6 +764,71 @@ describe('P1.11 canonical contest team lifecycle', () => {
         const partials = indexes.filter((index) => index.partialFilterExpression);
         expect(partials).to.have.length(3);
         expect(partials.map((index) => index.partialFilterExpression)).to.deep.equal([{ active: true }, { active: true }, { status: 'pending' }]);
+    });
+});
+
+describe('P1.14 team Exam Mode capabilities', () => {
+    it('derives captain and member capabilities from the same active roster', async () => {
+        const team = await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(99, true) },
+            { name: 'Exam team', memberUids: [10, 11], captainUid: 10, managementMode: 'admin' },
+        );
+
+        const captain = teamModel.buildExamModeTeamContext(team, 10);
+        expect(captain).to.deep.include({
+            teamId: team.teamId.toHexString(),
+            teamRole: 'captain',
+            canBrowseProblems: true,
+            canViewTeamRecords: true,
+            canEditCode: true,
+            canRun: true,
+            canSubmit: true,
+            canUseVirtualPrint: true,
+        });
+        expect(captain.teamInfo).to.deep.equal({
+            teamId: team.teamId.toHexString(),
+            name: 'Exam team',
+            captainUid: 10,
+            memberUids: [10, 11],
+            revision: team.revision,
+        });
+
+        const member = teamModel.buildExamModeTeamContext(team, 11);
+        expect(member).to.deep.include({
+            teamRole: 'member',
+            canBrowseProblems: true,
+            canViewTeamRecords: true,
+            canEditCode: false,
+            canRun: false,
+            canSubmit: false,
+            canUseVirtualPrint: false,
+        });
+    });
+
+    it('fails closed for an outsider while allowing a non-writing administrator preview', async () => {
+        const team = await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(99, true) },
+            { name: 'Exam team', memberUids: [10], captainUid: 10, managementMode: 'admin' },
+        );
+        expect(() => teamModel.buildExamModeTeamContext(team, 11)).to.throw(TestConflictError);
+        expect(() => teamModel.buildExamModeTeamContext({ ...team, active: false }, 10)).to.throw(TestConflictError);
+
+        const preview = teamModel.buildExamModeTeamContext(null, 99, true);
+        expect(preview).to.deep.include({
+            teamId: null,
+            teamRole: 'admin_preview',
+            teamInfo: null,
+            canBrowseProblems: true,
+            canViewTeamRecords: true,
+            canEditCode: false,
+            canRun: false,
+            canSubmit: false,
+            canUseVirtualPrint: false,
+        });
     });
 });
 

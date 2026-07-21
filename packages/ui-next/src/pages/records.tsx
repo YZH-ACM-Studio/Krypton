@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { KryptonIDE } from '@/components/krypton-ide';
+import { readTeamExamModeContext } from '@/components/team-exam-mode';
 import { Input } from '@/components/ui/input';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -486,6 +487,7 @@ export function RecordDetailPage() {
   const subtasks = normalizeSubtasks(rdoc.subtasks);
   const allRevs = Object.entries(data.allRevs || {}) as Array<[string, string]>;
   const examUrls: R = data.examMode?.urls || {};
+  const teamExamMode = readTeamExamModeContext(data.examMode);
   const recordUrl = examUrls.record
     ? String(examUrls.record).replace('__RID__', String(rdoc._id))
     : replaceRouteTokens(bs.urls.recordDetail, { RID: String(rdoc._id) });
@@ -519,7 +521,7 @@ export function RecordDetailPage() {
           </div>
           <h1 className="mt-1 text-xl font-semibold">提交记录 #{String(rdoc._id).slice(-8)}</h1>
         </div>
-        {code || rdoc.files?.code || rdoc.files?.hack ? (
+        {(code || rdoc.files?.code || rdoc.files?.hack) && (!teamExamMode || teamExamMode.canEditCode) ? (
           <Button asChild variant="outline" size="sm" className="w-fit">
             <a href={downloadUrl}>
               <Download className="size-4" />

@@ -13,7 +13,7 @@
  * created" and disable any action button that would write data.
  */
 import { motion } from 'motion/react';
-import { BookOpen, CheckCircle2, ChevronRight, Clock, Code, Eye, ListChecks, Lock, MessageCircle, Printer, Trophy } from 'lucide-react';
+import { BookOpen, CheckCircle2, ChevronRight, Clock, Code, Eye, ListChecks, Lock, MessageCircle, Printer, Trophy, Users } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DateTime } from '@/components/ui/datetime';
 import { ExamHomeShell } from '@/components/layout/exam-shell';
 import { MarkdownView } from '@/components/markdown-renderer';
+import { readTeamExamModeContext, TeamExamModeSummary } from '@/components/team-exam-mode';
 
 function getAlphabeticId(index: number) {
   if (index < 0) return '?';
@@ -74,6 +75,8 @@ export function ContestWorkspaceContent() {
   const tid = String(tdoc._id || tdoc.docId);
   const examMode = (data as any).examMode || {};
   const urls = examMode.urls || {};
+  const teamContext = readTeamExamModeContext(examMode);
+  const adminPreview = previewMode || teamContext?.teamRole === 'admin_preview';
 
   const ruleLabel = RULE_LABEL[tdoc.rule] || tdoc.rule;
   const now = Date.now();
@@ -86,7 +89,7 @@ export function ContestWorkspaceContent() {
 
   return (
     <div className="space-y-6">
-      {previewMode && (
+      {adminPreview && (
         <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
           <Eye className="size-5 shrink-0 text-amber-500" />
           <div className="flex-1">
@@ -133,6 +136,29 @@ export function ContestWorkspaceContent() {
           </span>
         </div>
       </motion.header>
+
+      {teamContext?.teamInfo ? (
+        <Card data-team-exam-workspace={teamContext.teamRole}>
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/20">
+                <Users className="size-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate font-medium">{teamContext.teamInfo.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {teamContext.teamInfo.memberUids.length} 人队伍 · <TeamExamModeSummary context={teamContext} includeTeamName={false} />
+                </p>
+              </div>
+            </div>
+            {teamContext.teamRole === 'member' ? (
+              <Badge variant="outline" className="w-fit border-amber-500/40 text-amber-600 dark:text-amber-300">
+                可看题与本队记录，不可运行或提交
+              </Badge>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {tdoc.content && (
         <Card>

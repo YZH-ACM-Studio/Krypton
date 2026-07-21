@@ -36,12 +36,15 @@ import {
     validateStructuredCodeJudgeConfig,
     ValidationError,
 } from 'hydrooj';
-import { ContestClientFinishedError } from '../error';
+import { ContestClientFinishedError, ContestTeamConflictError } from '../error';
 import * as contest from '../model/contest';
+import * as contestTeam from '../model/contest-team';
+import type { ContestTeamExamModeContext } from '../model/contest-team';
 import * as discussion from '../model/discussion';
 import * as document from '../model/document';
 import { markManualPending } from '../model/manual-grade';
 import record from '../model/record';
+import { ConnectionHandler, subscribe } from '../service/server';
 import { closeSessionOnVigil } from '../service/vigil-bridge';
 import { ContestPrintHandler, ContestProblemListHandler, ContestScoreboardHandler } from './contest';
 import { DiscussionDetailHandler } from './discussion';
@@ -247,7 +250,13 @@ function tidOf(tdoc: any) {
     return String(tdoc?.docId || tdoc?._id || '');
 }
 
-function examModeContext(tdoc: any, section: ExamModeSection, contentTemplate: string, previewMode = false) {
+function examModeContext(
+    tdoc: any,
+    section: ExamModeSection,
+    contentTemplate: string,
+    previewMode = false,
+    teamContext: ContestTeamExamModeContext | null = null,
+) {
     const tid = tidOf(tdoc);
     return {
         enabled: true,
@@ -274,7 +283,19 @@ function examModeContext(tdoc: any, section: ExamModeSection, contentTemplate: s
             discussionDetail: `/exam-mode/${tid}/discussion/__DID__`,
             discussionCreate: `/exam-mode/${tid}/discussion/create`,
         },
+        ...(teamContext || {}),
     };
+}
+
+async function resolveExamModeTeamContext(
+    handler: Handler | ConnectionHandler,
+    domainId: string,
+    tdoc: any,
+    isAdminBypass: boolean,
+): Promise<ContestTeamExamModeContext | null> {
+    if (contest.getParticipationMode(tdoc) !== 'team' || tdoc.rule !== 'acm') return null;
+    const team = await contestTeam.getTeamByMember(domainId, tdoc.docId, handler.user._id);
+    return contestTeam.buildExamModeTeamContext(team, handler.user._id, isAdminBypass);
 }
 
 /**
@@ -298,18 +319,25 @@ async function resolveExamModeStudent(handler: any, domainId: string): Promise<{
     }
 }
 
-async function decorateExamMode(handler: Handler, tdoc: any, section: ExamModeSection, contentTemplate: string, previewMode = false) {
+async function decorateExamMode(
+    handler: Handler,
+    tdoc: any,
+    section: ExamModeSection,
+    contentTemplate: string,
+    previewMode = false,
+    teamContext: ContestTeamExamModeContext | null = null,
+) {
     handler.response.template = 'exam_contest.html';
     handler.response.body ||= {};
     handler.response.body.tdoc ||= tdoc;
     handler.response.body.previewMode ||= previewMode;
     handler.response.body.currentUserId ||= handler.user?._id;
-    const ctx: any = examModeContext(tdoc, section, contentTemplate, previewMode);
+    const ctx: any = examModeContext(tdoc, section, contentTemplate, previewMode, teamContext);
     ctx.student = await resolveExamModeStudent(handler, tdoc.domainId);
     handler.response.body.examMode = ctx;
 }
 
-async function ensureExamModeAccess(handler: Handler, domainId: string, tid: ObjectId, tdoc: any) {
+async function ensureExamModeAccess(handler: Handler | ConnectionHandler, domainId: string, tid: ObjectId, tdoc: any) {
     const vg = (global as any).Hydro?.model?.vigilguard;
     const sessionKey = vg?.clientSessionKeyFromSession
         ? vg.clientSessionKeyFromSession((handler as any).session)
@@ -324,6 +352,8 @@ async function ensureExamModeAccess(handler: Handler, domainId: string, tid: Obj
         const result = await vg.effectiveContestAccess(domainId, tdoc, handler.user._id, sessionKey);
         if (!result.ok) throw new PermissionError(PERM.PERM_ATTEND_CONTEST);
     }
+
+    const teamContext = await resolveExamModeTeamContext(handler, domainId, tdoc, isAdminBypass);
 
     let tsdoc = await contest.getStatus(domainId, tid, handler.user._id);
     if (!isAdminBypass && contest.isClientRequired(tdoc) && contest.isClientFinished(tsdoc)) {
@@ -340,7 +370,7 @@ async function ensureExamModeAccess(handler: Handler, domainId: string, tid: Obj
             tsdoc.startAt = startAt;
         }
     }
-    return { previewMode, tsdoc, isAdminBypass };
+    return { previewMode, tsdoc, isAdminBypass, teamContext };
 }
 
 // ─── Cell + grading helpers ──────────────────────────────────────────────
@@ -841,7 +871,7 @@ class ExamModeEntryHandler extends Handler {
         const authoritativeDomainId = String(this.domain?._id);
         const tdoc = await contest.get(authoritativeDomainId, tid);
         if (!tdoc) throw new NotFoundError('Contest');
-        const { previewMode, isAdminBypass } = await ensureExamModeAccess(this, authoritativeDomainId, tid, tdoc);
+        const { previewMode, isAdminBypass, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, tdoc);
         if (tdoc.rule === 'exam') {
             this.response.redirect = this.url('paper_layout', { tid });
             return;
@@ -879,7 +909,7 @@ class ExamModeEntryHandler extends Handler {
             currentUserId: this.user._id,
             page_name: 'contest_workspace',
         };
-        await decorateExamMode(this, tdoc, 'overview', 'contest_workspace.html', previewMode);
+        await decorateExamMode(this, tdoc, 'overview', 'contest_workspace.html', previewMode, teamContext);
     }
 }
 
@@ -904,11 +934,11 @@ class ExamModeProblemListHandler extends ContestProblemListHandler {
     @param('tid', Types.ObjectId)
     async get(_domainId: string, tid: ObjectId) {
         const authoritativeDomainId = this.authoritativeDomainId();
-        const { previewMode, tsdoc } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
+        const { previewMode, tsdoc, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         this.tsdoc = tsdoc;
         if (bounceIfNotStarted(this, this.tdoc, tid)) return;
         await super.get(authoritativeDomainId, tid);
-        await decorateExamMode(this, this.tdoc, 'problems', 'contest_problemlist.html', previewMode);
+        await decorateExamMode(this, this.tdoc, 'problems', 'contest_problemlist.html', previewMode, teamContext);
     }
 }
 
@@ -919,11 +949,11 @@ class ExamModeAnnouncementsHandler extends ContestProblemListHandler {
     @param('tid', Types.ObjectId)
     async get(_domainId: string, tid: ObjectId) {
         const authoritativeDomainId = this.authoritativeDomainId();
-        const { previewMode, tsdoc } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
+        const { previewMode, tsdoc, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         this.tsdoc = tsdoc;
         if (bounceIfNotStarted(this, this.tdoc, tid)) return;
         await super.get(authoritativeDomainId, tid);
-        await decorateExamMode(this, this.tdoc, 'announcements', 'exam_announcements.html', previewMode);
+        await decorateExamMode(this, this.tdoc, 'announcements', 'exam_announcements.html', previewMode, teamContext);
     }
 }
 
@@ -961,8 +991,8 @@ class ExamModeProblemDetailHandler extends ProblemDetailHandler {
         if (pdoc && typeof pdoc.content === 'string') {
             pdoc.content = absolutizeProblemFileUrls(this, pdoc.content, pdoc, tid);
         }
-        const { previewMode } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
-        await decorateExamMode(this, this.tdoc, 'problems', 'problem_detail.html', previewMode);
+        const { previewMode, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
+        await decorateExamMode(this, this.tdoc, 'problems', 'problem_detail.html', previewMode, teamContext);
     }
 }
 
@@ -974,8 +1004,8 @@ class ExamModeScoreboardHandler extends ContestScoreboardHandler {
         if (bounceIfNotStarted(this, this.tdoc, tid)) return;
         await super.get(authoritativeDomainId, tid, viewId);
         if (this.response.template !== 'contest_scoreboard.html') return;
-        const { previewMode } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
-        await decorateExamMode(this, this.tdoc, 'ranking', 'contest_scoreboard.html', previewMode);
+        const { previewMode, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
+        await decorateExamMode(this, this.tdoc, 'ranking', 'contest_scoreboard.html', previewMode, teamContext);
     }
 }
 
@@ -993,8 +1023,8 @@ class ExamModePrintHandler extends ContestPrintHandler {
         if (this.response.redirect) return;
         await super.get();
         const tid = this.tdoc.docId;
-        const { previewMode } = await ensureExamModeAccess(this, this.authoritativeDomainId(), tid, this.tdoc);
-        await decorateExamMode(this, this.tdoc, 'print', 'contest_print.html', previewMode);
+        const { previewMode, teamContext } = await ensureExamModeAccess(this, this.authoritativeDomainId(), tid, this.tdoc);
+        await decorateExamMode(this, this.tdoc, 'print', 'contest_print.html', previewMode, teamContext);
     }
 }
 
@@ -1004,12 +1034,13 @@ class ExamModeRecordDetailHandler extends RecordDetailHandler {
     @param('rev', Types.ObjectId, true)
     async get(_domainId: string, rid: ObjectId, download = false, rev?: ObjectId) {
         const authoritativeDomainId = this.authoritativeDomainId();
-        await super.get(authoritativeDomainId, rid, download, rev);
-        if (download) return;
         const tid = this.tdoc?.docId;
         if (!this.tdoc || !this.rdoc?.contest?.equals?.(tid)) throw new NotFoundError('Record');
-        const { previewMode } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
-        await decorateExamMode(this, this.tdoc, 'problems', 'record_detail.html', previewMode);
+        const { previewMode, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
+        if (download && teamContext && !teamContext.canEditCode) throw new PermissionError(PERM.PERM_READ_RECORD_CODE);
+        await super.get(authoritativeDomainId, rid, download, rev);
+        if (download) return;
+        await decorateExamMode(this, this.tdoc, 'problems', 'record_detail.html', previewMode, teamContext);
     }
 }
 
@@ -1030,6 +1061,7 @@ class ExamModeDiscussionListHandler extends Handler {
     @param('page', Types.PositiveInt, true)
     async get(_domainId: string, tid: ObjectId, page = 1) {
         const authoritativeDomainId = String(this.domain?._id);
+        const { previewMode, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         const vnode = await discussion.getVnode(authoritativeDomainId, document.TYPE_CONTEST, tid.toHexString(), this.user._id);
         const hidden = this.user.own(vnode) || this.user.hasPerm(PERM.PERM_EDIT_DISCUSSION) ? {} : { hidden: false };
         const [ddocs, dpcount] = await this.paginate(
@@ -1052,7 +1084,7 @@ class ExamModeDiscussionListHandler extends Handler {
             vnodes: [],
             page_name: 'discussion_node',
         };
-        await decorateExamMode(this, this.tdoc, 'discussion', 'discussion_main_or_node.html', false);
+        await decorateExamMode(this, this.tdoc, 'discussion', 'discussion_main_or_node.html', previewMode, teamContext);
     }
 }
 
@@ -1072,8 +1104,10 @@ class ExamModeDiscussionCreateHandler extends Handler {
     }
 
     async get() {
+        const tid = this.tdoc.docId;
+        const { previewMode, teamContext } = await ensureExamModeAccess(this, String(this.domain?._id), tid, this.tdoc);
         this.response.body = { vnode: this.vnode };
-        await decorateExamMode(this, this.tdoc, 'discussion', 'discussion_create.html', false);
+        await decorateExamMode(this, this.tdoc, 'discussion', 'discussion_create.html', previewMode, teamContext);
     }
 
     @param('tid', Types.ObjectId)
@@ -1121,13 +1155,69 @@ class ExamModeDiscussionDetailHandler extends DiscussionDetailHandler {
     @param('page', Types.PositiveInt, true)
     async get(_domainId: string, did: ObjectId, page = 1) {
         await super.get(String(this.domain?._id), did, page);
-        await decorateExamMode(this, this.tdoc, 'discussion', 'discussion_detail.html', false);
+        const { previewMode, teamContext } = await ensureExamModeAccess(
+            this,
+            String(this.domain?._id),
+            this.tdoc.docId,
+            this.tdoc,
+        );
+        await decorateExamMode(this, this.tdoc, 'discussion', 'discussion_detail.html', previewMode, teamContext);
+    }
+}
+
+/**
+ * One lightweight invalidation channel shared by every team Exam Mode page.
+ * It carries only the new team revision; the browser always reloads the
+ * authoritative bootstrap instead of applying role state from the socket.
+ */
+class ExamModeTeamRoleConnectionHandler extends ConnectionHandler {
+    contestId: ObjectId;
+    teamId: ObjectId;
+
+    @param('tid', Types.ObjectId)
+    @param('teamId', Types.ObjectId)
+    @param('teamRevision', Types.UnsignedInt)
+    async prepare(_domainId: string, tid: ObjectId, bootstrapTeamId: ObjectId, bootstrapTeamRevision: number) {
+        const authoritativeDomainId = String(this.domain?._id);
+        const tdoc = await contest.get(authoritativeDomainId, tid);
+        if (!tdoc) throw new NotFoundError('Contest');
+        let teamContext: ContestTeamExamModeContext | null;
+        try {
+            ({ teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, tdoc));
+        } catch (error) {
+            if (!(error instanceof ContestTeamConflictError)) throw error;
+            logger.info(
+                'Team Exam Mode role socket access revoked domain=%s tid=%s uid=%d',
+                authoritativeDomainId,
+                tid.toHexString(),
+                this.user._id,
+            );
+            this.send({ teamRoleChanged: true, teamRevision: null });
+            this.close(4003, 'Team Exam Mode access revoked');
+            return;
+        }
+        if (!teamContext?.teamId) throw new PermissionError(PERM.PERM_ATTEND_CONTEST);
+        this.contestId = tid;
+        this.teamId = new ObjectId(teamContext.teamId);
+        if (!bootstrapTeamId.equals(this.teamId) || bootstrapTeamRevision !== teamContext.teamInfo?.revision) {
+            this.send({ teamRoleChanged: true, teamRevision: teamContext.teamInfo?.revision ?? null });
+        }
+    }
+
+    @subscribe('contest/team-role-change')
+    async onTeamRoleChange(payload: { after: contestTeam.ContestTeamDoc }) {
+        if (!payload.after.contestId.equals(this.contestId) || !payload.after.teamId.equals(this.teamId)) return;
+        this.send({ teamRoleChanged: true, teamRevision: payload.after.revision });
+        if (!payload.after.active || !payload.after.memberUids.includes(this.user._id)) {
+            this.close(4003, 'Team Exam Mode access revoked');
+        }
     }
 }
 
 // ─── Route registration ───────────────────────────────────────────────────
 
 export async function apply(ctx: Context) {
+    ctx.Connection('exam_mode_team_role_conn', '/exam-mode/team-role-conn', ExamModeTeamRoleConnectionHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('exam_mode_home', '/exam-mode', ExamModeHomeHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('exam_mode_entry', '/exam-mode/:tid', ExamModeEntryHandler, PRIV.PRIV_USER_PROFILE);
     ctx.Route('exam_mode_problems', '/exam-mode/:tid/problems', ExamModeProblemListHandler, PRIV.PRIV_USER_PROFILE);

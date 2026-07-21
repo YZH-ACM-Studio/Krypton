@@ -47,6 +47,7 @@ import { oneDark } from '@codemirror/theme-one-dark';
 
 import { cn } from '@/lib/cn';
 import { distributePretestRecord, pretestActualOutput, selfTestVerdict, type PretestResult } from '@/lib/pretest-results';
+import { READ_ONLY_CODE_EXTENSIONS, resolveReadOnlyCodeLanguage } from '@/lib/readonly-code-policy';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -60,6 +61,7 @@ import {
   History,
   Loader2,
   Maximize2,
+  Minus,
   Minimize2,
   Play,
   Plus,
@@ -230,6 +232,7 @@ interface IdeConfig {
 
 const IDE_CONFIG_KEY = 'krypton:ide-config';
 const LANG_KEY = 'krypton:ide-lang';
+const FONT_SIZE_OPTIONS = [12, 13, 14, 15, 16, 18, 20, 22, 24];
 
 const DEFAULT_CONFIG: IdeConfig = {
   fontSize: 14,
@@ -246,7 +249,7 @@ function normalizeConfig(value: Partial<IdeConfig> = {}): IdeConfig {
   return {
     ...DEFAULT_CONFIG,
     ...value,
-    fontSize: [12, 13, 14, 15, 16, 18, 20, 22, 24].includes(fontSize) ? fontSize : DEFAULT_CONFIG.fontSize,
+    fontSize: FONT_SIZE_OPTIONS.includes(fontSize) ? fontSize : DEFAULT_CONFIG.fontSize,
     tabSize: [2, 4, 8].includes(tabSize) ? tabSize : DEFAULT_CONFIG.tabSize,
     theme,
     wordWrap: typeof value.wordWrap === 'boolean' ? value.wordWrap : DEFAULT_CONFIG.wordWrap,
@@ -397,7 +400,7 @@ function SettingsDialog({
                     size="sm"
                     className="w-auto min-w-[6rem]"
                     ariaLabel="字号"
-                    options={[12, 13, 14, 15, 16, 18, 20, 22, 24].map((s) => ({
+                    options={FONT_SIZE_OPTIONS.map((s) => ({
                       value: String(s),
                       label: `${s}px`,
                     }))}
@@ -676,6 +679,10 @@ export interface KryptonIDEProps {
   recordsVisible?: boolean;
   /** Number of records displayed by the external panel */
   recordsCount?: number;
+  /** Reload the authoritative bootstrap after a revision/role conflict. */
+  reloadOnConflict?: boolean;
+  /** Team Exam Mode read-only viewer: expose zoom controls while removing file-import DOM. */
+  teamReadOnlyView?: boolean;
 
   /* ── Editor modes ───────────────────────────────────────────── */
 
@@ -716,6 +723,8 @@ export function KryptonIDE({
   showRecordsButton = false,
   recordsVisible,
   recordsCount = 0,
+  reloadOnConflict = false,
+  teamReadOnlyView = false,
   mode = 'full',
   value,
   onValueChange,
@@ -744,13 +753,15 @@ export function KryptonIDE({
 
   /* ── state ── */
   const [selectedLang, setSelectedLang] = useState(() => {
-    try {
-      const saved = localStorage.getItem(LANG_KEY);
-      if (saved && (langs.length === 0 || langs.includes(saved))) return saved;
-    } catch {
-      /* empty */
+    if (!isReadOnly) {
+      try {
+        const saved = localStorage.getItem(LANG_KEY);
+        if (saved && (langs.length === 0 || langs.includes(saved))) return saved;
+      } catch {
+        /* empty */
+      }
     }
-    return defaultLang || langs[0] || 'cc.cc17';
+    return isReadOnly ? resolveReadOnlyCodeLanguage(defaultLang, langs) : defaultLang || langs[0] || 'cc.cc17';
   });
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [langMenuPos, setLangMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -868,15 +879,23 @@ export function KryptonIDE({
 
   /* ── persist selected language ── */
   useEffect(() => {
+    if (isReadOnly) return;
     try {
       localStorage.setItem(LANG_KEY, selectedLang);
     } catch {
       /* empty */
     }
-  }, [selectedLang]);
+  }, [isReadOnly, selectedLang]);
+
+  /* A read-only record owns its language. Never reuse the author's cached
+   * IDE choice, and update highlighting when another record opens. */
+  useEffect(() => {
+    if (!isReadOnly) return;
+    setSelectedLang(resolveReadOnlyCodeLanguage(defaultLang, langs));
+  }, [defaultLang, isReadOnly, langs]);
 
   /* ── helpers ── */
-  const codeCacheKey = cacheKey ? `krypton:code:${cacheKey}` : null;
+  const codeCacheKey = !isReadOnly && cacheKey ? `krypton:code:${cacheKey}` : null;
   const getCode = useCallback(() => viewRef.current?.state.doc.toString() || '', []);
 
   /* ── CodeMirror extensions ── */
@@ -887,44 +906,44 @@ export function KryptonIDE({
       lineNumbers(),
       highlightActiveLineGutter(),
       highlightActiveLine(),
-      history(),
       foldGutter(),
       drawSelection(),
-      dropCursor(),
       EditorState.allowMultipleSelections.of(true),
-      indentOnInput(),
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       bracketMatching(),
-      closeBrackets(),
-      autocompletion(),
-      rectangularSelection(),
-      crosshairCursor(),
       highlightSelectionMatches(),
-      keymap.of([
-        ...closeBracketsKeymap,
-        ...defaultKeymap,
-        ...searchKeymap,
-        ...historyKeymap,
-        ...foldKeymap,
-        ...completionKeymap,
-        ...lintKeymap,
-        indentWithTab,
-        {
-          key: 'F9',
-          run: () => {
-            pretestRef.current();
-            return true;
-          },
-        },
-        {
-          key: 'F10',
-          run: () => {
-            submitRef.current();
-            return true;
-          },
-          preventDefault: true,
-        },
-      ]),
+      ...(isReadOnly
+        ? []
+        : [history(), dropCursor(), indentOnInput(), closeBrackets(), autocompletion(), rectangularSelection(), crosshairCursor()]),
+      keymap.of(
+        isReadOnly
+          ? [...searchKeymap, ...foldKeymap]
+          : [
+              ...closeBracketsKeymap,
+              ...defaultKeymap,
+              ...searchKeymap,
+              ...historyKeymap,
+              ...foldKeymap,
+              ...completionKeymap,
+              ...lintKeymap,
+              indentWithTab,
+              {
+                key: 'F9',
+                run: () => {
+                  pretestRef.current();
+                  return true;
+                },
+              },
+              {
+                key: 'F10',
+                run: () => {
+                  submitRef.current();
+                  return true;
+                },
+                preventDefault: true,
+              },
+            ],
+      ),
       lang.extension(),
       themeExtension(config.theme),
       /* Fix: make .cm-editor fill the container so ALL lines have background */
@@ -959,9 +978,9 @@ export function KryptonIDE({
         }
       }),
       /* Read-only flag for `mode='readonly'` */
-      ...(isReadOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
+      ...(isReadOnly ? READ_ONLY_CODE_EXTENSIONS : []),
       /* Controlled value: emit onValueChange on each keystroke */
-      ...(onValueChange
+      ...(!isReadOnly && onValueChange
         ? [
             EditorView.updateListener.of((update) => {
               if (update.docChanged) onValueChange(update.state.doc.toString());
@@ -1060,6 +1079,7 @@ export function KryptonIDE({
 
   /* ── Submit handler ── */
   const handleSubmit = useCallback(async () => {
+    if (isReadOnly) return;
     if (submitting || submitCooldown > 0) return;
     const code = getCode();
     if (!code.trim()) return;
@@ -1077,6 +1097,10 @@ export function KryptonIDE({
         body: JSON.stringify({ lang: selectedLang, code }),
         credentials: 'same-origin',
       });
+      if (res.status === 409 && reloadOnConflict) {
+        window.location.reload();
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         const rid = data.rid ? String(data.rid) : '';
@@ -1107,7 +1131,7 @@ export function KryptonIDE({
     } finally {
       setSubmitting(false);
     }
-  }, [submitUrl, selectedLang, getCode, onSubmit, onOpenRecords, submitting, submitCooldown, pollRecord, resolveRecordUrl]);
+  }, [submitUrl, selectedLang, getCode, isReadOnly, onSubmit, onOpenRecords, submitting, submitCooldown, pollRecord, reloadOnConflict, resolveRecordUrl]);
 
   /* ── Pretest handler ──
    *  Runs one or more tabs in a single backend pretest request. The judge
@@ -1123,6 +1147,7 @@ export function KryptonIDE({
    */
   const runPretestForTabs = useCallback(
     async (tabIds: string[], includeEmpty = false) => {
+      if (isReadOnly) return;
       if (!submitUrl || !canPretest) return;
       const tabs = tabIds
         .map((id) => pretestTabs.find((t) => t.id === id))
@@ -1168,6 +1193,10 @@ export function KryptonIDE({
           signal: abort.signal,
           credentials: 'same-origin',
         });
+        if (res.status === 409 && reloadOnConflict) {
+          window.location.reload();
+          return;
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const data = await res.json();
@@ -1217,7 +1246,7 @@ export function KryptonIDE({
         });
       }
     },
-    [submitUrl, canPretest, pretestTabs, selectedLang, getCode, resolvePretestRecordUrl],
+    [submitUrl, canPretest, pretestTabs, selectedLang, getCode, isReadOnly, reloadOnConflict, resolvePretestRecordUrl],
   );
 
   /** Toolbar "运行全部自测" — run all samples and populated custom tabs in one request. */
@@ -1356,6 +1385,10 @@ export function KryptonIDE({
 
   /* ── File upload handler ── */
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isReadOnly) {
+      e.target.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -1369,10 +1402,11 @@ export function KryptonIDE({
     };
     reader.readAsText(file);
     e.target.value = '';
-  }, []);
+  }, [isReadOnly]);
 
   /* ── Reset code handler ── */
   const handleReset = useCallback(() => {
+    if (isReadOnly) return;
     if (!confirm('确定要重置代码吗？这将清除所有未保存的更改。')) return;
     if (viewRef.current) {
       viewRef.current.dispatch({
@@ -1386,12 +1420,13 @@ export function KryptonIDE({
         /* empty */
       }
     }
-  }, [defaultCode, codeCacheKey]);
+  }, [defaultCode, codeCacheKey, isReadOnly]);
 
   /* ── Derived values ── */
   const availableLangs = langs.length > 0 ? langs : Object.keys(LANGUAGES);
   const langLabel = getLangEntry(selectedLang).label;
   const themeBg = THEME_BG[config.theme];
+  const readOnlyFontIndex = Math.max(0, FONT_SIZE_OPTIONS.indexOf(config.fontSize));
 
   /* ── Render ── */
   return (
@@ -1563,6 +1598,35 @@ export function KryptonIDE({
             {fullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
           </button>
         </ScrollArea>
+      ) : isReadOnly && teamReadOnlyView ? (
+        <div data-readonly-code-toolbar className="flex shrink-0 items-center gap-2 border-b bg-muted/50 px-3 py-1 text-xs">
+          <span className="font-medium">{langLabel}</span>
+          <span className="text-muted-foreground">只读</span>
+          <div className="flex-1" />
+          <button
+            type="button"
+            aria-label="缩小只读代码字号"
+            title="缩小字号"
+            disabled={readOnlyFontIndex === 0}
+            onClick={() => updateConfig({ ...config, fontSize: FONT_SIZE_OPTIONS[Math.max(0, readOnlyFontIndex - 1)] })}
+            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+          >
+            <Minus className="size-3.5" />
+          </button>
+          <span className="min-w-9 text-center font-mono tabular-nums text-muted-foreground">{config.fontSize}px</span>
+          <button
+            type="button"
+            aria-label="放大只读代码字号"
+            title="放大字号"
+            disabled={readOnlyFontIndex === FONT_SIZE_OPTIONS.length - 1}
+            onClick={() =>
+              updateConfig({ ...config, fontSize: FONT_SIZE_OPTIONS[Math.min(FONT_SIZE_OPTIONS.length - 1, readOnlyFontIndex + 1)] })
+            }
+            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+          >
+            <Plus className="size-3.5" />
+          </button>
+        </div>
       ) : null}
 
       {/* ── Editor area ── */}
@@ -1809,14 +1873,16 @@ export function KryptonIDE({
       <SettingsDialog open={showSettings} onOpenChange={setShowSettings} config={config} onChange={updateConfig} />
 
       {/* ── Hidden file input ── */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".c,.cc,.cpp,.cxx,.h,.hpp,.py,.java,.js,.ts,.go,.rs,.rb,.cs,.hs,.php,.kt,.pas,.txt"
-        className="hidden"
-        aria-label="上传代码文件"
-        onChange={handleFileUpload}
-      />
+      {!isReadOnly || !teamReadOnlyView ? (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".c,.cc,.cpp,.cxx,.h,.hpp,.py,.java,.js,.ts,.go,.rs,.rb,.cs,.hs,.php,.kt,.pas,.txt"
+          className="hidden"
+          aria-label="上传代码文件"
+          onChange={handleFileUpload}
+        />
+      ) : null}
     </div>
   );
 }

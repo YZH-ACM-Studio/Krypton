@@ -15,6 +15,8 @@ import { Bell, ClipboardList, ListOrdered, MessageSquare, Moon, Printer, Sun, Sw
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { readTeamExamModeContext, TeamExamModeSummary } from '@/components/team-exam-mode';
+import { useRecordSocket } from '@/hooks/use-record-socket';
 
 const THEME_KEY = 'krypton:theme';
 
@@ -281,7 +283,25 @@ export function ExamContestShell({ children }: { children: ReactNode }) {
   const beforeStart = Number.isFinite(beginAt) && Date.now() < beginAt && !examMode.previewMode;
   const lockedBeforeStart = new Set<ExamSection>(['problems', 'print']);
   const items = CLIENT_WORKSPACE_SIDEBAR.filter((item) => item.key !== 'print' || examMode.allowPrint);
-  const subtitle = examMode.previewMode ? <span className="text-amber-600 dark:text-amber-300">管理员预览模式</span> : null;
+  const teamContext = readTeamExamModeContext(examMode);
+  const teamRoleTid = String(examMode.tid || '');
+  const teamRoleRevision = teamContext?.teamInfo?.revision;
+  useRecordSocket({
+    path: '/exam-mode/team-role-conn',
+    filters: {
+      tid: teamRoleTid || undefined,
+      teamId: teamContext?.teamId || undefined,
+      teamRevision: Number.isSafeInteger(teamRoleRevision) ? teamRoleRevision : undefined,
+    },
+    onRdoc: () => {},
+    onTeamRoleChange: teamContext ? () => window.location.reload() : undefined,
+    disabled: !teamContext?.teamId || !teamRoleTid || !Number.isSafeInteger(teamRoleRevision),
+  });
+  const subtitle = teamContext ? (
+    <TeamExamModeSummary context={teamContext} />
+  ) : examMode.previewMode ? (
+    <span className="text-amber-600 dark:text-amber-300">管理员预览模式</span>
+  ) : null;
   const stopUserProfileLinks = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     const target = event.target as HTMLElement | null;
     const anchor = target?.closest?.('a[href]') as HTMLAnchorElement | null;

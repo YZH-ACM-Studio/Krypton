@@ -73,6 +73,26 @@ export interface ContestTeamUpdateInput {
     active?: boolean;
 }
 
+export type ContestTeamExamModeRole = 'captain' | 'member' | 'admin_preview';
+
+export interface ContestTeamExamModeContext {
+    teamId: string | null;
+    teamRole: ContestTeamExamModeRole;
+    teamInfo: {
+        teamId: string;
+        name: string;
+        captainUid: number;
+        memberUids: number[];
+        revision: number;
+    } | null;
+    canBrowseProblems: boolean;
+    canViewTeamRecords: boolean;
+    canEditCode: boolean;
+    canRun: boolean;
+    canSubmit: boolean;
+    canUseVirtualPrint: boolean;
+}
+
 export const coll = db.collection<ContestTeamDoc>('contest.teams');
 export const inviteColl = db.collection<ContestTeamInviteDoc>('contest.teamInvites');
 
@@ -119,6 +139,43 @@ export function emergencyTeamConfirmation(teamId: ObjectId, revision: number): s
 
 export function canManageContestTeams(actor: User, tdoc: Tdoc): boolean {
     return actor.own(tdoc, PERM.PERM_EDIT_CONTEST_SELF) || actor.hasPerm(PERM.PERM_EDIT_CONTEST) || actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+}
+
+/**
+ * Build the team-only Exam Mode bootstrap from the current durable roster.
+ * The handler decides whether the request is an administrator preview; this
+ * helper deliberately derives every capability from that fact plus the
+ * roster, never from request parameters or client state.
+ */
+export function buildExamModeTeamContext(
+    team: ContestTeamDoc | null,
+    uid: number,
+    adminPreview = false,
+): ContestTeamExamModeContext {
+    if (!Number.isSafeInteger(uid) || uid <= 0) throw new ValidationError('uid');
+    if (!adminPreview && (!team || !team.active || !team.memberUids.includes(uid))) teamConflict('active_team_required');
+
+    const role: ContestTeamExamModeRole = adminPreview ? 'admin_preview' : team?.captainUid === uid ? 'captain' : 'member';
+    const captainCanWrite = role === 'captain';
+    return {
+        teamId: team?.teamId.toHexString() || null,
+        teamRole: role,
+        teamInfo: team
+            ? {
+                  teamId: team.teamId.toHexString(),
+                  name: team.name,
+                  captainUid: team.captainUid,
+                  memberUids: [...team.memberUids],
+                  revision: team.revision,
+              }
+            : null,
+        canBrowseProblems: true,
+        canViewTeamRecords: true,
+        canEditCode: captainCanWrite,
+        canRun: captainCanWrite,
+        canSubmit: captainCanWrite,
+        canUseVirtualPrint: captainCanWrite,
+    };
 }
 
 function started(tdoc: Tdoc, now: Date): boolean {
@@ -430,7 +487,10 @@ export async function updateTeam(
             }
             if (patch.active === false && current.managementMode === 'admin' && !admin) throw new PermissionError(PERM.PERM_EDIT_CONTEST);
             if (patch.active === false && emergency && !admin) throw new PermissionError(PERM.PERM_EDIT_CONTEST);
-            const roleChanged = current.captainUid !== captainUid || current.memberUids.join(',') !== memberUids.join(',');
+            const roleChanged =
+                current.captainUid !== captainUid ||
+                current.memberUids.join(',') !== memberUids.join(',') ||
+                (input.active !== undefined && current.active !== input.active);
             const before = { ...current, memberUids: [...current.memberUids] };
 
             const latestContest = await contest.get(domainId, contestId);
@@ -466,8 +526,8 @@ export async function updateTeam(
         () => syncPendingInvitesAfterTeamMutation(outcome.updated, actor.user._id, actor.now || new Date()),
     );
     if (outcome.roleChanged) {
-        await runPostCommitStep('publish-role-change', outcome.updated, actor.user._id, () =>
-            bus.parallel('contest/team-role-change', {
+        await runPostCommitStep('publish-role-change', outcome.updated, actor.user._id, async () =>
+            bus.broadcast('contest/team-role-change', {
                 before: outcome.before,
                 after: outcome.updated,
                 actorUid: actor.user._id,
@@ -886,8 +946,8 @@ export async function acceptInvite(domainId: string, contestId: ObjectId, invite
     await runPostCommitStep('sync-invitations', outcome.updated, actor.user._id, () =>
         syncPendingInvitesAfterTeamMutation(outcome.updated, actor.user._id, outcome.committedAt, outcome.invite.inviteId),
     );
-    await runPostCommitStep('publish-role-change', outcome.updated, actor.user._id, () =>
-        bus.parallel('contest/team-role-change', {
+    await runPostCommitStep('publish-role-change', outcome.updated, actor.user._id, async () =>
+        bus.broadcast('contest/team-role-change', {
             before: outcome.before,
             after: outcome.updated,
             actorUid: actor.user._id,
@@ -973,6 +1033,7 @@ global.Hydro.model.contestTeam = {
     normalizeMemberUids,
     validateTeamShape,
     canManageContestTeams,
+    buildExamModeTeamContext,
     createTeam,
     updateTeam,
     createInvite,

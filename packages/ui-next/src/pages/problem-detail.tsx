@@ -27,6 +27,7 @@ import { getLangEntry, getStatus, KryptonIDE, type RecordEntry } from '@/compone
 import { MarkdownView } from '@/components/markdown-renderer';
 import { ObjectiveAnswerPanel, type ObjectiveClientQuestion } from '@/components/objective-answer-panel';
 import { ProblemAuthorText, ProblemEditGate } from '@/components/problem-authoring-state';
+import { readTeamExamModeContext } from '@/components/team-exam-mode';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -638,6 +639,11 @@ export function ProblemDetailPage() {
   /* ── Contest mode ── */
   const tdoc: R | null = data.tdoc || null;
   const examMode: R | null = data.examMode || null;
+  const teamExamMode = readTeamExamModeContext(examMode);
+  const teamCodeWritable =
+    teamExamMode?.teamRole === 'captain' && teamExamMode.canEditCode && teamExamMode.canRun && teamExamMode.canSubmit;
+  const teamCodeReadOnly = !!teamExamMode && !teamCodeWritable;
+  const teamCanViewRecords = !teamExamMode || teamExamMode.canViewTeamRecords;
   const showNoTestdataWarning = shouldShowNoTestdataWarning(pdoc, !!examMode?.enabled);
   const examUrls: R = examMode?.urls || {};
   const mode: string = data.mode || 'normal';
@@ -687,6 +693,9 @@ export function ProblemDetailPage() {
   const [ideRecordsLoaded, setIdeRecordsLoaded] = useState(false);
   const [ideRecordsLoading, setIdeRecordsLoading] = useState(false);
   const [ideRecordsError, setIdeRecordsError] = useState<string | null>(null);
+  const [readonlySource, setReadonlySource] = useState<{ rid: string; lang: string; code: string } | null>(null);
+  const [readonlySourceLoading, setReadonlySourceLoading] = useState(false);
+  const [readonlySourceError, setReadonlySourceError] = useState<string | null>(null);
   const [ideRecordsPct, setIdeRecordsPct] = useState(70); // top content takes 70%
   const recordsDragging = useRef(false);
   const recordsPanelRef = useRef<HTMLDivElement>(null);
@@ -698,8 +707,37 @@ export function ProblemDetailPage() {
     setShowIdeRecords((p) => !p);
   }, []);
 
+  const loadReadonlySource = useCallback(
+    async (entry: RecordEntry) => {
+      if (!teamCodeReadOnly || !teamCanViewRecords) return;
+      setReadonlySourceLoading(true);
+      setReadonlySourceError(null);
+      try {
+        const res = await fetch(entry.url, {
+          headers: { Accept: 'application/json' },
+          credentials: 'same-origin',
+        });
+        if (res.status === 409) {
+          window.location.reload();
+          return;
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        const record = json.rdoc || json.page?.data?.rdoc || {};
+        const code = json.code ?? record.code;
+        if (typeof code !== 'string' || !code) throw new Error('该记录没有可查看的文本源码');
+        setReadonlySource({ rid: entry.rid, lang: String(record.lang || entry.lang || ''), code });
+      } catch (error: any) {
+        setReadonlySourceError(error?.message || '加载本队源码失败');
+      } finally {
+        setReadonlySourceLoading(false);
+      }
+    },
+    [teamCanViewRecords, teamCodeReadOnly],
+  );
+
   const loadIdeRecords = useCallback(async () => {
-    if (!bs.user?.signedIn || !pid) return;
+    if (!bs.user?.signedIn || !pid || !teamCanViewRecords) return;
     setIdeRecordsLoading(true);
     setIdeRecordsError(null);
     try {
@@ -717,6 +755,7 @@ export function ProblemDetailPage() {
       const rdocs = Array.isArray(json.rdocs) ? json.rdocs : Array.isArray(json.page?.data?.rdocs) ? json.page.data.rdocs : [];
       const entries = rdocs.map((rdoc: R) => recordEntryFromRdoc(rdoc, recordDetailRoute)).filter(Boolean) as RecordEntry[];
       setIdeRecords((prev) => mergeRecordEntries(prev, entries));
+      if (teamCodeReadOnly && entries[0]) await loadReadonlySource(entries[0]);
       setIdeRecordsLoaded(true);
     } catch (e: any) {
       setIdeRecordsError(e?.message || '加载提交记录失败');
@@ -724,7 +763,7 @@ export function ProblemDetailPage() {
     } finally {
       setIdeRecordsLoading(false);
     }
-  }, [bs.urls.records, bs.user?.id, bs.user?.signedIn, pid, recordDetailRoute, tid]);
+  }, [bs.urls.records, bs.user?.id, bs.user?.signedIn, loadReadonlySource, pid, recordDetailRoute, teamCanViewRecords, teamCodeReadOnly, tid]);
 
   useEffect(() => {
     if (showIdeRecords && !ideRecordsLoaded && !ideRecordsLoading) {
@@ -778,6 +817,15 @@ export function ProblemDetailPage() {
           <Code2 className="size-4 text-primary" />
           <span className="text-sm font-medium">{title}</span>
           <span className="text-xs text-muted-foreground">— {pid}</span>
+          {teamCodeReadOnly ? (
+            <Badge variant="outline" className="border-amber-500/40 text-amber-600 dark:text-amber-300">
+              {teamExamMode?.teamRole === 'invalid'
+                ? '团队身份异常 · 已锁定'
+                : teamExamMode?.teamRole === 'admin_preview'
+                  ? '管理员只读预览'
+                  : '队员只读'}
+            </Badge>
+          ) : null}
           <div className="flex-1" />
           <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => setIdeMode(false)}>
             <X className="size-3.5" />
@@ -859,7 +907,7 @@ export function ProblemDetailPage() {
                   <div className="flex flex-col min-h-0 overflow-hidden" style={{ height: `${100 - ideRecordsPct}%` }}>
                     <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1.5 shrink-0">
                       <History className="size-3.5 text-muted-foreground" />
-                      <span className="text-xs font-medium">提交记录</span>
+                      <span className="text-xs font-medium">{teamExamMode ? '本队提交记录' : '提交记录'}</span>
                       <span className="text-[10px] text-muted-foreground">({ideRecords.length})</span>
                       <div className="flex-1" />
                       <button type="button" onClick={() => setShowIdeRecords(false)} className="text-xs text-muted-foreground hover:text-foreground">
@@ -878,7 +926,9 @@ export function ProblemDetailPage() {
                           {ideRecordsError}
                         </div>
                       ) : ideRecords.length === 0 ? (
-                        <div className="flex h-full items-center justify-center px-4 text-xs text-muted-foreground">暂无个人提交记录</div>
+                        <div className="flex h-full items-center justify-center px-4 text-xs text-muted-foreground">
+                          {teamExamMode ? '暂无本队提交记录' : '暂无个人提交记录'}
+                        </div>
                       ) : (
                         <table className="min-w-[620px] w-full text-xs">
                           <thead>
@@ -913,9 +963,15 @@ export function ProblemDetailPage() {
                                   <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.memory != null ? formatMemory(r.memory) : '—'}</td>
                                   <td className="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{formatRecordTimestamp(r.timestamp)}</td>
                                   <td className="px-3 py-1.5">
-                                    <a href={r.url} className="text-primary hover:underline">
-                                      详情
-                                    </a>
+                                    {teamCodeReadOnly ? (
+                                      <button type="button" onClick={() => void loadReadonlySource(r)} className="text-primary hover:underline">
+                                        查看代码
+                                      </button>
+                                    ) : (
+                                      <a href={r.url} className="text-primary hover:underline">
+                                        详情
+                                      </a>
+                                    )}
                                   </td>
                                 </tr>
                               );
@@ -930,23 +986,55 @@ export function ProblemDetailPage() {
             </div>
           }
           right={
-            <KryptonIDE
-              langs={config.langs || []}
-              defaultLang={config.langs?.[0]}
-              submitUrl={submitUrl}
-              canPretest={problemCanPretest}
-              cacheKey={ideCacheKey}
-              samples={samples}
-              onRecordsChange={handleRecordsChange}
-              onToggleRecords={handleToggleRecords}
-              onOpenRecords={() => setShowIdeRecords(true)}
-              recordUrlTemplate={recordDetailRoute}
-              pretestRecordUrlTemplate={pretestRecordRoute}
-              showRecordsButton
-              recordsVisible={showIdeRecords}
-              recordsCount={ideRecords.length}
-              className="h-full rounded-none border-0"
-            />
+            teamCodeReadOnly ? (
+              <div className="flex h-full min-h-0 flex-col">
+                <div className="flex h-10 shrink-0 items-center gap-2 border-b bg-muted/30 px-3 text-xs">
+                  <span className="font-medium">只读源码</span>
+                  {readonlySource ? <span className="font-mono text-muted-foreground">#{readonlySource.rid.slice(-8)}</span> : null}
+                  <div className="flex-1" />
+                  {readonlySourceLoading ? <Loader2 className="size-3.5 animate-spin text-muted-foreground" /> : null}
+                  {readonlySourceError ? <span className="text-destructive">{readonlySourceError}</span> : null}
+                </div>
+                {readonlySource ? (
+                  <KryptonIDE
+                    mode="readonly"
+                    teamReadOnlyView
+                    langs={[]}
+                    defaultLang={readonlySource.lang || config.langs?.[0]}
+                    value={readonlySource.code}
+                    minHeight={0}
+                    className="h-full min-h-0 flex-1 rounded-none border-0"
+                  />
+                ) : (
+                  <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+                    {!teamCanViewRecords
+                      ? '当前服务端能力不允许查看本队源码。'
+                      : readonlySourceLoading
+                        ? '正在加载本队最新源码…'
+                        : '本队提交源码会在这里以只读方式显示。'}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <KryptonIDE
+                langs={config.langs || []}
+                defaultLang={config.langs?.[0]}
+                submitUrl={submitUrl}
+                canPretest={problemCanPretest}
+                cacheKey={ideCacheKey}
+                samples={samples}
+                onRecordsChange={handleRecordsChange}
+                onToggleRecords={handleToggleRecords}
+                onOpenRecords={() => setShowIdeRecords(true)}
+                recordUrlTemplate={recordDetailRoute}
+                pretestRecordUrlTemplate={pretestRecordRoute}
+                showRecordsButton
+                recordsVisible={showIdeRecords}
+                recordsCount={ideRecords.length}
+                reloadOnConflict={!!teamExamMode}
+                className="h-full rounded-none border-0"
+              />
+            )
           }
           defaultLeftPercent={40}
         />
@@ -1022,9 +1110,17 @@ export function ProblemDetailPage() {
         <div className="flex shrink-0 gap-2">
           {/* 客观题在下方面板作答，IDE 模式无意义 */}
           {!isObjective && !isStructuredAnswer ? (
-            <Button size="sm" variant="default" className="gap-1" onClick={() => setIdeMode(true)}>
+            <Button
+              size="sm"
+              variant="default"
+              className="gap-1"
+              onClick={() => {
+                if (teamCodeReadOnly && teamCanViewRecords) setShowIdeRecords(true);
+                setIdeMode(true);
+              }}
+            >
               <Code2 className="size-3.5" />
-              IDE 模式
+              {teamCodeReadOnly ? '只读代码' : 'IDE 模式'}
             </Button>
           ) : null}
           {!examMode?.enabled ? (
@@ -1070,13 +1166,14 @@ export function ProblemDetailPage() {
               <MarkdownView content={content} preferredLang={preferredLang} />
             </CardContent>
           </Card>
-          {isObjective && (!isSubjective || inContest || canPreviewSubjective) ? (
+          {isObjective && (!teamExamMode || teamExamMode.canSubmit) && (!isSubjective || inContest || canPreviewSubjective) ? (
             <ObjectiveAnswerPanel
               questions={objectiveQuestions}
               submitUrl={submitUrl}
               storageKey={objectiveDraftKey}
               signedIn={!!bs.user?.signedIn}
               previewOnly={isSubjective && !inContest}
+              reloadOnConflict={!!teamExamMode}
             />
           ) : null}
           {showExternals && solutionCount > 0 ? (

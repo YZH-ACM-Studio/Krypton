@@ -23,6 +23,14 @@
 - 作者端源码变更只使用 CodeMirror change mapping 更新整行区间；整体删除、交叠或无法确定的映射必须显式失效并阻止保存，不得靠附近文本或旧 anchor 猜测恢复。
 - P3.21/P3.22/P3.23 是不可拆部署单元；生产唯一旧函数草稿只能经过备份、只读 plan、确认、精确迁移和 verify 后切换，不维护旧协议双读双写。
 
+## 团队 ACM 赛前组队协议
+
+- `contest.teamBatches`、`contest.teamBatchTeams`、`contest.teamBatchInvites` 只承载比赛创建前的组队协作；每名用户在同一开放批次最多属于一支 1–3 人 active 队伍，关闭批次后所有阵容写入冻结。
+- 比赛只能显式选择一个已关闭且非空的批次，并在比赛开始前、无 Record、无既有 active ContestTeam 时整批校验后生成新的 `contest.teams` 快照。任一成员不符合目标比赛的 `assign`、`participantScope` 或账号参赛权限时整批拒绝且清理本次准备态；`_code` 是开赛入口凭据，不在赛前快照时自动代领。
+- 本站单 Hydro 进程通过同一 contest 级轻量边界串行化快照激活、ContestTeam 写入及运行时队伍读取，保证多文档快照不会以半批状态对应用可见；禁止新增绕过该边界的 active team 游标或直接写入口，也不为此引入 Mongo 事务、队列或分布式锁。
+- 计分、提交授权、榜单、Vigil 角色、Record 和虚拟打印只读取比赛内 `ContestTeam`；禁止运行时回查批次、复用批次 teamId、自动同步或把赛内修正反写批次。一个关闭批次可用于多场比赛，但每场必须生成独立 teamId 与 snapshot hash。
+- P1.17 不修改 Vigil Server 或 Client，不需要迁移或回填历史比赛与队伍。部署只加载 OJ/UI 源码及等值 partial/普通索引，不得顺带创建批次、绑定比赛或连接 Windows 主机。
+
 ## 赛事题目批量导入触发规则
 
 ### 何时自动触发

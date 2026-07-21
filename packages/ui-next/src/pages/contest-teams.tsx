@@ -1,6 +1,6 @@
 import { useCallback, useState, type ReactNode } from 'react';
 import { motion } from 'motion/react';
-import { AlertTriangle, ArrowLeft, Crown, LogOut, Pencil, Plus, ShieldCheck, UserPlus, Users, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Crown, Lock, LogOut, Pencil, Plus, ShieldCheck, UserPlus, Users, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -122,14 +122,16 @@ function MemberList({ team, users, actions }: { team: TeamView; users: Record<st
 export function ContestTeamsPage() {
   const bs = useBootstrap();
   const data = bs.page.data as R;
+  const isBatch = data.workspaceKind === 'batch';
   const tdoc = data.tdoc || {};
+  const batch = data.batch || {};
   const tid = String(tdoc.docId || '');
   const ownTeam = (data.ownTeam || null) as TeamView | null;
   const invitations = (data.pendingInvites || []) as InviteView[];
   const users = (data.users || {}) as Record<string, TeamUser>;
   const capabilities = data.capabilities || {};
   const managedTeams = (data.teams || []) as TeamView[];
-  const teamsUrl = `/contest/${encodeURIComponent(tid)}/teams`;
+  const teamsUrl = String(data.workspaceUrl || `/contest/${encodeURIComponent(tid)}/teams`);
   const teamSearch = String(data.teamSearch || '');
   const teamPageUrl = teamSearch ? `${teamsUrl}?teamSearch=${encodeURIComponent(teamSearch)}` : teamsUrl;
   const currentUid = Number(bs.user.id);
@@ -167,33 +169,64 @@ export function ContestTeamsPage() {
 
   const ownIsCaptain = !!ownTeam && ownTeam.captainUid === currentUid;
   const ownIsSelfManaged = ownTeam?.managementMode === 'self';
+  const emergencyAdminEdit = !!capabilities.started && !!capabilities.canEmergencyEdit;
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
       <header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-3">
-            <a href="/contest" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-              <ArrowLeft className="size-4" /> 返回比赛
+            <a
+              href={isBatch ? '/teams' : '/contest'}
+              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="size-4" /> {isBatch ? '返回队伍中心' : '返回比赛'}
             </a>
-            <a href={`/contest/${encodeURIComponent(tid)}`} className="text-sm text-muted-foreground hover:text-foreground">
-              比赛详情
-            </a>
+            {!isBatch ? (
+              <a href={`/contest/${encodeURIComponent(tid)}`} className="text-sm text-muted-foreground hover:text-foreground">
+                比赛详情
+              </a>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">比赛队伍</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">{isBatch ? '赛前组队' : '比赛队伍'}</h1>
             <Badge variant="outline">1–3 人 ACM</Badge>
-            {capabilities.started ? <Badge variant="destructive">已开赛 · 普通操作冻结</Badge> : <Badge variant="secondary">赛前可调整</Badge>}
+            {capabilities.started ? (
+              <Badge variant={isBatch ? 'outline' : 'destructive'}>{isBatch ? '批次已关闭 · 可绑定比赛' : '已开赛 · 普通操作冻结'}</Badge>
+            ) : (
+              <Badge variant="secondary">{isBatch ? '开放组队' : '赛前可调整'}</Badge>
+            )}
           </div>
-          <p className="text-sm text-muted-foreground">{tdoc.title}</p>
+          <p className="text-sm text-muted-foreground">{isBatch ? batch.name : tdoc.title}</p>
+          {isBatch && batch.description ? <p className="max-w-2xl text-sm text-muted-foreground">{batch.description}</p> : null}
         </div>
-        <div className="text-sm text-muted-foreground">
-          <span>开始时间</span>
-          <strong className="ml-2 font-medium text-foreground">{formatDateTime(tdoc.beginAt, bs.locale)}</strong>
+        <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+          <div>
+            <span>{isBatch ? (batch.closedAt ? '关闭时间' : '创建时间') : '开始时间'}</span>
+            <strong className="ml-2 font-medium text-foreground">
+              {formatDateTime(isBatch ? batch.closedAt || batch.createdAt : tdoc.beginAt, bs.locale)}
+            </strong>
+          </div>
+          {isBatch && capabilities.canClose ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                setConfirmAction({
+                  title: '关闭这个组队批次？',
+                  description: '关闭后普通组队操作全部冻结，阵容可在创建团队 ACM 比赛时生成独立快照。关闭后不再重新开放。',
+                  operation: 'close',
+                  fields: { expectedRevision: Number(batch.revision || 0) },
+                })
+              }
+            >
+              <Lock className="size-4" /> 关闭批次
+            </Button>
+          ) : null}
         </div>
       </header>
 
-      {data.vigilRoleSyncWarning ? (
+      {!isBatch && data.vigilRoleSyncWarning ? (
         <div className="flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm" role="alert">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-600" />
           <div>
@@ -207,8 +240,10 @@ export function ContestTeamsPage() {
         <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
           <div>
-            <p className="font-medium">队伍已冻结</p>
-            <p className="mt-1 text-muted-foreground">普通成员与队长只能查看。管理员紧急调整不会重算或转移已经取得的成绩。</p>
+            <p className="font-medium">{isBatch ? '组队批次已关闭' : '队伍已冻结'}</p>
+            <p className="mt-1 text-muted-foreground">
+              {isBatch ? '当前阵容只读，可作为后续团队 ACM 比赛的快照来源。' : '普通成员与队长只能查看。管理员紧急调整不会重算或转移已经取得的成绩。'}
+            </p>
           </div>
         </div>
       ) : null}
@@ -216,7 +251,7 @@ export function ContestTeamsPage() {
       <section className="space-y-3">
         <div>
           <h2 className="text-lg font-semibold">我的队伍</h2>
-          <p className="text-sm text-muted-foreground">一个账号在本场比赛只能属于一支有效队伍。</p>
+          <p className="text-sm text-muted-foreground">一个账号在{isBatch ? '当前组队批次' : '本场比赛'}只能属于一支有效队伍。</p>
         </div>
 
         {ownTeam ? (
@@ -266,7 +301,9 @@ export function ContestTeamsPage() {
                           onClick={() =>
                             setConfirmAction({
                               title: `移除 ${userLabel(users, uid)}？`,
-                              description: '该成员会立即失去本队身份。操作不会改变队伍已经取得的成绩。',
+                              description: isBatch
+                                ? '该成员会立即退出本批次的当前队伍，并可加入本批次的其它队伍。'
+                                : '该成员会立即失去本队身份。操作不会改变队伍已经取得的成绩。',
                               operation: 'remove_member',
                               fields: { teamId: ownTeam.teamId, expectedRevision: ownTeam.revision, memberUid: uid },
                               destructive: true,
@@ -295,7 +332,9 @@ export function ContestTeamsPage() {
                           description:
                             ownTeam.memberUids.length === 1
                               ? '最后一名成员退出后，队伍会被停用但不会物理删除。'
-                              : '退出后你会立即失去本队身份，已有成绩仍保留在稳定 teamId 下。',
+                              : isBatch
+                                ? '退出后你会立即失去本批次的当前队伍身份。'
+                                : '退出后你会立即失去本队身份，已有成绩仍保留在稳定 teamId 下。',
                           operation: 'leave',
                           fields: { teamId: ownTeam.teamId, expectedRevision: ownTeam.revision },
                           destructive: true,
@@ -362,7 +401,7 @@ export function ContestTeamsPage() {
                         name="inviteeUid"
                         maxItems={1}
                         placeholder="搜索 UID / 用户名 / 展示名"
-                        emptyText="没有符合本场资格且未入队的用户"
+                        emptyText={isBatch ? '没有可加入本批次且尚未入队的用户' : '没有符合本场资格且未入队的用户'}
                       />
                       <Button type="submit" className="w-full" disabled={inviteTargets.length !== 1}>
                         发送邀请
@@ -402,7 +441,7 @@ export function ContestTeamsPage() {
                             onClick={() =>
                               setConfirmAction({
                                 title: `加入「${invite.teamName}」？`,
-                                description: '接受后会自动清理你在本场的其它待处理邀请，并由唯一索引确保不会同时属于两队。',
+                                description: `接受后会自动清理你在${isBatch ? '本批次' : '本场'}的其它待处理邀请，并由唯一索引确保不会同时属于两队。`,
                                 operation: 'accept_invite',
                                 fields: { inviteId: invite.inviteId },
                               })
@@ -439,10 +478,10 @@ export function ContestTeamsPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">开始参赛</CardTitle>
+                <CardTitle className="text-base">{isBatch ? '开始组队' : '开始参赛'}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <p className="text-sm leading-6 text-muted-foreground">你可以先创建一支队伍再邀请同伴，也可以明确以单人队参赛，之后仍能继续邀请。</p>
+                <p className="text-sm leading-6 text-muted-foreground">你可以先创建一支队伍再邀请同伴，也可以明确创建单人队，之后仍能继续邀请。</p>
                 <Button type="button" className="w-full" disabled={!capabilities.canCreate} onClick={() => setCreateSelfOpen(true)}>
                   <Users className="size-4" /> 创建队伍
                 </Button>
@@ -453,14 +492,14 @@ export function ContestTeamsPage() {
                   disabled={!capabilities.canCreate}
                   onClick={() =>
                     setConfirmAction({
-                      title: '以单人队参赛？',
-                      description: '系统会立即创建由你担任队长的一人队。开赛前仍可以邀请最多两名队友。',
+                      title: isBatch ? '创建单人队？' : '以单人队参赛？',
+                      description: `系统会立即创建由你担任队长的一人队。${isBatch ? '批次关闭前' : '开赛前'}仍可以邀请最多两名队友。`,
                       operation: 'create_solo',
                       fields: {},
                     })
                   }
                 >
-                  <ShieldCheck className="size-4" /> 以单人队参赛
+                  <ShieldCheck className="size-4" /> {isBatch ? '创建单人队' : '以单人队参赛'}
                 </Button>
               </CardContent>
             </Card>
@@ -520,8 +559,14 @@ export function ContestTeamsPage() {
                 <CardContent className="space-y-3">
                   <MemberList team={team} users={users} />
                   <div className="flex justify-end gap-2">
-                    <Button type="button" size="sm" variant="outline" onClick={() => openAdminEdit(team)}>
-                      <Pencil className="size-3" /> {capabilities.started ? '紧急调整' : '编辑'}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={capabilities.started && !capabilities.canEmergencyEdit}
+                      onClick={() => openAdminEdit(team)}
+                    >
+                      <Pencil className="size-3" /> {emergencyAdminEdit ? '紧急调整' : capabilities.started ? '已冻结' : '编辑'}
                     </Button>
                     <Button
                       type="button"
@@ -549,7 +594,9 @@ export function ContestTeamsPage() {
 
           {managedTeams.length === 0 ? (
             <Card>
-              <CardContent className="py-10 text-center text-sm text-muted-foreground">本场还没有有效队伍。</CardContent>
+              <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                {isBatch ? '本批次还没有有效队伍。' : '本场还没有有效队伍。'}
+              </CardContent>
             </Card>
           ) : null}
           <Pagination current={Number(data.teamPage || 1)} total={Number(data.teamPageCount || 1)} baseUrl={teamPageUrl} />
@@ -603,7 +650,7 @@ export function ContestTeamsPage() {
                 getLabel={(item) => `${item.displayName} ${item.uname} ${item._id}`}
                 name="memberUids"
                 maxItems={3}
-                placeholder="搜索符合本场资格且未入队的用户"
+                placeholder={isBatch ? '搜索可加入本批次且尚未入队的用户' : '搜索符合本场资格且未入队的用户'}
               />
             </div>
             <div className="space-y-1.5">
@@ -631,19 +678,21 @@ export function ContestTeamsPage() {
       <Dialog open={!!editingTeam} onOpenChange={(open) => !open && setEditingTeam(null)}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>{capabilities.started ? '赛中紧急调整队伍' : '编辑队伍'}</DialogTitle>
+            <DialogTitle>{emergencyAdminEdit ? '赛中紧急调整队伍' : '编辑队伍'}</DialogTitle>
           </DialogHeader>
           {editingTeam ? (
             <form method="post" className="space-y-4 p-5">
               <input type="hidden" name="operation" value="update_admin" />
               <input type="hidden" name="teamId" value={editingTeam.teamId} />
               <input type="hidden" name="expectedRevision" value={editingTeam.revision} />
-              {capabilities.started ? (
+              {emergencyAdminEdit ? (
                 <>
                   <input type="hidden" name="emergencyConfirmation" value={editingTeam.emergencyConfirmation || ''} />
                   <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm">
                     <p className="font-medium text-destructive">高风险赛中调整</p>
-                    <p className="mt-1 text-muted-foreground">仅允许修改成员和队长。已有成绩绑定稳定 teamId，不会转移或重算；客户端角色会立即变化。</p>
+                    <p className="mt-1 text-muted-foreground">
+                      仅允许修改成员和队长。已有成绩绑定稳定 teamId，不会转移或重算；客户端角色会立即变化。
+                    </p>
                   </div>
                   <div className="rounded-lg bg-muted px-3 py-2 text-sm">
                     <p className="font-medium">{editingTeam.name}</p>
@@ -697,8 +746,8 @@ export function ContestTeamsPage() {
                 <Button type="button" variant="outline" onClick={() => setEditingTeam(null)}>
                   取消
                 </Button>
-                <Button type="submit" variant={capabilities.started ? 'destructive' : 'default'} disabled={!editingMembers.length || !editingCaptain}>
-                  {capabilities.started ? '确认赛中调整' : '保存修改'}
+                <Button type="submit" variant={emergencyAdminEdit ? 'destructive' : 'default'} disabled={!editingMembers.length || !editingCaptain}>
+                  {emergencyAdminEdit ? '确认赛中调整' : '保存修改'}
                 </Button>
               </div>
             </form>

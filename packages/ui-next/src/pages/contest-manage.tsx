@@ -340,6 +340,10 @@ export function ContestEditPage() {
   const [rule, setRule] = useState(String(tdoc.rule || 'acm'));
   const initialParticipationMode: 'individual' | 'team' = tdoc.participationMode === 'team' ? 'team' : 'individual';
   const [participationMode, setParticipationMode] = useState<'individual' | 'team'>(initialParticipationMode);
+  const initialTeamBatchId = String(tdoc.teamBatchId || '');
+  const [teamBatchId, setTeamBatchId] = useState(initialTeamBatchId);
+  const closedTeamBatches: R[] = data.closedTeamBatches || [];
+  const activeTeamCount = Number(data.activeTeamCount || 0);
   const [rated, setRated] = useState(defaultRated);
   const [modeClearOpen, setModeClearOpen] = useState(false);
   const [modeClearConfirmed, setModeClearConfirmed] = useState(false);
@@ -536,6 +540,40 @@ export function ContestEditPage() {
                     <p className="text-[11px] text-muted-foreground">团队模式固定为 ACM，强制通过 Vigil Client 进入且不计个人 Rating。</p>
                   </div>
                 </div>
+
+                {participationMode === 'team' ? (
+                  <div className="space-y-2 rounded-xl border bg-muted/20 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <label className="text-sm font-medium">赛前组队批次</label>
+                        <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                          可选。保存时把已关闭批次的当前阵容整批校验，并生成这场比赛自己的队伍快照。
+                        </p>
+                      </div>
+                      {initialTeamBatchId ? <Badge variant="outline">已绑定 · 不自动同步</Badge> : null}
+                    </div>
+                    <SimpleSelect
+                      name="teamBatchId"
+                      value={teamBatchId}
+                      onValueChange={setTeamBatchId}
+                      disabled={!!initialTeamBatchId || activeTeamCount > 0}
+                      options={[
+                        { value: '', label: '不使用赛前批次（保存后在比赛内组队）' },
+                        ...closedTeamBatches.map((batch) => ({
+                          value: String(batch.batchId),
+                          label: `${batch.name} · ${Number(batch.teamCount || 0)} 队 / ${Number(batch.memberCount || 0)} 人`,
+                        })),
+                      ]}
+                    />
+                    {activeTeamCount > 0 && !initialTeamBatchId ? (
+                      <p className="text-xs text-amber-600">本场已经有队伍，不能再导入赛前批次。</p>
+                    ) : teamBatchId ? (
+                      <p className="text-xs text-muted-foreground">任一成员不符合当前参赛范围时整批拒绝，不会跳过失败队伍。</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">没有可选项时，请先到「队伍中心」创建并关闭一个组队批次。</p>
+                    )}
+                  </div>
+                ) : null}
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-1.5">
@@ -1523,7 +1561,10 @@ export function ContestProblemListPage() {
                           ? 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300'
                           : 'border-border bg-muted/50 text-muted-foreground';
                   return (
-                    <TableRow key={String(pid)} className={status?.code === 'pass' ? 'bg-emerald-500/[0.035] hover:bg-emerald-500/[0.065]' : undefined}>
+                    <TableRow
+                      key={String(pid)}
+                      className={status?.code === 'pass' ? 'bg-emerald-500/[0.035] hover:bg-emerald-500/[0.065]' : undefined}
+                    >
                       <TableCell className="text-center font-mono font-semibold">{getAlphabeticId(idx)}</TableCell>
                       <TableCell>
                         <a href={contestProblemUrl(bs, tdoc, pid)} className="text-sm text-primary hover:underline">
@@ -1533,7 +1574,10 @@ export function ContestProblemListPage() {
                       {inExamMode ? (
                         <TableCell className="text-center">
                           {status && statusDoc?.rid && canViewRecord ? (
-                            <a href={recordDetailUrl(String(statusDoc.rid))} className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                            <a
+                              href={recordDetailUrl(String(statusDoc.rid))}
+                              className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            >
                               <Badge variant="outline" className={statusClass} title={status.title}>
                                 {status.label}
                               </Badge>

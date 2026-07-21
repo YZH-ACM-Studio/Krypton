@@ -36,24 +36,7 @@ let revokeAfterFirstRead: number | null = null;
 let currentContest: any;
 let failNextInviteUpdateOne = false;
 let failNextInviteUpdateMany = false;
-let teamCasBarrierRemaining = 0;
-let releaseTeamCasBarrier: (() => void) | null = null;
-let teamCasBarrier = Promise.resolve();
 let activeVigilSessionChanges = 0;
-
-function armTeamCasBarrier(participants: number) {
-    teamCasBarrierRemaining = participants;
-    teamCasBarrier = new Promise<void>((resolve) => {
-        releaseTeamCasBarrier = resolve;
-    });
-}
-
-async function waitAtTeamCasBarrier(filter: any, update: any) {
-    if (!teamCasBarrierRemaining || filter.revision === undefined || !update.$set?.memberUids) return;
-    teamCasBarrierRemaining -= 1;
-    if (teamCasBarrierRemaining === 0) releaseTeamCasBarrier?.();
-    else await teamCasBarrier;
-}
 
 function same(left: any, right: any): boolean {
     if (left instanceof ObjectId && right instanceof ObjectId) return left.equals(right);
@@ -99,7 +82,6 @@ const teamCollection = {
         return docs.find((doc) => matches(doc, filter)) || null;
     },
     async findOneAndUpdate(filter: any, update: any) {
-        await waitAtTeamCasBarrier(filter, update);
         const doc = docs.find((candidate) => matches(candidate, filter));
         if (!doc) return null;
         const next = { ...doc, ...(update.$set || {}), revision: doc.revision + Number(update.$inc?.revision || 0) };
@@ -337,9 +319,6 @@ beforeEach(() => {
     revokeAfterFirstRead = null;
     failNextInviteUpdateOne = false;
     failNextInviteUpdateMany = false;
-    teamCasBarrierRemaining = 0;
-    releaseTeamCasBarrier = null;
-    teamCasBarrier = Promise.resolve();
     activeVigilSessionChanges = 0;
     (global as any).Hydro.model.vigilguard = {
         refreshActiveTeamSessionRoles: async (before: any, after: any) => {
@@ -928,7 +907,6 @@ describe('P1.12 invitation and assignment lifecycle', () => {
         );
         const first = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 12);
         const second = await teamModel.createInvite('system', currentContest.docId, { user: actor(11) }, 12);
-        armTeamCasBarrier(2);
         const results = await Promise.allSettled([
             teamModel.acceptInvite('system', currentContest.docId, first.inviteId, { user: actor(12) }),
             teamModel.acceptInvite('system', currentContest.docId, second.inviteId, { user: actor(12) }),
@@ -940,7 +918,7 @@ describe('P1.12 invitation and assignment lifecycle', () => {
         expect(invites.filter((invite) => invite.inviteeUid === 12 && invite.status === 'superseded')).to.have.length(1);
     });
 
-    it('refreshes the losing invitation revision when two users accept the same non-full team concurrently', async () => {
+    it('serializes two concurrent accepts into one complete three-person team', async () => {
         const team = await teamModel.createTeam(
             'system',
             currentContest.docId,
@@ -949,20 +927,15 @@ describe('P1.12 invitation and assignment lifecycle', () => {
         );
         const first = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 11);
         const second = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 12);
-        armTeamCasBarrier(2);
         const results = await Promise.allSettled([
             teamModel.acceptInvite('system', currentContest.docId, first.inviteId, { user: actor(11) }),
             teamModel.acceptInvite('system', currentContest.docId, second.inviteId, { user: actor(12) }),
         ]);
-        expect(results.filter((result) => result.status === 'fulfilled')).to.have.length(1);
+        expect(results.filter((result) => result.status === 'fulfilled')).to.have.length(2);
         const current = await teamModel.getTeam('system', currentContest.docId, team.teamId);
-        const pending = invites.find((invite) => invite.status === 'pending');
-        expect(current?.memberUids).to.have.length(2);
-        expect(pending?.teamRevision).to.equal(current?.revision);
-        const final = await teamModel.acceptInvite('system', currentContest.docId, pending.inviteId, {
-            user: actor(pending.inviteeUid),
-        });
-        expect(final.memberUids).to.deep.equal([10, 11, 12]);
+        expect(current?.memberUids).to.deep.equal([10, 11, 12]);
+        expect(invites.filter((invite) => invite.status === 'pending')).to.have.length(0);
+        expect(invites.filter((invite) => invite.status === 'accepted')).to.have.length(2);
     });
 
     it('returns the committed membership and emits the role event when invitation finalization fails', async () => {

@@ -37,6 +37,7 @@ import {
     teamModeClearConfirmation,
 } from './contest-participation';
 import type { ContestTeamDoc } from './contest-team';
+import { withContestTeamBoundary } from './contest-team-gate';
 import * as contestTeamStatus from './contest-team-status';
 import * as document from './document';
 import MessageModel from './message';
@@ -248,7 +249,7 @@ export async function resolveTeamSubmissionCapability(
         if (tdoc.rule !== 'acm') throw new ValidationError('participationMode');
         const [tsdoc, currentTeam] = await Promise.all([
             getStatus(domainId, tid, uid),
-            collTeam.findOne({ domainId, contestId: tid, memberUids: uid, active: true }),
+            withContestTeamBoundary(domainId, tid, () => collTeam.findOne({ domainId, contestId: tid, memberUids: uid, active: true })),
         ]);
         team = currentTeam;
         if (!tsdoc?.attend) throw new ContestTeamConflictError('not_attended');
@@ -1202,7 +1203,7 @@ export async function edit(domainId: string, tid: ObjectId, $set: Partial<Tdoc>,
             throw error;
         }
         const recordCount = await RecordModel.coll.countDocuments({ domainId, contest: tid });
-        activeTeamCount = await collTeam.countDocuments({ domainId, contestId: tid, active: true });
+        activeTeamCount = await withContestTeamBoundary(domainId, tid, () => collTeam.countDocuments({ domainId, contestId: tid, active: true }));
         let transition;
         try {
             transition = planParticipationModeTransition({
@@ -1228,89 +1229,93 @@ export async function edit(domainId: string, tid: ObjectId, $set: Partial<Tdoc>,
     RULES[next.rule].check(next);
     let res: Tdoc;
     if (modeChanged) {
-        const revisionFilter: any =
-            expectedRevision === 0
-                ? { $or: [{ participationRevision: 0 }, { participationRevision: { $exists: false } }] }
-                : { participationRevision: expectedRevision };
-        const storedModeFilter =
-            current.participationMode === undefined ? { participationMode: { $exists: false } } : { participationMode: current.participationMode };
         await bus.parallel('document/set', domainId, document.TYPE_CONTEST, tid, $set, undefined);
-        // Production Mongo is a standalone node, so multi-document transactions are unavailable.
-        // CAS the contest first: an individual mode immediately closes every team capability;
-        // then synchronously deactivate and verify all teams before reporting success.
-        try {
-            const finalNow = options.now || new Date();
-            const finalBeginAt = $set.beginAt || current.beginAt;
-            if (finalNow >= current.beginAt || finalNow >= finalBeginAt) throw new ContestTeamConflictError('contest_started');
-            const finalRecordCount = await RecordModel.coll.countDocuments({ domainId, contest: tid });
-            if (finalRecordCount > 0) throw new ContestTeamConflictError('contest_has_records');
-            res = await document.coll.findOneAndUpdate(
-                {
-                    domainId,
-                    docType: document.TYPE_CONTEST,
-                    docId: tid,
-                    rule: current.rule,
-                    beginAt: current.beginAt,
-                    ...storedModeFilter,
-                    ...revisionFilter,
-                },
-                { $set },
-                { returnDocument: 'after' },
-            );
-            if (!res) throw new ContestTeamConflictError('participation_revision_mismatch');
-            if (clearActiveTeams) {
-                const changedAt = options.now || new Date();
-                let cleanupCount = 0;
-                const cleanup = await collTeam.updateMany(
-                    { domainId, contestId: tid, active: true },
+        await withContestTeamBoundary(domainId, tid, async () => {
+            const revisionFilter: any =
+                expectedRevision === 0
+                    ? { $or: [{ participationRevision: 0 }, { participationRevision: { $exists: false } }] }
+                    : { participationRevision: expectedRevision };
+            const storedModeFilter =
+                current.participationMode === undefined
+                    ? { participationMode: { $exists: false } }
+                    : { participationMode: current.participationMode };
+            // Production Mongo is a standalone node, so multi-document transactions are unavailable.
+            // The shared contest-team boundary keeps readers and team writers out while the
+            // contest CAS and any multi-team cleanup establish one application-visible state.
+            try {
+                const finalNow = options.now || new Date();
+                const finalBeginAt = $set.beginAt || current.beginAt;
+                if (finalNow >= current.beginAt || finalNow >= finalBeginAt) throw new ContestTeamConflictError('contest_started');
+                const finalRecordCount = await RecordModel.coll.countDocuments({ domainId, contest: tid });
+                if (finalRecordCount > 0) throw new ContestTeamConflictError('contest_has_records');
+                res = await document.coll.findOneAndUpdate(
                     {
-                        $set: {
-                            active: false,
-                            updatedAt: changedAt,
-                            deactivatedAt: changedAt,
-                            deactivatedBy: options.actor._id,
-                            deactivationReason: 'participation_mode_changed',
-                        },
-                        $inc: { revision: 1 },
+                        domainId,
+                        docType: document.TYPE_CONTEST,
+                        docId: tid,
+                        rule: current.rule,
+                        beginAt: current.beginAt,
+                        ...storedModeFilter,
+                        ...revisionFilter,
                     },
+                    { $set },
+                    { returnDocument: 'after' },
                 );
-                cleanupCount = cleanup.modifiedCount;
-                const remaining = await collTeam.countDocuments({ domainId, contestId: tid, active: true });
-                if (remaining > 0) throw new ContestTeamConflictError('team_cleanup_incomplete');
-                await collTeamInvite.updateMany(
-                    { domainId, contestId: tid, status: { $in: ['pending', 'accepting'] } },
-                    {
-                        $set: {
-                            status: 'cancelled',
-                            resolvedAt: changedAt,
-                            resolvedBy: options.actor._id,
-                            updatedAt: changedAt,
+                if (!res) throw new ContestTeamConflictError('participation_revision_mismatch');
+                if (clearActiveTeams) {
+                    const changedAt = options.now || new Date();
+                    let cleanupCount = 0;
+                    const cleanup = await collTeam.updateMany(
+                        { domainId, contestId: tid, active: true },
+                        {
+                            $set: {
+                                active: false,
+                                updatedAt: changedAt,
+                                deactivatedAt: changedAt,
+                                deactivatedBy: options.actor._id,
+                                deactivationReason: 'participation_mode_changed',
+                            },
+                            $inc: { revision: 1 },
                         },
-                    },
-                );
-                const remainingInvites = await collTeamInvite.countDocuments({
-                    domainId,
-                    contestId: tid,
-                    status: { $in: ['pending', 'accepting'] },
-                });
-                if (remainingInvites > 0) throw new ContestTeamConflictError('invite_cleanup_incomplete');
-                await oplog.add({
-                    type: 'contest.team.mode-clear',
-                    operation: 'mode-clear',
-                    domainId,
-                    operator: options.actor._id,
-                    contestId: tid,
-                    fromRevision: expectedRevision,
-                    toRevision: expectedRevision + 1,
-                    deactivatedTeams: cleanupCount,
-                    result: 'success',
-                    time: changedAt,
-                });
+                    );
+                    cleanupCount = cleanup.modifiedCount;
+                    const remaining = await collTeam.countDocuments({ domainId, contestId: tid, active: true });
+                    if (remaining > 0) throw new ContestTeamConflictError('team_cleanup_incomplete');
+                    await collTeamInvite.updateMany(
+                        { domainId, contestId: tid, status: { $in: ['pending', 'accepting'] } },
+                        {
+                            $set: {
+                                status: 'cancelled',
+                                resolvedAt: changedAt,
+                                resolvedBy: options.actor._id,
+                                updatedAt: changedAt,
+                            },
+                        },
+                    );
+                    const remainingInvites = await collTeamInvite.countDocuments({
+                        domainId,
+                        contestId: tid,
+                        status: { $in: ['pending', 'accepting'] },
+                    });
+                    if (remainingInvites > 0) throw new ContestTeamConflictError('invite_cleanup_incomplete');
+                    await oplog.add({
+                        type: 'contest.team.mode-clear',
+                        operation: 'mode-clear',
+                        domainId,
+                        operator: options.actor._id,
+                        contestId: tid,
+                        fromRevision: expectedRevision,
+                        toRevision: expectedRevision + 1,
+                        deactivatedTeams: cleanupCount,
+                        result: 'success',
+                        time: changedAt,
+                    });
+                }
+            } catch (error) {
+                await auditRejectedParticipationModeChange(domainId, tid, options.actor._id, previousMode, nextMode, expectedRevision, error);
+                throw error;
             }
-        } catch (error) {
-            await auditRejectedParticipationModeChange(domainId, tid, options.actor._id, previousMode, nextMode, expectedRevision, error);
-            throw error;
-        }
+        });
         await auditParticipationModeChange(domainId, tid, options.actor._id, previousMode, nextMode, expectedRevision, 'success');
     } else {
         res = await document.set(domainId, document.TYPE_CONTEST, tid, $set);
@@ -1349,7 +1354,11 @@ export async function addBalloon(domainId: string, tid: ObjectId, uid: number, r
     if (contestTeamId !== undefined && !(contestTeamId instanceof ObjectId)) throw new ValidationError('contestTeamId');
     const identityKey = contestTeamId ? `t:${contestTeamId.toHexString()}` : `u:${uid}`;
     const balloon = await collBalloon.find({ domainId, tid, pid }).project({ uid: 1, contestTeamId: 1 }).toArray();
-    if (contestTeamId ? balloon.some((item) => item.contestTeamId?.equals(contestTeamId)) : balloon.some((item) => !item.contestTeamId && item.uid === uid)) {
+    if (
+        contestTeamId
+            ? balloon.some((item) => item.contestTeamId?.equals(contestTeamId))
+            : balloon.some((item) => !item.contestTeamId && item.uid === uid)
+    ) {
         return null;
     }
     let isFirst = !balloon.length;
@@ -1389,10 +1398,7 @@ export async function addBalloon(domainId: string, tid: ObjectId, uid: number, r
             domainId,
             tid,
             pid,
-            $or: [
-                { identityKey },
-                ...(contestTeamId ? [{ contestTeamId }] : [{ uid, contestTeamId: { $exists: false } }]),
-            ],
+            $or: [{ identityKey }, ...(contestTeamId ? [{ contestTeamId }] : [{ uid, contestTeamId: { $exists: false } }])],
         });
         if (existing) return null;
         if (!newBdoc.first) throw error;
@@ -1419,14 +1425,7 @@ export async function getStatus(domainId: string, tid: ObjectId, uid: number) {
     return await document.getStatus(domainId, document.TYPE_CONTEST, tid, uid);
 }
 
-export async function updateStatus(
-    domainId: string,
-    tid: ObjectId,
-    uid: number,
-    rid: ObjectId,
-    pid: number,
-    result: Partial<RecordDoc> = {},
-) {
+export async function updateStatus(domainId: string, tid: ObjectId, uid: number, rid: ObjectId, pid: number, result: Partial<RecordDoc> = {}) {
     const { status = STATUS.STATUS_WAITING, score = 0, subtasks, lang } = result;
     const tdoc = await get(domainId, tid);
     if (getParticipationMode(tdoc) === 'team') {
@@ -1564,7 +1563,7 @@ export type TeamScoreboardEntry = contestTeamStatus.TeamScoreboardEntry;
 export async function getTeamScoreboardEntries(tdoc: Tdoc): Promise<TeamScoreboardEntry[]> {
     if (getParticipationMode(tdoc) !== 'team' || tdoc.rule !== 'acm') throw new ValidationError('participationMode');
     const [teams, statuses] = await Promise.all([
-        collTeam.find({ domainId: tdoc.domainId, contestId: tdoc.docId }).toArray(),
+        withContestTeamBoundary(tdoc.domainId, tdoc.docId, () => collTeam.find({ domainId: tdoc.domainId, contestId: tdoc.docId }).toArray()),
         contestTeamStatus.getMulti(tdoc.domainId, tdoc.docId).toArray(),
     ]);
     return contestTeamStatus.mergeScoreboardEntries(tdoc, teams, statuses);
@@ -1579,19 +1578,11 @@ function teamScoreboardName(team: ContestTeamDoc, udict: BaseUserDict, showDispl
     return `${team.name}\nCaptain: ${display(team.captainUid)}\nMembers: ${team.memberUids.map(display).join(' / ')}`;
 }
 
-async function getTeamScoreboard(
-    this: Handler,
-    tdoc: Tdoc,
-    config: ScoreboardConfig,
-    pdict: ProblemDict,
-): Promise<[ScoreboardRow[], BaseUserDict]> {
+async function getTeamScoreboard(this: Handler, tdoc: Tdoc, config: ScoreboardConfig, pdict: ProblemDict): Promise<[ScoreboardRow[], BaseUserDict]> {
     const entries = await getTeamScoreboardEntries(tdoc);
     const memberUids = Array.from(new Set(entries.flatMap(({ team }) => team.memberUids)));
     const udict = await UserModel.getListForRender(tdoc.domainId, memberUids, config.showDisplayName ? ['displayName'] : []);
-    const ranked = await db.ranked(
-        entries,
-        (left, right) => left.status.accept === right.status.accept && left.status.time === right.status.time,
-    );
+    const ranked = await db.ranked(entries, (left, right) => left.status.accept === right.status.accept && left.status.time === right.status.time);
     const first = contestTeamStatus.firstAcceptedRidByProblem(
         entries.map((entry) => entry.status),
         STATUS.STATUS_ACCEPTED,
@@ -1727,7 +1718,9 @@ export async function apply(ctx: Context) {
         const uids = Array.from<number>(new Set(tsdocs.map((tsdoc) => tsdoc.uid)));
         const [actor, team, tdoc, pdoc] = await Promise.all([
             UserModel.getById(domainId, bdoc.uid),
-            bdoc.contestTeamId ? collTeam.findOne({ domainId, contestId: tid, teamId: bdoc.contestTeamId }) : Promise.resolve(null),
+            bdoc.contestTeamId
+                ? withContestTeamBoundary(domainId, tid, () => collTeam.findOne({ domainId, contestId: tid, teamId: bdoc.contestTeamId }))
+                : Promise.resolve(null),
             get(domainId, tid),
             ProblemModel.get(domainId, bdoc.pid),
         ]);

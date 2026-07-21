@@ -108,7 +108,7 @@ export class ContestTeamsHandler extends Handler {
 
         const candidates = (await user.getPrefixList(this.domainId(), q, 20)).filter((candidate) => candidate?._id > 1);
         const uids = Array.from(new Set(candidates.map((candidate) => candidate._id)));
-        const assigned = uids.length ? await contestTeam.getMultiTeam(this.domainId(), tid, { memberUids: { $in: uids } }).toArray() : [];
+        const assigned = uids.length ? await contestTeam.listTeams(this.domainId(), tid, { memberUids: { $in: uids } }) : [];
         const assignedUids = new Set(assigned.flatMap((team) => team.memberUids));
         const result: PublicTeamUser[] = [];
         for (const candidate of candidates) {
@@ -169,7 +169,7 @@ export class ContestTeamsHandler extends Handler {
         let teamCount = 0;
         if (this.canManage) {
             const teamQuery = teamSearch ? { nameKey: { $regex: teamNameSearch(teamSearch) } } : {};
-            [teams, teamPageCount, teamCount] = await this.paginate(contestTeam.getMultiTeam(this.domainId(), tid, teamQuery), page, 20);
+            [teams, teamPageCount, teamCount] = await contestTeam.paginateTeams(this.domainId(), tid, teamQuery, page, 20);
         }
 
         const allUids = new Set<number>();

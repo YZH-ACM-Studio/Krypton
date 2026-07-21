@@ -30,7 +30,7 @@ describe('P1.12 team assembly workspace contracts', () => {
   it('keeps ordinary bootstrap scoped to the current team and targeted invitations', () => {
     expect(handler).to.include('getTeamByMember(this.domainId(), tid, this.user._id)');
     expect(handler).to.include('getPendingInvitesForUser(this.domainId(), tid, this.user._id)');
-    expect(handler).to.match(/if \(this\.canManage\)[\s\S]*?this\.paginate\(contestTeam\.getMultiTeam/);
+    expect(handler).to.match(/if \(this\.canManage\)[\s\S]*?contestTeam\.paginateTeams/);
     expect(handler).to.include('_id: uid');
     expect(handler).to.include('uname: rawUsers[uid]?.uname');
     expect(handler).to.include('displayName: rawUsers[uid]?.displayName');
@@ -49,7 +49,7 @@ describe('P1.12 team assembly workspace contracts', () => {
   });
 
   it('uses server pagination and revision-bound emergency confirmation without a presence subsystem', () => {
-    expect(handler).to.include('this.paginate(contestTeam.getMultiTeam(this.domainId(), tid, teamQuery), page, 20)');
+    expect(handler).to.include('contestTeam.paginateTeams(this.domainId(), tid, teamQuery, page, 20)');
     expect(handler).to.include('nameKey: { $regex: teamNameSearch(teamSearch) }');
     expect(page).to.include('name="teamSearch"');
     expect(handler).to.include('emergencyTeamConfirmation(team.teamId, team.revision)');

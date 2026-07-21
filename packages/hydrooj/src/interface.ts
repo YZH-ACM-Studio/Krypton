@@ -383,6 +383,11 @@ export interface Tdoc extends Document {
     participationMode?: 'individual' | 'team';
     /** CAS revision used only when changing participationMode. */
     participationRevision?: number;
+    /** Closed pre-contest batch used to materialize this contest's independent roster snapshot. */
+    teamBatchId?: ObjectId;
+    teamBatchSnapshotHash?: string;
+    teamBatchSnapshotAt?: Date;
+    teamBatchSnapshotCount?: number;
 
     // For contest
     lockAt?: Date;
@@ -863,6 +868,9 @@ declare module './service/db' {
         schedule: Schedule;
         'contest.balloon': ContestBalloonDoc;
         'contest.teams': import('./model/contest-team').ContestTeamDoc;
+        'contest.teamBatches': import('./model/contest-team-batch').TeamBatchDoc;
+        'contest.teamBatchTeams': import('./model/contest-team-batch').TeamBatchTeamDoc;
+        'contest.teamBatchInvites': import('./model/contest-team-batch').TeamBatchInviteDoc;
         'contest.teamCodeSnapshots': import('./model/contest-team-code').TeamCodeSnapshotDoc;
         'contest.teamCodeSnapshotCounters': import('./model/contest-team-code').TeamCodeSnapshotCounterDoc;
         'contest.teamStatuses': import('./model/contest-team-status').TeamContestStatusDoc;
@@ -883,6 +891,7 @@ export interface Model {
     builtin: typeof import('./model/builtin');
     contest: typeof import('./model/contest');
     contestTeam: Omit<typeof import('./model/contest-team'), 'apply'>;
+    contestTeamBatch: Omit<typeof import('./model/contest-team-batch'), 'apply'>;
     contestTeamCode: Omit<typeof import('./model/contest-team-code'), 'apply'>;
     contestTeamStatus: Omit<typeof import('./model/contest-team-status'), 'apply'>;
     discussion: typeof import('./model/discussion');

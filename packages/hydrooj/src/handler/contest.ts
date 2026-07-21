@@ -30,6 +30,7 @@ import { buildLatestContestProblemStatusByPid } from '../lib/contest-problem-sta
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
+import * as contestTeamBatch from '../model/contest-team-batch';
 import * as contestTeamStatus from '../model/contest-team-status';
 import * as discussion from '../model/discussion';
 import * as document from '../model/document';
@@ -321,8 +322,7 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
             : {};
         const canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
         const canViewRecord =
-            contest.canShowSelfRecord.call(this, this.tdoc) &&
-            (contest.getParticipationMode(this.tdoc) !== 'team' || !!teamContext.team);
+            contest.canShowSelfRecord.call(this, this.tdoc) && (contest.getParticipationMode(this.tdoc) !== 'team' || !!teamContext.team);
         this.response.body = {
             tdoc: this.tdoc,
             tsdoc: this.tsdocAsPublic(),
@@ -599,10 +599,7 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
         if (teamMode && this.response.body.rdocs.length) {
             Object.assign(
                 this.response.body.udict,
-                await user.getList(
-                    authoritativeDomainId,
-                    Array.from(new Set(this.response.body.rdocs.map((rdoc: any) => rdoc.uid))),
-                ),
+                await user.getList(authoritativeDomainId, Array.from(new Set(this.response.body.rdocs.map((rdoc: any) => rdoc.uid)))),
             );
         }
         if (!this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_EDIT_CONTEST)) {
@@ -673,6 +670,7 @@ export class ContestEditHandler extends Handler {
         const beginAt = moment(this.tdoc?.beginAt || new Date(ts)).tz(this.user.timeZone);
         const activeTeamCount = tid ? await contestTeam.countActiveTeams(authoritativeDomainId, tid) : 0;
         const participationRevision = this.tdoc?.participationRevision ?? 0;
+        const closedTeamBatches = await contestTeamBatch.listClosedBatches(authoritativeDomainId);
 
         // Hydrate the school + user-group catalog when krypton-userbind is
         // loaded, so the participant-scope picker in the editor doesn't
@@ -702,8 +700,14 @@ export class ContestEditHandler extends Handler {
             canAutoHideProblems: this.user.hasPerm(PERM.PERM_EDIT_PROBLEM),
             activeTeamCount,
             participationRevision,
-            teamModeClearConfirmation:
-                tid && activeTeamCount > 0 ? contest.teamModeClearConfirmation(tid, participationRevision) : '',
+            closedTeamBatches: closedTeamBatches.map((batch) => ({
+                batchId: batch.batchId,
+                name: batch.name,
+                teamCount: batch.teamCount,
+                memberCount: batch.memberCount,
+                closedAt: batch.closedAt,
+            })),
+            teamModeClearConfirmation: tid && activeTeamCount > 0 ? contest.teamModeClearConfirmation(tid, participationRevision) : '',
         };
     }
 
@@ -754,6 +758,7 @@ export class ContestEditHandler extends Handler {
     @param('participationMode', Types.Range(['individual', 'team']), true)
     @param('participationRevision', Types.UnsignedInt, true)
     @param('teamModeClearConfirmation', Types.String, true)
+    @param('teamBatchId', Types.ObjectId, true)
     async postUpdate(
         _domainId: string,
         tid: ObjectId,
@@ -800,6 +805,7 @@ export class ContestEditHandler extends Handler {
         participationMode: 'individual' | 'team' = null,
         participationRevision: number = null,
         teamModeClearConfirmation = '',
+        teamBatchId: ObjectId = null,
     ) {
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
@@ -816,6 +822,11 @@ export class ContestEditHandler extends Handler {
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, this.tdoc?.pids);
         if (autoHide) await assertCanPublishAutoHiddenProblems(authoritativeDomainId, pids, this.user);
         const effectiveParticipationMode = participationMode || (this.tdoc ? contest.getParticipationMode(this.tdoc) : 'individual');
+        const existingTeamBatchId = this.tdoc?.teamBatchId ? new ObjectId(this.tdoc.teamBatchId) : null;
+        if (teamBatchId && effectiveParticipationMode !== 'team') throw new ValidationError('teamBatchId');
+        if (existingTeamBatchId && teamBatchId && !existingTeamBatchId.equals(teamBatchId)) {
+            throw new ValidationError('teamBatchId', null, 'A contest team snapshot cannot be rebound to another batch.');
+        }
 
         // Normalize the shared client-entry contract before the first write so
         // a participation-mode change can never leave a half-configured team contest.
@@ -960,6 +971,29 @@ export class ContestEditHandler extends Handler {
             participantSchoolIds: sids,
             participantGroupIds: gids,
         });
+        if (effectiveParticipationMode === 'individual' && existingTeamBatchId) {
+            await document.set(authoritativeDomainId, document.TYPE_CONTEST, tid, undefined, {
+                teamBatchId: '',
+                teamBatchSnapshotHash: '',
+                teamBatchSnapshotAt: '',
+                teamBatchSnapshotCount: '',
+            });
+        } else if (teamBatchId && !existingTeamBatchId) {
+            try {
+                await contestTeamBatch.snapshotToContest(authoritativeDomainId, tid, teamBatchId, this.user._id);
+            } catch (error) {
+                logger.error(
+                    'Contest team-batch snapshot failed domain=%s contest=%s batch=%s actor=%s stage=%s error=%o',
+                    authoritativeDomainId,
+                    tid,
+                    teamBatchId,
+                    this.user._id,
+                    (error as any)?.snapshotStage || 'unknown',
+                    error,
+                );
+                throw error;
+            }
+        }
         this.response.body = { tid };
         this.response.redirect = this.url('contest_detail', { tid });
     }
@@ -1390,16 +1424,16 @@ export class ContestBalloonHandler extends ContestManagementBaseHandler {
         const teamIds = Array.from(
             new Map(bdocs.filter((item) => item.contestTeamId).map((item) => [item.contestTeamId.toHexString(), item.contestTeamId])).values(),
         );
-        const teamDocs = teamIds.length
-            ? await contestTeam.coll.find({ domainId: authoritativeDomainId, contestId: tid, teamId: { $in: teamIds } }).toArray()
-            : [];
+        const teamDocs = teamIds.length ? await contestTeam.listTeams(authoritativeDomainId, tid, { teamId: { $in: teamIds } }) : [];
         this.response.body = {
             tdoc: this.tdoc,
             tsdoc: this.tsdoc,
             owner_udoc: await user.getById(authoritativeDomainId, this.tdoc.owner),
             pdict: await problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, problem.PROJECTION_CONTEST_LIST),
             bdocs,
-            teamDict: Object.fromEntries(teamDocs.map((team) => [team.teamId.toHexString(), pick(team, ['teamId', 'name', 'captainUid', 'memberUids'])])),
+            teamDict: Object.fromEntries(
+                teamDocs.map((team) => [team.teamId.toHexString(), pick(team, ['teamId', 'name', 'captainUid', 'memberUids'])]),
+            ),
             udict: await user.getListForRender(authoritativeDomainId, uids, this.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO)),
         };
         this.response.pjax = 'partials/contest_balloon.html';

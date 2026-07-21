@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   Swords,
   Trophy,
+  Users,
   UserRoundCog,
   Wrench,
   X,
@@ -153,6 +154,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
             'contest_print.html',
           ],
         },
+        { label: '队伍', href: '/teams', icon: Users, templates: ['team_batches.html', 'team_batch_detail.html'] },
         {
           label: '作业',
           href: bs.urls.homework,

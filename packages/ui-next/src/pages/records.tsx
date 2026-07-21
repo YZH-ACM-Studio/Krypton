@@ -204,6 +204,7 @@ export function RecordsPage() {
       tid: filterParams.tid || undefined,
       pid: filterParams.pid || undefined,
       uidOrName: filterParams.uidOrName || undefined,
+      lang: filterParams.lang || undefined,
       status: filterStatus || undefined,
       all: filterParams.all === '1' || undefined,
       allDomain: filterParams.allDomain === '1' || undefined,

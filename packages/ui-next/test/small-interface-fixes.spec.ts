@@ -64,4 +64,9 @@ describe('small interface fixes', () => {
     expect(record).to.include("if (args.type === 'pretest')");
     expect(record).to.include('data.contest = RecordModel.RECORD_PRETEST;');
   });
+
+  it('keeps the record list language filter on its live WebSocket subscription', () => {
+    const page = source('packages/ui-next/src/pages/records.tsx');
+    expect(page).to.include('lang: filterParams.lang || undefined');
+  });
 });

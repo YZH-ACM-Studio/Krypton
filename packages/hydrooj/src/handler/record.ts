@@ -14,6 +14,7 @@ import {
     UserNotFoundError,
 } from '../error';
 import { RecordDoc, Tdoc } from '../interface';
+import { matchesRecordConnectionScope, RECORD_PRETEST_CONTEST_ID } from '../lib/record-connection-scope';
 import { PERM, PRIV, STATUS, STATUS_TEXTS } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
@@ -125,11 +126,11 @@ export class RecordListHandler extends ContestDetailBaseHandler {
         if (all) {
             this.checkPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
             this.checkPerm(PERM.PERM_VIEW_HOMEWORK_HIDDEN_SCOREBOARD);
-            delete q.contest;
+            q.contest = { $nin: [record.RECORD_PRETEST, record.RECORD_GENERATE] };
         }
         if (allDomain) {
             this.checkPriv(PRIV.PRIV_MANAGE_ALL_DOMAIN);
-            delete q.contest;
+            q.contest = { $nin: [record.RECORD_PRETEST, record.RECORD_GENERATE] };
             q._id = { $gt: Time.getObjectID(new Date(Date.now() - 10 * Time.week)) };
         }
         let cursor = record.getMulti(allDomain ? '' : domainId, q).sort('_id', -1);
@@ -438,6 +439,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
     uid: number;
     teamId?: ObjectId;
     pid: number;
+    lang: string;
     status: number;
     pretest = false;
     tdoc: Tdoc;
@@ -449,6 +451,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
     @param('tid', Types.ObjectId, true)
     @param('pid', Types.ProblemId, true)
     @param('uidOrName', Types.UidOrName, true)
+    @param('lang', Types.String, true)
     @param('status', Types.Int, true)
     @param('pretest', Types.Boolean)
     @param('all', Types.Boolean)
@@ -459,6 +462,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         tid?: ObjectId,
         pid?: string | number,
         uidOrName?: string,
+        lang?: string,
         status?: number,
         pretest = false,
         all = false,
@@ -501,7 +505,8 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
             if (pdoc) this.pid = pdoc.docId;
             else throw new ProblemNotFoundError(domainId, pid);
         }
-        if (status) this.status = status;
+        if (lang) this.lang = lang;
+        if (typeof status === 'number') this.status = status;
         if (all) {
             this.checkPerm(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
             this.checkPerm(PERM.PERM_VIEW_HOMEWORK_HIDDEN_SCOREBOARD);
@@ -527,25 +532,41 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
 
     @subscribe('record/change')
     async onRecordChange(rdoc: RecordDoc) {
-        if (!this.allDomain) {
-            if (rdoc.domainId !== this.args.domainId) return;
-            if (!this.pretest && typeof rdoc.input === 'string') return;
-            if (!this.all) {
-                if (!rdoc.contest && this.tid) return;
-                if (rdoc.contest && ![this.tid, '000000000000000000000000'].includes(rdoc.contest.toString())) return;
-                if (this.tid && rdoc.contest?.toString() !== '0'.repeat(24)) {
-                    if (this.teamId) {
-                        if (!(rdoc.contestTeamId instanceof ObjectId) || !rdoc.contestTeamId.equals(this.teamId)) return;
-                        const team = await contestTeam.getTeam(this.args.domainId, this.tdoc.docId, this.teamId);
-                        if (!team?.memberUids.includes(this.user._id)) {
-                            this.close(4003, 'Team record access revoked');
-                            return;
-                        }
-                        if (!contest.canShowSelfRecord.call(this, this.tdoc, true)) return;
-                    } else {
-                        if (rdoc.uid !== this.user._id && !contest.canShowRecord.call(this, this.tdoc, true)) return;
-                        if (rdoc.uid === this.user._id && !contest.canShowSelfRecord.call(this, this.tdoc, true)) return;
+        const contestId = rdoc.contest?.toString();
+        if (
+            !matchesRecordConnectionScope(
+                {
+                    domainId: rdoc.domainId,
+                    contestId,
+                    lang: rdoc.lang,
+                    status: rdoc.status,
+                    input: rdoc.input,
+                },
+                {
+                    domainId: this.args.domainId,
+                    tid: this.tid,
+                    lang: this.lang,
+                    status: this.status,
+                    pretest: this.pretest,
+                    all: this.all,
+                    allDomain: this.allDomain,
+                },
+            )
+        )
+            return;
+        if (!this.allDomain && !this.all) {
+            if (this.tid && contestId !== RECORD_PRETEST_CONTEST_ID) {
+                if (this.teamId) {
+                    if (!(rdoc.contestTeamId instanceof ObjectId) || !rdoc.contestTeamId.equals(this.teamId)) return;
+                    const team = await contestTeam.getTeam(this.args.domainId, this.tdoc.docId, this.teamId);
+                    if (!team?.memberUids.includes(this.user._id)) {
+                        this.close(4003, 'Team record access revoked');
+                        return;
                     }
+                    if (!contest.canShowSelfRecord.call(this, this.tdoc, true)) return;
+                } else {
+                    if (rdoc.uid !== this.user._id && !contest.canShowRecord.call(this, this.tdoc, true)) return;
+                    if (rdoc.uid === this.user._id && !contest.canShowSelfRecord.call(this, this.tdoc, true)) return;
                 }
             }
         }

@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useState, type FormEvent, type ReactNode } from 'react';
 import { motion } from 'motion/react';
 import { AlertTriangle, ArrowLeft, Crown, Lock, LogOut, Pencil, Plus, ShieldCheck, UserPlus, Users, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -11,6 +11,7 @@ import { Pagination } from '@/components/ui/pagination';
 import { SimpleSelect } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
+import { evaluateSelfTeamName } from '@/lib/contest-team-form';
 import { formatDateTime } from '@/lib/format';
 
 type R = Record<string, any>;
@@ -138,6 +139,7 @@ export function ContestTeamsPage() {
 
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [createSelfOpen, setCreateSelfOpen] = useState(false);
+  const [createSelfNameError, setCreateSelfNameError] = useState('');
   const [inviteTargets, setInviteTargets] = useState<TeamUser[]>([]);
   const [adminCreateOpen, setAdminCreateOpen] = useState(false);
   const [adminCreateMembers, setAdminCreateMembers] = useState<TeamUser[]>([]);
@@ -165,6 +167,24 @@ export function ContestTeamsPage() {
     setEditingTeam(team);
     setEditingMembers(team.memberUids.map((uid) => teamUser(users, uid)));
     setEditingCaptain(String(team.captainUid));
+  };
+
+  const handleCreateSelfOpenChange = (open: boolean) => {
+    setCreateSelfOpen(open);
+    if (!open) setCreateSelfNameError('');
+  };
+
+  const handleCreateSelfSubmit = (event: FormEvent<HTMLFormElement>) => {
+    const nameInput = event.currentTarget.elements.namedItem('name');
+    if (!(nameInput instanceof HTMLInputElement)) throw new Error('Self-team name input is missing.');
+    const nameValidation = evaluateSelfTeamName(nameInput.value);
+    if (!nameValidation.preventSubmit) {
+      setCreateSelfNameError('');
+      return;
+    }
+    event.preventDefault();
+    setCreateSelfNameError(nameValidation.error);
+    nameInput.focus();
   };
 
   const ownIsCaptain = !!ownTeam && ownTeam.captainUid === currentUid;
@@ -603,26 +623,105 @@ export function ContestTeamsPage() {
         </section>
       ) : null}
 
-      <Dialog open={createSelfOpen} onOpenChange={setCreateSelfOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>创建自主队伍</DialogTitle>
-          </DialogHeader>
-          <form method="post" className="space-y-4 p-5">
+      <Dialog open={createSelfOpen} onOpenChange={handleCreateSelfOpenChange}>
+        <DialogContent
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="create-self-dialog-title"
+          aria-describedby="create-self-dialog-description"
+          className="sm:w-[30rem] rounded-[28px] border-0 bg-background/95 shadow-[0_32px_90px_-34px_rgba(0,0,0,0.72),0_14px_36px_-22px_rgba(0,0,0,0.52)] ring-1 ring-foreground/10 backdrop-blur-xl"
+        >
+          <div className="flex items-start gap-4 px-6 pb-5 pt-6 sm:px-7 sm:pt-7">
+            <div className="grid size-12 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary shadow-sm ring-1 ring-primary/15">
+              <Crown className="size-5" />
+            </div>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <DialogTitle id="create-self-dialog-title" className="text-balance text-xl font-semibold leading-tight tracking-tight">
+                创建自主队伍
+              </DialogTitle>
+              <p id="create-self-dialog-description" className="mt-1.5 text-pretty text-sm leading-6 text-muted-foreground">
+                创建后你将成为队长，可以继续邀请至多两名队员。
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-label="关闭创建队伍弹窗"
+              title="关闭"
+              onClick={() => handleCreateSelfOpenChange(false)}
+              className="grid size-10 shrink-0 place-items-center rounded-full bg-muted/65 text-muted-foreground ring-1 ring-foreground/10 transition-[scale,background-color,color] duration-150 ease-out hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] motion-reduce:transition-none"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+          <form
+            method="post"
+            noValidate
+            onSubmit={handleCreateSelfSubmit}
+            className="min-h-0 space-y-5 overflow-y-auto overscroll-contain px-6 pb-6 pt-1 sm:px-7 sm:pb-7"
+          >
             <input type="hidden" name="operation" value="create_self" />
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">队伍名称</label>
-              <Input name="name" required maxLength={64} placeholder="1–64 个字符" />
+            <div className="space-y-2">
+              <div className="flex items-baseline justify-between gap-3">
+                <label htmlFor="create-self-name" className="text-sm font-semibold">
+                  队伍名称
+                </label>
+                <span className="text-xs text-muted-foreground">1–64 个字符</span>
+              </div>
+              <Input
+                id="create-self-name"
+                name="name"
+                required
+                maxLength={64}
+                autoFocus
+                aria-invalid={!!createSelfNameError}
+                aria-describedby={createSelfNameError ? 'create-self-name-error' : undefined}
+                placeholder="给队伍起一个名字"
+                onChange={(event) => {
+                  if (createSelfNameError && event.currentTarget.value.trim()) setCreateSelfNameError('');
+                }}
+                className={`h-12 rounded-[14px] border-border/70 bg-muted/30 px-4 py-3 text-base shadow-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-muted-foreground/70 focus-visible:border-primary/50 focus-visible:bg-background focus-visible:ring-4 focus-visible:ring-primary/10 sm:text-sm dark:bg-white/[0.035] ${
+                  createSelfNameError ? 'border-destructive/60 focus-visible:border-destructive/70 focus-visible:ring-destructive/10' : ''
+                }`}
+              />
+              <div className="min-h-5">
+                {createSelfNameError ? (
+                  <p id="create-self-name-error" role="alert" className="flex items-center gap-1.5 text-xs font-medium text-destructive">
+                    <AlertTriangle className="size-3.5" />
+                    {createSelfNameError}
+                  </p>
+                ) : null}
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">说明（可选）</label>
-              <Textarea name="description" maxLength={500} placeholder="训练方向、队伍介绍等" />
+            <div className="space-y-2">
+              <div className="flex items-baseline justify-between gap-3">
+                <label htmlFor="create-self-description" className="text-sm font-semibold">
+                  队伍说明
+                </label>
+                <span className="text-xs text-muted-foreground">可选 · 最多 500 个字符</span>
+              </div>
+              <Textarea
+                id="create-self-description"
+                name="description"
+                maxLength={500}
+                placeholder="训练方向、队伍介绍等"
+                className="min-h-28 resize-none rounded-2xl border-border/70 bg-muted/30 px-4 py-3 text-base leading-6 shadow-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-muted-foreground/70 focus-visible:border-primary/50 focus-visible:bg-background focus-visible:ring-4 focus-visible:ring-primary/10 sm:text-sm dark:bg-white/[0.035]"
+              />
             </div>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setCreateSelfOpen(false)}>
+            <div className="grid grid-cols-[0.8fr_1.4fr] gap-2.5 pt-1">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => handleCreateSelfOpenChange(false)}
+                className="h-11 rounded-[14px] bg-muted/70 shadow-none transition-[scale,background-color,color] duration-150 ease-out hover:bg-muted active:scale-[0.96] motion-reduce:transition-none"
+              >
                 取消
               </Button>
-              <Button type="submit">创建并成为队长</Button>
+              <Button
+                type="submit"
+                className="h-11 rounded-[14px] shadow-lg shadow-primary/20 transition-[scale,background-color,box-shadow] duration-150 ease-out active:scale-[0.96] motion-reduce:transition-none"
+              >
+                创建并成为队长
+              </Button>
             </div>
           </form>
         </DialogContent>

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
+import { evaluateSelfTeamName } from '../src/lib/contest-team-form';
 
 const workspace = resolve(import.meta.dirname, '../../..');
 
@@ -78,6 +79,29 @@ describe('P1.12 team assembly workspace contracts', () => {
     expect(page).to.include('<Dialog');
     expect(page).to.include('<ConfirmDialog');
     expect(page).not.to.match(/window\.(?:alert|confirm)|\balert\(|\bconfirm\(/);
+  });
+
+  it('uses a polished self-team dialog with inline validation instead of the native required bubble', () => {
+    const start = page.indexOf('<Dialog open={createSelfOpen}');
+    const end = page.indexOf('<Dialog open={adminCreateOpen}', start);
+    const dialog = page.slice(start, end);
+    expect(dialog).to.include('method="post"');
+    expect(dialog).to.include('name="operation" value="create_self"');
+    expect(dialog).to.include('name="name"');
+    expect(dialog).to.include('name="description"');
+    expect(dialog).to.include('noValidate');
+    expect(dialog).to.include('onSubmit={handleCreateSelfSubmit}');
+    expect(dialog).to.include('role="dialog"');
+    expect(dialog).to.include('aria-modal="true"');
+    expect(dialog).to.include('overflow-y-auto overscroll-contain');
+    expect(dialog).not.to.include('placeholder="1–64 个字符"');
+  });
+
+  it('blocks the native post only for empty and whitespace-only self-team names', () => {
+    expect(evaluateSelfTeamName('')).to.deep.equal({ error: '请输入队伍名称', preventSubmit: true });
+    expect(evaluateSelfTeamName('   \t')).to.deep.equal({ error: '请输入队伍名称', preventSubmit: true });
+    expect(evaluateSelfTeamName('  Null Pointers  ')).to.deep.equal({ error: '', preventSubmit: false });
+    expect(page).to.match(/if \(!nameValidation\.preventSubmit\)[\s\S]*?return;[\s\S]*?event\.preventDefault\(\)/);
   });
 
   it('keeps an invitation persisted when notification delivery fails and logs the exact identifiers', () => {

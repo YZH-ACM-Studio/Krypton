@@ -32,6 +32,11 @@ import { SimpleSelect } from '@/components/ui/select';
 import { MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import {
+  prioritizeCurrentScoreboardRows,
+  scoreboardParticipantColumn,
+  scoreboardRowMatches,
+} from '@/lib/contest-exam-display';
 import { formatDateTime, replaceRouteTokens, toDate } from '@/lib/format';
 
 type R = Record<string, any>;
@@ -1026,6 +1031,12 @@ export function ContestScoreboardPage() {
         ];
       })
     : body;
+  const teamMode = tdoc.participationMode === 'team';
+  const participantColumn = scoreboardParticipantColumn(displayHeader, teamMode);
+  const currentParticipantId = teamMode ? data.examMode?.teamId : (data.currentUserId ?? bs.user?.id);
+  const orderedDisplayBody = inExamMode
+    ? prioritizeCurrentScoreboardRows(displayBody, participantColumn, currentParticipantId)
+    : displayBody;
 
   function cellText(cell: ScoreboardCell) {
     return cell.value == null ? '—' : String(cell.value);
@@ -1246,24 +1257,46 @@ export function ContestScoreboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {displayBody.map((row, rowIndex) => (
-                  <TableRow key={rowIndex}>
-                    {displayHeader.map((head, columnIndex) => {
-                      const cell = row[columnIndex] || {};
-                      return (
-                        <TableCell
-                          key={`${rowIndex}-${columnIndex}`}
-                          className={cn(
-                            head.type === 'problem' || cell.type === 'record' || cell.type === 'records' ? 'text-center' : '',
-                            firstBloodClass(cell),
-                          )}
-                        >
-                          {renderBodyCell(cell)}
-                        </TableCell>
-                      );
-                    })}
-                  </TableRow>
-                ))}
+                {orderedDisplayBody.map((row, rowIndex) => {
+                  const isCurrent = inExamMode && scoreboardRowMatches(row, participantColumn, currentParticipantId);
+                  const participantKey = row[participantColumn]?.raw;
+                  return (
+                    <TableRow
+                      key={`${String(participantKey ?? 'row')}-${rowIndex}`}
+                      aria-current={isCurrent ? 'true' : undefined}
+                      className={
+                        isCurrent
+                          ? 'bg-primary/[0.08] hover:bg-primary/[0.12] dark:bg-primary/[0.13] dark:hover:bg-primary/[0.17]'
+                          : undefined
+                      }
+                    >
+                      {displayHeader.map((head, columnIndex) => {
+                        const cell = row[columnIndex] || {};
+                        const content = renderBodyCell(cell);
+                        return (
+                          <TableCell
+                            key={`${rowIndex}-${columnIndex}`}
+                            className={cn(
+                              head.type === 'problem' || cell.type === 'record' || cell.type === 'records' ? 'text-center' : '',
+                              firstBloodClass(cell),
+                            )}
+                          >
+                            {isCurrent && columnIndex === participantColumn ? (
+                              <span className="inline-flex items-center gap-2">
+                                {content}
+                                <Badge variant="outline" className="border-primary/25 bg-primary/10 text-[10px] text-primary">
+                                  {teamMode ? '本队' : '我'}
+                                </Badge>
+                              </span>
+                            ) : (
+                              content
+                            )}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           ) : (

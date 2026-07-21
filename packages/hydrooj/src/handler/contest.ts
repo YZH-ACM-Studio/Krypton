@@ -26,6 +26,7 @@ import {
     ValidationError,
 } from '../error';
 import { FileInfo, ScoreboardConfig, Tdoc } from '../interface';
+import { buildLatestContestProblemStatusByPid } from '../lib/contest-problem-status';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
@@ -521,6 +522,8 @@ async function getContestLiveStats(domainId: string, tid: ObjectId, pids: number
 export class ContestProblemListHandler extends ContestDetailBaseHandler {
     /** 考试壳（exam-mode）子类置 false——本场热度数据不进考试客户端 payload。 */
     protected liveStatsEnabled = true;
+    /** Exam Mode only: expose a minimal status snapshot before rule projection removes status fields. */
+    protected latestProblemStatusesEnabled = false;
 
     @param('tid', Types.ObjectId)
     async prepare(_domainId: string, tid: ObjectId) {
@@ -565,6 +568,10 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
         this.response.body.tsdoc = this.tsdocAsPublic();
         const teamMode = contest.getParticipationMode(this.tdoc) === 'team';
         this.response.body.psdict = teamMode ? teamContext.status?.detail || {} : this.tsdoc.detail || {};
+        if (this.latestProblemStatusesEnabled) {
+            const statusJournal = teamMode ? teamContext.status?.journal || [] : this.tsdoc.journal || [];
+            this.response.body.problemStatusByPid = buildLatestContestProblemStatusByPid(statusJournal, this.tdoc.pids);
+        }
         const psdocs: any[] = Object.values(this.response.body.psdict);
         const canViewRecord = contest.canShowSelfRecord.call(this, this.tdoc) && (!teamMode || !!teamContext.team);
         this.response.body.canViewRecord = canViewRecord;

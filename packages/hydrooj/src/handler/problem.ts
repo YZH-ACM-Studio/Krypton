@@ -644,6 +644,7 @@ export class ProblemMainHandler extends Handler {
     @param('visibility', Types.Range(['all', 'hidden', 'published']), true)
     @param('lifecycle', Types.Range(['active', 'archived', 'all']), true)
     @param('managedReview', Types.Range(['all', 'pending']), true)
+    @param('contest', Types.ObjectId, true)
     async get(
         _domainId: string,
         page = 1,
@@ -658,6 +659,7 @@ export class ProblemMainHandler extends Handler {
         visibility: 'all' | 'hidden' | 'published' = 'all',
         lifecycle: 'active' | 'archived' | 'all' = 'active',
         managedReview: 'all' | 'pending' = 'all',
+        contestId: ObjectId = null,
     ) {
         const domainId = String(this.domain?._id);
         if (!problem.canBrowseProblemBank(this.user)) {
@@ -678,7 +680,33 @@ export class ProblemMainHandler extends Handler {
         const isBankAdmin = problem.isProblemBankAdmin(this.user);
         if (owner && !isBankAdmin) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
         if (managedReview === 'pending' && !isBankAdmin) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+        const canFilterContest = this.user.hasPerm(PERM.PERM_VIEW_CONTEST);
+        if (contestId && !canFilterContest) throw new PermissionError(PERM.PERM_VIEW_CONTEST);
+        let contestAccessFilter: Filter<any> | null = null;
+        if (canFilterContest) {
+            const contestGroups = (
+                await user.listGroup(domainId, this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST) ? undefined : this.user._id)
+            ).map((item) => item.name);
+            contestAccessFilter = {
+                ...(this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)
+                    ? {}
+                    : {
+                          $or: [
+                              { maintainer: this.user._id },
+                              { owner: this.user._id },
+                              { assign: { $in: contestGroups } },
+                              { assign: { $size: 0 } },
+                          ],
+                      }),
+                rule: { $ne: 'homework' },
+            };
+        }
+        const selectedContest = contestId
+            ? await contest.getMulti(domainId, { ...contestAccessFilter!, docId: contestId }).limit(1).next()
+            : null;
+        if (contestId && !selectedContest) throw new ContestNotFoundError(domainId, contestId);
         const filterParts: Filter<ProblemDoc>[] = [problemBankScope];
+        if (selectedContest) filterParts.push({ docId: { $in: selectedContest.pids || [] } });
         if (kindSlug) {
             const problemKind = parseProblemKindSlug(kindSlug);
             filterParts.push(
@@ -782,6 +810,13 @@ export class ProblemMainHandler extends Handler {
             !quick && isBankAdmin && pdocs.some((pdoc) => pdoc.managedAuthoring?.pendingTrainingPlacement)
                 ? await listManagedTrainingOptions(domainId)
                 : [];
+        const contestOptions = quick || !contestAccessFilter
+            ? []
+            : await contest
+                  .getMulti(domainId, contestAccessFilter)
+                  .project({ docId: 1, title: 1, beginAt: 1 })
+                  .sort({ beginAt: -1, docId: -1 })
+                  .toArray();
         if (pjax) {
             this.response.body = {
                 title: this.renderTitle(this.translate('problem_main')),
@@ -818,7 +853,13 @@ export class ProblemMainHandler extends Handler {
                     visibility,
                     lifecycle,
                     managedReview,
+                    contest: contestId?.toHexString() || '',
                 },
+                contestOptions: contestOptions.map((tdoc) => ({
+                    id: tdoc.docId.toHexString(),
+                    title: tdoc.title,
+                    beginAt: tdoc.beginAt,
+                })),
                 problemKinds: PROBLEM_KINDS.map((kind) => ({
                     kind,
                     slug: problemKindToSlug(kind),

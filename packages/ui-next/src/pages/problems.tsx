@@ -34,6 +34,7 @@ const KIND_LABEL: Record<ProblemKind, string> = {
 interface BankFilters {
   kind?: string;
   tag?: string;
+  contest?: string;
   owner?: string | number;
   visibility?: 'all' | 'hidden' | 'published';
   lifecycle?: 'active' | 'archived' | 'all';
@@ -56,6 +57,7 @@ function FilterForm({
   sort,
   filters,
   problemKinds,
+  contestOptions,
   canFilterOwner,
   canReviewManaged,
   compact = false,
@@ -65,6 +67,7 @@ function FilterForm({
   sort: string;
   filters: BankFilters;
   problemKinds: Array<{ kind: ProblemKind; slug: string }>;
+  contestOptions: Array<{ id: string; title: string; beginAt?: string | Date }>;
   canFilterOwner: boolean;
   canReviewManaged: boolean;
   compact?: boolean;
@@ -87,6 +90,23 @@ function FilterForm({
           options={[{ value: '', label: '全部题型' }, ...problemKinds.map((item) => ({ value: item.slug, label: KIND_LABEL[item.kind] }))]}
         />
       </label>
+      {contestOptions.length ? (
+        <label className="space-y-1.5">
+          <span className="text-xs font-medium text-muted-foreground">所属比赛</span>
+          <SimpleSelect
+            name="contest"
+            defaultValue={filters.contest || ''}
+            className="min-h-11"
+            options={[
+              { value: '', label: '全部比赛' },
+              ...contestOptions.map((item) => {
+                const year = item.beginAt ? new Date(item.beginAt).getFullYear() : null;
+                return { value: item.id, label: `${item.title}${year && Number.isFinite(year) ? ` · ${year}` : ''}` };
+              }),
+            ]}
+          />
+        </label>
+      ) : null}
       <label className="space-y-1.5">
         <span className="text-xs font-medium text-muted-foreground">标签</span>
         <Input name="tag" defaultValue={filters.tag || ''} placeholder="精确标签" className="min-h-11" />
@@ -179,6 +199,7 @@ export function ProblemsPage() {
   const sort = String(data.sort || 'default');
   const filters: BankFilters = data.filters || {};
   const problemKinds: Array<{ kind: ProblemKind; slug: string }> = data.problemKinds || [];
+  const contestOptions: Array<{ id: string; title: string; beginAt?: string | Date }> = data.contestOptions || [];
   const ownerNames: Record<string, string> = data.ownerNames || {};
   const canManageByDocId: Record<string, boolean> = data.canManageByDocId || {};
   const canManageContributionsByDocId: Record<string, boolean> = data.canManageContributionsByDocId || {};
@@ -208,6 +229,7 @@ export function ProblemsPage() {
     query ||
     filters.kind ||
     filters.tag ||
+    filters.contest ||
     filters.owner ||
     (filters.visibility && filters.visibility !== 'all') ||
     (filters.lifecycle && filters.lifecycle !== 'active') ||
@@ -218,6 +240,7 @@ export function ProblemsPage() {
     q: query,
     kind: filters.kind,
     tag: filters.tag,
+    contest: filters.contest,
     owner: filters.owner,
     visibility: filters.visibility === 'all' ? '' : filters.visibility,
     lifecycle: filters.lifecycle === 'active' ? '' : filters.lifecycle,
@@ -363,6 +386,7 @@ export function ProblemsPage() {
           sort={sort}
           filters={filters}
           problemKinds={problemKinds}
+          contestOptions={contestOptions}
           canFilterOwner={!!data.canFilterOwner}
           canReviewManaged={!!data.canReviewManaged}
         />
@@ -380,6 +404,7 @@ export function ProblemsPage() {
               sort={sort}
               filters={filters}
               problemKinds={problemKinds}
+              contestOptions={contestOptions}
               canFilterOwner={!!data.canFilterOwner}
               canReviewManaged={!!data.canReviewManaged}
               compact

@@ -55,6 +55,7 @@ import {
   type ProblemOption,
 } from '@/lib/multi-select-presets';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
+import { getContestProblemStatus } from '@/lib/contest-exam-display';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { isSystemAdmin } from '@/lib/perms';
 
@@ -1450,6 +1451,7 @@ export function ContestProblemListPage() {
   const data = bs.page.data;
   const tdoc: R = data.tdoc || {};
   const pdict: Record<string, R> = data.pdict || {};
+  const problemStatusByPid: Record<string, R> = data.problemStatusByPid || {};
   const tcdocs: R[] = data.tcdocs || [];
   const rdocs: R[] = data.rdocs || [];
   const pids: number[] = tdoc.pids || [];
@@ -1459,6 +1461,8 @@ export function ContestProblemListPage() {
   const recordDetailUrl = (rid: string) =>
     urls?.record ? String(urls.record).replace('__RID__', rid) : replaceRouteTokens(bs.urls.recordDetail, { RID: rid });
   const showScore = data.showScore;
+  const inExamMode = !!data.examMode?.enabled;
+  const canViewRecord = !!data.canViewRecord;
   // P1.4：本场每题通过统计（仅 ACM；考试壳 examMode 下后端不下发、前端也不渲染——红线1）。
   const liveStats: Record<string, R> | null = tdoc.rule === 'acm' && !data.examMode && data.liveStats ? data.liveStats : null;
   const liveStatsUnit = data.liveStatsParticipantUnit === 'team' ? '队' : '人';
@@ -1499,6 +1503,7 @@ export function ContestProblemListPage() {
                 <TableRow>
                   <TableHead className="w-16 text-center">#</TableHead>
                   <TableHead>题目</TableHead>
+                  {inExamMode ? <TableHead className="w-28 text-center">我的状态</TableHead> : null}
                   {liveStats && <TableHead className="w-32 text-right">本场通过</TableHead>}
                   {showScore && <TableHead className="w-20 text-right">分值</TableHead>}
                 </TableRow>
@@ -1507,14 +1512,39 @@ export function ContestProblemListPage() {
                 {pids.map((pid, idx) => {
                   const p = pdict[String(pid)] || {};
                   const ls = liveStats?.[String(pid)];
+                  const statusDoc = problemStatusByPid[String(pid)] || null;
+                  const status = getContestProblemStatus(problemStatusByPid[String(pid)]?.status);
+                  const statusClass =
+                    status?.code === 'pass'
+                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                      : status?.code === 'fail'
+                        ? 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                        : status?.code === 'progress'
+                          ? 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300'
+                          : 'border-border bg-muted/50 text-muted-foreground';
                   return (
-                    <TableRow key={String(pid)}>
+                    <TableRow key={String(pid)} className={status?.code === 'pass' ? 'bg-emerald-500/[0.035] hover:bg-emerald-500/[0.065]' : undefined}>
                       <TableCell className="text-center font-mono font-semibold">{getAlphabeticId(idx)}</TableCell>
                       <TableCell>
                         <a href={contestProblemUrl(bs, tdoc, pid)} className="text-sm text-primary hover:underline">
                           {p.title || `P${pid}`}
                         </a>
                       </TableCell>
+                      {inExamMode ? (
+                        <TableCell className="text-center">
+                          {status && statusDoc?.rid && canViewRecord ? (
+                            <a href={recordDetailUrl(String(statusDoc.rid))} className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                              <Badge variant="outline" className={statusClass} title={status.title}>
+                                {status.label}
+                              </Badge>
+                            </a>
+                          ) : (
+                            <Badge variant="outline" className={statusClass} title={status?.title || '尚未提交'}>
+                              {status?.label || '未提交'}
+                            </Badge>
+                          )}
+                        </TableCell>
+                      ) : null}
                       {liveStats && (
                         <TableCell
                           className="text-right font-mono text-xs text-muted-foreground"

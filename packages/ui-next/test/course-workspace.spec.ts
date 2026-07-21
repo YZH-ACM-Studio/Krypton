@@ -12,8 +12,18 @@ describe('P3.8 course workspace', () => {
     expect(resolveChapterId([2, 5, 9], '5')).to.equal(5);
     expect(resolveChapterId([2, 5, 9], '404')).to.equal(2);
     expect(resolveChapterId([2, 5, 9], null)).to.equal(2);
+    expect(resolveChapterId([2, 5, 9], null, 5)).to.equal(5);
+    expect(resolveChapterId([2, 5, 9], '404', 5)).to.equal(5);
+    expect(resolveChapterId([0, 5], null, 5)).to.equal(5);
     expect(resolveChapterId([], '5')).to.equal(null);
     expect(withChapterQuery('https://oj.test/course/abc?q=x', 9)).to.equal('https://oj.test/course/abc?q=x&chapter=9');
+  });
+
+  it('uses the shared chapter query protocol on training details', () => {
+    const training = readFileSync(resolve(root, 'src/pages/training.tsx'), 'utf8');
+    expect(training).to.include('useChapterQuery(dag, preferredNid)');
+    expect(training).to.include('selectChapter(Number(rid))');
+    expect(training).to.include('selectChapter(s._id)');
   });
 
   it('keeps list, detail, and editor in focused files with explicit extension slots', () => {

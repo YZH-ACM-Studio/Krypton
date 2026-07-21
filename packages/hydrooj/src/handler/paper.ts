@@ -932,6 +932,7 @@ function bounceIfNotStarted(handler: any, tdoc: any, tid: ObjectId): boolean {
 class ExamModeProblemListHandler extends ContestProblemListHandler {
     // 考试壳不下发本场热度统计（P1.4 红线：exam-mode payload/DOM 不变）。
     protected liveStatsEnabled = false;
+    protected latestProblemStatusesEnabled = true;
 
     @param('tid', Types.ObjectId)
     async get(_domainId: string, tid: ObjectId) {

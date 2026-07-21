@@ -10,6 +10,7 @@ import { Pagination } from '@/components/ui/pagination';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatPlainTextSummary, replaceRouteTokens } from '@/lib/format';
+import { useChapterQuery } from './course/chapter-query';
 
 type R = Record<string, any>;
 
@@ -407,7 +408,7 @@ export function TrainingDetailPage() {
   const ndict: Record<string, R> = data.ndict || {};
   const nsdict: Record<string, R> = data.nsdict || {};
   const enrolled = !!tsdoc.enroll;
-  const dag: R[] = Array.isArray(tdoc.dag) ? tdoc.dag : [];
+  const dag = (Array.isArray(tdoc.dag) ? tdoc.dag : []) as Array<R & { _id: number }>;
 
   const totalProblems = dag.reduce((n, s) => n + (Array.isArray(s.pids) ? s.pids.length : 0), 0);
   const doneProblems = Array.isArray(tsdoc.donePids) ? tsdoc.donePids.length : 0;
@@ -434,13 +435,12 @@ export function TrainingDetailPage() {
   // is the source of truth. (Old status-priority sort was removed when the
   // DAG canvas was dropped; users browse stages top-down like a TOC now.)
 
-  const [selectedNid, setSelectedNid] = useState<number | null>(() => {
-    const inProg = dag.find((n) => nsdict[n._id]?.isProgress);
-    if (inProg) return inProg._id;
-    const open = dag.find((n) => nsdict[n._id]?.isOpen && !nsdict[n._id]?.isDone);
-    if (open) return open._id;
-    return dag[0]?._id ?? null;
-  });
+  const preferredNid =
+    dag.find((node) => nsdict[node._id]?.isProgress)?._id ??
+    dag.find((node) => nsdict[node._id]?.isOpen && !nsdict[node._id]?.isDone)?._id ??
+    dag[0]?._id ??
+    null;
+  const { activeId: selectedNid, selectChapter } = useChapterQuery(dag, preferredNid);
 
   const selected = selectedNid != null ? ndict[selectedNid] || dag.find((n) => n._id === selectedNid) : null;
   const selectedStatus = selectedNid != null ? nsdict[selectedNid] || {} : {};
@@ -569,7 +569,7 @@ export function TrainingDetailPage() {
                         <button
                           key={String(rid)}
                           type="button"
-                          onClick={() => setSelectedNid(Number(rid))}
+                          onClick={() => selectChapter(Number(rid))}
                           className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] ${done ? 'bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'}`}
                         >
                           {done ? <CheckCircle2 className="size-2.5" /> : <Lock className="size-2.5" />}
@@ -666,7 +666,7 @@ export function TrainingDetailPage() {
                       <button
                         key={String(s._id)}
                         type="button"
-                        onClick={() => setSelectedNid(s._id)}
+                        onClick={() => selectChapter(s._id)}
                         className={`flex w-full items-center gap-3 rounded-md border px-4 py-3.5 text-left transition-colors hover:bg-accent ${
                           isSelected ? 'border-primary/50 bg-accent/60 ring-1 ring-primary/30' : 'border-border'
                         }`}

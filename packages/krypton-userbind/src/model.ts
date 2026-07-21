@@ -857,6 +857,37 @@ export async function findStudentsByUserIds(domainId: string, userIds: number[])
 }
 
 /**
+ * Search only bound student identities for reusable user pickers. The caller
+ * still owns authorization and any domain-specific eligibility checks.
+ */
+export async function searchBoundStudents(
+    domainId: string,
+    query: string,
+    limit = 20,
+): Promise<Array<{ boundUserId: number; studentId: string; realName: string }>> {
+    const q = query.trim();
+    if (!q) return [];
+    const regex = new RegExp(escapeRegexLiteral(q), 'i');
+    const docs = await studentsColl
+        .find(
+            {
+                domainId,
+                boundUserId: { $ne: null },
+                $or: [{ studentId: { $regex: regex } }, { realName: { $regex: regex } }],
+            },
+            { projection: { boundUserId: 1, studentId: 1, realName: 1 } },
+        )
+        .sort({ studentId: 1, _id: 1 })
+        .limit(Math.max(1, Math.min(limit, 50)))
+        .toArray();
+    return docs.flatMap((student) =>
+        Number.isSafeInteger(student.boundUserId) && Number(student.boundUserId) > 1
+            ? [{ boundUserId: Number(student.boundUserId), studentId: student.studentId, realName: student.realName }]
+            : [],
+    );
+}
+
+/**
  * Return bound roster entries that belong to any requested user group.
  * Statistics callers keep the full groupIds array so one student can
  * contribute independently to every selected group they belong to.
@@ -990,6 +1021,7 @@ export const userBindModel = {
     findStudentsByStudentId,
     findStudentByUserId,
     findStudentsByUserIds,
+    searchBoundStudents,
     findBoundStudentsByGroupIds,
     updateStudent,
     deleteStudent,

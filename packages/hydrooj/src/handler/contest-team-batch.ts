@@ -1,17 +1,11 @@
 import { ObjectId } from 'mongodb';
 import { Context } from '../context';
 import { PermissionError, UserNotFoundError, ValidationError } from '../error';
+import { getPublicTeamUsers, type PublicTeamUser, searchPublicTeamUsers } from '../lib/team-user';
 import { PERM } from '../model/builtin';
 import * as teamBatch from '../model/contest-team-batch';
 import message from '../model/message';
-import user from '../model/user';
 import { Handler, param, Types } from '../service/server';
-
-interface PublicTeamUser {
-    _id: number;
-    uname: string;
-    displayName: string;
-}
 
 function parseMemberUids(value: string): number[] {
     const tokens = String(value || '')
@@ -147,7 +141,7 @@ export class TeamBatchDetailHandler extends Handler {
             ownTeam.memberUids.length < 3;
         if (!this.canManage && !canInvite) throw new PermissionError(PERM.PERM_EDIT_CONTEST_SELF);
 
-        const candidates = (await user.getPrefixList(this.domainId(), q, 20)).filter((candidate) => candidate?._id > 1);
+        const candidates = await searchPublicTeamUsers(this.domainId(), q, 20);
         const uids = Array.from(new Set(candidates.map((candidate) => candidate._id)));
         const assigned = uids.length ? await teamBatch.getMultiTeam(this.domainId(), batchId, { memberUids: { $in: uids } }).toArray() : [];
         const assignedUids = new Set(assigned.flatMap((team) => team.memberUids));
@@ -160,11 +154,7 @@ export class TeamBatchDetailHandler extends Handler {
                 if (error instanceof PermissionError || error instanceof UserNotFoundError) continue;
                 throw error;
             }
-            result.push({
-                _id: candidate._id,
-                uname: candidate.uname,
-                displayName: candidate.displayName || candidate.uname,
-            });
+            result.push(candidate);
         }
         return result;
     }
@@ -222,17 +212,7 @@ export class TeamBatchDetailHandler extends Handler {
             invitation.memberUids.forEach((uid) => allUids.add(uid));
         }
         for (const team of teams) team.memberUids.forEach((uid) => allUids.add(uid));
-        const rawUsers = allUids.size ? await user.getListForRender(this.domainId(), [...allUids], false) : {};
-        const users = Object.fromEntries(
-            [...allUids].map((uid) => [
-                String(uid),
-                {
-                    _id: uid,
-                    uname: rawUsers[uid]?.uname || `UID ${uid}`,
-                    displayName: rawUsers[uid]?.displayName || rawUsers[uid]?.uname || `UID ${uid}`,
-                } satisfies PublicTeamUser,
-            ]),
-        );
+        const users = await getPublicTeamUsers(this.domainId(), [...allUids]);
         let eligible = false;
         try {
             await teamBatch.assertTeamBatchMemberEligibility(this.domainId(), this.user._id);

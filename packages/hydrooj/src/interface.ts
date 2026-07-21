@@ -880,6 +880,11 @@ declare module './service/db' {
 
 export interface UserbindModelBridge {
     findStudentsByUserIds(domainId: string, userIds: number[]): Promise<Record<string, { studentId: string; realName: string }>>;
+    searchBoundStudents(
+        domainId: string,
+        query: string,
+        limit?: number,
+    ): Promise<Array<{ boundUserId: number; studentId: string; realName: string }>>;
     findBoundStudentsByGroupIds(
         domainId: string,
         groupIds: ObjectId[],

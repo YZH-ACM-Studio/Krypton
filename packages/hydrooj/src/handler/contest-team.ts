@@ -2,18 +2,12 @@ import { ObjectId } from 'mongodb';
 import { Context } from '../context';
 import { ContestNotFoundError, NotAssignedError, PermissionError, UserNotFoundError, ValidationError } from '../error';
 import type { Tdoc } from '../interface';
+import { getPublicTeamUsers, type PublicTeamUser, searchPublicTeamUsers } from '../lib/team-user';
 import { PERM } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
 import message from '../model/message';
-import user from '../model/user';
 import { Handler, param, Types } from '../service/server';
-
-interface PublicTeamUser {
-    _id: number;
-    uname: string;
-    displayName: string;
-}
 
 function parseMemberUids(value: string): number[] {
     const tokens = String(value || '')
@@ -106,7 +100,7 @@ export class ContestTeamsHandler extends Handler {
         const canInvite = beforeStart && ownTeam?.managementMode === 'self' && ownTeam.captainUid === this.user._id && ownTeam.memberUids.length < 3;
         if (!this.canManage && !canInvite) throw new PermissionError(PERM.PERM_EDIT_CONTEST_SELF);
 
-        const candidates = (await user.getPrefixList(this.domainId(), q, 20)).filter((candidate) => candidate?._id > 1);
+        const candidates = await searchPublicTeamUsers(this.domainId(), q, 20);
         const uids = Array.from(new Set(candidates.map((candidate) => candidate._id)));
         const assigned = uids.length ? await contestTeam.listTeams(this.domainId(), tid, { memberUids: { $in: uids } }) : [];
         const assignedUids = new Set(assigned.flatMap((team) => team.memberUids));
@@ -119,11 +113,7 @@ export class ContestTeamsHandler extends Handler {
                 if (eligibilityRejection(error)) continue;
                 throw error;
             }
-            result.push({
-                _id: candidate._id,
-                uname: candidate.uname,
-                displayName: candidate.displayName || candidate.uname,
-            });
+            result.push(candidate);
         }
         return result;
     }
@@ -179,17 +169,7 @@ export class ContestTeamsHandler extends Handler {
             invitation.memberUids.forEach((uid) => allUids.add(uid));
         }
         for (const team of teams) team.memberUids.forEach((uid) => allUids.add(uid));
-        const rawUsers = allUids.size ? await user.getListForRender(this.domainId(), [...allUids], false) : {};
-        const users = Object.fromEntries(
-            [...allUids].map((uid) => [
-                String(uid),
-                {
-                    _id: uid,
-                    uname: rawUsers[uid]?.uname || `UID ${uid}`,
-                    displayName: rawUsers[uid]?.displayName || rawUsers[uid]?.uname || `UID ${uid}`,
-                } satisfies PublicTeamUser,
-            ]),
-        );
+        const users = await getPublicTeamUsers(this.domainId(), [...allUids]);
         const started = new Date() >= this.tdoc.beginAt;
         this.response.template = 'contest_teams.html';
         this.response.body = {

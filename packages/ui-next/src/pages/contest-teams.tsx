@@ -1,10 +1,11 @@
 import { useCallback, useState, type FormEvent, type ReactNode } from 'react';
 import { motion } from 'motion/react';
-import { AlertTriangle, ArrowLeft, Crown, Lock, LogOut, Pencil, Plus, ShieldCheck, UserPlus, Users, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Crown, Lock, LogOut, Pencil, Plus, Search, ShieldCheck, UserPlus, Users, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { DomainUserSearchOption, type DomainUserOption, domainUserSearchLabel } from '@/components/domain-user-search';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { Pagination } from '@/components/ui/pagination';
@@ -16,8 +17,7 @@ import { formatDateTime } from '@/lib/format';
 
 type R = Record<string, any>;
 
-interface TeamUser {
-  _id: number;
+interface TeamUser extends DomainUserOption {
   uname: string;
   displayName: string;
 }
@@ -67,6 +67,10 @@ function teamUser(users: Record<string, TeamUser>, uid: number): TeamUser {
   return users[String(uid)] || { _id: uid, uname: `UID ${uid}`, displayName: `UID ${uid}` };
 }
 
+function studentIdentity(user: TeamUser) {
+  return [user.studentId ? `学号 ${user.studentId}` : '', user.realName].filter(Boolean).join(' · ');
+}
+
 function ConfirmDialog({ action, onClose }: { action: ConfirmAction | null; onClose: () => void }) {
   return (
     <Dialog open={!!action} onOpenChange={(open) => !open && onClose()}>
@@ -111,7 +115,10 @@ function MemberList({ team, users, actions }: { team: TeamView; users: Record<st
                 </Badge>
               ) : null}
             </div>
-            <p className="font-mono text-[11px] text-muted-foreground">UID {uid}</p>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {studentIdentity(teamUser(users, uid)) || '未绑定学生档案'}
+              <span className="font-mono"> · UID {uid}</span>
+            </p>
           </div>
           {actions?.(uid)}
         </div>
@@ -408,19 +415,12 @@ export function ContestTeamsPage() {
                         onChange={setInviteTargets}
                         loadOptions={searchUsers}
                         getKey={(item) => String(item._id)}
-                        getLabel={(item) => `${item.displayName} ${item.uname} ${item._id}`}
+                        getLabel={domainUserSearchLabel}
                         renderChip={(item) => <span>{item.displayName || item.uname}</span>}
-                        renderOption={(item) => (
-                          <span className="flex min-w-0 flex-col">
-                            <span className="truncate text-sm font-medium">{item.displayName || item.uname}</span>
-                            <span className="font-mono text-[11px] text-muted-foreground">
-                              {item.uname} · UID {item._id}
-                            </span>
-                          </span>
-                        )}
+                        renderOption={(item) => <DomainUserSearchOption user={item} />}
                         name="inviteeUid"
                         maxItems={1}
-                        placeholder="搜索 UID / 用户名 / 展示名"
+                        placeholder="搜索 UID / OJ 用户 / 学号 / 姓名"
                         emptyText={isBatch ? '没有可加入本批次且尚未入队的用户' : '没有符合本场资格且未入队的用户'}
                       />
                       <Button type="submit" className="w-full" disabled={inviteTargets.length !== 1}>
@@ -529,70 +529,115 @@ export function ContestTeamsPage() {
 
       {capabilities.canManage ? (
         <section className="space-y-4 border-t pt-6">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold">管理员编队</h2>
-              <p className="text-sm text-muted-foreground">服务端分页，共 {Number(data.teamCount || 0)} 支有效队伍。</p>
-            </div>
-            <Button
-              type="button"
-              disabled={capabilities.started}
-              onClick={() => {
-                setAdminCreateMembers([]);
-                setAdminCreateCaptain('');
-                setAdminCreateOpen(true);
-              }}
-            >
-              <Plus className="size-4" /> 新建管理员队伍
-            </Button>
-          </div>
-
-          <form method="get" className="flex max-w-xl gap-2">
-            <Input name="teamSearch" defaultValue={teamSearch} placeholder="按队伍名称搜索" maxLength={64} />
-            <Button type="submit" variant="outline">
-              搜索
-            </Button>
-            {teamSearch ? (
-              <Button asChild type="button" variant="ghost">
-                <a href={teamsUrl}>清除</a>
-              </Button>
-            ) : null}
-          </form>
-
-          <div className="grid gap-3 lg:grid-cols-2">
-            {managedTeams.map((team) => (
-              <Card key={team.teamId}>
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-                        {team.name}
-                        <Badge variant={team.managementMode === 'admin' ? 'default' : 'secondary'}>
-                          {team.managementMode === 'admin' ? '管理员' : '自主'}
-                        </Badge>
-                      </CardTitle>
-                      <p className="mt-1 text-xs text-muted-foreground">{team.description || '无说明'}</p>
-                    </div>
-                    <span className="font-mono text-[11px] text-muted-foreground">rev.{team.revision}</span>
+          <div className="overflow-hidden rounded-[24px] bg-card shadow-[0_18px_50px_-34px_rgba(0,0,0,0.55)] ring-1 ring-foreground/10">
+            <div className="space-y-4 border-b border-border/70 px-4 py-5 sm:px-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-lg font-semibold tracking-tight">管理员编队</h2>
+                    <Badge variant="secondary" className="rounded-full px-2.5 font-mono text-[11px]">
+                      {Number(data.teamCount || 0)} 支
+                    </Badge>
                   </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <MemberList team={team} users={users} />
-                  <div className="flex justify-end gap-2">
+                  <p className="mt-1 text-sm text-muted-foreground">每页 20 支，按队伍快速检查阵容与学生身份。</p>
+                </div>
+                <Button
+                  type="button"
+                  className="h-10 rounded-xl transition-[scale,background-color,box-shadow] duration-150 active:scale-[0.96] motion-reduce:transition-none"
+                  disabled={capabilities.started}
+                  onClick={() => {
+                    setAdminCreateMembers([]);
+                    setAdminCreateCaptain('');
+                    setAdminCreateOpen(true);
+                  }}
+                >
+                  <Plus className="size-4" /> 新建管理员队伍
+                </Button>
+              </div>
+
+              <form method="get" className="flex max-w-2xl flex-col gap-2 sm:flex-row">
+                <div className="relative min-w-0 flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    name="teamSearch"
+                    defaultValue={teamSearch}
+                    placeholder="按队伍名称搜索"
+                    maxLength={64}
+                    className="h-10 rounded-xl border-border/70 bg-muted/35 pl-9 shadow-none"
+                  />
+                </div>
+                <Button type="submit" variant="outline" className="h-10 rounded-xl px-5 active:scale-[0.96]">
+                  搜索
+                </Button>
+                {teamSearch ? (
+                  <Button asChild type="button" variant="ghost" className="h-10 rounded-xl px-4 active:scale-[0.96]">
+                    <a href={teamsUrl}>清除</a>
+                  </Button>
+                ) : null}
+              </form>
+            </div>
+
+            <div className="hidden grid-cols-[minmax(12rem,0.8fr)_minmax(24rem,1.7fr)_10.5rem] gap-5 bg-muted/25 px-5 py-2.5 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground xl:grid">
+              <span>队伍</span>
+              <span>成员与绑定身份</span>
+              <span className="text-right">操作</span>
+            </div>
+
+            <div className="divide-y divide-border/65">
+              {managedTeams.map((team) => (
+                <article
+                  key={team.teamId}
+                  className="grid gap-4 px-4 py-4 transition-[background-color] duration-150 hover:bg-muted/20 sm:px-5 xl:grid-cols-[minmax(12rem,0.8fr)_minmax(24rem,1.7fr)_10.5rem] xl:items-center xl:gap-5"
+                >
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <h3 className="truncate text-sm font-semibold">{team.name}</h3>
+                      <Badge variant={team.managementMode === 'admin' ? 'default' : 'secondary'} className="shrink-0 text-[10px]">
+                        {team.managementMode === 'admin' ? '管理员' : '自主'}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">{team.description || '无说明'}</p>
+                    <p className="mt-2 font-mono text-[10px] text-muted-foreground">
+                      {team.memberUids.length}/3 人 · rev.{team.revision}
+                    </p>
+                  </div>
+
+                  <div className="grid gap-1.5 sm:grid-cols-3">
+                    {team.memberUids.map((uid) => {
+                      const member = teamUser(users, uid);
+                      return (
+                        <div key={uid} className="flex min-w-0 items-center gap-2 rounded-xl bg-muted/45 px-2.5 py-2 ring-1 ring-foreground/[0.06]">
+                          <span className="grid size-7 shrink-0 place-items-center rounded-full bg-background text-[10px] font-semibold shadow-sm ring-1 ring-foreground/10">
+                            {userLabel(users, uid).slice(0, 1).toUpperCase()}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              <span className="truncate text-xs font-medium">{userLabel(users, uid)}</span>
+                              {team.captainUid === uid ? <Crown className="size-3 shrink-0 text-amber-500" aria-label="队长" /> : null}
+                            </span>
+                            <span className="block truncate text-[10px] text-muted-foreground">
+                              {studentIdentity(member) || '未绑定学生档案'} · UID {uid}
+                            </span>
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex justify-end gap-2 xl:justify-self-end">
                     <Button
                       type="button"
-                      size="sm"
                       variant="outline"
+                      className="h-10 rounded-xl px-3 transition-[scale,background-color,border-color] duration-150 active:scale-[0.96] motion-reduce:transition-none"
                       disabled={capabilities.started && !capabilities.canEmergencyEdit}
                       onClick={() => openAdminEdit(team)}
                     >
-                      <Pencil className="size-3" /> {emergencyAdminEdit ? '紧急调整' : capabilities.started ? '已冻结' : '编辑'}
+                      <Pencil className="size-3.5" /> {emergencyAdminEdit ? '紧急调整' : capabilities.started ? '已冻结' : '编辑'}
                     </Button>
                     <Button
                       type="button"
-                      size="sm"
-                      variant="outline"
-                      className="text-destructive"
+                      variant="ghost"
+                      className="h-10 rounded-xl px-3 text-destructive transition-[scale,background-color,color] duration-150 hover:bg-destructive/10 hover:text-destructive active:scale-[0.96] motion-reduce:transition-none"
                       disabled={capabilities.started}
                       onClick={() =>
                         setConfirmAction({
@@ -607,18 +652,18 @@ export function ContestTeamsPage() {
                       停用
                     </Button>
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                </article>
+              ))}
+            </div>
 
-          {managedTeams.length === 0 ? (
-            <Card>
-              <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                {isBatch ? '本批次还没有有效队伍。' : '本场还没有有效队伍。'}
-              </CardContent>
-            </Card>
-          ) : null}
+            {managedTeams.length === 0 ? (
+              <div className="px-5 py-14 text-center">
+                <Users className="mx-auto size-8 text-muted-foreground/45" />
+                <p className="mt-3 text-sm font-medium">{teamSearch ? '没有匹配的队伍' : isBatch ? '本批次还没有有效队伍' : '本场还没有有效队伍'}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{teamSearch ? '换一个队伍名称继续搜索。' : '创建后会在这里集中管理成员与队长。'}</p>
+              </div>
+            ) : null}
+          </div>
           <Pagination current={Number(data.teamPage || 1)} total={Number(data.teamPageCount || 1)} baseUrl={teamPageUrl} />
         </section>
       ) : null}
@@ -746,10 +791,12 @@ export function ContestTeamsPage() {
                 }}
                 loadOptions={searchUsers}
                 getKey={(item) => String(item._id)}
-                getLabel={(item) => `${item.displayName} ${item.uname} ${item._id}`}
+                getLabel={domainUserSearchLabel}
+                renderChip={(item) => <span>{item.displayName || item.uname}</span>}
+                renderOption={(item) => <DomainUserSearchOption user={item} />}
                 name="memberUids"
                 maxItems={3}
-                placeholder={isBatch ? '搜索可加入本批次且尚未入队的用户' : '搜索符合本场资格且未入队的用户'}
+                placeholder={isBatch ? '按 OJ 用户、学号或姓名搜索可加入成员' : '按 OJ 用户、学号或姓名搜索符合资格的成员'}
               />
             </div>
             <div className="space-y-1.5">
@@ -825,10 +872,12 @@ export function ContestTeamsPage() {
                   }}
                   loadOptions={searchUsers}
                   getKey={(item) => String(item._id)}
-                  getLabel={(item) => `${item.displayName} ${item.uname} ${item._id}`}
+                  getLabel={domainUserSearchLabel}
+                  renderChip={(item) => <span>{item.displayName || item.uname}</span>}
+                  renderOption={(item) => <DomainUserSearchOption user={item} />}
                   name="memberUids"
                   maxItems={3}
-                  placeholder="搜索并加入符合资格的用户"
+                  placeholder="按 OJ 用户、学号或姓名搜索符合资格的成员"
                 />
               </div>
               <div className="space-y-1.5">

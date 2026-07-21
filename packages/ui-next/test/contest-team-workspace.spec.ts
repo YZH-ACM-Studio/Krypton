@@ -12,8 +12,12 @@ function source(path: string) {
 
 describe('P1.12 team assembly workspace contracts', () => {
   const handler = source('packages/hydrooj/src/handler/contest-team.ts');
+  const teamUser = source('packages/hydrooj/src/lib/team-user.ts');
+  const userHandler = source('packages/hydrooj/src/handler/user.ts');
+  const userbindModel = source('packages/krypton-userbind/src/model.ts');
   const model = source('packages/hydrooj/src/model/contest-team.ts');
   const page = source('packages/ui-next/src/pages/contest-teams.tsx');
+  const domainUserSearch = source('packages/ui-next/src/components/domain-user-search.tsx');
   const resolver = source('packages/ui-next/src/pages/resolver.tsx');
   const sidebar = source('packages/ui-next/src/components/layout/sidebar.tsx');
   const contests = source('packages/ui-next/src/pages/contests.tsx');
@@ -32,10 +36,31 @@ describe('P1.12 team assembly workspace contracts', () => {
     expect(handler).to.include('getTeamByMember(this.domainId(), tid, this.user._id)');
     expect(handler).to.include('getPendingInvitesForUser(this.domainId(), tid, this.user._id)');
     expect(handler).to.match(/if \(this\.canManage\)[\s\S]*?contestTeam\.paginateTeams/);
-    expect(handler).to.include('_id: uid');
-    expect(handler).to.include('uname: rawUsers[uid]?.uname');
-    expect(handler).to.include('displayName: rawUsers[uid]?.displayName');
-    expect(handler).not.to.match(/(?:mail|studentId|studentRecord|schoolId):\s*rawUsers/);
+    expect(handler).to.include('getPublicTeamUsers(this.domainId(), [...allUids])');
+    expect(teamUser).to.include('studentId: student.studentId');
+    expect(teamUser).to.include('realName: student.realName');
+    expect(teamUser).not.to.match(/(?:mail|studentRecord|schoolId):/);
+  });
+
+  it('reuses the common user picker presentation and searches UID, OJ identity, student ID and real name', () => {
+    expect(teamUser).to.include('user.getById(domainId, exactUid)');
+    expect(teamUser).to.include('user.getPrefixList(domainId, q, limit)');
+    expect(teamUser).to.include('bridge.searchBoundStudents(domainId, q, limit)');
+    expect(userbindModel).to.include('$or: [{ studentId: { $regex: regex } }, { realName: { $regex: regex } }]');
+    expect(page).to.include('getLabel={domainUserSearchLabel}');
+    expect(page).to.include('<DomainUserSearchOption user={item} />');
+    expect(page).to.include('搜索 UID / OJ 用户 / 学号 / 姓名');
+    expect(domainUserSearch).to.include("'studentId', 'realName'");
+    expect(userHandler).to.include('canViewStudentIdentity');
+    expect(userHandler).to.include('userbind.searchBoundStudents');
+  });
+
+  it('shows bound student identity on rosters and keeps the manager view dense and server-paginated', () => {
+    expect(page).to.include("studentIdentity(teamUser(users, uid)) || '未绑定学生档案'");
+    expect(page).to.include('成员与绑定身份');
+    expect(page).to.include('xl:grid-cols-[minmax(12rem,0.8fr)_minmax(24rem,1.7fr)_10.5rem]');
+    expect(page).not.to.include('grid gap-3 lg:grid-cols-2');
+    expect(handler).to.include('contestTeam.paginateTeams(this.domainId(), tid, teamQuery, page, 20)');
   });
 
   it('enforces eligibility, final membership uniqueness, stable invites and start-time freezing on the server', () => {

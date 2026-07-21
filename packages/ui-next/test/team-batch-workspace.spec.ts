@@ -26,7 +26,8 @@ describe('P1.17 pre-contest team batch workspace contracts', () => {
     expect(handler).to.include('getPendingInvitesForUser(this.domainId(), batchId, this.user._id)');
     expect(handler).to.include('if (this.canManage)');
     expect(handler).to.include('await this.paginate(teamBatch.getMultiTeam');
-    expect(handler).to.include('getListForRender(this.domainId(), [...allUids], false)');
+    expect(handler).to.include('getPublicTeamUsers(this.domainId(), [...allUids])');
+    expect(handler).to.include('searchPublicTeamUsers(this.domainId(), q, 20)');
     expect(handler).to.include('!Number.isSafeInteger(uid) || uid <= 1');
     expect(handler).not.to.include('.filter((uid) => Number.isFinite(uid))');
     expect(handler).not.to.include('JSON.stringify(teams)');

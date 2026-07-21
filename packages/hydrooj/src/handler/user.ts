@@ -646,19 +646,50 @@ const UserApi = {
                 return result;
             }
             if (!arg.search) return [];
+            const limit = Math.min(arg.limit || 10, 10);
+            const canViewStudentIdentity = c.user.hasPerm(PERM.PERM_VIEW_USER_PRIVATE_INFO);
             const udoc =
                 (await user.getById(arg.domainId, +arg.search)) ||
                 (await user.getByUname(arg.domainId, arg.search)) ||
                 (await user.getByEmail(arg.domainId, arg.search));
-            const udocs: User[] = arg.exact ? [] : await user.getPrefixList(arg.domainId, arg.search, Math.min(arg.limit || 10, 10));
+            const udocs: User[] = arg.exact ? [] : await user.getPrefixList(arg.domainId, arg.search, limit);
             if (udoc && !udocs.find((i) => i._id === udoc._id)) {
                 udocs.pop();
                 udocs.unshift(udoc);
             }
+            const userbind = global.Hydro?.model?.userbind;
+            if (!arg.exact && canViewStudentIdentity && userbind?.searchBoundStudents) {
+                const studentMatches = await userbind.searchBoundStudents(arg.domainId, arg.search, limit);
+                const missingUids = studentMatches
+                    .map((student) => student.boundUserId)
+                    .filter((uid) => !udocs.some((candidate) => candidate._id === uid))
+                    .slice(0, Math.max(0, limit - udocs.length));
+                if (missingUids.length) {
+                    const matchedUsers = await user.getList(arg.domainId, missingUids);
+                    for (const uid of missingUids) {
+                        if (matchedUsers[uid]?._id === uid) udocs.push(matchedUsers[uid]);
+                    }
+                }
+            }
+            const students =
+                canViewStudentIdentity && userbind?.findStudentsByUserIds
+                    ? await userbind.findStudentsByUserIds(
+                          arg.domainId,
+                          udocs.map((candidate) => candidate._id),
+                      )
+                    : {};
             for (const i in udocs) {
                 udocs[i].avatarUrl = avatar(udocs[i].avatar);
             }
-            return udocs;
+            return udocs.map((candidate) => {
+                const student = students[String(candidate._id)];
+                return {
+                    ...candidate.serialize(c),
+                    avatarUrl: candidate.avatarUrl,
+                    ...(student?.studentId ? { studentId: student.studentId } : {}),
+                    ...(student?.realName ? { realName: student.realName } : {}),
+                };
+            });
         },
     ),
 } as const;

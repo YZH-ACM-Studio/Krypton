@@ -623,6 +623,7 @@ export function ContestDetailPage() {
   const isACM = tdoc.rule === 'acm';
   const isExam = tdoc.rule === 'exam';
   const isTeam = isTeamContest(tdoc);
+  const scoreDoc: R = isTeam ? data.teamStatus || {} : tsdoc;
   const canManageContest = !!data.canManageContest;
   const canViewRecord = !!data.canViewRecord;
   const isClientRequired = tdoc.entryMode === 'client_required';
@@ -669,7 +670,7 @@ export function ContestDetailPage() {
             <div className="mt-4 grid gap-3 text-sm text-muted-foreground sm:grid-cols-3">
               <span className="inline-flex items-center gap-2">
                 <Users className="size-4" />
-                {tdoc.attend || 0} 人参加
+                {isTeam ? data.teamCount ?? 0 : tdoc.attend || 0} {isTeam ? '队参赛' : '人参加'}
               </span>
               <span className="inline-flex items-center gap-2">
                 <List className="size-4" />
@@ -783,8 +784,8 @@ export function ContestDetailPage() {
                 </DetailAction>
               ) : null}
               {attended && canViewRecord ? (
-                <DetailAction href={myRecordUrl} icon={<Code className="size-4" />} title="我的提交">
-                  查看本场个人提交
+                <DetailAction href={myRecordUrl} icon={<Code className="size-4" />} title={isTeam ? '本队提交' : '我的提交'}>
+                  {isTeam ? '查看本队全部提交与真实提交者' : '查看本场个人提交'}
                 </DetailAction>
               ) : null}
             </CardContent>
@@ -794,20 +795,20 @@ export function ContestDetailPage() {
         <div className="space-y-3">
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm">我的成绩</CardTitle>
+              <CardTitle className="text-sm">{isTeam ? '本队成绩' : '我的成绩'}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               {attended ? (
                 <>
-                  {typeof tsdoc.rank === 'number' && tsdoc.rank > 0 ? <Row label="当前排名" value={`# ${tsdoc.rank}`} /> : null}
-                  {typeof tsdoc.score === 'number' ? <Row label={isACM ? '通过题数' : '总得分'} value={String(tsdoc.score)} /> : null}
+                  {typeof scoreDoc.rank === 'number' && scoreDoc.rank > 0 ? <Row label="当前排名" value={`# ${scoreDoc.rank}`} /> : null}
+                  {typeof scoreDoc.score === 'number' ? <Row label={isACM ? '通过题数' : '总得分'} value={String(scoreDoc.score)} /> : null}
                   {tsdoc.endAt ? <Row label="结束时间" value={formatDateTime(tsdoc.endAt, locale)} /> : null}
                   <a href={`${detailUrl}/scoreboard`} className="block pt-2 text-xs text-primary hover:underline">
                     查看完整排行 →
                   </a>
                 </>
               ) : (
-                <p className="text-xs text-muted-foreground">参加比赛后显示个人成绩</p>
+                <p className="text-xs text-muted-foreground">{isTeam ? '加入队伍并参加比赛后显示本队成绩' : '参加比赛后显示个人成绩'}</p>
               )}
             </CardContent>
           </Card>
@@ -863,7 +864,7 @@ export function ContestDetailPage() {
               ) : null}
               {attended && canViewRecord ? (
                 <SidebarLink href={myRecordUrl} icon={<Code className="size-3.5" />}>
-                  我的提交
+                  {isTeam ? '本队提交' : '我的提交'}
                 </SidebarLink>
               ) : null}
               {canManageContest ? (

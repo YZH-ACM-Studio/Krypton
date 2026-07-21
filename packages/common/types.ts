@@ -265,6 +265,8 @@ export interface RecordPayload extends RecordJudgeInfo {
     hackTarget?: string;
     /** 0 if pretest&script */
     contest?: string;
+    /** Stable team identity for a team-mode ACM submission. */
+    contestTeamId?: string;
 
     files?: Record<string, string>;
     manualGrade?: {

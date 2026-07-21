@@ -40,6 +40,7 @@ export default class RecordModel {
         'progress',
         'domainId',
         'contest',
+        'contestTeamId',
         'judger',
         'judgeAt',
         'status',
@@ -230,6 +231,8 @@ export default class RecordModel {
         addTask: boolean,
         args: {
             contest?: ObjectId;
+            /** Original contest context for pretests, whose `contest` field is replaced by the pretest sentinel. */
+            contestContext?: ObjectId;
             input?: string[];
             files?: Record<string, string>;
             hackTarget?: ObjectId;
@@ -256,6 +259,7 @@ export default class RecordModel {
             judgeAt: null,
             rejudged: false,
         };
+        const contestContext = args.contestContext || args.contest;
         let isContest = !!args.contest;
         if (args.contest) data.contest = args.contest;
         if (args.files) data.files = args.files;
@@ -309,6 +313,18 @@ export default class RecordModel {
                     error,
                 );
                 throw error;
+            }
+        }
+        if (
+            contestContext &&
+            ![RecordModel.RECORD_PRETEST, RecordModel.RECORD_GENERATE].some((sentinel) => sentinel.equals(contestContext))
+        ) {
+            const resolver = global.Hydro?.model?.contest?.resolveTeamSubmissionCapability;
+            if (typeof resolver !== 'function') throw new Error('Contest submission capability resolver is unavailable.');
+            const capability = await resolver(domainId, contestContext, uid);
+            if (capability.mode === 'team') {
+                if (!(capability.teamId instanceof ObjectId)) throw new ValidationError('contestTeamId');
+                data.contestTeamId = capability.teamId;
             }
         }
         let res;

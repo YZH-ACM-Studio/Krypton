@@ -1,5 +1,6 @@
 import { sumBy } from 'lodash';
 import { Filter, ObjectId } from 'mongodb';
+import { Logger } from '@hydrooj/utils';
 import { Counter, formatSeconds, getAlphabeticId, sleep, Time } from '@hydrooj/utils/lib/utils';
 import { Context } from '../context';
 import {
@@ -35,12 +36,16 @@ import {
     planParticipationModeTransition,
     teamModeClearConfirmation,
 } from './contest-participation';
+import type { ContestTeamDoc } from './contest-team';
+import * as contestTeamStatus from './contest-team-status';
 import * as document from './document';
 import MessageModel from './message';
 import * as oplog from './oplog';
 import problem, { ProblemModel } from './problem';
 import RecordModel from './record';
 import UserModel, { User } from './user';
+
+const logger = new Logger('model/contest');
 
 export enum PrintTaskStatus {
     pending = 'pending',
@@ -218,6 +223,57 @@ export {
     teamModeClearConfirmation,
 } from './contest-participation';
 
+export interface TeamSubmissionCapability {
+    mode: 'individual' | 'team';
+    contestId: ObjectId;
+    teamId?: ObjectId;
+    captainUid?: number;
+    memberUids?: number[];
+    /** P1.15 attaches the active Vigil-session assertion at this same resolver boundary. */
+    vigilSessionCheck: 'not_applicable' | 'reserved';
+}
+
+export async function resolveTeamSubmissionCapability(domainId: string, tid: ObjectId, uid: number): Promise<TeamSubmissionCapability> {
+    if (!(tid instanceof ObjectId) || !Number.isSafeInteger(uid) || uid <= 0) throw new ValidationError('contestTeamId');
+    const tdoc = await get(domainId, tid);
+    if (getParticipationMode(tdoc) !== 'team') {
+        return { mode: 'individual', contestId: tid, vigilSessionCheck: 'not_applicable' };
+    }
+    let team: ContestTeamDoc | null = null;
+    try {
+        if (tdoc.rule !== 'acm') throw new ValidationError('participationMode');
+        const [tsdoc, currentTeam] = await Promise.all([
+            getStatus(domainId, tid, uid),
+            collTeam.findOne({ domainId, contestId: tid, memberUids: uid, active: true }),
+        ]);
+        team = currentTeam;
+        if (!tsdoc?.attend) throw new ContestTeamConflictError('not_attended');
+        if (!team) throw new ContestTeamConflictError('active_team_required');
+        if (team.captainUid !== uid) throw new ContestTeamConflictError('captain_required');
+        const eligibility = global.Hydro?.model?.contestTeam?.assertContestTeamEligibility;
+        if (typeof eligibility !== 'function') throw new Error('Contest team eligibility service is unavailable.');
+        await eligibility(domainId, tdoc, uid);
+        return {
+            mode: 'team',
+            contestId: tid,
+            teamId: team.teamId,
+            captainUid: team.captainUid,
+            memberUids: [...team.memberUids],
+            vigilSessionCheck: 'reserved',
+        };
+    } catch (error: any) {
+        logger.warn(
+            'Team submission authorization denied domain=%s contest=%s team=%s actor=%d operation=record.create result=rejected reason=%s',
+            domainId,
+            tid,
+            team?.teamId || '-',
+            uid,
+            error?.message || error?.name || 'unknown',
+        );
+        throw error;
+    }
+}
+
 export function buildContestRule<T>(def: Optional<ContestRule<T>, 'applyProjection'>): ContestRule<T>;
 export function buildContestRule<T>(def: Partial<ContestRule<T>>, baseRule: ContestRule<T>): ContestRule<T>;
 export function buildContestRule<T>(def: Partial<ContestRule<T>>, baseRule: ContestRule<T> = {} as any) {
@@ -366,7 +422,10 @@ const acm = buildContestRule({
                     value,
                     hover: accept ? formatSeconds(doc.time) : '',
                     raw: doc.rid,
-                    style: accept && doc.rid.getTimestamp().getTime() === meta?.first?.[pid] ? 'background-color: rgb(217, 240, 199);' : undefined,
+                    style:
+                        accept && contestTeamStatus.matchesFirstAcceptedRid(doc.rid, meta?.first?.[pid])
+                            ? 'background-color: rgb(217, 240, 199);'
+                            : undefined,
                 });
             }
         }
@@ -994,7 +1053,7 @@ export const RULES: ContestRules = {
 };
 
 const collBalloon = db.collection('contest.balloon');
-const collTeam = db.collection('contest.teams');
+const collTeam = db.collection<ContestTeamDoc>('contest.teams');
 const collTeamInvite = db.collection('contest.teamInvites');
 
 async function auditParticipationModeChange(
@@ -1278,9 +1337,13 @@ export async function getRelated(domainId: string, pid: number, rule?: string) {
     return await document.getMulti(domainId, document.TYPE_CONTEST, { pids: pid, rule: rule || { $in: rules } }).toArray();
 }
 
-export async function addBalloon(domainId: string, tid: ObjectId, uid: number, rid: ObjectId, pid: number) {
-    const balloon = await collBalloon.find({ domainId, tid, pid }).project({ uid: 1 }).toArray();
-    if (balloon.find((i) => i.uid === uid)) return null;
+export async function addBalloon(domainId: string, tid: ObjectId, uid: number, rid: ObjectId, pid: number, contestTeamId?: ObjectId) {
+    if (contestTeamId !== undefined && !(contestTeamId instanceof ObjectId)) throw new ValidationError('contestTeamId');
+    const identityKey = contestTeamId ? `t:${contestTeamId.toHexString()}` : `u:${uid}`;
+    const balloon = await collBalloon.find({ domainId, tid, pid }).project({ uid: 1, contestTeamId: 1 }).toArray();
+    if (contestTeamId ? balloon.some((item) => item.contestTeamId?.equals(contestTeamId)) : balloon.some((item) => !item.contestTeamId && item.uid === uid)) {
+        return null;
+    }
     let isFirst = !balloon.length;
     if (isFirst) {
         let pending: RecordDoc[] = [];
@@ -1305,9 +1368,29 @@ export async function addBalloon(domainId: string, tid: ObjectId, uid: number, r
         tid,
         pid,
         uid,
+        identityKey,
+        identityIndexed: true as const,
+        ...(contestTeamId ? { contestTeamId } : {}),
         ...(isFirst ? { first: true } : {}),
     };
-    await collBalloon.insertOne(newBdoc);
+    try {
+        await collBalloon.insertOne(newBdoc);
+    } catch (error: any) {
+        if (error?.code !== 11000) throw error;
+        const existing = await collBalloon.findOne({
+            domainId,
+            tid,
+            pid,
+            $or: [
+                { identityKey },
+                ...(contestTeamId ? [{ contestTeamId }] : [{ uid, contestTeamId: { $exists: false } }]),
+            ],
+        });
+        if (existing) return null;
+        if (!newBdoc.first) throw error;
+        delete newBdoc.first;
+        await collBalloon.insertOne(newBdoc);
+    }
     bus.emit('contest/balloon', domainId, tid, newBdoc);
     return rid;
 }
@@ -1334,14 +1417,23 @@ export async function updateStatus(
     uid: number,
     rid: ObjectId,
     pid: number,
-    {
-        status = STATUS.STATUS_WAITING,
-        score = 0,
-        subtasks,
-        lang,
-    }: { status?: STATUS; score?: number; subtasks?: Record<number, SubtaskResult>; lang?: string } = {},
+    result: Partial<RecordDoc> = {},
 ) {
+    const { status = STATUS.STATUS_WAITING, score = 0, subtasks, lang } = result;
     const tdoc = await get(domainId, tid);
+    if (getParticipationMode(tdoc) === 'team') {
+        const synced = await contestTeamStatus.synchronizeFromRecord(
+            tdoc,
+            rid,
+            (recordId) => RecordModel.get(domainId, recordId),
+            (contestDoc, journal) => RULES[contestDoc.rule].stat(contestDoc, journal),
+        );
+        if (!synced.record._id.equals(rid) || synced.record.uid !== uid || synced.record.pid !== pid) throw new ValidationError('record');
+        if (tdoc.balloon && synced.record.status === STATUS.STATUS_ACCEPTED && !isLocked(tdoc)) {
+            await addBalloon(domainId, tid, uid, rid, pid, synced.record.contestTeamId);
+        }
+        return synced.status;
+    }
     if (tdoc.balloon && status === STATUS.STATUS_ACCEPTED && !isLocked(tdoc)) await addBalloon(domainId, tid, uid, rid, pid);
     const tsdoc = await document.revPushStatus(
         tdoc.domainId,
@@ -1413,6 +1505,10 @@ export async function recalcStatus(domainId: string, tid: ObjectId) {
         document.get(domainId, document.TYPE_CONTEST, tid),
         document.getMultiStatus(domainId, document.TYPE_CONTEST, { docId: tid }).toArray(),
     ]);
+    if (getParticipationMode(tdoc) === 'team') {
+        await contestTeamStatus.recalculateAll(tdoc, (contestDoc, journal) => RULES[contestDoc.rule].stat(contestDoc, journal));
+        return [];
+    }
     const tasks = [];
     for (const tsdoc of tsdocs || []) {
         if (tsdoc.journal) {
@@ -1455,6 +1551,70 @@ export function canShowScoreboard(this: { user: User }, tdoc: Tdoc, allowPermOve
     return false;
 }
 
+export type TeamScoreboardEntry = contestTeamStatus.TeamScoreboardEntry;
+
+export async function getTeamScoreboardEntries(tdoc: Tdoc): Promise<TeamScoreboardEntry[]> {
+    if (getParticipationMode(tdoc) !== 'team' || tdoc.rule !== 'acm') throw new ValidationError('participationMode');
+    const [teams, statuses] = await Promise.all([
+        collTeam.find({ domainId: tdoc.domainId, contestId: tdoc.docId }).toArray(),
+        contestTeamStatus.getMulti(tdoc.domainId, tdoc.docId).toArray(),
+    ]);
+    return contestTeamStatus.mergeScoreboardEntries(tdoc, teams, statuses);
+}
+
+function teamScoreboardName(team: ContestTeamDoc, udict: BaseUserDict, showDisplayName: boolean): string {
+    const display = (uid: number) => {
+        const udoc = udict[uid];
+        if (!udoc) return `UID ${uid}`;
+        return showDisplayName && udoc.displayName ? `${udoc.displayName} (${udoc.uname})` : udoc.uname;
+    };
+    return `${team.name}\nCaptain: ${display(team.captainUid)}\nMembers: ${team.memberUids.map(display).join(' / ')}`;
+}
+
+async function getTeamScoreboard(
+    this: Handler,
+    tdoc: Tdoc,
+    config: ScoreboardConfig,
+    pdict: ProblemDict,
+): Promise<[ScoreboardRow[], BaseUserDict]> {
+    const entries = await getTeamScoreboardEntries(tdoc);
+    const memberUids = Array.from(new Set(entries.flatMap(({ team }) => team.memberUids)));
+    const udict = await UserModel.getListForRender(tdoc.domainId, memberUids, config.showDisplayName ? ['displayName'] : []);
+    const ranked = await db.ranked(
+        entries,
+        (left, right) => left.status.accept === right.status.accept && left.status.time === right.status.time,
+    );
+    const first = contestTeamStatus.firstAcceptedRidByProblem(
+        entries.map((entry) => entry.status),
+        STATUS.STATUS_ACCEPTED,
+    );
+    const ruleConfig = { ...config, showDisplayName: false };
+    const columns = await RULES.acm.scoreboardHeader(ruleConfig, this.translate.bind(this), tdoc, pdict);
+    columns[1] = { type: 'string', value: this.translate('Team') };
+    const rows: ScoreboardRow[] = [columns];
+    for (const [rank, entry] of ranked) {
+        const captain = udict[entry.team.captainUid] || ({ uname: `UID ${entry.team.captainUid}` } as any);
+        const row = await RULES.acm.scoreboardRow(
+            ruleConfig,
+            this.translate.bind(this),
+            tdoc,
+            pdict,
+            captain,
+            rank,
+            { ...entry.status, uid: entry.team.captainUid },
+            { first },
+        );
+        row[1] = { type: 'string', value: teamScoreboardName(entry.team, udict, config.showDisplayName), raw: entry.team.teamId };
+        row.raw = {
+            teamId: entry.team.teamId,
+            captainUid: entry.team.captainUid,
+            memberUids: entry.team.memberUids,
+        };
+        rows.push(row);
+    }
+    return [rows, udict];
+}
+
 export async function getScoreboard(
     this: Handler,
     domainId: string,
@@ -1463,9 +1623,17 @@ export async function getScoreboard(
 ): Promise<[Tdoc, ScoreboardRow[], BaseUserDict, ProblemDict]> {
     const tdoc = await get(domainId, tid);
     if (!canShowScoreboard.call(this, tdoc)) throw new ContestScoreboardHiddenError(tid);
-    const tsdocsCursor = getMultiStatus(domainId, { docId: tid }).sort(RULES[tdoc.rule].statusSort);
     const pdict = await problem.getList(domainId, tdoc.pids, true, true, problem.PROJECTION_CONTEST_DETAIL);
-    const [rows, udict] = await RULES[tdoc.rule].scoreboard(config, this.translate.bind(this), tdoc, pdict, tsdocsCursor);
+    const [rows, udict] =
+        getParticipationMode(tdoc) === 'team'
+            ? await getTeamScoreboard.call(this, tdoc, config, pdict)
+            : await RULES[tdoc.rule].scoreboard(
+                  config,
+                  this.translate.bind(this),
+                  tdoc,
+                  pdict,
+                  getMultiStatus(domainId, { docId: tid }).sort(RULES[tdoc.rule].statusSort),
+              );
     await bus.parallel('contest/scoreboard', tdoc, rows, udict, pdict);
     return [tdoc, rows, udict, pdict];
 }
@@ -1545,31 +1713,37 @@ export function getMultiPrintTask(domainId: string, tid: ObjectId, query = {}) {
 }
 
 export async function apply(ctx: Context) {
-    ctx.on('contest/balloon', (domainId, tid, bdoc) => {
+    ctx.on('contest/balloon', async (domainId, tid, bdoc) => {
         if (!bdoc.first) return;
-        (async () => {
-            const tsdocs = await getMultiStatus(domainId, { docId: tid, subscribe: 1 }).toArray();
-            const uids = Array.from<number>(new Set(tsdocs.map((tsdoc) => tsdoc.uid)));
-            const [team, tdoc, pdoc] = await Promise.all([
-                UserModel.getById(domainId, bdoc.uid),
-                get(domainId, tid),
-                ProblemModel.get(domainId, bdoc.pid),
-            ]);
-            await MessageModel.send(
-                1,
-                uids,
-                JSON.stringify({
-                    message: 'First Blood Notice\n{0} solved problem {1} ({2})',
-                    avatar: avatar(team.avatar),
-                    params: [team.uname, getAlphabeticId(tdoc.pids.indexOf(bdoc.pid)), pdoc.title],
-                }),
-                MessageModel.FLAG_I18N,
-            );
-        })();
+        const tsdocs = await getMultiStatus(domainId, { docId: tid, subscribe: 1 }).toArray();
+        const uids = Array.from<number>(new Set(tsdocs.map((tsdoc) => tsdoc.uid)));
+        const [actor, team, tdoc, pdoc] = await Promise.all([
+            UserModel.getById(domainId, bdoc.uid),
+            bdoc.contestTeamId ? collTeam.findOne({ domainId, contestId: tid, teamId: bdoc.contestTeamId }) : Promise.resolve(null),
+            get(domainId, tid),
+            ProblemModel.get(domainId, bdoc.pid),
+        ]);
+        if (bdoc.contestTeamId && !team) throw new Error(`First-blood balloon references missing team ${domainId}/${tid}/${bdoc.contestTeamId}.`);
+        await MessageModel.send(
+            1,
+            uids,
+            JSON.stringify({
+                message: 'First Blood Notice\n{0} solved problem {1} ({2})',
+                avatar: avatar(actor.avatar),
+                params: [team?.name || actor.uname, getAlphabeticId(tdoc.pids.indexOf(bdoc.pid)), pdoc.title],
+            }),
+            MessageModel.FLAG_I18N,
+        );
     });
+    await ctx.db.clearIndexes(collBalloon, ['basic', 'contestBalloonIndividual', 'contestBalloonTeam', 'contestBalloonIdentity']);
     await ctx.db.ensureIndexes(
         collBalloon,
-        { key: { domainId: 1, tid: 1, pid: 1, uid: 1 }, unique: true, name: 'basic' },
+        {
+            key: { domainId: 1, tid: 1, pid: 1, identityKey: 1 },
+            unique: true,
+            name: 'contestBalloonIdentityV2',
+            partialFilterExpression: { identityIndexed: true },
+        },
         { key: { domainId: 1, tid: 1, pid: 1 }, unique: true, name: 'first', partialFilterExpression: { first: true } },
     );
 }
@@ -1581,6 +1755,7 @@ global.Hydro.model.contest = {
     PrintTaskStatus,
     buildContestRule,
     getParticipationMode,
+    resolveTeamSubmissionCapability,
     normalizeParticipationConfig,
     planParticipationModeTransition,
     teamModeClearConfirmation,
@@ -1610,6 +1785,7 @@ global.Hydro.model.contest = {
     canShowScoreboard,
     canViewHiddenScoreboard,
     getScoreboard,
+    getTeamScoreboardEntries,
     addClarification,
     addClarificationReply,
     getClarification,

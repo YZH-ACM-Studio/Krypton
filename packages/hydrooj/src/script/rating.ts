@@ -54,7 +54,7 @@ export const RpTypes: Record<string, RpDef> = {
     contest: {
         async run(domainIds, udict, report) {
             const contests: Tdoc[] = (await contest
-                .getMulti('', { domainId: { $in: domainIds }, rated: true })
+                .getMulti('', { domainId: { $in: domainIds }, rated: true, participationMode: { $ne: 'team' } })
                 .limit(10)
                 .toArray()) as any;
             if (contests.length) await report({ message: `Found ${contests.length} contests in ${domainIds[0]}` });

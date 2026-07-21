@@ -180,6 +180,13 @@ beforeEach(() => {
     resetUpdates.length = 0;
     deletedStatQueries.length = 0;
     historyInserts.length = 0;
+    (global as any).Hydro.model.contest = {
+        resolveTeamSubmissionCapability: async (_domainId: string, contestId: ObjectId) => ({
+            mode: 'individual',
+            contestId,
+            vigilSessionCheck: 'not_applicable',
+        }),
+    };
 });
 
 describe('record judge problem config', () => {
@@ -521,5 +528,66 @@ describe('record judge problem config', () => {
         expect(insertedRecords[0].judgeAt).to.be.instanceOf(Date);
         expect(insertedRecords[0].judgeAt.getTime()).to.be.at.least(before.getTime());
         expect(queuedTasks).to.deep.equal([]);
+    });
+
+    it('derives and persists the stable team identity before inserting a contest record', async () => {
+        problemConfig = { type: 'default' };
+        const contestId = new ObjectId();
+        const teamId = new ObjectId();
+        const calls: any[] = [];
+        (global as any).Hydro.model.contest.resolveTeamSubmissionCapability = async (domainId: string, tid: ObjectId, uid: number) => {
+            calls.push({ domainId, tid, uid });
+            return { mode: 'team', contestId: tid, teamId, captainUid: uid, memberUids: [uid], vigilSessionCheck: 'reserved' };
+        };
+
+        await recordModel.add('system', 7, 42, 'cc', 'int main() {}', false, { contest: contestId, type: 'judge' });
+
+        expect(calls).to.have.length(1);
+        expect(calls[0]).to.include({ domainId: 'system', uid: 42 });
+        expect(calls[0].tid.equals(contestId)).to.equal(true);
+        expect(insertedRecords).to.have.length(1);
+        expect(insertedRecords[0].contest.equals(contestId)).to.equal(true);
+        expect(insertedRecords[0].contestTeamId.equals(teamId)).to.equal(true);
+        expect(insertedRecords[0].uid).to.equal(42);
+    });
+
+    it('uses the original team contest context for pretests while retaining the pretest sentinel', async () => {
+        problemConfig = { type: 'default' };
+        const contestId = new ObjectId();
+        const teamId = new ObjectId();
+        (global as any).Hydro.model.contest.resolveTeamSubmissionCapability = async () => ({
+            mode: 'team',
+            contestId,
+            teamId,
+            captainUid: 42,
+            memberUids: [42],
+            vigilSessionCheck: 'reserved',
+        });
+
+        await recordModel.add('system', 7, 42, 'cc', 'int main() {}', false, {
+            type: 'pretest',
+            input: ['1'],
+            contestContext: contestId,
+        });
+
+        expect(insertedRecords).to.have.length(1);
+        expect(insertedRecords[0].contest.equals(recordModel.RECORD_PRETEST)).to.equal(true);
+        expect(insertedRecords[0].contestTeamId.equals(teamId)).to.equal(true);
+    });
+
+    it('does not insert any record when the unified team capability rejects the actor', async () => {
+        problemConfig = { type: 'default' };
+        const contestId = new ObjectId();
+        (global as any).Hydro.model.contest.resolveTeamSubmissionCapability = async () => {
+            throw new Error('captain_required');
+        };
+
+        const error = await recordModel
+            .add('system', 7, 43, 'cc', 'int main() {}', false, { contest: contestId, type: 'judge' })
+            .catch((caught) => caught);
+
+        expect(error).to.be.instanceOf(Error);
+        expect(error.message).to.equal('captain_required');
+        expect(insertedRecords).to.deep.equal([]);
     });
 });

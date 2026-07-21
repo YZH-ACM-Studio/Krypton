@@ -1353,8 +1353,11 @@ export function ContestManagePage() {
                   {[
                     ['总提交', submissionStats.total ?? 0],
                     ['AC 数', submissionStats.accepted ?? 0],
-                    ['提交人数', submissionStats.participants ?? 0],
-                    ['人均提交', submissionStats.participants ? (submissionStats.total / submissionStats.participants).toFixed(1) : '—'],
+                    [submissionStats.participantUnit === 'team' ? '提交队伍' : '提交人数', submissionStats.participants ?? 0],
+                    [
+                      submissionStats.participantUnit === 'team' ? '队均提交' : '人均提交',
+                      submissionStats.participants ? (submissionStats.total / submissionStats.participants).toFixed(1) : '—',
+                    ],
                   ].map(([label, value]) => (
                     <div key={String(label)} className="rounded-md border bg-muted/20 px-3 py-2">
                       <div className="text-[11px] text-muted-foreground">{label}</div>
@@ -1458,6 +1461,8 @@ export function ContestProblemListPage() {
   const showScore = data.showScore;
   // P1.4：本场每题通过统计（仅 ACM；考试壳 examMode 下后端不下发、前端也不渲染——红线1）。
   const liveStats: Record<string, R> | null = tdoc.rule === 'acm' && !data.examMode && data.liveStats ? data.liveStats : null;
+  const liveStatsUnit = data.liveStatsParticipantUnit === 'team' ? '队' : '人';
+  const teamMode = tdoc.participationMode === 'team';
   const [workspaceTab, setWorkspaceTab] = useState<'problems' | 'submissions' | 'clarifications'>('problems');
 
   return (
@@ -1479,7 +1484,7 @@ export function ContestProblemListPage() {
         onValueChange={setWorkspaceTab}
         items={[
           { value: 'problems', label: '题目', count: pids.length, icon: ListChecks },
-          { value: 'submissions', label: '我的提交', count: rdocs.length, icon: Send },
+          { value: 'submissions', label: teamMode ? '本队提交' : '我的提交', count: rdocs.length, icon: Send },
           { value: 'clarifications', label: '澄清', count: tcdocs.length, icon: MessageSquare },
         ]}
         size="md"
@@ -1515,7 +1520,8 @@ export function ContestProblemListPage() {
                           className="text-right font-mono text-xs text-muted-foreground"
                           title={`AC 提交 ${ls?.acSubmits ?? 0} / 总提交 ${ls?.totalSubmits ?? 0}`}
                         >
-                          <span className={ls?.acUsers ? 'text-green-600 dark:text-green-400' : ''}>{ls?.acUsers ?? 0}</span>/{ls?.triedUsers ?? 0} 人
+                          <span className={ls?.acUsers ? 'text-green-600 dark:text-green-400' : ''}>{ls?.acUsers ?? 0}</span>/{ls?.triedUsers ?? 0}{' '}
+                          {liveStatsUnit}
                         </TableCell>
                       )}
                       {showScore && <TableCell className="text-right font-mono text-sm">{tdoc.score?.[pid] || 100}</TableCell>}
@@ -1841,6 +1847,7 @@ export function ContestBalloonPage() {
   const bdocs: R[] = data.bdocs || [];
   const pdict: Record<string, R> = data.pdict || {};
   const udict: Record<string, GenericUserDoc> = bs.udict || data.udict || {};
+  const teamDict: Record<string, R> = data.teamDict || {};
   const tid = tdoc.docId || tdoc._id;
   const contestUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
   const [balloonRows, setBalloonRows] = useState<BalloonColorRow[]>(() => normalizeBalloonRows(tdoc, pdict));
@@ -1933,7 +1940,7 @@ export function ContestBalloonPage() {
                     <TableHead className="w-24">状态</TableHead>
                     <TableHead className="w-28">编号</TableHead>
                     <TableHead>题目</TableHead>
-                    <TableHead className="w-36">提交者</TableHead>
+                    <TableHead className="w-44">队伍 / 提交者</TableHead>
                     <TableHead className="w-36">送达者</TableHead>
                     <TableHead className="w-28 text-center">奖励</TableHead>
                     <TableHead className="w-20 text-center">操作</TableHead>
@@ -1942,6 +1949,7 @@ export function ContestBalloonPage() {
                 <TableBody>
                   {visibleBalloons.map((b) => {
                     const u = getUser(udict, b.uid);
+                    const team = b.contestTeamId ? teamDict[String(b.contestTeamId)] : null;
                     const sentBy = getUser(udict, b.sent);
                     const p = pdict[String(b.pid)] || {};
                     const index = (tdoc.pids || []).map(String).indexOf(String(b.pid));
@@ -1969,7 +1977,8 @@ export function ContestBalloonPage() {
                           </div>
                         </TableCell>
                         <TableCell className="text-sm">
-                          <div>{u?.uname || `UID ${b.uid}`}</div>
+                          <div>{team?.name || u?.uname || `UID ${b.uid}`}</div>
+                          {team ? <div className="text-xs text-muted-foreground">提交者：{u?.uname || `UID ${b.uid}`}</div> : null}
                           {submitTime && <div className="text-xs text-muted-foreground">{submitTime}</div>}
                         </TableCell>
                         <TableCell className="text-sm">

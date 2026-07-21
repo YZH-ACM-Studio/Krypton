@@ -310,7 +310,7 @@ export interface ProblemDataWriteConfirmation {
 }
 
 export type RecordDoc = {
-    [K in keyof RecordPayload]: K extends 'hackTarget' | 'contest' ? ObjectId : RecordPayload[K];
+    [K in keyof RecordPayload]: K extends 'hackTarget' | 'contest' | 'contestTeamId' ? ObjectId : RecordPayload[K];
 } & {
     _id: ObjectId;
     notify?: boolean;
@@ -810,6 +810,12 @@ export interface ContestBalloonDoc {
     tid: ObjectId;
     pid: number;
     uid: number;
+    /** Stable team identity for team-mode ACM; uid remains the true submitting actor. */
+    contestTeamId?: ObjectId;
+    /** Unique participant identity: `u:<uid>` for individuals or `t:<teamId>` for teams. */
+    identityKey?: string;
+    /** Equality-only partial-index marker for records carrying identityKey. */
+    identityIndexed?: true;
     first?: boolean;
     /** Sent by */
     sent?: number;
@@ -857,6 +863,7 @@ declare module './service/db' {
         schedule: Schedule;
         'contest.balloon': ContestBalloonDoc;
         'contest.teams': import('./model/contest-team').ContestTeamDoc;
+        'contest.teamStatuses': import('./model/contest-team-status').TeamContestStatusDoc;
         lock: LockDoc;
     }
 }
@@ -874,6 +881,7 @@ export interface Model {
     builtin: typeof import('./model/builtin');
     contest: typeof import('./model/contest');
     contestTeam: Omit<typeof import('./model/contest-team'), 'apply'>;
+    contestTeamStatus: Omit<typeof import('./model/contest-team-status'), 'apply'>;
     discussion: typeof import('./model/discussion');
     document: Omit<typeof import('./model/document'), 'apply'>;
     domain: typeof import('./model/domain').default;

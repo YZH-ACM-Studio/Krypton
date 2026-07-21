@@ -1484,7 +1484,7 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             lang,
             code,
             true,
-            pretest ? { input, type: 'pretest' } : { contest: tid, files, type: isSubjective ? 'manual' : 'judge' },
+            pretest ? { input, type: 'pretest', contestContext: tid } : { contest: tid, files, type: isSubjective ? 'manual' : 'judge' },
         );
         if (!pretest) {
             const updates: Promise<unknown>[] = [

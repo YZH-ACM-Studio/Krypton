@@ -125,6 +125,12 @@ async function rejectsActiveSession(work: Promise<unknown>) {
     expect(error.message).to.include('active captain Vigil session');
 }
 
+async function rejectsVirtualPrintSession(work: Promise<unknown>) {
+    const error: any = await work.catch((caught) => caught);
+    expect(error).to.be.instanceOf(Error);
+    expect(error.message).to.include('virtual-print capability');
+}
+
 describe('P1.15 authoritative team client sessions', () => {
     it('accepts only the active captain session bound to the same sid, user, contest and team', async () => {
         const row = {
@@ -176,5 +182,29 @@ describe('P1.15 authoritative team client sessions', () => {
         expect(sessions.find((row) => row.uid === 11)).to.deep.include({ active: true, teamRole: 'captain', teamRevision: 8 });
         expect(sessions.find((row) => row.uid === 11).capabilities.canSubmit).to.equal(true);
         expect(sessions.find((row) => row.uid === 12)).to.deep.include({ active: false, teamRole: 'none', teamRevision: 8 });
+    });
+
+    it('derives virtual-print authority and client version only from the active captain session', async () => {
+        const row = {
+            sid: 'sid-print',
+            domainId: 'system',
+            contestId,
+            teamId,
+            uid: 10,
+            active: true,
+            participationMode: 'team',
+            teamRole: 'captain',
+            capabilities: { canUseVirtualPrint: true },
+            clientVersion: '1.4.0',
+            expiresAt: new Date(Date.now() + 60_000),
+        };
+        sessions.push(row);
+
+        expect(await vigilSessions.assertActiveTeamVirtualPrintSession('sid-print', 'system', contestId, 10, teamId)).to.equal(row);
+        row.capabilities.canUseVirtualPrint = false;
+        await rejectsVirtualPrintSession(vigilSessions.assertActiveTeamVirtualPrintSession('sid-print', 'system', contestId, 10, teamId));
+        row.capabilities.canUseVirtualPrint = true;
+        row.clientVersion = '';
+        await rejectsVirtualPrintSession(vigilSessions.assertActiveTeamVirtualPrintSession('sid-print', 'system', contestId, 10, teamId));
     });
 });

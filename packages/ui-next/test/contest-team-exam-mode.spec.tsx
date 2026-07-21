@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, it } from 'node:test';
 import { readTeamExamModeContext, TeamExamModeSummary } from '../src/components/team-exam-mode.tsx';
 import { dispatchRecordSocketPayload, isTerminalRecordSocketClose } from '../src/hooks/use-record-socket.ts';
+import { createLatestRequestGate } from '../src/lib/latest-request.ts';
 import { READ_ONLY_CODE_EXTENSIONS, resolveReadOnlyCodeLanguage } from '../src/lib/readonly-code-policy.ts';
 
 const workspace = resolve(import.meta.dirname, '../../..');
@@ -110,13 +111,56 @@ describe('P1.14 team Exam Mode UI contracts', () => {
   it('turns the existing record socket role event into an authoritative refresh signal', () => {
     const records: unknown[] = [];
     const revisions: Array<number | null> = [];
+    const snapshots: string[] = [];
     dispatchRecordSocketPayload({ teamRoleChanged: true, teamRevision: 7 }, (rdoc) => records.push(rdoc), (revision) => revisions.push(revision));
+    dispatchRecordSocketPayload(
+      { teamCodeAvailable: true, snapshotId: '64a000000000000000000211' },
+      (rdoc) => records.push(rdoc),
+      (revision) => revisions.push(revision),
+      (snapshotId) => snapshots.push(snapshotId),
+    );
+    dispatchRecordSocketPayload(
+      { teamCodeAvailable: true, snapshotId: 'invalid' },
+      (rdoc) => records.push(rdoc),
+      (revision) => revisions.push(revision),
+      (snapshotId) => snapshots.push(snapshotId),
+    );
     dispatchRecordSocketPayload({ rdoc: { _id: 'record-1' } }, (rdoc) => records.push(rdoc), (revision) => revisions.push(revision));
     expect(revisions).to.deep.equal([7]);
+    expect(snapshots).to.deep.equal(['64a000000000000000000211']);
     expect(records).to.deep.equal([{ _id: 'record-1' }]);
     expect(isTerminalRecordSocketClose('/exam-mode/team-role-conn', 4003)).to.equal(true);
     expect(isTerminalRecordSocketClose('/exam-mode/team-role-conn', 1006)).to.equal(false);
     expect(isTerminalRecordSocketClose('/record-conn', 4003)).to.equal(false);
+  });
+
+  it('keeps the latest snapshot selected when detail responses arrive out of order', async () => {
+    const gate = createLatestRequestGate();
+    let visibleSnapshot = '';
+    let resolveFirst!: (value: string) => void;
+    const firstResponse = new Promise<string>((resolvePromise) => {
+      resolveFirst = resolvePromise;
+    });
+
+    const firstGeneration = gate.begin();
+    const firstCommit = firstResponse.then((snapshotId) => {
+      if (gate.isCurrent(firstGeneration)) visibleSnapshot = snapshotId;
+    });
+    const secondGeneration = gate.begin();
+    await Promise.resolve('snapshot-b').then((snapshotId) => {
+      if (gate.isCurrent(secondGeneration)) visibleSnapshot = snapshotId;
+    });
+    resolveFirst('snapshot-a');
+    await firstCommit;
+
+    expect(visibleSnapshot).to.equal('snapshot-b');
+  });
+
+  it('clears pending snapshot detail state on close, an empty list, and a list failure', () => {
+    const drawer = source('packages/ui-next/src/components/team-code-snapshots.tsx');
+    expect(drawer).to.match(/if \(!open\) \{[\s\S]*?setDetailLoading\(false\);[\s\S]*?return;/);
+    expect(drawer).to.match(/setSelectedId\(null\);\s*setDetail\(null\);\s*setDetailLoading\(false\);/);
+    expect(drawer).to.match(/caught\?\.name !== 'AbortError'[\s\S]*?setDetailLoading\(false\);[\s\S]*?无法读取代码快照列表/);
   });
 
   it('removes every member write affordance and preserves the same internal routes', () => {

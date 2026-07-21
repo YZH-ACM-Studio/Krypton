@@ -114,6 +114,13 @@ export interface EventMap {
         actorUid: number;
         emergency: boolean;
     }) => VoidReturn;
+    'contest/team-code-snapshot': (payload: {
+        domainId: string;
+        contestId: ObjectId;
+        teamId: ObjectId;
+        targetUid: number;
+        snapshotId: ObjectId;
+    }) => VoidReturn;
     'contest/list': (query: Filter<Tdoc>, handler: any) => VoidReturn;
     'contest/scoreboard': (tdoc: Tdoc, rows: ScoreboardRow[], udict: BaseUserDict, pdict: ProblemDict) => VoidReturn;
     'contest/balloon': (domainId: string, tid: ObjectId, bdoc: ContestBalloonDoc) => VoidReturn;

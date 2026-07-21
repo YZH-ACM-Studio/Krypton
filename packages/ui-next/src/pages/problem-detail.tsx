@@ -27,6 +27,7 @@ import { getLangEntry, getStatus, KryptonIDE, type RecordEntry } from '@/compone
 import { MarkdownView } from '@/components/markdown-renderer';
 import { ObjectiveAnswerPanel, type ObjectiveClientQuestion } from '@/components/objective-answer-panel';
 import { ProblemAuthorText, ProblemEditGate } from '@/components/problem-authoring-state';
+import { TeamCodeSendDialog, type TeamCodeBuffer } from '@/components/team-code-snapshots';
 import { readTeamExamModeContext } from '@/components/team-exam-mode';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -643,9 +644,11 @@ export function ProblemDetailPage() {
   const teamCodeWritable =
     teamExamMode?.teamRole === 'captain' && teamExamMode.canEditCode && teamExamMode.canRun && teamExamMode.canSubmit;
   const teamCodeReadOnly = !!teamExamMode && !teamCodeWritable;
+  const teamCanVirtualPrint = teamCodeWritable && teamExamMode?.canUseVirtualPrint === true;
   const teamCanViewRecords = !teamExamMode || teamExamMode.canViewTeamRecords;
   const showNoTestdataWarning = shouldShowNoTestdataWarning(pdoc, !!examMode?.enabled);
   const examUrls: R = examMode?.urls || {};
+  const teamCodeEndpoint = String(examUrls.teamCodeSnapshots || '');
   const mode: string = data.mode || 'normal';
   // mode ∈ 'normal' | 'view' | 'contest' | 'correction' | 'none' (from problem.ts ProblemDetailHandler)
   // Contest mode shows banner + locks down external links; correction reopens them.
@@ -668,6 +671,7 @@ export function ProblemDetailPage() {
 
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const [ideMode, setIdeMode] = useState(false);
+  const [teamCodeBuffer, setTeamCodeBuffer] = useState<TeamCodeBuffer | null>(null);
   // Submit and pretest endpoints must carry tid so the record is attributed to the contest.
   const contestQS = tid ? `?tid=${tid}` : '';
   const submitUrl = `${problemUrl}/submit${contestQS}`;
@@ -1032,12 +1036,24 @@ export function ProblemDetailPage() {
                 recordsVisible={showIdeRecords}
                 recordsCount={ideRecords.length}
                 reloadOnConflict={!!teamExamMode}
+                onSendToTeammates={teamCanVirtualPrint && teamCodeEndpoint ? setTeamCodeBuffer : undefined}
                 className="h-full rounded-none border-0"
               />
             )
           }
           defaultLeftPercent={40}
         />
+        {teamCanVirtualPrint && teamCodeEndpoint ? (
+          <TeamCodeSendDialog
+            open={!!teamCodeBuffer}
+            onOpenChange={(open) => {
+              if (!open) setTeamCodeBuffer(null);
+            }}
+            endpoint={teamCodeEndpoint}
+            problemId={Number(pdoc.docId)}
+            buffer={teamCodeBuffer}
+          />
+        ) : null}
       </div>
     );
   }

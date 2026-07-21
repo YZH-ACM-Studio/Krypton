@@ -162,6 +162,31 @@ export async function notifyTeamRoleChangeOnVigil(payload: VigilTeamRoleChangePa
     );
 }
 
+export interface VigilTeamCodePresence {
+    uid: number;
+    online: boolean;
+}
+
+/** Resolve current WebSocket presence on demand; no lease or presence cache. */
+export async function getTeamCodePresenceOnVigil(ojContestId: string, targetUids: number[]): Promise<VigilTeamCodePresence[]> {
+    const response = await fetchWithRetry(`${baseUrl()}/api/integrations/oj/team-code-presence`, {
+        method: 'POST',
+        body: { contestId: ojContestId, targetUids },
+        retries: 1,
+    });
+    const payload: any = await response.json();
+    if (!Array.isArray(payload?.targets)) throw new Error('Vigil team-code presence returned malformed targets.');
+    const targets = payload.targets.map((target: any) => ({ uid: Number(target?.uid), online: target?.online === true }));
+    if (
+        targets.length !== targetUids.length ||
+        targets.some((target: VigilTeamCodePresence) => !Number.isSafeInteger(target.uid) || !targetUids.includes(target.uid)) ||
+        new Set(targets.map((target: VigilTeamCodePresence) => target.uid)).size !== targets.length
+    ) {
+        throw new Error('Vigil team-code presence did not match the requested recipients.');
+    }
+    return targets;
+}
+
 export interface RecordingDeleteScope {
     cid: string;
     ojUserId?: number;

@@ -40,6 +40,7 @@ import { ContestClientFinishedError, ContestTeamConflictError } from '../error';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
 import type { ContestTeamExamModeContext } from '../model/contest-team';
+import * as contestTeamCode from '../model/contest-team-code';
 import * as discussion from '../model/discussion';
 import * as document from '../model/document';
 import { markManualPending } from '../model/manual-grade';
@@ -282,6 +283,7 @@ function examModeContext(
             record: `/exam-mode/${tid}/record/__RID__`,
             discussionDetail: `/exam-mode/${tid}/discussion/__DID__`,
             discussionCreate: `/exam-mode/${tid}/discussion/create`,
+            ...(teamContext ? { teamCodeSnapshots: `/exam-mode/${tid}/team-code` } : {}),
         },
         ...(teamContext || {}),
     };
@@ -1171,6 +1173,7 @@ class ExamModeDiscussionDetailHandler extends DiscussionDetailHandler {
  * authoritative bootstrap instead of applying role state from the socket.
  */
 class ExamModeTeamRoleConnectionHandler extends ConnectionHandler {
+    domainId: string;
     contestId: ObjectId;
     teamId: ObjectId;
 
@@ -1179,6 +1182,7 @@ class ExamModeTeamRoleConnectionHandler extends ConnectionHandler {
     @param('teamRevision', Types.UnsignedInt)
     async prepare(_domainId: string, tid: ObjectId, bootstrapTeamId: ObjectId, bootstrapTeamRevision: number) {
         const authoritativeDomainId = String(this.domain?._id);
+        this.domainId = authoritativeDomainId;
         const tdoc = await contest.get(authoritativeDomainId, tid);
         if (!tdoc) throw new NotFoundError('Contest');
         let teamContext: ContestTeamExamModeContext | null;
@@ -1210,6 +1214,37 @@ class ExamModeTeamRoleConnectionHandler extends ConnectionHandler {
         this.send({ teamRoleChanged: true, teamRevision: payload.after.revision });
         if (!payload.after.active || !payload.after.memberUids.includes(this.user._id)) {
             this.close(4003, 'Team Exam Mode access revoked');
+        }
+    }
+
+    @subscribe('contest/team-code-snapshot')
+    async onTeamCodeSnapshot(payload: {
+        domainId: string;
+        contestId: ObjectId;
+        teamId: ObjectId;
+        targetUid: number;
+        snapshotId: ObjectId;
+    }) {
+        if (
+            payload.domainId !== this.domainId ||
+            !payload.contestId.equals(this.contestId) ||
+            !payload.teamId.equals(this.teamId) ||
+            payload.targetUid !== this.user._id
+        ) {
+            return;
+        }
+        const currentTeam = await contestTeam.getTeamByMember(this.domainId, this.contestId, this.user._id);
+        if (!currentTeam?.active || !currentTeam.teamId.equals(this.teamId)) return;
+        this.send({ teamCodeAvailable: true, snapshotId: payload.snapshotId.toHexString() });
+        if (!(await contestTeamCode.markNotified(payload.snapshotId, this.user._id))) {
+            logger.warn(
+                'Team-code browser wake-up sent but state update was not applied domain=%s tid=%s team=%s target=%d snapshot=%s',
+                this.domainId,
+                this.contestId,
+                this.teamId,
+                this.user._id,
+                payload.snapshotId,
+            );
         }
     }
 }

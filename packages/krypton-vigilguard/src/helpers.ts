@@ -111,6 +111,35 @@ export async function assertActiveTeamSubmissionSession(
     return session;
 }
 
+/**
+ * Authoritative OJ-side gate for team virtual printing. The browser payload
+ * cannot nominate a machine, client version, role or capability: all four are
+ * read from the active Vigil-bound Hydro session.
+ */
+export async function assertActiveTeamVirtualPrintSession(
+    sid: string,
+    domainId: string,
+    contestId: ObjectId,
+    uid: number,
+    teamId: ObjectId,
+): Promise<ClientSessionDoc> {
+    const session = await currentClientSession(sid);
+    if (
+        !session ||
+        session.domainId !== domainId ||
+        session.uid !== uid ||
+        !session.contestId.equals(contestId) ||
+        session.participationMode !== 'team' ||
+        session.teamRole !== 'captain' ||
+        !session.teamId?.equals(teamId) ||
+        session.capabilities?.canUseVirtualPrint !== true ||
+        !session.clientVersion
+    ) {
+        throw new Error('An active captain Vigil session with virtual-print capability is required.');
+    }
+    return session;
+}
+
 export async function refreshActiveTeamSessionRoles(
     before: { domainId: string; contestId: ObjectId; teamId: ObjectId; memberUids: number[] },
     after: {

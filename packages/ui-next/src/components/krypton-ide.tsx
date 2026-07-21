@@ -65,6 +65,7 @@ import {
   Minimize2,
   Play,
   Plus,
+  Printer,
   RotateCcw,
   Send,
   Settings2,
@@ -683,6 +684,8 @@ export interface KryptonIDEProps {
   reloadOnConflict?: boolean;
   /** Team Exam Mode read-only viewer: expose zoom controls while removing file-import DOM. */
   teamReadOnlyView?: boolean;
+  /** Captain-only virtual print using the current unsaved editor buffer. */
+  onSendToTeammates?: (buffer: { language: string; code: string }) => void;
 
   /* ── Editor modes ───────────────────────────────────────────── */
 
@@ -725,6 +728,7 @@ export function KryptonIDE({
   recordsCount = 0,
   reloadOnConflict = false,
   teamReadOnlyView = false,
+  onSendToTeammates,
   mode = 'full',
   value,
   onValueChange,
@@ -1537,6 +1541,24 @@ export function KryptonIDE({
               <kbd className="ml-0.5 rounded bg-primary-foreground/20 px-1 text-[10px] font-normal">F10</kbd>
             </Button>
           )}
+
+          {onSendToTeammates ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1 text-xs"
+              onClick={() =>
+                onSendToTeammates({
+                  language: selectedLang,
+                  code: viewRef.current?.state.doc.toString() || '',
+                })
+              }
+            >
+              <Printer className="size-3" />
+              发送给队友
+            </Button>
+          ) : null}
 
           {/* Records toggle — right next to submit */}
           {showRecordsButton && (

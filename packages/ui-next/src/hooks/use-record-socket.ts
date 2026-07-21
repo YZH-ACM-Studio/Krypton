@@ -26,6 +26,8 @@ export interface UseRecordSocketOptions {
   onError?: (e: any) => void;
   /** Team roster/captain revision changed; callers must refresh server capabilities. */
   onTeamRoleChange?: (revision: number | null) => void;
+  /** A virtual-print snapshot was persisted for this team member. */
+  onTeamCodeAvailable?: (snapshotId: string) => void;
   /** Disable connection entirely (e.g. when user is signed out). */
   disabled?: boolean;
 }
@@ -34,10 +36,16 @@ export function dispatchRecordSocketPayload(
   payload: any,
   onRdoc: (rdoc: Rdoc) => void,
   onTeamRoleChange?: (revision: number | null) => void,
+  onTeamCodeAvailable?: (snapshotId: string) => void,
 ) {
   if (payload?.teamRoleChanged === true) {
     const revision = Number(payload.teamRevision);
     onTeamRoleChange?.(Number.isSafeInteger(revision) && revision >= 0 ? revision : null);
+    return;
+  }
+  if (payload?.teamCodeAvailable === true) {
+    const snapshotId = String(payload.snapshotId || '');
+    if (/^[0-9a-f]{24}$/.test(snapshotId)) onTeamCodeAvailable?.(snapshotId);
     return;
   }
   if (payload?.rdoc) onRdoc(payload.rdoc);
@@ -47,12 +55,21 @@ export function isTerminalRecordSocketClose(path: RecordSocketPath, code: number
   return path === '/exam-mode/team-role-conn' && code === 4003;
 }
 
-export function useRecordSocket({ path = '/record-conn', filters, onRdoc, onError, onTeamRoleChange, disabled }: UseRecordSocketOptions) {
+export function useRecordSocket({
+  path = '/record-conn',
+  filters,
+  onRdoc,
+  onError,
+  onTeamRoleChange,
+  onTeamCodeAvailable,
+  disabled,
+}: UseRecordSocketOptions) {
   // Latest callbacks captured in refs so re-renders don't re-open the
   // socket merely because the closure changed.
   const onRdocRef = useRef(onRdoc);
   const onErrorRef = useRef(onError);
   const onTeamRoleChangeRef = useRef(onTeamRoleChange);
+  const onTeamCodeAvailableRef = useRef(onTeamCodeAvailable);
   useEffect(() => {
     onRdocRef.current = onRdoc;
   }, [onRdoc]);
@@ -62,6 +79,9 @@ export function useRecordSocket({ path = '/record-conn', filters, onRdoc, onErro
   useEffect(() => {
     onTeamRoleChangeRef.current = onTeamRoleChange;
   }, [onTeamRoleChange]);
+  useEffect(() => {
+    onTeamCodeAvailableRef.current = onTeamCodeAvailable;
+  }, [onTeamCodeAvailable]);
 
   // Stringify filters into a stable dep so React knows when to reconnect.
   const filterKey = stableFilterKey(filters);
@@ -100,7 +120,12 @@ export function useRecordSocket({ path = '/record-conn', filters, onRdoc, onErro
           return;
         }
         if (payload?.teamRoleChanged === true) teamInvalidated = true;
-        dispatchRecordSocketPayload(payload, onRdocRef.current, onTeamRoleChangeRef.current);
+        dispatchRecordSocketPayload(
+          payload,
+          onRdocRef.current,
+          onTeamRoleChangeRef.current,
+          onTeamCodeAvailableRef.current,
+        );
       };
       ws.onerror = (err) => {
         onErrorRef.current?.(err);

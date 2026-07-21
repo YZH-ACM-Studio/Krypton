@@ -23,6 +23,7 @@ import { ensureIndexes } from './src/db';
 import { applyHandlers } from './src/handler';
 import {
     assertActiveTeamSubmissionSession,
+    assertActiveTeamVirtualPrintSession,
     clientSessionKeyFromSession,
     currentClientSession,
     deleteClientSessionByVigilSessionId,
@@ -38,6 +39,7 @@ import { migrationScripts } from './src/migration';
 export * from './src/types';
 export {
     assertActiveTeamSubmissionSession,
+    assertActiveTeamVirtualPrintSession,
     clientSessionKeyFromSession,
     currentClientSession,
     deleteClientSessionByVigilSessionId,
@@ -58,6 +60,7 @@ export {
  */
 export const vigilGuardModel = {
     assertActiveTeamSubmissionSession,
+    assertActiveTeamVirtualPrintSession,
     hitsParticipantScope,
     currentClientSession,
     clientSessionKeyFromSession,

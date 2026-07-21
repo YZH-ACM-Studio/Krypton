@@ -863,6 +863,8 @@ declare module './service/db' {
         schedule: Schedule;
         'contest.balloon': ContestBalloonDoc;
         'contest.teams': import('./model/contest-team').ContestTeamDoc;
+        'contest.teamCodeSnapshots': import('./model/contest-team-code').TeamCodeSnapshotDoc;
+        'contest.teamCodeSnapshotCounters': import('./model/contest-team-code').TeamCodeSnapshotCounterDoc;
         'contest.teamStatuses': import('./model/contest-team-status').TeamContestStatusDoc;
         lock: LockDoc;
     }
@@ -881,6 +883,7 @@ export interface Model {
     builtin: typeof import('./model/builtin');
     contest: typeof import('./model/contest');
     contestTeam: Omit<typeof import('./model/contest-team'), 'apply'>;
+    contestTeamCode: Omit<typeof import('./model/contest-team-code'), 'apply'>;
     contestTeamStatus: Omit<typeof import('./model/contest-team-status'), 'apply'>;
     discussion: typeof import('./model/discussion');
     document: Omit<typeof import('./model/document'), 'apply'>;

@@ -11,9 +11,11 @@
  *    The sidebar items deep-link via hash (#overview / #problems / ...).
  */
 import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { Bell, ClipboardList, ListOrdered, MessageSquare, Moon, Printer, Sun, Swords, Trophy, type LucideIcon } from 'lucide-react';
+import { Bell, ClipboardList, Code2, ListOrdered, MessageSquare, Moon, Printer, Sun, Swords, Trophy, type LucideIcon } from 'lucide-react';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { TeamCodeSnapshotDrawer } from '@/components/team-code-snapshots';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { readTeamExamModeContext, TeamExamModeSummary } from '@/components/team-exam-mode';
 import { useRecordSocket } from '@/hooks/use-record-socket';
@@ -286,6 +288,13 @@ export function ExamContestShell({ children }: { children: ReactNode }) {
   const teamContext = readTeamExamModeContext(examMode);
   const teamRoleTid = String(examMode.tid || '');
   const teamRoleRevision = teamContext?.teamInfo?.revision;
+  const teamCodeEndpoint = String(urls.teamCodeSnapshots || '');
+  const [teamCodeDrawerOpen, setTeamCodeDrawerOpen] = useState(false);
+  const [preferredTeamCodeSnapshotId, setPreferredTeamCodeSnapshotId] = useState<string | null>(null);
+  const openIncomingTeamCode = useCallback((snapshotId: string) => {
+    setPreferredTeamCodeSnapshotId(snapshotId);
+    setTeamCodeDrawerOpen(true);
+  }, []);
   useRecordSocket({
     path: '/exam-mode/team-role-conn',
     filters: {
@@ -295,6 +304,7 @@ export function ExamContestShell({ children }: { children: ReactNode }) {
     },
     onRdoc: () => {},
     onTeamRoleChange: teamContext ? () => window.location.reload() : undefined,
+    onTeamCodeAvailable: teamContext?.teamRole === 'member' ? openIncomingTeamCode : undefined,
     disabled: !teamContext?.teamId || !teamRoleTid || !Number.isSafeInteger(teamRoleRevision),
   });
   const subtitle = teamContext ? (
@@ -325,7 +335,27 @@ export function ExamContestShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-dvh min-w-0 flex-col overflow-hidden bg-background">
-      <ExamTopBar title={title} subtitle={subtitle} />
+      <ExamTopBar
+        title={title}
+        subtitle={subtitle}
+        right={
+          teamContext?.teamId && teamCodeEndpoint ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5 px-2 text-xs sm:px-3"
+              onClick={() => {
+                setPreferredTeamCodeSnapshotId(null);
+                setTeamCodeDrawerOpen(true);
+              }}
+            >
+              <Code2 className="size-3.5" />
+              <span className="hidden sm:inline">代码快照</span>
+            </Button>
+          ) : null
+        }
+      />
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-20 shrink-0 flex-col border-r bg-card/40">
           <nav className="flex flex-col gap-1.5 p-2.5">
@@ -362,6 +392,15 @@ export function ExamContestShell({ children }: { children: ReactNode }) {
           </ScrollArea>
         </main>
       </div>
+      {teamContext?.teamId && teamCodeEndpoint ? (
+        <TeamCodeSnapshotDrawer
+          open={teamCodeDrawerOpen}
+          onOpenChange={setTeamCodeDrawerOpen}
+          endpoint={teamCodeEndpoint}
+          locale={bs.locale}
+          preferredSnapshotId={preferredTeamCodeSnapshotId}
+        />
+      ) : null}
     </div>
   );
 }

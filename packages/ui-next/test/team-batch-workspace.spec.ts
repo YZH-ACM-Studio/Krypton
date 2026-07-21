@@ -38,6 +38,8 @@ describe('P1.17 pre-contest team batch workspace contracts', () => {
     const workspace = readFileSync(resolve(root, 'src/pages/contest-teams.tsx'), 'utf8');
     expect(list).to.include('队伍中心');
     expect(list).to.include('新建组队批次');
+    expect(list).to.include('<TeamDialogContent');
+    expect(list).not.to.include('<DialogContent');
     expect(workspace).to.include("const isBatch = data.workspaceKind === 'batch'");
     expect(workspace).to.include("operation: 'close'");
     expect(workspace).to.include('expectedRevision: Number(batch.revision || 0)');

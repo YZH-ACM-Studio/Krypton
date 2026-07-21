@@ -4,8 +4,18 @@ import { AlertTriangle, ArrowLeft, Crown, Lock, LogOut, Pencil, Plus, Search, Sh
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog } from '@/components/ui/dialog';
 import { DomainUserSearchOption, type DomainUserOption, domainUserSearchLabel } from '@/components/domain-user-search';
+import {
+  TEAM_DIALOG_BUTTON_CLASS,
+  TEAM_DIALOG_CONTROL_CLASS,
+  TEAM_DIALOG_MULTI_SELECT_CLASS,
+  TEAM_DIALOG_TEXTAREA_CLASS,
+  TeamDialogBody,
+  TeamDialogContent,
+  TeamDialogField,
+  TeamDialogFooter,
+} from '@/components/team-dialog';
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { Pagination } from '@/components/ui/pagination';
@@ -74,26 +84,31 @@ function studentIdentity(user: TeamUser) {
 function ConfirmDialog({ action, onClose }: { action: ConfirmAction | null; onClose: () => void }) {
   return (
     <Dialog open={!!action} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{action?.title || '确认操作'}</DialogTitle>
-        </DialogHeader>
-        <form method="post" className="space-y-4 p-5">
-          <p className="text-sm leading-6 text-muted-foreground">{action?.description}</p>
+      <TeamDialogContent
+        titleId="team-confirm-dialog-title"
+        descriptionId="team-confirm-dialog-description"
+        title={action?.title || '确认操作'}
+        description={action?.description || '确认后将立即执行此操作。'}
+        icon={action?.destructive ? <AlertTriangle className="size-5" /> : <ShieldCheck className="size-5" />}
+        tone={action?.destructive ? 'destructive' : 'primary'}
+        onClose={onClose}
+        className="sm:w-[28rem]"
+      >
+        <form method="post" className="flex min-h-0 flex-1 flex-col">
           <input type="hidden" name="operation" value={action?.operation || ''} />
           {Object.entries(action?.fields || {}).map(([name, value]) => (
             <input key={name} type="hidden" name={name} value={value} />
           ))}
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={onClose}>
+          <TeamDialogFooter>
+            <Button type="button" variant="secondary" onClick={onClose} className={TEAM_DIALOG_BUTTON_CLASS}>
               取消
             </Button>
-            <Button type="submit" variant={action?.destructive ? 'destructive' : 'default'}>
+            <Button type="submit" variant={action?.destructive ? 'destructive' : 'default'} className={TEAM_DIALOG_BUTTON_CLASS}>
               确认
             </Button>
-          </div>
+          </TeamDialogFooter>
         </form>
-      </DialogContent>
+      </TeamDialogContent>
     </Dialog>
   );
 }
@@ -669,206 +684,109 @@ export function ContestTeamsPage() {
       ) : null}
 
       <Dialog open={createSelfOpen} onOpenChange={handleCreateSelfOpenChange}>
-        <DialogContent
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="create-self-dialog-title"
-          aria-describedby="create-self-dialog-description"
-          className="sm:w-[30rem] rounded-[28px] border-0 bg-background/95 shadow-[0_32px_90px_-34px_rgba(0,0,0,0.72),0_14px_36px_-22px_rgba(0,0,0,0.52)] ring-1 ring-foreground/10 backdrop-blur-xl"
+        <TeamDialogContent
+          titleId="create-self-dialog-title"
+          descriptionId="create-self-dialog-description"
+          title="创建自主队伍"
+          description="创建后你将成为队长，可以继续邀请至多两名队员。"
+          icon={<Crown className="size-5" />}
+          onClose={() => handleCreateSelfOpenChange(false)}
+          className="sm:w-[30rem]"
         >
-          <div className="flex items-start gap-4 px-6 pb-5 pt-6 sm:px-7 sm:pt-7">
-            <div className="grid size-12 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary shadow-sm ring-1 ring-primary/15">
-              <Crown className="size-5" />
-            </div>
-            <div className="min-w-0 flex-1 pt-0.5">
-              <DialogTitle id="create-self-dialog-title" className="text-balance text-xl font-semibold leading-tight tracking-tight">
-                创建自主队伍
-              </DialogTitle>
-              <p id="create-self-dialog-description" className="mt-1.5 text-pretty text-sm leading-6 text-muted-foreground">
-                创建后你将成为队长，可以继续邀请至多两名队员。
-              </p>
-            </div>
-            <button
-              type="button"
-              aria-label="关闭创建队伍弹窗"
-              title="关闭"
-              onClick={() => handleCreateSelfOpenChange(false)}
-              className="grid size-10 shrink-0 place-items-center rounded-full bg-muted/65 text-muted-foreground ring-1 ring-foreground/10 transition-[scale,background-color,color] duration-150 ease-out hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] motion-reduce:transition-none"
-            >
-              <X className="size-4" />
-            </button>
-          </div>
-          <form
-            method="post"
-            noValidate
-            onSubmit={handleCreateSelfSubmit}
-            className="min-h-0 space-y-5 overflow-y-auto overscroll-contain px-6 pb-6 pt-1 sm:px-7 sm:pb-7"
-          >
+          <form method="post" noValidate onSubmit={handleCreateSelfSubmit} className="flex min-h-0 flex-1 flex-col">
             <input type="hidden" name="operation" value="create_self" />
-            <div className="space-y-2">
-              <div className="flex items-baseline justify-between gap-3">
-                <label htmlFor="create-self-name" className="text-sm font-semibold">
-                  队伍名称
-                </label>
-                <span className="text-xs text-muted-foreground">1–64 个字符</span>
-              </div>
-              <Input
-                id="create-self-name"
-                name="name"
-                required
-                maxLength={64}
-                autoFocus
-                aria-invalid={!!createSelfNameError}
-                aria-describedby={createSelfNameError ? 'create-self-name-error' : undefined}
-                placeholder="给队伍起一个名字"
-                onChange={(event) => {
-                  if (createSelfNameError && event.currentTarget.value.trim()) setCreateSelfNameError('');
-                }}
-                className={`h-12 rounded-[14px] border-border/70 bg-muted/30 px-4 py-3 text-base shadow-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-muted-foreground/70 focus-visible:border-primary/50 focus-visible:bg-background focus-visible:ring-4 focus-visible:ring-primary/10 sm:text-sm dark:bg-white/[0.035] ${
-                  createSelfNameError ? 'border-destructive/60 focus-visible:border-destructive/70 focus-visible:ring-destructive/10' : ''
-                }`}
-              />
-              <div className="min-h-5">
-                {createSelfNameError ? (
-                  <p id="create-self-name-error" role="alert" className="flex items-center gap-1.5 text-xs font-medium text-destructive">
-                    <AlertTriangle className="size-3.5" />
-                    {createSelfNameError}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-baseline justify-between gap-3">
-                <label htmlFor="create-self-description" className="text-sm font-semibold">
-                  队伍说明
-                </label>
-                <span className="text-xs text-muted-foreground">可选 · 最多 500 个字符</span>
-              </div>
-              <Textarea
-                id="create-self-description"
-                name="description"
-                maxLength={500}
-                placeholder="训练方向、队伍介绍等"
-                className="min-h-28 resize-none rounded-2xl border-border/70 bg-muted/30 px-4 py-3 text-base leading-6 shadow-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-muted-foreground/70 focus-visible:border-primary/50 focus-visible:bg-background focus-visible:ring-4 focus-visible:ring-primary/10 sm:text-sm dark:bg-white/[0.035]"
-              />
-            </div>
-            <div className="grid grid-cols-[0.8fr_1.4fr] gap-2.5 pt-1">
+            <TeamDialogBody>
+              <TeamDialogField htmlFor="create-self-name" label="队伍名称" hint="1–64 个字符">
+                <Input
+                  id="create-self-name"
+                  name="name"
+                  required
+                  maxLength={64}
+                  autoFocus
+                  aria-invalid={!!createSelfNameError}
+                  aria-describedby={createSelfNameError ? 'create-self-name-error' : undefined}
+                  placeholder="给队伍起一个名字"
+                  onChange={(event) => {
+                    if (createSelfNameError && event.currentTarget.value.trim()) setCreateSelfNameError('');
+                  }}
+                  className={`${TEAM_DIALOG_CONTROL_CLASS} ${
+                    createSelfNameError ? 'border-destructive/60 focus-visible:border-destructive/70 focus-visible:ring-destructive/10' : ''
+                  }`}
+                />
+                <div className="min-h-5">
+                  {createSelfNameError ? (
+                    <p id="create-self-name-error" role="alert" className="flex items-center gap-1.5 text-xs font-medium text-destructive">
+                      <AlertTriangle className="size-3.5" />
+                      {createSelfNameError}
+                    </p>
+                  ) : null}
+                </div>
+              </TeamDialogField>
+              <TeamDialogField htmlFor="create-self-description" label="队伍说明" hint="可选 · 最多 500 个字符">
+                <Textarea
+                  id="create-self-description"
+                  name="description"
+                  maxLength={500}
+                  placeholder="训练方向、队伍介绍等"
+                  className={TEAM_DIALOG_TEXTAREA_CLASS}
+                />
+              </TeamDialogField>
+            </TeamDialogBody>
+            <TeamDialogFooter className="grid-cols-[0.8fr_1.4fr]">
               <Button
                 type="button"
                 variant="secondary"
                 onClick={() => handleCreateSelfOpenChange(false)}
-                className="h-11 rounded-[14px] bg-muted/70 shadow-none transition-[scale,background-color,color] duration-150 ease-out hover:bg-muted active:scale-[0.96] motion-reduce:transition-none"
+                className={`${TEAM_DIALOG_BUTTON_CLASS} bg-muted/70 shadow-none hover:bg-muted`}
               >
                 取消
               </Button>
-              <Button
-                type="submit"
-                className="h-11 rounded-[14px] shadow-lg shadow-primary/20 transition-[scale,background-color,box-shadow] duration-150 ease-out active:scale-[0.96] motion-reduce:transition-none"
-              >
+              <Button type="submit" className={`${TEAM_DIALOG_BUTTON_CLASS} shadow-lg shadow-primary/20`}>
                 创建并成为队长
               </Button>
-            </div>
+            </TeamDialogFooter>
           </form>
-        </DialogContent>
+        </TeamDialogContent>
       </Dialog>
 
       <Dialog open={adminCreateOpen} onOpenChange={setAdminCreateOpen}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>新建管理员队伍</DialogTitle>
-          </DialogHeader>
-          <form method="post" className="space-y-4 p-5">
+        <TeamDialogContent
+          titleId="admin-create-team-dialog-title"
+          descriptionId="admin-create-team-dialog-description"
+          title="新建管理员队伍"
+          description={isBatch ? '直接编入本批次，成员不能自行退出。' : '直接编入本场比赛，成员不能自行退出。'}
+          icon={<ShieldCheck className="size-5" />}
+          onClose={() => setAdminCreateOpen(false)}
+        >
+          <form method="post" className="flex min-h-0 flex-1 flex-col">
             <input type="hidden" name="operation" value="create_admin" />
-            <Input name="name" required maxLength={64} placeholder="队伍名称" />
-            <Textarea name="description" maxLength={500} placeholder="队伍说明（可选）" />
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">成员（1–3 人）</label>
-              <MultiSelect<TeamUser>
-                value={adminCreateMembers}
-                onChange={(next) => {
-                  setAdminCreateMembers(next);
-                  if (!next.some((item) => String(item._id) === adminCreateCaptain)) setAdminCreateCaptain(String(next[0]?._id || ''));
-                }}
-                loadOptions={searchUsers}
-                getKey={(item) => String(item._id)}
-                getLabel={domainUserSearchLabel}
-                renderChip={(item) => <span>{item.displayName || item.uname}</span>}
-                renderOption={(item) => <DomainUserSearchOption user={item} />}
-                name="memberUids"
-                maxItems={3}
-                placeholder={isBatch ? '按 OJ 用户、学号或姓名搜索可加入成员' : '按 OJ 用户、学号或姓名搜索符合资格的成员'}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">队长</label>
-              <SimpleSelect
-                name="captainUid"
-                value={adminCreateCaptain}
-                onValueChange={setAdminCreateCaptain}
-                options={adminCreateMembers.map((item) => ({ value: String(item._id), label: userLabel({ [item._id]: item }, item._id) }))}
-                disabled={!adminCreateMembers.length}
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setAdminCreateOpen(false)}>
-                取消
-              </Button>
-              <Button type="submit" disabled={!adminCreateMembers.length || !adminCreateCaptain}>
-                创建队伍
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!editingTeam} onOpenChange={(open) => !open && setEditingTeam(null)}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{emergencyAdminEdit ? '赛中紧急调整队伍' : '编辑队伍'}</DialogTitle>
-          </DialogHeader>
-          {editingTeam ? (
-            <form method="post" className="space-y-4 p-5">
-              <input type="hidden" name="operation" value="update_admin" />
-              <input type="hidden" name="teamId" value={editingTeam.teamId} />
-              <input type="hidden" name="expectedRevision" value={editingTeam.revision} />
-              {emergencyAdminEdit ? (
-                <>
-                  <input type="hidden" name="emergencyConfirmation" value={editingTeam.emergencyConfirmation || ''} />
-                  <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm">
-                    <p className="font-medium text-destructive">高风险赛中调整</p>
-                    <p className="mt-1 text-muted-foreground">
-                      仅允许修改成员和队长。已有成绩绑定稳定 teamId，不会转移或重算；客户端角色会立即变化。
-                    </p>
-                  </div>
-                  <div className="rounded-lg bg-muted px-3 py-2 text-sm">
-                    <p className="font-medium">{editingTeam.name}</p>
-                    <p className="text-xs text-muted-foreground">{editingTeam.managementMode === 'admin' ? '管理员队伍' : '自主队伍'}</p>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <Input name="name" defaultValue={editingTeam.name} required maxLength={64} />
-                  <Textarea name="description" defaultValue={editingTeam.description} maxLength={500} />
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium">管理模式</label>
-                    <SimpleSelect
-                      name="managementMode"
-                      defaultValue={editingTeam.managementMode}
-                      options={[
-                        { value: 'self', label: '自主队伍（成员可按规则退出）' },
-                        { value: 'admin', label: '管理员编队（成员不可退出）' },
-                      ]}
-                    />
-                  </div>
-                </>
-              )}
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">成员（1–3 人）</label>
+            <TeamDialogBody>
+              <TeamDialogField htmlFor="admin-create-team-name" label="队伍名称" hint="1–64 个字符">
+                <Input
+                  id="admin-create-team-name"
+                  name="name"
+                  required
+                  maxLength={64}
+                  autoFocus
+                  placeholder="给队伍起一个名字"
+                  className={TEAM_DIALOG_CONTROL_CLASS}
+                />
+              </TeamDialogField>
+              <TeamDialogField htmlFor="admin-create-team-description" label="队伍说明" hint="可选 · 最多 500 个字符">
+                <Textarea
+                  id="admin-create-team-description"
+                  name="description"
+                  maxLength={500}
+                  placeholder="训练方向、队伍介绍等"
+                  className={TEAM_DIALOG_TEXTAREA_CLASS}
+                />
+              </TeamDialogField>
+              <TeamDialogField label="成员" hint={`${adminCreateMembers.length}/3 人`}>
                 <MultiSelect<TeamUser>
-                  value={editingMembers}
+                  value={adminCreateMembers}
                   onChange={(next) => {
-                    setEditingMembers(next);
-                    if (!next.some((item) => String(item._id) === editingCaptain)) setEditingCaptain(String(next[0]?._id || ''));
+                    setAdminCreateMembers(next);
+                    if (!next.some((item) => String(item._id) === adminCreateCaptain)) setAdminCreateCaptain(String(next[0]?._id || ''));
                   }}
                   loadOptions={searchUsers}
                   getKey={(item) => String(item._id)}
@@ -877,30 +795,146 @@ export function ContestTeamsPage() {
                   renderOption={(item) => <DomainUserSearchOption user={item} />}
                   name="memberUids"
                   maxItems={3}
-                  placeholder="按 OJ 用户、学号或姓名搜索符合资格的成员"
+                  className={TEAM_DIALOG_MULTI_SELECT_CLASS}
+                  minHeight={48}
+                  placeholder={isBatch ? '按 OJ 用户、学号或姓名搜索可加入成员' : '按 OJ 用户、学号或姓名搜索符合资格的成员'}
                 />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">队长</label>
+              </TeamDialogField>
+              <TeamDialogField label="队长" hint={adminCreateMembers.length ? '从已选成员中指定' : '请先选择成员'}>
                 <SimpleSelect
                   name="captainUid"
-                  value={editingCaptain}
-                  onValueChange={setEditingCaptain}
-                  options={editingMembers.map((item) => ({ value: String(item._id), label: userLabel({ [item._id]: item }, item._id) }))}
-                  disabled={!editingMembers.length}
+                  value={adminCreateCaptain}
+                  onValueChange={setAdminCreateCaptain}
+                  options={adminCreateMembers.map((item) => ({ value: String(item._id), label: userLabel({ [item._id]: item }, item._id) }))}
+                  disabled={!adminCreateMembers.length}
+                  placeholder="选择队长"
+                  className={TEAM_DIALOG_CONTROL_CLASS}
                 />
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => setEditingTeam(null)}>
+              </TeamDialogField>
+            </TeamDialogBody>
+            <TeamDialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setAdminCreateOpen(false)} className={TEAM_DIALOG_BUTTON_CLASS}>
+                取消
+              </Button>
+              <Button type="submit" disabled={!adminCreateMembers.length || !adminCreateCaptain} className={TEAM_DIALOG_BUTTON_CLASS}>
+                创建队伍
+              </Button>
+            </TeamDialogFooter>
+          </form>
+        </TeamDialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingTeam} onOpenChange={(open) => !open && setEditingTeam(null)}>
+        <TeamDialogContent
+          titleId="edit-team-dialog-title"
+          descriptionId="edit-team-dialog-description"
+          title={emergencyAdminEdit ? '赛中紧急调整队伍' : '编辑队伍'}
+          description={emergencyAdminEdit ? '本次调整会立即改变客户端角色，请核对成员与队长。' : '维护队伍资料、管理方式、成员与队长。'}
+          icon={emergencyAdminEdit ? <AlertTriangle className="size-5" /> : <Pencil className="size-5" />}
+          tone={emergencyAdminEdit ? 'destructive' : 'primary'}
+          onClose={() => setEditingTeam(null)}
+        >
+          {editingTeam ? (
+            <form method="post" className="flex min-h-0 flex-1 flex-col">
+              <input type="hidden" name="operation" value="update_admin" />
+              <input type="hidden" name="teamId" value={editingTeam.teamId} />
+              <input type="hidden" name="expectedRevision" value={editingTeam.revision} />
+              <TeamDialogBody>
+                {emergencyAdminEdit ? (
+                  <>
+                    <input type="hidden" name="emergencyConfirmation" value={editingTeam.emergencyConfirmation || ''} />
+                    <div className="rounded-2xl bg-destructive/5 p-4 text-sm ring-1 ring-destructive/20">
+                      <p className="font-semibold text-destructive">高风险赛中调整</p>
+                      <p className="mt-1.5 leading-6 text-muted-foreground">
+                        仅允许修改成员和队长。已有成绩绑定稳定 teamId，不会转移或重算；客户端角色会立即变化。
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-muted/40 px-4 py-3 text-sm ring-1 ring-foreground/8">
+                      <p className="font-semibold">{editingTeam.name}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{editingTeam.managementMode === 'admin' ? '管理员队伍' : '自主队伍'}</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <TeamDialogField htmlFor="edit-team-name" label="队伍名称" hint="1–64 个字符">
+                      <Input
+                        id="edit-team-name"
+                        name="name"
+                        defaultValue={editingTeam.name}
+                        required
+                        maxLength={64}
+                        className={TEAM_DIALOG_CONTROL_CLASS}
+                      />
+                    </TeamDialogField>
+                    <TeamDialogField htmlFor="edit-team-description" label="队伍说明" hint="可选 · 最多 500 个字符">
+                      <Textarea
+                        id="edit-team-description"
+                        name="description"
+                        defaultValue={editingTeam.description}
+                        maxLength={500}
+                        className={TEAM_DIALOG_TEXTAREA_CLASS}
+                      />
+                    </TeamDialogField>
+                    <TeamDialogField label="管理模式" hint="决定成员能否自行退出">
+                      <SimpleSelect
+                        name="managementMode"
+                        defaultValue={editingTeam.managementMode}
+                        options={[
+                          { value: 'self', label: '自主队伍（成员可按规则退出）' },
+                          { value: 'admin', label: '管理员编队（成员不可退出）' },
+                        ]}
+                        className={TEAM_DIALOG_CONTROL_CLASS}
+                      />
+                    </TeamDialogField>
+                  </>
+                )}
+                <TeamDialogField label="成员" hint={`${editingMembers.length}/3 人`}>
+                  <MultiSelect<TeamUser>
+                    value={editingMembers}
+                    onChange={(next) => {
+                      setEditingMembers(next);
+                      if (!next.some((item) => String(item._id) === editingCaptain)) setEditingCaptain(String(next[0]?._id || ''));
+                    }}
+                    loadOptions={searchUsers}
+                    getKey={(item) => String(item._id)}
+                    getLabel={domainUserSearchLabel}
+                    renderChip={(item) => <span>{item.displayName || item.uname}</span>}
+                    renderOption={(item) => <DomainUserSearchOption user={item} />}
+                    name="memberUids"
+                    maxItems={3}
+                    className={TEAM_DIALOG_MULTI_SELECT_CLASS}
+                    minHeight={48}
+                    placeholder="按 OJ 用户、学号或姓名搜索符合资格的成员"
+                  />
+                </TeamDialogField>
+                <TeamDialogField label="队长" hint={editingMembers.length ? '从已选成员中指定' : '请先选择成员'}>
+                  <SimpleSelect
+                    name="captainUid"
+                    value={editingCaptain}
+                    onValueChange={setEditingCaptain}
+                    options={editingMembers.map((item) => ({ value: String(item._id), label: userLabel({ [item._id]: item }, item._id) }))}
+                    disabled={!editingMembers.length}
+                    placeholder="选择队长"
+                    className={TEAM_DIALOG_CONTROL_CLASS}
+                  />
+                </TeamDialogField>
+              </TeamDialogBody>
+              <TeamDialogFooter>
+                <Button type="button" variant="secondary" onClick={() => setEditingTeam(null)} className={TEAM_DIALOG_BUTTON_CLASS}>
                   取消
                 </Button>
-                <Button type="submit" variant={emergencyAdminEdit ? 'destructive' : 'default'} disabled={!editingMembers.length || !editingCaptain}>
+                <Button
+                  type="submit"
+                  variant={emergencyAdminEdit ? 'destructive' : 'default'}
+                  disabled={!editingMembers.length || !editingCaptain}
+                  className={TEAM_DIALOG_BUTTON_CLASS}
+                >
                   {emergencyAdminEdit ? '确认赛中调整' : '保存修改'}
                 </Button>
-              </div>
+              </TeamDialogFooter>
             </form>
           ) : null}
-        </DialogContent>
+        </TeamDialogContent>
       </Dialog>
 
       <ConfirmDialog action={confirmAction} onClose={() => setConfirmAction(null)} />

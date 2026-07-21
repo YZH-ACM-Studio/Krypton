@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
+  AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   ClipboardCheck,
@@ -42,6 +43,7 @@ import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { MarkdownEditor, MarkdownView } from '@/components/markdown-renderer';
+import { TEAM_DIALOG_BUTTON_CLASS, TeamDialogBody, TeamDialogContent, TeamDialogFooter } from '@/components/team-dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { MiniTabs } from '@/components/ui/mini-tabs';
@@ -1073,19 +1075,25 @@ export function ContestEditPage() {
           </CardContent>
         </Card>
         <Dialog open={modeClearOpen} onOpenChange={setModeClearOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>停用本场全部队伍？</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3 text-sm text-muted-foreground">
-              <p>
-                当前有 <strong className="text-foreground">{Number(data.activeTeamCount || 0)}</strong> 支有效队伍。切回个人模式会停用这些队伍；
-                操作不会删除历史文档，但之后需要重新组队才能再次启用团队赛。
-              </p>
-              <p>只有比赛尚未开始且没有任何提交时允许执行。</p>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setModeClearOpen(false)}>
+          <TeamDialogContent
+            titleId="clear-contest-teams-dialog-title"
+            descriptionId="clear-contest-teams-dialog-description"
+            title="停用本场全部队伍？"
+            description="切回个人模式会释放当前阵容，但不会删除历史队伍文档。"
+            icon={<AlertTriangle className="size-5" />}
+            tone="destructive"
+            onClose={() => setModeClearOpen(false)}
+            className="sm:w-[30rem]"
+          >
+            <TeamDialogBody className="pb-6">
+              <div className="rounded-2xl bg-destructive/5 p-4 ring-1 ring-destructive/20">
+                <p className="text-sm font-semibold text-destructive">将停用 {Number(data.activeTeamCount || 0)} 支有效队伍</p>
+                <p className="mt-1.5 text-sm leading-6 text-muted-foreground">之后需要重新组队，才能再次启用团队赛。</p>
+              </div>
+              <p className="text-sm leading-6 text-muted-foreground">只有比赛尚未开始且没有任何提交时允许执行。</p>
+            </TeamDialogBody>
+            <TeamDialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setModeClearOpen(false)} className={TEAM_DIALOG_BUTTON_CLASS}>
                 取消
               </Button>
               <Button
@@ -1099,11 +1107,12 @@ export function ContestEditPage() {
                     formRef.current.requestSubmit(primarySubmitRef.current);
                   }, 0);
                 }}
+                className={TEAM_DIALOG_BUTTON_CLASS}
               >
                 停用队伍并保存
               </Button>
-            </div>
-          </DialogContent>
+            </TeamDialogFooter>
+          </TeamDialogContent>
         </Dialog>
       </ContestManagementChrome>
     </motion.div>

@@ -4,9 +4,18 @@ import { ArrowRight, CheckCircle2, Clock3, Plus, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
+import {
+  TEAM_DIALOG_BUTTON_CLASS,
+  TEAM_DIALOG_CONTROL_CLASS,
+  TEAM_DIALOG_TEXTAREA_CLASS,
+  TeamDialogBody,
+  TeamDialogContent,
+  TeamDialogField,
+  TeamDialogFooter,
+} from '@/components/team-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatDateTime } from '@/lib/format';
@@ -106,28 +115,48 @@ export function TeamBatchesPage() {
       <Pagination current={Number(data.page || 1)} total={Number(data.pageCount || 1)} baseUrl="/teams" />
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>新建组队批次</DialogTitle>
-          </DialogHeader>
-          <form method="post" className="space-y-4 p-5">
+        <TeamDialogContent
+          titleId="create-team-batch-dialog-title"
+          descriptionId="create-team-batch-dialog-description"
+          title="新建组队批次"
+          description="先开放独立组队空间，关闭后再把确定阵容绑定到团队 ACM 比赛。"
+          icon={<Users className="size-5" />}
+          onClose={() => setCreateOpen(false)}
+        >
+          <form method="post" className="flex min-h-0 flex-1 flex-col">
             <input type="hidden" name="operation" value="create" />
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">批次名称</label>
-              <Input name="name" required maxLength={64} placeholder="例如：2026 暑期留校赛组队" />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">说明（可选）</label>
-              <Textarea name="description" maxLength={500} placeholder="组队用途、截止安排等" />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+            <TeamDialogBody>
+              <TeamDialogField htmlFor="create-team-batch-name" label="批次名称" hint="1–64 个字符">
+                <Input
+                  id="create-team-batch-name"
+                  name="name"
+                  required
+                  maxLength={64}
+                  autoFocus
+                  placeholder="例如：2026 暑期留校赛组队"
+                  className={TEAM_DIALOG_CONTROL_CLASS}
+                />
+              </TeamDialogField>
+              <TeamDialogField htmlFor="create-team-batch-description" label="批次说明" hint="可选 · 最多 500 个字符">
+                <Textarea
+                  id="create-team-batch-description"
+                  name="description"
+                  maxLength={500}
+                  placeholder="组队用途、截止安排等"
+                  className={TEAM_DIALOG_TEXTAREA_CLASS}
+                />
+              </TeamDialogField>
+            </TeamDialogBody>
+            <TeamDialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setCreateOpen(false)} className={TEAM_DIALOG_BUTTON_CLASS}>
                 取消
               </Button>
-              <Button type="submit">创建批次</Button>
-            </div>
+              <Button type="submit" className={TEAM_DIALOG_BUTTON_CLASS}>
+                创建批次
+              </Button>
+            </TeamDialogFooter>
           </form>
-        </DialogContent>
+        </TeamDialogContent>
       </Dialog>
     </motion.div>
   );

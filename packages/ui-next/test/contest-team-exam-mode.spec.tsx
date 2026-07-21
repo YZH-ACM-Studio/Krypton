@@ -112,7 +112,11 @@ describe('P1.14 team Exam Mode UI contracts', () => {
     const records: unknown[] = [];
     const revisions: Array<number | null> = [];
     const snapshots: string[] = [];
-    dispatchRecordSocketPayload({ teamRoleChanged: true, teamRevision: 7 }, (rdoc) => records.push(rdoc), (revision) => revisions.push(revision));
+    dispatchRecordSocketPayload(
+      { teamRoleChanged: true, teamRevision: 7 },
+      (rdoc) => records.push(rdoc),
+      (revision) => revisions.push(revision),
+    );
     dispatchRecordSocketPayload(
       { teamCodeAvailable: true, snapshotId: '64a000000000000000000211' },
       (rdoc) => records.push(rdoc),
@@ -125,7 +129,11 @@ describe('P1.14 team Exam Mode UI contracts', () => {
       (revision) => revisions.push(revision),
       (snapshotId) => snapshots.push(snapshotId),
     );
-    dispatchRecordSocketPayload({ rdoc: { _id: 'record-1' } }, (rdoc) => records.push(rdoc), (revision) => revisions.push(revision));
+    dispatchRecordSocketPayload(
+      { rdoc: { _id: 'record-1' } },
+      (rdoc) => records.push(rdoc),
+      (revision) => revisions.push(revision),
+    );
     expect(revisions).to.deep.equal([7]);
     expect(snapshots).to.deep.equal(['64a000000000000000000211']);
     expect(records).to.deep.equal([{ _id: 'record-1' }]);
@@ -158,6 +166,9 @@ describe('P1.14 team Exam Mode UI contracts', () => {
 
   it('clears pending snapshot detail state on close, an empty list, and a list failure', () => {
     const drawer = source('packages/ui-next/src/components/team-code-snapshots.tsx');
+    expect(drawer).to.include('<TeamDialogContent');
+    expect(drawer).not.to.include('<DialogContent');
+    expect(drawer).to.include('titleId="send-team-code-dialog-title"');
     expect(drawer).to.match(/if \(!open\) \{[\s\S]*?setDetailLoading\(false\);[\s\S]*?return;/);
     expect(drawer).to.match(/setSelectedId\(null\);\s*setDetail\(null\);\s*setDetailLoading\(false\);/);
     expect(drawer).to.match(/caught\?\.name !== 'AbortError'[\s\S]*?setDetailLoading\(false\);[\s\S]*?无法读取代码快照列表/);

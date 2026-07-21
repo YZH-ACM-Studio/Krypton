@@ -106,20 +106,34 @@ describe('P1.12 team assembly workspace contracts', () => {
     expect(page).not.to.match(/window\.(?:alert|confirm)|\balert\(|\bconfirm\(/);
   });
 
-  it('uses a polished self-team dialog with inline validation instead of the native required bubble', () => {
+  it('uses the shared polished team dialog with inline validation instead of the native required bubble', () => {
+    const chrome = source('packages/ui-next/src/components/team-dialog.tsx');
     const start = page.indexOf('<Dialog open={createSelfOpen}');
     const end = page.indexOf('<Dialog open={adminCreateOpen}', start);
     const dialog = page.slice(start, end);
+    expect(dialog).to.include('<TeamDialogContent');
     expect(dialog).to.include('method="post"');
     expect(dialog).to.include('name="operation" value="create_self"');
     expect(dialog).to.include('name="name"');
     expect(dialog).to.include('name="description"');
     expect(dialog).to.include('noValidate');
     expect(dialog).to.include('onSubmit={handleCreateSelfSubmit}');
-    expect(dialog).to.include('role="dialog"');
-    expect(dialog).to.include('aria-modal="true"');
-    expect(dialog).to.include('overflow-y-auto overscroll-contain');
+    expect(chrome).to.include('role="dialog"');
+    expect(chrome).to.include('aria-modal="true"');
+    expect(chrome).to.include('overflow-y-auto overscroll-contain');
+    expect(chrome).to.include('rounded-[28px]');
+    expect(chrome).to.include('active:scale-[0.96]');
+    expect(chrome).not.to.include('transition-all');
     expect(dialog).not.to.include('placeholder="1–64 个字符"');
+  });
+
+  it('applies the shared visual system to every dialog in the team workspace', () => {
+    expect(page.match(/<TeamDialogContent/g)).to.have.length(4);
+    expect(page).not.to.include('<DialogContent');
+    expect(page).not.to.include('<DialogHeader');
+    expect(page).to.include('title="新建管理员队伍"');
+    expect(page).to.include("title={emergencyAdminEdit ? '赛中紧急调整队伍' : '编辑队伍'}");
+    expect(page).to.include("title={action?.title || '确认操作'}");
   });
 
   it('blocks the native post only for empty and whitespace-only self-team names', () => {

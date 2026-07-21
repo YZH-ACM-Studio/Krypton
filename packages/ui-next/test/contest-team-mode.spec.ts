@@ -12,6 +12,8 @@ describe('P1.11 contest team-mode editor contract', () => {
     expect(editor).to.include('name="participationRevision"');
     expect(editor).to.include('name="teamModeClearConfirmation"');
     expect(editor).to.include('停用本场全部队伍？');
+    expect(editor).to.include('titleId="clear-contest-teams-dialog-title"');
+    expect(editor).to.include('tone="destructive"');
     expect(editor).to.include('setModeClearOpen(true)');
     expect(editor).to.include('ref={primarySubmitRef}');
     expect(editor).to.include('formRef.current.requestSubmit(primarySubmitRef.current)');

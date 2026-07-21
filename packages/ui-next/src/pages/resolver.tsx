@@ -41,6 +41,7 @@ import {
   ContestProblemListPage,
   ContestUserPage,
 } from '@/pages/contest-manage';
+import { ContestTeamsPage } from '@/pages/contest-teams';
 import { ContestDetailPage, ContestScoreboardPage, ContestsPage } from '@/pages/contests';
 import { CourseDetailPage, CourseEditPage, CoursePage } from '@/pages/course';
 import { DiscussionCreatePage, DiscussionEditPage } from '@/pages/discussion-manage';
@@ -139,6 +140,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
   // Contests
   'contest_main.html': ContestsPage,
   'contest_detail.html': ContestDetailPage,
+  'contest_teams.html': ContestTeamsPage,
   'contest_edit.html': ContestEditPage,
   'contest_scoreboard.html': ContestScoreboardPage,
   'xcpcio_board.html': XcpcioBoardPage,

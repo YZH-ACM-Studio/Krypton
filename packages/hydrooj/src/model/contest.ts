@@ -995,6 +995,7 @@ export const RULES: ContestRules = {
 
 const collBalloon = db.collection('contest.balloon');
 const collTeam = db.collection('contest.teams');
+const collTeamInvite = db.collection('contest.teamInvites');
 
 async function auditParticipationModeChange(
     domainId: string,
@@ -1209,6 +1210,23 @@ export async function edit(domainId: string, tid: ObjectId, $set: Partial<Tdoc>,
                 cleanupCount = cleanup.modifiedCount;
                 const remaining = await collTeam.countDocuments({ domainId, contestId: tid, active: true });
                 if (remaining > 0) throw new ContestTeamConflictError('team_cleanup_incomplete');
+                await collTeamInvite.updateMany(
+                    { domainId, contestId: tid, status: { $in: ['pending', 'accepting'] } },
+                    {
+                        $set: {
+                            status: 'cancelled',
+                            resolvedAt: changedAt,
+                            resolvedBy: options.actor._id,
+                            updatedAt: changedAt,
+                        },
+                    },
+                );
+                const remainingInvites = await collTeamInvite.countDocuments({
+                    domainId,
+                    contestId: tid,
+                    status: { $in: ['pending', 'accepting'] },
+                });
+                if (remainingInvites > 0) throw new ContestTeamConflictError('invite_cleanup_incomplete');
                 await oplog.add({
                     type: 'contest.team.mode-clear',
                     operation: 'mode-clear',

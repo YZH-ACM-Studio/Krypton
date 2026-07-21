@@ -141,6 +141,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
           templates: [
             'contest_main.html',
             'contest_detail.html',
+            'contest_teams.html',
             'contest_edit.html',
             'contest_scoreboard.html',
             'xcpcio_board.html',

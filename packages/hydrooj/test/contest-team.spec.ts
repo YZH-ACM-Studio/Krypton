@@ -21,9 +21,10 @@ class TestPermissionError extends Error {
 class TestNotAssignedError extends Error {}
 class TestUserNotFoundError extends Error {}
 
-const PERM = { PERM_EDIT_CONTEST: 1n, PERM_EDIT_CONTEST_SELF: 2n };
+const PERM = { PERM_EDIT_CONTEST: 1n, PERM_EDIT_CONTEST_SELF: 2n, PERM_VIEW_CONTEST: 4n, PERM_ATTEND_CONTEST: 8n };
 const PRIV = { PRIV_EDIT_SYSTEM: 1 };
 const docs: any[] = [];
+const invites: any[] = [];
 const audit: any[] = [];
 const events: any[] = [];
 const indexes: any[] = [];
@@ -31,6 +32,25 @@ const users = new Map<number, any>();
 const userReads = new Map<number, number>();
 let revokeAfterFirstRead: number | null = null;
 let currentContest: any;
+let failNextInviteUpdateOne = false;
+let failNextInviteUpdateMany = false;
+let teamCasBarrierRemaining = 0;
+let releaseTeamCasBarrier: (() => void) | null = null;
+let teamCasBarrier = Promise.resolve();
+
+function armTeamCasBarrier(participants: number) {
+    teamCasBarrierRemaining = participants;
+    teamCasBarrier = new Promise<void>((resolve) => {
+        releaseTeamCasBarrier = resolve;
+    });
+}
+
+async function waitAtTeamCasBarrier(filter: any, update: any) {
+    if (!teamCasBarrierRemaining || filter.revision === undefined || !update.$set?.memberUids) return;
+    teamCasBarrierRemaining -= 1;
+    if (teamCasBarrierRemaining === 0) releaseTeamCasBarrier?.();
+    else await teamCasBarrier;
+}
 
 function same(left: any, right: any): boolean {
     if (left instanceof ObjectId && right instanceof ObjectId) return left.equals(right);
@@ -40,6 +60,15 @@ function same(left: any, right: any): boolean {
 function matches(doc: any, filter: any): boolean {
     return Object.entries(filter).every(([key, value]: any) => {
         const actual = doc[key];
+        if (value && typeof value === 'object' && !(value instanceof ObjectId) && !Array.isArray(value)) {
+            if ('$in' in value) {
+                const expected = value.$in;
+                return Array.isArray(actual)
+                    ? actual.some((entry) => expected.some((item: any) => same(entry, item)))
+                    : expected.some((item: any) => same(actual, item));
+            }
+            if ('$ne' in value) return !same(actual, value.$ne);
+        }
         if (Array.isArray(actual) && !Array.isArray(value)) return actual.some((entry) => same(entry, value));
         return same(actual, value);
     });
@@ -67,6 +96,7 @@ const teamCollection = {
         return docs.find((doc) => matches(doc, filter)) || null;
     },
     async findOneAndUpdate(filter: any, update: any) {
+        await waitAtTeamCasBarrier(filter, update);
         const doc = docs.find((candidate) => matches(candidate, filter));
         if (!doc) return null;
         const next = { ...doc, ...(update.$set || {}), revision: doc.revision + Number(update.$inc?.revision || 0) };
@@ -110,6 +140,89 @@ const teamCollection = {
     },
 };
 
+function duplicateInvite(candidate: any, ignore?: any) {
+    if (candidate.status !== 'pending') return;
+    const duplicate = invites.find(
+        (invite) =>
+            invite !== ignore &&
+            invite.status === 'pending' &&
+            invite.domainId === candidate.domainId &&
+            same(invite.contestId, candidate.contestId) &&
+            same(invite.teamId, candidate.teamId) &&
+            invite.inviteeUid === candidate.inviteeUid,
+    );
+    if (duplicate) {
+        throw Object.assign(new Error('duplicate invite'), {
+            code: 11000,
+            keyPattern: { domainId: 1, contestId: 1, teamId: 1, inviteeUid: 1 },
+        });
+    }
+}
+
+function applyUpdate(doc: any, update: any) {
+    Object.assign(doc, update.$set || {});
+    for (const key of Object.keys(update.$unset || {})) delete doc[key];
+    for (const [key, value] of Object.entries(update.$inc || {})) doc[key] += Number(value);
+}
+
+const inviteCollection = {
+    async insertOne(doc: any) {
+        duplicateInvite(doc);
+        invites.push(doc);
+        return { insertedId: doc._id };
+    },
+    async findOne(filter: any) {
+        return invites.find((doc) => matches(doc, filter)) || null;
+    },
+    async findOneAndUpdate(filter: any, update: any) {
+        const doc = invites.find((candidate) => matches(candidate, filter));
+        if (!doc) return null;
+        const next = { ...doc };
+        applyUpdate(next, update);
+        duplicateInvite(next, doc);
+        applyUpdate(doc, update);
+        return doc;
+    },
+    async updateOne(filter: any, update: any) {
+        if (failNextInviteUpdateOne) {
+            failNextInviteUpdateOne = false;
+            throw new Error('injected invite updateOne failure');
+        }
+        const doc = invites.find((candidate) => matches(candidate, filter));
+        if (!doc) return { matchedCount: 0, modifiedCount: 0 };
+        applyUpdate(doc, update);
+        return { matchedCount: 1, modifiedCount: 1 };
+    },
+    async updateMany(filter: any, update: any) {
+        if (failNextInviteUpdateMany) {
+            failNextInviteUpdateMany = false;
+            throw new Error('injected invite updateMany failure');
+        }
+        const found = invites.filter((candidate) => matches(candidate, filter));
+        for (const doc of found) applyUpdate(doc, update);
+        return { matchedCount: found.length, modifiedCount: found.length };
+    },
+    async deleteMany(filter: any) {
+        const found = invites.filter((candidate) => matches(candidate, filter));
+        for (const doc of found) invites.splice(invites.indexOf(doc), 1);
+        return { deletedCount: found.length };
+    },
+    async countDocuments(filter: any) {
+        return invites.filter((doc) => matches(doc, filter)).length;
+    },
+    find(filter: any) {
+        return {
+            sort() {
+                return {
+                    async toArray() {
+                        return invites.filter((doc) => matches(doc, filter));
+                    },
+                };
+            },
+        };
+    },
+};
+
 const contestStub = {
     async get() {
         return currentContest;
@@ -140,8 +253,9 @@ const userModelStub = {
 
 const dbStub = {
     collection(name: string) {
-        if (name !== 'contest.teams') throw new Error(`unexpected collection ${name}`);
-        return teamCollection;
+        if (name === 'contest.teams') return teamCollection;
+        if (name === 'contest.teamInvites') return inviteCollection;
+        throw new Error(`unexpected collection ${name}`);
     },
 };
 
@@ -206,13 +320,19 @@ async function rejects(work: Promise<unknown>, errorType: new (...args: any[]) =
 
 beforeEach(() => {
     docs.length = 0;
+    invites.length = 0;
     audit.length = 0;
     events.length = 0;
     indexes.length = 0;
     users.clear();
     userReads.clear();
     revokeAfterFirstRead = null;
-    for (const uid of [10, 11, 12, 13, 99]) users.set(uid, { _id: uid });
+    failNextInviteUpdateOne = false;
+    failNextInviteUpdateMany = false;
+    teamCasBarrierRemaining = 0;
+    releaseTeamCasBarrier = null;
+    teamCasBarrier = Promise.resolve();
+    for (const uid of [10, 11, 12, 13, 99]) users.set(uid, { _id: uid, hasPerm: () => true });
     currentContest = {
         domainId: 'system',
         docId: new ObjectId('64a000000000000000000001'),
@@ -635,7 +755,240 @@ describe('P1.11 canonical contest team lifecycle', () => {
             on() {},
         } as any);
         const partials = indexes.filter((index) => index.partialFilterExpression);
-        expect(partials).to.have.length(2);
-        expect(partials.every((index) => JSON.stringify(index.partialFilterExpression) === JSON.stringify({ active: true }))).to.equal(true);
+        expect(partials).to.have.length(3);
+        expect(partials.map((index) => index.partialFilterExpression)).to.deep.equal([{ active: true }, { active: true }, { status: 'pending' }]);
+    });
+});
+
+describe('P1.12 invitation and assignment lifecycle', () => {
+    it('keeps one stable pending invitation per team and invitee', async () => {
+        const team = await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(10) },
+            { name: 'Invite team', memberUids: [10], captainUid: 10, managementMode: 'self' },
+        );
+        const first = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 11);
+        const second = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 11);
+        expect(first.inviteId.equals(second.inviteId)).to.equal(true);
+        expect(second.teamId.equals(team.teamId)).to.equal(true);
+        expect(invites.filter((invite) => invite.status === 'pending')).to.have.length(1);
+        expect(audit.some((entry) => entry.operation === 'invite-create' && entry.result === 'success')).to.equal(true);
+    });
+
+    it('accepts one of several invitations atomically into one team and supersedes the rest', async () => {
+        const firstTeam = await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(10) },
+            { name: 'First', memberUids: [10], captainUid: 10, managementMode: 'self' },
+        );
+        await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(11) },
+            { name: 'Second', memberUids: [11], captainUid: 11, managementMode: 'self' },
+        );
+        const acceptedInvite = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 12);
+        const otherInvite = await teamModel.createInvite('system', currentContest.docId, { user: actor(11) }, 12);
+        const joined = await teamModel.acceptInvite('system', currentContest.docId, acceptedInvite.inviteId, { user: actor(12) });
+        expect(joined.teamId.equals(firstTeam.teamId)).to.equal(true);
+        expect(joined.memberUids).to.deep.equal([10, 12]);
+        expect(invites.find((invite) => invite.inviteId.equals(acceptedInvite.inviteId))?.status).to.equal('accepted');
+        expect(invites.find((invite) => invite.inviteId.equals(otherInvite.inviteId))?.status).to.equal('superseded');
+        expect(events.at(-1)?.[0]).to.equal('contest/team-role-change');
+    });
+
+    it('resolves concurrent accepts of different teams without restoring a superseded invitation', async () => {
+        await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(10) },
+            { name: 'Race first', memberUids: [10], captainUid: 10, managementMode: 'self' },
+        );
+        await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(11) },
+            { name: 'Race second', memberUids: [11], captainUid: 11, managementMode: 'self' },
+        );
+        const first = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 12);
+        const second = await teamModel.createInvite('system', currentContest.docId, { user: actor(11) }, 12);
+        armTeamCasBarrier(2);
+        const results = await Promise.allSettled([
+            teamModel.acceptInvite('system', currentContest.docId, first.inviteId, { user: actor(12) }),
+            teamModel.acceptInvite('system', currentContest.docId, second.inviteId, { user: actor(12) }),
+        ]);
+        expect(results.filter((result) => result.status === 'fulfilled')).to.have.length(1);
+        expect(results.filter((result) => result.status === 'rejected')).to.have.length(1);
+        expect(invites.filter((invite) => invite.inviteeUid === 12 && invite.status === 'pending')).to.have.length(0);
+        expect(invites.filter((invite) => invite.inviteeUid === 12 && invite.status === 'accepted')).to.have.length(1);
+        expect(invites.filter((invite) => invite.inviteeUid === 12 && invite.status === 'superseded')).to.have.length(1);
+    });
+
+    it('refreshes the losing invitation revision when two users accept the same non-full team concurrently', async () => {
+        const team = await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(10) },
+            { name: 'Shared race', memberUids: [10], captainUid: 10, managementMode: 'self' },
+        );
+        const first = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 11);
+        const second = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 12);
+        armTeamCasBarrier(2);
+        const results = await Promise.allSettled([
+            teamModel.acceptInvite('system', currentContest.docId, first.inviteId, { user: actor(11) }),
+            teamModel.acceptInvite('system', currentContest.docId, second.inviteId, { user: actor(12) }),
+        ]);
+        expect(results.filter((result) => result.status === 'fulfilled')).to.have.length(1);
+        const current = await teamModel.getTeam('system', currentContest.docId, team.teamId);
+        const pending = invites.find((invite) => invite.status === 'pending');
+        expect(current?.memberUids).to.have.length(2);
+        expect(pending?.teamRevision).to.equal(current?.revision);
+        const final = await teamModel.acceptInvite('system', currentContest.docId, pending.inviteId, {
+            user: actor(pending.inviteeUid),
+        });
+        expect(final.memberUids).to.deep.equal([10, 11, 12]);
+    });
+
+    it('returns the committed membership and emits the role event when invitation finalization fails', async () => {
+        await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(10) },
+            { name: 'Observable commit', memberUids: [10], captainUid: 10, managementMode: 'self' },
+        );
+        const invite = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 11);
+        const errors: any[][] = [];
+        const originalError = console.error;
+        console.error = (...args: any[]) => errors.push(args);
+        failNextInviteUpdateOne = true;
+        try {
+            const committed = await teamModel.acceptInvite('system', currentContest.docId, invite.inviteId, { user: actor(11) });
+            expect(committed.memberUids).to.deep.equal([10, 11]);
+        } finally {
+            console.error = originalError;
+        }
+        expect(events.at(-1)?.[0]).to.equal('contest/team-role-change');
+        expect(errors.some((entry) => entry[0] === '[contest-team] committed mutation post-commit step failed')).to.equal(true);
+        expect(audit.some((entry) => entry.operation === 'invite-accept' && entry.result === 'success')).to.equal(true);
+    });
+
+    it('keeps a committed roster change successful and publishes its role event when invite synchronization fails', async () => {
+        const team = await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(99, true) },
+            { name: 'Admin sync failure', memberUids: [10, 11], captainUid: 10, managementMode: 'admin' },
+        );
+        const errors: any[][] = [];
+        const originalError = console.error;
+        console.error = (...args: any[]) => errors.push(args);
+        failNextInviteUpdateMany = true;
+        try {
+            const committed = await teamModel.updateTeam(
+                'system',
+                currentContest.docId,
+                team.teamId,
+                { user: actor(99, true) },
+                { expectedRevision: team.revision, memberUids: [11], captainUid: 11 },
+            );
+            expect(committed.memberUids).to.deep.equal([11]);
+        } finally {
+            console.error = originalError;
+        }
+        expect(events.at(-1)?.[0]).to.equal('contest/team-role-change');
+        expect(errors.some((entry) => entry[0] === '[contest-team] committed mutation post-commit step failed')).to.equal(true);
+    });
+
+    it('lets only the invitee decline and freezes invite actions at contest start', async () => {
+        await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(10) },
+            { name: 'Decline team', memberUids: [10], captainUid: 10, managementMode: 'self' },
+        );
+        const first = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 11);
+        await rejects(teamModel.declineInvite('system', currentContest.docId, first.inviteId, { user: actor(12) }), TestPermissionError);
+        const declined = await teamModel.declineInvite('system', currentContest.docId, first.inviteId, { user: actor(11) });
+        expect(declined.status).to.equal('declined');
+
+        const second = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 12);
+        currentContest.beginAt = new Date('2000-01-01T00:00:00Z');
+        await rejects(teamModel.acceptInvite('system', currentContest.docId, second.inviteId, { user: actor(12) }), TestConflictError);
+        await rejects(teamModel.declineInvite('system', currentContest.docId, second.inviteId, { user: actor(12) }), TestConflictError);
+    });
+
+    it('rechecks eligibility and active membership before accepting', async () => {
+        await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(10) },
+            { name: 'Eligibility team', memberUids: [10], captainUid: 10, managementMode: 'self' },
+        );
+        const invite = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 11);
+        users.set(11, { _id: 11, hasPerm: () => false });
+        await rejects(teamModel.acceptInvite('system', currentContest.docId, invite.inviteId, { user: actor(11) }), TestNotAssignedError);
+        expect(invites.find((entry) => entry.inviteId.equals(invite.inviteId))?.status).to.equal('pending');
+    });
+
+    it('restores the claimed invitation when eligibility disappears at the final accept check', async () => {
+        await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(10) },
+            { name: 'Final eligibility team', memberUids: [10], captainUid: 10, managementMode: 'self' },
+        );
+        const invite = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 11);
+        userReads.clear();
+        revokeAfterFirstRead = 11;
+        await rejects(teamModel.acceptInvite('system', currentContest.docId, invite.inviteId, { user: actor(11) }), TestUserNotFoundError);
+        expect(invites.find((entry) => entry.inviteId.equals(invite.inviteId))?.status).to.equal('pending');
+        expect(docs[0].memberUids).to.deep.equal([10]);
+    });
+
+    it('allows exactly three members and rejects another invitation once the team is full', async () => {
+        await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(10) },
+            { name: 'Three person team', memberUids: [10], captainUid: 10, managementMode: 'self' },
+        );
+        const first = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 11);
+        await teamModel.acceptInvite('system', currentContest.docId, first.inviteId, { user: actor(11) });
+        const second = await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 12);
+        const full = await teamModel.acceptInvite('system', currentContest.docId, second.inviteId, { user: actor(12) });
+        expect(full.memberUids).to.deep.equal([10, 11, 12]);
+        await rejects(teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 13), TestConflictError);
+    });
+
+    it('reserves invitations for self-managed captains and lets admins change management mode', async () => {
+        const selfTeam = await teamModel.createTeam(
+            'system',
+            currentContest.docId,
+            { user: actor(10) },
+            { name: 'Convertible', memberUids: [10], captainUid: 10, managementMode: 'self' },
+        );
+        await rejects(
+            teamModel.updateTeam(
+                'system',
+                currentContest.docId,
+                selfTeam.teamId,
+                { user: actor(10) },
+                { expectedRevision: selfTeam.revision, managementMode: 'admin' },
+            ),
+            TestPermissionError,
+        );
+        await teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 11);
+        const converted = await teamModel.updateTeam(
+            'system',
+            currentContest.docId,
+            selfTeam.teamId,
+            { user: actor(99, true) },
+            { expectedRevision: selfTeam.revision, managementMode: 'admin' },
+        );
+        expect(converted.managementMode).to.equal('admin');
+        expect(invites.filter((invite) => invite.teamId.equals(converted.teamId) && invite.status === 'pending')).to.have.length(0);
+        await rejects(teamModel.createInvite('system', currentContest.docId, { user: actor(10) }, 11), TestPermissionError);
     });
 });

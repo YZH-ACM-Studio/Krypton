@@ -19,6 +19,7 @@ const TEMPLATE_LABELS: Record<string, string> = {
   'problem_statistics.html': '题目统计',
   'problem_import.html': '导入题目',
   'contest_edit.html': '编辑比赛',
+  'contest_teams.html': '比赛队伍',
   'contest_manage.html': '比赛管理',
   'contest_problemlist.html': '比赛题目',
   'contest_user.html': '比赛参赛者',

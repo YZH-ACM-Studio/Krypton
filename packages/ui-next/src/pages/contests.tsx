@@ -91,6 +91,14 @@ function ruleBadgeVariant(rule?: string): 'default' | 'secondary' | 'outline' {
   }
 }
 
+function isTeamContest(c: R): boolean {
+  return c.rule === 'acm' && c.participationMode === 'team';
+}
+
+function teamWorkspaceUrl(c: R): string {
+  return `/contest/${encodeURIComponent(String(c.docId))}/teams`;
+}
+
 /** Live countdown that re-renders every second while the contest matters. */
 function useCountdown(target: number | null) {
   const [now, setNow] = useState(() => Date.now());
@@ -448,9 +456,9 @@ function RunningContestCard({ c, bs, tsdict }: { c: R; bs: ReturnType<typeof use
   const tsdoc = tsdict[String(c.docId)] || {};
   const detailUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(c.docId) });
   return (
-    <a href={detailUrl} className="group block">
-      <Card className="h-full transition-all group-hover:border-primary/40 group-hover:shadow-md">
-        <CardContent className="p-4 space-y-2">
+    <Card className="group h-full transition-all hover:border-primary/40 hover:shadow-md">
+      <CardContent className="space-y-2 p-4">
+        <a href={detailUrl} className="block space-y-2">
           <div className="flex items-start justify-between gap-2">
             <h3 className="font-medium line-clamp-2 leading-tight">{c.title || '未命名'}</h3>
             <Badge variant={ruleBadgeVariant(c.rule)} className="shrink-0">
@@ -476,9 +484,14 @@ function RunningContestCard({ c, bs, tsdict }: { c: R; bs: ReturnType<typeof use
               </Badge>
             )}
           </div>
-        </CardContent>
-      </Card>
-    </a>
+        </a>
+        {isTeamContest(c) ? (
+          <a href={teamWorkspaceUrl(c)} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+            <Users className="size-3" /> 管理我的队伍
+          </a>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -487,9 +500,9 @@ function ContestCard({ c, bs, tsdict }: { c: R; bs: ReturnType<typeof useBootstr
   const tsdoc = tsdict[String(c.docId)] || {};
   const detailUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(c.docId) });
   return (
-    <a href={detailUrl} className="group block">
-      <Card className="h-full transition-all group-hover:border-primary/40 group-hover:shadow-md">
-        <CardContent className="p-4 space-y-2">
+    <Card className="group h-full transition-all hover:border-primary/40 hover:shadow-md">
+      <CardContent className="space-y-2 p-4">
+        <a href={detailUrl} className="block space-y-2">
           <div className="flex items-start justify-between gap-2">
             <h3 className="font-medium line-clamp-2 leading-tight">{c.title || '未命名'}</h3>
             <Badge variant={ruleBadgeVariant(c.rule)} className="shrink-0">
@@ -511,9 +524,14 @@ function ContestCard({ c, bs, tsdict }: { c: R; bs: ReturnType<typeof useBootstr
               </Badge>
             ) : null}
           </div>
-        </CardContent>
-      </Card>
-    </a>
+        </a>
+        {isTeamContest(c) ? (
+          <a href={teamWorkspaceUrl(c)} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+            <Users className="size-3" /> 管理我的队伍
+          </a>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -549,6 +567,11 @@ function ContestTable({ docs, bs, tsdict, locale }: { docs: R[]; bs: ReturnType<
                       <Badge variant="secondary" className="ml-2 text-[10px]">
                         Rated
                       </Badge>
+                    ) : null}
+                    {isTeamContest(c) ? (
+                      <a href={teamWorkspaceUrl(c)} className="ml-2 inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                        <Users className="size-3" /> 队伍
+                      </a>
                     ) : null}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">{formatDateTime(c.beginAt, locale)}</TableCell>
@@ -599,6 +622,7 @@ export function ContestDetailPage() {
   const isHomework = tdoc.rule === 'homework';
   const isACM = tdoc.rule === 'acm';
   const isExam = tdoc.rule === 'exam';
+  const isTeam = isTeamContest(tdoc);
   const canManageContest = !!data.canManageContest;
   const canViewRecord = !!data.canViewRecord;
   const isClientRequired = tdoc.entryMode === 'client_required';
@@ -686,6 +710,14 @@ export function ContestDetailPage() {
                 排行榜
               </a>
             </Button>
+            {isTeam ? (
+              <Button asChild variant="outline">
+                <a href={`${detailUrl}/teams`}>
+                  <Users className="size-4" />
+                  我的队伍
+                </a>
+              </Button>
+            ) : null}
             {canManageContest ? (
               <Button asChild variant="outline">
                 <a href={`${detailUrl}/management`}>
@@ -732,6 +764,11 @@ export function ContestDetailPage() {
               <DetailAction href={`${detailUrl}/scoreboard`} icon={<Trophy className="size-4" />} title="排行榜">
                 查看排名与榜单视图
               </DetailAction>
+              {isTeam ? (
+                <DetailAction href={`${detailUrl}/teams`} icon={<Users className="size-4" />} title="队伍工作台">
+                  组建队伍、处理邀请与查看成员
+                </DetailAction>
+              ) : null}
               {!isExam ? (
                 <DetailAction href={`${detailUrl}/clarification`} icon={<MessageSquare className="size-4" />} title="澄清答疑">
                   查看公告与提交提问
@@ -806,6 +843,11 @@ export function ContestDetailPage() {
               <SidebarLink href={`${detailUrl}/scoreboard`} icon={<Trophy className="size-3.5" />}>
                 排行榜
               </SidebarLink>
+              {isTeam ? (
+                <SidebarLink href={`${detailUrl}/teams`} icon={<Users className="size-3.5" />}>
+                  比赛队伍
+                </SidebarLink>
+              ) : null}
               {!isExam ? (
                 <SidebarLink href={`${detailUrl}/clarification`} icon={<MessageSquare className="size-3.5" />}>
                   澄清答疑

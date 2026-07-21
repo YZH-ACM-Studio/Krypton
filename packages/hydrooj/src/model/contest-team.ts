@@ -10,6 +10,7 @@ import * as oplog from './oplog';
 import UserModel, { type User } from './user';
 
 export type ContestTeamManagementMode = 'self' | 'admin';
+export type ContestTeamInviteStatus = 'pending' | 'accepting' | 'accepted' | 'declined' | 'cancelled' | 'superseded';
 
 export interface ContestTeamDoc {
     _id: ObjectId;
@@ -38,6 +39,22 @@ export interface ContestTeamActor {
     emergencyConfirmation?: string;
 }
 
+export interface ContestTeamInviteDoc {
+    _id: ObjectId;
+    inviteId: ObjectId;
+    domainId: string;
+    contestId: ObjectId;
+    teamId: ObjectId;
+    inviterUid: number;
+    inviteeUid: number;
+    teamRevision: number;
+    status: ContestTeamInviteStatus;
+    createdAt: Date;
+    updatedAt: Date;
+    resolvedAt?: Date;
+    resolvedBy?: number;
+}
+
 export interface ContestTeamCreateInput {
     name: string;
     description?: string;
@@ -52,10 +69,12 @@ export interface ContestTeamUpdateInput {
     description?: string;
     captainUid?: number;
     memberUids?: number[];
+    managementMode?: ContestTeamManagementMode;
     active?: boolean;
 }
 
 export const coll = db.collection<ContestTeamDoc>('contest.teams');
+export const inviteColl = db.collection<ContestTeamInviteDoc>('contest.teamInvites');
 
 function teamConflict(reason: string): never {
     throw new ContestTeamConflictError(reason);
@@ -98,7 +117,7 @@ export function emergencyTeamConfirmation(teamId: ObjectId, revision: number): s
     return `TEAM-EMERGENCY:${teamId.toHexString()}:${revision}`;
 }
 
-function isContestManager(actor: User, tdoc: Tdoc): boolean {
+export function canManageContestTeams(actor: User, tdoc: Tdoc): boolean {
     return actor.own(tdoc, PERM.PERM_EDIT_CONTEST_SELF) || actor.hasPerm(PERM.PERM_EDIT_CONTEST) || actor.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
 }
 
@@ -117,6 +136,9 @@ async function assertTeamContest(domainId: string, contestId: ObjectId): Promise
 export async function assertContestTeamEligibility(domainId: string, tdoc: Tdoc, uid: number): Promise<void> {
     const udoc = await UserModel.getById(domainId, uid);
     if (!udoc || !udoc._id) throw new UserNotFoundError(uid);
+    if (!udoc.hasPerm(PERM.PERM_VIEW_CONTEST) || !udoc.hasPerm(PERM.PERM_ATTEND_CONTEST)) {
+        throw new NotAssignedError('contest', tdoc.docId);
+    }
 
     if (tdoc.assign?.length) {
         const groups = await UserModel.listGroup(domainId, uid);
@@ -201,7 +223,15 @@ async function auditedMutation<T>(data: TeamAuditData, mutation: () => Promise<T
         }
         throw error;
     }
-    await audit({ ...data, toRevision: revisionOf(result), result: 'success' });
+    try {
+        await audit({ ...data, toRevision: revisionOf(result), result: 'success' });
+    } catch (auditError) {
+        console.error(
+            '[contest-team] mutation committed but success audit failed',
+            { domainId: data.domainId, contestId: data.contestId, teamId: data.teamId, actorUid: data.actorUid, operation: data.operation },
+            auditError,
+        );
+    }
     return result;
 }
 
@@ -226,7 +256,7 @@ export async function createTeam(
         async () => {
             const now = actor.now || new Date();
             const tdoc = await assertTeamContest(domainId, contestId);
-            const admin = isContestManager(actor.user, tdoc);
+            const admin = canManageContestTeams(actor.user, tdoc);
             if (started(tdoc, now)) throw new ContestTeamConflictError('contest_started');
             if (!['self', 'admin'].includes(input.managementMode)) throw new ValidationError('managementMode');
             if (input.managementMode === 'admin' && !admin) throw new PermissionError(PERM.PERM_EDIT_CONTEST);
@@ -308,7 +338,7 @@ function authorizeMutation(
     changesRoster: boolean,
 ): { admin: boolean; emergency: boolean } {
     const now = actor.now || new Date();
-    const admin = isContestManager(actor.user, tdoc);
+    const admin = canManageContestTeams(actor.user, tdoc);
     const emergency = started(tdoc, now);
     if (emergency) {
         if (!admin || actor.emergencyConfirmation !== emergencyTeamConfirmation(team.teamId, team.revision)) {
@@ -349,9 +379,14 @@ export async function updateTeam(
             auditData.fromRevision = current.revision;
             auditData.targetUids = [...current.memberUids];
             if (current.revision !== input.expectedRevision) teamConflict('revision_mismatch');
-            const changesRoster = input.memberUids !== undefined || input.captainUid !== undefined || input.active === false;
+            const changesRoster =
+                input.memberUids !== undefined || input.captainUid !== undefined || input.managementMode !== undefined || input.active === false;
             if (started(tdoc, actor.now || new Date())) auditData.operation = 'emergency-update';
             const { admin, emergency } = authorizeMutation(tdoc, current, actor, changesRoster);
+            if (input.managementMode !== undefined && !['self', 'admin'].includes(input.managementMode)) {
+                throw new ValidationError('managementMode');
+            }
+            if (input.managementMode !== undefined && !admin) throw new PermissionError(PERM.PERM_EDIT_CONTEST);
 
             const memberUids =
                 input.memberUids === undefined ? current.memberUids : validateTeamShape(input.memberUids, input.captainUid ?? current.captainUid);
@@ -385,8 +420,12 @@ export async function updateTeam(
             };
             if (input.name !== undefined) Object.assign(patch, normalizeTeamName(input.name));
             if (input.description !== undefined) patch.description = normalizeTeamDescription(input.description);
+            if (input.managementMode !== undefined) patch.managementMode = input.managementMode;
             if (input.active !== undefined) patch.active = input.active;
-            if (emergency && (input.name !== undefined || input.description !== undefined || input.active !== undefined)) {
+            if (
+                emergency &&
+                (input.name !== undefined || input.description !== undefined || input.managementMode !== undefined || input.active !== undefined)
+            ) {
                 teamConflict('contest_started');
             }
             if (patch.active === false && current.managementMode === 'admin' && !admin) throw new PermissionError(PERM.PERM_EDIT_CONTEST);
@@ -420,15 +459,446 @@ export async function updateTeam(
         },
         (result) => result.updated.revision,
     );
+    await runPostCommitStep(
+        'sync-invitations',
+        outcome.updated,
+        actor.user._id,
+        () => syncPendingInvitesAfterTeamMutation(outcome.updated, actor.user._id, actor.now || new Date()),
+    );
     if (outcome.roleChanged) {
-        await bus.parallel('contest/team-role-change', {
+        await runPostCommitStep('publish-role-change', outcome.updated, actor.user._id, () =>
+            bus.parallel('contest/team-role-change', {
+                before: outcome.before,
+                after: outcome.updated,
+                actorUid: actor.user._id,
+                emergency: outcome.emergency,
+            }),
+        );
+    }
+    return outcome.updated;
+}
+
+async function runPostCommitStep(
+    operation: string,
+    team: ContestTeamDoc,
+    actorUid: number,
+    step: () => Promise<unknown>,
+): Promise<void> {
+    try {
+        await step();
+    } catch (error) {
+        console.error(
+            '[contest-team] committed mutation post-commit step failed',
+            {
+                domainId: team.domainId,
+                contestId: team.contestId,
+                teamId: team.teamId,
+                teamRevision: team.revision,
+                actorUid,
+                operation,
+            },
+            error,
+        );
+    }
+}
+
+async function syncPendingInvitesAfterTeamMutation(
+    team: ContestTeamDoc,
+    actorUid: number,
+    now: Date,
+    excludeInviteId?: ObjectId,
+): Promise<void> {
+    const filter = {
+        domainId: team.domainId,
+        contestId: team.contestId,
+        teamId: team.teamId,
+        status: { $in: ['pending', 'accepting'] as ContestTeamInviteStatus[] },
+        ...(excludeInviteId ? { inviteId: { $ne: excludeInviteId } } : {}),
+    };
+    if (!team.active || team.managementMode !== 'self' || team.memberUids.length >= 3) {
+        await inviteColl.updateMany(filter, {
+            $set: { status: 'cancelled', resolvedAt: now, resolvedBy: actorUid, updatedAt: now },
+        });
+        return;
+    }
+    await inviteColl.updateMany(filter, { $set: { teamRevision: team.revision, updatedAt: now } });
+}
+
+interface InviteAuditData {
+    operation: 'invite-create' | 'invite-accept' | 'invite-decline';
+    domainId: string;
+    contestId: ObjectId;
+    inviteId: ObjectId;
+    actorUid: number;
+    targetUids: number[];
+    fromRevision: number;
+    teamId?: ObjectId;
+}
+
+async function auditInvite(data: InviteAuditData & { toRevision: number; result: 'success' | 'rejected'; reason?: string }): Promise<void> {
+    await oplog.add({
+        type: `contest.team.${data.operation}`,
+        operation: data.operation,
+        domainId: data.domainId,
+        operator: data.actorUid,
+        contestId: data.contestId,
+        teamId: data.teamId,
+        inviteId: data.inviteId,
+        targetUids: data.targetUids,
+        fromRevision: data.fromRevision,
+        toRevision: data.toRevision,
+        result: data.result,
+        reason: data.reason,
+        time: new Date(),
+    });
+}
+
+async function auditedInviteMutation<T>(data: InviteAuditData, mutation: () => Promise<T>, revisionOf: (result: T) => number): Promise<T> {
+    let result: T;
+    try {
+        result = await mutation();
+    } catch (error: any) {
+        try {
+            await auditInvite({
+                ...data,
+                toRevision: data.fromRevision,
+                result: 'rejected',
+                reason: String(error?.params?.[0] || error?.code || error?.name || 'Error'),
+            });
+        } catch (auditError) {
+            console.error(
+                '[contest-team] failed to audit rejected invitation mutation',
+                {
+                    domainId: data.domainId,
+                    contestId: data.contestId,
+                    teamId: data.teamId,
+                    inviteId: data.inviteId,
+                    actorUid: data.actorUid,
+                    operation: data.operation,
+                },
+                auditError,
+            );
+        }
+        throw error;
+    }
+    try {
+        await auditInvite({ ...data, toRevision: revisionOf(result), result: 'success' });
+    } catch (auditError) {
+        console.error(
+            '[contest-team] invitation mutation committed but success audit failed',
+            {
+                domainId: data.domainId,
+                contestId: data.contestId,
+                teamId: data.teamId,
+                inviteId: data.inviteId,
+                actorUid: data.actorUid,
+                operation: data.operation,
+            },
+            auditError,
+        );
+    }
+    return result;
+}
+
+function assertInviteWindow(tdoc: Tdoc, now: Date): void {
+    if (started(tdoc, now)) teamConflict('contest_started');
+}
+
+async function loadPendingInvite(domainId: string, contestId: ObjectId, inviteId: ObjectId): Promise<ContestTeamInviteDoc> {
+    const invite = await inviteColl.findOne({ domainId, contestId, inviteId, status: 'pending' });
+    if (!invite) teamConflict('invite_not_found_or_resolved');
+    return invite;
+}
+
+export async function createInvite(
+    domainId: string,
+    contestId: ObjectId,
+    actor: ContestTeamActor,
+    inviteeUid: number,
+): Promise<ContestTeamInviteDoc> {
+    const inviteId = new ObjectId();
+    const auditData: InviteAuditData = {
+        operation: 'invite-create',
+        domainId,
+        contestId,
+        inviteId,
+        actorUid: actor.user._id,
+        targetUids: [inviteeUid],
+        fromRevision: 0,
+    };
+    return await auditedInviteMutation(
+        auditData,
+        async () => {
+            if (!Number.isSafeInteger(inviteeUid) || inviteeUid <= 0) throw new ValidationError('inviteeUid');
+            const now = actor.now || new Date();
+            const tdoc = await assertTeamContest(domainId, contestId);
+            assertInviteWindow(tdoc, now);
+            const team = await getTeamByMember(domainId, contestId, actor.user._id);
+            if (!team) teamConflict('team_required');
+            auditData.teamId = team.teamId;
+            auditData.fromRevision = team.revision;
+            if (team.managementMode !== 'self' || team.captainUid !== actor.user._id) {
+                throw new PermissionError(PERM.PERM_EDIT_CONTEST_SELF);
+            }
+            if (team.memberUids.length >= 3) teamConflict('team_full');
+            if (team.memberUids.includes(inviteeUid)) teamConflict('member_already_assigned');
+            await assertContestTeamEligibility(domainId, tdoc, inviteeUid);
+            if (await getTeamByMember(domainId, contestId, inviteeUid)) teamConflict('member_already_assigned');
+
+            const [latestContest, latestTeam] = await Promise.all([
+                contest.get(domainId, contestId),
+                loadActiveTeam(domainId, contestId, team.teamId),
+            ]);
+            const finalNow = actor.now || new Date();
+            if (
+                contest.getParticipationMode(latestContest) !== 'team' ||
+                latestContest.rule !== 'acm' ||
+                (latestContest.participationRevision ?? 0) !== (tdoc.participationRevision ?? 0)
+            ) {
+                teamConflict('participation_mode_changed');
+            }
+            assertInviteWindow(latestContest, finalNow);
+            if (latestTeam.revision !== team.revision) teamConflict('revision_mismatch');
+            if (latestTeam.memberUids.length >= 3) teamConflict('team_full');
+            await assertContestTeamEligibility(domainId, latestContest, inviteeUid);
+            if (await getTeamByMember(domainId, contestId, inviteeUid)) teamConflict('member_already_assigned');
+
+            const existing = await inviteColl.findOne({
+                domainId,
+                contestId,
+                teamId: team.teamId,
+                inviteeUid,
+                status: 'pending',
+            });
+            if (existing) {
+                auditData.inviteId = existing.inviteId;
+                const refreshed = await inviteColl.findOneAndUpdate(
+                    { _id: existing._id, status: 'pending', teamRevision: existing.teamRevision },
+                    {
+                        $set: {
+                            inviterUid: actor.user._id,
+                            teamRevision: latestTeam.revision,
+                            updatedAt: finalNow,
+                        },
+                    },
+                    { returnDocument: 'after' },
+                );
+                if (!refreshed) teamConflict('invite_revision_mismatch');
+                return refreshed;
+            }
+            const doc: ContestTeamInviteDoc = {
+                _id: inviteId,
+                inviteId,
+                domainId,
+                contestId,
+                teamId: team.teamId,
+                inviterUid: actor.user._id,
+                inviteeUid,
+                teamRevision: latestTeam.revision,
+                status: 'pending',
+                createdAt: finalNow,
+                updatedAt: finalNow,
+            };
+            try {
+                await inviteColl.insertOne(doc);
+            } catch (error: any) {
+                if (error?.code === 11000) teamConflict('invite_already_pending');
+                throw error;
+            }
+            return doc;
+        },
+        (invite) => invite.teamRevision,
+    );
+}
+
+export async function declineInvite(
+    domainId: string,
+    contestId: ObjectId,
+    inviteId: ObjectId,
+    actor: ContestTeamActor,
+): Promise<ContestTeamInviteDoc> {
+    const auditData: InviteAuditData = {
+        operation: 'invite-decline',
+        domainId,
+        contestId,
+        inviteId,
+        actorUid: actor.user._id,
+        targetUids: [actor.user._id],
+        fromRevision: 0,
+    };
+    return await auditedInviteMutation(
+        auditData,
+        async () => {
+            const now = actor.now || new Date();
+            const tdoc = await assertTeamContest(domainId, contestId);
+            assertInviteWindow(tdoc, now);
+            const invite = await loadPendingInvite(domainId, contestId, inviteId);
+            auditData.teamId = invite.teamId;
+            auditData.fromRevision = invite.teamRevision;
+            if (invite.inviteeUid !== actor.user._id) throw new PermissionError(PERM.PERM_EDIT_CONTEST_SELF);
+            const updated = await inviteColl.findOneAndUpdate(
+                { _id: invite._id, status: 'pending', inviteeUid: actor.user._id },
+                { $set: { status: 'declined', resolvedAt: now, resolvedBy: actor.user._id, updatedAt: now } },
+                { returnDocument: 'after' },
+            );
+            if (!updated) teamConflict('invite_not_found_or_resolved');
+            return updated;
+        },
+        (invite) => invite.teamRevision,
+    );
+}
+
+async function restoreInviteClaim(invite: ContestTeamInviteDoc, now: Date): Promise<void> {
+    const currentTeam = await coll.findOne({
+        domainId: invite.domainId,
+        contestId: invite.contestId,
+        teamId: invite.teamId,
+        active: true,
+    });
+    const canRemainPending = !!currentTeam && currentTeam.managementMode === 'self' && currentTeam.memberUids.length < 3;
+    const restored = await inviteColl.updateOne(
+        { _id: invite._id, status: 'accepting', inviteeUid: invite.inviteeUid },
+        canRemainPending
+            ? {
+                  $set: { status: 'pending', teamRevision: currentTeam.revision, updatedAt: now },
+                  $unset: { resolvedAt: '', resolvedBy: '' },
+              }
+            : { $set: { status: 'cancelled', resolvedAt: now, updatedAt: now } },
+    );
+    if (restored.modifiedCount === 1) return;
+    const resolved = await inviteColl.findOne({ _id: invite._id });
+    if (!resolved || resolved.status === 'accepting') teamConflict('invite_claim_restore_failed');
+}
+
+export async function acceptInvite(domainId: string, contestId: ObjectId, inviteId: ObjectId, actor: ContestTeamActor): Promise<ContestTeamDoc> {
+    const auditData: InviteAuditData = {
+        operation: 'invite-accept',
+        domainId,
+        contestId,
+        inviteId,
+        actorUid: actor.user._id,
+        targetUids: [actor.user._id],
+        fromRevision: 0,
+    };
+    const outcome = await auditedInviteMutation(
+        auditData,
+        async () => {
+            const now = actor.now || new Date();
+            const tdoc = await assertTeamContest(domainId, contestId);
+            assertInviteWindow(tdoc, now);
+            const invite = await loadPendingInvite(domainId, contestId, inviteId);
+            auditData.teamId = invite.teamId;
+            auditData.fromRevision = invite.teamRevision;
+            if (invite.inviteeUid !== actor.user._id) throw new PermissionError(PERM.PERM_EDIT_CONTEST_SELF);
+            if (await getTeamByMember(domainId, contestId, actor.user._id)) teamConflict('member_already_assigned');
+            const current = await loadActiveTeam(domainId, contestId, invite.teamId);
+            if (current.managementMode !== 'self') teamConflict('invite_team_not_self_managed');
+            if (current.revision !== invite.teamRevision) teamConflict('invite_revision_mismatch');
+            if (current.memberUids.length >= 3) teamConflict('team_full');
+            await assertContestTeamEligibility(domainId, tdoc, actor.user._id);
+
+            const claimed = await inviteColl.findOneAndUpdate(
+                {
+                    _id: invite._id,
+                    status: 'pending',
+                    inviteeUid: actor.user._id,
+                    teamRevision: current.revision,
+                },
+                { $set: { status: 'accepting', updatedAt: now } },
+                { returnDocument: 'after' },
+            );
+            if (!claimed) teamConflict('invite_not_found_or_resolved');
+
+            let teamUpdated = false;
+            try {
+                const [latestContest, latestTeam] = await Promise.all([
+                    contest.get(domainId, contestId),
+                    loadActiveTeam(domainId, contestId, current.teamId),
+                ]);
+                const finalNow = actor.now || new Date();
+                if (
+                    contest.getParticipationMode(latestContest) !== 'team' ||
+                    latestContest.rule !== 'acm' ||
+                    (latestContest.participationRevision ?? 0) !== (tdoc.participationRevision ?? 0)
+                ) {
+                    teamConflict('participation_mode_changed');
+                }
+                assertInviteWindow(latestContest, finalNow);
+                if (latestTeam.revision !== current.revision) teamConflict('revision_mismatch');
+                if (latestTeam.memberUids.length >= 3) teamConflict('team_full');
+                if (await getTeamByMember(domainId, contestId, actor.user._id)) teamConflict('member_already_assigned');
+                await assertContestTeamEligibility(domainId, latestContest, actor.user._id);
+                const memberUids = validateTeamShape([...latestTeam.memberUids, actor.user._id], latestTeam.captainUid);
+                let updated: ContestTeamDoc;
+                try {
+                    updated = await coll.findOneAndUpdate(
+                        { domainId, contestId, teamId: latestTeam.teamId, active: true, revision: latestTeam.revision },
+                        { $set: { memberUids, updatedAt: finalNow }, $inc: { revision: 1 } },
+                        { returnDocument: 'after' },
+                    );
+                } catch (error) {
+                    duplicateConflict(error);
+                }
+                if (!updated) teamConflict('revision_mismatch');
+                teamUpdated = true;
+
+                return { before: current, updated, invite, committedAt: finalNow };
+            } catch (error) {
+                if (!teamUpdated) await restoreInviteClaim(invite, actor.now || new Date());
+                throw error;
+            }
+        },
+        (result) => result.updated.revision,
+    );
+    await runPostCommitStep('finalize-accepted-invitation', outcome.updated, actor.user._id, async () => {
+        const finalized = await inviteColl.updateOne(
+            { _id: outcome.invite._id, status: 'accepting', inviteeUid: actor.user._id },
+            {
+                $set: {
+                    status: 'accepted',
+                    resolvedAt: outcome.committedAt,
+                    resolvedBy: actor.user._id,
+                    updatedAt: outcome.committedAt,
+                },
+            },
+        );
+        if (finalized.modifiedCount !== 1) teamConflict('invite_finalize_failed');
+    });
+    await runPostCommitStep('supersede-other-invitations', outcome.updated, actor.user._id, () =>
+        inviteColl.updateMany(
+            {
+                domainId,
+                contestId,
+                inviteeUid: actor.user._id,
+                status: { $in: ['pending', 'accepting'] },
+                inviteId: { $ne: outcome.invite.inviteId },
+            },
+            {
+                $set: {
+                    status: 'superseded',
+                    resolvedAt: outcome.committedAt,
+                    resolvedBy: actor.user._id,
+                    updatedAt: outcome.committedAt,
+                },
+            },
+        ),
+    );
+    await runPostCommitStep('sync-invitations', outcome.updated, actor.user._id, () =>
+        syncPendingInvitesAfterTeamMutation(outcome.updated, actor.user._id, outcome.committedAt, outcome.invite.inviteId),
+    );
+    await runPostCommitStep('publish-role-change', outcome.updated, actor.user._id, () =>
+        bus.parallel('contest/team-role-change', {
             before: outcome.before,
             after: outcome.updated,
             actorUid: actor.user._id,
-            emergency: outcome.emergency,
-        });
-    }
+            emergency: false,
+        }),
+    );
     return outcome.updated;
+}
+
+export function getPendingInvitesForUser(domainId: string, contestId: ObjectId, inviteeUid: number) {
+    return inviteColl.find({ domainId, contestId, inviteeUid, status: 'pending' }).sort({ createdAt: -1, inviteId: -1 });
 }
 
 export async function getTeam(domainId: string, contestId: ObjectId, teamId: ObjectId): Promise<ContestTeamDoc | null> {
@@ -464,16 +934,36 @@ export async function apply(ctx: Context) {
         },
         { key: { domainId: 1, contestId: 1, active: 1, nameKey: 1 }, name: 'contestTeamList' },
     );
-    ctx.on('domain/delete', (domainId) => coll.deleteMany({ domainId }));
-    ctx.on('contest/del', (domainId, contestId) =>
-        coll.updateMany(
-            { domainId, contestId, active: true },
-            {
-                $set: { active: false, deactivatedAt: new Date(), deactivationReason: 'team_closed', updatedAt: new Date() },
-                $inc: { revision: 1 },
-            },
-        ),
+    await ctx.db.ensureIndexes(
+        inviteColl,
+        {
+            key: { domainId: 1, contestId: 1, teamId: 1, inviteeUid: 1 },
+            name: 'contestTeamInvitePendingUnique',
+            unique: true,
+            partialFilterExpression: { status: 'pending' },
+        },
+        { key: { domainId: 1, contestId: 1, inviteeUid: 1, status: 1, createdAt: -1 }, name: 'contestTeamInviteeList' },
+        { key: { domainId: 1, contestId: 1, teamId: 1, status: 1 }, name: 'contestTeamInviteTeamList' },
     );
+    ctx.on('domain/delete', async (domainId) => {
+        await Promise.all([coll.deleteMany({ domainId }), inviteColl.deleteMany({ domainId })]);
+    });
+    ctx.on('contest/del', async (domainId, contestId) => {
+        const now = new Date();
+        await Promise.all([
+            coll.updateMany(
+                { domainId, contestId, active: true },
+                {
+                    $set: { active: false, deactivatedAt: now, deactivationReason: 'team_closed', updatedAt: now },
+                    $inc: { revision: 1 },
+                },
+            ),
+            inviteColl.updateMany(
+                { domainId, contestId, status: { $in: ['pending', 'accepting'] } },
+                { $set: { status: 'cancelled', resolvedAt: now, updatedAt: now } },
+            ),
+        ]);
+    });
 }
 
 global.Hydro.model.contestTeam = {
@@ -482,12 +972,18 @@ global.Hydro.model.contestTeam = {
     normalizeTeamDescription,
     normalizeMemberUids,
     validateTeamShape,
+    canManageContestTeams,
     createTeam,
     updateTeam,
+    createInvite,
+    acceptInvite,
+    declineInvite,
+    getPendingInvitesForUser,
     getTeam,
     getTeamByMember,
     getMultiTeam,
     countActiveTeams,
     assertContestTeamEligibility,
     emergencyTeamConfirmation,
+    inviteColl,
 };

@@ -116,6 +116,31 @@ export interface TeamBatchSnapshotResult {
     alreadyApplied: boolean;
 }
 
+export type TeamBatchReadinessLevel = 'pass' | 'warning' | 'block';
+
+export interface TeamBatchReadinessItem {
+    level: TeamBatchReadinessLevel;
+    code: string;
+    title: string;
+    message: string;
+}
+
+export interface TeamBatchReadinessReport {
+    checkId: string;
+    checkedAt: Date;
+    result: TeamBatchReadinessLevel;
+    contestId: string;
+    batchId?: string;
+    batchStatus?: TeamBatchStatus;
+    batchRevision?: number;
+    teamCount: number;
+    memberCount: number;
+    snapshotHash?: string;
+    canFinalize: boolean;
+    canStart: boolean;
+    items: TeamBatchReadinessItem[];
+}
+
 export const batchColl = db.collection<TeamBatchDoc>('contest.teamBatches');
 export const teamColl = db.collection<TeamBatchTeamDoc>('contest.teamBatchTeams');
 export const inviteColl = db.collection<TeamBatchInviteDoc>('contest.teamBatchInvites');
@@ -1108,6 +1133,285 @@ function snapshotMemberConflict(batchId: ObjectId, team: TeamBatchTeamDoc, uid: 
     );
 }
 
+interface SnapshotRosterIssue {
+    kind: 'team_shape_invalid' | 'duplicate_member' | 'member_ineligible';
+    team: Pick<TeamBatchTeamDoc, 'teamId' | 'captainUid' | 'memberUids'>;
+    uid: number;
+    error?: unknown;
+}
+
+async function inspectSnapshotRoster(
+    domainId: string,
+    tdoc: Tdoc,
+    teams: Array<Pick<TeamBatchTeamDoc, 'teamId' | 'captainUid' | 'memberUids'>>,
+): Promise<SnapshotRosterIssue[]> {
+    const issues: SnapshotRosterIssue[] = [];
+    const seen = new Set<number>();
+    for (const team of teams) {
+        try {
+            contestTeam.validateTeamShape(team.memberUids, team.captainUid);
+        } catch (error) {
+            issues.push({ kind: 'team_shape_invalid', team, uid: team.captainUid, error });
+        }
+        for (const uid of team.memberUids) {
+            if (seen.has(uid)) {
+                issues.push({ kind: 'duplicate_member', team, uid });
+                continue;
+            }
+            seen.add(uid);
+            try {
+                await contestTeam.assertContestTeamRosterEligibility(domainId, tdoc, uid);
+            } catch (error) {
+                issues.push({ kind: 'member_ineligible', team, uid, error });
+            }
+        }
+    }
+    return issues;
+}
+
+function throwSnapshotRosterIssue(batchId: ObjectId, issue: SnapshotRosterIssue, stage: string): never {
+    if (issue.kind === 'duplicate_member') {
+        conflict(`batch_snapshot_duplicate_member;batchId=${batchId};teamId=${issue.team.teamId};uid=${issue.uid};stage=${stage}`);
+    }
+    if (issue.kind === 'team_shape_invalid') {
+        snapshotMemberConflict(batchId, issue.team as TeamBatchTeamDoc, issue.uid, 'team-shape', issue.error);
+    }
+    snapshotMemberConflict(batchId, issue.team as TeamBatchTeamDoc, issue.uid, stage, issue.error);
+}
+
+function readinessResult(items: TeamBatchReadinessItem[]): TeamBatchReadinessLevel {
+    if (items.some((item) => item.level === 'block')) return 'block';
+    if (items.some((item) => item.level === 'warning')) return 'warning';
+    return 'pass';
+}
+
+function lockReadinessItem(tdoc: Tdoc): TeamBatchReadinessItem {
+    if (!tdoc.lockAt) {
+        return { level: 'warning', code: 'scoreboard_lock_missing', title: '封榜时间', message: '未配置封榜；这不会阻止开赛。' };
+    }
+    if (tdoc.lockAt < tdoc.beginAt || tdoc.lockAt > tdoc.endAt) {
+        return { level: 'warning', code: 'scoreboard_lock_outside_contest', title: '封榜时间', message: '封榜时间不在比赛时段内，请确认配置。' };
+    }
+    const minutes = Math.round((tdoc.endAt.getTime() - tdoc.lockAt.getTime()) / 60_000);
+    return { level: 'pass', code: 'scoreboard_lock_ready', title: '封榜时间', message: `将在比赛结束前 ${minutes} 分钟封榜。` };
+}
+
+export async function checkContestReadiness(domainId: string, contestId: ObjectId, actor: TeamBatchActor): Promise<TeamBatchReadinessReport> {
+    requireManager(actor);
+    const checkedAt = actor.now || new Date();
+    const checkId = new ObjectId().toHexString();
+    const tdoc = await contest.get(domainId, contestId);
+    if (!tdoc) throw new ValidationError('tid');
+    const items: TeamBatchReadinessItem[] = [];
+    let batchId: ObjectId | null = null;
+    let batchStatus: TeamBatchStatus | undefined;
+    let batchRevision: number | undefined;
+    let teamCount = 0;
+    let memberCount = 0;
+    let previewHash: string | undefined;
+    let canFinalize = false;
+    let hasUnfinalizedPlan = false;
+
+    if (contest.getParticipationMode(tdoc) !== 'team') {
+        items.push({ level: 'pass', code: 'individual_contest', title: '参赛模式', message: '个人赛无需团队阵容定版。' });
+        items.push(lockReadinessItem(tdoc));
+    } else {
+        items.push({ level: 'pass', code: 'team_acm', title: '参赛模式', message: '当前为 1–3 人团队 ACM。' });
+        if (tdoc.rule !== 'acm') {
+            items.push({ level: 'block', code: 'team_rule_invalid', title: '团队协议', message: '团队模式必须使用 ACM 赛制。' });
+        }
+        if (tdoc.vigilEnabled === true && tdoc.entryMode === 'client_required' && tdoc.rated === false) {
+            items.push({
+                level: 'pass',
+                code: 'vigil_team_protocol_ready',
+                title: 'Vigil 协议',
+                message: '已启用团队协议 v2 所需的客户端入场配置。',
+            });
+        } else {
+            items.push({
+                level: 'block',
+                code: 'vigil_team_protocol_invalid',
+                title: 'Vigil 协议',
+                message: '团队赛必须启用 Vigil、强制客户端入场并关闭个人 Rating。',
+            });
+        }
+
+        const [recordCount, activeTeamCount] = await Promise.all([
+            recordColl.countDocuments({ domainId, contest: contestId }),
+            contestTeam.coll.countDocuments({ domainId, contestId, active: true }),
+        ]);
+        if (checkedAt >= tdoc.beginAt) {
+            items.push({ level: 'block', code: 'contest_started', title: '比赛状态', message: '比赛已经开始，不能再生成或调整赛前快照。' });
+        } else {
+            items.push({ level: 'pass', code: 'contest_not_started', title: '比赛状态', message: '比赛尚未开始。' });
+        }
+        if (recordCount) {
+            items.push({ level: 'block', code: 'contest_has_records', title: '提交记录', message: `已经存在 ${recordCount} 条比赛记录。` });
+        } else {
+            items.push({ level: 'pass', code: 'contest_has_no_records', title: '提交记录', message: '尚无比赛记录。' });
+        }
+
+        const finalizedBatchId = tdoc.teamBatchId ? new ObjectId(tdoc.teamBatchId) : null;
+        const plannedBatchId = tdoc.plannedTeamBatchId ? new ObjectId(tdoc.plannedTeamBatchId) : null;
+        hasUnfinalizedPlan = !!plannedBatchId && !finalizedBatchId;
+        batchId = finalizedBatchId || plannedBatchId;
+        if (finalizedBatchId && plannedBatchId) {
+            items.push({ level: 'block', code: 'batch_state_conflict', title: '批次状态', message: '比赛同时存在 planned 与 finalized 批次引用。' });
+        }
+
+        if (!batchId) {
+            const directTeams = await contestTeam.listTeams(domainId, contestId);
+            teamCount = directTeams.length;
+            memberCount = directTeams.reduce((sum, team) => sum + team.memberUids.length, 0);
+            const rosterIssues = await inspectSnapshotRoster(domainId, tdoc, directTeams);
+            if (!teamCount) {
+                items.push({ level: 'block', code: 'team_roster_empty', title: '比赛队伍', message: '尚未预绑定批次，也没有比赛内队伍。' });
+            } else if (rosterIssues.length) {
+                items.push({
+                    level: 'block',
+                    code: 'team_roster_invalid',
+                    title: '比赛队伍',
+                    message: `${rosterIssues.length} 项队伍形状、重复成员或参赛资格检查未通过。`,
+                });
+            } else {
+                items.push({
+                    level: 'pass',
+                    code: 'direct_team_roster_ready',
+                    title: '比赛队伍',
+                    message: `${teamCount} 支队伍、${memberCount} 名成员已就绪。`,
+                });
+            }
+        } else {
+            const batch = await batchColl.findOne({ domainId, batchId });
+            if (!batch) {
+                items.push({ level: 'block', code: 'batch_not_found', title: '组队批次', message: '绑定的组队批次不存在或不属于当前域。' });
+            }
+            if (batch) {
+                batchStatus = batch.status;
+                batchRevision = batch.revision;
+                const teams = await getMultiTeam(domainId, batchId).toArray();
+                teamCount = teams.length;
+                memberCount = teams.reduce((sum, team) => sum + team.memberUids.length, 0);
+                previewHash = snapshotHash(batch, teams);
+                const rosterIssues = await inspectSnapshotRoster(domainId, tdoc, teams);
+                const duplicateCount = rosterIssues.filter((issue) => issue.kind === 'duplicate_member').length;
+                const shapeCount = rosterIssues.filter((issue) => issue.kind === 'team_shape_invalid').length;
+                const ineligibleCount = rosterIssues.filter((issue) => issue.kind === 'member_ineligible').length;
+
+                if (finalizedBatchId) {
+                    items.push({ level: 'pass', code: 'batch_finalized', title: '组队批次', message: `阵容已定版于批次修订 ${batch.revision}。` });
+                } else if (batch.status === 'closed') {
+                    items.push({ level: 'pass', code: 'batch_closed', title: '组队批次', message: `批次已关闭，修订 ${batch.revision} 可供定版。` });
+                } else {
+                    items.push({ level: 'block', code: 'batch_open', title: '组队批次', message: '批次仍开放；请先关闭批次再定版。' });
+                }
+                if (!teamCount) {
+                    items.push({ level: 'block', code: 'batch_empty', title: '阵容规模', message: '批次中没有有效队伍。' });
+                } else {
+                    items.push({ level: 'pass', code: 'batch_size', title: '阵容规模', message: `${teamCount} 支队伍、${memberCount} 名成员。` });
+                }
+                if (shapeCount) {
+                    items.push({
+                        level: 'block',
+                        code: 'team_shape_invalid',
+                        title: '队伍结构',
+                        message: `${shapeCount} 支队伍的队长或 1–3 人结构不合法。`,
+                    });
+                }
+                if (duplicateCount) {
+                    items.push({ level: 'block', code: 'duplicate_members', title: '重复成员', message: `发现 ${duplicateCount} 项重复成员归属。` });
+                }
+                if (ineligibleCount) {
+                    items.push({
+                        level: 'block',
+                        code: 'member_ineligible',
+                        title: '成员资格',
+                        message: `${ineligibleCount} 名成员不符合当前比赛参赛条件。`,
+                    });
+                } else if (teamCount) {
+                    items.push({ level: 'pass', code: 'members_eligible', title: '成员资格', message: '全部成员符合当前比赛范围与账号权限。' });
+                }
+
+                if (finalizedBatchId) {
+                    const sourceActiveCount = await contestTeam.coll.countDocuments({
+                        domainId,
+                        contestId,
+                        sourceBatchId: finalizedBatchId,
+                        active: true,
+                    });
+                    if (
+                        tdoc.teamBatchSnapshotHash === previewHash &&
+                        tdoc.teamBatchSnapshotCount === teamCount &&
+                        sourceActiveCount === teamCount &&
+                        activeTeamCount === teamCount
+                    ) {
+                        items.push({
+                            level: 'pass',
+                            code: 'snapshot_consistent',
+                            title: '比赛快照',
+                            message: '快照 hash、队伍数量和 active ContestTeam 一致。',
+                        });
+                    } else {
+                        items.push({ level: 'block', code: 'snapshot_inconsistent', title: '比赛快照', message: '快照 hash 或队伍数量不一致。' });
+                    }
+                } else if (activeTeamCount) {
+                    items.push({
+                        level: 'block',
+                        code: 'contest_has_active_teams',
+                        title: '比赛快照',
+                        message: `定版前已存在 ${activeTeamCount} 支比赛队伍。`,
+                    });
+                } else {
+                    items.push({
+                        level: 'pass',
+                        code: 'snapshot_preview',
+                        title: '比赛快照',
+                        message: '已生成只读 hash/count 预览；实际定版会重新校验。',
+                    });
+                }
+            }
+        }
+        if (hasUnfinalizedPlan) {
+            items.push({
+                level: 'warning',
+                code: 'team_batch_not_finalized',
+                title: '开赛条件',
+                message: '当前仅预绑定批次；完成显式定版前不能开赛。',
+            });
+        }
+        items.push(lockReadinessItem(tdoc));
+        canFinalize = !!plannedBatchId && !finalizedBatchId && readinessResult(items) !== 'block';
+    }
+
+    const result = readinessResult(items);
+    const canStart = result !== 'block' && (contest.getParticipationMode(tdoc) === 'team' ? !hasUnfinalizedPlan && teamCount > 0 : true);
+    const report: TeamBatchReadinessReport = {
+        checkId,
+        checkedAt,
+        result,
+        contestId: contestId.toHexString(),
+        batchId: batchId?.toHexString(),
+        batchStatus,
+        batchRevision,
+        teamCount,
+        memberCount,
+        snapshotHash: previewHash,
+        canFinalize,
+        canStart,
+        items,
+    };
+    console.info('[contest-team-batch] readiness checked', {
+        domainId,
+        contestId: report.contestId,
+        actorUid: actor.user._id,
+        batchId: report.batchId || null,
+        checkId,
+        result,
+        blockCodes: items.filter((item) => item.level === 'block').map((item) => item.code),
+    });
+    return report;
+}
+
 async function snapshotToContestUnlocked(
     domainId: string,
     contestId: ObjectId,
@@ -1131,20 +1435,8 @@ async function snapshotToContestUnlocked(
     const teams = await getMultiTeam(domainId, batchId).toArray();
     if (!teams.length) conflict('batch_has_no_teams');
     trace.stage = 'member-validation';
-    for (const team of teams) {
-        try {
-            contestTeam.validateTeamShape(team.memberUids, team.captainUid);
-        } catch (error) {
-            snapshotMemberConflict(batchId, team, team.captainUid, 'team-shape', error);
-        }
-        for (const uid of team.memberUids) {
-            try {
-                await contestTeam.assertContestTeamRosterEligibility(domainId, tdoc, uid);
-            } catch (error) {
-                snapshotMemberConflict(batchId, team, uid, 'contest-eligibility', error);
-            }
-        }
-    }
+    const rosterIssues = await inspectSnapshotRoster(domainId, tdoc, teams);
+    if (rosterIssues.length) throwSnapshotRosterIssue(batchId, rosterIssues[0], 'contest-eligibility');
     const hash = snapshotHash(batch, teams);
     const memberCount = teams.reduce((sum, team) => sum + team.memberUids.length, 0);
     if (existingBatchId) {
@@ -1482,6 +1774,7 @@ global.Hydro.model.contestTeamBatch = {
     countBatchMembers,
     listBatches,
     listClosedBatches,
+    checkContestReadiness,
     setContestPlannedBatch,
     snapshotToContest,
     finalizePlannedBatchToContest,

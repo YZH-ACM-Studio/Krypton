@@ -359,6 +359,9 @@ export function ContestEditPage() {
   const [modeClearOpen, setModeClearOpen] = useState(false);
   const [modeClearConfirmed, setModeClearConfirmed] = useState(false);
   const [finalizeTeamBatchOpen, setFinalizeTeamBatchOpen] = useState(false);
+  const [teamReadiness, setTeamReadiness] = useState<R | null>(null);
+  const [teamReadinessLoading, setTeamReadinessLoading] = useState(false);
+  const [teamReadinessError, setTeamReadinessError] = useState('');
   const formRef = useRef<HTMLFormElement | null>(null);
   const primarySubmitRef = useRef<HTMLButtonElement | null>(null);
   const [permission, setPermission] = useState(() => {
@@ -459,6 +462,37 @@ export function ContestEditPage() {
     if (entryMode !== 'client_required') setEntryMode('client_required');
     if (rated) setRated(false);
   }, [participationMode, rule, vigilEnabled, entryMode, rated]);
+
+  const runTeamReadinessCheck = async () => {
+    if (!isEdit) return;
+    setTeamReadinessLoading(true);
+    setTeamReadinessError('');
+    try {
+      const response = await fetch(window.location.href, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        },
+        body: new URLSearchParams({ operation: 'check_team_readiness' }),
+      });
+      const text = await response.text();
+      let payload: R = {};
+      try {
+        payload = text ? JSON.parse(text) : {};
+      } catch {
+        if (!response.ok) throw new Error(text || '赛前检查失败');
+      }
+      if (!response.ok || !payload.ok) throw new Error(String(payload.message || payload.error || text || '赛前检查失败'));
+      setTeamReadiness(payload.readiness || null);
+    } catch (error) {
+      setTeamReadiness(null);
+      setTeamReadinessError(error instanceof Error ? error.message : '赛前检查失败');
+    } finally {
+      setTeamReadinessLoading(false);
+    }
+  };
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -608,6 +642,97 @@ export function ContestEditPage() {
                     ) : (
                       <p className="text-xs text-muted-foreground">也可以不使用批次，继续沿用比赛内直接组队。</p>
                     )}
+                    {isEdit && data.canManageTeamBatches ? (
+                      <div className="mt-4 space-y-3 border-t pt-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium">赛前就绪检查</p>
+                            <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                              只读检查已保存配置；不会自动关批、定版或探测客户端安装。
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={teamReadinessLoading || plannedTeamBatchId !== (persistedPlannedTeamBatchId || finalizedTeamBatchId)}
+                            onClick={runTeamReadinessCheck}
+                          >
+                            <RefreshCw className={`size-4 ${teamReadinessLoading ? 'animate-spin' : ''}`} />
+                            {teamReadiness ? '重新检查' : '运行检查'}
+                          </Button>
+                        </div>
+                        {plannedTeamBatchId !== (persistedPlannedTeamBatchId || finalizedTeamBatchId) ? (
+                          <p className="text-xs text-amber-600">请先保存批次选择，再运行赛前检查。</p>
+                        ) : null}
+                        {teamReadinessError ? (
+                          <div className="rounded-xl bg-destructive/8 px-3 py-2 text-xs text-destructive ring-1 ring-destructive/20">
+                            {teamReadinessError}
+                          </div>
+                        ) : null}
+                        {teamReadiness ? (
+                          <div className="space-y-3 rounded-2xl bg-background/75 p-3 ring-1 ring-foreground/8">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <Badge
+                                  variant="outline"
+                                  className={
+                                    teamReadiness.result === 'pass'
+                                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600'
+                                      : teamReadiness.result === 'warning'
+                                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-600'
+                                        : 'border-destructive/30 bg-destructive/10 text-destructive'
+                                  }
+                                >
+                                  {teamReadiness.result === 'block'
+                                    ? '存在阻断'
+                                    : teamReadiness.canFinalize
+                                      ? '可定版，尚不可开赛'
+                                      : teamReadiness.canStart
+                                        ? teamReadiness.result === 'warning'
+                                          ? '可以开赛，有提醒'
+                                          : '可以开赛'
+                                        : '尚不可开赛'}
+                                </Badge>
+                                <span className="text-xs text-muted-foreground">
+                                  {Number(teamReadiness.teamCount || 0)} 队 · {Number(teamReadiness.memberCount || 0)} 人
+                                </span>
+                              </div>
+                              {teamReadiness.canFinalize ? (
+                                <Button type="button" size="sm" onClick={() => setFinalizeTeamBatchOpen(true)}>
+                                  <ClipboardCheck className="size-4" /> 锁定阵容并生成快照
+                                </Button>
+                              ) : null}
+                            </div>
+                            {teamReadiness.snapshotHash ? (
+                              <p className="break-all font-mono text-[10px] text-muted-foreground">snapshot {teamReadiness.snapshotHash}</p>
+                            ) : null}
+                            {(['block', 'warning', 'pass'] as const).map((level) => {
+                              const levelItems = (teamReadiness.items || []).filter((item: R) => item.level === level);
+                              if (!levelItems.length) return null;
+                              const LevelIcon = level === 'pass' ? CheckCircle2 : AlertTriangle;
+                              return (
+                                <div key={level} className="space-y-1.5">
+                                  {levelItems.map((item: R) => (
+                                    <div key={item.code} className="flex items-start gap-2 rounded-xl bg-muted/35 px-3 py-2">
+                                      <LevelIcon
+                                        className={`mt-0.5 size-4 shrink-0 ${
+                                          level === 'pass' ? 'text-emerald-500' : level === 'warning' ? 'text-amber-500' : 'text-destructive'
+                                        }`}
+                                      />
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-medium">{item.title}</p>
+                                        <p className="mt-0.5 text-[11px] leading-5 text-muted-foreground">{item.message}</p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 

@@ -668,13 +668,13 @@ export class ContestEditHandler extends Handler {
         let ts = Date.now();
         ts = ts - (ts % (15 * Time.minute)) + 15 * Time.minute;
         const beginAt = moment(this.tdoc?.beginAt || new Date(ts)).tz(this.user.timeZone);
+        const canManageTeamBatches = contestTeamBatch.canManageTeamBatches(this.user);
         const [activeTeamCount, recordCount, teamBatches] = await Promise.all([
             tid ? contestTeam.countActiveTeams(authoritativeDomainId, tid) : Promise.resolve(0),
             tid ? record.coll.countDocuments({ domainId: authoritativeDomainId, contest: tid }) : Promise.resolve(0),
-            contestTeamBatch.listBatches(authoritativeDomainId),
+            canManageTeamBatches ? contestTeamBatch.listBatches(authoritativeDomainId) : Promise.resolve([]),
         ]);
         const participationRevision = this.tdoc?.participationRevision ?? 0;
-        const canManageTeamBatches = contestTeamBatch.canManageTeamBatches(this.user);
         const canUpdatePlannedTeamBatch =
             canManageTeamBatches &&
             (!tid || (new Date() < this.tdoc.beginAt && recordCount === 0 && activeTeamCount === 0 && !this.tdoc.teamBatchId));
@@ -1093,6 +1093,12 @@ export class ContestEditHandler extends Handler {
             throw error;
         }
         this.response.redirect = this.url('contest_edit', { tid });
+    }
+
+    @param('tid', Types.ObjectId)
+    async postCheckTeamReadiness(_domainId: string, tid: ObjectId) {
+        const readiness = await contestTeamBatch.checkContestReadiness(String(this.domain?._id), tid, { user: this.user });
+        this.response.body = { ok: true, readiness };
     }
 
     @param('tid', Types.ObjectId)

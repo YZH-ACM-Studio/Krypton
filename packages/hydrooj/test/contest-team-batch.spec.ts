@@ -254,6 +254,9 @@ const contestTeamStub = {
     async assertContestTeamRosterEligibility(_domainId: string, _tdoc: any, uid: number) {
         if (uid === rejectedRosterUid) throw new TestPermissionError('rejected roster member');
     },
+    async listTeams(domainId: string, contestId: ObjectId) {
+        return contestTeams.filter((team) => team.domainId === domainId && same(team.contestId, contestId) && team.active);
+    },
 };
 
 const contestStub = {
@@ -859,6 +862,93 @@ describe('P1.17 pre-contest team batches', () => {
             batchModel.setContestPlannedBatch('system', contestDocs[0].docId, second.batchId, first.batchId, { user: actor(99, true) }),
             TestConflictError,
         );
+    });
+
+    it('runs a manager-only read-only readiness check and shares roster blockers with finalization', async () => {
+        Object.assign(contestDocs[0], {
+            vigilEnabled: true,
+            entryMode: 'client_required',
+            rated: false,
+            endAt: new Date('2099-01-01T05:00:00Z'),
+            lockAt: new Date('2099-01-01T04:00:00Z'),
+        });
+        const batch = await createPlannedClosedBatch('Readiness');
+        const before = JSON.stringify({ batches, batchTeams, contestTeams, contestDocs, records, audits });
+        await rejects(batchModel.checkContestReadiness('system', contestDocs[0].docId, { user: actor(10) }), TestPermissionError);
+
+        const ready = await batchModel.checkContestReadiness('system', contestDocs[0].docId, { user: actor(99, true) });
+        expect(ready).to.include({ result: 'warning', canFinalize: true, canStart: false, teamCount: 2, memberCount: 3, batchStatus: 'closed' });
+        expect(ready.snapshotHash).to.match(/^[a-f0-9]{64}$/);
+        expect(ready.items.some((item) => item.code === 'members_eligible' && item.level === 'pass')).to.equal(true);
+        expect(JSON.stringify({ batches, batchTeams, contestTeams, contestDocs, records, audits })).to.equal(before);
+
+        rejectedRosterUid = 11;
+        const blocked = await batchModel.checkContestReadiness('system', contestDocs[0].docId, { user: actor(99, true) });
+        expect(blocked).to.include({ result: 'block', canFinalize: false });
+        expect(blocked.items.some((item) => item.code === 'member_ineligible')).to.equal(true);
+        await rejects(
+            batchModel.finalizePlannedBatchToContest('system', contestDocs[0].docId, batch.batchId, { user: actor(99, true) }),
+            TestConflictError,
+        );
+        expect(contestTeams).to.have.length(0);
+    });
+
+    it('reports open, duplicate, started, record, Vigil and lock findings without automatic repair', async () => {
+        const batch = await batchModel.createBatch('system', { user: actor(99, true) }, { name: 'Open Readiness' });
+        await batchModel.createTeam(
+            'system',
+            batch.batchId,
+            { user: actor(99, true) },
+            { name: 'First', captainUid: 10, memberUids: [10, 11], managementMode: 'admin' },
+        );
+        await batchModel.createTeam(
+            'system',
+            batch.batchId,
+            { user: actor(99, true) },
+            { name: 'Second', captainUid: 12, memberUids: [12], managementMode: 'admin' },
+        );
+        contestDocs[0].plannedTeamBatchId = batch.batchId;
+        batchTeams.find((team) => team.name === 'Second').memberUids = [11, 12];
+        records.push({ domainId: 'system', contest: contestDocs[0].docId });
+
+        const report = await batchModel.checkContestReadiness('system', contestDocs[0].docId, {
+            user: actor(99, true),
+            now: new Date('2100-01-01T00:00:00Z'),
+        });
+        const codes = new Set(report.items.map((item) => item.code));
+        for (const code of [
+            'batch_open',
+            'duplicate_members',
+            'contest_started',
+            'contest_has_records',
+            'vigil_team_protocol_invalid',
+            'scoreboard_lock_missing',
+        ]) {
+            expect(codes.has(code), code).to.equal(true);
+        }
+        expect(report).to.include({ result: 'block', canFinalize: false });
+        expect(contestDocs[0].plannedTeamBatchId.equals(batch.batchId)).to.equal(true);
+        expect(batch.status).to.equal('open');
+    });
+
+    it('verifies finalized snapshot hash and count consistency', async () => {
+        Object.assign(contestDocs[0], {
+            vigilEnabled: true,
+            entryMode: 'client_required',
+            rated: false,
+            endAt: new Date('2099-01-01T05:00:00Z'),
+            lockAt: new Date('2099-01-01T04:00:00Z'),
+        });
+        const batch = await createPlannedClosedBatch('Finalized Readiness');
+        await batchModel.finalizePlannedBatchToContest('system', contestDocs[0].docId, batch.batchId, { user: actor(99, true) });
+        const ready = await batchModel.checkContestReadiness('system', contestDocs[0].docId, { user: actor(99, true) });
+        expect(ready).to.include({ result: 'pass', canFinalize: false, canStart: true, teamCount: 2, memberCount: 3 });
+        expect(ready.items.some((item) => item.code === 'snapshot_consistent')).to.equal(true);
+
+        contestDocs[0].teamBatchSnapshotCount = 99;
+        const drifted = await batchModel.checkContestReadiness('system', contestDocs[0].docId, { user: actor(99, true) });
+        expect(drifted).to.include({ result: 'block', canFinalize: false });
+        expect(drifted.items.some((item) => item.code === 'snapshot_inconsistent')).to.equal(true);
     });
 
     it('materializes independent contest teams and rejects a concurrent or repeated explicit finalization', async () => {

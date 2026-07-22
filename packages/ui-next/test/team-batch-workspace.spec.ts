@@ -100,6 +100,22 @@ describe('P1.17 pre-contest team batch workspace contracts', () => {
     expect(model).to.include('withContestTeamBoundary(domainId, contestId');
   });
 
+  it('runs a manager-gated manual readiness check without polling or automatic repair', () => {
+    const editor = readFileSync(resolve(root, 'src/pages/contest-manage.tsx'), 'utf8');
+    const contestHandler = readFileSync(resolve(hydroRoot, 'handler/contest.ts'), 'utf8');
+    const model = readFileSync(resolve(hydroRoot, 'model/contest-team-batch.ts'), 'utf8');
+    expect(editor).to.include("operation: 'check_team_readiness'");
+    expect(editor).to.include('只读检查已保存配置');
+    expect(editor).to.include('teamReadiness.canFinalize');
+    expect(editor).not.to.include('setInterval(');
+    expect(contestHandler).to.include('contestTeamBatch.checkContestReadiness');
+    expect(contestHandler).to.include('canManageTeamBatches ? contestTeamBatch.listBatches');
+    expect(model).to.include('export async function checkContestReadiness');
+    expect(model).to.include('requireManager(actor)');
+    expect(model).to.include("blockCodes: items.filter((item) => item.level === 'block')");
+    expect(model).not.to.include('clientInstalled');
+  });
+
   it('shares one application-visible boundary with ordinary contest teams and runtime readers', () => {
     const teamModel = readFileSync(resolve(hydroRoot, 'model/contest-team.ts'), 'utf8');
     const contestModel = readFileSync(resolve(hydroRoot, 'model/contest.ts'), 'utf8');

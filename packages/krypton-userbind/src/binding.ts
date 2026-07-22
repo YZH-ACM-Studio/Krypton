@@ -18,12 +18,14 @@
  * `claimTemporaryAccount` lets a real account "absorb" a temp account's records.
  */
 import type { Filter } from 'mongodb';
+import { Logger } from '@hydrooj/utils';
 import { ObjectId, ValidationError, UserModel, NotFoundError } from 'hydrooj';
 import RecordModel from 'hydrooj/src/model/record';
 import { randomBytes } from 'node:crypto';
 import { bindingRequestsColl, bindTokensColl, schoolsColl, studentsColl, userGroupsColl } from './db';
 import { notifyBindingRequest } from './binding-notification';
 import { deriveEnrollmentYear, userBindModel } from './model';
+import { resolveVigilTeamEligibility } from './vigil-team-eligibility';
 import type {
     BindToken,
     BindTokenKind,
@@ -36,6 +38,8 @@ import type {
     StudentRecord,
     UserGroupBindToken,
 } from './types';
+
+const logger = new Logger('userbind.vigil-eligibility');
 
 function randomTokenId(): string {
     return randomBytes(32).toString('hex');
@@ -653,6 +657,7 @@ function isClientCandidateTime(contestModel: any, tdoc: any, now: number): boole
  *   - Krypton school/group scope must match when configured.
  *   - Legacy Hydro access is still respected: assign must match and
  *     invitation-code contests require the user to have attended already.
+ *   - Team contests require membership in the finalized active ContestTeam.
  *
  * The legacy name `computeEligibleExamContests` is retained as an alias
  * for back-compat — Vigil server pinned to the old name still works.
@@ -676,6 +681,20 @@ export async function computeEligibleContests(domainId: string, uid: number): Pr
         if (!isClientCandidateTime(contest, tdoc, now)) continue;
         if (!scopeMatchesContest(tdoc, record)) continue;
         if (!(await legacyHydroContestAccess(domainId, tdoc, uid))) continue;
+        const contestTeam = require('hydrooj/src/model/contest-team');
+        const teamEligibility = await resolveVigilTeamEligibility(domainId, tdoc, uid, (targetDomainId, contestId, targetUid) =>
+            (contestTeam as any).getTeamByMember(targetDomainId, contestId, targetUid),
+        );
+        if (!teamEligibility.eligible) {
+            logger.info(
+                'Vigil candidate excluded domain=%s contest=%s uid=%d teamId=- stage=candidate_filter reason=%s',
+                domainId,
+                teamEligibility.contestId?.toHexString() || 'missing',
+                uid,
+                teamEligibility.reason,
+            );
+            continue;
+        }
         eligible.push(tdoc.docId || tdoc._id);
     }
     return eligible;

@@ -339,6 +339,8 @@ class VigilResolveContestRoleHandler extends VigilApiHandler {
             role: role.role,
             teamRevision: role.teamRevision,
             eligible: role.eligible,
+            stage: 'resolve_role',
+            reason: role.reason,
         });
         this.response.body = role;
     }

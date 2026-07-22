@@ -48,6 +48,24 @@ describe('P1.17 pre-contest team batch workspace contracts', () => {
     expect(workspace).not.to.include('window.alert');
   });
 
+  it('copies a batch through the canonical model and the shared team dialog', () => {
+    const handler = readFileSync(resolve(hydroRoot, 'handler/contest-team-batch.ts'), 'utf8');
+    const model = readFileSync(resolve(hydroRoot, 'model/contest-team-batch.ts'), 'utf8');
+    const workspace = readFileSync(resolve(root, 'src/pages/contest-teams.tsx'), 'utf8');
+    expect(handler).to.include('teamBatch.copyBatch(this.domainId(), batchId');
+    expect(handler).to.include('canCopy: this.canManage');
+    expect(handler).to.include('teamBatch.countBatchTeams(this.domainId(), batchId)');
+    expect(handler).to.include('batchTeamCount,');
+    expect(model).to.include('copiedFromBatchId: sourceBatchId');
+    expect(model).to.include('if (targetTeams.length) await teamColl.insertMany(targetTeams)');
+    expect(model.indexOf('teamColl.insertMany(targetTeams)')).to.be.lessThan(model.indexOf('batchColl.insertOne(targetBatch)'));
+    expect(workspace).to.include('title="复制组队批次"');
+    expect(workspace).to.include('name="operation" value="copy"');
+    expect(workspace).to.include('Number(data.batchTeamCount || 0)');
+    expect(workspace).to.include('Number(data.memberCount || 0)');
+    expect(workspace).to.include('邀请、历史记录、关闭状态和比赛快照不会复制');
+  });
+
   it('offers only closed batches for team contests and binds through the canonical snapshot model', () => {
     const editor = readFileSync(resolve(root, 'src/pages/contest-manage.tsx'), 'utf8');
     const contestHandler = readFileSync(resolve(hydroRoot, 'handler/contest.ts'), 'utf8');

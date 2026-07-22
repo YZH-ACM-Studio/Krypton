@@ -33,6 +33,7 @@ function publicBatch(batch: teamBatch.TeamBatchDoc) {
         createdAt: batch.createdAt,
         updatedAt: batch.updatedAt,
         closedAt: batch.closedAt,
+        copiedFromBatchId: batch.copiedFromBatchId,
     };
 }
 
@@ -204,6 +205,11 @@ export class TeamBatchDetailHandler extends Handler {
             const query = teamSearch ? { nameKey: { $regex: teamNameSearch(teamSearch) } } : {};
             [teams, teamPageCount, teamCount] = await this.paginate(teamBatch.getMultiTeam(this.domainId(), batchId, query), page, 20);
         }
+        const [batchTeamCount, memberCount, copiedFromBatch] = await Promise.all([
+            this.canManage ? teamBatch.countBatchTeams(this.domainId(), batchId) : Promise.resolve(0),
+            this.canManage ? teamBatch.countBatchMembers(this.domainId(), batchId) : Promise.resolve(0),
+            this.batch.copiedFromBatchId ? teamBatch.getBatch(this.domainId(), this.batch.copiedFromBatchId) : Promise.resolve(null),
+        ]);
 
         const allUids = new Set<number>();
         if (ownTeam) ownTeam.memberUids.forEach((uid) => allUids.add(uid));
@@ -236,15 +242,28 @@ export class TeamBatchDetailHandler extends Handler {
                 canEditOwn: !closed && !!ownTeam && (this.canManage || ownTeam.captainUid === this.user._id),
                 canLeave: !closed && !!ownTeam && ownTeam.managementMode === 'self',
                 canClose: this.canManage && !closed,
+                canCopy: this.canManage,
                 canEmergencyEdit: false,
                 started: closed,
             },
+            copiedFromBatch: copiedFromBatch ? { batchId: copiedFromBatch.batchId, name: copiedFromBatch.name } : null,
             teams: teams.map(publicTeam),
             teamPage: page,
             teamPageCount,
             teamCount,
+            batchTeamCount,
+            memberCount,
             teamSearch: teamSearch.trim(),
         };
+    }
+
+    @param('batchId', Types.ObjectId)
+    @param('name', Types.String)
+    @param('description', Types.Content, true)
+    async postCopy(_domainId: string, batchId: ObjectId, name: string, description = '') {
+        this.requireManager();
+        const result = await teamBatch.copyBatch(this.domainId(), batchId, this.actor(), { name, description });
+        this.redirect(result.batch.batchId);
     }
 
     @param('batchId', Types.ObjectId)

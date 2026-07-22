@@ -1,6 +1,6 @@
 import { useCallback, useState, type FormEvent, type ReactNode } from 'react';
 import { motion } from 'motion/react';
-import { AlertTriangle, ArrowLeft, Crown, Lock, LogOut, Pencil, Plus, Search, ShieldCheck, UserPlus, Users, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Copy, Crown, Lock, LogOut, Pencil, Plus, Search, ShieldCheck, UserPlus, Users, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -148,6 +148,7 @@ export function ContestTeamsPage() {
   const isBatch = data.workspaceKind === 'batch';
   const tdoc = data.tdoc || {};
   const batch = data.batch || {};
+  const copiedFromBatch = data.copiedFromBatch || null;
   const tid = String(tdoc.docId || '');
   const ownTeam = (data.ownTeam || null) as TeamView | null;
   const invitations = (data.pendingInvites || []) as InviteView[];
@@ -161,6 +162,7 @@ export function ContestTeamsPage() {
 
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [createSelfOpen, setCreateSelfOpen] = useState(false);
+  const [copyBatchOpen, setCopyBatchOpen] = useState(false);
   const [createSelfNameError, setCreateSelfNameError] = useState('');
   const [inviteTargets, setInviteTargets] = useState<TeamUser[]>([]);
   const [adminCreateOpen, setAdminCreateOpen] = useState(false);
@@ -241,6 +243,14 @@ export function ContestTeamsPage() {
           </div>
           <p className="text-sm text-muted-foreground">{isBatch ? batch.name : tdoc.title}</p>
           {isBatch && batch.description ? <p className="max-w-2xl text-sm text-muted-foreground">{batch.description}</p> : null}
+          {isBatch && copiedFromBatch ? (
+            <p className="text-xs text-muted-foreground">
+              复制自{' '}
+              <a href={`/teams/${encodeURIComponent(String(copiedFromBatch.batchId))}`} className="font-medium text-foreground hover:underline">
+                {copiedFromBatch.name}
+              </a>
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
           <div>
@@ -249,6 +259,11 @@ export function ContestTeamsPage() {
               {formatDateTime(isBatch ? batch.closedAt || batch.createdAt : tdoc.beginAt, bs.locale)}
             </strong>
           </div>
+          {isBatch && capabilities.canCopy ? (
+            <Button type="button" variant="outline" onClick={() => setCopyBatchOpen(true)}>
+              <Copy className="size-4" /> 复制批次
+            </Button>
+          ) : null}
           {isBatch && capabilities.canClose ? (
             <Button
               type="button"
@@ -551,8 +566,13 @@ export function ContestTeamsPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-lg font-semibold tracking-tight">管理员编队</h2>
                     <Badge variant="secondary" className="rounded-full px-2.5 font-mono text-[11px]">
-                      {Number(data.teamCount || 0)} 支
+                      {Number(data.batchTeamCount || 0)} 支 · {Number(data.memberCount || 0)} 人
                     </Badge>
+                    {data.teamSearch ? (
+                      <Badge variant="outline" className="rounded-full px-2.5 font-mono text-[11px]">
+                        匹配 {Number(data.teamCount || 0)} 支
+                      </Badge>
+                    ) : null}
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">每页 20 支，按队伍快速检查阵容与学生身份。</p>
                 </div>
@@ -818,6 +838,57 @@ export function ContestTeamsPage() {
               </Button>
               <Button type="submit" disabled={!adminCreateMembers.length || !adminCreateCaptain} className={TEAM_DIALOG_BUTTON_CLASS}>
                 创建队伍
+              </Button>
+            </TeamDialogFooter>
+          </form>
+        </TeamDialogContent>
+      </Dialog>
+
+      <Dialog open={copyBatchOpen} onOpenChange={setCopyBatchOpen}>
+        <TeamDialogContent
+          titleId="copy-team-batch-dialog-title"
+          descriptionId="copy-team-batch-dialog-description"
+          title="复制组队批次"
+          description="创建一份可继续调整的独立开放批次。"
+          icon={<Copy className="size-5" />}
+          onClose={() => setCopyBatchOpen(false)}
+        >
+          <form method="post" className="flex min-h-0 flex-1 flex-col">
+            <input type="hidden" name="operation" value="copy" />
+            <TeamDialogBody>
+              <div className="rounded-2xl bg-muted/45 px-4 py-3 text-sm ring-1 ring-foreground/8">
+                <p className="font-semibold">
+                  将复制 {Number(data.batchTeamCount || 0)} 支队伍、{Number(data.memberCount || 0)} 名成员
+                </p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">队伍和成员会获得全新 ID；邀请、历史记录、关闭状态和比赛快照不会复制。</p>
+              </div>
+              <TeamDialogField htmlFor="copy-team-batch-name" label="新批次名称" hint="1–64 个字符">
+                <Input
+                  id="copy-team-batch-name"
+                  name="name"
+                  required
+                  maxLength={64}
+                  autoFocus
+                  defaultValue={`${String(batch.name || '')}（副本）`}
+                  className={TEAM_DIALOG_CONTROL_CLASS}
+                />
+              </TeamDialogField>
+              <TeamDialogField htmlFor="copy-team-batch-description" label="批次说明" hint="可选 · 最多 500 个字符">
+                <Textarea
+                  id="copy-team-batch-description"
+                  name="description"
+                  maxLength={500}
+                  defaultValue={String(batch.description || '')}
+                  className={TEAM_DIALOG_TEXTAREA_CLASS}
+                />
+              </TeamDialogField>
+            </TeamDialogBody>
+            <TeamDialogFooter>
+              <Button type="button" variant="secondary" onClick={() => setCopyBatchOpen(false)} className={TEAM_DIALOG_BUTTON_CLASS}>
+                取消
+              </Button>
+              <Button type="submit" className={TEAM_DIALOG_BUTTON_CLASS}>
+                复制为开放批次
               </Button>
             </TeamDialogFooter>
           </form>

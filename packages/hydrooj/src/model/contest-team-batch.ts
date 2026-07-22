@@ -30,6 +30,7 @@ export interface TeamBatchDoc {
     updatedAt: Date;
     closedAt?: Date;
     closedBy?: number;
+    copiedFromBatchId?: ObjectId;
 }
 
 export interface TeamBatchTeamDoc {
@@ -76,6 +77,12 @@ export interface TeamBatchActor {
 export interface TeamBatchCreateInput {
     name: string;
     description?: string;
+}
+
+export interface TeamBatchCopyResult {
+    batch: TeamBatchDoc;
+    teamCount: number;
+    memberCount: number;
 }
 
 export interface TeamBatchTeamCreateInput {
@@ -188,6 +195,8 @@ async function audit(
         teamCount?: number;
         memberCount?: number;
         stage?: string;
+        sourceBatchId?: ObjectId;
+        sourceRevision?: number;
     },
 ): Promise<void> {
     await oplog.add({
@@ -208,6 +217,8 @@ async function audit(
         teamCount: data.teamCount,
         memberCount: data.memberCount,
         stage: data.stage,
+        sourceBatchId: data.sourceBatchId,
+        sourceRevision: data.sourceRevision,
         time: new Date(),
     });
 }
@@ -332,6 +343,144 @@ export async function createBatch(domainId: string, actor: TeamBatchActor, input
         toRevision: 1,
     });
     return doc;
+}
+
+async function cleanupFailedBatchCopy(
+    domainId: string,
+    sourceBatchId: ObjectId,
+    targetBatchId: ObjectId,
+    targetTeamIds: ObjectId[],
+    writeError: unknown,
+): Promise<void> {
+    try {
+        await Promise.all([
+            teamColl.deleteMany({ domainId, batchId: targetBatchId, teamId: { $in: targetTeamIds } }),
+            batchColl.deleteMany({ domainId, batchId: targetBatchId }),
+        ]);
+        const [remainingTeams, remainingBatches] = await Promise.all([
+            teamColl.countDocuments({ domainId, batchId: targetBatchId }),
+            batchColl.countDocuments({ domainId, batchId: targetBatchId }),
+        ]);
+        if (remainingTeams || remainingBatches) {
+            throw new Error(`Batch copy cleanup left ${remainingTeams} teams and ${remainingBatches} batches`);
+        }
+    } catch (cleanupError) {
+        console.error('[contest-team-batch] batch copy cleanup failed', {
+            domainId,
+            sourceBatchId,
+            targetBatchId,
+            targetTeamIds,
+            writeError,
+            cleanupError,
+        });
+        throw new Error(`Batch copy cleanup failed for ${targetBatchId.toHexString()}`, { cause: writeError });
+    }
+}
+
+export async function copyBatch(
+    domainId: string,
+    sourceBatchId: ObjectId,
+    actor: TeamBatchActor,
+    input: TeamBatchCreateInput,
+): Promise<TeamBatchCopyResult> {
+    requireManager(actor);
+    return await withBatchMutation(domainId, sourceBatchId, async () => {
+        const sourceBatch = await loadBatch(domainId, sourceBatchId);
+        const targetBatchId = new ObjectId();
+        const auditBase = {
+            domainId,
+            actorUid: actor.user._id,
+            batchId: targetBatchId,
+            sourceBatchId,
+            sourceRevision: sourceBatch.revision,
+            fromRevision: 0,
+        };
+        let writeAttempted = false;
+        let targetTeamIds: ObjectId[] = [];
+        try {
+            const { name, nameKey } = contestTeam.normalizeTeamName(input.name);
+            const description = contestTeam.normalizeTeamDescription(input.description);
+            if (await batchColl.findOne({ domainId, nameKey })) conflict('name_already_used');
+
+            const sourceTeams = await teamColl.find({ domainId, batchId: sourceBatchId, active: true }).sort({ nameKey: 1, teamId: 1 }).toArray();
+            const seenNames = new Set<string>();
+            const seenMembers = new Set<number>();
+            const now = actor.now || new Date();
+            const targetTeams = sourceTeams.map((sourceTeam) => {
+                if (!['self', 'admin'].includes(sourceTeam.managementMode)) conflict('source_team_invalid');
+                const memberUids = contestTeam.validateTeamShape(sourceTeam.memberUids, sourceTeam.captainUid);
+                if (memberUids.length !== sourceTeam.memberUids.length) conflict('source_team_invalid');
+                const normalizedName = contestTeam.normalizeTeamName(sourceTeam.name);
+                if (seenNames.has(normalizedName.nameKey)) conflict('source_team_invalid');
+                seenNames.add(normalizedName.nameKey);
+                for (const uid of memberUids) {
+                    if (seenMembers.has(uid)) conflict('source_member_duplicated');
+                    seenMembers.add(uid);
+                }
+                const teamId = new ObjectId();
+                return {
+                    _id: teamId,
+                    teamId,
+                    batchId: targetBatchId,
+                    domainId,
+                    name: normalizedName.name,
+                    nameKey: normalizedName.nameKey,
+                    description: contestTeam.normalizeTeamDescription(sourceTeam.description),
+                    captainUid: sourceTeam.captainUid,
+                    memberUids,
+                    managementMode: sourceTeam.managementMode,
+                    revision: 1,
+                    active: true,
+                    createdBy: actor.user._id,
+                    createdAt: now,
+                    updatedAt: now,
+                } satisfies TeamBatchTeamDoc;
+            });
+            targetTeamIds = targetTeams.map((team) => team.teamId);
+            const targetBatch: TeamBatchDoc = {
+                _id: targetBatchId,
+                batchId: targetBatchId,
+                domainId,
+                name,
+                nameKey,
+                description,
+                status: 'open',
+                revision: 1,
+                createdBy: actor.user._id,
+                createdAt: now,
+                updatedAt: now,
+                copiedFromBatchId: sourceBatchId,
+            };
+
+            writeAttempted = true;
+            if (targetTeams.length) await teamColl.insertMany(targetTeams);
+            await batchColl.insertOne(targetBatch);
+            const result = {
+                batch: targetBatch,
+                teamCount: targetTeams.length,
+                memberCount: targetTeams.reduce((total, team) => total + team.memberUids.length, 0),
+            };
+            await auditSuccess('copy', {
+                ...auditBase,
+                toRevision: 1,
+                teamCount: result.teamCount,
+                memberCount: result.memberCount,
+            });
+            return result;
+        } catch (error) {
+            let rejectedError = error;
+            if (writeAttempted) {
+                try {
+                    await cleanupFailedBatchCopy(domainId, sourceBatchId, targetBatchId, targetTeamIds, error);
+                } catch (cleanupError) {
+                    rejectedError = cleanupError;
+                }
+            }
+            await auditRejected('copy', auditBase, rejectedError);
+            if ((rejectedError as any)?.code === 11000) duplicateConflict(rejectedError);
+            throw rejectedError;
+        }
+    });
 }
 
 export async function closeBatch(domainId: string, batchId: ObjectId, expectedRevision: number, actor: TeamBatchActor): Promise<TeamBatchDoc> {
@@ -1086,6 +1235,7 @@ global.Hydro.model.contestTeamBatch = {
     canManageTeamBatches,
     assertTeamBatchMemberEligibility,
     createBatch,
+    copyBatch,
     closeBatch,
     createTeam,
     updateTeam,

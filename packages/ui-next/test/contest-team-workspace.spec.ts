@@ -128,10 +128,11 @@ describe('P1.12 team assembly workspace contracts', () => {
   });
 
   it('applies the shared visual system to every dialog in the team workspace', () => {
-    expect(page.match(/<TeamDialogContent/g)).to.have.length(4);
+    expect(page.match(/<TeamDialogContent/g)).to.have.length(5);
     expect(page).not.to.include('<DialogContent');
     expect(page).not.to.include('<DialogHeader');
     expect(page).to.include('title="新建管理员队伍"');
+    expect(page).to.include('title="复制组队批次"');
     expect(page).to.include("title={emergencyAdminEdit ? '赛中紧急调整队伍' : '编辑队伍'}");
     expect(page).to.include("title={action?.title || '确认操作'}");
   });

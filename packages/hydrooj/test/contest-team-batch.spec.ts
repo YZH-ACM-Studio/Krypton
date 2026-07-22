@@ -34,6 +34,7 @@ let contestReads = 0;
 let mutateScopeOnSecondContestRead = false;
 let mutateRuleBeforeBinding = false;
 let failInviteUpdateManyOnce = false;
+let failBatchInsertOnce = false;
 
 function same(left: any, right: any): boolean {
     if (left instanceof ObjectId && right instanceof ObjectId) return left.equals(right);
@@ -189,7 +190,17 @@ function collection(source: any[], duplicate?: (candidate: any, ignore?: any) =>
     };
 }
 
-const batchCollection = collection(batches, duplicateBatch);
+const batchCollectionBase = collection(batches, duplicateBatch);
+const batchCollection = {
+    ...batchCollectionBase,
+    async insertOne(doc: any) {
+        if (failBatchInsertOnce) {
+            failBatchInsertOnce = false;
+            throw new Error('injected batch publish failure');
+        }
+        return await batchCollectionBase.insertOne(doc);
+    },
+};
 const batchTeamCollection = collection(batchTeams, duplicateBatchTeam);
 const inviteCollectionBase = collection(batchInvites);
 const inviteCollection = {
@@ -371,7 +382,8 @@ beforeEach(() => {
     mutateScopeOnSecondContestRead = false;
     mutateRuleBeforeBinding = false;
     failInviteUpdateManyOnce = false;
-    for (const uid of [10, 11, 12, 13, 99]) {
+    failBatchInsertOnce = false;
+    for (const uid of [10, 11, 12, 13, 14, 15, 16, 99]) {
         users.set(uid, {
             _id: uid,
             hasPerm: (permission: bigint) => permission === PERM.PERM_VIEW_CONTEST || permission === PERM.PERM_ATTEND_CONTEST,
@@ -521,6 +533,128 @@ describe('P1.17 pre-contest team batches', () => {
         expect(logged).to.have.length(1);
         expect(String(logged[0][0])).to.include('committed mutation post-commit step failed');
         expect(audits.at(-1)).to.include({ operation: 'team-update', result: 'success' });
+    });
+
+    it('copies active one-to-three-person rosters into independent open batches', async () => {
+        const source = await batchModel.createBatch('system', { user: actor(99, true) }, { name: 'Reusable Teams', description: 'Summer roster' });
+        await batchModel.createTeam(
+            'system',
+            source.batchId,
+            { user: actor(10) },
+            { name: 'Solo', captainUid: 10, memberUids: [10], managementMode: 'self' },
+        );
+        await batchModel.createInvite('system', source.batchId, { user: actor(10) }, 16);
+        await batchModel.createTeam(
+            'system',
+            source.batchId,
+            { user: actor(99, true) },
+            { name: 'Duo', captainUid: 11, memberUids: [11, 12], managementMode: 'admin' },
+        );
+        await batchModel.createTeam(
+            'system',
+            source.batchId,
+            { user: actor(99, true) },
+            { name: 'Trio', captainUid: 13, memberUids: [13, 14, 15], managementMode: 'admin' },
+        );
+        const sourceTeams = await batchModel.getMultiTeam('system', source.batchId).toArray();
+
+        const copied = await batchModel.copyBatch(
+            'system',
+            source.batchId,
+            { user: actor(99, true) },
+            { name: 'Reusable Teams（副本）', description: 'Next contest' },
+        );
+
+        expect(copied).to.include({ teamCount: 3, memberCount: 6 });
+        expect(copied.batch).to.include({ name: 'Reusable Teams（副本）', description: 'Next contest', status: 'open', revision: 1 });
+        expect(copied.batch.copiedFromBatchId.equals(source.batchId)).to.equal(true);
+        expect(copied.batch.batchId.equals(source.batchId)).to.equal(false);
+        const targetTeams = await batchModel.getMultiTeam('system', copied.batch.batchId).toArray();
+        expect(targetTeams.map((team) => [team.name, team.memberUids, team.managementMode, team.revision])).to.deep.equal(
+            sourceTeams.map((team) => [team.name, team.memberUids, team.managementMode, 1]),
+        );
+        expect(new Set([...sourceTeams, ...targetTeams].map((team) => team.teamId.toHexString())).size).to.equal(6);
+        expect(batchInvites.filter((invite) => same(invite.batchId, copied.batch.batchId))).to.have.length(0);
+        expect(audits.at(-1)).to.include({ operation: 'copy', result: 'success', teamCount: 3, memberCount: 6 });
+        expect(audits.at(-1).sourceBatchId.equals(source.batchId)).to.equal(true);
+        expect(audits.at(-1)).to.include({ sourceRevision: source.revision, fromRevision: 0, toRevision: 1 });
+
+        const targetSolo = targetTeams.find((team) => team.name === 'Solo');
+        await batchModel.updateTeam(
+            'system',
+            copied.batch.batchId,
+            targetSolo.teamId,
+            { user: actor(99, true) },
+            { expectedRevision: targetSolo.revision, name: 'Solo Copy' },
+        );
+        expect((await batchModel.getTeam('system', source.batchId, sourceTeams.find((team) => team.name === 'Solo').teamId)).name).to.equal('Solo');
+    });
+
+    it('rejects unauthorized, duplicate, cross-domain and malformed copy sources before writing', async () => {
+        const source = await batchModel.createBatch('system', { user: actor(99, true) }, { name: 'Validated Source' });
+        await batchModel.createTeam(
+            'system',
+            source.batchId,
+            { user: actor(99, true) },
+            { name: 'Alpha', captainUid: 10, memberUids: [10, 11], managementMode: 'admin' },
+        );
+        await batchModel.createTeam(
+            'system',
+            source.batchId,
+            { user: actor(99, true) },
+            { name: 'Beta', captainUid: 12, memberUids: [12], managementMode: 'admin' },
+        );
+        const baseline = { batches: batches.length, teams: batchTeams.length };
+
+        await rejects(batchModel.copyBatch('system', source.batchId, { user: actor(10) }, { name: 'Denied Copy' }), TestPermissionError);
+        await rejects(batchModel.copyBatch('system', source.batchId, { user: actor(99, true) }, { name: source.name }), TestConflictError);
+        await rejects(
+            batchModel.copyBatch('another-domain', source.batchId, { user: actor(99, true) }, { name: 'Cross-domain Copy' }),
+            TestConflictError,
+        );
+
+        const alpha = batchTeams.find((team) => same(team.batchId, source.batchId) && team.name === 'Alpha');
+        const beta = batchTeams.find((team) => same(team.batchId, source.batchId) && team.name === 'Beta');
+        alpha.memberUids = [10, 10];
+        await rejects(batchModel.copyBatch('system', source.batchId, { user: actor(99, true) }, { name: 'Malformed Copy' }), TestConflictError);
+        alpha.memberUids = [10, 11];
+        beta.memberUids = [11, 12];
+        await rejects(batchModel.copyBatch('system', source.batchId, { user: actor(99, true) }, { name: 'Repeated Member Copy' }), TestConflictError);
+        expect({ batches: batches.length, teams: batchTeams.length }).to.deep.equal(baseline);
+    });
+
+    it('removes exact target documents when either copy write stage fails', async () => {
+        const source = await batchModel.createBatch('system', { user: actor(99, true) }, { name: 'Failure Source' });
+        for (const [name, uid] of [
+            ['Alpha', 10],
+            ['Beta', 11],
+        ] as const) {
+            await batchModel.createTeam(
+                'system',
+                source.batchId,
+                { user: actor(99, true) },
+                { name, captainUid: uid, memberUids: [uid], managementMode: 'admin' },
+            );
+        }
+        const baseline = { batches: batches.length, teams: batchTeams.length };
+
+        failInsertManyAfter = 1;
+        const partialError = await rejects(
+            batchModel.copyBatch('system', source.batchId, { user: actor(99, true) }, { name: 'Partial Copy' }),
+            Error,
+        );
+        expect(partialError.message).to.equal('injected partial insert failure');
+        expect({ batches: batches.length, teams: batchTeams.length }).to.deep.equal(baseline);
+        failInsertManyAfter = null;
+
+        failBatchInsertOnce = true;
+        const publishError = await rejects(
+            batchModel.copyBatch('system', source.batchId, { user: actor(99, true) }, { name: 'Publish Failure Copy' }),
+            Error,
+        );
+        expect(publishError.message).to.equal('injected batch publish failure');
+        expect({ batches: batches.length, teams: batchTeams.length }).to.deep.equal(baseline);
+        expect(audits.slice(-2).every((entry) => entry.operation === 'copy' && entry.result === 'rejected')).to.equal(true);
     });
 
     it('materializes independent contest teams and makes repeated or concurrent submission idempotent', async () => {

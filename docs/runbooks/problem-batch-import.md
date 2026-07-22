@@ -25,7 +25,7 @@ config/<code>.yaml
 - `schemaVersion: 1`、稳定且唯一的 `batchId`、`domain`、管理员 `actor`；
 - 可选的最终可见性 `visibility: public|hidden`；省略时兼容 v1 并最终公开；
 - 已注册的来源模板及其 `year/round/season/level`；
-- 专用来源账号的 `author.uid` 和精确 `author.username`；官方来源账号不得是 root、UID 2、actor 或其他题库管理员；
+- 专用来源账号的 canonical `author.uid` 和人工核对用的 `author.username` 快照；官方来源作者 UID 不得是 UID 2、actor 或实时题库管理员，用户名字符串本身不具有授权含义；
 - 已存在训练的精确 `id/title` 与本场 `chapterTitle`；历史回填还须声明既有 `chapterId` 和要精确替换的 `replacePids`；
 - 明确的通过量筛选，或用户给出的完整 `sourceProblemCode in [...]` 清单及证据来源；
 - 每题的稳定 `sourceProblemCode`、标题、难度、导图节点 ID；只有材料真实提供赛时数据时才写 `accepted/submitted`，不得用 `0/0` 代替未知；
@@ -56,7 +56,7 @@ cd /opt/Krypton
 
 默认生成同目录 `batch.preflight.json`（0600）。预检只读核对：
 
-- actor、专用来源账号 UID/用户名；
+- actor、专用来源账号 UID，以及它们当时的用户名显示快照；后续 apply/verify 只以 UID 识别同一账号；
 - 来源 counter 与逐题计划 PID；
 - 导图节点及物化标签；
 - 训练 ID/标题、来源锚点、目标章节 ID/绝对顺序；历史回填同时核对待替换成员；

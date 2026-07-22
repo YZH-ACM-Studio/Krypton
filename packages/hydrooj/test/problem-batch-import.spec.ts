@@ -444,6 +444,19 @@ Promise.resolve(cli.runMatchedCommand()).catch((error) => {
         expect(report.events.at(-1)?.stage).to.equal('verified');
     });
 
+    it('treats actor and author usernames as current display snapshots instead of identity locks', async () => {
+        const batch = await validateProblemBatchManifest(manifestPath);
+        const facts = productionFacts(batch);
+        facts.actor.username = 'renamed-admin';
+        facts.author.username = 'renamed-source-author';
+
+        const plan = await preflightProblemBatchImport(batch, new FixtureAdapter(facts, verifyResult(batch)));
+
+        expect(plan.facts.actor).to.deep.equal({ uid: batch.manifest.actor, username: 'renamed-admin' });
+        expect(plan.facts.author).to.deep.equal({ uid: batch.manifest.author.uid, username: 'renamed-source-author' });
+        expect(batch.manifest.author.username).to.equal('nowcoder-2026');
+    });
+
     it('blocks unconfirmed ambiguity, fingerprint conflicts, and legacy duplicate suspicions', async () => {
         const original = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
         original.problems[0].ambiguities = [{ field: 'title', message: 'check source typography', confirmed: false }];

@@ -169,13 +169,7 @@ export async function buildProblemBatchProductionFacts(
     if (!actor || actor.uid !== batch.manifest.actor) fail(`actor UID ${batch.manifest.actor} does not exist`);
     if (!actor.isProblemBankAdmin) fail(`actor UID ${batch.manifest.actor} is not a problem-bank administrator`);
     if (!author || author.uid !== batch.manifest.author.uid) fail(`author UID ${batch.manifest.author.uid} does not exist`);
-    if (author.username !== batch.manifest.author.username) {
-        fail(`author UID ${author.uid} username changed: expected ${batch.manifest.author.username}, got ${author.username}`);
-    }
-    if (
-        sourceMeta.template !== 'self' &&
-        (author.uid === 2 || author.uid === actor.uid || author.isProblemBankAdmin || author.username.trim().toLowerCase() === 'root')
-    ) {
+    if (sourceMeta.template !== 'self' && (author.uid === 2 || author.uid === actor.uid || author.isProblemBankAdmin)) {
         fail(`official source ${sourceMeta.template} requires a dedicated non-administrator author account`, 'BATCH_IMPORT_AUTHOR_CONFLICT', {
             actorUid: actor.uid,
             authorUid: author.uid,

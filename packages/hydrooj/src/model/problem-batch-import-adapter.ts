@@ -61,9 +61,6 @@ async function loadUsers(batch: ValidatedProblemBatch) {
     if (!actor || actor._id !== batch.manifest.actor) fail(`actor UID ${batch.manifest.actor} does not exist`);
     if (!ProblemModel.isProblemBankAdmin(actor)) fail(`actor UID ${batch.manifest.actor} is not a problem-bank administrator`);
     if (!author || author._id !== batch.manifest.author.uid) fail(`author UID ${batch.manifest.author.uid} does not exist`);
-    if (author.uname !== batch.manifest.author.username) {
-        fail(`author UID ${author._id} username changed: expected ${batch.manifest.author.username}, got ${author.uname}`);
-    }
     return { actor, author };
 }
 
@@ -185,7 +182,7 @@ async function assertApplyFacts(batch: ValidatedProblemBatch, plan: ProblemBatch
     if (current.suspectedDuplicates.length) {
         fail('suspected duplicates appeared after preflight', 'BATCH_IMPORT_DUPLICATE', current.suspectedDuplicates);
     }
-    if (!equal(current.actor, plan.facts.actor) || !equal(current.author, plan.facts.author)) {
+    if (current.actor.uid !== plan.facts.actor.uid || current.author.uid !== plan.facts.author.uid) {
         fail('actor or source author changed after preflight');
     }
     if (!equal(current.knowledgeMaps, plan.facts.knowledgeMaps) || !equal(current.mindmapNodes, plan.facts.mindmapNodes)) {

@@ -370,6 +370,36 @@ function SecurityPanel() {
 
   return (
     <div className="space-y-4">
+      {/* Change username */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <UserIcon className="size-4" />
+            修改用户名
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form method="post" className="space-y-3">
+            <input type="hidden" name="operation" value="change_username" />
+            <input type="hidden" name="expectedUsername" value={bs.user.name} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">新用户名</label>
+                <Input name="username" defaultValue={bs.user.name} autoComplete="username" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">当前密码</label>
+                <Input name="current" type="password" autoComplete="current-password" />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">保存后使用新用户名登录；现有登录会话保持不变。</p>
+            <Button type="submit" size="sm">
+              更新用户名
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
       {/* Change password */}
       <Card>
         <CardHeader className="pb-3">

@@ -28,6 +28,8 @@ let failConfigObserver = false;
 let publicationIncomplete = false;
 let failOriginalStatisticsAuditOnce = false;
 let clearHistoricalChapterAfterDraftReady = false;
+let actorIsProblemBankAdmin = true;
+let authorIsProblemBankAdmin = false;
 
 const anchorProblem = { domainId: 'system', docType: 10, docId: 99, tag: ['牛客暑期多校'] };
 const training: any = {
@@ -112,7 +114,9 @@ function problemForClaim(claim: any) {
 const sourceTags = ['MultiSchool', '牛客暑期多校', '2026牛客暑期多校'];
 const ProblemModelStub = {
     isProblemBankAdmin(user: any) {
-        return user?._id === 2;
+        if (user?._id === actor._id) return actorIsProblemBankAdmin;
+        if (user?._id === author._id) return authorIsProblemBankAdmin;
+        return false;
     },
     async createManagedProgrammingDraft(domainId: string, input: any, creator: number) {
         calls.push('createManagedProgrammingDraft');
@@ -418,6 +422,8 @@ describe('P2.23 Hydro production batch adapter', () => {
     after(() => fs.rmSync(root, { recursive: true, force: true }));
 
     beforeEach(() => {
+        actor.uname = 'root';
+        author.uname = '2025多校';
         counter.value = 1063;
         nextDocId = 3000;
         problemDocs.length = 0;
@@ -430,7 +436,51 @@ describe('P2.23 Hydro production batch adapter', () => {
         publicationIncomplete = false;
         failOriginalStatisticsAuditOnce = false;
         clearHistoricalChapterAfterDraftReady = false;
+        actorIsProblemBankAdmin = true;
+        authorIsProblemBankAdmin = false;
         training.dag = [{ _id: 1, title: '2025年牛客-第10场', requireNids: [], pids: [99] }];
+    });
+
+    it('keeps the approved actor and author valid by UID after both usernames change', async () => {
+        const batch = await validateProblemBatchManifest(manifestPath);
+        const adapter = new HydroProblemBatchImportAdapter();
+        const plan = await preflightProblemBatchImport(batch, adapter);
+        actor.uname = 'renamed-admin';
+        author.uname = 'renamed-data-author';
+
+        const result = await adapter.apply(batch, plan, createProblemBatchExecutionReport(plan, 2), async () => {});
+        const verified = await adapter.verify(batch, plan);
+
+        expect(result.ok).to.equal(true);
+        expect(verified.ok).to.equal(true);
+        expect(authorPermits.filter((permit) => permit.role === 'author')).to.deep.equal([
+            { domainId: 'system', pid: result.problems[0].docId, uid: 515, role: 'author', active: true },
+        ]);
+    });
+
+    it('still fails closed when actor or author authority changes after preflight', async () => {
+        const batch = await validateProblemBatchManifest(manifestPath);
+        const adapter = new HydroProblemBatchImportAdapter();
+        const plan = await preflightProblemBatchImport(batch, adapter);
+
+        authorIsProblemBankAdmin = true;
+        try {
+            await adapter.apply(batch, plan, createProblemBatchExecutionReport(plan, 2), async () => {});
+            expect.fail('expected source author administrator conflict');
+        } catch (error) {
+            expect(error).to.have.property('code', 'BATCH_IMPORT_AUTHOR_CONFLICT');
+        }
+        expect(problemDocs).to.have.length(0);
+
+        authorIsProblemBankAdmin = false;
+        actorIsProblemBankAdmin = false;
+        try {
+            await adapter.apply(batch, plan, createProblemBatchExecutionReport(plan, 2), async () => {});
+            expect.fail('expected actor authority conflict');
+        } catch (error) {
+            expect(error).to.have.property('message').that.includes('is not a problem-bank administrator');
+        }
+        expect(problemDocs).to.have.length(0);
     });
 
     it('uses only canonical managed methods, publishes after readiness, verifies hashes, and resumes as a no-op', async () => {

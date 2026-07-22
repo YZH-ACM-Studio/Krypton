@@ -5,6 +5,8 @@ import { LoginError, UserAlreadyExistError, UserNotFoundError } from '../error';
 import { Authenticator, BaseUserDict, FileInfo, GDoc, OwnerInfo, Udict, Udoc, VUdoc } from '../interface';
 import avatar from '../lib/avatar';
 import pwhash from '../lib/hash.hydro';
+import { cacheKeyMatchesIdentity, loadAndCommitWhenGenerationIsStable, UserCacheGenerationTracker } from '../lib/user-cache-generation';
+import { renameUsernameRecord } from '../lib/user-rename';
 import bus from '../service/bus';
 import db from '../service/db';
 import { Value } from '../typeutils';
@@ -20,21 +22,34 @@ export const coll: Collection<Udoc> = db.collection('user');
 export const collV: Collection<VUdoc> = db.collection('vuser');
 export const collGroup: Collection<GDoc> = db.collection('user.group');
 const cache = new LRUCache<string, User>({ max: 10000, ttl: 300 * 1000 });
+const cacheGeneration = new UserCacheGenerationTracker();
 
-export function deleteUserCache(udoc: { _id: number; uname: string; mail: string } | string | true | undefined | null, receiver = false) {
+function identityCacheKeys(udoc: { _id: number; uname: string; mail: string; unameLower?: string; mailLower?: string }) {
+    return [`id/${udoc._id}`, `name/${udoc.unameLower || udoc.uname.trim().toLowerCase()}`, `mail/${udoc.mailLower || handleMailLower(udoc.mail)}`];
+}
+
+export function deleteUserCache(
+    udoc: { _id: number; uname: string; mail: string; unameLower?: string; mailLower?: string } | string | true | undefined | null,
+    receiver = false,
+) {
     if (!udoc) return false;
-    if (!receiver) {
-        bus.broadcast('user/delcache', JSON.stringify(typeof udoc === 'string' ? udoc : pick(udoc, ['uname', 'mail', '_id'])));
-    }
-    if (udoc === true) return cache.clear();
-    if (typeof udoc === 'string') {
+    if (udoc === true) {
+        cacheGeneration.invalidateAll();
+        cache.clear();
+    } else if (typeof udoc === 'string') {
+        cacheGeneration.invalidateDomain(udoc);
         // is domainId
         for (const key of [...cache.keys()].filter((i) => i.endsWith(`/${udoc}`))) cache.delete(key);
-        return true;
+    } else {
+        const id = identityCacheKeys(udoc);
+        cacheGeneration.invalidateIdentities(id);
+        for (const key of [...cache.keys()].filter((cacheKey) => cacheKeyMatchesIdentity(cacheKey, id))) {
+            cache.delete(key);
+        }
     }
-    const id = [`id/${udoc._id.toString()}`, `name/${udoc.uname.toLowerCase()}`, `mail/${udoc.mail.toLowerCase()}`];
-    for (const key of [...cache.keys()].filter((k) => id.includes(`${k.split('/')[0]}/${k.split('/')[1]}`))) {
-        cache.delete(key);
+    if (!receiver) {
+        const payload = typeof udoc === 'string' || udoc === true ? udoc : pick(udoc, ['uname', 'mail', '_id']);
+        bus.broadcast('user/delcache', JSON.stringify(payload));
     }
     return true;
 }
@@ -180,8 +195,11 @@ export function handleMailLower(mail: string) {
     return `${name.replace(/\./g, '')}@${d === 'googlemail.com' ? 'gmail.com' : d}`;
 }
 
-async function initAndCache(udoc: Udoc, dudoc, scope: bigint = PERM.PERM_ALL) {
-    const res = await new User(udoc, dudoc, scope).init();
+async function initializeUser(udoc: Udoc, dudoc, scope: bigint = PERM.PERM_ALL) {
+    return new User(udoc, dudoc, scope).init();
+}
+
+function cacheInitializedUser(udoc: Udoc, dudoc, res: User) {
     cache.set(`id/${udoc._id}/${dudoc.domainId}`, res);
     cache.set(`name/${udoc.unameLower}/${dudoc.domainId}`, res);
     cache.set(`mail/${udoc.mailLower}/${dudoc.domainId}`, res);
@@ -217,12 +235,19 @@ class UserModel {
     @ArgMethod
     static async getById(domainId: string, _id: number, scope: bigint | string = PERM.PERM_ALL): Promise<User> {
         if (cache.has(`id/${_id}/${domainId}`)) return cache.get(`id/${_id}/${domainId}`) || null;
-        const udoc = await (_id < -999 ? collV : coll).findOne({ _id });
-        if (!udoc) return null;
-        const [dudoc, groups] = await Promise.all([domain.getDomainUser(domainId, udoc), UserModel.listGroup(domainId, _id)]);
-        dudoc.group = groups.map((i) => i.name);
         if (typeof scope === 'string') scope = BigInt(scope);
-        return initAndCache(udoc, dudoc, scope);
+        return loadAndCommitWhenGenerationIsStable(
+            () => cacheGeneration.snapshot(`id/${_id}`, domainId),
+            async () => {
+                const udoc = await (_id < -999 ? collV : coll).findOne({ _id });
+                if (!udoc) return null;
+                const [dudoc, groups] = await Promise.all([domain.getDomainUser(domainId, udoc), UserModel.listGroup(domainId, _id)]);
+                dudoc.group = groups.map((i) => i.name);
+                const initialized = await initializeUser(udoc, dudoc, scope);
+                return { udoc, dudoc, initialized };
+            },
+            (loaded) => (loaded ? cacheInitializedUser(loaded.udoc, loaded.dudoc, loaded.initialized) : null),
+        );
     }
 
     static async getList(domainId: string, uids: number[]): Promise<Udict> {
@@ -239,20 +264,34 @@ class UserModel {
     static async getByUname(domainId: string, uname: string): Promise<User | null> {
         const unameLower = uname.trim().toLowerCase();
         if (cache.has(`name/${unameLower}/${domainId}`)) return cache.get(`name/${unameLower}/${domainId}`);
-        const udoc = (await coll.findOne({ unameLower })) || (await collV.findOne({ unameLower }));
-        if (!udoc) return null;
-        const dudoc = await domain.getDomainUser(domainId, udoc);
-        return initAndCache(udoc, dudoc);
+        return loadAndCommitWhenGenerationIsStable(
+            () => cacheGeneration.snapshot(`name/${unameLower}`, domainId),
+            async () => {
+                const udoc = (await coll.findOne({ unameLower })) || (await collV.findOne({ unameLower }));
+                if (!udoc) return null;
+                const dudoc = await domain.getDomainUser(domainId, udoc);
+                const initialized = await initializeUser(udoc, dudoc);
+                return { udoc, dudoc, initialized };
+            },
+            (loaded) => (loaded ? cacheInitializedUser(loaded.udoc, loaded.dudoc, loaded.initialized) : null),
+        );
     }
 
     @ArgMethod
     static async getByEmail(domainId: string, mail: string): Promise<User> {
         const mailLower = handleMailLower(mail);
         if (cache.has(`mail/${mailLower}/${domainId}`)) return cache.get(`mail/${mailLower}/${domainId}`);
-        const udoc = await coll.findOne({ mailLower });
-        if (!udoc) return null;
-        const dudoc = await domain.getDomainUser(domainId, udoc);
-        return initAndCache(udoc, dudoc);
+        return loadAndCommitWhenGenerationIsStable(
+            () => cacheGeneration.snapshot(`mail/${mailLower}`, domainId),
+            async () => {
+                const udoc = await coll.findOne({ mailLower });
+                if (!udoc) return null;
+                const dudoc = await domain.getDomainUser(domainId, udoc);
+                const initialized = await initializeUser(udoc, dudoc);
+                return { udoc, dudoc, initialized };
+            },
+            (loaded) => (loaded ? cacheInitializedUser(loaded.udoc, loaded.dudoc, loaded.initialized) : null),
+        );
     }
 
     @ArgMethod
@@ -264,11 +303,15 @@ class UserModel {
         if ($push && Object.keys($push).length) op.$push = $push;
         if (op.$set?.loginip) op.$addToSet = { ip: op.$set.loginip };
         const keys = new Set(Object.values(op).flatMap((i) => Object.keys(i)));
+        let identityBefore: Udoc | null = null;
         if (keys.has('mailLower') || keys.has('unameLower')) {
-            const udoc = await coll.findOne({ _id: uid });
-            deleteUserCache(udoc);
+            identityBefore = await coll.findOne({ _id: uid });
+            deleteUserCache(identityBefore);
         }
         const res = await coll.findOneAndUpdate({ _id: uid }, op, { returnDocument: 'after' });
+        // Close the lookup/write race: an old identity can be cached again
+        // after the pre-write invalidation but before Mongo commits.
+        if (identityBefore) deleteUserCache(identityBefore);
         deleteUserCache(res);
         return res;
     }
@@ -276,6 +319,11 @@ class UserModel {
     @ArgMethod
     static setUname(uid: number, uname: string) {
         return UserModel.setById(uid, { uname, unameLower: uname.trim().toLowerCase() });
+    }
+
+    @ArgMethod
+    static renameUname(uid: number, expectedUsername: string, uname: string) {
+        return renameUsernameRecord(coll, deleteUserCache, { uid, expectedUsername, username: uname });
     }
 
     @ArgMethod

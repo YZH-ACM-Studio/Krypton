@@ -22,6 +22,8 @@ import {
 import { DomainDoc, Setting } from '../interface';
 import avatar, { validate } from '../lib/avatar';
 import * as mail from '../lib/mail';
+import { assertImpersonationActorPrivileges } from '../lib/sudo-auth';
+import { runAuditedUsernameRename } from '../lib/user-rename';
 import { verifyTFA } from '../lib/verifyTFA';
 import BlackListModel from '../model/blacklist';
 import { PERM, PRIV } from '../model/builtin';
@@ -30,6 +32,7 @@ import * as discussion from '../model/discussion';
 import domain from '../model/domain';
 import { buildHomeworkListAccessFilter, canBypassHomeworkAccess, getHomeworkUserGroupIds, participantGroupObjectIds } from '../model/homework-access';
 import message from '../model/message';
+import * as oplog from '../model/oplog';
 import ProblemModel from '../model/problem';
 import * as setting from '../model/setting';
 import storage from '../model/storage';
@@ -228,6 +231,67 @@ class HomeSecurityHandler extends Handler {
             geoipProvider: this.ctx.geoip?.provider,
             relations,
         };
+    }
+
+    @requireSudo
+    @param('current', Types.String)
+    @param('expectedUsername', Types.String)
+    @param('username', Types.Username)
+    async postChangeUsername(domainId: string, current: string, expectedUsername: string, username: string) {
+        let actorUid = this.user._id;
+        if (this.session.sudoUid) {
+            const actor = await user.getById(domainId, this.session.sudoUid);
+            if (!actor) throw new UserNotFoundError(this.session.sudoUid);
+            assertImpersonationActorPrivileges(actor, [PRIV.PRIV_EDIT_SYSTEM, PRIV.PRIV_USER_PROFILE]);
+            await actor.checkPassword(current);
+            actorUid = this.session.sudoUid;
+        } else await this.user.checkPassword(current);
+
+        const target = await user.coll.findOne({ _id: this.user._id }, { projection: { uname: 1, unameLower: 1, mail: 1 } });
+        if (!target) throw new UserNotFoundError(this.user._id);
+        const nextUsername = username.trim();
+        const auditId = await oplog.add({
+            type: 'user.rename',
+            time: new Date(),
+            domainId,
+            ua: this.request.headers?.['user-agent'],
+            referer: this.request.headers?.referer,
+            path: this.request.path,
+            operator: actorUid,
+            actorUid,
+            targetUid: this.user._id,
+            operateIp: this.request.ip,
+            before: { username: target.uname },
+            after: { username: nextUsername },
+            result: 'started',
+        });
+        await runAuditedUsernameRename({
+            rename: () => user.renameUname(this.user._id, expectedUsername, nextUsername),
+            markSuccess: async (updated) => {
+                const finalized = await oplog.coll.updateOne(
+                    { _id: auditId, result: 'started' },
+                    { $set: { result: 'success', finishedAt: new Date(), after: { username: updated.uname } } },
+                );
+                if (finalized.matchedCount !== 1) throw new Error(`用户名改名审计 ${auditId.toHexString()} 在成功收尾时不存在`);
+            },
+            markFailure: async (error) => {
+                const finalized = await oplog.coll.updateOne(
+                    { _id: auditId, result: 'started' },
+                    {
+                        $set: {
+                            result: 'failed',
+                            finishedAt: new Date(),
+                            error: {
+                                name: error instanceof Error ? error.name : 'Error',
+                                message: error instanceof Error ? error.message : String(error),
+                            },
+                        },
+                    },
+                );
+                if (finalized.matchedCount !== 1) throw new Error(`用户名改名审计 ${auditId.toHexString()} 在失败收尾时不存在`);
+            },
+        });
+        this.response.redirect = this.url('home_security');
     }
 
     @requireSudo

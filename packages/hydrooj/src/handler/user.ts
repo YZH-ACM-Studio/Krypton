@@ -23,6 +23,7 @@ import {
 import { TokenDoc, Udoc, User } from '../interface';
 import avatar from '../lib/avatar';
 import { sendMail } from '../lib/mail';
+import { assertImpersonationActorPrivileges, resolveSudoAuthenticationUser } from '../lib/sudo-auth';
 import { verifyTFA } from '../lib/verifyTFA';
 import BlackListModel from '../model/blacklist';
 import { PERM, PRIV, STATUS } from '../model/builtin';
@@ -118,10 +119,18 @@ class UserLoginHandler extends Handler {
     }
 }
 
+async function getSudoAuthenticationContext(handler: Handler, domainId: string) {
+    const result = await resolveSudoAuthenticationUser(handler.user, handler.session.sudoUid, (uid) => user.getById(domainId, uid));
+    if (result.impersonated) assertImpersonationActorPrivileges(result.user, [PRIV.PRIV_EDIT_SYSTEM, PRIV.PRIV_USER_PROFILE]);
+    return result;
+}
+
 class UserSudoHandler extends Handler {
-    async get() {
+    async get(domainId: string) {
         if (!this.session.sudoArgs?.method) throw new ForbiddenError();
+        const { impersonated } = await getSudoAuthenticationContext(this, domainId);
         this.response.template = 'user_sudo.html';
+        this.response.body = { impersonated };
     }
 
     @param('password', Types.String, true)
@@ -129,15 +138,24 @@ class UserSudoHandler extends Handler {
     @param('authnChallenge', Types.String, true)
     async post(domainId: string, password = '', tfa = '', authnChallenge = '') {
         if (!this.session.sudoArgs?.method) throw new ForbiddenError();
-        await Promise.all([this.limitRate('user_sudo', 60, 5, '{{user}}'), oplog.log(this, 'user.sudo', {})]);
-        if (this.user.authn && authnChallenge) {
+        const { user: authUser, impersonated } = await getSudoAuthenticationContext(this, domainId);
+        await Promise.all([
+            this.limitRate('user_sudo', 60, 5, authUser._id.toString()),
+            oplog.log(this, 'user.sudo', {
+                actorUid: authUser._id,
+                targetUid: this.user._id,
+                impersonated,
+            }),
+        ]);
+        if (impersonated) await authUser.checkPassword(password);
+        else if (authUser.authn && authnChallenge) {
             const challenge = await token.get(authnChallenge, token.TYPE_WEBAUTHN);
-            if (challenge?.uid !== this.user._id) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_WEBAUTHN]);
+            if (challenge?.uid !== authUser._id) throw new InvalidTokenError(token.TYPE_TEXTS[token.TYPE_WEBAUTHN]);
             if (!challenge.verified) throw new ValidationError('challenge');
             await token.del(authnChallenge, token.TYPE_WEBAUTHN);
-        } else if (this.user.tfa && tfa) {
-            if (!verifyTFA(this.user._tfa, tfa)) throw new InvalidTokenError('2FA');
-        } else await this.user.checkPassword(password);
+        } else if (authUser.tfa && tfa) {
+            if (!verifyTFA(authUser._tfa, tfa)) throw new InvalidTokenError('2FA');
+        } else await authUser.checkPassword(password);
         this.session.sudo = Date.now();
         if (this.session.sudoArgs.method.toLowerCase() !== 'get') {
             this.response.template = 'user_sudo_redirect.html';

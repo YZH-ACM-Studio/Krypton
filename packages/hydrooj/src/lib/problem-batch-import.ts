@@ -637,11 +637,6 @@ export async function preflightProblemBatchImport(batch: ValidatedProblemBatch, 
     invariant(facts.actor.uid === batch.manifest.actor, 'production actor differs from manifest', 'BATCH_IMPORT_PRODUCTION_DRIFT');
     invariant(facts.author.uid === batch.manifest.author.uid, 'production author differs from manifest', 'BATCH_IMPORT_PRODUCTION_DRIFT');
     invariant(
-        facts.author.username === batch.manifest.author.username,
-        'production author username differs from manifest',
-        'BATCH_IMPORT_PRODUCTION_DRIFT',
-    );
-    invariant(
         !facts.suspectedDuplicates.length,
         'suspected legacy duplicates require an explicit user decision',
         'BATCH_IMPORT_DUPLICATE',

@@ -255,6 +255,54 @@ describe('P2.23 read-only production preflight adapter', () => {
         expect(closed).to.equal(1);
     });
 
+    it('accepts a renamed author UID and gives the username root no authorization meaning', async () => {
+        const input = batch();
+        const repository = {
+            async getUser(_domainId: string, uid: number) {
+                if (uid === 2) return { uid, username: 'renamed-admin', isProblemBankAdmin: true };
+                if (uid === 515) return { uid, username: 'root', isProblemBankAdmin: false };
+                return null;
+            },
+            async getCounter() {
+                return 1063;
+            },
+            async getTraining() {
+                return { id: trainingId, title: '牛客暑期多校训练集', dag: [{ _id: 7, title: '往期', requireNids: [], pids: [99] }] };
+            },
+            async hasTrainingAnchor() {
+                return true;
+            },
+            async getMindmapFacts() {
+                return [
+                    {
+                        id: selectedNodeId.toHexString(),
+                        mapId: mapId.toHexString(),
+                        mapTitle: '算法知识图谱',
+                        topic: '算法 / 模拟',
+                        tags: ['基础', '模拟'],
+                    },
+                ];
+            },
+            async getBatchProblems() {
+                return [];
+            },
+            async getActiveProblemPermits() {
+                return [];
+            },
+            async getDuplicateProblems() {
+                return [];
+            },
+            async getTrainingReplacementAudit() {
+                return null;
+            },
+        } satisfies ProblemBatchFactsRepository;
+
+        const facts = await buildProblemBatchProductionFacts(input, repository);
+
+        expect(facts.actor).to.deep.equal({ uid: 2, username: 'renamed-admin' });
+        expect(facts.author).to.deep.equal({ uid: 515, username: 'root' });
+    });
+
     it('rejects root or an administrator as an official-source author', async () => {
         const input = batch();
         input.manifest.author = { uid: 2, username: 'root' };

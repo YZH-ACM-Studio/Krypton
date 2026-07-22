@@ -226,6 +226,7 @@ const contestDocumentCollection = {
     },
 };
 const recordCollection = collection(records);
+const auditCollection = collection(audits);
 
 function normalizeName(value: unknown) {
     const name = String(value || '')
@@ -306,7 +307,14 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
         if (request === './contest') return contestStub;
         if (request === './contest-team') return contestTeamStub;
         if (request === './document') return { TYPE_CONTEST: 30, coll: contestDocumentCollection };
-        if (request === './oplog') return { add: async (entry: any) => audits.push(entry) };
+        if (request === './oplog') {
+            return {
+                coll: auditCollection,
+                add: async (entry: any) => {
+                    audits.push(entry);
+                },
+            };
+        }
         if (request === './user') return { __esModule: true, default: userModelStub };
     }
     return originalLoad.call(this, request, parent, isMain);
@@ -657,6 +665,102 @@ describe('P1.17 pre-contest team batches', () => {
         expect(audits.slice(-2).every((entry) => entry.operation === 'copy' && entry.result === 'rejected')).to.equal(true);
     });
 
+    it('reopens an unused closed batch with its pending invitations intact', async () => {
+        const batch = await batchModel.createBatch('system', { user: actor(99, true) }, { name: 'Reopen Me' });
+        await batchModel.createTeam(
+            'system',
+            batch.batchId,
+            { user: actor(10) },
+            { name: 'Self Team', captainUid: 10, memberUids: [10], managementMode: 'self' },
+        );
+        const invite = await batchModel.createInvite('system', batch.batchId, { user: actor(10) }, 11);
+        const latest = await batchModel.getBatch('system', batch.batchId);
+        const closed = await batchModel.closeBatch('system', batch.batchId, latest.revision, { user: actor(99, true) });
+        const closedRevision = closed.revision;
+
+        expect(await batchModel.canReopenBatch('system', batch.batchId)).to.equal(true);
+        await rejects(batchModel.reopenBatch('system', batch.batchId, closedRevision - 1, { user: actor(99, true) }), TestConflictError);
+        expect((await batchModel.getBatch('system', batch.batchId)).status).to.equal('closed');
+        const reopened = await batchModel.reopenBatch('system', batch.batchId, closedRevision, { user: actor(99, true) });
+        expect(reopened).to.include({ status: 'open', revision: closedRevision + 1 });
+        expect(reopened.closedAt).to.equal(undefined);
+        expect(reopened.closedBy).to.equal(undefined);
+        expect(
+            (await batchModel.getPendingInvitesForUser('system', batch.batchId, 11).toArray()).map((item) => item.inviteId.toHexString()),
+        ).to.deep.equal([invite.inviteId.toHexString()]);
+        await rejects(batchModel.reopenBatch('system', batch.batchId, closedRevision, { user: actor(99, true) }), TestConflictError);
+        await rejects(batchModel.reopenBatch('system', batch.batchId, reopened.revision, { user: actor(10) }), TestPermissionError);
+        expect(audits.find((entry) => entry.operation === 'reopen' && entry.result === 'success')).to.include({
+            fromRevision: closedRevision,
+            toRevision: reopened.revision,
+        });
+    });
+
+    it('rejects reopening when any finalized binding, source team or success audit remains', async () => {
+        const bound = await createClosedBatch('Bound Evidence');
+        contestDocs[0].teamBatchId = bound.batchId;
+
+        const sourced = await createClosedBatch('Source Evidence');
+        contestTeams.push({
+            _id: new ObjectId(),
+            teamId: new ObjectId(),
+            domainId: 'system',
+            contestId: new ObjectId(),
+            sourceBatchId: sourced.batchId,
+            active: false,
+        });
+
+        const audited = await createClosedBatch('Audit Evidence');
+        audits.push({
+            type: 'contest.team-batch.snapshot',
+            operation: 'snapshot',
+            domainId: 'system',
+            batchId: audited.batchId,
+            result: 'success',
+        });
+
+        for (const batch of [bound, sourced, audited]) {
+            expect(await batchModel.canReopenBatch('system', batch.batchId)).to.equal(false);
+            await rejects(batchModel.reopenBatch('system', batch.batchId, batch.revision, { user: actor(99, true) }), TestConflictError);
+        }
+    });
+
+    it('persists first use and serializes snapshot activation against reopen', async () => {
+        const batch = await createClosedBatch('First Use');
+        await batchModel.snapshotToContest('system', contestDocs[0].docId, batch.batchId, 99);
+        const used = await batchModel.getBatch('system', batch.batchId);
+        expect(used.firstSnapshotContestId.equals(contestDocs[0].docId)).to.equal(true);
+        expect(used.firstSnapshotHash).to.match(/^[a-f0-9]{64}$/);
+        expect(used.firstSnapshotAt).to.be.instanceOf(Date);
+
+        contestTeams.length = 0;
+        delete contestDocs[0].teamBatchId;
+        delete contestDocs[0].teamBatchSnapshotHash;
+        delete contestDocs[0].teamBatchSnapshotAt;
+        delete contestDocs[0].teamBatchSnapshotCount;
+        for (let index = audits.length - 1; index >= 0; index -= 1) {
+            if (audits[index].operation === 'snapshot') audits.splice(index, 1);
+        }
+        expect(await batchModel.canReopenBatch('system', batch.batchId)).to.equal(false);
+        await rejects(batchModel.reopenBatch('system', batch.batchId, used.revision, { user: actor(99, true) }), TestConflictError);
+
+        const racing = await createClosedBatch('Race');
+        const outcomes = await Promise.allSettled([
+            batchModel.snapshotToContest('system', contestDocs[0].docId, racing.batchId, 99),
+            batchModel.reopenBatch('system', racing.batchId, racing.revision, { user: actor(99, true) }),
+        ]);
+        expect(outcomes.filter((item) => item.status === 'fulfilled')).to.have.length(1);
+        const racedBatch = await batchModel.getBatch('system', racing.batchId);
+        if (outcomes[0].status === 'fulfilled') {
+            expect(racedBatch.status).to.equal('closed');
+            expect(contestDocs[0].teamBatchId.equals(racing.batchId)).to.equal(true);
+        } else {
+            expect(racedBatch.status).to.equal('open');
+            expect(contestDocs[0].teamBatchId).to.equal(undefined);
+            expect(contestTeams).to.have.length(0);
+        }
+    });
+
     it('materializes independent contest teams and makes repeated or concurrent submission idempotent', async () => {
         const batch = await createClosedBatch();
         const contestId = contestDocs[0].docId;
@@ -754,6 +858,10 @@ describe('P1.17 pre-contest team batches', () => {
         await rejects(batchModel.snapshotToContest('system', contestDocs[0].docId, batch.batchId, 99), TestConflictError);
         expect(contestTeams).to.have.length(0);
         expect(contestDocs[0].teamBatchId).to.equal(undefined);
+        const latest = await batchModel.getBatch('system', batch.batchId);
+        expect(latest.firstSnapshotAt).to.equal(undefined);
+        expect(latest.firstSnapshotContestId).to.equal(undefined);
+        expect(latest.firstSnapshotHash).to.equal(undefined);
         expect(audits.at(-1)).to.include({ operation: 'snapshot', result: 'rejected', stage: 'binding-cas' });
     });
 

@@ -227,6 +227,7 @@ export class TeamBatchDetailHandler extends Handler {
             if (!(error instanceof PermissionError) && !(error instanceof UserNotFoundError)) throw error;
         }
         const closed = this.batch.status === 'closed';
+        const canReopen = this.canManage && closed ? await teamBatch.canReopenBatch(this.domainId(), batchId) : false;
         this.response.template = 'team_batch_detail.html';
         this.response.body = {
             workspaceKind: 'batch',
@@ -243,6 +244,7 @@ export class TeamBatchDetailHandler extends Handler {
                 canLeave: !closed && !!ownTeam && ownTeam.managementMode === 'self',
                 canClose: this.canManage && !closed,
                 canCopy: this.canManage,
+                canReopen,
                 canEmergencyEdit: false,
                 started: closed,
             },
@@ -271,6 +273,14 @@ export class TeamBatchDetailHandler extends Handler {
     async postClose(_domainId: string, batchId: ObjectId, expectedRevision: number) {
         this.requireManager();
         await teamBatch.closeBatch(this.domainId(), batchId, expectedRevision, this.actor());
+        this.redirect(batchId);
+    }
+
+    @param('batchId', Types.ObjectId)
+    @param('expectedRevision', Types.UnsignedInt)
+    async postReopen(_domainId: string, batchId: ObjectId, expectedRevision: number) {
+        this.requireManager();
+        await teamBatch.reopenBatch(this.domainId(), batchId, expectedRevision, this.actor());
         this.redirect(batchId);
     }
 

@@ -31,6 +31,9 @@ export interface TeamBatchDoc {
     closedAt?: Date;
     closedBy?: number;
     copiedFromBatchId?: ObjectId;
+    firstSnapshotAt?: Date;
+    firstSnapshotContestId?: ObjectId;
+    firstSnapshotHash?: string;
 }
 
 export interface TeamBatchTeamDoc {
@@ -501,6 +504,72 @@ export async function closeBatch(domainId: string, batchId: ObjectId, expectedRe
             return updated;
         } catch (error) {
             await auditRejected('close', auditBase, error);
+            throw error;
+        }
+    });
+}
+
+async function hasBatchUseEvidence(domainId: string, batch: TeamBatchDoc): Promise<boolean> {
+    if (batch.firstSnapshotAt || batch.firstSnapshotContestId || batch.firstSnapshotHash) return true;
+    const [contestBinding, snapshotTeam, snapshotAudit] = await Promise.all([
+        document.coll.findOne({
+            domainId,
+            docType: document.TYPE_CONTEST,
+            teamBatchId: batch.batchId,
+        }),
+        contestTeam.coll.findOne({ domainId, sourceBatchId: batch.batchId }),
+        oplog.coll.findOne({
+            type: 'contest.team-batch.snapshot',
+            domainId,
+            batchId: batch.batchId,
+            result: 'success',
+        }),
+    ]);
+    return !!contestBinding || !!snapshotTeam || !!snapshotAudit;
+}
+
+export async function canReopenBatch(domainId: string, batchId: ObjectId): Promise<boolean> {
+    const batch = await batchColl.findOne({ domainId, batchId });
+    return !!batch && batch.status === 'closed' && !(await hasBatchUseEvidence(domainId, batch));
+}
+
+export async function reopenBatch(domainId: string, batchId: ObjectId, expectedRevision: number, actor: TeamBatchActor): Promise<TeamBatchDoc> {
+    requireManager(actor);
+    return await withBatchMutation(domainId, batchId, async () => {
+        const batch = await loadBatch(domainId, batchId);
+        const auditBase = { domainId, actorUid: actor.user._id, batchId, fromRevision: batch.revision };
+        try {
+            if (batch.status !== 'closed') conflict('batch_must_be_closed');
+            if (batch.revision !== expectedRevision) conflict('batch_revision_mismatch');
+            if (await hasBatchUseEvidence(domainId, batch)) conflict('batch_already_used_copy_required');
+            const now = actor.now || new Date();
+            let updated: TeamBatchDoc | null;
+            try {
+                updated = await batchColl.findOneAndUpdate(
+                    {
+                        domainId,
+                        batchId,
+                        status: 'closed',
+                        revision: expectedRevision,
+                        firstSnapshotAt: { $exists: false },
+                        firstSnapshotContestId: { $exists: false },
+                        firstSnapshotHash: { $exists: false },
+                    },
+                    {
+                        $set: { status: 'open', updatedAt: now },
+                        $unset: { closedAt: '', closedBy: '' },
+                        $inc: { revision: 1 },
+                    },
+                    { returnDocument: 'after' },
+                );
+            } catch (error) {
+                duplicateConflict(error);
+            }
+            if (!updated) conflict('batch_revision_mismatch');
+            await auditSuccess('reopen', { ...auditBase, toRevision: updated.revision });
+            return updated;
+        } catch (error) {
+            await auditRejected('reopen', auditBase, error);
             throw error;
         }
     });
@@ -1054,6 +1123,7 @@ async function snapshotToContestUnlocked(
         memberCount,
         fromRevision: batch.revision,
     };
+    let usageMarkerClaimed = false;
     try {
         trace.stage = 'prepare-cleanup';
         await contestTeam.coll.deleteMany({ domainId, contestId, active: false, snapshotState: 'preparing' });
@@ -1085,6 +1155,37 @@ async function snapshotToContestUnlocked(
                     snapshotMemberConflict(batchId, team, uid, 'contest-eligibility-recheck', error);
                 }
             }
+        }
+
+        trace.stage = 'source-recheck';
+        const currentBatch = await batchColl.findOne({
+            domainId,
+            batchId,
+            status: 'closed',
+            revision: batch.revision,
+        });
+        if (!currentBatch) conflict('batch_revision_mismatch');
+        if (!batch.firstSnapshotAt && !batch.firstSnapshotContestId && !batch.firstSnapshotHash) {
+            const marker = await batchColl.updateOne(
+                {
+                    domainId,
+                    batchId,
+                    status: 'closed',
+                    revision: batch.revision,
+                    firstSnapshotAt: { $exists: false },
+                    firstSnapshotContestId: { $exists: false },
+                    firstSnapshotHash: { $exists: false },
+                },
+                {
+                    $set: {
+                        firstSnapshotAt: snapshotAt,
+                        firstSnapshotContestId: contestId,
+                        firstSnapshotHash: hash,
+                    },
+                },
+            );
+            if (marker.modifiedCount !== 1) conflict('batch_snapshot_usage_marker_changed');
+            usageMarkerClaimed = true;
         }
 
         trace.stage = 'activation';
@@ -1143,6 +1244,27 @@ async function snapshotToContestUnlocked(
         trace.stage = 'cleanup';
         try {
             await cleanupSnapshot(domainId, contestId, snapshotId, docs.length);
+            if (usageMarkerClaimed) {
+                const markerCleanup = await batchColl.updateOne(
+                    {
+                        domainId,
+                        batchId,
+                        status: 'closed',
+                        revision: batch.revision,
+                        firstSnapshotAt: snapshotAt,
+                        firstSnapshotContestId: contestId,
+                        firstSnapshotHash: hash,
+                    },
+                    {
+                        $unset: {
+                            firstSnapshotAt: '',
+                            firstSnapshotContestId: '',
+                            firstSnapshotHash: '',
+                        },
+                    },
+                );
+                if (markerCleanup.modifiedCount !== 1) conflict('batch_snapshot_usage_marker_cleanup_failed');
+            }
         } catch (cleanupError) {
             await auditRejected('snapshot', { ...auditBase, stage: trace.stage }, cleanupError);
             throw cleanupError;
@@ -1162,7 +1284,7 @@ export async function snapshotToContest(
     const trace: SnapshotTrace = { stage: 'queued' };
     return await withContestTeamBoundary(domainId, contestId, async () => {
         try {
-            return await snapshotToContestUnlocked(domainId, contestId, batchId, actorUid, trace);
+            return await withBatchMutation(domainId, batchId, () => snapshotToContestUnlocked(domainId, contestId, batchId, actorUid, trace));
         } catch (error) {
             if (error && typeof error === 'object') {
                 Object.assign(error, {
@@ -1237,6 +1359,8 @@ global.Hydro.model.contestTeamBatch = {
     createBatch,
     copyBatch,
     closeBatch,
+    canReopenBatch,
+    reopenBatch,
     createTeam,
     updateTeam,
     createInvite,

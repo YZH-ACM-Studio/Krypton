@@ -66,6 +66,18 @@ describe('P1.17 pre-contest team batch workspace contracts', () => {
     expect(workspace).to.include('邀请、历史记录、关闭状态和比赛快照不会复制');
   });
 
+  it('only offers a confirmed reopen when the server proves the closed batch was never used', () => {
+    const handler = readFileSync(resolve(hydroRoot, 'handler/contest-team-batch.ts'), 'utf8');
+    const model = readFileSync(resolve(hydroRoot, 'model/contest-team-batch.ts'), 'utf8');
+    const workspace = readFileSync(resolve(root, 'src/pages/contest-teams.tsx'), 'utf8');
+    expect(handler).to.include('teamBatch.canReopenBatch(this.domainId(), batchId)');
+    expect(handler).to.include('teamBatch.reopenBatch(this.domainId(), batchId, expectedRevision');
+    expect(model).to.include("conflict('batch_already_used_copy_required')");
+    expect(model).to.include('return await withBatchMutation(domainId, batchId');
+    expect(workspace).to.include("operation: 'reopen'");
+    expect(workspace).to.include('若批次已生成过比赛快照，服务端会拒绝并要求改用复制');
+  });
+
   it('offers only closed batches for team contests and binds through the canonical snapshot model', () => {
     const editor = readFileSync(resolve(root, 'src/pages/contest-manage.tsx'), 'utf8');
     const contestHandler = readFileSync(resolve(hydroRoot, 'handler/contest.ts'), 'utf8');

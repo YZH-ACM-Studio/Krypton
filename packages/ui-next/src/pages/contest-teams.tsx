@@ -1,6 +1,6 @@
 import { useCallback, useState, type FormEvent, type ReactNode } from 'react';
 import { motion } from 'motion/react';
-import { AlertTriangle, ArrowLeft, Copy, Crown, Lock, LogOut, Pencil, Plus, Search, ShieldCheck, UserPlus, Users, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Copy, Crown, Lock, LockOpen, LogOut, Pencil, Plus, Search, ShieldCheck, UserPlus, Users, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -264,6 +264,22 @@ export function ContestTeamsPage() {
               <Copy className="size-4" /> 复制批次
             </Button>
           ) : null}
+          {isBatch && capabilities.canReopen ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                setConfirmAction({
+                  title: '重新开放这个批次？',
+                  description: '重新开放后可继续改队和处理待邀请，之后必须再次关闭才能用于比赛。若批次已生成过比赛快照，服务端会拒绝并要求改用复制。',
+                  operation: 'reopen',
+                  fields: { expectedRevision: Number(batch.revision || 0) },
+                })
+              }
+            >
+              <LockOpen className="size-4" /> 重新开放
+            </Button>
+          ) : null}
           {isBatch && capabilities.canClose ? (
             <Button
               type="button"
@@ -271,7 +287,8 @@ export function ContestTeamsPage() {
               onClick={() =>
                 setConfirmAction({
                   title: '关闭这个组队批次？',
-                  description: '关闭后普通组队操作全部冻结，阵容可在创建团队 ACM 比赛时生成独立快照。关闭后不再重新开放。',
+                  description:
+                    '关闭后普通组队操作全部冻结，阵容可用于生成团队 ACM 比赛快照。未被任何比赛使用前仍可重新开放；一旦生成过快照，只能复制为新批次。',
                   operation: 'close',
                   fields: { expectedRevision: Number(batch.revision || 0) },
                 })

@@ -25,6 +25,7 @@ class UnexpectedProblemWrite extends Error {}
 const calls = {
     contestEdits: [] as any[],
     events: [] as string[],
+    recalcClears: [] as any[],
     getLists: [] as any[],
     maintains: [] as any[],
     publishes: [] as any[],
@@ -35,6 +36,7 @@ const calls = {
 const problemDocs = new Map<number, any>();
 let currentContest: any;
 let currentStatus: any;
+let recalcError: Error | null;
 
 const contestStub: any = {
     RULES: { acm: { hidden: false, TEXT: 'ACM' } },
@@ -54,6 +56,7 @@ const contestStub: any = {
     isNotStarted: () => false,
     isClientRequired: () => false,
     isClientFinished: () => false,
+    getParticipationMode: (tdoc: any) => tdoc.participationMode || 'individual',
     canShowSelfRecord: () => false,
     async edit(...args: any[]) {
         calls.events.push('contest.edit');
@@ -64,6 +67,8 @@ const contestStub: any = {
         return 'new-contest';
     },
     async recalcStatus() {
+        calls.events.push('contest.recalcStatus');
+        if (recalcError) throw recalcError;
         return undefined;
     },
 };
@@ -143,6 +148,15 @@ const genericModel = new Proxy(
         get: () => async () => undefined,
     },
 );
+const documentStub = {
+    TYPE_CONTEST: 30,
+    coll: {
+        async findOneAndUpdate(...args: any[]) {
+            calls.recalcClears.push(args);
+            return { docId: 'contest' };
+        },
+    },
+};
 const scheduleStub = {
     async deleteMany() {
         return undefined;
@@ -174,6 +188,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (fromContest && request === '../model/contest') return contestStub;
     if (fromContest && request === '../model/problem') return problemStub;
     if (fromContest && request === '../model/problem-access') return problemAccessStub;
+    if (fromContest && request === '../model/document') return documentStub;
     if (fromContest && request === '../model/schedule') return scheduleStub;
     if (fromContest && request === '../model/user') return userStub;
     if (fromContest && request === '../service/server') return serverStub;
@@ -218,6 +233,7 @@ function makeHandler() {
             lockAt: null,
         },
         response: { body: {} },
+        url: () => '/contest/contest',
         checkPerm: () => undefined,
     });
     return handler;
@@ -269,6 +285,85 @@ beforeEach(() => {
         score: {},
     };
     currentStatus = null;
+    recalcError = null;
+});
+
+describe('contest status recalculation ordering', () => {
+    async function updateLock(handler: any, lock: number = null) {
+        return handler.postUpdate(
+            'forged-domain',
+            'contest',
+            '2099-01-01',
+            '08:00',
+            2,
+            'Contest',
+            'Body',
+            'acm',
+            '11,22',
+            false,
+            '',
+            false,
+            [],
+            lock,
+        );
+    }
+
+    it('persists the lock boundary before recalculating exactly once', async () => {
+        const handler = makeHandler();
+        handler.tdoc.unlocked = true;
+
+        await updateLock(handler, 30);
+
+        expect(calls.events).to.deep.equal(['contest.edit', 'contest.edit', 'contest.recalcStatus']);
+        expect(calls.contestEdits[1][2].lockAt.toISOString()).to.equal('2099-01-01T01:30:00.000Z');
+        expect(calls.contestEdits[1][2].unlocked).to.equal(false);
+        expect(calls.recalcClears).to.have.length(1);
+        expect(handler.response.redirect).to.equal('/contest/contest');
+    });
+
+    it('does not recalculate for equivalent date objects and unchanged scoring inputs', async () => {
+        const handler = makeHandler();
+
+        await updateLock(handler);
+
+        expect(calls.events).to.deep.equal(['contest.edit', 'contest.edit']);
+        expect(calls.contestEdits[1][2]).not.to.have.property('unlocked');
+        expect(calls.recalcClears).to.deep.equal([]);
+    });
+
+    it('compares problem ids without mutating the loaded contest order', async () => {
+        const handler = makeHandler();
+        handler.tdoc.pids = [22, 11];
+
+        await updateLock(handler);
+
+        expect(handler.tdoc.pids).to.deep.equal([22, 11]);
+        expect(calls.events).to.deep.equal(['contest.edit', 'contest.edit']);
+    });
+
+    it('fails the save response when recalculation fails after persistence', async () => {
+        const handler = makeHandler();
+        recalcError = new Error('recalc failed');
+
+        const error = await captureFailure(() => updateLock(handler, 30));
+
+        expect(error).to.equal(recalcError);
+        expect(calls.events).to.deep.equal(['contest.edit', 'contest.edit', 'contest.recalcStatus']);
+        expect(calls.recalcClears).to.deep.equal([]);
+        expect(handler.response.redirect).to.equal(undefined);
+    });
+
+    it('retries a previously failed recalculation even when the submitted values are unchanged', async () => {
+        const handler = makeHandler();
+        handler.tdoc.statusRecalcToken = 'failed-request-token';
+
+        await updateLock(handler);
+
+        expect(calls.events).to.deep.equal(['contest.edit', 'contest.edit', 'contest.recalcStatus']);
+        expect(calls.contestEdits[0][2].statusRecalcToken).to.be.a('string').and.not.equal('failed-request-token');
+        expect(calls.contestEdits[1][2].statusRecalcToken).to.equal(calls.contestEdits[0][2].statusRecalcToken);
+        expect(calls.recalcClears[0][0].statusRecalcToken).to.equal(calls.contestEdits[0][2].statusRecalcToken);
+    });
 });
 
 describe('contest autoHide canonical maintenance', () => {

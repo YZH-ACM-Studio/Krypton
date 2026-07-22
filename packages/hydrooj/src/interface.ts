@@ -392,6 +392,8 @@ export interface Tdoc extends Document {
     // For contest
     lockAt?: Date;
     unlocked?: boolean;
+    /** Durable retry marker for a persisted contest edit whose status recalculation has not been acknowledged yet. */
+    statusRecalcToken?: string;
     autoHide?: boolean;
     balloon?: Record<number, string | { color: string; name: string }>;
     score?: Record<number, number>;

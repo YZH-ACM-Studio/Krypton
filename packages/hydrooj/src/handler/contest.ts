@@ -5,7 +5,7 @@ import { readFile } from 'fs-extra';
 import { escapeRegExp, pick } from 'lodash';
 import moment from 'moment-timezone';
 import { ObjectId } from 'mongodb';
-import { Counter, diffArray, getAlphabeticId, Logger, randomstring, sortFiles, Time, yaml } from '@hydrooj/utils/lib/utils';
+import { Counter, getAlphabeticId, Logger, randomstring, sortFiles, Time, yaml } from '@hydrooj/utils/lib/utils';
 import { Context, Service } from '../context';
 import {
     BadRequestError,
@@ -819,6 +819,23 @@ export class ContestEditHandler extends Handler {
         const beginAt = beginAtMoment.toDate();
         const lockAt = lock ? moment(endAt).add(-lock, 'minutes').toDate() : null;
         if (lockAt && contestDuration) throw new ValidationError('lockAt', 'duration');
+        const statusRecalcReasons: string[] = [];
+        let lockBoundaryChanged = false;
+        if (tid) {
+            const timestamp = (value: Date | null | undefined) => value?.getTime() ?? null;
+            if (timestamp(this.tdoc.beginAt) !== timestamp(beginAt)) statusRecalcReasons.push('beginAt');
+            if (timestamp(this.tdoc.endAt) !== timestamp(endAt)) statusRecalcReasons.push('endAt');
+            const previousPids = [...this.tdoc.pids].sort((a, b) => a - b);
+            const nextPids = [...pids].sort((a, b) => a - b);
+            if (previousPids.length !== nextPids.length || previousPids.some((pid, index) => pid !== nextPids[index])) {
+                statusRecalcReasons.push('pids');
+            }
+            if (this.tdoc.rule !== rule) statusRecalcReasons.push('rule');
+            lockBoundaryChanged = timestamp(this.tdoc.lockAt) !== timestamp(lockAt);
+            if (lockBoundaryChanged) statusRecalcReasons.push('lockAt');
+            if (this.tdoc.statusRecalcToken) statusRecalcReasons.push('pending');
+        }
+        const statusRecalcToken = statusRecalcReasons.length ? randomstring(24) : null;
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, this.tdoc?.pids);
         if (autoHide) await assertCanPublishAutoHiddenProblems(authoritativeDomainId, pids, this.user);
         const effectiveParticipationMode = participationMode || (this.tdoc ? contest.getParticipationMode(this.tdoc) : 'individual');
@@ -853,6 +870,7 @@ export class ContestEditHandler extends Handler {
                     participationMode: effectiveParticipationMode,
                     vigilEnabled,
                     entryMode,
+                    ...(statusRecalcToken ? { statusRecalcToken } : {}),
                 },
                 {
                     actor: this.user,
@@ -860,15 +878,6 @@ export class ContestEditHandler extends Handler {
                     teamModeClearConfirmation,
                 },
             );
-            if (
-                this.tdoc.beginAt !== beginAt ||
-                this.tdoc.endAt !== endAt ||
-                diffArray(this.tdoc.pids, pids) ||
-                this.tdoc.rule !== rule ||
-                lockAt !== this.tdoc.lockAt
-            ) {
-                await contest.recalcStatus(authoritativeDomainId, this.tdoc.docId);
-            }
         } else {
             tid = await contest.add(authoritativeDomainId, title, content, this.user._id, rule, beginAt, endAt, pids, rated, {
                 duration: contestDuration,
@@ -943,6 +952,8 @@ export class ContestEditHandler extends Handler {
             _code,
             autoHide,
             lockAt,
+            ...(lockBoundaryChanged ? { unlocked: false } : {}),
+            ...(statusRecalcToken ? { statusRecalcToken } : {}),
             maintainer,
             allowViewCode,
             allowPrint,
@@ -971,6 +982,59 @@ export class ContestEditHandler extends Handler {
             participantSchoolIds: sids,
             participantGroupIds: gids,
         });
+        if (statusRecalcReasons.length) {
+            try {
+                await contest.recalcStatus(authoritativeDomainId, tid);
+            } catch (error) {
+                logger.error(
+                    'Contest status recalculation failed after persisted edit domain=%s contest=%s actor=%s token=%s reasons=%j oldLockAt=%s newLockAt=%s stage=recalc error=%o',
+                    authoritativeDomainId,
+                    tid,
+                    this.user._id,
+                    statusRecalcToken,
+                    statusRecalcReasons,
+                    this.tdoc.lockAt?.toISOString?.() || null,
+                    lockAt?.toISOString() || null,
+                    error,
+                );
+                throw error;
+            }
+            let cleared;
+            try {
+                cleared = await document.coll.findOneAndUpdate(
+                    {
+                        domainId: authoritativeDomainId,
+                        docType: document.TYPE_CONTEST,
+                        docId: tid,
+                        statusRecalcToken,
+                    },
+                    { $unset: { statusRecalcToken: '' } },
+                    { returnDocument: 'after' },
+                );
+            } catch (error) {
+                logger.error(
+                    'Contest status recalculation token clear failed domain=%s contest=%s actor=%s token=%s reasons=%j stage=clear-token error=%o',
+                    authoritativeDomainId,
+                    tid,
+                    this.user._id,
+                    statusRecalcToken,
+                    statusRecalcReasons,
+                    error,
+                );
+                throw error;
+            }
+            logger.info(
+                'Contest status recalculated after persisted edit domain=%s contest=%s actor=%s token=%s reasons=%j oldLockAt=%s newLockAt=%s stage=%s',
+                authoritativeDomainId,
+                tid,
+                this.user._id,
+                statusRecalcToken,
+                statusRecalcReasons,
+                this.tdoc.lockAt?.toISOString?.() || null,
+                lockAt?.toISOString() || null,
+                cleared ? 'complete' : 'superseded',
+            );
+        }
         if (effectiveParticipationMode === 'individual' && existingTeamBatchId) {
             await document.set(authoritativeDomainId, document.TYPE_CONTEST, tid, undefined, {
                 teamBatchId: '',

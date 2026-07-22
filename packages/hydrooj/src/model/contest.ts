@@ -1426,41 +1426,43 @@ export async function getStatus(domainId: string, tid: ObjectId, uid: number) {
 }
 
 export async function updateStatus(domainId: string, tid: ObjectId, uid: number, rid: ObjectId, pid: number, result: Partial<RecordDoc> = {}) {
-    const { status = STATUS.STATUS_WAITING, score = 0, subtasks, lang } = result;
-    const tdoc = await get(domainId, tid);
-    if (getParticipationMode(tdoc) === 'team') {
-        const synced = await contestTeamStatus.synchronizeFromRecord(
-            tdoc,
-            rid,
-            (recordId) => RecordModel.get(domainId, recordId),
-            (contestDoc, journal) => RULES[contestDoc.rule].stat(contestDoc, journal),
-        );
-        if (!synced.record._id.equals(rid) || synced.record.uid !== uid || synced.record.pid !== pid) throw new ValidationError('record');
-        if (tdoc.balloon && synced.record.status === STATUS.STATUS_ACCEPTED && !isLocked(tdoc)) {
-            await addBalloon(domainId, tid, uid, rid, pid, synced.record.contestTeamId);
+    return await withContestTeamBoundary(domainId, tid, async () => {
+        const { status = STATUS.STATUS_WAITING, score = 0, subtasks, lang } = result;
+        const tdoc = await get(domainId, tid);
+        if (getParticipationMode(tdoc) === 'team') {
+            const synced = await contestTeamStatus.synchronizeFromRecord(
+                tdoc,
+                rid,
+                (recordId) => RecordModel.get(domainId, recordId),
+                (contestDoc, journal) => RULES[contestDoc.rule].stat(contestDoc, journal),
+            );
+            if (!synced.record._id.equals(rid) || synced.record.uid !== uid || synced.record.pid !== pid) throw new ValidationError('record');
+            if (tdoc.balloon && synced.record.status === STATUS.STATUS_ACCEPTED && !isLocked(tdoc)) {
+                await addBalloon(domainId, tid, uid, rid, pid, synced.record.contestTeamId);
+            }
+            return synced.status;
         }
-        return synced.status;
-    }
-    if (tdoc.balloon && status === STATUS.STATUS_ACCEPTED && !isLocked(tdoc)) await addBalloon(domainId, tid, uid, rid, pid);
-    const tsdoc = await document.revPushStatus(
-        tdoc.domainId,
-        document.TYPE_CONTEST,
-        tdoc.docId,
-        uid,
-        'journal',
-        {
-            rid,
-            pid,
-            status,
-            score,
-            subtasks,
-            lang,
-        },
-        'rid',
-    );
-    const journal = _getStatusJournal(tsdoc);
-    const stats = RULES[tdoc.rule].stat(tdoc, journal);
-    return await document.revSetStatus(tdoc.domainId, document.TYPE_CONTEST, tdoc.docId, uid, tsdoc.rev, { journal, ...stats });
+        if (tdoc.balloon && status === STATUS.STATUS_ACCEPTED && !isLocked(tdoc)) await addBalloon(domainId, tid, uid, rid, pid);
+        const tsdoc = await document.revPushStatus(
+            tdoc.domainId,
+            document.TYPE_CONTEST,
+            tdoc.docId,
+            uid,
+            'journal',
+            {
+                rid,
+                pid,
+                status,
+                score,
+                subtasks,
+                lang,
+            },
+            'rid',
+        );
+        const journal = _getStatusJournal(tsdoc);
+        const stats = RULES[tdoc.rule].stat(tdoc, journal);
+        return await document.revSetStatus(tdoc.domainId, document.TYPE_CONTEST, tdoc.docId, uid, tsdoc.rev, { journal, ...stats });
+    });
 }
 
 export async function getListStatus(domainId: string, uid: number, tids: ObjectId[]) {
@@ -1508,23 +1510,33 @@ export async function getAndListStatus(domainId: string, tid: ObjectId): Promise
 }
 
 export async function recalcStatus(domainId: string, tid: ObjectId) {
-    const [tdoc, tsdocs] = await Promise.all([
-        document.get(domainId, document.TYPE_CONTEST, tid),
-        document.getMultiStatus(domainId, document.TYPE_CONTEST, { docId: tid }).toArray(),
-    ]);
-    if (getParticipationMode(tdoc) === 'team') {
-        await contestTeamStatus.recalculateAll(tdoc, (contestDoc, journal) => RULES[contestDoc.rule].stat(contestDoc, journal));
-        return [];
-    }
-    const tasks = [];
-    for (const tsdoc of tsdocs || []) {
-        if (tsdoc.journal) {
-            const journal = _getStatusJournal(tsdoc);
-            const stats = RULES[tdoc.rule].stat(tdoc, journal);
-            tasks.push(document.revSetStatus(domainId, document.TYPE_CONTEST, tid, tsdoc.uid, tsdoc.rev, { journal, ...stats }));
+    return await withContestTeamBoundary(domainId, tid, async () => {
+        const [tdoc, tsdocs] = await Promise.all([
+            document.get(domainId, document.TYPE_CONTEST, tid),
+            document.getMultiStatus(domainId, document.TYPE_CONTEST, { docId: tid }).toArray(),
+        ]);
+        if (getParticipationMode(tdoc) === 'team') {
+            await contestTeamStatus.recalculateAll(tdoc, (contestDoc, journal) => RULES[contestDoc.rule].stat(contestDoc, journal));
+            return [];
+        }
+        const tasks = [];
+        for (const tsdoc of tsdocs || []) {
+            if (tsdoc.journal) tasks.push(recalculateIndividualStatus(tdoc, tsdoc));
+        }
+        return await Promise.all(tasks);
+    });
+
+    async function recalculateIndividualStatus(contestDoc: Tdoc, initialStatus: any) {
+        let current = initialStatus;
+        for (;;) {
+            const journal = _getStatusJournal(current);
+            const stats = RULES[contestDoc.rule].stat(contestDoc, journal);
+            const updated = await document.revSetStatus(domainId, document.TYPE_CONTEST, tid, current.uid, current.rev, { journal, ...stats });
+            if (updated) return updated;
+            current = await document.getStatus(domainId, document.TYPE_CONTEST, tid, current.uid);
+            if (!current?.journal) return null;
         }
     }
-    return await Promise.all(tasks);
 }
 
 export async function unlockScoreboard(domainId: string, tid: ObjectId) {

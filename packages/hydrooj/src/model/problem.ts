@@ -474,7 +474,7 @@ function pendingProblemContributionFingerprint(rows: PendingProblemContributionF
 
 async function prepareManagedPublish(
     claim: ProblemWriteClaim,
-    confirmation: { pendingContributionsConfirmed?: boolean; pendingContributionFingerprint?: string },
+    confirmation: { finalHidden?: boolean; pendingContributionsConfirmed?: boolean; pendingContributionFingerprint?: string },
 ): Promise<number[]> {
     const permits = (global.Hydro?.model as any)?.permits;
     if (
@@ -491,6 +491,7 @@ async function prepareManagedPublish(
         problemId: claim.pid,
         action: 'publish',
         result: 'attempt',
+        finalHidden: confirmation.finalHidden === true,
         requestId: claim.requestId,
         time: new Date(),
     } as any);
@@ -1420,7 +1421,7 @@ export class ProblemModel {
         );
     }
 
-    /** The only service allowed to confirm metadata, attach training, and expose a managed draft. */
+    /** The only service allowed to confirm metadata, attach training, and finalize managed-draft visibility. */
     static async publishManagedProgrammingProblem(input: {
         domainId: string;
         docId: number;
@@ -1429,6 +1430,8 @@ export class ProblemModel {
         expectedStructureRevision: number;
         actor: number;
         user: ProblemAclUser;
+        /** Confirm metadata and training placement without exposing the problem. */
+        finalHidden?: boolean;
         pendingContributionsConfirmed?: boolean;
         pendingContributionFingerprint?: string;
     }): Promise<ManagedProgrammingPublicationResult> {
@@ -1438,6 +1441,7 @@ export class ProblemModel {
             throw new ValidationError('difficulty');
         }
         assertStructureRevision(input.expectedStructureRevision);
+        if (input.finalHidden !== undefined && typeof input.finalHidden !== 'boolean') throw new ValidationError('finalHidden');
         if (input.user._id !== input.actor || !ProblemModel.isProblemBankAdmin(input.user)) {
             throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
         }
@@ -1587,6 +1591,7 @@ export class ProblemModel {
                             managedAuthoring,
                             expectedMetadataStatus: pdoc.managedAuthoring.metadataStatus,
                             expectedStructureRevision: input.expectedStructureRevision,
+                            finalHidden: input.finalHidden === true,
                             pendingTrainingPlacement: prepared.pendingTrainingPlacement,
                         });
                     } catch (error) {
@@ -1688,6 +1693,7 @@ export class ProblemModel {
                 requestId: context.requestId,
                 formalTitle,
                 difficulty: input.difficulty,
+                finalHidden: input.finalHidden === true,
                 approvedAt: context.approvedAt,
                 trainingId: context.trainingId,
                 chapterId: context.chapterId,
@@ -1713,7 +1719,7 @@ export class ProblemModel {
         }
         const state = incompleteStages.length ? 'committed_with_error' : 'published';
         logger.info(
-            'Managed publish completed domain=%s pid=%d publicPid=%s actor=%d requestId=%s training=%s chapter=%s verifierCleanup=%s incompleteStages=%o result=%s',
+            'Managed publish completed domain=%s pid=%d publicPid=%s actor=%d requestId=%s training=%s chapter=%s finalHidden=%s verifierCleanup=%s incompleteStages=%o result=%s',
             input.domainId,
             input.docId,
             context.publicPid,
@@ -1721,6 +1727,7 @@ export class ProblemModel {
             context.requestId,
             context.trainingId,
             context.chapterId,
+            input.finalHidden === true,
             context.verifierCleanup,
             incompleteStages,
             state,

@@ -28,6 +28,8 @@ export interface ManagedProblemPublicationCommit {
     managedAuthoring: NonNullable<ProblemDoc['managedAuthoring']>;
     expectedMetadataStatus: 'draft' | 'confirmed';
     expectedStructureRevision: number;
+    /** Defaults to false so existing publication callers remain public. */
+    finalHidden?: boolean;
     pendingTrainingPlacement?: ManagedTrainingPlacement;
 }
 
@@ -81,7 +83,7 @@ function publicationUpdate(input: ManagedProblemPublicationCommit) {
             knowledgeNodeIds: input.knowledgeNodeIds,
             sourceMeta: input.sourceMeta,
             managedAuthoring: input.managedAuthoring,
-            hidden: false,
+            hidden: input.finalHidden === true,
         },
     };
 }
@@ -218,7 +220,7 @@ async function confirmPublished(input: ManagedProblemPublicationCommit): Promise
         domainId: input.domainId,
         docType: document.TYPE_PROBLEM,
         docId: input.docId,
-        hidden: false,
+        hidden: input.finalHidden === true,
         title: input.title,
         difficulty: input.difficulty,
         tag: input.tags,
@@ -349,12 +351,13 @@ export async function commitManagedProblemPublication(input: ManagedProblemPubli
     }
     const usesTransaction = !!input.pendingTrainingPlacement && transactionCapable();
     logger.info(
-        'Managed publish persistence start domain=%s pid=%d requestId=%s training=%s chapter=%s transaction=%s stage=commit',
+        'Managed publish persistence start domain=%s pid=%d requestId=%s training=%s chapter=%s finalHidden=%s transaction=%s stage=commit',
         input.domainId,
         input.docId,
         input.claim.requestId,
         input.pendingTrainingPlacement?.trainingId,
         input.pendingTrainingPlacement?.chapterId,
+        input.finalHidden === true,
         usesTransaction,
     );
     const published = !input.pendingTrainingPlacement
@@ -363,12 +366,13 @@ export async function commitManagedProblemPublication(input: ManagedProblemPubli
           ? await commitWithTransaction(input)
           : await commitWithCompensation(input);
     logger.info(
-        'Managed publish persistence complete domain=%s pid=%d requestId=%s training=%s chapter=%s stage=committed',
+        'Managed publish persistence complete domain=%s pid=%d requestId=%s training=%s chapter=%s finalHidden=%s stage=committed',
         input.domainId,
         input.docId,
         input.claim.requestId,
         input.pendingTrainingPlacement?.trainingId,
         input.pendingTrainingPlacement?.chapterId,
+        input.finalHidden === true,
     );
     return published;
 }

@@ -4,7 +4,14 @@ import {
     MANAGED_SOURCE_TEMPLATES,
     normalizeManagedSourceMeta,
 } from '../model/managed-problem-source';
-import { canonicalJson, ProblemBatchImportError, type ProblemBatchProductionFacts, sha256, type ValidatedProblemBatch } from './problem-batch-import';
+import {
+    canonicalJson,
+    problemBatchFinalHidden,
+    ProblemBatchImportError,
+    type ProblemBatchProductionFacts,
+    sha256,
+    type ValidatedProblemBatch,
+} from './problem-batch-import';
 import { resolveProblemKnowledgeNodeIds } from './problem-tag-canonical';
 
 export interface ProblemBatchFactUser {
@@ -129,9 +136,9 @@ function canonicalChapter(chapter: any, index: number) {
     return { _id: id, title, requireNids, pids };
 }
 
-export function problemBatchDocumentState(pdoc: ProblemBatchFactProblem): 'draft' | 'published' {
+export function problemBatchDocumentState(pdoc: ProblemBatchFactProblem, finalHidden = false): 'draft' | 'published' {
     if (pdoc.hidden === true && pdoc.managedAuthoring?.metadataStatus === 'draft') return 'draft';
-    if (pdoc.hidden === false && pdoc.managedAuthoring?.metadataStatus === 'confirmed') return 'published';
+    if (pdoc.hidden === finalHidden && pdoc.managedAuthoring?.metadataStatus === 'confirmed') return 'published';
     fail(`batch problem has an invalid lifecycle state: ${pdoc.docId}`);
 }
 
@@ -287,7 +294,7 @@ export async function buildProblemBatchProductionFacts(
                 fingerprint: entry.fingerprint,
                 pid: pdoc.pid,
                 knowledgeMapId,
-                state: problemBatchDocumentState(pdoc),
+                state: problemBatchDocumentState(pdoc, problemBatchFinalHidden(batch.manifest)),
                 docId: pdoc.docId,
             });
         } else {

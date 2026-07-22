@@ -7,6 +7,7 @@ import { Logger } from '@hydrooj/utils';
 import type { ProblemDoc } from '../interface';
 import {
     canonicalJson,
+    problemBatchFinalHidden,
     ProblemBatchImportError,
     type ProblemBatchExecutionReport,
     type ProblemBatchImportAdapter,
@@ -527,7 +528,7 @@ async function verifyImportedProblem(
         pdoc.pid !== plannedPid ||
         pdoc.title !== entry.title ||
         pdoc.difficulty !== entry.difficulty ||
-        pdoc.hidden !== false ||
+        pdoc.hidden !== problemBatchFinalHidden(batch.manifest) ||
         pdoc.problemKind !== 'programming' ||
         pdoc.authoringMode !== 'managed' ||
         pdoc.managedAuthoring?.metadataStatus !== 'confirmed' ||
@@ -689,7 +690,7 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
         for (const entry of batch.problems) {
             let pdoc = await loadIdentityProblem(batch, entry);
             if (!pdoc) fail(`${entry.sourceProblemCode}: draft disappeared before upload`);
-            if (problemBatchDocumentState(pdoc) === 'published') {
+            if (problemBatchDocumentState(pdoc, problemBatchFinalHidden(batch.manifest)) === 'published') {
                 await verifyImportedProblem(
                     batch,
                     entry,
@@ -735,7 +736,7 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
             const planned = plannedByCode.get(entry.sourceProblemCode)!;
             let pdoc = await loadIdentityProblem(batch, entry);
             if (!pdoc) fail(`${entry.sourceProblemCode}: draft disappeared before publication`);
-            if (problemBatchDocumentState(pdoc) === 'published') continue;
+            if (problemBatchDocumentState(pdoc, problemBatchFinalHidden(batch.manifest)) === 'published') continue;
             await assertDraftReady(batch, entry, pdoc, planned.knowledgeMapId);
             if (!Number.isSafeInteger(pdoc.structureRevision)) fail(`${entry.sourceProblemCode}: structure revision is missing`);
             const placement = pdoc.managedAuthoring?.pendingTrainingPlacement;
@@ -759,6 +760,7 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
                 expectedStructureRevision: pdoc.structureRevision!,
                 actor: batch.manifest.actor,
                 user: actor,
+                finalHidden: problemBatchFinalHidden(batch.manifest),
             });
             if (published.state !== 'published') {
                 logger.error(

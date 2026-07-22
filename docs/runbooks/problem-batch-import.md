@@ -23,6 +23,7 @@ config/<code>.yaml
 `batch.json` 必须声明：
 
 - `schemaVersion: 1`、稳定且唯一的 `batchId`、`domain`、管理员 `actor`；
+- 可选的最终可见性 `visibility: public|hidden`；省略时兼容 v1 并最终公开；
 - 已注册的来源模板及其 `year/round/season/level`；
 - 专用来源账号的 `author.uid` 和精确 `author.username`；官方来源账号不得是 root、UID 2、actor 或其他题库管理员；
 - 已存在训练的精确 `id/title` 与本场 `chapterTitle`；历史回填还须声明既有 `chapterId` 和要精确替换的 `replacePids`；
@@ -91,7 +92,7 @@ cd /opt/Krypton
 
 缺少或不匹配 fingerprint、token、actor，或 counter/账号/导图/训练/已有题状态发生漂移，命令都会在写入前非零退出。
 
-执行顺序是：全批 hidden managed drafts → 题面/资源/testdata/checker/config/可选 origStat → 全批 readiness 检查 → 创建最新首章节，或以 CAS 清除 manifest 明确声明的历史占位成员并保持章节绝对位置 → 逐题走 canonical publication。没有跨整批的大事务，也没有后台恢复器；持久 import identity、本地 execution report 和幂等阶段用于显式续跑。不会自动创建训练，也不会自动删除失败草稿。
+执行顺序是：全批 hidden managed drafts → 题面/资源/testdata/checker/config/可选 origStat → 全批 readiness 检查 → 创建最新首章节，或以 CAS 清除 manifest 明确声明的历史占位成员并保持章节绝对位置 → 逐题走 canonical metadata/训练/可见性确认。`visibility: hidden` 会保持题目隐藏，但不会跳过确认、训练挂载或 verify；禁止先公开再另行补写隐藏。没有跨整批的大事务，也没有后台恢复器；持久 import identity、本地 execution report 和幂等阶段用于显式续跑。不会自动创建训练，也不会自动删除失败草稿。
 
 ## 5. Verify、失败与续跑
 

@@ -221,7 +221,7 @@ const ProblemModelStub = {
         chapter.pids.push(pdoc.docId);
         pdoc.title = input.formalTitle;
         pdoc.difficulty = input.difficulty;
-        pdoc.hidden = false;
+        pdoc.hidden = input.finalHidden === true;
         pdoc.structureRevision++;
         pdoc.managedAuthoring.metadataStatus = 'confirmed';
         pdoc.managedAuthoring.approvedBy = input.actor;
@@ -484,6 +484,28 @@ describe('P2.23 Hydro production batch adapter', () => {
             ].some((prefix) => call.startsWith(prefix)),
         ).length;
         expect(resumedMutationCount).to.equal(mutationCount);
+    });
+
+    it('confirms and attaches an explicitly hidden batch without exposing its problems', async () => {
+        const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+        manifest.batchId = 'fixture-2026-1-hidden';
+        manifest.visibility = 'hidden';
+        const hiddenPath = path.join(root, 'hidden.json');
+        await fsp.writeFile(hiddenPath, JSON.stringify(manifest));
+
+        const batch = await validateProblemBatchManifest(hiddenPath);
+        const adapter = new HydroProblemBatchImportAdapter();
+        const plan = await preflightProblemBatchImport(batch, adapter);
+        const report = createProblemBatchExecutionReport(plan, 2);
+        const result = await adapter.apply(batch, plan, report, async () => {});
+
+        expect(result.problems[0]).to.include({ pid: 'NK1064', hidden: true, metadataStatus: 'confirmed' });
+        expect(problemDocs[0]).to.include({ hidden: true });
+        expect(problemDocs[0].managedAuthoring).to.include({ metadataStatus: 'confirmed' });
+        expect(training.dag[0].pids).to.deep.equal([problemDocs[0].docId]);
+
+        const resumed = await adapter.apply(batch, plan, report, async () => {});
+        expect(resumed).to.deep.equal(result);
     });
 
     it('replaces an exact historical placeholder in place and omits unavailable contest statistics', async () => {

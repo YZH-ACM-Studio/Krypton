@@ -274,8 +274,9 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             ManagedProblemPublicationCommittedError: TestPublicationCommittedError,
             async commitManagedProblemPublication(input: any) {
                 publicationCommits.push(input);
-                if (failPersistenceSessionFinalization) throw new TestPublicationCommittedError(publishedDoc);
-                return publishedDoc;
+                const committed = { ...publishedDoc, hidden: input.finalHidden === true };
+                if (failPersistenceSessionFinalization) throw new TestPublicationCommittedError(committed);
+                return committed;
             },
         };
     }
@@ -707,6 +708,16 @@ describe('managed programming publication service seam', () => {
         expect(result.pdoc.hidden).to.equal(false);
         expect(observerCalls[0][0]).to.equal('problem/edit');
         expect(oplogs.some((entry) => entry.result === 'success')).to.equal(true);
+    });
+
+    it('forwards an explicit hidden final state to the canonical persistence service', async () => {
+        const result = await publish({ finalHidden: true });
+
+        expect(publicationCommits[0].finalHidden).to.equal(true);
+        expect(result.pdoc.hidden).to.equal(true);
+        expect(result.pdoc.managedAuthoring.metadataStatus).to.equal('confirmed');
+        expect(oplogs.filter((entry) => entry.type === 'problem.managed.publish').map((entry) => entry.finalHidden)).to.deep.equal([true, true]);
+        expect(logs.some((entry) => entry[0] === 'info' && String(entry[1]).includes('finalHidden=%s') && entry.includes(true))).to.equal(true);
     });
 
     it('returns the committed problem with explicit incomplete stages when the publication claim cannot finalize', async () => {

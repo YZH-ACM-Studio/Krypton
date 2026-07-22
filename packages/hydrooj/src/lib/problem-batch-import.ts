@@ -15,6 +15,8 @@ export interface ProblemBatchManifest {
     batchId: string;
     domain: string;
     actor: number;
+    /** Omitted manifests retain the v1 public-finalization behavior. */
+    visibility?: 'public' | 'hidden';
     source: {
         template: string;
         year: number;
@@ -286,12 +288,17 @@ function selectionMatches(entry: ProblemBatchManifestEntry, selection: ProblemBa
 
 function normalizeManifest(raw: unknown): ProblemBatchManifest {
     invariant(isPlainObject(raw), 'batch.json must contain one object');
-    assertKeys(raw, ['schemaVersion', 'batchId', 'domain', 'actor', 'source', 'author', 'training', 'selection', 'problems'], 'batch');
+    assertKeys(raw, ['schemaVersion', 'batchId', 'domain', 'actor', 'visibility', 'source', 'author', 'training', 'selection', 'problems'], 'batch');
     invariant(raw.schemaVersion === 1, 'schemaVersion must be 1');
     const batchId = nonEmptyString(raw.batchId, 'batchId', 96);
     invariant(BATCH_ID.test(batchId), 'batchId contains unsupported characters');
     const domain = nonEmptyString(raw.domain, 'domain', 64);
     const actor = integer(raw.actor, 'actor', 1);
+    let visibility: ProblemBatchManifest['visibility'];
+    if (raw.visibility !== undefined) {
+        invariant(raw.visibility === 'public' || raw.visibility === 'hidden', 'visibility must be public or hidden');
+        visibility = raw.visibility;
+    }
 
     invariant(isPlainObject(raw.source), 'source must be an object');
     assertKeys(raw.source, ['template', 'year', 'round', 'season', 'level'], 'source');
@@ -463,7 +470,22 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
         invariant(canonicalJson(selected) === canonicalJson(declared), 'selection.value must exactly match the declared problem codes');
     }
 
-    return { schemaVersion: 1, batchId, domain, actor, source, author, training, selection, problems };
+    return {
+        schemaVersion: 1,
+        batchId,
+        domain,
+        actor,
+        ...(visibility ? { visibility } : {}),
+        source,
+        author,
+        training,
+        selection,
+        problems,
+    };
+}
+
+export function problemBatchFinalHidden(manifest: ProblemBatchManifest): boolean {
+    return manifest.visibility === 'hidden';
 }
 
 export async function validateProblemBatchManifest(manifestPathInput: string): Promise<ValidatedProblemBatch> {
@@ -785,6 +807,7 @@ export function problemBatchValidationSummary(batch: ValidatedProblemBatch) {
         ok: true as const,
         stage: 'validate' as const,
         batchId: batch.manifest.batchId,
+        visibility: batch.manifest.visibility || 'public',
         fingerprint: batch.fingerprint,
         problems: batch.problems.map((entry) => ({
             sourceProblemCode: entry.sourceProblemCode,

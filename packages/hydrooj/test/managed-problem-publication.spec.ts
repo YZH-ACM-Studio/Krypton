@@ -63,7 +63,7 @@ const documentColl = {
         calls.problemReads.push(filter);
         const expectedAt = filter['managedAuthoring.approvedAt'];
         if (
-            problemDoc?.hidden === false &&
+            problemDoc?.hidden === filter.hidden &&
             problemDoc.managedAuthoring?.metadataStatus === 'confirmed' &&
             problemDoc.managedAuthoring?.approvedAt?.getTime() === expectedAt?.getTime() &&
             filter.structureRevision === problemDoc.structureRevision &&
@@ -208,6 +208,17 @@ describe('P2.14 managed problem publication persistence', () => {
         expect(calls.problemUpdates[0].filter['aclWriteClaim.operation']).to.equal('managed-review-publish');
         expect(calls.updates).to.have.lengthOf(0);
         expect(calls.sessions).to.have.lengthOf(0);
+    });
+
+    it('can confirm a managed problem while intentionally keeping it hidden', async () => {
+        const request = input();
+        request.finalHidden = true;
+
+        const result = await publication.commitManagedProblemPublication(request);
+
+        expect(result).to.include({ hidden: true, title: '正式标题', difficulty: 4 });
+        expect(result.managedAuthoring.metadataStatus).to.equal('confirmed');
+        expect(calls.problemUpdates[0].update.$set.hidden).to.equal(true);
     });
 
     it('does not open a transaction for a problem-only publish even when Mongo supports transactions', async () => {

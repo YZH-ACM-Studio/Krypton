@@ -284,6 +284,25 @@ Promise.resolve(cli.runMatchedCommand()).catch((error) => {
         expect(batch.problems[0].configFile.name).to.equal('config.yaml');
     });
 
+    it('keeps legacy manifests public by default and accepts only explicit public or hidden visibility', async () => {
+        const legacy = await validateProblemBatchManifest(manifestPath);
+        expect(legacy.manifest.visibility).to.equal(undefined);
+
+        const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+        manifest.visibility = 'hidden';
+        const hiddenPath = path.join(root, 'hidden.json');
+        await fsp.writeFile(hiddenPath, JSON.stringify(manifest));
+        const hidden = await validateProblemBatchManifest(hiddenPath);
+        expect(hidden.manifest.visibility).to.equal('hidden');
+        expect(hidden.fingerprint).not.to.equal(legacy.fingerprint);
+        expect(problemBatchValidationSummary(hidden).visibility).to.equal('hidden');
+
+        manifest.visibility = 'private';
+        const invalidPath = path.join(root, 'invalid-visibility.json');
+        await fsp.writeFile(invalidPath, JSON.stringify(manifest));
+        await expectReject(validateProblemBatchManifest(invalidPath), 'visibility must be public or hidden');
+    });
+
     it('accepts an explicit source-code selection without inventing unavailable contest statistics', async () => {
         const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
         manifest.batchId = 'pat-advanced-2021-spring';

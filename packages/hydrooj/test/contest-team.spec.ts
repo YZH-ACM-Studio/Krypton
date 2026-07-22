@@ -3,6 +3,7 @@ import { beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
 import {
     getParticipationMode,
+    isTeamBatchFinalizationPending,
     normalizeParticipationConfig,
     planParticipationModeTransition,
     teamModeClearConfirmation,
@@ -355,6 +356,13 @@ describe('P1.11 contest participation policy', () => {
         expect(team).to.include({ rated: false, vigilEnabled: true, entryMode: 'client_required' });
         expect(() => normalizeParticipationConfig({ rule: 'oi', participationMode: 'team' } as any)).to.throw();
         expect(() => normalizeParticipationConfig({ rule: 'acm', participationMode: 'other' } as any)).to.throw();
+    });
+
+    it('marks only planned but unfinalized team contests as pending', () => {
+        const plannedTeamBatchId = new ObjectId();
+        expect(isTeamBatchFinalizationPending({ participationMode: 'team', plannedTeamBatchId } as any)).to.equal(true);
+        expect(isTeamBatchFinalizationPending({ participationMode: 'team', plannedTeamBatchId, teamBatchId: new ObjectId() } as any)).to.equal(false);
+        expect(isTeamBatchFinalizationPending({ participationMode: 'individual', plannedTeamBatchId } as any)).to.equal(false);
     });
 
     it('binds destructive mode confirmation to contest id and revision', () => {

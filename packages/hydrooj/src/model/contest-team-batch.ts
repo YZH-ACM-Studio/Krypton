@@ -968,6 +968,17 @@ export async function listClosedBatches(domainId: string): Promise<Array<TeamBat
     );
 }
 
+export async function listBatches(domainId: string): Promise<Array<TeamBatchDoc & { teamCount: number; memberCount: number }>> {
+    const batches = await getMultiBatch(domainId).toArray();
+    return await Promise.all(
+        batches.map(async (batch) => ({
+            ...batch,
+            teamCount: await countBatchTeams(domainId, batch.batchId),
+            memberCount: await countBatchMembers(domainId, batch.batchId),
+        })),
+    );
+}
+
 function snapshotHash(batch: TeamBatchDoc, teams: TeamBatchTeamDoc[]): string {
     const canonical = {
         batchId: batch.batchId.toHexString(),
@@ -1003,6 +1014,73 @@ function exactStoredField(field: keyof Tdoc, value: unknown): Record<string, unk
     return value === undefined ? { [field]: { $exists: false } } : { [field]: value };
 }
 
+function sameOptionalObjectId(left: ObjectId | null | undefined, right: ObjectId | null | undefined): boolean {
+    if (!left && !right) return true;
+    return !!left && !!right && left.equals(right);
+}
+
+export async function setContestPlannedBatch(
+    domainId: string,
+    contestId: ObjectId,
+    nextBatchId: ObjectId | null,
+    expectedBatchId: ObjectId | null,
+    actor: TeamBatchActor,
+): Promise<Tdoc> {
+    requireManager(actor);
+    const nextBatch = nextBatchId ? await loadBatch(domainId, nextBatchId) : null;
+    return await withContestTeamBoundary(domainId, contestId, async () => {
+        const tdoc = await contest.get(domainId, contestId);
+        const currentBatchId = tdoc.plannedTeamBatchId ? new ObjectId(tdoc.plannedTeamBatchId) : null;
+        if (!sameOptionalObjectId(currentBatchId, expectedBatchId)) conflict('contest_planned_batch_changed');
+        if (sameOptionalObjectId(currentBatchId, nextBatchId)) return tdoc;
+        const auditBatchId = nextBatchId || currentBatchId;
+        if (!auditBatchId) throw new ValidationError('plannedTeamBatchId');
+        const auditBase = {
+            domainId,
+            actorUid: actor.user._id,
+            batchId: auditBatchId,
+            contestId,
+            fromRevision: nextBatch?.revision || 0,
+        };
+        try {
+            if (contest.getParticipationMode(tdoc) !== 'team' || tdoc.rule !== 'acm') {
+                if (nextBatchId) throw new ValidationError('plannedTeamBatchId');
+            }
+            if (tdoc.teamBatchId) conflict('contest_batch_snapshot_finalized');
+            const now = actor.now || new Date();
+            if (now >= tdoc.beginAt) conflict('contest_started');
+            const [recordCount, activeTeamCount] = await Promise.all([
+                recordColl.countDocuments({ domainId, contest: contestId }),
+                contestTeam.coll.countDocuments({ domainId, contestId, active: true }),
+            ]);
+            if (recordCount) conflict('contest_has_records');
+            if (activeTeamCount) conflict('contest_already_has_teams');
+            const filter = {
+                domainId,
+                docType: document.TYPE_CONTEST,
+                docId: contestId,
+                rule: tdoc.rule,
+                beginAt: tdoc.beginAt,
+                ...exactStoredField('participationMode', tdoc.participationMode),
+                ...exactStoredField('plannedTeamBatchId', tdoc.plannedTeamBatchId),
+                $and: [{ $or: [{ teamBatchId: { $exists: false } }, { teamBatchId: null }] }],
+            };
+            const update = nextBatchId ? { $set: { plannedTeamBatchId: nextBatchId } } : { $unset: { plannedTeamBatchId: '' as const } };
+            const updated = await document.coll.findOneAndUpdate(filter, update, { returnDocument: 'after' });
+            if (!updated) conflict('contest_planned_batch_changed');
+            await auditSuccess('plan', {
+                ...auditBase,
+                toRevision: nextBatch?.revision || 0,
+                stage: nextBatchId ? `set:${nextBatch.status}` : 'clear',
+            });
+            return updated;
+        } catch (error) {
+            await auditRejected('plan', auditBase, error);
+            throw error;
+        }
+    });
+}
+
 interface SnapshotTrace {
     stage: string;
 }
@@ -1036,10 +1114,14 @@ async function snapshotToContestUnlocked(
     batchId: ObjectId,
     actorUid: number,
     trace: SnapshotTrace,
+    rejectAlreadyFinalized: boolean,
 ): Promise<TeamBatchSnapshotResult> {
     trace.stage = 'target-load';
     const tdoc = await contest.get(domainId, contestId);
     if (!tdoc || contest.getParticipationMode(tdoc) !== 'team' || tdoc.rule !== 'acm') throw new ValidationError('teamBatchId');
+    const existingBatchId = tdoc.teamBatchId ? new ObjectId(tdoc.teamBatchId) : null;
+    const plannedBatchId = tdoc.plannedTeamBatchId ? new ObjectId(tdoc.plannedTeamBatchId) : null;
+    if (!existingBatchId && (!plannedBatchId || !plannedBatchId.equals(batchId))) conflict('contest_planned_batch_changed');
     if (new Date() >= tdoc.beginAt) conflict('contest_started');
     if (await recordColl.countDocuments({ domainId, contest: contestId })) conflict('contest_has_records');
 
@@ -1065,8 +1147,8 @@ async function snapshotToContestUnlocked(
     }
     const hash = snapshotHash(batch, teams);
     const memberCount = teams.reduce((sum, team) => sum + team.memberUids.length, 0);
-    const existingBatchId = tdoc.teamBatchId ? new ObjectId(tdoc.teamBatchId) : null;
     if (existingBatchId) {
+        if (rejectAlreadyFinalized) conflict('contest_batch_snapshot_finalized');
         if (!existingBatchId.equals(batchId) || tdoc.teamBatchSnapshotHash !== hash) conflict('contest_bound_to_different_batch_snapshot');
         const existingCount = await contestTeam.coll.countDocuments({
             domainId,
@@ -1209,6 +1291,7 @@ async function snapshotToContestUnlocked(
                 rule: 'acm',
                 participationMode: 'team',
                 beginAt: latestContest.beginAt,
+                plannedTeamBatchId: batchId,
                 $and: [
                     { $or: [{ teamBatchId: { $exists: false } }, { teamBatchId: null }] },
                     exactStoredField('participationRevision', latestContest.participationRevision),
@@ -1225,6 +1308,7 @@ async function snapshotToContestUnlocked(
                     teamBatchSnapshotAt: snapshotAt,
                     teamBatchSnapshotCount: docs.length,
                 },
+                $unset: { plannedTeamBatchId: '' },
             },
         );
         if (stored.modifiedCount !== 1) conflict('contest_batch_binding_changed');
@@ -1275,16 +1359,19 @@ async function snapshotToContestUnlocked(
     }
 }
 
-export async function snapshotToContest(
+async function snapshotToContestWithPolicy(
     domainId: string,
     contestId: ObjectId,
     batchId: ObjectId,
     actorUid: number,
+    rejectAlreadyFinalized: boolean,
 ): Promise<TeamBatchSnapshotResult> {
     const trace: SnapshotTrace = { stage: 'queued' };
     return await withContestTeamBoundary(domainId, contestId, async () => {
         try {
-            return await withBatchMutation(domainId, batchId, () => snapshotToContestUnlocked(domainId, contestId, batchId, actorUid, trace));
+            return await withBatchMutation(domainId, batchId, () =>
+                snapshotToContestUnlocked(domainId, contestId, batchId, actorUid, trace, rejectAlreadyFinalized),
+            );
         } catch (error) {
             if (error && typeof error === 'object') {
                 Object.assign(error, {
@@ -1295,6 +1382,25 @@ export async function snapshotToContest(
             throw error;
         }
     });
+}
+
+export async function snapshotToContest(
+    domainId: string,
+    contestId: ObjectId,
+    batchId: ObjectId,
+    actorUid: number,
+): Promise<TeamBatchSnapshotResult> {
+    return await snapshotToContestWithPolicy(domainId, contestId, batchId, actorUid, false);
+}
+
+export async function finalizePlannedBatchToContest(
+    domainId: string,
+    contestId: ObjectId,
+    batchId: ObjectId,
+    actor: TeamBatchActor,
+): Promise<TeamBatchSnapshotResult> {
+    requireManager(actor);
+    return await snapshotToContestWithPolicy(domainId, contestId, batchId, actor.user._id, true);
 }
 
 export async function apply(ctx: Context) {
@@ -1374,6 +1480,9 @@ global.Hydro.model.contestTeamBatch = {
     getPendingInvitesForUser,
     countBatchTeams,
     countBatchMembers,
+    listBatches,
     listClosedBatches,
+    setContestPlannedBatch,
     snapshotToContest,
+    finalizePlannedBatchToContest,
 };

@@ -8,6 +8,10 @@ export function getParticipationMode(tdoc: Pick<Tdoc, 'participationMode'>): Con
     return tdoc.participationMode === 'team' ? 'team' : 'individual';
 }
 
+export function isTeamBatchFinalizationPending(tdoc: Pick<Tdoc, 'participationMode' | 'plannedTeamBatchId' | 'teamBatchId'>): boolean {
+    return getParticipationMode(tdoc) === 'team' && !!tdoc.plannedTeamBatchId && !tdoc.teamBatchId;
+}
+
 export function teamModeClearConfirmation(tid: ObjectId, participationRevision: number): string {
     return `TEAM-MODE-CLEAR:${tid.toHexString()}:${participationRevision}`;
 }

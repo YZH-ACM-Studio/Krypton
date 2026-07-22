@@ -342,13 +342,23 @@ export function ContestEditPage() {
   const [rule, setRule] = useState(String(tdoc.rule || 'acm'));
   const initialParticipationMode: 'individual' | 'team' = tdoc.participationMode === 'team' ? 'team' : 'individual';
   const [participationMode, setParticipationMode] = useState<'individual' | 'team'>(initialParticipationMode);
-  const initialTeamBatchId = String(tdoc.teamBatchId || '');
-  const [teamBatchId, setTeamBatchId] = useState(initialTeamBatchId);
-  const closedTeamBatches: R[] = data.closedTeamBatches || [];
+  const finalizedTeamBatchId = String(tdoc.teamBatchId || '');
+  const persistedPlannedTeamBatchId = String(tdoc.plannedTeamBatchId || '');
+  const [plannedTeamBatchId, setPlannedTeamBatchId] = useState(persistedPlannedTeamBatchId || finalizedTeamBatchId);
+  const teamBatches: R[] = data.teamBatches || [];
+  const selectedTeamBatch = teamBatches.find((batch) => String(batch.batchId) === plannedTeamBatchId) || null;
+  const canUpdatePlannedTeamBatch = !!data.canUpdatePlannedTeamBatch && !finalizedTeamBatchId;
+  const canFinalizePlannedTeamBatch =
+    isEdit &&
+    canUpdatePlannedTeamBatch &&
+    !!persistedPlannedTeamBatchId &&
+    plannedTeamBatchId === persistedPlannedTeamBatchId &&
+    selectedTeamBatch?.status === 'closed';
   const activeTeamCount = Number(data.activeTeamCount || 0);
   const [rated, setRated] = useState(defaultRated);
   const [modeClearOpen, setModeClearOpen] = useState(false);
   const [modeClearConfirmed, setModeClearConfirmed] = useState(false);
+  const [finalizeTeamBatchOpen, setFinalizeTeamBatchOpen] = useState(false);
   const formRef = useRef<HTMLFormElement | null>(null);
   const primarySubmitRef = useRef<HTMLButtonElement | null>(null);
   const [permission, setPermission] = useState(() => {
@@ -549,30 +559,54 @@ export function ContestEditPage() {
                       <div>
                         <label className="text-sm font-medium">赛前组队批次</label>
                         <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                          可选。保存时把已关闭批次的当前阵容整批校验，并生成这场比赛自己的队伍快照。
+                          可选。开放批次只建立管理关联，组队仍可继续；关闭后再由管理员显式锁定阵容并生成本场独立快照。
                         </p>
                       </div>
-                      {initialTeamBatchId ? <Badge variant="outline">已绑定 · 不自动同步</Badge> : null}
+                      {finalizedTeamBatchId ? (
+                        <Badge variant="outline">已定版 · 不自动同步</Badge>
+                      ) : persistedPlannedTeamBatchId ? (
+                        <Badge variant={selectedTeamBatch?.status === 'closed' ? 'secondary' : 'outline'}>
+                          {selectedTeamBatch?.status === 'closed' ? '已预绑定 · 待定版' : '已预绑定 · 开放组队中'}
+                        </Badge>
+                      ) : null}
                     </div>
                     <SimpleSelect
-                      name="teamBatchId"
-                      value={teamBatchId}
-                      onValueChange={setTeamBatchId}
-                      disabled={!!initialTeamBatchId || activeTeamCount > 0}
+                      name="plannedTeamBatchId"
+                      value={plannedTeamBatchId}
+                      onValueChange={setPlannedTeamBatchId}
+                      disabled={!canUpdatePlannedTeamBatch}
                       options={[
-                        { value: '', label: '不使用赛前批次（保存后在比赛内组队）' },
-                        ...closedTeamBatches.map((batch) => ({
+                        { value: '', label: '不预绑定批次（保持现有比赛内组队方式）' },
+                        ...teamBatches.map((batch) => ({
                           value: String(batch.batchId),
-                          label: `${batch.name} · ${Number(batch.teamCount || 0)} 队 / ${Number(batch.memberCount || 0)} 人`,
+                          label: `${batch.status === 'open' ? '开放' : '已关闭'} · ${batch.name} · ${Number(batch.teamCount || 0)} 队 / ${Number(batch.memberCount || 0)} 人`,
                         })),
                       ]}
                     />
-                    {activeTeamCount > 0 && !initialTeamBatchId ? (
-                      <p className="text-xs text-amber-600">本场已经有队伍，不能再导入赛前批次。</p>
-                    ) : teamBatchId ? (
-                      <p className="text-xs text-muted-foreground">任一成员不符合当前参赛范围时整批拒绝，不会跳过失败队伍。</p>
+                    {!canUpdatePlannedTeamBatch && persistedPlannedTeamBatchId ? (
+                      <input type="hidden" name="plannedTeamBatchId" value={persistedPlannedTeamBatchId} />
+                    ) : null}
+                    {selectedTeamBatch ? (
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-background/70 px-3 py-2.5 text-xs ring-1 ring-foreground/8">
+                        <span className="text-muted-foreground">
+                          当前批次：{Number(selectedTeamBatch.teamCount || 0)} 支队伍 · {Number(selectedTeamBatch.memberCount || 0)} 名成员 ·
+                          {selectedTeamBatch.status === 'open' ? ' 仍可继续组队' : ' 阵容已冻结'}
+                        </span>
+                        {canFinalizePlannedTeamBatch ? (
+                          <Button type="button" size="sm" onClick={() => setFinalizeTeamBatchOpen(true)}>
+                            <ClipboardCheck className="size-4" /> 锁定阵容并生成快照
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {finalizedTeamBatchId ? (
+                      <p className="text-xs text-muted-foreground">本场运行时只读取已定版的 ContestTeam；后续批次变化不会同步到比赛。</p>
+                    ) : activeTeamCount > 0 ? (
+                      <p className="text-xs text-amber-600">本场已经存在比赛内队伍，不能再更换或绑定赛前批次。</p>
+                    ) : plannedTeamBatchId ? (
+                      <p className="text-xs text-muted-foreground">预绑定不会创建临时队伍；定版时任一成员资格失败都会整批拒绝。</p>
                     ) : (
-                      <p className="text-xs text-muted-foreground">没有可选项时，请先到「队伍中心」创建并关闭一个组队批次。</p>
+                      <p className="text-xs text-muted-foreground">也可以不使用批次，继续沿用比赛内直接组队。</p>
                     )}
                   </div>
                 ) : null}
@@ -1112,6 +1146,42 @@ export function ContestEditPage() {
                 停用队伍并保存
               </Button>
             </TeamDialogFooter>
+          </TeamDialogContent>
+        </Dialog>
+        <Dialog open={finalizeTeamBatchOpen} onOpenChange={setFinalizeTeamBatchOpen}>
+          <TeamDialogContent
+            titleId="finalize-team-batch-dialog-title"
+            descriptionId="finalize-team-batch-dialog-description"
+            title="锁定阵容并生成快照？"
+            description="系统会重新校验整批成员，并为本场比赛生成一份不可自动同步的独立队伍快照。"
+            icon={<ClipboardCheck className="size-5" />}
+            onClose={() => setFinalizeTeamBatchOpen(false)}
+            className="sm:w-[30rem]"
+          >
+            <form method="post" className="flex min-h-0 flex-1 flex-col">
+              <input type="hidden" name="operation" value="finalize_team_batch" />
+              <input type="hidden" name="plannedTeamBatchId" value={persistedPlannedTeamBatchId} />
+              <TeamDialogBody>
+                <div className="rounded-2xl bg-muted/45 p-4 ring-1 ring-foreground/8">
+                  <p className="text-sm font-semibold">{selectedTeamBatch?.name || '当前预绑定批次'}</p>
+                  <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
+                    {Number(selectedTeamBatch?.teamCount || 0)} 支队伍 · {Number(selectedTeamBatch?.memberCount || 0)}{' '}
+                    名成员。定版成功后，批次仍可供其他比赛独立使用。
+                  </p>
+                </div>
+                <p className="text-sm leading-6 text-muted-foreground">
+                  比赛开始、已有提交、已有比赛队伍或成员资格变化时，服务端会拒绝且不会留下半批队伍。
+                </p>
+              </TeamDialogBody>
+              <TeamDialogFooter>
+                <Button type="button" variant="secondary" onClick={() => setFinalizeTeamBatchOpen(false)} className={TEAM_DIALOG_BUTTON_CLASS}>
+                  取消
+                </Button>
+                <Button type="submit" className={TEAM_DIALOG_BUTTON_CLASS}>
+                  确认定版
+                </Button>
+              </TeamDialogFooter>
+            </form>
           </TeamDialogContent>
         </Dialog>
       </ContestManagementChrome>

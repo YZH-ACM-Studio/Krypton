@@ -78,16 +78,21 @@ describe('P1.17 pre-contest team batch workspace contracts', () => {
     expect(workspace).to.include('若批次已生成过比赛快照，服务端会拒绝并要求改用复制');
   });
 
-  it('offers only closed batches for team contests and binds through the canonical snapshot model', () => {
+  it('pre-binds open or closed batches and finalizes only through the canonical snapshot model', () => {
     const editor = readFileSync(resolve(root, 'src/pages/contest-manage.tsx'), 'utf8');
     const contestHandler = readFileSync(resolve(hydroRoot, 'handler/contest.ts'), 'utf8');
     const model = readFileSync(resolve(hydroRoot, 'model/contest-team-batch.ts'), 'utf8');
-    expect(editor).to.include('name="teamBatchId"');
-    expect(editor).to.include('closedTeamBatches.map');
-    expect(editor).to.include('不使用赛前批次');
-    expect(contestHandler).to.include('contestTeamBatch.listClosedBatches');
-    expect(contestHandler).to.include('contestTeamBatch.snapshotToContest');
+    expect(editor).to.include('name="plannedTeamBatchId"');
+    expect(editor).to.include('teamBatches.map');
+    expect(editor).to.include('不预绑定批次');
+    expect(editor).to.include('value="finalize_team_batch"');
+    expect(contestHandler).to.include('contestTeamBatch.listBatches');
+    expect(contestHandler).to.include('contestTeamBatch.setContestPlannedBatch');
+    expect(contestHandler).to.include('contestTeamBatch.finalizePlannedBatchToContest');
+    expect(contestHandler).not.to.include('contestTeamBatch.snapshotToContest(authoritativeDomainId');
     expect(model).to.include("batch.status !== 'closed'");
+    expect(model).to.include('plannedTeamBatchId: batchId');
+    expect(model).to.include("$unset: { plannedTeamBatchId: '' }");
     expect(model).to.include("snapshotState: 'preparing'");
     expect(model).to.include("snapshotState: 'active'");
     expect(model).to.include('sourceBatchTeamId: source.teamId');
@@ -106,11 +111,14 @@ describe('P1.17 pre-contest team batch workspace contracts', () => {
   });
 
   it('does not make contest scoring, submission or Vigil runtime paths depend on batch collections', () => {
-    for (const file of ['contest-team-status.ts', 'contest-team-code.ts']) {
+    for (const file of ['contest.ts', 'contest-team.ts', 'contest-team-status.ts', 'contest-team-code.ts']) {
       const source = readFileSync(resolve(hydroRoot, `model/${file}`), 'utf8');
       expect(source).not.to.include('contest-team-batch');
       expect(source).not.to.include('contest.teamBatch');
     }
+    const vigilIntegration = readFileSync(resolve(hydroRoot, 'handler/vigil-integration.ts'), 'utf8');
+    expect(vigilIntegration).not.to.include('contest-team-batch');
+    expect(vigilIntegration).not.to.include('contest.teamBatch');
     const vigil = readFileSync(resolve(root, '../krypton-vigilguard/src/handler.ts'), 'utf8');
     expect(vigil).not.to.include('contest-team-batch');
     expect(vigil).not.to.include('contest.teamBatch');

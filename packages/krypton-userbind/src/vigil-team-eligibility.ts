@@ -4,6 +4,8 @@ interface VigilCandidateContest {
     _id?: ObjectId;
     docId?: ObjectId;
     participationMode?: 'individual' | 'team';
+    plannedTeamBatchId?: ObjectId;
+    teamBatchId?: ObjectId;
 }
 
 interface ActiveContestTeam {
@@ -14,7 +16,7 @@ export interface VigilTeamEligibility {
     eligible: boolean;
     contestId?: ObjectId;
     teamId?: string;
-    reason?: 'active_team_required';
+    reason?: 'active_team_required' | 'team_batch_not_finalized';
 }
 
 export type FindActiveContestTeam = (domainId: string, contestId: ObjectId, uid: number) => Promise<ActiveContestTeam | null>;
@@ -29,6 +31,9 @@ export async function resolveVigilTeamEligibility(
     if (tdoc.participationMode !== 'team') return { eligible: true };
     const contestId = tdoc.docId || tdoc._id;
     if (!contestId) throw new Error('Team contest candidate is missing its contest id');
+    if (tdoc.plannedTeamBatchId && !tdoc.teamBatchId) {
+        return { eligible: false, contestId, reason: 'team_batch_not_finalized' };
+    }
     const team = await findActiveTeam(domainId, contestId, uid);
     if (!team) return { eligible: false, contestId, reason: 'active_team_required' };
     return { eligible: true, contestId, teamId: team.teamId.toHexString() };

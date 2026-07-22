@@ -385,6 +385,8 @@ export interface Tdoc extends Document {
     participationRevision?: number;
     /** Closed pre-contest batch used to materialize this contest's independent roster snapshot. */
     teamBatchId?: ObjectId;
+    /** Management-only pre-binding; runtime authorization never reads TeamBatch data through this field. */
+    plannedTeamBatchId?: ObjectId;
     teamBatchSnapshotHash?: string;
     teamBatchSnapshotAt?: Date;
     teamBatchSnapshotCount?: number;

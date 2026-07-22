@@ -375,6 +375,12 @@ async function createClosedBatch(name = 'Summer Teams') {
     return await batchModel.getBatch('system', batch.batchId);
 }
 
+async function createPlannedClosedBatch(name = 'Summer Teams') {
+    const batch = await createClosedBatch(name);
+    contestDocs[0].plannedTeamBatchId = batch.batchId;
+    return batch;
+}
+
 beforeEach(() => {
     batches.length = 0;
     batchTeams.length = 0;
@@ -726,7 +732,7 @@ describe('P1.17 pre-contest team batches', () => {
     });
 
     it('persists first use and serializes snapshot activation against reopen', async () => {
-        const batch = await createClosedBatch('First Use');
+        const batch = await createPlannedClosedBatch('First Use');
         await batchModel.snapshotToContest('system', contestDocs[0].docId, batch.batchId, 99);
         const used = await batchModel.getBatch('system', batch.batchId);
         expect(used.firstSnapshotContestId.equals(contestDocs[0].docId)).to.equal(true);
@@ -745,6 +751,7 @@ describe('P1.17 pre-contest team batches', () => {
         await rejects(batchModel.reopenBatch('system', batch.batchId, used.revision, { user: actor(99, true) }), TestConflictError);
 
         const racing = await createClosedBatch('Race');
+        contestDocs[0].plannedTeamBatchId = racing.batchId;
         const outcomes = await Promise.allSettled([
             batchModel.snapshotToContest('system', contestDocs[0].docId, racing.batchId, 99),
             batchModel.reopenBatch('system', racing.batchId, racing.revision, { user: actor(99, true) }),
@@ -761,21 +768,119 @@ describe('P1.17 pre-contest team batches', () => {
         }
     });
 
-    it('materializes independent contest teams and makes repeated or concurrent submission idempotent', async () => {
-        const batch = await createClosedBatch();
+    it('pre-binds open or closed batches without materializing teams and supports change or clear', async () => {
+        const open = await batchModel.createBatch('system', { user: actor(99, true) }, { name: 'Open Plan' });
+        await batchModel.createTeam(
+            'system',
+            open.batchId,
+            { user: actor(99, true) },
+            { name: 'Early Team', captainUid: 10, memberUids: [10], managementMode: 'admin' },
+        );
+        const plannedOpen = await batchModel.setContestPlannedBatch('system', contestDocs[0].docId, open.batchId, null, {
+            user: actor(99, true),
+        });
+        expect(plannedOpen.plannedTeamBatchId.equals(open.batchId)).to.equal(true);
+        expect(contestTeams).to.have.length(0);
+
+        await batchModel.createTeam(
+            'system',
+            open.batchId,
+            { user: actor(99, true) },
+            { name: 'Late Team', captainUid: 11, memberUids: [11], managementMode: 'admin' },
+        );
+        expect(await batchModel.countBatchTeams('system', open.batchId)).to.equal(2);
+        expect(contestTeams).to.have.length(0);
+
+        const closed = await createClosedBatch('Closed Plan');
+        const plannedClosed = await batchModel.setContestPlannedBatch('system', contestDocs[0].docId, closed.batchId, open.batchId, {
+            user: actor(99, true),
+        });
+        expect(plannedClosed.plannedTeamBatchId.equals(closed.batchId)).to.equal(true);
+        const cleared = await batchModel.setContestPlannedBatch('system', contestDocs[0].docId, null, closed.batchId, {
+            user: actor(99, true),
+        });
+        expect(cleared.plannedTeamBatchId).to.equal(undefined);
+        expect(contestTeams).to.have.length(0);
+
+        await rejects(
+            batchModel.setContestPlannedBatch('system', contestDocs[0].docId, open.batchId, null, { user: actor(10) }),
+            TestPermissionError,
+        );
+        await rejects(
+            batchModel.setContestPlannedBatch('another-domain', contestDocs[0].docId, open.batchId, null, { user: actor(99, true) }),
+            TestConflictError,
+        );
+        contestDocs[0].participationMode = 'individual';
+        await rejects(
+            batchModel.setContestPlannedBatch('system', contestDocs[0].docId, open.batchId, null, { user: actor(99, true) }),
+            TestValidationError,
+        );
+    });
+
+    it('rejects stale or late plan changes and any mutation after a finalized roster exists', async () => {
+        const first = await batchModel.createBatch('system', { user: actor(99, true) }, { name: 'First Plan' });
+        const second = await batchModel.createBatch('system', { user: actor(99, true) }, { name: 'Second Plan' });
+        await batchModel.setContestPlannedBatch('system', contestDocs[0].docId, first.batchId, null, { user: actor(99, true) });
+        await rejects(
+            batchModel.setContestPlannedBatch('system', contestDocs[0].docId, second.batchId, null, { user: actor(99, true) }),
+            TestConflictError,
+        );
+
+        records.push({ domainId: 'system', contest: contestDocs[0].docId });
+        await rejects(
+            batchModel.setContestPlannedBatch('system', contestDocs[0].docId, second.batchId, first.batchId, { user: actor(99, true) }),
+            TestConflictError,
+        );
+        records.length = 0;
+        contestTeams.push({
+            _id: new ObjectId(),
+            teamId: new ObjectId(),
+            domainId: 'system',
+            contestId: contestDocs[0].docId,
+            name: 'Existing',
+            nameKey: 'existing',
+            captainUid: 12,
+            memberUids: [12],
+            active: true,
+        });
+        await rejects(
+            batchModel.setContestPlannedBatch('system', contestDocs[0].docId, second.batchId, first.batchId, { user: actor(99, true) }),
+            TestConflictError,
+        );
+        contestTeams.length = 0;
+        contestDocs[0].teamBatchId = first.batchId;
+        await rejects(
+            batchModel.setContestPlannedBatch('system', contestDocs[0].docId, second.batchId, first.batchId, { user: actor(99, true) }),
+            TestConflictError,
+        );
+        delete contestDocs[0].teamBatchId;
+        contestDocs[0].beginAt = new Date('2000-01-01T00:00:00Z');
+        await rejects(
+            batchModel.setContestPlannedBatch('system', contestDocs[0].docId, second.batchId, first.batchId, { user: actor(99, true) }),
+            TestConflictError,
+        );
+    });
+
+    it('materializes independent contest teams and rejects a concurrent or repeated explicit finalization', async () => {
+        const batch = await createPlannedClosedBatch();
         const contestId = contestDocs[0].docId;
-        const [first, second] = await Promise.all([
-            batchModel.snapshotToContest('system', contestId, batch.batchId, 99),
-            batchModel.snapshotToContest('system', contestId, batch.batchId, 99),
+        await rejects(batchModel.finalizePlannedBatchToContest('system', contestId, batch.batchId, { user: actor(10) }), TestPermissionError);
+        const concurrent = await Promise.allSettled([
+            batchModel.finalizePlannedBatchToContest('system', contestId, batch.batchId, { user: actor(99, true) }),
+            batchModel.finalizePlannedBatchToContest('system', contestId, batch.batchId, { user: actor(99, true) }),
         ]);
-        expect([first.alreadyApplied, second.alreadyApplied].sort()).to.deep.equal([false, true]);
+        expect(concurrent.filter((result) => result.status === 'fulfilled')).to.have.length(1);
+        expect(concurrent.filter((result) => result.status === 'rejected')).to.have.length(1);
+        expect((concurrent.find((result) => result.status === 'fulfilled') as PromiseFulfilledResult<any>).value.alreadyApplied).to.equal(false);
         expect(contestTeams).to.have.length(2);
         expect(contestTeams.every((team) => team.active && team.snapshotState === 'active')).to.equal(true);
         expect(contestTeams.every((team) => team.sourceBatchId.equals(batch.batchId))).to.equal(true);
         expect(contestTeams.every((team) => !batchTeams.some((source) => source.teamId.equals(team.teamId)))).to.equal(true);
         expect(contestDocs[0]).to.include({ teamBatchSnapshotCount: 2 });
         expect(contestDocs[0].teamBatchId.equals(batch.batchId)).to.equal(true);
+        expect(contestDocs[0].plannedTeamBatchId).to.equal(undefined);
         expect(contestDocs[0].teamBatchSnapshotHash).to.match(/^[a-f0-9]{64}$/);
+        await rejects(batchModel.finalizePlannedBatchToContest('system', contestId, batch.batchId, { user: actor(99, true) }), TestConflictError);
 
         const secondContestId = new ObjectId('64a000000000000000000002');
         contestDocs.push({
@@ -786,6 +891,7 @@ describe('P1.17 pre-contest team batches', () => {
             teamBatchSnapshotHash: undefined,
             teamBatchSnapshotAt: undefined,
             teamBatchSnapshotCount: undefined,
+            plannedTeamBatchId: batch.batchId,
         });
         const third = await batchModel.snapshotToContest('system', secondContestId, batch.batchId, 99);
         const firstIds = contestTeams.filter((team) => team.contestId.equals(contestId)).map((team) => team.teamId.toHexString());
@@ -796,6 +902,9 @@ describe('P1.17 pre-contest team batches', () => {
     });
 
     it('rejects open, empty, recorded or already-populated targets before exposing a snapshot', async () => {
+        const unplanned = await createClosedBatch('Not Planned');
+        await rejects(batchModel.snapshotToContest('system', contestDocs[0].docId, unplanned.batchId, 99), TestConflictError);
+
         const open = await batchModel.createBatch('system', { user: actor(99, true) }, { name: 'Still Open' });
         await batchModel.createTeam(
             'system',
@@ -808,13 +917,16 @@ describe('P1.17 pre-contest team batches', () => {
                 managementMode: 'admin',
             },
         );
+        contestDocs[0].plannedTeamBatchId = open.batchId;
         await rejects(batchModel.snapshotToContest('system', contestDocs[0].docId, open.batchId, 99), TestConflictError);
 
         const empty = await batchModel.createBatch('system', { user: actor(99, true) }, { name: 'Empty' });
         await batchModel.closeBatch('system', empty.batchId, empty.revision, { user: actor(99, true) });
+        contestDocs[0].plannedTeamBatchId = empty.batchId;
         await rejects(batchModel.snapshotToContest('system', contestDocs[0].docId, empty.batchId, 99), TestConflictError);
 
         const closed = await createClosedBatch('Ready');
+        contestDocs[0].plannedTeamBatchId = closed.batchId;
         records.push({ domainId: 'system', contest: contestDocs[0].docId });
         await rejects(batchModel.snapshotToContest('system', contestDocs[0].docId, closed.batchId, 99), TestConflictError);
         records.length = 0;
@@ -835,7 +947,7 @@ describe('P1.17 pre-contest team batches', () => {
     });
 
     it('rejects one ineligible member with exact context and leaves no visible or prepared teams', async () => {
-        const batch = await createClosedBatch();
+        const batch = await createPlannedClosedBatch();
         rejectedRosterUid = 11;
         const error = await rejects(batchModel.snapshotToContest('system', contestDocs[0].docId, batch.batchId, 99), TestConflictError);
         expect(error.message).to.include('teamId=').and.to.include('uid=11').and.to.include('stage=contest-eligibility');
@@ -844,7 +956,7 @@ describe('P1.17 pre-contest team batches', () => {
     });
 
     it('rejects target eligibility drift at the final check and audits the exact failed stage', async () => {
-        const batch = await createClosedBatch();
+        const batch = await createPlannedClosedBatch();
         mutateScopeOnSecondContestRead = true;
         await rejects(batchModel.snapshotToContest('system', contestDocs[0].docId, batch.batchId, 99), TestConflictError);
         expect(contestTeams).to.have.length(0);
@@ -853,7 +965,7 @@ describe('P1.17 pre-contest team batches', () => {
     });
 
     it('rejects an ACM rule change at the binding CAS and removes activated snapshot teams', async () => {
-        const batch = await createClosedBatch();
+        const batch = await createPlannedClosedBatch();
         mutateRuleBeforeBinding = true;
         await rejects(batchModel.snapshotToContest('system', contestDocs[0].docId, batch.batchId, 99), TestConflictError);
         expect(contestTeams).to.have.length(0);
@@ -866,7 +978,7 @@ describe('P1.17 pre-contest team batches', () => {
     });
 
     it('cleans an exact partially inserted snapshot without hiding the original failure', async () => {
-        const batch = await createClosedBatch();
+        const batch = await createPlannedClosedBatch();
         failInsertManyAfter = 1;
         const error = await rejects(batchModel.snapshotToContest('system', contestDocs[0].docId, batch.batchId, 99), Error);
         expect(error.message).to.equal('injected partial insert failure');

@@ -39,6 +39,22 @@ describe('P1.19 Vigil team candidate eligibility', () => {
         }
     });
 
+    it('fails closed before roster lookup while a planned batch has not been finalized', async () => {
+        let lookups = 0;
+        const result = await resolveVigilTeamEligibility(
+            'system',
+            { docId: contestId, participationMode: 'team', plannedTeamBatchId: new ObjectId() },
+            10,
+            async () => {
+                lookups += 1;
+                return { teamId };
+            },
+        );
+
+        expect(result).to.deep.equal({ eligible: false, contestId, reason: 'team_batch_not_finalized' });
+        expect(lookups).to.equal(0);
+    });
+
     it('fails fast when a team contest candidate has no contest id', async () => {
         let thrown: unknown;
         try {

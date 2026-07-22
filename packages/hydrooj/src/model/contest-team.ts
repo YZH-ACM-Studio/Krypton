@@ -192,6 +192,7 @@ async function assertTeamContest(domainId: string, contestId: ObjectId): Promise
     if (contest.getParticipationMode(tdoc) !== 'team' || tdoc.rule !== 'acm') {
         throw new ValidationError('participationMode', null, 'Teams are only available for team-mode ACM contests.');
     }
+    if (tdoc.plannedTeamBatchId && !tdoc.teamBatchId) teamConflict('team_batch_not_finalized');
     return tdoc;
 }
 

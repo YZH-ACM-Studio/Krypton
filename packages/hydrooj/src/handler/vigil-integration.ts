@@ -18,10 +18,7 @@ import { Context, Handler, NotFoundError, OplogModel, param, PRIV, requireServic
 import * as contestModel from '../model/contest';
 import * as contestTeam from '../model/contest-team';
 import * as document from '../model/document';
-import {
-    buildVigilContestRoleResolution,
-    type VigilContestRoleResolution,
-} from '../model/vigil-contest-role';
+import { buildVigilContestRoleResolution, type VigilContestRoleResolution } from '../model/vigil-contest-role';
 import system from '../model/system';
 import db from '../service/db';
 import { executeRecordingDelete, previewRecordingDelete } from '../service/vigil-bridge';
@@ -51,12 +48,7 @@ function clientSessionKeyFromHydroSession(session: any): string {
     return session?.sessionId || session?._id || session?.sid || '';
 }
 
-async function persistVigilClientSession(
-    handler: Handler,
-    result: any,
-    vigilSessionId: string,
-    role: VigilContestRoleResolution,
-) {
+async function persistVigilClientSession(handler: Handler, result: any, vigilSessionId: string, role: VigilContestRoleResolution) {
     const sidValue = clientSessionKeyFromHydroSession((handler as any).session);
     if (!sidValue || !result?.ojContestId) return;
     const clientSessionsColl = (db as any).collection('vigil.client_sessions');
@@ -119,11 +111,7 @@ async function persistVigilClientSession(
     );
 }
 
-export async function resolveVigilContestRole(
-    domainId: string,
-    contestId: string,
-    uid: number,
-): Promise<VigilContestRoleResolution> {
+export async function resolveVigilContestRole(domainId: string, contestId: string, uid: number): Promise<VigilContestRoleResolution> {
     if (!ObjectId.isValid(contestId) || !Number.isSafeInteger(uid) || uid <= 0) throw new ValidationError('contestId');
     const tid = new ObjectId(contestId);
     const tdoc = await contestModel.get(domainId, tid);
@@ -133,6 +121,9 @@ export async function resolveVigilContestRole(
     }
     if (tdoc.rule !== 'acm' || !tdoc.vigilEnabled || tdoc.entryMode !== 'client_required' || tdoc.rated) {
         throw new ValidationError('participationMode');
+    }
+    if (contestModel.isTeamBatchFinalizationPending(tdoc)) {
+        return buildVigilContestRoleResolution(tdoc, null, uid, 'team_batch_not_finalized');
     }
     try {
         await contestTeam.assertContestTeamEligibility(domainId, tdoc, uid);
@@ -451,16 +442,7 @@ class VigilNotifySessionOpenedHandler extends VigilApiHandler {
             this.response.body = denied;
             return;
         }
-        await activateVigilClientSession(
-            sessionId,
-            domainId,
-            tid,
-            ojUserId,
-            machineId,
-            clientProtocolVersion,
-            clientVersion,
-            role,
-        );
+        await activateVigilClientSession(sessionId, domainId, tid, ojUserId, machineId, clientProtocolVersion, clientVersion, role);
         await OplogModel.log(this as any, 'vigil.session_opened', {
             sessionId,
             ojUserId,
@@ -790,11 +772,7 @@ class VigilExamModeLaunchHandler extends Handler {
         }
         const roleDenied = roleAccessError(role, result.clientProtocolVersion || 0);
         if (roleDenied) {
-            renderError(
-                roleDenied.status === 426 ? '客户端版本过低' : '无权进入团队比赛',
-                roleDenied.error,
-                roleDenied.status,
-            );
+            renderError(roleDenied.status === 426 ? '客户端版本过低' : '无权进入团队比赛', roleDenied.error, roleDenied.status);
             return;
         }
         const scopeCheck = await verifyVigilParticipantScope(

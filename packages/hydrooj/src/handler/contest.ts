@@ -668,9 +668,16 @@ export class ContestEditHandler extends Handler {
         let ts = Date.now();
         ts = ts - (ts % (15 * Time.minute)) + 15 * Time.minute;
         const beginAt = moment(this.tdoc?.beginAt || new Date(ts)).tz(this.user.timeZone);
-        const activeTeamCount = tid ? await contestTeam.countActiveTeams(authoritativeDomainId, tid) : 0;
+        const [activeTeamCount, recordCount, teamBatches] = await Promise.all([
+            tid ? contestTeam.countActiveTeams(authoritativeDomainId, tid) : Promise.resolve(0),
+            tid ? record.coll.countDocuments({ domainId: authoritativeDomainId, contest: tid }) : Promise.resolve(0),
+            contestTeamBatch.listBatches(authoritativeDomainId),
+        ]);
         const participationRevision = this.tdoc?.participationRevision ?? 0;
-        const closedTeamBatches = await contestTeamBatch.listClosedBatches(authoritativeDomainId);
+        const canManageTeamBatches = contestTeamBatch.canManageTeamBatches(this.user);
+        const canUpdatePlannedTeamBatch =
+            canManageTeamBatches &&
+            (!tid || (new Date() < this.tdoc.beginAt && recordCount === 0 && activeTeamCount === 0 && !this.tdoc.teamBatchId));
 
         // Hydrate the school + user-group catalog when krypton-userbind is
         // loaded, so the participant-scope picker in the editor doesn't
@@ -699,10 +706,14 @@ export class ContestEditHandler extends Handler {
             scopeGroups,
             canAutoHideProblems: this.user.hasPerm(PERM.PERM_EDIT_PROBLEM),
             activeTeamCount,
+            recordCount,
             participationRevision,
-            closedTeamBatches: closedTeamBatches.map((batch) => ({
+            canManageTeamBatches,
+            canUpdatePlannedTeamBatch,
+            teamBatches: teamBatches.map((batch) => ({
                 batchId: batch.batchId,
                 name: batch.name,
+                status: batch.status,
                 teamCount: batch.teamCount,
                 memberCount: batch.memberCount,
                 closedAt: batch.closedAt,
@@ -758,7 +769,7 @@ export class ContestEditHandler extends Handler {
     @param('participationMode', Types.Range(['individual', 'team']), true)
     @param('participationRevision', Types.UnsignedInt, true)
     @param('teamModeClearConfirmation', Types.String, true)
-    @param('teamBatchId', Types.ObjectId, true)
+    @param('plannedTeamBatchId', Types.ObjectId, true)
     async postUpdate(
         _domainId: string,
         tid: ObjectId,
@@ -805,7 +816,7 @@ export class ContestEditHandler extends Handler {
         participationMode: 'individual' | 'team' = null,
         participationRevision: number = null,
         teamModeClearConfirmation = '',
-        teamBatchId: ObjectId = null,
+        plannedTeamBatchId: ObjectId = null,
     ) {
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
@@ -840,9 +851,18 @@ export class ContestEditHandler extends Handler {
         if (autoHide) await assertCanPublishAutoHiddenProblems(authoritativeDomainId, pids, this.user);
         const effectiveParticipationMode = participationMode || (this.tdoc ? contest.getParticipationMode(this.tdoc) : 'individual');
         const existingTeamBatchId = this.tdoc?.teamBatchId ? new ObjectId(this.tdoc.teamBatchId) : null;
-        if (teamBatchId && effectiveParticipationMode !== 'team') throw new ValidationError('teamBatchId');
-        if (existingTeamBatchId && teamBatchId && !existingTeamBatchId.equals(teamBatchId)) {
-            throw new ValidationError('teamBatchId', null, 'A contest team snapshot cannot be rebound to another batch.');
+        const existingPlannedTeamBatchId = this.tdoc?.plannedTeamBatchId ? new ObjectId(this.tdoc.plannedTeamBatchId) : null;
+        if (plannedTeamBatchId && effectiveParticipationMode !== 'team') throw new ValidationError('plannedTeamBatchId');
+        const requestedPlannedTeamBatchId = effectiveParticipationMode === 'team' ? plannedTeamBatchId : null;
+        const plannedTeamBatchChanged =
+            !!existingPlannedTeamBatchId !== !!requestedPlannedTeamBatchId ||
+            (!!existingPlannedTeamBatchId && !!requestedPlannedTeamBatchId && !existingPlannedTeamBatchId.equals(requestedPlannedTeamBatchId));
+        if (plannedTeamBatchChanged) {
+            if (!contestTeamBatch.canManageTeamBatches(this.user)) throw new PermissionError(PERM.PERM_EDIT_CONTEST);
+            if (existingTeamBatchId) throw new ValidationError('plannedTeamBatchId', null, 'A finalized contest roster cannot be rebound.');
+            if (requestedPlannedTeamBatchId && !(await contestTeamBatch.getBatch(authoritativeDomainId, requestedPlannedTeamBatchId))) {
+                throw new ValidationError('plannedTeamBatchId');
+            }
         }
 
         // Normalize the shared client-entry contract before the first write so
@@ -884,6 +904,7 @@ export class ContestEditHandler extends Handler {
                 participationMode: effectiveParticipationMode,
                 vigilEnabled,
                 entryMode,
+                ...(requestedPlannedTeamBatchId ? { plannedTeamBatchId: requestedPlannedTeamBatchId } : {}),
             });
         }
         const task = {
@@ -982,6 +1003,11 @@ export class ContestEditHandler extends Handler {
             participantSchoolIds: sids,
             participantGroupIds: gids,
         });
+        if (this.tdoc && plannedTeamBatchChanged) {
+            await contestTeamBatch.setContestPlannedBatch(authoritativeDomainId, tid, requestedPlannedTeamBatchId, existingPlannedTeamBatchId, {
+                user: this.user,
+            });
+        }
         if (statusRecalcReasons.length) {
             try {
                 await contest.recalcStatus(authoritativeDomainId, tid);
@@ -1038,28 +1064,35 @@ export class ContestEditHandler extends Handler {
         if (effectiveParticipationMode === 'individual' && existingTeamBatchId) {
             await document.set(authoritativeDomainId, document.TYPE_CONTEST, tid, undefined, {
                 teamBatchId: '',
+                plannedTeamBatchId: '',
                 teamBatchSnapshotHash: '',
                 teamBatchSnapshotAt: '',
                 teamBatchSnapshotCount: '',
             });
-        } else if (teamBatchId && !existingTeamBatchId) {
-            try {
-                await contestTeamBatch.snapshotToContest(authoritativeDomainId, tid, teamBatchId, this.user._id);
-            } catch (error) {
-                logger.error(
-                    'Contest team-batch snapshot failed domain=%s contest=%s batch=%s actor=%s stage=%s error=%o',
-                    authoritativeDomainId,
-                    tid,
-                    teamBatchId,
-                    this.user._id,
-                    (error as any)?.snapshotStage || 'unknown',
-                    error,
-                );
-                throw error;
-            }
         }
         this.response.body = { tid };
         this.response.redirect = this.url('contest_detail', { tid });
+    }
+
+    @param('tid', Types.ObjectId)
+    @param('plannedTeamBatchId', Types.ObjectId)
+    async postFinalizeTeamBatch(_domainId: string, tid: ObjectId, plannedTeamBatchId: ObjectId) {
+        const authoritativeDomainId = String(this.domain?._id);
+        try {
+            await contestTeamBatch.finalizePlannedBatchToContest(authoritativeDomainId, tid, plannedTeamBatchId, { user: this.user });
+        } catch (error) {
+            logger.error(
+                'Contest planned team-batch finalization failed domain=%s contest=%s batch=%s actor=%s stage=%s error=%o',
+                authoritativeDomainId,
+                tid,
+                plannedTeamBatchId,
+                this.user._id,
+                (error as any)?.snapshotStage || 'unknown',
+                error,
+            );
+            throw error;
+        }
+        this.response.redirect = this.url('contest_edit', { tid });
     }
 
     @param('tid', Types.ObjectId)

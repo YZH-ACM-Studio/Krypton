@@ -32,6 +32,7 @@ import { Optional } from '../typeutils';
 import { PERM, PRIV, STATUS, STATUS_SHORT_TEXTS } from './builtin';
 import {
     getParticipationMode,
+    isTeamBatchFinalizationPending,
     normalizeParticipationConfig,
     planParticipationModeTransition,
     teamModeClearConfirmation,
@@ -219,6 +220,7 @@ export interface ContestEditOptions {
 
 export {
     getParticipationMode,
+    isTeamBatchFinalizationPending,
     normalizeParticipationConfig,
     planParticipationModeTransition,
     teamModeClearConfirmation,
@@ -244,6 +246,7 @@ export async function resolveTeamSubmissionCapability(
     if (getParticipationMode(tdoc) !== 'team') {
         return { mode: 'individual', contestId: tid, vigilSessionCheck: 'not_applicable' };
     }
+    if (tdoc.plannedTeamBatchId && !tdoc.teamBatchId) throw new ContestTeamConflictError('team_batch_not_finalized');
     let team: ContestTeamDoc | null = null;
     try {
         if (tdoc.rule !== 'acm') throw new ValidationError('participationMode');
@@ -1768,6 +1771,7 @@ global.Hydro.model.contest = {
     PrintTaskStatus,
     buildContestRule,
     getParticipationMode,
+    isTeamBatchFinalizationPending,
     resolveTeamSubmissionCapability,
     normalizeParticipationConfig,
     planParticipationModeTransition,

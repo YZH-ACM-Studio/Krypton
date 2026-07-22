@@ -5,6 +5,7 @@ import { Context, PERM, PRIV, ProblemModel } from 'hydrooj';
 import { serializer } from '@hydrooj/framework';
 import type { ViteDevServer } from 'vite';
 import { resolveAnnouncementManagementCapability } from './announcement-capabilities';
+import { resolveDomainPermissionManagementCapability } from './domain-permission-capabilities';
 import { resolveRankboardCapabilities } from './rankboard-capabilities';
 import { resolveTaskManagementCapability } from './task-capabilities';
 
@@ -257,6 +258,21 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       );
     },
   });
+  const canManageDomainPermissions = resolveDomainPermissionManagementCapability({
+    user: context.handler?.user,
+    editDomainPerm: PERM.PERM_EDIT_DOMAIN,
+    onError(error) {
+      console.error(
+        '[ui-next] domain permission capability resolution failed:',
+        {
+          domainId: String(domain?._id || ''),
+          uid: Number(context.handler?.user?._id || 0),
+          templateName,
+        },
+        error,
+      );
+    },
+  });
   const problemBankCapability = resolveProblemBankCapability(context.handler?.user, (error) => {
     console.error(
       '[ui-next] problem bank capability resolution failed; denying navigation:',
@@ -309,6 +325,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       canManageRankboard: rankboardCapabilities.canManageRankboard,
       canManageAnnouncements,
       canManageTasks,
+      canManageDomainPermissions,
       impersonation,
     },
     domain: {
@@ -335,6 +352,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       files: safeUrl(context, 'home_files'),
       records: safeUrl(context, 'record_main'),
       domainDashboard: safeUrl(context, 'domain_dashboard'),
+      domainPermission: safeUrl(context, 'domain_permission'),
       manage: safeUrl(context, 'manage_dashboard'),
       status: safeUrl(context, 'status'),
       problemDetail: safeUrl(context, 'problem_detail', { pid: '__PID__' }),

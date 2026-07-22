@@ -7,6 +7,7 @@ import {
   Clock,
   GraduationCap,
   Home,
+  KeyRound,
   LayoutDashboard,
   ListChecks,
   type LucideIcon,
@@ -196,11 +197,17 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
             'domain_edit.html',
             'domain_user.html',
             'domain_user_raw.html',
-            'domain_permission.html',
-            'domain_role.html',
             'domain_group.html',
             'domain_join_applications.html',
           ],
+        });
+      }
+      if (bs.user.canManageDomainPermissions) {
+        adminItems.push({
+          label: '权限管理',
+          href: bs.urls.domainPermission,
+          icon: KeyRound,
+          templates: ['domain_permission.html', 'domain_role.html'],
         });
       }
       if (bs.user.canManageAnnouncements) {

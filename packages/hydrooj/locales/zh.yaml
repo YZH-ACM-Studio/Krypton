@@ -207,6 +207,7 @@ Create managed programming drafts: 仅创建本人托管编程题草稿
 Create managed programming drafts permission detail: 仅可创建本人名下的隐藏自命题托管编程题草稿，不能导入、代指定出题人或发布。
 Create problems: 创建全部题型
 Create problems permission detail: 可创建全部八种题型；其中编程题仍创建为本人名下的隐藏托管草稿。
+Create tasks: 创建任务
 Create Role: 创建角色
 Create Training Plan: 创建训练计划
 Create training plans: 创建训练计划
@@ -292,6 +293,7 @@ domain_role: 管理角色
 domain_user: 管理用户
 domain: 域
 Domain: 域
+Domain permission behavior detail: 启用后，角色成员可以在当前域内{0}；关闭后不授予该项能力。
 Don't have an account?: 还没有账户？
 Done: 已结束
 Download Dataset: 下载数据集
@@ -589,14 +591,22 @@ perm_problem: 题库
 perm_ranking: 排名
 perm_rankboard: 荣誉榜
 perm_record: 记录
+perm_tasks: 任务
 perm_training: 训练
 perm_userbind: 学生档案
 Browse the problem bank list: 浏览题库列表
 Import and edit rankboard data: 导入与编辑荣誉榜数据
 Manage rankboard structure and scoring: 管理荣誉榜结构与计分
 Manage student records and groups: 管理学生档案与班级
+Manage all tasks in this domain: 管理当前域全部任务
 Create courses: 创建课程
 Edit any courses: 编辑所有课程
+Read all record codes: 查看全部提交代码
+Read data of problem: 读取题目测试数据
+React to discussion: 为讨论添加反应
+Submit problem: 提交题目
+View other's records: 查看他人提交记录
+View tasks: 查看任务
 Permission: 权限
 Permissions: 权限
 Phone: 手机号

@@ -63,8 +63,7 @@ export function DomainDashboardPage() {
             {[
               { label: '编辑域信息', href: '/domain/edit' },
               { label: '域用户管理', href: '/domain/user' },
-              { label: '权限设置', href: '/domain/permission' },
-              { label: '角色管理', href: '/domain/role' },
+              { label: '角色与权限', href: bs.urls.domainPermission },
               { label: '域权限用户组', href: '/domain/group', hint: 'Hydro 自带，按 UID 分组授权' },
               { label: '反作弊后台', href: '/admin/vigil' },
               { label: '任务系统', href: '/admin/tasks' },

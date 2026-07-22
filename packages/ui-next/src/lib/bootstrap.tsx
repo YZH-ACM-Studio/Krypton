@@ -18,6 +18,7 @@ export interface KryptonUrls {
   files: string;
   records: string;
   domainDashboard: string;
+  domainPermission: string;
   manage: string;
   status: string;
   problemDetail: string;
@@ -59,6 +60,8 @@ export interface KryptonUser {
   canManageAnnouncements?: boolean;
   /** 当前域任务创建/管理能力；仅控制前端入口，路由仍按服务端权限鉴权。 */
   canManageTasks?: boolean;
+  /** 当前域角色与权限管理能力；只由服务端 PERM_EDIT_DOMAIN 判定。 */
+  canManageDomainPermissions?: boolean;
   /** 管理员代理身份；只来自服务端 session，普通账号不可自行声明。 */
   impersonation?: {
     actorUid: number;

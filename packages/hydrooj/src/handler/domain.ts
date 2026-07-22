@@ -1,5 +1,4 @@
 import { load } from 'js-yaml';
-import { Dictionary } from 'lodash';
 import moment from 'moment-timezone';
 import Schema from 'schemastery';
 import type { Context } from '../context';
@@ -12,12 +11,19 @@ import {
     NotFoundError,
     OnlyOwnerCanDeleteDomainError,
     PermissionError,
-    RoleAlreadyExistError,
     ValidationError,
 } from '../error';
 import type { DomainDoc } from '../interface';
 import avatar from '../lib/avatar';
-import { localizeDomainPermissionCatalog } from '../lib/domain-permission-catalog';
+import { buildLocalizedDomainPermissionFamilies } from '../lib/domain-permission-catalog';
+import {
+    createDomainRole,
+    deleteDomainRole,
+    loadDomainPermissionWorkspace,
+    resolveCurrentDomainId,
+    updateDomainRolePermissions,
+} from '../lib/domain-role-permission';
+import { Logger } from '../logger';
 import { PERM, PERMS_BY_FAMILY, PRIV } from '../model/builtin';
 import * as discussion from '../model/discussion';
 import domain from '../model/domain';
@@ -27,7 +33,8 @@ import { DOMAIN_SETTINGS, DOMAIN_SETTINGS_BY_KEY } from '../model/setting';
 import system from '../model/system';
 import user from '../model/user';
 import { Handler, Mutation, param, post, Query, query, requireSudo, Types } from '../service/server';
-import { log2 } from '../utils';
+
+const logger = new Logger('domain-permission');
 
 class DomainRankHandler extends Handler {
     @query('page', Types.PositiveInt, true)
@@ -93,8 +100,9 @@ class DomainRankHandler extends Handler {
 
 class ManageHandler extends Handler {
     async prepare({ domainId }) {
+        const authoritativeDomainId = resolveCurrentDomainId(domainId, this.domain?._id);
         this.checkPerm(PERM.PERM_EDIT_DOMAIN);
-        this.domain = await domain.get(domainId);
+        this.domain = await domain.get(authoritativeDomainId);
     }
 }
 
@@ -255,61 +263,123 @@ class DomainUserHandler extends ManageHandler {
 }
 
 class DomainPermissionHandler extends ManageHandler {
-    @requireSudo
+    respondMutation(body: Record<string, unknown>) {
+        const accept = String(this.request.headers.accept || '').toLowerCase();
+        if (accept.includes('application/json')) this.response.body = body;
+        else this.response.redirect = this.url('domain_permission');
+    }
+
     async get({ domainId }) {
-        const roles = await domain.getRoles(domainId);
+        const roles = await loadDomainPermissionWorkspace(domain, domainId);
         this.response.template = 'domain_permission.html';
         this.response.body = {
             roles,
-            PERMS_BY_FAMILY: localizeDomainPermissionCatalog(PERMS_BY_FAMILY, this.translate.bind(this)),
+            permissionFamilies: buildLocalizedDomainPermissionFamilies(PERMS_BY_FAMILY, this.translate.bind(this)),
             domain: this.domain,
-            log2,
+            permissionEndpoint: this.url('domain_permission'),
         };
     }
 
     @requireSudo
-    async post({ domainId }) {
-        const roles = {};
-        for (const [role, list] of Object.entries(this.request.body)) {
-            if (role === 'root') continue; // root role is not editable
-            const perms = Array.isArray(list) ? list : typeof list === 'object' && list ? Object.values(list) : [list];
-            roles[role] = 0n;
-            for (const r of perms) {
-                if (+r === 1000) continue; // skip placeholder value
-                roles[role] |= 1n << BigInt(r);
-            }
+    @param('role', Types.Role)
+    @param('expectedMask', Types.String)
+    @param('mask', Types.String)
+    async postUpdate(domainId: string, role: string, expectedMask: string, mask: string) {
+        try {
+            const result = await updateDomainRolePermissions(domain, {
+                domainId,
+                role,
+                expectedMask,
+                submittedMask: mask,
+                permissions: this.request.body.permissions,
+            });
+            const audit = {
+                domainId,
+                actor: this.user._id,
+                role,
+                added: result.added,
+                removed: result.removed,
+                affectedUsers: result.affectedUsers,
+                result: 'success',
+            };
+            logger.info('Domain role permissions updated %o', audit);
+            await oplog.log(this, 'domain.role.permissions.update', audit);
+            this.respondMutation({ ok: true, operation: 'update', ...result });
+        } catch (error) {
+            logger.warn('Domain role permissions update rejected %o', {
+                domainId,
+                actor: this.user._id,
+                role,
+                result: 'rejected',
+                error: error instanceof Error ? error.name : String(error),
+            });
+            throw error;
         }
-        await Promise.all([domain.setRoles(domainId, roles), oplog.log(this, 'domain.setRoles', { roles })]);
-        this.back();
+    }
+
+    @requireSudo
+    @param('role', Types.Role)
+    async postAdd(domainId: string, role: string) {
+        try {
+            const created = await createDomainRole(domain, domainId, role);
+            const audit = {
+                domainId,
+                actor: this.user._id,
+                role,
+                inheritedFrom: 'default',
+                permissionMask: created.perm,
+                affectedUsers: 0,
+                result: 'success',
+            };
+            logger.info('Domain role created %o', audit);
+            await oplog.log(this, 'domain.role.create', audit);
+            this.respondMutation({ ok: true, operation: 'add', role: created });
+        } catch (error) {
+            logger.warn('Domain role creation rejected %o', {
+                domainId,
+                actor: this.user._id,
+                role,
+                result: 'rejected',
+                error: error instanceof Error ? error.name : String(error),
+            });
+            throw error;
+        }
+    }
+
+    @requireSudo
+    @param('role', Types.Role)
+    async postDelete(domainId: string, role: string) {
+        try {
+            const deleted = await deleteDomainRole(domain, domainId, role);
+            const audit = {
+                domainId,
+                actor: this.user._id,
+                role,
+                fallbackRole: deleted.fallbackRole,
+                added: [],
+                removed: [],
+                affectedUsers: deleted.affectedUsers,
+                result: 'success',
+            };
+            logger.info('Domain role deleted %o', audit);
+            await oplog.log(this, 'domain.role.delete', audit);
+            this.respondMutation({ ok: true, operation: 'delete', ...deleted });
+        } catch (error) {
+            logger.warn('Domain role deletion rejected %o', {
+                domainId,
+                actor: this.user._id,
+                role,
+                result: 'rejected',
+                error: error instanceof Error ? error.name : String(error),
+            });
+            throw error;
+        }
     }
 }
 
 class DomainRoleHandler extends ManageHandler {
-    @requireSudo
-    async get({ domainId }) {
-        const roles = await domain.getRoles(domainId, true);
-        this.response.template = 'domain_role.html';
-        this.response.body = { roles, domain: this.domain };
-    }
-
-    @param('role', Types.Role)
-    async postAdd(domainId: string, role: string) {
-        const roles = await domain.getRoles(this.domain);
-        const rdict: Dictionary<any> = {};
-        for (const r of roles) rdict[r._id] = r.perm;
-        if (rdict[role]) throw new RoleAlreadyExistError(role);
-        await Promise.all([domain.addRole(domainId, role, rdict.default), oplog.log(this, 'domain.addRole', { role })]);
-        this.back();
-    }
-
-    @requireSudo
-    @param('roles', Types.ArrayOf(Types.Role))
-    async postDelete(domainId: string, roles: string[]) {
-        if (new Set(roles).intersection(new Set(['root', 'default', 'guest'])).size > 0) {
-            throw new ValidationError('role', null, 'You cannot delete root, default or guest roles');
-        }
-        await Promise.all([domain.deleteRoles(domainId, roles), oplog.log(this, 'domain.deleteRoles', { roles })]);
-        this.back();
+    async get() {
+        this.response.redirect = this.url('domain_permission');
     }
 }
 

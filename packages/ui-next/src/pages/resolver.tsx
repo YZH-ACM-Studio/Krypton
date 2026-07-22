@@ -47,7 +47,8 @@ import { ContestDetailPage, ContestScoreboardPage, ContestsPage } from '@/pages/
 import { CourseDetailPage, CourseEditPage, CoursePage } from '@/pages/course';
 import { DiscussionCreatePage, DiscussionEditPage } from '@/pages/discussion-manage';
 import { DiscussionDetailPage, DiscussionsPage } from '@/pages/discussions';
-import { DomainEditPage, DomainGroupPage, DomainPermissionPage, DomainRolePage, DomainUserPage } from '@/pages/domain-manage';
+import { DomainEditPage, DomainGroupPage, DomainUserPage } from '@/pages/domain-manage';
+import { DomainPermissionPage, DomainRolePage } from '@/pages/domain-permission-workspace';
 import { ContestModePage, DomainCreatePage, DomainJoinApplicationsPage, DomainJoinPage } from '@/pages/domain-misc';
 import { BsodPage, ErrorPage } from '@/pages/error';
 import { ExamContestPage } from '@/pages/exam-mode/contest';

@@ -3,6 +3,7 @@ import { LRUCache } from 'lru-cache';
 import { Filter } from 'mongodb';
 import { Context } from '../context';
 import { DomainDoc } from '../interface';
+import { Logger } from '../logger';
 import bus from '../service/bus';
 import db from '../service/db';
 import { MaybeArray, NumberKeys } from '../typeutils';
@@ -13,6 +14,7 @@ import UserModel, { deleteUserCache } from './user';
 const coll = db.collection('domain');
 const collUser = db.collection('domain.user');
 const cache = new LRUCache<string, DomainDoc>({ max: 1000, ttl: 300 * 1000 });
+const logger = new Logger('model/domain');
 
 interface DomainUserArg {
     _id: number;
@@ -175,7 +177,7 @@ class DomainModel {
         const roles = [];
         const r = [];
         for (const role in ddoc.roles) {
-            roles.push({ _id: role, perm: BigInt(ddoc.roles[role]) });
+            roles.push({ _id: role, perm: role === 'root' ? BUILTIN_ROLES.root : BigInt(ddoc.roles[role]) });
             r.push(role);
         }
         for (const role in BUILTIN_ROLES) {
@@ -205,6 +207,74 @@ class DomainModel {
         return await coll.updateOne({ _id: domainId }, { $set: { roles: current.roles } });
     }
 
+    static async compareAndSetRolePermission(domainId: string, role: string, expected: bigint, next: bigint) {
+        if (role === 'root') return { state: 'conflict' as const, current: BUILTIN_ROLES.root };
+        const current = await DomainModel.get(domainId);
+        const stored = Object.hasOwn(current.roles, role);
+        const effective = stored ? BigInt(current.roles[role]) : BUILTIN_ROLES[role];
+        if (effective === undefined) return { state: 'missing' as const };
+        if (effective !== expected) return { state: 'conflict' as const, current: effective };
+        const path = `roles.${role}`;
+        const filter = { _id: domainId, [path]: stored ? current.roles[role] : { $exists: false } } as any;
+        const result = await coll.updateOne(filter, { $set: { [path]: next.toString() } });
+        if (!result.matchedCount) return { state: 'conflict' as const };
+        deleteUserCache(domainId);
+        bus.broadcast('domain/delete-cache', domainId.toLowerCase());
+        return { state: 'updated' as const };
+    }
+
+    static async addRoleFromDefault(domainId: string, name: string, expectedDefault: bigint) {
+        const current = await DomainModel.get(domainId);
+        if (Object.hasOwn(current.roles, name) || Object.hasOwn(BUILTIN_ROLES, name)) {
+            return { state: 'exists' as const };
+        }
+        const defaultStored = Object.hasOwn(current.roles, 'default');
+        const effectiveDefault = defaultStored ? BigInt(current.roles.default) : BUILTIN_ROLES.default;
+        if (effectiveDefault !== expectedDefault) return { state: 'conflict' as const };
+        const rolePath = `roles.${name}`;
+        const defaultPath = 'roles.default';
+        const filter = {
+            _id: domainId,
+            [rolePath]: { $exists: false },
+            [defaultPath]: defaultStored ? current.roles.default : { $exists: false },
+        } as any;
+        const result = await coll.updateOne(filter, { $set: { [rolePath]: expectedDefault.toString() } });
+        if (!result.matchedCount) {
+            const latest = await coll.findOne({ _id: domainId }, { projection: { roles: 1 } });
+            if (latest?.roles && Object.hasOwn(latest.roles, name)) return { state: 'exists' as const };
+            return { state: 'conflict' as const };
+        }
+        deleteUserCache(domainId);
+        bus.broadcast('domain/delete-cache', domainId.toLowerCase());
+        return { state: 'created' as const };
+    }
+
+    static async deleteRoleWithFallback(domainId: string, role: string) {
+        const current = await DomainModel.get(domainId);
+        if (!Object.hasOwn(current.roles, role)) return { state: 'missing' as const };
+        const path = `roles.${role}`;
+        const removed = await coll.updateOne(
+            { _id: domainId, [path]: current.roles[role] } as any,
+            { $unset: { [path]: '' } },
+        );
+        if (!removed.matchedCount) return { state: 'conflict' as const };
+        deleteUserCache(domainId);
+        bus.broadcast('domain/delete-cache', domainId.toLowerCase());
+        let reassigned;
+        try {
+            reassigned = await collUser.updateMany({ domainId, role }, { $set: { role: 'default' } });
+        } catch (error) {
+            logger.error(
+                'Domain role deletion partially applied domain=%s role=%s stage=member-fallback result=failed error=%o',
+                domainId,
+                role,
+                error,
+            );
+            throw error;
+        }
+        return { state: 'deleted' as const, affectedUsers: reassigned.modifiedCount };
+    }
+
     static async addRole(domainId: string, name: string, permission: bigint) {
         const current = await DomainModel.get(domainId);
         current.roles[name] = permission.toString();
@@ -231,7 +301,7 @@ class DomainModel {
         if (udoc.priv & PRIV.PRIV_MANAGE_ALL_DOMAIN) dudoc.role = 'root';
         dudoc.role ||= 'default';
         const ddoc = await DomainModel.get(domainId);
-        dudoc.perm = ddoc?.roles[dudoc.role] ? BigInt(ddoc?.roles[dudoc.role]) : BUILTIN_ROLES[dudoc.role];
+        dudoc.perm = dudoc.role === 'root' ? BUILTIN_ROLES.root : ddoc?.roles[dudoc.role] ? BigInt(ddoc.roles[dudoc.role]) : BUILTIN_ROLES[dudoc.role];
         return dudoc;
     }
 

@@ -94,6 +94,12 @@ export const AccountStateConflictError = Err(
     'Account state changed ({0}). Reload the account workspace and try again.',
     409,
 );
+export const DomainRolePermissionConflictError = Err(
+    'DomainRolePermissionConflictError',
+    UserFacingError,
+    '角色 {0} 的权限已被其他操作修改，请刷新页面后重试。',
+    409,
+);
 export const ContestTeamConflictError = Err(
     'ContestTeamConflictError',
     UserFacingError,

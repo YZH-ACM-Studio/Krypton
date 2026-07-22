@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import { describe, it } from 'node:test';
-import { localizeDomainPermissionCatalog } from '../src/lib/domain-permission-catalog';
+import { buildLocalizedDomainPermissionFamilies, localizeDomainPermissionCatalog } from '../src/lib/domain-permission-catalog';
 
 describe('domain permission catalog localization', () => {
     it('sends localized names and capability explanations to the permission UI', () => {
@@ -30,6 +30,48 @@ describe('domain permission catalog localization', () => {
                 key: 2n,
                 desc: '仅创建本人托管编程题草稿',
                 detail: '仅可创建本人名下的隐藏自命题托管编程题草稿，不能导入、代指定出题人或发布。',
+            },
+        ]);
+    });
+
+    it('adds localized family, risk and non-mutating inclusion metadata for the workspace', () => {
+        const translations = {
+            perm_problem: '题目',
+            'Create problems': '创建全部题型',
+            'Create problems permission detail': '可创建全部八种题型；其中编程题仍创建为本人名下的隐藏托管草稿。',
+            'Create managed programming drafts': '仅创建本人托管编程题草稿',
+            'Create managed programming drafts permission detail': '仅可创建本人名下的隐藏自命题托管编程题草稿，不能导入、代指定出题人或发布。',
+        };
+        const families = buildLocalizedDomainPermissionFamilies(
+            {
+                perm_problem: [
+                    { key: 1n, desc: 'Create problems' },
+                    { key: 2n, desc: 'Create managed programming drafts' },
+                ],
+            },
+            (key) => translations[key],
+        );
+
+        expect(families).to.deep.equal([
+            {
+                key: 'perm_problem',
+                label: '题目',
+                permissions: [
+                    {
+                        key: '1',
+                        name: '创建全部题型',
+                        detail: '可创建全部八种题型；其中编程题仍创建为本人名下的隐藏托管草稿。',
+                        risk: null,
+                        includes: [{ key: '2', name: '仅创建本人托管编程题草稿' }],
+                    },
+                    {
+                        key: '2',
+                        name: '仅创建本人托管编程题草稿',
+                        detail: '仅可创建本人名下的隐藏自命题托管编程题草稿，不能导入、代指定出题人或发布。',
+                        risk: null,
+                        includes: [],
+                    },
+                ],
             },
         ]);
     });

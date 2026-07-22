@@ -203,6 +203,7 @@ Create managed programming drafts: 僅建立本人託管程式題草稿
 Create managed programming drafts permission detail: 僅可建立本人名下的隱藏自命題託管程式題草稿，不能匯入、代指定出題人或發佈。
 Create problems: 建立全部題型
 Create problems permission detail: 可建立全部八種題型；其中程式題仍建立為本人名下的隱藏託管草稿。
+Create tasks: 建立任務
 Create Role: 建立角色
 Create Training Plan: 建立訓練計劃
 Create training plans: 建立訓練計劃
@@ -288,6 +289,7 @@ domain_role: 管理角色
 domain_user: 管理使用者
 domain: 域
 Domain: 域
+Domain permission behavior detail: 啟用後，角色成員可以在目前域內{0}；關閉後不授予該項能力。
 Don't have an account?: 還沒有賬戶？
 Done: 已結束
 Download Dataset: 下載資料集
@@ -578,14 +580,31 @@ Path {0} not found.: 路徑 {0} 不存在。
 Peak Memory: 峰值記憶體
 Penalty (Minutes): 罰時（分鐘）
 perm_contest: 比賽
+perm_course: 課程
 perm_discussion: 討論
 perm_general: 一般
 perm_homework: 作業
 perm_problem_solution: 題解
 perm_problem: 題庫
 perm_ranking: 排名
+perm_rankboard: 榮譽榜
 perm_record: 記錄
+perm_tasks: 任務
 perm_training: 訓練
+perm_userbind: 學生檔案
+Browse the problem bank list: 瀏覽題庫列表
+Import and edit rankboard data: 匯入與編輯榮譽榜資料
+Manage rankboard structure and scoring: 管理榮譽榜結構與計分
+Manage student records and groups: 管理學生檔案與班級
+Manage all tasks in this domain: 管理目前域全部任務
+Create courses: 建立課程
+Edit any courses: 編輯所有課程
+Read all record codes: 檢視全部提交程式碼
+Read data of problem: 讀取題目測試資料
+React to discussion: 為討論新增反應
+Submit problem: 提交題目
+View other's records: 檢視他人提交記錄
+View tasks: 檢視任務
 Permission: 許可權
 Permissions: 許可權
 Phone: 手機號

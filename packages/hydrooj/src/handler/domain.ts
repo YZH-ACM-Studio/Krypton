@@ -17,6 +17,7 @@ import {
 } from '../error';
 import type { DomainDoc } from '../interface';
 import avatar from '../lib/avatar';
+import { localizeDomainPermissionCatalog } from '../lib/domain-permission-catalog';
 import { PERM, PERMS_BY_FAMILY, PRIV } from '../model/builtin';
 import * as discussion from '../model/discussion';
 import domain from '../model/domain';
@@ -260,7 +261,7 @@ class DomainPermissionHandler extends ManageHandler {
         this.response.template = 'domain_permission.html';
         this.response.body = {
             roles,
-            PERMS_BY_FAMILY,
+            PERMS_BY_FAMILY: localizeDomainPermissionCatalog(PERMS_BY_FAMILY, this.translate.bind(this)),
             domain: this.domain,
             log2,
         };

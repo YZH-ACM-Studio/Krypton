@@ -250,7 +250,10 @@ Create Homework: 建立功課
 Create Link: 建立連結
 Create problem solutions: 建立題解
 Create Problem: 建立題目
-Create problems: 建立題目
+Create managed programming drafts: 僅建立本人託管程式題草稿
+Create managed programming drafts permission detail: 僅可建立本人名下的隱藏自命題託管程式題草稿，不能匯入、代指定出題人或發佈。
+Create problems: 建立全部題型
+Create problems permission detail: 可建立全部八種題型；其中程式題仍建立為本人名下的隱藏託管草稿。
 Create Role: 建立身分組
 Create Training Plan: 建立訓練計劃
 Create training plans: 建立訓練計劃

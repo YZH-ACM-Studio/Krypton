@@ -1,8 +1,9 @@
 import { type FormEvent, useState } from 'react';
-import { Archive, CheckCircle2, Copy, Eye, EyeOff, LockKeyhole, Pencil, Plus, Search, SlidersHorizontal, Upload, Users, XCircle } from 'lucide-react';
+import { Archive, CheckCircle2, Copy, Eye, EyeOff, LockKeyhole, Pencil, Search, SlidersHorizontal, Users, XCircle } from 'lucide-react';
 import { effectiveProblemKind, type ProblemKind } from '@hydrooj/common';
 import { DomainUserSearchOption, type DomainUserOption, domainUserSearchLabel, loadDomainUsers } from '@/components/domain-user-search';
 import { ManagedPublishProtocolFields } from '@/components/managed-programming-authority';
+import { ProblemCreationActions } from '@/components/problem-creation-actions';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -210,6 +211,14 @@ export function ProblemsPage() {
   const contributionUdict: Record<string, { _id: number; uname?: string }> = data.contributionUdict || {};
   const managedSourceTemplates: ManagedSourceTemplateOption[] = data.managedSourceTemplates || [];
   const managedTrainingOptions: R[] = data.managedTrainingOptions || [];
+  const problemCreationCapabilities = data.problemCreationCapabilities as { canCreateAny: boolean; canImport: boolean } | undefined;
+  if (
+    !problemCreationCapabilities ||
+    typeof problemCreationCapabilities.canCreateAny !== 'boolean' ||
+    typeof problemCreationCapabilities.canImport !== 'boolean'
+  ) {
+    throw new Error('Problem creation capabilities are missing');
+  }
   const psdict: Record<string, R> = data.psdict || {};
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [selectedContributionPids, setSelectedContributionPids] = useState<Set<number>>(new Set());
@@ -350,18 +359,7 @@ export function ProblemsPage() {
             <SlidersHorizontal className="size-4" />
             筛选{filtersActive ? ' · 已启用' : ''}
           </Button>
-          <Button asChild variant="outline">
-            <a href="/problem/import/hydro">
-              <Upload className="size-4" />
-              导入
-            </a>
-          </Button>
-          <Button asChild>
-            <a href="/problem/create">
-              <Plus className="size-4" />
-              新建题目
-            </a>
-          </Button>
+          <ProblemCreationActions {...problemCreationCapabilities} />
         </div>
       </header>
 

@@ -12,27 +12,24 @@
             </div>
           </div>
           <div class="row">
-            {{ form.form_text({
-              label:'preferredPrefix',
-              columns:6,
-              name:'preferredPrefix',
-              row:false,
-              help_text:_('The preferred problem ID prefix.'),
-              placeholder:_('Leave empty for default')
-            }) }}
-            {{ form.form_checkbox({
-              label:'Hidden',
-              columns:6,
-              name:'hidden',
-              placeholder:_('Make the problem hidden.'),
-              row:false
-            }) }}
-            {% if handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) and not type %}
+            <div class="medium-6 columns">
+              <label>
+                所属导图
+                <select name="knowledgeMapId" required>
+                  <option value="">请选择导图</option>
+                  {% for knowledgeMap in knowledgeMaps %}
+                    <option value="{{ knowledgeMap.id }}">{{ knowledgeMap.title }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <p class="help-text">导入题将成为隐藏的自命题托管草稿，题号由系统自动分配。</p>
+            </div>
+            {% if canKeepOriginalAuthor %}
               {{ form.form_checkbox({
-                label:'Keep original user',
+                label:'保留题目包中的原出题人',
                 columns:6,
                 name:'keepUser',
-                placeholder:_('Keep original problem owner. Only used if this problemset is exported from current system.'),
+                placeholder:'仅管理员可用；题目包必须包含有效的 owner。',
                 row:false
               }) }}
             {% endif %}
@@ -48,9 +45,7 @@
     <div class="section side">
       <div class="section__body typo">
         <h2>{{ _('What is this?') }}</h2>
-        <p>{{ _('With this feature, you can import problems that you can view from a site to here. Their title, content, tags and categories will be imported.') }}</p>
-        <h2>{{ _('About preferredPrefix option') }}</h2>
-        <p>{{ _('preferredPrefix_hint') }}</p>
+        <p>从 Hydro 格式压缩包批量导入编程题。导入题默认隐藏，来源固定为自命题，知识标签需在导入后归类。</p>
       </div>
     </div>
   </div>

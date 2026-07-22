@@ -250,7 +250,10 @@ Create Homework: 创建作业
 Create Link: 创建链接
 Create problem solutions: 创建题解
 Create Problem: 创建题目
-Create problems: 创建题目
+Create managed programming drafts: 仅创建本人托管编程题草稿
+Create managed programming drafts permission detail: 仅可创建本人名下的隐藏自命题托管编程题草稿，不能导入、代指定出题人或发布。
+Create problems: 创建全部题型
+Create problems permission detail: 可创建全部八种题型；其中编程题仍创建为本人名下的隐藏托管草稿。
 Create Role: 创建角色
 Create Training Plan: 创建训练计划
 Create training plans: 创建训练计划

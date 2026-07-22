@@ -866,6 +866,10 @@ export class ProblemMainHandler extends Handler {
                 })),
                 canFilterOwner: isBankAdmin,
                 canReviewManaged: isBankAdmin,
+                problemCreationCapabilities: {
+                    canCreateAny: problem.canCreateManagedProgrammingDraft(this.user),
+                    canImport: problem.canImportProblems(this.user),
+                },
                 ownerNames,
                 canManageByDocId,
                 canManageContributionsByDocId,
@@ -2150,6 +2154,7 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
     abstract problemKind: DedicatedStructuredEditorKind;
 
     async get() {
+        if (!problem.canCreateAllProblemKinds(this.user)) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
         const [knowledgeMaps, knowledgeMindmapOptions] = await Promise.all([listKnowledgeMapsForProblemSelection(), listKnowledgeMindmapOptions()]);
         const defaultMapId = knowledgeMaps.length === 1 ? knowledgeMaps[0].id : '';
         this.response.template = structuredEditorTemplate(this.problemKind);
@@ -2191,6 +2196,7 @@ abstract class DedicatedStructuredCreateHandler extends Handler {
         const domainId = String(this.domain?._id);
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
+        if (!problem.canCreateAllProblemKinds(this.user)) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
         const canUseCustomPid = this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
         const allowedFields = new Set([
             'title',
@@ -2856,7 +2862,7 @@ export class ProblemMineHandler extends Handler {
             problem.getMulti(domainId, bankScope).count(),
         ]);
         this.response.template = 'problem_mine.html';
-        const canCreate = problem.isProblemBankAdmin(this.user) || this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        const canCreate = problem.canCreateManagedProgrammingDraft(this.user);
         this.response.body = {
             pdocs,
             page,
@@ -2869,10 +2875,10 @@ export class ProblemMineHandler extends Handler {
 
 export class ProblemCreateHubHandler extends Handler {
     async get() {
-        const isBankAdmin = problem.isProblemBankAdmin(this.user);
-        const canCreateManagedDraft = this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
-        if (!isBankAdmin && !canCreateManagedDraft) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
-        const availableKinds = isBankAdmin ? PROBLEM_KINDS : (['programming'] as const);
+        const canCreateAllKinds = problem.canCreateAllProblemKinds(this.user);
+        const canCreateManagedDraft = problem.canCreateManagedProgrammingDraft(this.user);
+        if (!canCreateManagedDraft) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        const availableKinds = canCreateAllKinds ? PROBLEM_KINDS : (['programming'] as const);
         this.response.template = 'problem_create_hub.html';
         this.response.body = {
             problemKinds: availableKinds.map((kind) => ({
@@ -2885,9 +2891,8 @@ export class ProblemCreateHubHandler extends Handler {
 
 export class ProblemCreateProgrammingHandler extends Handler {
     async get() {
-        const canAssignManagedAuthor = problem.isProblemBankAdmin(this.user);
-        const managedCreate = this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
-        if (!canAssignManagedAuthor && !managedCreate) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        const canAssignManagedAuthor = problem.canAssignManagedAuthor(this.user);
+        if (!problem.canCreateManagedProgrammingDraft(this.user)) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         const [knowledgeMaps, managedMindmapOptions, managedTrainingOptions] = await Promise.all([
             listKnowledgeMapsForProblemSelection(),
             listManagedMindmapOptions(),
@@ -2967,9 +2972,8 @@ export class ProblemCreateProgrammingHandler extends Handler {
         authorUid = 0,
     ) {
         const domainId = String(this.domain?._id);
-        const isBankAdmin = problem.isProblemBankAdmin(this.user);
-        const managedCreate = this.user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
-        if (!isBankAdmin && !managedCreate) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        const isBankAdmin = problem.canAssignManagedAuthor(this.user);
+        if (!problem.canCreateManagedProgrammingDraft(this.user)) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
         if (
@@ -3163,43 +3167,43 @@ export async function apply(ctx: Context) {
         'problem_create_single',
         `/problem/create/${problemKindToSlug(BASIC_OBJECTIVE_KIND.single)}`,
         ProblemCreateSingleHandler,
-        PERM.PERM_CREATE_PROBLEM,
+        PRIV.PRIV_USER_PROFILE,
     );
     ctx.Route(
         'problem_create_multi',
         `/problem/create/${problemKindToSlug(BASIC_OBJECTIVE_KIND.multi)}`,
         ProblemCreateMultiHandler,
-        PERM.PERM_CREATE_PROBLEM,
+        PRIV.PRIV_USER_PROFILE,
     );
     ctx.Route(
         'problem_create_true_false',
         `/problem/create/${problemKindToSlug(BASIC_OBJECTIVE_KIND.trueFalse)}`,
         ProblemCreateTrueFalseHandler,
-        PERM.PERM_CREATE_PROBLEM,
+        PRIV.PRIV_USER_PROFILE,
     );
     ctx.Route(
         'problem_create_blank',
         `/problem/create/${problemKindToSlug(BASIC_OBJECTIVE_KIND.blank)}`,
         ProblemCreateBlankHandler,
-        PERM.PERM_CREATE_PROBLEM,
+        PRIV.PRIV_USER_PROFILE,
     );
     ctx.Route(
         'problem_create_subjective',
         `/problem/create/${problemKindToSlug(SUBJECTIVE_KIND)}`,
         ProblemCreateSubjectiveHandler,
-        PERM.PERM_CREATE_PROBLEM,
+        PRIV.PRIV_USER_PROFILE,
     );
     ctx.Route(
         'problem_create_program_fill',
         `/problem/create/${problemKindToSlug(PROGRAM_FILL_KIND)}`,
         ProblemCreateProgramFillHandler,
-        PERM.PERM_CREATE_PROBLEM,
+        PRIV.PRIV_USER_PROFILE,
     );
     ctx.Route(
         'problem_create_function',
         `/problem/create/${problemKindToSlug(FUNCTION_KIND)}`,
         ProblemCreateFunctionHandler,
-        PERM.PERM_CREATE_PROBLEM,
+        PRIV.PRIV_USER_PROFILE,
     );
     await ctx.inject(['api'], ({ api }) => {
         api.provide(ProblemApi);

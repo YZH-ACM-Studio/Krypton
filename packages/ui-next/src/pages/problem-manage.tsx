@@ -710,21 +710,16 @@ export function ProblemImportPage() {
   const data = useBootstrap().page.data;
   const knowledgeMaps: Array<{ id: string; title: string }> = data.knowledgeMaps || [];
   const defaultMapId = knowledgeMaps.length === 1 ? knowledgeMaps[0].id : '';
+  const canKeepOriginalAuthor = data.canKeepOriginalAuthor === true;
   return (
-    <AdminPage bypassPrivGate title="导入题目" description="从 Hydro 格式压缩包批量导入题目">
+    <AdminPage bypassPrivGate title="导入题目" description="将 Hydro 题目包导入为隐藏的自命题托管草稿">
       <Card>
         <CardContent className="p-6">
           <form method="post" encType="multipart/form-data" className="grid gap-4 sm:max-w-xl">
             <div className="space-y-1.5">
               <label className="text-sm font-medium">题目文件</label>
-              <input type="file" name="file" accept=".zip,.tar,.gz" required className="w-full text-sm" />
+              <input type="file" name="file" accept=".zip" required className="w-full text-sm" />
               <p className="text-xs text-muted-foreground">支持 .zip 格式的 Hydro 题目包</p>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="prefix" className="text-sm font-medium">
-                题号前缀 (可选)
-              </label>
-              <Input id="prefix" name="preferredPrefix" placeholder="例如 A, P, CF" pattern="[a-zA-Z]*" />
             </div>
             <div className="space-y-1.5">
               <label htmlFor="knowledge-map" className="text-sm font-medium">
@@ -738,18 +733,14 @@ export function ProblemImportPage() {
                 placeholder="请选择导图"
                 options={knowledgeMaps.map((map) => ({ value: map.id, label: map.title }))}
               />
-              <p className="text-xs text-muted-foreground">导入题会先保持隐藏；知识节点可在导入后逐题归类。</p>
+              <p className="text-xs text-muted-foreground">系统自动分配题号；知识节点可在导入后逐题归类。</p>
             </div>
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox name="hidden" value="true" />
-                导入后隐藏
-              </label>
+            {canKeepOriginalAuthor ? (
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox name="keepUser" value="true" />
-                保留用户信息
+                保留题目包中的原出题人
               </label>
-            </div>
+            ) : null}
             <div className="flex justify-end">
               <Button type="submit">
                 <Import className="mr-1 size-4" />

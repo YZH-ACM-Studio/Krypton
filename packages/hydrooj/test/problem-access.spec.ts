@@ -256,7 +256,10 @@ const {
     buildProblemContainerSelectionScope,
     canArchiveProblem,
     canAuthorProblem,
+    canAssignManagedAuthor,
     canBrowseProblemBank,
+    canCreateAllProblemKinds,
+    canCreateManagedProgrammingDraft,
     canCloneProblem,
     canDeleteProblem,
     canEditProblemContent,
@@ -269,6 +272,7 @@ const {
     canMaintainProblem,
     canOpenProblemWorkspace,
     canPublishProblem,
+    canImportProblems,
     canViewProblem,
     isProblemBankAdmin,
     readStableEditableProblem,
@@ -387,6 +391,33 @@ describe('P2.11 problem-bank capability matrix', () => {
         expect(isProblemBankAdmin(makeUser('admin'))).to.equal(true);
         expect(isProblemBankAdmin(makeUser('student', { role: 'root' }))).to.equal(false);
         expect(isProblemBankAdmin(makeUser('creator', { role: 'admin' }))).to.equal(false);
+    });
+
+    it('derives creation capabilities from the canonical upper and narrow permissions', () => {
+        const student = makeUser('student');
+        const broadCreator = makeUser('creator');
+        const managedCreator = makeUser('draft-creator');
+        const administrator = makeUser('admin');
+
+        expect(canCreateAllProblemKinds(student)).to.equal(false);
+        expect(canCreateManagedProgrammingDraft(student)).to.equal(false);
+        expect(canImportProblems(student)).to.equal(false);
+        expect(canAssignManagedAuthor(student)).to.equal(false);
+
+        expect(canCreateAllProblemKinds(managedCreator)).to.equal(false);
+        expect(canCreateManagedProgrammingDraft(managedCreator)).to.equal(true);
+        expect(canImportProblems(managedCreator)).to.equal(false);
+        expect(canAssignManagedAuthor(managedCreator)).to.equal(false);
+
+        expect(canCreateAllProblemKinds(broadCreator)).to.equal(true);
+        expect(canCreateManagedProgrammingDraft(broadCreator)).to.equal(true);
+        expect(canImportProblems(broadCreator)).to.equal(true);
+        expect(canAssignManagedAuthor(broadCreator)).to.equal(false);
+
+        expect(canCreateAllProblemKinds(administrator)).to.equal(true);
+        expect(canCreateManagedProgrammingDraft(administrator)).to.equal(true);
+        expect(canImportProblems(administrator)).to.equal(true);
+        expect(canAssignManagedAuthor(administrator)).to.equal(true);
     });
 
     it('lets admins, creators, and actual legacy owners with a successfully loaded ACL browse', () => {
@@ -2125,6 +2156,10 @@ describe('P2.11 ProblemModel public surface', () => {
         for (const method of [
             'assertProblemAclDomain',
             'isProblemBankAdmin',
+            'canCreateAllProblemKinds',
+            'canCreateManagedProgrammingDraft',
+            'canImportProblems',
+            'canAssignManagedAuthor',
             'canBrowseProblemBank',
             'buildProblemBankScope',
             'canMaintainProblem',

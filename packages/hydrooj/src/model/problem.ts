@@ -57,7 +57,10 @@ import {
     buildProblemBankScope as buildProblemBankScopeAccess,
     canArchiveProblem as canArchiveProblemAccess,
     canAuthorProblem as canAuthorProblemAccess,
+    canAssignManagedAuthor as canAssignManagedAuthorAccess,
     canBrowseProblemBank as canBrowseProblemBankAccess,
+    canCreateAllProblemKinds as canCreateAllProblemKindsAccess,
+    canCreateManagedProgrammingDraft as canCreateManagedProgrammingDraftAccess,
     canCloneProblem as canCloneProblemAccess,
     canDeleteProblem as canDeleteProblemAccess,
     canEditProblemContent as canEditProblemContentAccess,
@@ -70,6 +73,7 @@ import {
     canMaintainProblem as canMaintainProblemAccess,
     canOpenProblemWorkspace as canOpenProblemWorkspaceAccess,
     canPublishProblem as canPublishProblemAccess,
+    canImportProblems as canImportProblemsAccess,
     canUseProblemWriteCapability,
     canViewProblem,
     clearProblemWriteClaim,
@@ -132,6 +136,7 @@ import {
     DEDICATED_STRUCTURED_PROBLEM_KINDS,
 } from './structured-problem-metadata';
 import SystemModel from './system';
+import UserModel from './user';
 
 export interface ProblemDoc extends Document {}
 export type Field = keyof ProblemDoc;
@@ -626,12 +631,10 @@ function findOverrideContent(dir: string, base: string) {
 }
 
 interface ProblemImportOptions {
-    preferredPrefix?: string;
     progress?: any;
-    override?: boolean;
-    operator?: number;
+    actorUser: ProblemAclUser;
+    keepOriginalAuthor?: boolean;
     delSource?: boolean;
-    hidden?: boolean;
     knowledgeMapId?: unknown;
 }
 
@@ -737,6 +740,22 @@ export class ProblemModel {
 
     static isProblemBankAdmin(user: ProblemAclUser) {
         return isProblemBankAdminAccess(user);
+    }
+
+    static canCreateAllProblemKinds(user: ProblemAclUser) {
+        return canCreateAllProblemKindsAccess(user);
+    }
+
+    static canCreateManagedProgrammingDraft(user: ProblemAclUser) {
+        return canCreateManagedProgrammingDraftAccess(user);
+    }
+
+    static canImportProblems(user: ProblemAclUser) {
+        return canImportProblemsAccess(user);
+    }
+
+    static canAssignManagedAuthor(user: ProblemAclUser) {
+        return canAssignManagedAuthorAccess(user);
     }
 
     static assertProblemAclDomain(user: ProblemAclUser, authoritativeDomainId: string) {
@@ -1072,8 +1091,8 @@ export class ProblemModel {
         actorUser?: ProblemAclUser,
     ): Promise<{ docId: number; pid: string }> {
         const actorMatches = !!actorUser && actorUser._id === creator;
-        const isBankAdmin = !!actorUser && actorMatches && ProblemModel.isProblemBankAdmin(actorUser);
-        const isTrustedCreator = !!actorUser && actorMatches && actorUser.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        const isBankAdmin = !!actorUser && actorMatches && ProblemModel.canAssignManagedAuthor(actorUser);
+        const isTrustedCreator = !!actorUser && actorMatches && ProblemModel.canCreateManagedProgrammingDraft(actorUser);
         const requestedTemplate =
             input.sourceMeta && typeof input.sourceMeta === 'object' && !Array.isArray(input.sourceMeta)
                 ? String((input.sourceMeta as Record<string, unknown>).template || '')
@@ -4388,13 +4407,14 @@ export class ProblemModel {
         return canViewProblem(udoc, pdoc);
     }
 
-    static async import(domainId: string, filepath: string, options: ProblemImportOptions = {}) {
+    static async import(domainId: string, filepath: string, options: ProblemImportOptions) {
         let tmpdir = '';
-        if (typeof options !== 'object') {
-            logger.warn('ProblemModel.import: options should be an object');
-            options = {};
+        const { actorUser, keepOriginalAuthor = false, progress } = options;
+        if (!ProblemModel.canImportProblems(actorUser)) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
+        if (keepOriginalAuthor && !ProblemModel.canAssignManagedAuthor(actorUser)) {
+            throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
         }
-        const { preferredPrefix, progress, override = false, operator = 1 } = options;
+        const operator = actorUser._id;
         const importKnowledge = await ProblemModel.resolveProgrammingKnowledgeMap(options.knowledgeMapId);
         let delSource = options.delSource;
         let problems: string[];
@@ -4427,226 +4447,224 @@ export class ProblemModel {
             if (delSource) await fs.remove(tmpdir);
             throw e;
         }
-        for (const i of problems) {
-            try {
-                const files = await fs.readdir(path.join(tmpdir, i), { withFileTypes: true });
-                if (!files.find((f) => f.name === 'problem.yaml')) continue;
-                if (process.env.HYDRO_CLI) logger.info(`Importing problem ${i}`);
-                const content = fs.readFileSync(path.join(tmpdir, i, 'problem.yaml'), 'utf-8');
-                const pdoc: ProblemDoc = yaml.load(content) as any;
-                if (!pdoc) {
-                    if (process.env.HYDRO_CLI) logger.error(`Invalid problem.yaml ${i}`);
-                    continue;
-                }
-                if (pdoc.problemKind !== undefined && parseProblemKind(pdoc.problemKind) !== 'programming') {
-                    throw new ValidationError('problemKind', null, '结构化题导入将在对应题型任务中开放');
-                }
-                let pid = pdoc.pid;
-                let overridePid = null;
-
-                const isValidPid = async (id: string) => {
-                    if (!/^(?:[a-z0-9]{1,10}-)?[a-z][0-9a-z]*$/i.test(id)) return false;
-                    if (id.includes('-')) {
-                        const [prefix] = id.split('-');
-                        if (!ddoc?.namespaces?.[prefix]) return false;
+        let imported = 0;
+        try {
+            for (const i of problems) {
+                try {
+                    const files = await fs.readdir(path.join(tmpdir, i), { withFileTypes: true });
+                    if (!files.find((f) => f.name === 'problem.yaml')) continue;
+                    if (process.env.HYDRO_CLI) logger.info(`Importing problem ${i}`);
+                    const content = fs.readFileSync(path.join(tmpdir, i, 'problem.yaml'), 'utf-8');
+                    const pdoc: ProblemDoc = yaml.load(content) as any;
+                    if (!pdoc) throw new ValidationError('problem.yaml', null, 'Invalid problem.yaml');
+                    if (pdoc.problemKind !== undefined && parseProblemKind(pdoc.problemKind) !== 'programming') {
+                        throw new ValidationError('problemKind', null, '结构化题导入将在对应题型任务中开放');
                     }
-                    const doc = await ProblemModel.get(domainId, id);
-                    if (doc) {
-                        if (!override) return false;
-                        overridePid = doc.docId;
-                        return true;
-                    }
-                    return true;
-                };
-                const getFiles = async (...type: string[]): Promise<[fs.Dirent, string][]> => {
-                    if (type.length > 1) {
-                        let result = [];
-                        for (const t of type) result = result.concat(await getFiles(t));
-                        return result;
-                    }
-                    const [t] = type;
-                    if (!files.find((f) => f.name === t && f.isDirectory())) return [];
-                    const rs = await fs.readdir(path.join(tmpdir, i, t), { withFileTypes: true });
-                    return rs.map((r) => [r, path.join(tmpdir, i, t, r.name)] as [fs.Dirent, string]);
-                };
-
-                if (pid) {
-                    if (preferredPrefix) {
-                        const newPid = pid.replace(/^[A-Za-z]+/, preferredPrefix);
-                        if (await isValidPid(newPid)) pid = newPid;
-                    }
-                    if (!(await isValidPid(pid))) pid = undefined;
-                }
-                let overrideContent = findOverrideContent(path.join(tmpdir, i), 'problem');
-                overrideContent ||= findOverrideContent(path.join(tmpdir, i, 'statement'), 'problem');
-                overrideContent ||= findOverrideContent(path.join(tmpdir, i, 'problem_statement'), 'problem');
-                if (pdoc.difficulty && !Number.isSafeInteger(pdoc.difficulty)) delete pdoc.difficulty;
-                const title = pdoc.title || (pdoc as any).name;
-                if (typeof title !== 'string') throw new ValidationError('title', null, 'Invalid title');
-                const allFiles = await getFiles(
-                    'testdata',
-                    'additional_file',
-                    // The following is from https://icpc.io/problem-package-format/spec/2023-07-draft.html
-                    'attachments',
-                    'generators',
-                    'include',
-                    'data',
-                    'statement',
-                    'problem_statement',
-                );
-                const totalSize = allFiles.map((f) => fs.statSync(f[1]).size).reduce((a, b) => a + b, 0);
-                if (allFiles.length > SystemModel.get('limit.problem_files')) throw new ValidationError('files', null, 'Too many files');
-                if (totalSize > SystemModel.get('limit.problem_files_size')) throw new ValidationError('files', null, 'Files too large');
-                const validateImportedTestdataConfigs = async () => {
-                    const entries = await getFiles('testdata', 'attachments', 'generators', 'include', 'data', 'output_validators');
-                    for (const [entry, location] of entries) {
-                        if (entry.isFile()) {
-                            if (isProblemConfigFilename(entry.name)) {
-                                await normalizeProblemTestdataUpload(entry.name, location);
+                    const getFiles = async (...type: string[]): Promise<[fs.Dirent, string][]> => {
+                        if (type.length > 1) {
+                            let result = [];
+                            for (const t of type) result = result.concat(await getFiles(t));
+                            return result;
+                        }
+                        const [t] = type;
+                        if (!files.find((f) => f.name === t && f.isDirectory())) return [];
+                        const rs = await fs.readdir(path.join(tmpdir, i, t), { withFileTypes: true });
+                        return rs.map((r) => [r, path.join(tmpdir, i, t, r.name)] as [fs.Dirent, string]);
+                    };
+                    let overrideContent = findOverrideContent(path.join(tmpdir, i), 'problem');
+                    overrideContent ||= findOverrideContent(path.join(tmpdir, i, 'statement'), 'problem');
+                    overrideContent ||= findOverrideContent(path.join(tmpdir, i, 'problem_statement'), 'problem');
+                    if (pdoc.difficulty && !Number.isSafeInteger(pdoc.difficulty)) delete pdoc.difficulty;
+                    const title = pdoc.title || (pdoc as any).name;
+                    if (typeof title !== 'string') throw new ValidationError('title', null, 'Invalid title');
+                    const allFiles = await getFiles(
+                        'testdata',
+                        'additional_file',
+                        // The following is from https://icpc.io/problem-package-format/spec/2023-07-draft.html
+                        'attachments',
+                        'generators',
+                        'include',
+                        'data',
+                        'statement',
+                        'problem_statement',
+                    );
+                    const totalSize = allFiles.map((f) => fs.statSync(f[1]).size).reduce((a, b) => a + b, 0);
+                    if (allFiles.length > SystemModel.get('limit.problem_files')) throw new ValidationError('files', null, 'Too many files');
+                    if (totalSize > SystemModel.get('limit.problem_files_size')) throw new ValidationError('files', null, 'Files too large');
+                    const validateImportedTestdataConfigs = async () => {
+                        const entries = await getFiles('testdata', 'attachments', 'generators', 'include', 'data', 'output_validators');
+                        for (const [entry, location] of entries) {
+                            if (entry.isFile()) {
+                                if (isProblemConfigFilename(entry.name)) {
+                                    await normalizeProblemTestdataUpload(entry.name, location);
+                                }
+                                continue;
                             }
-                            continue;
+                            if (!entry.isDirectory()) continue;
+                            const children = await fs.readdir(location, { withFileTypes: true });
+                            for (const childEntry of children) {
+                                if (!childEntry.isFile() || !isProblemConfigFilename(childEntry.name)) continue;
+                                await normalizeProblemTestdataUpload(childEntry.name, path.join(location, childEntry.name));
+                            }
                         }
+                    };
+                    await validateImportedTestdataConfigs();
+                    let configChanged = false;
+                    let config: ProblemConfigFile = {};
+                    if (await fs.exists(path.join(tmpdir, i, 'testdata/config.yaml'))) {
+                        try {
+                            config = yaml.load(await fs.readFile(path.join(tmpdir, i, 'testdata/config.yaml'), 'utf-8'));
+                        } catch (e) {
+                            throw new ValidationError('config', null, `Invalid testdata/config.yaml: ${e.message}`);
+                        }
+                    }
+                    if (await fs.exists(path.join(tmpdir, i, 'domjudge-problem.ini'))) {
+                        const djConfig = ((await fs.readFile(path.join(tmpdir, i, 'domjudge-problem.ini'), 'utf-8')) as string)
+                            .split('\n')
+                            .map((line: string) => line.split('=').map((lines: string) => lines.trim()));
+                        const djConfigJson: any = {};
+                        for (const [key, value] of djConfig) {
+                            djConfigJson[key] = value;
+                        }
+                        if (djConfigJson.timelimit) {
+                            config.time = `${djConfigJson.timelimit * 1000}ms`;
+                            configChanged = true;
+                        }
+                    }
+                    if ((pdoc as any).limits) {
+                        config.time = (pdoc as any).limits.time_limit ? `${(pdoc as any).limits.time_limit * 1000}ms` : config.time || undefined;
+                        config.memory = (pdoc as any).limits.memory ? `${(pdoc as any).limits.memory}m` : config.memory || undefined;
+                        configChanged = true;
+                    }
+                    const testdataUploads: Array<{ name: string; source: string | Buffer }> = [];
+                    const additionalFileUploads: Array<{ name: string; source: string }> = [];
+                    for (const [entry, location] of await getFiles('testdata', 'attachments', 'generators', 'include')) {
+                        if (entry.isDirectory()) {
+                            const children = await fs.readdir(location);
+                            for (const filename of children) testdataUploads.push({ name: filename, source: path.join(location, filename) });
+                        } else if (entry.isFile()) testdataUploads.push({ name: entry.name, source: location });
+                    }
+                    for (const [entry, location] of await getFiles('data')) {
                         if (!entry.isDirectory()) continue;
-                        const children = await fs.readdir(location, { withFileTypes: true });
-                        for (const childEntry of children) {
-                            if (!childEntry.isFile() || !isProblemConfigFilename(childEntry.name)) continue;
-                            await normalizeProblemTestdataUpload(childEntry.name, path.join(location, childEntry.name));
+                        const children = await fs.readdir(location);
+                        for (const filename of children) {
+                            const source = path.join(location, filename);
+                            if (entry.name === 'sample') additionalFileUploads.push({ name: filename, source });
+                            testdataUploads.push({ name: filename, source });
                         }
                     }
-                };
-                await validateImportedTestdataConfigs();
-                const tag = (pdoc.tag || []).map((t) => t.toString());
-                let configChanged = false;
-                let config: ProblemConfigFile = {};
-                if (await fs.exists(path.join(tmpdir, i, 'testdata/config.yaml'))) {
-                    try {
-                        config = yaml.load(await fs.readFile(path.join(tmpdir, i, 'testdata/config.yaml'), 'utf-8'));
-                    } catch (e) {
-                        throw new ValidationError('config', null, `Invalid testdata/config.yaml: ${e.message}`);
+                    for (const [entry, location] of await getFiles('output_validators')) {
+                        if (entry.isFile()) continue;
+                        const children = await fs.readdir(location);
+                        for (const filename of children) {
+                            if (filename === 'testlib.h') continue;
+                            testdataUploads.push({ name: filename, source: path.join(location, filename) });
+                            if (entry.name === 'checker') {
+                                config.checker_type = 'testlib';
+                                config.checker = filename;
+                            } else if (entry.name === 'interactor') {
+                                config.type = ProblemType.Interactive;
+                                config.interactor = filename;
+                            }
+                            configChanged = true;
+                        }
                     }
-                }
-                if (await fs.exists(path.join(tmpdir, i, 'domjudge-problem.ini'))) {
-                    const djConfig = ((await fs.readFile(path.join(tmpdir, i, 'domjudge-problem.ini'), 'utf-8')) as string)
-                        .split('\n')
-                        .map((line: string) => line.split('=').map((lines: string) => lines.trim()));
-                    const djConfigJson: any = {};
-                    for (const [key, value] of djConfig) {
-                        djConfigJson[key] = value;
+                    for (const [entry, location] of await getFiles('additional_file', 'attachments', 'statement', 'problem_statement')) {
+                        if (entry.isFile()) additionalFileUploads.push({ name: entry.name, source: location });
                     }
-                    if (djConfigJson.timelimit) {
-                        config.time = `${djConfigJson.timelimit * 1000}ms`;
+                    for (const [entry] of await getFiles('attachments', 'include')) {
+                        if (!entry.isFile()) continue;
+                        config.user_extra_files ||= [];
+                        config.user_extra_files = Array.from(new Set(config.user_extra_files.concat(entry.name)));
+                        config.judge_extra_files ||= [];
+                        config.judge_extra_files = Array.from(new Set(config.judge_extra_files.concat(entry.name)));
                         configChanged = true;
                     }
-                    if (djConfigJson.externalid) pid = djConfigJson.externalid;
-                }
-                if ((pdoc as any).limits) {
-                    config.time = (pdoc as any).limits.time_limit ? `${(pdoc as any).limits.time_limit * 1000}ms` : config.time || undefined;
-                    config.memory = (pdoc as any).limits.memory ? `${(pdoc as any).limits.memory}m` : config.memory || undefined;
-                    configChanged = true;
-                }
-                const overrideDoc = overridePid ? await ProblemModel.get(domainId, overridePid, ['structureRevision'] as any, true) : null;
-                const docId = overridePid
-                    ? (
-                          await ProblemModel.edit(
-                              domainId,
-                              overridePid,
-                              {
-                                  title: title.trim(),
-                                  content: overrideContent || pdoc.content?.toString() || 'No content',
-                                  tag,
-                                  difficulty: pdoc.difficulty,
-                                  ...(options.hidden ? { hidden: true } : {}),
-                              },
-                              { expectedStructureRevision: overrideDoc?.structureRevision },
-                          )
-                      ).docId
-                    : await ProblemModel.add(
-                          domainId,
-                          pid,
-                          title.trim(),
-                          overrideContent || pdoc.content?.toString() || 'No content',
-                          operator || pdoc.owner,
-                          tag,
-                          {
-                              hidden: options.hidden || pdoc.hidden,
-                              difficulty: pdoc.difficulty,
-                              problemKind: 'programming',
-                              knowledgeMapId: importKnowledge.mapId,
-                              knowledgeNodeIds: [],
-                          },
-                      );
-                // TODO delete unused file when updating pdoc
-                for (const [f, loc] of await getFiles('testdata', 'attachments', 'generators', 'include')) {
-                    if (f.isDirectory()) {
+                    if (configChanged) {
+                        const canonicalConfigIndex = testdataUploads.findIndex((file) => file.name === 'config.yaml');
+                        if (canonicalConfigIndex >= 0) testdataUploads.splice(canonicalConfigIndex, 1);
+                        testdataUploads.push({ name: 'config.yaml', source: Buffer.from(yaml.dump(config)) });
+                    }
+                    const importedAuthorUid = keepOriginalAuthor ? Number(pdoc.owner) : operator;
+                    if (!Number.isSafeInteger(importedAuthorUid) || importedAuthorUid < 1) throw new ValidationError('owner');
+                    if (keepOriginalAuthor && importedAuthorUid !== operator) {
+                        const importedAuthor = await UserModel.getById(domainId, importedAuthorUid);
+                        if (!importedAuthor || importedAuthor._id !== importedAuthorUid) throw new ValidationError('owner');
+                    }
+                    const created = await ProblemModel.createManagedProgrammingDraft(
+                        domainId,
+                        {
+                            workingTitle: title.trim(),
+                            content: overrideContent || pdoc.content?.toString() || 'No content',
+                            difficulty:
+                                Number.isSafeInteger(pdoc.difficulty) && Number(pdoc.difficulty) >= 1 && Number(pdoc.difficulty) <= 10
+                                    ? Number(pdoc.difficulty)
+                                    : 1,
+                            sourceMeta: { template: 'self', year: new Date().getFullYear() },
+                            knowledgeMapId: importKnowledge.mapId,
+                            mindmapNodeIds: [],
+                            ...(importedAuthorUid !== operator ? { authorUid: importedAuthorUid } : {}),
+                        },
+                        operator,
+                        actorUser,
+                    );
+                    const docId = created.docId;
+                    const configUploads = testdataUploads.filter((file) => isProblemConfigFilename(file.name));
+                    const ordinaryTestdataUploads = testdataUploads.filter((file) => !isProblemConfigFilename(file.name));
+                    if (ordinaryTestdataUploads.length || additionalFileUploads.length || configUploads.length) {
+                        await ProblemModel.withAuthorizedDataWriteClaim(
+                            domainId,
+                            docId,
+                            actorUser,
+                            'files-upload',
+                            async (claim) => {
+                                for (const file of ordinaryTestdataUploads) {
+                                    await ProblemModel.addTestdataWithClaim(claim, file.name, file.source, operator);
+                                }
+                                for (const file of additionalFileUploads) {
+                                    await ProblemModel.addAdditionalFileWithClaim(claim, file.name, file.source, operator);
+                                }
+                                for (const file of configUploads) {
+                                    await ProblemModel.addTestdataWithClaim(claim, file.name, file.source, operator);
+                                }
+                            },
+                            { requestId: `problem-import-upload:${domainId}:${docId}:${operator}` },
+                        );
+                    }
+                    for (const [f, loc] of await getFiles('solution')) {
+                        if (!f.isFile()) continue;
+                        await SolutionModel.add(domainId, docId, operator, await fs.readFile(loc, 'utf-8'));
+                    }
+                    let count = 0;
+                    for (const [f, loc] of await getFiles('std')) {
+                        if (!f.isFile()) continue;
+                        count++;
+                        if (count > 5) continue;
+                        await RecordModel.add(domainId, docId, operator, f.name.split('.')[1], await fs.readFile(loc, 'utf-8'), true);
+                    }
+                    for (const [f, loc] of await getFiles('submissions')) {
+                        if (f.isFile()) continue;
                         const sub = await fs.readdir(loc);
-                        for (const s of sub) await ProblemModel.addTestdata(domainId, docId, s, path.join(loc, s));
-                    } else if (f.isFile()) await ProblemModel.addTestdata(domainId, docId, f.name, loc);
-                }
-                for (const [f, loc] of await getFiles('data')) {
-                    if (!f.isDirectory()) continue;
-                    const sub = await fs.readdir(loc);
-                    for (const file of sub) {
-                        if (f.name === 'sample') await ProblemModel.addAdditionalFile(domainId, docId, file, path.join(loc, file));
-                        await ProblemModel.addTestdata(domainId, docId, file, path.join(loc, file));
-                    }
-                }
-                for (const [f, loc] of await getFiles('output_validators')) {
-                    if (f.isFile()) continue;
-                    const sub = await fs.readdir(loc);
-                    for (const file of sub) {
-                        if (file === 'testlib.h') continue;
-                        await ProblemModel.addTestdata(domainId, docId, file, path.join(loc, file));
-                        if (f.name === 'checker') {
-                            config.checker_type = 'testlib';
-                            config.checker = file;
-                        } else if (f.name === 'interactor') {
-                            config.type = ProblemType.Interactive;
-                            config.interactor = file;
+                        for (const file of sub) {
+                            if (file.endsWith('.zip')) continue;
+                            const code = await fs.readFile(path.join(loc, file), 'utf-8');
+                            await RecordModel.add(domainId, docId, operator, file.split('.')[1], `// ${file}: ${loc}\n${code}`, true);
                         }
-                        configChanged = true;
                     }
+                    imported++;
+                    const message = `Imported problem ${pdoc.pid || docId} as ${created.pid} (${title})`;
+                    (process.env.HYDRO_CLI ? logger.info : progress)?.(message);
+                } catch (e) {
+                    logger.error('Problem import failed domain=%s source=%s actor=%d stage=problem error=%o', domainId, i, operator, e);
+                    (process.env.HYDRO_CLI ? logger.error : progress)?.(`Error importing problem ${i}: ${e.message}`);
+                    throw new Error(`Failed to import problem ${i}`, { cause: e });
                 }
-                for (const [f, loc] of await getFiles('additional_file', 'attachments', 'statement', 'problem_statement')) {
-                    if (!f.isFile()) continue;
-                    await ProblemModel.addAdditionalFile(domainId, docId, f.name, loc);
-                }
-                for (const [f, loc] of await getFiles('solution')) {
-                    if (!f.isFile()) continue;
-                    await SolutionModel.add(domainId, docId, operator, await fs.readFile(loc, 'utf-8'));
-                }
-                for (const [f] of await getFiles('attachments', 'include')) {
-                    if (!f.isFile()) continue;
-                    config.user_extra_files ||= [];
-                    config.user_extra_files = Array.from(new Set(config.user_extra_files.concat(f.name)));
-                    config.judge_extra_files ||= [];
-                    config.judge_extra_files = Array.from(new Set(config.judge_extra_files.concat(f.name)));
-                    configChanged = true;
-                }
-                if (configChanged) await ProblemModel.addTestdata(domainId, docId, 'config.yaml', Buffer.from(yaml.dump(config)));
-                let count = 0;
-                for (const [f, loc] of await getFiles('std')) {
-                    if (!f.isFile()) continue;
-                    count++;
-                    if (count > 5) continue;
-                    await RecordModel.add(domainId, docId, operator, f.name.split('.')[1], await fs.readFile(loc, 'utf-8'), true);
-                }
-                for (const [f, loc] of await getFiles('submissions')) {
-                    if (f.isFile()) continue;
-                    const sub = await fs.readdir(loc);
-                    for (const file of sub) {
-                        if (file.endsWith('.zip')) continue;
-                        const code = await fs.readFile(path.join(loc, file), 'utf-8');
-                        await RecordModel.add(domainId, docId, operator, file.split('.')[1], `// ${file}: ${loc}\n${code}`, true);
-                    }
-                }
-                if (configChanged) await ProblemModel.addTestdata(domainId, docId, 'config.yaml', Buffer.from(yaml.dump(config)));
-                const message = `${overridePid ? 'Updated' : 'Imported'} problem ${pdoc.pid || docId} (${title})`;
-                (process.env.HYDRO_CLI ? logger.info : progress)?.(message);
-            } catch (e) {
-                (process.env.HYDRO_CLI ? logger.info : progress)?.(`Error importing problem ${i}: ${e.message}`);
             }
+        } finally {
+            if (delSource) await fs.remove(tmpdir);
         }
-        if (delSource) await fs.remove(tmpdir);
+        if (!imported) throw new ValidationError('file', null, 'No importable programming problems found');
+        return { imported };
     }
 
     static async export(domainId: string, pidFilter = '') {

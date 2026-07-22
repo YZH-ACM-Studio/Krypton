@@ -151,6 +151,16 @@ const problemStub = {
     assertProblemBankSelection: async () => undefined,
     buildProblemBankScope: (user: any) => user.scope || { docId: { $in: [] } },
     canBrowseProblemBank: (user: any) => user.canBrowse === true,
+    canCreateAllProblemKinds: (user: any) =>
+        user.admin === true || user.hasPriv?.(PRIV.PRIV_EDIT_SYSTEM) === true || user.hasPerm?.(PERM.PERM_CREATE_PROBLEM) === true,
+    canCreateManagedProgrammingDraft: (user: any) =>
+        user.admin === true ||
+        user.hasPriv?.(PRIV.PRIV_EDIT_SYSTEM) === true ||
+        user.hasPerm?.(PERM.PERM_CREATE_PROBLEM) === true ||
+        user.hasPerm?.(PERM.PERM_CREATE_PROGRAMMING_DRAFT) === true,
+    canImportProblems: (user: any) =>
+        user.admin === true || user.hasPriv?.(PRIV.PRIV_EDIT_SYSTEM) === true || user.hasPerm?.(PERM.PERM_CREATE_PROBLEM) === true,
+    canAssignManagedAuthor: (user: any) => user.admin === true || user.hasPriv?.(PRIV.PRIV_EDIT_SYSTEM) === true,
     canMaintainProblem(user: any, pdoc: any) {
         calls.maintain.push({ user, pdoc });
         return maintainResult;
@@ -648,6 +658,8 @@ function makeHandler(HandlerClass: any, user: Record<string, unknown>) {
     return instance as any;
 }
 
+const broadProblemCreator = () => ({ hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM });
+
 async function captureFailure(run: () => Promise<unknown>) {
     try {
         await run();
@@ -742,7 +754,7 @@ describe('P2.11 enumeration entry gates', () => {
                     scope: {},
                     hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM,
                 },
-                false,
+                true,
             ],
             [
                 {
@@ -759,6 +771,40 @@ describe('P2.11 enumeration entry gates', () => {
             await handler.get('system', 1);
             expect(handler.response.body.canCreate).to.equal(expected);
             expect(handler.response.body).not.to.have.property('canCreateProgrammingDraft');
+        }
+    });
+
+    it('publishes canonical problem-bank create and import capabilities', async () => {
+        for (const [user, expected] of [
+            [
+                { canBrowse: true, scope: {}, hasPerm: () => false },
+                { canCreateAny: false, canImport: false },
+            ],
+            [
+                {
+                    canBrowse: true,
+                    scope: {},
+                    hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROGRAMMING_DRAFT,
+                },
+                { canCreateAny: true, canImport: false },
+            ],
+            [
+                {
+                    canBrowse: true,
+                    scope: {},
+                    hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM,
+                },
+                { canCreateAny: true, canImport: true },
+            ],
+            [
+                { canBrowse: true, scope: {}, admin: true, hasPerm: () => false },
+                { canCreateAny: true, canImport: true },
+            ],
+        ] as const) {
+            getMultiResults = [[]];
+            const handler = makeHandler(ProblemMainHandler, user);
+            await handler.get('system', 1, '', 20, false, false);
+            expect(handler.response.body.problemCreationCapabilities).to.deep.equal(expected);
         }
     });
 
@@ -1186,7 +1232,7 @@ describe('P2.11 authoritative problem route domain', () => {
         expect(handler.response.body.dataContributorUdocs).to.deep.equal([{ _id: 77, uname: 'user-77' }]);
     });
 
-    it('opens the creation hub only for a bank administrator or trusted managed creator', async () => {
+    it('derives creation-hub kinds from the canonical upper and narrow capabilities', async () => {
         const trusted = makeHandler(ProblemCreateHubHandler, {
             hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROGRAMMING_DRAFT,
         });
@@ -1197,10 +1243,14 @@ describe('P2.11 authoritative problem route domain', () => {
         await admin.get();
         expect(admin.response.body.problemKinds).to.have.length.greaterThan(1);
 
-        for (const user of [{}, { hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM }]) {
-            const denied = await captureFailure(() => makeHandler(ProblemCreateHubHandler, user).get());
-            expect(denied).to.be.instanceOf(TestPermissionError);
-        }
+        const broadCreator = makeHandler(ProblemCreateHubHandler, {
+            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM,
+        });
+        await broadCreator.get();
+        expect(broadCreator.response.body.problemKinds).to.have.length.greaterThan(1);
+
+        const denied = await captureFailure(() => makeHandler(ProblemCreateHubHandler, {}).get());
+        expect(denied).to.be.instanceOf(TestPermissionError);
     });
 
     it('creates a problem only in the authoritative handler domain', async () => {
@@ -1306,6 +1356,28 @@ describe('P2.11 authoritative problem route domain', () => {
             expect(forged).to.be.instanceOf(TestPermissionError);
         }
         expect(calls.add).to.have.lengthOf(1);
+    });
+
+    it('lets an original broad creator use the same restricted self-managed programming path', async () => {
+        const handler = makeHandler(ProblemCreateProgrammingHandler, {
+            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM,
+        });
+        handler.request.body = {
+            title: 'Broad creator draft',
+            content: 'Statement',
+            managed: 'true',
+            template: 'self',
+            year: '2026',
+            difficulty: '3',
+            knowledgeMapId,
+            mindmapNodeIds: 'node-1',
+        };
+
+        await handler.post('forged', 'Broad creator draft', 'Statement', '', false, 3, [], true, 'self', 2026, '', '', 0, knowledgeMapId, ['node-1']);
+
+        expect(createKinds).to.deep.equal(['managed-programming']);
+        expect(calls.add[0][1]).to.deep.include({ authorUid: 42, workingTitle: 'Broad creator draft' });
+        expect(handler.response.body).to.include({ authoringMode: 'managed', hidden: true });
     });
 
     it('delegates managed source, mindmap, and training semantics to the observable model boundary', async () => {
@@ -1766,7 +1838,10 @@ describe('P2.17 programming tag HTTP boundaries', () => {
         const broadOnly = makeHandler(ProblemCreateProgrammingHandler, {
             hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROBLEM,
         });
-        expect(await captureFailure(() => broadOnly.get())).to.be.instanceOf(TestPermissionError);
+        await broadOnly.get();
+        expect(broadOnly.response.body.canAssignManagedAuthor).to.equal(false);
+        expect(broadOnly.response.body.canAssignManagedTraining).to.equal(false);
+        expect(broadOnly.response.body.managedSourceTemplates.map((template: any) => template.id)).to.deep.equal(['self']);
     });
 
     it('serves the administrator a revision-bound review preview derived from live catalog data', async () => {
@@ -2278,8 +2353,38 @@ describe('P3.15 files workspace capability contract', () => {
 });
 
 describe('P3.9 basic objective HTTP boundaries', () => {
+    it('keeps structured routes signed-in and lets the canonical capability authorize broad creators and administrators', async () => {
+        const signedInOnly = makeHandler(ProblemCreateSingleHandler, {});
+        const narrowCreator = makeHandler(ProblemCreateSingleHandler, {
+            hasPerm: (permission: bigint) => permission === PERM.PERM_CREATE_PROGRAMMING_DRAFT,
+        });
+        const administrator = makeHandler(ProblemCreateSingleHandler, {
+            hasPriv: (privilege: number) => privilege === PRIV.PRIV_EDIT_SYSTEM,
+        });
+
+        expect(await captureFailure(() => signedInOnly.get())).to.be.instanceOf(TestPermissionError);
+        expect(await captureFailure(() => narrowCreator.get())).to.be.instanceOf(TestPermissionError);
+        expect(await captureFailure(() => signedInOnly.post('system', '', undefined))).to.be.instanceOf(TestPermissionError);
+
+        await administrator.get();
+        expect(administrator.response.template).to.equal('problem_edit_single.html');
+
+        const source = readFileSync(resolve(__dirname, '../src/handler/problem.ts'), 'utf8');
+        for (const route of [
+            'problem_create_single',
+            'problem_create_multi',
+            'problem_create_true_false',
+            'problem_create_blank',
+            'problem_create_subjective',
+            'problem_create_program_fill',
+            'problem_create_function',
+        ]) {
+            expect(source).to.match(new RegExp(`'${route}',[\\s\\S]{0,240}PRIV\\.PRIV_USER_PROFILE`));
+        }
+    });
+
     it('creates a hidden single problem in the authoritative domain with a fixed URL kind', async () => {
-        const handler = makeHandler(ProblemCreateSingleHandler, {});
+        const handler = makeHandler(ProblemCreateSingleHandler, broadProblemCreator());
         handler.request.body = {
             title: 'Single',
             content: 'Statement',
@@ -2313,7 +2418,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
     });
 
     it('rejects a create-route kind mismatch before creating anything', async () => {
-        const handler = makeHandler(ProblemCreateSingleHandler, {});
+        const handler = makeHandler(ProblemCreateSingleHandler, broadProblemCreator());
         handler.request.body = {
             title: 'Single',
             content: 'Statement',
@@ -2342,7 +2447,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
 
     it('rejects raw tags, non-admin custom PIDs, and stale knowledge nodes before creation', async () => {
         for (const forged of [{ tag: 'free-text' }, { pid: 'FORGED1' }]) {
-            const handler = makeHandler(ProblemCreateSingleHandler, {});
+            const handler = makeHandler(ProblemCreateSingleHandler, broadProblemCreator());
             handler.request.body = {
                 title: 'Single',
                 content: 'Statement',
@@ -2369,7 +2474,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
             expect(error).to.be.instanceOf(GenericError);
         }
 
-        const stale = makeHandler(ProblemCreateSingleHandler, {});
+        const stale = makeHandler(ProblemCreateSingleHandler, broadProblemCreator());
         stale.request.body = {
             title: 'Single',
             content: 'Statement',
@@ -2808,7 +2913,7 @@ describe('P3.9 basic objective HTTP boundaries', () => {
 
 describe('P3.10 subjective problem HTTP boundaries', () => {
     it('creates a hidden subjective problem through its fixed-kind route', async () => {
-        const handler = makeHandler(ProblemCreateSubjectiveHandler, {});
+        const handler = makeHandler(ProblemCreateSubjectiveHandler, broadProblemCreator());
         handler.request.body = {
             title: 'Essay',
             content: 'Explain why.',
@@ -2869,7 +2974,7 @@ describe('P3.10 subjective problem HTTP boundaries', () => {
 
 describe('P3.19 program-fill and function HTTP boundaries', () => {
     it('creates each kind through a fixed dedicated route', async () => {
-        const programFill = makeHandler(ProblemCreateProgramFillHandler, {});
+        const programFill = makeHandler(ProblemCreateProgramFillHandler, broadProblemCreator());
         programFill.request.body = {
             title: 'Program fill',
             content: 'Statement',
@@ -2908,7 +3013,7 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
                 },
             }),
         );
-        const fn = makeHandler(ProblemCreateFunctionHandler, {});
+        const fn = makeHandler(ProblemCreateFunctionHandler, broadProblemCreator());
         fn.request.body = {
             title: 'Function',
             difficulty: '0',

@@ -10,6 +10,8 @@ import {
   ManagedReviewPanel,
 } from '../src/components/managed-programming-authority.tsx';
 import { ProblemCreateHubView } from '../src/pages/problem-create-hub.tsx';
+import { ProblemCreationActions } from '../src/components/problem-creation-actions.tsx';
+import { DomainPermissionCopy } from '../src/components/domain-permission-copy.tsx';
 import { ProblemMineCreateAction } from '../src/components/problem-mine-create-action.tsx';
 
 function renderManagedCreationBootstrap(bootstrap: { canAssignManagedAuthor: boolean; canAssignManagedTraining: boolean }) {
@@ -36,6 +38,15 @@ function renderManagedCreationBootstrap(bootstrap: { canAssignManagedAuthor: boo
 }
 
 describe('managed programming creation authority UI', () => {
+  it('renders the localized permission name and its concrete capability boundary', () => {
+    const markup = renderToStaticMarkup(
+      <DomainPermissionCopy name="仅创建本人托管编程题草稿" detail="仅可创建本人名下的隐藏自命题托管编程题草稿，不能导入、代指定出题人或发布。" />,
+    );
+    expect(markup).to.include('仅创建本人托管编程题草稿');
+    expect(markup).to.include('不能导入、代指定出题人或发布');
+    expect(markup).not.to.include('Create managed programming drafts');
+  });
+
   it('serializes the complete revision-bound managed publication protocol', () => {
     const markup = renderToStaticMarkup(<ManagedPublishProtocolFields docId={7} expectedStructureRevision={9} />);
     expect(markup).to.include('name="operation" value="managedPublish"');
@@ -204,5 +215,18 @@ describe('managed programming creation authority UI', () => {
     const allowed = renderToStaticMarkup(<ProblemMineCreateAction allowed />);
     expect(allowed).to.include('href="/problem/create"');
     expect(allowed).to.include('新建题目');
+  });
+
+  it('renders problem-bank actions only from server-authorized capabilities', () => {
+    const none = renderToStaticMarkup(<ProblemCreationActions canCreateAny={false} canImport={false} />);
+    expect(none).to.equal('');
+
+    const narrow = renderToStaticMarkup(<ProblemCreationActions canCreateAny canImport={false} />);
+    expect(narrow).to.include('href="/problem/create"');
+    expect(narrow).not.to.include('/problem/import/hydro');
+
+    const broad = renderToStaticMarkup(<ProblemCreationActions canCreateAny canImport />);
+    expect(broad).to.include('href="/problem/create"');
+    expect(broad).to.include('href="/problem/import/hydro"');
   });
 });

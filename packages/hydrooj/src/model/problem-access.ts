@@ -167,6 +167,26 @@ export function isProblemBankAdmin(user: ProblemAclUser): boolean {
     return user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
 }
 
+/** Whether this request may create every supported problem kind. */
+export function canCreateAllProblemKinds(user: ProblemAclUser): boolean {
+    return isProblemBankAdmin(user) || user.hasPerm(PERM.PERM_CREATE_PROBLEM);
+}
+
+/** Whether this request may create a hidden managed programming draft. */
+export function canCreateManagedProgrammingDraft(user: ProblemAclUser): boolean {
+    return canCreateAllProblemKinds(user) || user.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+}
+
+/** Hydro archive import remains an upper-level creation capability. */
+export function canImportProblems(user: ProblemAclUser): boolean {
+    return canCreateAllProblemKinds(user);
+}
+
+/** Assigning another managed author is reserved for the site problem-bank administrator. */
+export function canAssignManagedAuthor(user: ProblemAclUser): boolean {
+    return isProblemBankAdmin(user);
+}
+
 /** Whether this request may enumerate the problem bank. */
 export function canBrowseProblemBank(user: ProblemAclUser): boolean {
     if (user._problemAclLoaded !== true) return false;

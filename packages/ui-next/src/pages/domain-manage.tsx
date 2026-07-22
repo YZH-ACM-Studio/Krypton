@@ -12,6 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MarkdownEditor } from '@/components/markdown-renderer';
 import { AdminPage } from '@/components/admin/admin-page';
+import { DomainPermissionCopy } from '@/components/domain-permission-copy';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SimpleSelect } from '@/components/ui/select';
@@ -396,6 +397,7 @@ const FAMILY_LABELS: Record<string, string> = {
 interface Perm {
   key: string;
   desc: string;
+  detail?: string;
 }
 type PermsByFamily = Record<string, Perm[]>;
 
@@ -554,7 +556,7 @@ function RolePermissionDialog({ role, permsByFamily, onClose }: { role: R; perms
                       return (
                         <label key={p.key} className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1 text-xs hover:bg-muted/40">
                           <Checkbox size="sm" name={role._id} value={String(bitIndex)} checked={isChecked} onChange={() => toggle(String(p.key))} />
-                          <span className="text-foreground">{p.desc}</span>
+                          <DomainPermissionCopy name={p.desc} detail={p.detail} />
                         </label>
                       );
                     })}

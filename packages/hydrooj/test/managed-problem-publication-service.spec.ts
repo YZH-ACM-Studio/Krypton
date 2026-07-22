@@ -1,4 +1,7 @@
 import { expect } from 'chai';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, it } from 'node:test';
 
 const Module = require('module');
@@ -44,6 +47,7 @@ const publicationCommits: any[] = [];
 const observerCalls: any[][] = [];
 const cleanupCalls: any[][] = [];
 const documentAddCalls: any[][] = [];
+const bootstrapAuthorCalls: any[][] = [];
 let currentDraft: any = draft;
 let failPublicationClaimFinalization = false;
 let failPersistenceSessionFinalization = false;
@@ -53,6 +57,7 @@ let failFinalAudit = false;
 let observerWork: (...args: any[]) => Promise<void> = async () => undefined;
 let beforeAddHook: ((...args: any[]) => unknown) | null = null;
 let pendingContributionRows: any[] = [];
+let importedAuthorResult: any = null;
 
 const problemPath = require.resolve('../src/model/problem.ts');
 const originalLoad = Module._load;
@@ -130,7 +135,16 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
         };
     }
     if (request === '../service/db') return { __esModule: true, default: {} };
-    if (request === './builtin') return { PERM: { PERM_EDIT_PROBLEM: 1n }, STATUS: {} };
+    if (request === './builtin') {
+        return {
+            PERM: {
+                PERM_EDIT_PROBLEM: 1n,
+                PERM_CREATE_PROBLEM: 2n,
+                PERM_CREATE_PROGRAMMING_DRAFT: 4n,
+            },
+            STATUS: {},
+        };
+    }
     if (request === './domain') return { __esModule: true, default: { get: async () => ({ namespaces: {} }) } };
     if (request === './document') {
         const emptyCursor: any = {
@@ -188,11 +202,28 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === './problem-access') {
         return new Proxy(
             {
-                isProblemBankAdmin: () => true,
+                isProblemBankAdmin: (user: any) => (typeof user.hasPriv === 'function' ? user.hasPriv() === true : true),
+                canCreateAllProblemKinds: (user: any) =>
+                    (typeof user.hasPriv === 'function' ? user.hasPriv() === true : true) || user.hasPerm?.(2n) === true,
+                canCreateManagedProgrammingDraft: (user: any) =>
+                    (typeof user.hasPriv === 'function' ? user.hasPriv() === true : true) ||
+                    user.hasPerm?.(2n) === true ||
+                    user.hasPerm?.(4n) === true,
+                canImportProblems: (user: any) =>
+                    (typeof user.hasPriv === 'function' ? user.hasPriv() === true : true) || user.hasPerm?.(2n) === true,
+                canAssignManagedAuthor: (user: any) => (typeof user.hasPriv === 'function' ? user.hasPriv() === true : true),
                 PROBLEM_ACL_INTERNAL_FIELDS: new Set(),
             },
             { get: (target, key: string) => target[key] || (() => undefined) },
         );
+    }
+    if (request === './user') {
+        return {
+            __esModule: true,
+            default: {
+                getById: async () => importedAuthorResult,
+            },
+        };
     }
     if (request === './problem-lifecycle') {
         return new Proxy(
@@ -310,6 +341,7 @@ beforeEach(() => {
     observerCalls.length = 0;
     cleanupCalls.length = 0;
     documentAddCalls.length = 0;
+    bootstrapAuthorCalls.length = 0;
     currentDraft = draft;
     failPublicationClaimFinalization = false;
     failPersistenceSessionFinalization = false;
@@ -319,7 +351,11 @@ beforeEach(() => {
     observerWork = async () => undefined;
     beforeAddHook = null;
     pendingContributionRows = [];
+    importedAuthorResult = null;
     (global as any).Hydro.model.permits = {
+        bootstrapManagedDraftAuthor: async (...args: any[]) => {
+            bootstrapAuthorCalls.push(args);
+        },
         listForProblem: async () => [
             { role: 'author', uid: 77 },
             { role: 'verifier', uid: 88 },
@@ -381,6 +417,183 @@ describe('managed programming creation boundary', () => {
         expect(failure).to.be.instanceOf(TestValidationError);
         expect(documentAddCalls).to.deep.equal([]);
         expect(logs.some((entry) => entry[0] === 'warn' && String(entry[1]).includes('changed-by-hook'))).to.equal(true);
+    });
+
+    it('creates a real managed self draft for the original broad create permission', async () => {
+        const result = await ProblemModel.createManagedProgrammingDraft(
+            'system',
+            {
+                workingTitle: '工作标题',
+                content: '# 题面',
+                difficulty: 3,
+                sourceMeta: { template: 'self', year: 2026 },
+                mindmapNodeIds: ['node-1'],
+            },
+            2,
+            { _id: 2, hasPerm: (permission: bigint) => permission === 2n, hasPriv: () => false },
+        );
+
+        expect(result.pid).to.equal('P3107');
+        expect(documentAddCalls).to.have.lengthOf(1);
+        expect(bootstrapAuthorCalls).to.have.lengthOf(1);
+        expect(bootstrapAuthorCalls[0].slice(0, 3)).to.deep.equal(['system', result.docId, 2]);
+    });
+
+    it('imports a real Hydro fixture through the managed-draft creation boundary', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'krypton-managed-import-'));
+        const create = ProblemModel.createManagedProgrammingDraft;
+        const resolveMap = ProblemModel.resolveProgrammingKnowledgeMap;
+        const withDataClaim = ProblemModel.withAuthorizedDataWriteClaim;
+        const addTestdataWithClaim = ProblemModel.addTestdataWithClaim;
+        const addAdditionalFileWithClaim = ProblemModel.addAdditionalFileWithClaim;
+        const rawAddTestdata = ProblemModel.addTestdata;
+        const rawAddAdditionalFile = ProblemModel.addAdditionalFile;
+        const createCalls: any[][] = [];
+        const dataClaimCalls: any[][] = [];
+        const testdataCalls: any[][] = [];
+        const additionalFileCalls: any[][] = [];
+        const progress: string[] = [];
+        try {
+            await mkdir(join(directory, 'testdata'));
+            await mkdir(join(directory, 'additional_file'));
+            await writeFile(
+                join(directory, 'problem.yaml'),
+                ['pid: OLD100', 'owner: 77', 'title: Imported fixture', 'content: "# Statement"', 'difficulty: 3', ''].join('\n'),
+            );
+            await writeFile(join(directory, 'testdata', '1.in'), '1\n');
+            await writeFile(join(directory, 'testdata', '1.out'), '1\n');
+            await writeFile(join(directory, 'testdata', 'config.yaml'), 'cases:\n  - input: 1.in\n    output: 1.out\n');
+            await writeFile(join(directory, 'additional_file', 'readme.txt'), 'fixture attachment\n');
+            ProblemModel.resolveProgrammingKnowledgeMap = async () => ({ mapId: '507f1f77bcf86cd799439010' });
+            ProblemModel.createManagedProgrammingDraft = async (...args: any[]) => {
+                createCalls.push(args);
+                return { docId: 101, pid: 'P5001' };
+            };
+            ProblemModel.withAuthorizedDataWriteClaim = async (...args: any[]) => {
+                dataClaimCalls.push(args);
+                return args[4]({
+                    domainId: args[0],
+                    pid: args[1],
+                    actor: args[2]._id,
+                    operation: args[3],
+                    capability: 'data',
+                    state: 'active',
+                    requestId: args[5].requestId,
+                });
+            };
+            ProblemModel.addTestdataWithClaim = async (...args: any[]) => testdataCalls.push(args);
+            ProblemModel.addAdditionalFileWithClaim = async (...args: any[]) => additionalFileCalls.push(args);
+            ProblemModel.addTestdata = async () => {
+                throw new Error('legacy testdata writer used');
+            };
+            ProblemModel.addAdditionalFile = async () => {
+                throw new Error('legacy additional-file writer used');
+            };
+            const actorUser = { _id: 42, hasPerm: (permission: bigint) => permission === 2n, hasPriv: () => false };
+
+            const result = await ProblemModel.import('system', directory, {
+                actorUser,
+                knowledgeMapId: '507f1f77bcf86cd799439010',
+                progress: (message: string) => progress.push(message),
+            });
+
+            expect(result).to.deep.equal({ imported: 1 });
+            expect(createCalls).to.have.lengthOf(1);
+            expect(createCalls[0][0]).to.equal('system');
+            expect(createCalls[0][1]).to.deep.equal({
+                workingTitle: 'Imported fixture',
+                content: '# Statement',
+                difficulty: 3,
+                sourceMeta: { template: 'self', year: new Date().getFullYear() },
+                knowledgeMapId: '507f1f77bcf86cd799439010',
+                mindmapNodeIds: [],
+            });
+            expect(createCalls[0][2]).to.equal(42);
+            expect(createCalls[0][3]).to.equal(actorUser);
+            expect(dataClaimCalls).to.have.lengthOf(1);
+            expect(dataClaimCalls[0].slice(0, 4)).to.deep.equal(['system', 101, actorUser, 'files-upload']);
+            expect(testdataCalls.map((call) => call[1])).to.deep.equal(['1.in', '1.out', 'config.yaml']);
+            expect(additionalFileCalls.map((call) => call[1])).to.deep.equal(['readme.txt']);
+            expect(progress).to.deep.equal(['Imported problem OLD100 as P5001 (Imported fixture)']);
+        } finally {
+            ProblemModel.createManagedProgrammingDraft = create;
+            ProblemModel.resolveProgrammingKnowledgeMap = resolveMap;
+            ProblemModel.withAuthorizedDataWriteClaim = withDataClaim;
+            ProblemModel.addTestdataWithClaim = addTestdataWithClaim;
+            ProblemModel.addAdditionalFileWithClaim = addAdditionalFileWithClaim;
+            ProblemModel.addTestdata = rawAddTestdata;
+            ProblemModel.addAdditionalFile = rawAddAdditionalFile;
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects a nonexistent imported author before creating the managed draft', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'krypton-managed-import-owner-'));
+        const create = ProblemModel.createManagedProgrammingDraft;
+        const resolveMap = ProblemModel.resolveProgrammingKnowledgeMap;
+        let createCalls = 0;
+        try {
+            await writeFile(join(directory, 'problem.yaml'), ['owner: 999', 'title: Missing owner', 'content: "# Statement"', ''].join('\n'));
+            ProblemModel.resolveProgrammingKnowledgeMap = async () => ({ mapId: '507f1f77bcf86cd799439010' });
+            ProblemModel.createManagedProgrammingDraft = async () => {
+                createCalls++;
+                return { docId: 101, pid: 'P5001' };
+            };
+
+            let failure: any;
+            try {
+                await ProblemModel.import('system', directory, {
+                    actorUser: { _id: 2, hasPerm: () => false, hasPriv: () => true },
+                    keepOriginalAuthor: true,
+                    knowledgeMapId: '507f1f77bcf86cd799439010',
+                });
+            } catch (error) {
+                failure = error;
+            }
+
+            expect(failure.message).to.equal('Failed to import problem .');
+            expect(failure.cause).to.be.instanceOf(TestValidationError);
+            expect(createCalls).to.equal(0);
+        } finally {
+            ProblemModel.createManagedProgrammingDraft = create;
+            ProblemModel.resolveProgrammingKnowledgeMap = resolveMap;
+            await rm(directory, { recursive: true, force: true });
+        }
+    });
+
+    it('fails the complete import when any fixture cannot create a managed draft', async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'krypton-managed-import-failure-'));
+        const create = ProblemModel.createManagedProgrammingDraft;
+        const resolveMap = ProblemModel.resolveProgrammingKnowledgeMap;
+        const cause = new Error('managed draft rejected');
+        const progress: string[] = [];
+        try {
+            await writeFile(join(directory, 'problem.yaml'), ['title: Broken fixture', 'content: "# Statement"', ''].join('\n'));
+            ProblemModel.resolveProgrammingKnowledgeMap = async () => ({ mapId: '507f1f77bcf86cd799439010' });
+            ProblemModel.createManagedProgrammingDraft = async () => {
+                throw cause;
+            };
+
+            let failure: any;
+            try {
+                await ProblemModel.import('system', directory, {
+                    actorUser: { _id: 42, hasPerm: (permission: bigint) => permission === 2n, hasPriv: () => false },
+                    knowledgeMapId: '507f1f77bcf86cd799439010',
+                    progress: (message: string) => progress.push(message),
+                });
+            } catch (error) {
+                failure = error;
+            }
+
+            expect(failure).to.be.instanceOf(Error);
+            expect(failure.message).to.equal('Failed to import problem .');
+            expect(failure.cause).to.equal(cause);
+            expect(progress).to.deep.equal(['Error importing problem .: managed draft rejected']);
+        } finally {
+            ProblemModel.createManagedProgrammingDraft = create;
+            ProblemModel.resolveProgrammingKnowledgeMap = resolveMap;
+            await rm(directory, { recursive: true, force: true });
+        }
     });
 });
 

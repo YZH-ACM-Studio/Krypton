@@ -296,7 +296,15 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const importEnd = source.indexOf('static async export(', importStart);
         const importer = source.slice(importStart, importEnd);
         expect(importer).to.include("'testdata', 'attachments', 'generators', 'include', 'data', 'output_validators'");
-        expect(importer.indexOf('await validateImportedTestdataConfigs()')).to.be.lessThan(importer.indexOf('const overrideDoc = overridePid'));
+        expect(importer.indexOf('await validateImportedTestdataConfigs()')).to.be.lessThan(
+            importer.indexOf('await ProblemModel.createManagedProgrammingDraft('),
+        );
+        expect(importer).not.to.include('await ProblemModel.add(');
+        expect(importer).not.to.include('await ProblemModel.addTestdata(');
+        expect(importer).not.to.include('await ProblemModel.addAdditionalFile(');
+        expect(importer).to.include('await ProblemModel.withAuthorizedDataWriteClaim(');
+        expect(importer).to.include('await ProblemModel.addTestdataWithClaim(');
+        expect(importer).to.include('await ProblemModel.addAdditionalFileWithClaim(');
     });
 
     it('routes managed publication through one audited review service with transaction or bounded compensation', () => {
@@ -330,7 +338,7 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const publishEnd = source.indexOf('static createProblemByKind(', publishStart);
         const publish = source.slice(publishStart, publishEnd);
 
-        expect(create).to.include('actorUser.hasPerm(PERM.PERM_CREATE_PROGRAMMING_DRAFT)');
+        expect(create).to.include('ProblemModel.canCreateManagedProgrammingDraft(actorUser)');
         expect(create).to.include("requestedTemplate !== 'self'");
         expect(create).to.include("['pendingTrainingPlacement']");
         expect(create).to.include('throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT)');

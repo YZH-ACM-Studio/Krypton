@@ -135,6 +135,25 @@ describe('sudo mutation replay', () => {
     expect(() => resolveSudoReplayTarget('GET', '/domain/permission')).to.throw(TypeError);
     expect(() => buildSudoReplayFields({ nested: { unsafe: true } })).to.throw(TypeError);
   });
+
+  it('decodes session-persisted repeated fields without accepting arbitrary objects', () => {
+    expect(
+      buildSudoReplayFields({
+        operation: 'update',
+        permissions: {
+          0: '1',
+          1: (1n << 80n).toString(),
+        },
+      }),
+    ).to.deep.equal([
+      { name: 'operation', value: 'update' },
+      { name: 'permissions', value: '1' },
+      { name: 'permissions', value: (1n << 80n).toString() },
+    ]);
+    expect(() => buildSudoReplayFields({ permissions: { 1: 'missing-zero' } })).to.throw(TypeError);
+    expect(() => buildSudoReplayFields({ permissions: { 0: { unsafe: true } } })).to.throw(TypeError);
+    expect(() => buildSudoReplayFields({ permissions: { arbitrary: 'value' } })).to.throw(TypeError);
+  });
 });
 
 describe('domain permission workspace contracts', () => {
@@ -209,5 +228,6 @@ describe('domain permission workspace contracts', () => {
     expect(handler).to.include("accept.includes('application/json')");
     expect(sudo).to.include('formRef.current.requestSubmit()');
     expect(userHandler).to.include('args: { ...this.session.sudoArgs.args }');
+    expect(handler).to.match(/class DomainPermissionHandler[\s\S]*?@requireSudo\s+async get/);
   });
 });

@@ -269,6 +269,7 @@ class DomainPermissionHandler extends ManageHandler {
         else this.response.redirect = this.url('domain_permission');
     }
 
+    @requireSudo
     async get({ domainId }) {
         const roles = await loadDomainPermissionWorkspace(domain, domainId);
         this.response.template = 'domain_permission.html';

@@ -8,6 +8,7 @@ import { resolveAnnouncementManagementCapability } from './announcement-capabili
 import { resolveDomainPermissionManagementCapability } from './domain-permission-capabilities';
 import { resolveRankboardCapabilities } from './rankboard-capabilities';
 import { resolveTaskManagementCapability } from './task-capabilities';
+import { resolveUiLocale } from './ui-locale';
 
 interface ManifestChunk {
   file: string;
@@ -207,6 +208,7 @@ function renderUiNextMail(templateName: string, args: Record<string, any>, conte
 
 function buildBootstrap(templateName: string, args: Record<string, any>, context: Record<string, any>) {
   const currentUser = context.UserContext || {};
+  const uiLocale = resolveUiLocale(currentUser.viewLang);
   const domain = args.domain || context.handler?.domain || {};
   const siteName = domain?.ui?.name || domain?.name || 'Hydro';
   // Footer extras: system-wide and per-domain HTML lines. Pre-sanitised
@@ -298,7 +300,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
   return {
     appName: 'Krypton',
     siteName,
-    locale: currentUser.viewLang || 'zh-CN',
+    locale: uiLocale,
     theme: toUiTheme(currentUser.theme),
     generatedAt: new Date().toISOString(),
     user: {
@@ -307,7 +309,7 @@ function buildBootstrap(templateName: string, args: Record<string, any>, context
       mail: currentUser.mail || '',
       signedIn: Number(currentUser._id || 0) > 0,
       theme: currentUser.theme || 'light',
-      viewLang: currentUser.viewLang || 'zh-CN',
+      viewLang: uiLocale,
       unreadMessages: currentUser.unreadMsg || 0,
       rp: currentUser.rp || 0,
       bio: currentUser.bio || '',

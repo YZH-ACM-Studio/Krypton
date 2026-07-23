@@ -10,12 +10,27 @@ function serializeReplayValue(name: string, value: unknown): string {
   throw new TypeError(`身份验证重放字段 ${name} 不是可提交的标量`);
 }
 
+function expandReplayValues(name: string, raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw;
+  if (!raw || typeof raw !== 'object') return [raw];
+
+  const entries = Object.entries(raw);
+  if (!entries.length || entries.some(([key]) => !/^(0|[1-9]\d*)$/.test(key))) {
+    throw new TypeError(`身份验证重放字段 ${name} 不是可提交的重复字段`);
+  }
+  entries.sort(([left], [right]) => Number(left) - Number(right));
+  if (entries.some(([key], index) => Number(key) !== index)) {
+    throw new TypeError(`身份验证重放字段 ${name} 的顺序无效`);
+  }
+  return entries.map(([, value]) => value);
+}
+
 export function buildSudoReplayFields(args: unknown): SudoReplayField[] {
   if (!args || typeof args !== 'object' || Array.isArray(args)) throw new TypeError('身份验证重放参数无效');
   const fields: SudoReplayField[] = [];
   for (const [name, raw] of Object.entries(args)) {
     if (name === '__start' || raw === undefined || raw === null) continue;
-    const values = Array.isArray(raw) ? raw : [raw];
+    const values = expandReplayValues(name, raw);
     for (const value of values) fields.push({ name, value: serializeReplayValue(name, value) });
   }
   return fields;

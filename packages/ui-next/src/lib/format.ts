@@ -1,3 +1,7 @@
+import { resolveUiLocale } from '../../ui-locale';
+
+export { resolveUiLocale };
+
 export function toDate(value: unknown) {
   if (!value) return null;
   if (value instanceof Date) return value;
@@ -9,7 +13,7 @@ export function toDate(value: unknown) {
 export function formatDateTime(value: unknown, locale: string, timeZone?: string) {
   const date = toDate(value);
   if (!date) return 'TBD';
-  return new Intl.DateTimeFormat(locale || 'zh-CN', {
+  return new Intl.DateTimeFormat(resolveUiLocale(locale), {
     dateStyle: 'medium',
     timeStyle: 'short',
     ...(timeZone ? { timeZone } : {}),
@@ -19,7 +23,7 @@ export function formatDateTime(value: unknown, locale: string, timeZone?: string
 export function formatShortDate(value: unknown, locale: string) {
   const date = toDate(value);
   if (!date) return 'TBD';
-  return new Intl.DateTimeFormat(locale || 'zh-CN', {
+  return new Intl.DateTimeFormat(resolveUiLocale(locale), {
     month: 'short',
     day: 'numeric',
   }).format(date);
@@ -31,7 +35,7 @@ export function formatRelativeTime(value: unknown, locale: string) {
 
   const diffMs = date.getTime() - Date.now();
   const diffMinutes = Math.round(diffMs / 1000 / 60);
-  const relative = new Intl.RelativeTimeFormat(locale || 'zh-CN', {
+  const relative = new Intl.RelativeTimeFormat(resolveUiLocale(locale), {
     numeric: 'auto',
   });
 

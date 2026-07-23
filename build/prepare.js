@@ -141,6 +141,7 @@ const UINextConfig = {
         `packages/ui-next/domain-permission-capabilities.${ext}`,
         `packages/ui-next/rankboard-capabilities.${ext}`,
         `packages/ui-next/task-capabilities.${ext}`,
+        `packages/ui-next/ui-locale.${ext}`,
     ]),
     compilerOptions: {
         ...compilerOptionsBase,
@@ -204,6 +205,7 @@ const CheckConfig = {
         'packages/ui-next/domain-permission-capabilities.ts',
         'packages/ui-next/rankboard-capabilities.ts',
         'packages/ui-next/task-capabilities.ts',
+        'packages/ui-next/ui-locale.ts',
     ],
     compilerOptions: {
         ...compilerOptionsBase,

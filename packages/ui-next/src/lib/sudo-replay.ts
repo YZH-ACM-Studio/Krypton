@@ -28,3 +28,19 @@ export function resolveSudoReplayTarget(method: unknown, redirect: unknown): str
   }
   return redirect;
 }
+
+/**
+ * Hydro represents a redirect from a JSON request as `{ url }` with HTTP 200.
+ * Only the canonical same-origin sudo endpoint is valid for permission mutations.
+ */
+export function resolveSudoChallengeUrl(payload: unknown, currentHref: string): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || typeof (payload as { url?: unknown }).url !== 'string') {
+    return null;
+  }
+  const current = new URL(currentHref);
+  const destination = new URL((payload as { url: string }).url, current);
+  if (destination.origin !== current.origin || destination.pathname !== '/user/sudo' || destination.search || destination.hash) {
+    throw new TypeError('权限操作返回了无效的身份验证地址');
+  }
+  return destination.href;
+}

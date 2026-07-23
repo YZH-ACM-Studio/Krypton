@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { resolveDomainPermissionManagementCapability } from '../domain-permission-capabilities.ts';
-import { buildSudoReplayFields, resolveSudoReplayTarget } from '../src/lib/sudo-replay.ts';
+import { buildSudoReplayFields, resolveSudoChallengeUrl, resolveSudoReplayTarget } from '../src/lib/sudo-replay.ts';
 import {
   composeDomainPermissionMask,
   diffDomainPermissionDraft,
@@ -109,6 +109,14 @@ describe('domain permission workspace state', () => {
 });
 
 describe('sudo mutation replay', () => {
+  it('recognizes Hydro JSON sudo challenges without accepting arbitrary redirects', () => {
+    const currentUrl = 'http://10.1.234.2/domain/permission';
+    expect(resolveSudoChallengeUrl(JSON.parse('{"url":"/user/sudo"}'), currentUrl)).to.equal('http://10.1.234.2/user/sudo');
+    expect(resolveSudoChallengeUrl({ ok: true }, currentUrl)).to.equal(null);
+    expect(() => resolveSudoChallengeUrl({ url: 'https://example.com/user/sudo' }, currentUrl)).to.throw(TypeError);
+    expect(() => resolveSudoChallengeUrl({ url: '/domain/permission' }, currentUrl)).to.throw(TypeError);
+  });
+
   it('replays every selected permission as a repeated form field', () => {
     expect(
       buildSudoReplayFields({

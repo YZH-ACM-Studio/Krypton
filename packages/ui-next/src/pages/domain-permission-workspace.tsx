@@ -21,6 +21,7 @@ import {
   type DomainPermissionItem,
 } from '@/lib/domain-permission-state';
 import { readHydroResponseError } from '@/lib/problem-save-response';
+import { resolveSudoChallengeUrl } from '@/lib/sudo-replay';
 
 interface DomainPermissionRole {
   id: string;
@@ -73,13 +74,20 @@ async function postRoleOperation(endpoint: string, fields: Record<string, string
     body,
   });
   if (response.redirected) {
-    window.location.assign(response.url);
+    const sudoUrl = resolveSudoChallengeUrl({ url: response.url }, window.location.href);
+    if (!sudoUrl) throw new Error('权限操作发生了非预期重定向');
+    window.location.assign(sudoUrl);
     throw new Error('正在跳转到身份验证页面…');
   }
   if (!response.ok) throw new Error(await readHydroResponseError(response, '权限操作失败'));
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) throw new Error('服务器未返回明确的 JSON 成功结果');
   const payload = await response.json();
+  const sudoUrl = resolveSudoChallengeUrl(payload, window.location.href);
+  if (sudoUrl) {
+    window.location.assign(sudoUrl);
+    throw new Error('正在跳转到身份验证页面…');
+  }
   if (!payload || typeof payload !== 'object' || payload.ok !== true) throw new Error('服务器未确认权限操作成功');
   return payload as Record<string, any>;
 }

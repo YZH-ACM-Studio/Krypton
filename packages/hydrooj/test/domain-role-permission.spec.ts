@@ -167,6 +167,24 @@ describe('domain role permission workspace service', () => {
         expectValidationError(() => parseDomainPermissionSelection(['1', '1']));
     });
 
+    it('accepts Hydro repeated form fields while rejecting malformed field objects', () => {
+        const highest = 1n << 80n;
+        expect(
+            parseDomainPermissionSelection({
+                0: '1',
+                1: highest.toString(),
+            }),
+        ).to.deep.equal({
+            mask: 1n | highest,
+            keys: ['1', highest.toString()],
+        });
+
+        expectValidationError(() => parseDomainPermissionSelection({ 1: '1' }));
+        expectValidationError(() => parseDomainPermissionSelection({ 0: '1', 2: highest.toString() }));
+        expectValidationError(() => parseDomainPermissionSelection({ arbitrary: '1' }));
+        expectValidationError(() => parseDomainPermissionSelection({ 0: { unsafe: true } }));
+    });
+
     it('returns a 409 conflict for stale expected masks and CAS races', async () => {
         const stale = new FakeRoleRepository();
         stale.roles.set('reviewer', 1n);

@@ -83,6 +83,17 @@ function normalizePermissionValues(raw: unknown): unknown[] {
     if (raw === undefined || raw === null) return [];
     if (Array.isArray(raw)) return raw;
     if (typeof raw === 'string' || typeof raw === 'bigint') return [raw];
+    if (typeof raw === 'object') {
+        const entries = Object.entries(raw);
+        if (!entries.length || entries.some(([key]) => !/^(0|[1-9]\d*)$/.test(key))) {
+            throw new ValidationError('permissions', raw);
+        }
+        entries.sort(([left], [right]) => Number(left) - Number(right));
+        if (entries.some(([key], index) => Number(key) !== index)) {
+            throw new ValidationError('permissions', raw);
+        }
+        return entries.map(([, value]) => value);
+    }
     throw new ValidationError('permissions', raw);
 }
 

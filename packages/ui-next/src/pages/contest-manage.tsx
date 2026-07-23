@@ -605,7 +605,7 @@ export function ContestEditPage() {
                       ) : null}
                     </div>
                     <SimpleSelect
-                      name="plannedTeamBatchId"
+                  name={canUpdatePlannedTeamBatch ? 'plannedTeamBatchId' : undefined}
                       value={plannedTeamBatchId}
                       onValueChange={setPlannedTeamBatchId}
                       disabled={!canUpdatePlannedTeamBatch}

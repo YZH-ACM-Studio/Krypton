@@ -367,6 +367,19 @@ describe('contest status recalculation ordering', () => {
 });
 
 describe('contest autoHide canonical maintenance', () => {
+    it('does not rewrite grandfathered problems when autoHide is already enabled and the selection is unchanged', async () => {
+        const handler = makeHandler();
+        handler.tdoc.autoHide = true;
+        problemDocs.set(11, { domainId: 'system', docId: 11, owner: 7, allowed: false });
+        problemDocs.set(22, { domainId: 'system', docId: 22, owner: 8, allowed: false });
+
+        await update(handler);
+
+        expect(calls.getLists).to.deep.equal([]);
+        expect(calls.problemEdits).to.deep.equal([]);
+        expect(calls.contestEdits).to.have.length(2);
+    });
+
     it('rejects a grandfathered unauthorized target before any contest or problem write', async () => {
         problemDocs.set(11, { domainId: 'system', docId: 11, owner: 42, allowed: true });
         problemDocs.set(22, { domainId: 'system', docId: 22, owner: 7, allowed: false });

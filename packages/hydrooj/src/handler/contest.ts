@@ -823,6 +823,9 @@ export class ContestEditHandler extends Handler {
         if (!Object.keys(contest.RULES).includes(rule) || contest.RULES[rule].hidden) throw new ValidationError('rule');
         if (autoHide) this.checkPerm(PERM.PERM_EDIT_PROBLEM);
         const pids = parseProblemDocIds(_pids);
+        const previousPids = new Set(this.tdoc?.pids || []);
+        const autoHideTargets =
+            autoHide && (!this.tdoc || !this.tdoc.autoHide) ? pids : autoHide ? pids.filter((pid) => !previousPids.has(pid)) : [];
         const beginAtMoment = moment.tz(`${beginAtDate} ${beginAtTime}`, this.user.timeZone);
         if (!beginAtMoment.isValid()) throw new ValidationError('beginAtDate', 'beginAtTime');
         const endAt = beginAtMoment.clone().add(duration, 'hours').toDate();
@@ -848,7 +851,7 @@ export class ContestEditHandler extends Handler {
         }
         const statusRecalcToken = statusRecalcReasons.length ? randomstring(24) : null;
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, this.tdoc?.pids);
-        if (autoHide) await assertCanPublishAutoHiddenProblems(authoritativeDomainId, pids, this.user);
+        if (autoHideTargets.length) await assertCanPublishAutoHiddenProblems(authoritativeDomainId, autoHideTargets, this.user);
         const effectiveParticipationMode = participationMode || (this.tdoc ? contest.getParticipationMode(this.tdoc) : 'individual');
         const existingTeamBatchId = this.tdoc?.teamBatchId ? new ObjectId(this.tdoc.teamBatchId) : null;
         const existingPlannedTeamBatchId = this.tdoc?.plannedTeamBatchId ? new ObjectId(this.tdoc.plannedTeamBatchId) : null;
@@ -916,7 +919,7 @@ export class ContestEditHandler extends Handler {
         await ScheduleModel.deleteMany(task);
         const operation = [];
         if (Date.now() <= endAt.getTime() && autoHide) {
-            await Promise.all(pids.map((pid) => problem.editAuthorized(authoritativeDomainId, pid, { hidden: true }, this.user)));
+            await Promise.all(autoHideTargets.map((pid) => problem.editAuthorized(authoritativeDomainId, pid, { hidden: true }, this.user)));
             operation.push('unhide');
         }
         if (operation.length) {

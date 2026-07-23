@@ -558,7 +558,7 @@ export function ContestEditPage() {
                     </label>
                     <SimpleSelect
                       id="rule"
-                      name="rule"
+                      name={participationMode === 'team' ? undefined : 'rule'}
                       value={rule}
                       disabled={participationMode === 'team'}
                       onValueChange={setRule}

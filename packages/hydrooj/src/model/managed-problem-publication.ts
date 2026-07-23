@@ -63,7 +63,10 @@ function claimedDraftFilter(input: ManagedProblemPublicationCommit) {
         hidden: true,
         archivedAt: { $exists: false },
         structureRevision: input.expectedStructureRevision,
-        structureLockedAt: { $exists: false },
+        // A first submission locks the evaluated structure, not visibility.
+        // Initial publication still requires an unlocked draft; a previously
+        // confirmed problem may be re-published without discarding that lock.
+        ...(input.expectedMetadataStatus === 'draft' ? { structureLockedAt: { $exists: false } } : {}),
         'managedAuthoring.metadataStatus': input.expectedMetadataStatus,
         'aclWriteClaim.requestId': input.claim.requestId,
         'aclWriteClaim.actor': input.claim.actor,

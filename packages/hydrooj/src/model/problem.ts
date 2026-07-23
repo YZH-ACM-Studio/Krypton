@@ -1421,6 +1421,133 @@ export class ProblemModel {
         );
     }
 
+    /**
+     * Reveal one already-confirmed managed problem when an auto-hide contest
+     * ends. A submission lock protects evaluated content and test data; it
+     * must remain intact and must not block this visibility-only CAS.
+     */
+    static async autoRevealConfirmedManagedProgrammingProblem(input: {
+        domainId: string;
+        docId: number;
+        contestId: ObjectId | string;
+    }): Promise<ProblemDoc | null> {
+        const contestId = String(input.contestId);
+        const pdoc = await document.coll.findOne(
+            {
+                domainId: input.domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: input.docId,
+            },
+            {
+                projection: {
+                    domainId: 1,
+                    docId: 1,
+                    pid: 1,
+                    problemKind: 1,
+                    authoringMode: 1,
+                    hidden: 1,
+                    lockHidden: 1,
+                    archivedAt: 1,
+                    managedAuthoring: 1,
+                    structureRevision: 1,
+                    structureLockedAt: 1,
+                    structureLockReason: 1,
+                },
+            },
+        );
+        if (!pdoc) throw new ProblemNotFoundError(input.domainId, input.docId);
+        if (pdoc.authoringMode !== 'managed') throw new ValidationError('authoringMode');
+        if (pdoc.hidden !== true) {
+            logger.info(
+                'Contest managed auto-reveal already public domain=%s contest=%s pid=%d stage=preflight result=noop',
+                input.domainId,
+                contestId,
+                input.docId,
+            );
+            return pdoc as ProblemDoc;
+        }
+        if (pdoc.lockHidden) {
+            logger.info(
+                'Contest managed auto-reveal skipped locked-hidden problem domain=%s contest=%s pid=%d stage=preflight result=skipped',
+                input.domainId,
+                contestId,
+                input.docId,
+            );
+            return null;
+        }
+        if (pdoc.archivedAt) {
+            logger.warn(
+                'Contest managed auto-reveal skipped archived problem domain=%s contest=%s pid=%d stage=preflight result=skipped',
+                input.domainId,
+                contestId,
+                input.docId,
+            );
+            return null;
+        }
+        if (pdoc.managedAuthoring?.metadataStatus !== 'confirmed') {
+            logger.warn(
+                'Contest managed auto-reveal skipped unconfirmed problem domain=%s contest=%s pid=%d metadataStatus=%s stage=preflight result=manual-admin-publish-required',
+                input.domainId,
+                contestId,
+                input.docId,
+                pdoc.managedAuthoring?.metadataStatus || 'missing',
+            );
+            return null;
+        }
+        assertStructureRevision(pdoc.structureRevision);
+        const requestId = `contest-auto-unhide:${contestId}:${input.docId}:${pdoc.structureRevision}`;
+        await OplogModel.add({
+            type: 'problem.managed.contest-unhide',
+            domainId: input.domainId,
+            problemId: input.docId,
+            contestId,
+            revision: pdoc.structureRevision,
+            action: 'unhide',
+            result: 'attempt',
+            requestId,
+            time: new Date(),
+        } as any);
+        const revealed = (await document.coll.findOneAndUpdate(
+            {
+                domainId: input.domainId,
+                docType: document.TYPE_PROBLEM,
+                docId: input.docId,
+                problemKind: 'programming',
+                authoringMode: 'managed',
+                hidden: true,
+                lockHidden: { $ne: true },
+                archivedAt: { $exists: false },
+                structureRevision: pdoc.structureRevision,
+                'managedAuthoring.metadataStatus': 'confirmed',
+            },
+            { $set: { hidden: false } },
+            { returnDocument: 'after' },
+        )) as ProblemDoc | null;
+        if (!revealed) throw new ProblemStructureConflictError(input.docId);
+        bus.emit('problem/edit', revealed, requestId, { hidden: true });
+        await OplogModel.add({
+            type: 'problem.managed.contest-unhide',
+            domainId: input.domainId,
+            problemId: input.docId,
+            contestId,
+            revision: pdoc.structureRevision,
+            action: 'unhide',
+            result: 'success',
+            requestId,
+            time: new Date(),
+        } as any);
+        logger.info(
+            'Contest managed auto-reveal completed domain=%s contest=%s pid=%d requestId=%s revision=%d structureLocked=%s stage=complete result=success',
+            input.domainId,
+            contestId,
+            input.docId,
+            requestId,
+            pdoc.structureRevision,
+            !!pdoc.structureLockedAt,
+        );
+        return revealed;
+    }
+
     /** The only service allowed to confirm metadata, attach training, and finalize managed-draft visibility. */
     static async publishManagedProgrammingProblem(input: {
         domainId: string;
@@ -1506,7 +1633,8 @@ export class ProblemModel {
                     ) {
                         throw new ManagedProblemMetadataConflictError('题目不再是可发布的托管草稿');
                     }
-                    if (pdoc.structureRevision !== input.expectedStructureRevision || pdoc.structureLockedAt) {
+                    const isConfirmedRepublish = pdoc.managedAuthoring.metadataStatus === 'confirmed';
+                    if (pdoc.structureRevision !== input.expectedStructureRevision || (!isConfirmedRepublish && pdoc.structureLockedAt)) {
                         throw new ProblemStructureConflictError(input.docId);
                     }
                     let prepared: Awaited<ReturnType<typeof prepareManagedProblemPublication>>;

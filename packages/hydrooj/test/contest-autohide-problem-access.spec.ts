@@ -30,6 +30,7 @@ const calls = {
     maintains: [] as any[],
     publishes: [] as any[],
     modelDomains: [] as Array<{ model: string; domainId: string }>,
+    managedAutoReveals: [] as any[],
     problemEdits: [] as any[],
     selections: [] as any[],
 };
@@ -89,6 +90,10 @@ const problemStub = {
                 .map((doc) => [doc.docId, doc]),
         );
     },
+    async get(domainId: string, pid: number) {
+        calls.modelDomains.push({ model: 'problem.get', domainId });
+        return problemDocs.get(pid) || null;
+    },
     canMaintainProblem(user: any, pdoc: any) {
         calls.events.push(`maintain:${pdoc.docId}`);
         calls.maintains.push({ user, pdoc });
@@ -108,6 +113,11 @@ const problemStub = {
     async editAuthorized(...args: any[]) {
         calls.events.push(`problem.editAuthorized:${args[1]}`);
         calls.problemEdits.push(args);
+    },
+    async autoRevealConfirmedManagedProgrammingProblem(input: any) {
+        calls.events.push(`problem.autoReveal:${input.docId}`);
+        calls.managedAutoReveals.push(input);
+        return problemDocs.get(input.docId) || null;
     },
 };
 
@@ -424,6 +434,22 @@ describe('contest autoHide canonical maintenance', () => {
         expect(error?.name).to.equal('PermissionError');
         expect(calls.events).to.deep.equal(['publish:11', 'publish:22']);
         expect(calls.contestEdits).to.deep.equal([]);
+        expect(calls.problemEdits).to.deep.equal([]);
+    });
+
+    it('routes a confirmed managed contest problem through the canonical auto-reveal service', async () => {
+        problemDocs.set(11, {
+            domainId: 'system',
+            docId: 11,
+            authoringMode: 'managed',
+            managedAuthoring: { metadataStatus: 'confirmed' },
+            hidden: true,
+            structureLockedAt: new Date('2026-07-23T04:06:16.019Z'),
+        });
+
+        await contestModule.autoUnhideContestProblem('system', 'contest-1' as any, 11);
+
+        expect(calls.managedAutoReveals).to.deep.equal([{ domainId: 'system', docId: 11, contestId: 'contest-1' }]);
         expect(calls.problemEdits).to.deep.equal([]);
     });
 });

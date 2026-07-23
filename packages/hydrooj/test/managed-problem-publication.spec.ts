@@ -46,7 +46,12 @@ const documentColl = {
     async findOneAndUpdate(filter: any, update: any, options: any) {
         calls.problemUpdates.push({ filter, update, options });
         if (filter['aclWriteClaim.operation'] !== problemDoc?.aclWriteClaim?.operation) return null;
-        if (filter.structureRevision !== problemDoc?.structureRevision || problemDoc?.structureLockedAt) return null;
+        if (
+            filter.structureRevision !== problemDoc?.structureRevision ||
+            (filter.structureLockedAt?.$exists === false && problemDoc?.structureLockedAt)
+        ) {
+            return null;
+        }
         if (casMode === 'null') return null;
         Object.assign(problemDoc, update.$set);
         if (casMode === 'throw-after-write') throw new Error('problem update response lost');
@@ -252,6 +257,27 @@ describe('P2.14 managed problem publication persistence', () => {
         const result = await publication.commitManagedProblemPublication(request);
         expect(result).to.include({ hidden: false, title: '正式标题' });
         expect(calls.problemUpdates[0].update.$set.managedAuthoring.metadataStatus).to.equal('confirmed');
+    });
+
+    it('re-publishes a confirmed managed problem after a contest submission locked its structure', async () => {
+        const lockedAt = new Date('2026-07-23T04:06:16.019Z');
+        problemDoc.structureRevision = 3;
+        problemDoc.structureLockedAt = lockedAt;
+        problemDoc.structureLockReason = 'first_submission';
+        problemDoc.managedAuthoring.metadataStatus = 'confirmed';
+        const request = input();
+        request.expectedMetadataStatus = 'confirmed';
+        request.expectedStructureRevision = 3;
+
+        const result = await publication.commitManagedProblemPublication(request);
+
+        expect(result).to.include({
+            hidden: false,
+            structureRevision: 3,
+            structureLockedAt: lockedAt,
+            structureLockReason: 'first_submission',
+        });
+        expect(calls.problemUpdates[0].filter).not.to.have.property('structureLockedAt');
     });
 
     it('keeps the draft hidden when its structure revision changes before the publication CAS', async () => {

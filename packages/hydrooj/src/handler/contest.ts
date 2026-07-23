@@ -83,6 +83,20 @@ async function assertCanPublishAutoHiddenProblems(domainId: string, pids: number
     if (!allPublishable) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
 }
 
+export async function autoUnhideContestProblem(domainId: string, contestId: ObjectId | string, pid: number): Promise<void> {
+    const pdoc = await problem.get(domainId, pid);
+    if (!pdoc) {
+        logger.warn('Contest auto-publish skipped missing problem domain=%s contest=%s pid=%d stage=unhide result=skipped', domainId, contestId, pid);
+        return;
+    }
+    if (pdoc.authoringMode === 'managed') {
+        await problem.autoRevealConfirmedManagedProgrammingProblem({ domainId, docId: pid, contestId });
+        return;
+    }
+    if ((pdoc as any).lockHidden) return;
+    await problem.edit(domainId, pid, { hidden: false });
+}
+
 function parseStringList(value: any): string[] {
     const raw = Array.isArray(value) ? value.join('\n') : String(value || '');
     return raw
@@ -824,8 +838,7 @@ export class ContestEditHandler extends Handler {
         if (autoHide) this.checkPerm(PERM.PERM_EDIT_PROBLEM);
         const pids = parseProblemDocIds(_pids);
         const previousPids = new Set(this.tdoc?.pids || []);
-        const autoHideTargets =
-            autoHide && (!this.tdoc || !this.tdoc.autoHide) ? pids : autoHide ? pids.filter((pid) => !previousPids.has(pid)) : [];
+        const autoHideTargets = autoHide && (!this.tdoc || !this.tdoc.autoHide) ? pids : autoHide ? pids.filter((pid) => !previousPids.has(pid)) : [];
         const beginAtMoment = moment.tz(`${beginAtDate} ${beginAtTime}`, this.user.timeZone);
         if (!beginAtMoment.isValid()) throw new ValidationError('beginAtDate', 'beginAtTime');
         const endAt = beginAtMoment.clone().add(duration, 'hours').toDate();
@@ -1723,23 +1736,7 @@ export async function apply(ctx: Context) {
                 // unhide manually. Other contest workflows (assign, code,
                 // etc.) are unaffected.
                 for (const pid of tdoc.pids) {
-                    tasks.push(
-                        (async () => {
-                            const pdoc = await problem.get(doc.domainId, pid);
-                            if (!pdoc) return;
-                            if ((pdoc as any).lockHidden) return;
-                            if (pdoc.authoringMode === 'managed') {
-                                logger.warn(
-                                    'Contest auto-publish skipped managed problem domain=%s contest=%s pid=%d action=manual-admin-publish-required',
-                                    doc.domainId,
-                                    doc.tid,
-                                    pid,
-                                );
-                                return;
-                            }
-                            await problem.edit(doc.domainId, pid, { hidden: false });
-                        })(),
-                    );
+                    tasks.push(autoUnhideContestProblem(doc.domainId, doc.tid, pid));
                 }
             }
         }

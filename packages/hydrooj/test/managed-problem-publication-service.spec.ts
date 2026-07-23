@@ -47,6 +47,7 @@ const publicationCommits: any[] = [];
 const observerCalls: any[][] = [];
 const cleanupCalls: any[][] = [];
 const documentAddCalls: any[][] = [];
+const documentUpdateCalls: any[][] = [];
 const bootstrapAuthorCalls: any[][] = [];
 let currentDraft: any = draft;
 let failPublicationClaimFinalization = false;
@@ -182,7 +183,8 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                     }
                     return currentDraft;
                 },
-                async findOneAndUpdate(_filter: any, update: any) {
+                async findOneAndUpdate(filter: any, update: any) {
+                    documentUpdateCalls.push([filter, update]);
                     currentDraft = { ...currentDraft, ...(update.$set || {}) };
                     return currentDraft;
                 },
@@ -274,7 +276,13 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             ManagedProblemPublicationCommittedError: TestPublicationCommittedError,
             async commitManagedProblemPublication(input: any) {
                 publicationCommits.push(input);
-                const committed = { ...publishedDoc, hidden: input.finalHidden === true };
+                const committed = {
+                    ...currentDraft,
+                    title: input.title,
+                    difficulty: input.difficulty,
+                    hidden: input.finalHidden === true,
+                    managedAuthoring: input.managedAuthoring,
+                };
                 if (failPersistenceSessionFinalization) throw new TestPublicationCommittedError(committed);
                 return committed;
             },
@@ -342,6 +350,7 @@ beforeEach(() => {
     observerCalls.length = 0;
     cleanupCalls.length = 0;
     documentAddCalls.length = 0;
+    documentUpdateCalls.length = 0;
     bootstrapAuthorCalls.length = 0;
     currentDraft = draft;
     failPublicationClaimFinalization = false;
@@ -708,6 +717,85 @@ describe('managed programming publication service seam', () => {
         expect(result.pdoc.hidden).to.equal(false);
         expect(observerCalls[0][0]).to.equal('problem/edit');
         expect(oplogs.some((entry) => entry.result === 'success')).to.equal(true);
+    });
+
+    it('re-publishes a confirmed problem after its first contest submission locked the structure', async () => {
+        const lockedAt = new Date('2026-07-23T04:06:16.019Z');
+        currentDraft = {
+            ...publishedDoc,
+            hidden: true,
+            structureRevision: 3,
+            structureLockedAt: lockedAt,
+            structureLockReason: 'first_submission',
+        };
+
+        const result = await publish({ expectedStructureRevision: 3 });
+
+        expect(result.state).to.equal('published');
+        expect(result.pdoc).to.include({
+            hidden: false,
+            structureRevision: 3,
+            structureLockedAt: lockedAt,
+            structureLockReason: 'first_submission',
+        });
+        expect(publicationCommits[0]).to.include({
+            expectedMetadataStatus: 'confirmed',
+            expectedStructureRevision: 3,
+        });
+    });
+
+    it('auto-reveals a confirmed contest problem without removing its first-submission lock', async () => {
+        const lockedAt = new Date('2026-07-23T04:06:16.019Z');
+        currentDraft = {
+            ...publishedDoc,
+            hidden: true,
+            structureRevision: 3,
+            structureLockedAt: lockedAt,
+            structureLockReason: 'first_submission',
+        };
+
+        const result = await ProblemModel.autoRevealConfirmedManagedProgrammingProblem({
+            domainId: 'system',
+            docId: 7,
+            contestId: 'contest-1',
+        });
+
+        expect(result).to.include({
+            hidden: false,
+            structureRevision: 3,
+            structureLockedAt: lockedAt,
+            structureLockReason: 'first_submission',
+        });
+        expect(documentUpdateCalls.at(-1)?.[0]).to.deep.include({
+            domainId: 'system',
+            docId: 7,
+            hidden: true,
+            structureRevision: 3,
+            'managedAuthoring.metadataStatus': 'confirmed',
+        });
+        expect(documentUpdateCalls.at(-1)?.[0]).not.to.have.property('structureLockedAt');
+        expect(oplogs.at(-1)).to.deep.include({
+            type: 'problem.managed.contest-unhide',
+            domainId: 'system',
+            problemId: 7,
+            contestId: 'contest-1',
+            revision: 3,
+            result: 'success',
+        });
+    });
+
+    it('keeps an unconfirmed managed draft hidden at contest end', async () => {
+        currentDraft = { ...draft, hidden: true };
+
+        const result = await ProblemModel.autoRevealConfirmedManagedProgrammingProblem({
+            domainId: 'system',
+            docId: 7,
+            contestId: 'contest-1',
+        });
+
+        expect(result).to.equal(null);
+        expect(currentDraft.hidden).to.equal(true);
+        expect(documentUpdateCalls).to.deep.equal([]);
     });
 
     it('forwards an explicit hidden final state to the canonical persistence service', async () => {

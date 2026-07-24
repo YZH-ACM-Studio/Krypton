@@ -11,6 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useBootstrap } from '@/lib/bootstrap';
 import { formatPlainTextSummary, replaceRouteTokens } from '@/lib/format';
 import { useChapterQuery } from './course/chapter-query';
+import { searchTrainingProblems } from './training-search';
 
 type R = Record<string, any>;
 
@@ -446,6 +447,8 @@ export function TrainingDetailPage() {
   const selectedStatus = selectedNid != null ? nsdict[selectedNid] || {} : {};
   const isOwner = data.tdoc?.owner === bs.user?.id;
   const trainingUrl = replaceRouteTokens(bs.urls.trainingDetail, { TID: String(tdoc.docId) });
+  const [problemQuery, setProblemQuery] = useState('');
+  const problemSearch = useMemo(() => searchTrainingProblems({ dag, pdict, psdict, query: problemQuery }), [dag, pdict, problemQuery, psdict]);
 
   return (
     <motion.div className="space-y-5" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -535,6 +538,96 @@ export function TrainingDetailPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <CardTitle className="text-sm">训练内搜题</CardTitle>
+              <p className="mt-0.5 text-xs text-muted-foreground">按题号或标题搜索全部章节</p>
+            </div>
+            {problemQuery.trim() ? (
+              <span className="text-xs tabular-nums text-muted-foreground" role="status" aria-live="polite">
+                {problemSearch.total > problemSearch.results.length
+                  ? `${problemSearch.results.length}/${problemSearch.total} 个结果`
+                  : `${problemSearch.total} 个结果`}
+              </span>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={problemQuery}
+              onChange={(event) => setProblemQuery(event.target.value)}
+              placeholder="搜索公开题号、内部题号或标题"
+              aria-label="搜索当前训练中的题目"
+              className="pl-9 pr-9"
+            />
+            {problemQuery ? (
+              <button
+                type="button"
+                onClick={() => setProblemQuery('')}
+                className="absolute right-2 top-1/2 rounded-md p-1 -translate-y-1/2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                aria-label="清空训练题目搜索"
+              >
+                <X className="size-3.5" />
+              </button>
+            ) : null}
+          </div>
+
+          {problemQuery.trim() ? (
+            problemSearch.results.length ? (
+              <div className="divide-y rounded-lg border">
+                {problemSearch.results.map((row) => (
+                  <div key={row.docId} className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center">
+                    <a
+                      href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(row.docId) })}
+                      className="min-w-0 flex-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        {row.status === 'accepted' ? (
+                          <CheckCircle2 className="size-4 shrink-0 text-green-600" />
+                        ) : row.status === 'attempted' ? (
+                          <Clock className="size-4 shrink-0 text-amber-600" />
+                        ) : (
+                          <span className="size-4 shrink-0 rounded-full border border-muted-foreground/40" aria-hidden="true" />
+                        )}
+                        <span className="shrink-0 font-mono text-xs text-muted-foreground">{row.displayPid}</span>
+                        <span className="truncate text-sm font-medium hover:text-primary">{row.title}</span>
+                      </div>
+                    </a>
+                    <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+                      <Badge
+                        variant={row.status === 'accepted' ? 'default' : row.status === 'attempted' ? 'secondary' : 'outline'}
+                        className="text-[10px]"
+                      >
+                        {row.status === 'accepted' ? '已通过' : row.status === 'attempted' ? '尝试中' : '未尝试'}
+                      </Badge>
+                      {row.chapters.map((chapter) => (
+                        <button
+                          key={chapter.id}
+                          type="button"
+                          onClick={() => selectChapter(chapter.id)}
+                          className="max-w-44 truncate rounded-md border px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                          title={`切换到章节：${chapter.title}`}
+                        >
+                          {chapter.title}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground" role="status" aria-live="polite">
+                当前训练中没有匹配的可见题目
+              </div>
+            )
+          ) : null}
+        </CardContent>
+      </Card>
 
       {/* Main 64 : 36 grid — left = selected section, right = section list + DAG */}
       <div className="grid gap-5 lg:grid-cols-[64fr_36fr]">

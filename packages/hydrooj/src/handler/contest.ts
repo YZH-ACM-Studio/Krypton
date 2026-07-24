@@ -26,7 +26,13 @@ import {
     ValidationError,
 } from '../error';
 import { FileInfo, ScoreboardConfig, Tdoc } from '../interface';
-import { buildLatestContestProblemStatusByPid } from '../lib/contest-problem-status';
+import { canUsePostContestPractice, getPostContestPracticeState } from '../lib/contest-correction';
+import {
+    buildLatestContestProblemStatusByPid,
+    buildPersonalPracticeRecordQuery,
+    buildPersonalPracticeStatusByPid,
+    PersonalPracticeRecord,
+} from '../lib/contest-problem-status';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
@@ -179,10 +185,16 @@ export class ContestDetailBaseHandler extends Handler {
             contest.get(authoritativeDomainId, tid),
             contest.getStatus(authoritativeDomainId, tid, this.user._id),
         ]);
+        const postContestPracticeEligible = canUsePostContestPractice(this.tdoc, this.tsdoc);
         if (this.tdoc.rule === 'homework') {
             await assertHomeworkAccess(authoritativeDomainId, this.tdoc, this.user);
         } else {
-            if (this.tdoc.assign?.length && !this.user.own(this.tdoc) && !this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)) {
+            if (
+                this.tdoc.assign?.length &&
+                !postContestPracticeEligible &&
+                !this.user.own(this.tdoc) &&
+                !this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)
+            ) {
                 const groups = await user.listGroup(authoritativeDomainId, this.user._id);
                 if (!new Set(this.tdoc.assign).intersection(new Set(groups.map((i) => i.name))).size) {
                     throw new NotAssignedError('contest', tid);
@@ -223,7 +235,7 @@ export class ContestDetailBaseHandler extends Handler {
                         : (this as any).session?.sessionId || (this as any).session?._id || '';
                     const result = await vg.effectiveContestAccess(authoritativeDomainId, this.tdoc, this.user._id, sid);
                     if (!result.ok) {
-                        if (result.reason === 'scope_miss') {
+                        if (result.reason === 'scope_miss' && !postContestPracticeEligible) {
                             throw new NotAssignedError('contest', tid);
                         }
                         if (result.reason === 'client_only' && !contestDone) {
@@ -297,6 +309,8 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
     async get(_domainId: string, tid: ObjectId) {
         const authoritativeDomainId = this.authoritativeDomainId();
         this.response.template = 'contest_detail.html';
+        const canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+        const postContestPractice = getPostContestPracticeState(this.tdoc, this.tsdoc);
         // Load contest problem dict so the new UI can render the problem table
         // inline. Older Hydro split this across /contest/:tid (description) and
         // /contest/:tid/problems (table), but Krypton merges them.
@@ -305,24 +319,35 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
         // ahead of time (same bug class the `files` field already guards
         // against below at line ~185, and that `ContestProblemListHandler`
         // already guards at line ~305).
-        const canPeekProblems =
-            (this.tsdoc?.attend && !contest.isNotStarted(this.tdoc)) ||
-            contest.isDone(this.tdoc) ||
-            this.user.own(this.tdoc) ||
-            this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
+        const canPeekProblems = (this.tsdoc?.attend && !contest.isNotStarted(this.tdoc)) || contest.isDone(this.tdoc) || canManageContest;
+        const canViewAllContestProblems =
+            !postContestPractice.supported ||
+            canManageContest ||
+            (!!this.tsdoc?.attend && !contest.isDone(this.tdoc)) ||
+            postContestPractice.eligible;
         const [udict, pdict, teamContext, teamCount] = await Promise.all([
             user.getList(authoritativeDomainId, [this.tdoc.owner]),
             canPeekProblems
-                ? problem.getList(
-                      authoritativeDomainId,
-                      this.tdoc.pids,
-                      true,
-                      true,
-                      // PROJECTION_CONTEST_LIST omits nSubmit/nAccept/difficulty/tag —
-                      // include them so the detail page can show real pass/submit
-                      // counts in its problem table.
-                      [...problem.PROJECTION_CONTEST_LIST, 'nSubmit', 'nAccept', 'difficulty', 'tag'],
-                  )
+                ? canViewAllContestProblems
+                    ? problem.getList(
+                          authoritativeDomainId,
+                          this.tdoc.pids,
+                          true,
+                          true,
+                          // PROJECTION_CONTEST_LIST omits nSubmit/nAccept/difficulty/tag —
+                          // include them so the detail page can show real pass/submit
+                          // counts in its problem table.
+                          [...problem.PROJECTION_CONTEST_LIST, 'nSubmit', 'nAccept', 'difficulty', 'tag'],
+                          true,
+                      )
+                    : problem.getListViewableAuthorized(
+                          authoritativeDomainId,
+                          this.tdoc.pids,
+                          this.user,
+                          [...problem.PROJECTION_CONTEST_LIST, 'nSubmit', 'nAccept', 'difficulty', 'tag'],
+                          false,
+                          true,
+                      )
                 : Promise.resolve({}),
             currentTeamContext(authoritativeDomainId, this.tdoc, this.user._id),
             contest.getParticipationMode(this.tdoc) === 'team'
@@ -334,7 +359,6 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
                 ? teamContext.status?.detail || {}
                 : this.tsdoc?.detail || {}
             : {};
-        const canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST);
         const canViewRecord =
             contest.canShowSelfRecord.call(this, this.tdoc) && (contest.getParticipationMode(this.tdoc) !== 'team' || !!teamContext.team);
         this.response.body = {
@@ -342,12 +366,14 @@ export class ContestDetailHandler extends ContestDetailBaseHandler {
             tsdoc: this.tsdocAsPublic(),
             udict,
             pdict,
+            pids: this.tdoc.pids.filter((pid) => pdict[pid]),
             psdict,
             team: teamContext.team,
             teamStatus: publicTeamStatus(teamContext.status),
             teamCount,
             canManageContest,
             canViewRecord,
+            postContestPractice,
             files: this.tsdoc?.attend && !contest.isNotStarted(this.tdoc) ? sortFiles(this.tdoc.privateFiles || []) : [],
             urlForFile: (filename: string) => this.url('contest_file_download', { tid, filename, type: 'private' }),
         };
@@ -549,14 +575,24 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
         const authoritativeDomainId = this.authoritativeDomainId();
         if (contest.isNotStarted(this.tdoc)) throw new ContestNotLiveError(authoritativeDomainId, tid);
         if (!this.tsdoc?.attend && !contest.isDone(this.tdoc)) throw new ContestNotAttendedError(authoritativeDomainId, tid);
+        const postContestPractice = getPostContestPracticeState(this.tdoc, this.tsdoc);
+        const canManageContest = this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+        const canViewAllContestProblems =
+            !postContestPractice.supported ||
+            canManageContest ||
+            (!!this.tsdoc?.attend && !contest.isDone(this.tdoc)) ||
+            postContestPractice.eligible;
         const [pdict, udict, tcdocs, teamContext] = await Promise.all([
-            problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, problem.PROJECTION_CONTEST_LIST),
+            canViewAllContestProblems
+                ? problem.getList(authoritativeDomainId, this.tdoc.pids, true, true, problem.PROJECTION_CONTEST_LIST, true)
+                : problem.getListViewableAuthorized(authoritativeDomainId, this.tdoc.pids, this.user, problem.PROJECTION_CONTEST_LIST, false, true),
             user.getList(authoritativeDomainId, [this.tdoc.owner, this.user._id]),
             contest.getMultiClarification(authoritativeDomainId, tid, this.user._id),
             currentTeamContext(authoritativeDomainId, this.tdoc, this.user._id),
         ]);
         this.response.body = {
             pdict,
+            visiblePids: this.tdoc.pids.filter((pid) => pdict[pid]),
             psdict: {},
             udict,
             rdict: {},
@@ -564,6 +600,7 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
             tcdocs,
             team: teamContext.team,
             teamStatus: publicTeamStatus(teamContext.status),
+            postContestPractice,
         };
         // P1.4：仅 ACM 下发本场每题统计；上方两道 throw（未开赛/未报名且未结束）
         // 已保证可见性门槛（与题目可见同 gate）。
@@ -587,29 +624,48 @@ export class ContestProblemListHandler extends ContestDetailBaseHandler {
             this.response.body.problemStatusByPid = buildLatestContestProblemStatusByPid(statusJournal, this.tdoc.pids);
         }
         const psdocs: any[] = Object.values(this.response.body.psdict);
-        const canViewRecord = contest.canShowSelfRecord.call(this, this.tdoc) && (!teamMode || !!teamContext.team);
+        const canViewContestRecord = contest.canShowSelfRecord.call(this, this.tdoc) && (!teamMode || !!teamContext.team);
+        const canViewRecord = canViewContestRecord || postContestPractice.eligible;
+        this.response.body.canViewContestRecord = canViewContestRecord;
         this.response.body.canViewRecord = canViewRecord;
-        const rids = psdocs.map((i) => i.rid);
-        if (!teamMode && contest.isDone(this.tdoc) && canViewRecord) {
+        const contestRids = psdocs.map((i) => i.rid).filter(Boolean);
+        const rids = canViewContestRecord ? [...contestRids] : [];
+        if (postContestPractice.eligible) {
+            const personalRecords = await record
+                .getMulti(authoritativeDomainId, buildPersonalPracticeRecordQuery(this.user._id, this.tdoc.pids))
+                .project<PersonalPracticeRecord>({ _id: 1, pid: 1, status: 1, contest: 1, contestTeamId: 1, hackTarget: 1, input: 1 })
+                .toArray();
+            const personalPracticeStatusByPid = buildPersonalPracticeStatusByPid(personalRecords, this.tdoc.pids, this.tdoc.beginAt, this.tdoc.endAt);
+            rids.push(...Object.values(personalPracticeStatusByPid).map((i) => i.rid));
+            this.response.body.personalPracticeStatusByPid = personalPracticeStatusByPid;
+            // ui-default still renders this field as its correction column.
+            this.response.body.correction = personalPracticeStatusByPid;
+        } else if (!postContestPractice.supported && !teamMode && contest.isDone(this.tdoc) && canViewContestRecord) {
+            // Preserve Hydro's existing post-contest correction display for
+            // unsupported rules such as exam/homework. P1.24 must not reinterpret
+            // or remove that legacy behavior.
             const correction = await problem.getListStatus(authoritativeDomainId, this.user._id, this.tdoc.pids);
             for (const pid in correction) {
                 if (this.tsdoc.detail?.[pid]?.rid === correction[pid].rid) delete correction[pid];
             }
-            rids.push(...Object.values(correction).map((i) => i.rid));
+            rids.push(...Object.values(correction).map((i: any) => i.rid));
             this.response.body.correction = correction;
         }
+        const hiddenContestRecords = canViewContestRecord ? {} : Object.fromEntries(contestRids.map((rid) => [rid, { _id: rid }]));
         [this.response.body.rdict, this.response.body.rdocs] = canViewRecord
             ? await Promise.all([
-                  record.getList(authoritativeDomainId, rids),
-                  record
-                      .getMulti(
-                          authoritativeDomainId,
-                          teamMode ? { contest: tid, contestTeamId: teamContext.team.teamId } : { contest: tid, uid: this.user._id },
-                      )
-                      .sort({ _id: -1 })
-                      .toArray(),
+                  record.getList(authoritativeDomainId, rids).then((records) => ({ ...hiddenContestRecords, ...records })),
+                  canViewContestRecord
+                      ? record
+                            .getMulti(
+                                authoritativeDomainId,
+                                teamMode ? { contest: tid, contestTeamId: teamContext.team.teamId } : { contest: tid, uid: this.user._id },
+                            )
+                            .sort({ _id: -1 })
+                            .toArray()
+                      : Promise.resolve([]),
               ])
-            : [Object.fromEntries(psdocs.map((i) => [i.rid, { _id: i.rid }])), []];
+            : [hiddenContestRecords, []];
         if (teamMode && this.response.body.rdocs.length) {
             Object.assign(
                 this.response.body.udict,

@@ -25,6 +25,7 @@ import {
     Tdoc,
 } from '../interface';
 import avatar from '../lib/avatar';
+import { effectiveLockoutWindow } from '../lib/contest-lockout';
 import bus from '../service/bus';
 import db from '../service/db';
 import type { Handler } from '../service/server';
@@ -180,15 +181,7 @@ export async function clearClientFinished(domainId: string, tid: ObjectId, uid: 
  *
  * Returns `null` when the contest is not client_required (no window).
  */
-export function effectiveLockoutWindow(tdoc: Tdoc): { blockStart: Date; blockEnd: Date } | null {
-    if (!isClientRequired(tdoc)) return null;
-    const beforeMin = Number.isFinite(tdoc.clientLoginBlockBeforeMinutes) ? tdoc.clientLoginBlockBeforeMinutes : 60;
-    const afterMin = Number.isFinite(tdoc.clientLoginBlockAfterMinutes) ? tdoc.clientLoginBlockAfterMinutes : 30;
-    return {
-        blockStart: new Date(tdoc.beginAt.getTime() - beforeMin * 60 * 1000),
-        blockEnd: new Date(tdoc.endAt.getTime() + afterMin * 60 * 1000),
-    };
-}
+export { effectiveLockoutWindow } from '../lib/contest-lockout';
 
 /**
  * Is `now` inside the lockout window? Defaults `now` to `new Date()`.

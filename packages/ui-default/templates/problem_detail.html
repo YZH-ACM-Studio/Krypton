@@ -18,6 +18,12 @@
   {{ set(UiContext, 'getSubmissionsUrl', url('record_main', query={fullStatus:'true', pid:pdoc.docId, tid:tdoc.docId})) }}
   {{ set(UiContext, 'getRecordDetailUrl', url('record_detail', rid='{rid}', query={tid:tdoc.docId})) }}
   {{ set(UiContext, 'pretestConnUrl', "record-conn?pretest=1&uidOrName=" + handler.user._id + "&pid=" + pdoc.docId + "&domainId=" + handler.args.domainId + "&tid=" + tdoc.docId) }}
+{% elif tdoc and postContestPracticeActive %}
+  {{ set(UiContext, 'canViewRecord', true) }}
+  {{ set(UiContext, 'postSubmitUrl', url('problem_submit', pid=pdoc.docId, query={tid:tdoc.docId})) }}
+  {{ set(UiContext, 'getSubmissionsUrl', url('record_main', query={fullStatus:'true', pid:pdoc.docId, tid:tdoc.docId, practice:1})) }}
+  {{ set(UiContext, 'getRecordDetailUrl', url('record_detail', rid='{rid}', query={tid:tdoc.docId, practice:1})) }}
+  {{ set(UiContext, 'pretestConnUrl', "record-conn?pretest=1&uidOrName=" + handler.user._id + "&pid=" + pdoc.docId + "&domainId=" + handler.args.domainId + "&tid=" + tdoc.docId + "&practice=1") }}
 {% else %}
   {{ set(UiContext, 'canViewRecord', true) }}
   {{ set(UiContext, 'postSubmitUrl', url('problem_submit', pid=pdoc.docId)) }}
@@ -48,7 +54,7 @@
       <div class="section__header">
         <h1 class="section__title">
           {% if rdoc %}
-            <a href="{{ url('record_detail', {rid:rdoc._id}) }}">
+            <a href="{{ url('record_detail', rid=rdoc._id, query={tid:tdoc.docId, practice:1}) if postContestPracticeActive else url('record_detail', rid=rdoc._id) }}">
               <span class="icon record-status--icon {{ model.builtin.STATUS_CODES[rdoc['status']] }}"></span>
               <span class="record-status--text {{ model.builtin.STATUS_CODES[rdoc['status']] }}">{{ rdoc.score }}</span>
             </a>

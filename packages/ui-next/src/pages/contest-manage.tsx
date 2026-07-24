@@ -57,7 +57,7 @@ import {
   type ProblemOption,
 } from '@/lib/multi-select-presets';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
-import { getContestProblemStatus } from '@/lib/contest-exam-display';
+import { getContestProblemStatus, getPersonalPracticeStatus, type PersonalPracticeStatusSnapshot } from '@/lib/contest-exam-display';
 import { formatDateTime, formatRelativeTime, makeInitials, replaceRouteTokens } from '@/lib/format';
 import { isSystemAdmin } from '@/lib/perms';
 
@@ -1694,17 +1694,25 @@ export function ContestProblemListPage() {
   const tdoc: R = data.tdoc || {};
   const pdict: Record<string, R> = data.pdict || {};
   const problemStatusByPid: Record<string, R> = data.problemStatusByPid || {};
+  const personalPracticeStatusByPid: Record<string, PersonalPracticeStatusSnapshot & { rid?: unknown }> = data.personalPracticeStatusByPid || {};
   const tcdocs: R[] = data.tcdocs || [];
   const rdocs: R[] = data.rdocs || [];
-  const pids: number[] = tdoc.pids || [];
+  const pids: number[] = data.visiblePids || tdoc.pids || [];
   const tid = tdoc.docId || tdoc._id;
   const urls = examModeUrls(bs);
   const contestUrl = urls?.overview || replaceRouteTokens(bs.urls.contestDetail, { TID: String(tid) });
   const recordDetailUrl = (rid: string) =>
     urls?.record ? String(urls.record).replace('__RID__', rid) : replaceRouteTokens(bs.urls.recordDetail, { RID: rid });
+  const practiceRecordDetailUrl = (rid: string) => {
+    const base = recordDetailUrl(rid);
+    const query = new URLSearchParams({ tid: String(tid), practice: '1' });
+    return `${base}${base.includes('?') ? '&' : '?'}${query.toString()}`;
+  };
   const showScore = data.showScore;
   const inExamMode = !!data.examMode?.enabled;
   const canViewRecord = !!data.canViewRecord;
+  const canViewContestRecord = data.canViewContestRecord ?? canViewRecord;
+  const showPostContestPractice = data.postContestPractice?.eligible === true;
   // P1.4：本场每题通过统计（仅 ACM；考试壳 examMode 下后端不下发、前端也不渲染——红线1）。
   const liveStats: Record<string, R> | null = tdoc.rule === 'acm' && !data.examMode && data.liveStats ? data.liveStats : null;
   const liveStatsUnit = data.liveStatsParticipantUnit === 'team' ? '队' : '人';
@@ -1738,78 +1746,121 @@ export function ContestProblemListPage() {
       />
 
       {workspaceTab === 'problems' ? (
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-16 text-center">#</TableHead>
-                  <TableHead>题目</TableHead>
-                  {inExamMode ? <TableHead className="w-28 text-center">我的状态</TableHead> : null}
-                  {liveStats && <TableHead className="w-32 text-right">本场通过</TableHead>}
-                  {showScore && <TableHead className="w-20 text-right">分值</TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pids.map((pid, idx) => {
-                  const p = pdict[String(pid)] || {};
-                  const ls = liveStats?.[String(pid)];
-                  const statusDoc = problemStatusByPid[String(pid)] || null;
-                  const status = getContestProblemStatus(problemStatusByPid[String(pid)]?.status);
-                  const statusClass =
-                    status?.code === 'pass'
-                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-                      : status?.code === 'fail'
-                        ? 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300'
-                        : status?.code === 'progress'
-                          ? 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300'
-                          : 'border-border bg-muted/50 text-muted-foreground';
-                  return (
-                    <TableRow
-                      key={String(pid)}
-                      className={status?.code === 'pass' ? 'bg-emerald-500/[0.035] hover:bg-emerald-500/[0.065]' : undefined}
-                    >
-                      <TableCell className="text-center font-mono font-semibold">{getAlphabeticId(idx)}</TableCell>
-                      <TableCell>
-                        <a href={contestProblemUrl(bs, tdoc, pid)} className="text-sm text-primary hover:underline">
-                          {p.title || `P${pid}`}
-                        </a>
-                      </TableCell>
-                      {inExamMode ? (
-                        <TableCell className="text-center">
-                          {status && statusDoc?.rid && canViewRecord ? (
-                            <a
-                              href={recordDetailUrl(String(statusDoc.rid))}
-                              className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            >
-                              <Badge variant="outline" className={statusClass} title={status.title}>
-                                {status.label}
+        <div className="space-y-3">
+          {showPostContestPractice ? (
+            <div
+              role="note"
+              className="flex items-start gap-2 rounded-xl border border-sky-500/25 bg-sky-500/[0.06] px-4 py-3 text-sm text-muted-foreground"
+            >
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-sky-600 dark:text-sky-300" />
+              <span>赛后补题按个人记录评测，不会改动原比赛成绩、罚时或排行榜。</span>
+            </div>
+          ) : null}
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-16 text-center">#</TableHead>
+                    <TableHead>题目</TableHead>
+                    {showPostContestPractice ? (
+                      <>
+                        <TableHead className="w-28 text-center">赛时结果</TableHead>
+                        <TableHead className="w-36 text-center">个人补题</TableHead>
+                      </>
+                    ) : inExamMode ? (
+                      <TableHead className="w-28 text-center">我的状态</TableHead>
+                    ) : null}
+                    {liveStats && <TableHead className="w-32 text-right">本场通过</TableHead>}
+                    {showScore && <TableHead className="w-20 text-right">分值</TableHead>}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pids.map((pid, idx) => {
+                    const p = pdict[String(pid)] || {};
+                    const ls = liveStats?.[String(pid)];
+                    const statusDoc = showPostContestPractice ? data.psdict?.[String(pid)] || null : problemStatusByPid[String(pid)] || null;
+                    const status =
+                      statusDoc?.rid && !canViewContestRecord
+                        ? ({ label: '已提交', title: '比赛规则暂不公开赛时结果', code: 'pending' } as const)
+                        : getContestProblemStatus(statusDoc?.status);
+                    const practiceStatusDoc = personalPracticeStatusByPid[String(pid)] || null;
+                    const practiceStatus = getPersonalPracticeStatus(practiceStatusDoc);
+                    const badgeClass = (value: ReturnType<typeof getContestProblemStatus>) =>
+                      value?.code === 'pass'
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                        : value?.code === 'fail'
+                          ? 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                          : value?.code === 'progress'
+                            ? 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300'
+                            : 'border-border bg-muted/50 text-muted-foreground';
+                    const statusClass = badgeClass(status);
+                    const practiceStatusClass = badgeClass(practiceStatus);
+                    return (
+                      <TableRow
+                        key={String(pid)}
+                        className={status?.code === 'pass' ? 'bg-emerald-500/[0.035] hover:bg-emerald-500/[0.065]' : undefined}
+                      >
+                        <TableCell className="text-center font-mono font-semibold">{getAlphabeticId(idx)}</TableCell>
+                        <TableCell>
+                          <a href={contestProblemUrl(bs, tdoc, pid)} className="text-sm text-primary hover:underline">
+                            {p.title || `P${pid}`}
+                          </a>
+                        </TableCell>
+                        {showPostContestPractice || inExamMode ? (
+                          <TableCell className="text-center">
+                            {status && statusDoc?.rid && canViewContestRecord ? (
+                              <a
+                                href={recordDetailUrl(String(statusDoc.rid))}
+                                className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              >
+                                <Badge variant="outline" className={statusClass} title={status.title}>
+                                  {status.label}
+                                </Badge>
+                              </a>
+                            ) : (
+                              <Badge variant="outline" className={statusClass} title={status?.title || '尚未提交'}>
+                                {status?.label || '未提交'}
                               </Badge>
-                            </a>
-                          ) : (
-                            <Badge variant="outline" className={statusClass} title={status?.title || '尚未提交'}>
-                              {status?.label || '未提交'}
-                            </Badge>
-                          )}
-                        </TableCell>
-                      ) : null}
-                      {liveStats && (
-                        <TableCell
-                          className="text-right font-mono text-xs text-muted-foreground"
-                          title={`AC 提交 ${ls?.acSubmits ?? 0} / 总提交 ${ls?.totalSubmits ?? 0}`}
-                        >
-                          <span className={ls?.acUsers ? 'text-green-600 dark:text-green-400' : ''}>{ls?.acUsers ?? 0}</span>/{ls?.triedUsers ?? 0}{' '}
-                          {liveStatsUnit}
-                        </TableCell>
-                      )}
-                      {showScore && <TableCell className="text-right font-mono text-sm">{tdoc.score?.[pid] || 100}</TableCell>}
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                            )}
+                          </TableCell>
+                        ) : null}
+                        {showPostContestPractice ? (
+                          <TableCell className="text-center">
+                            {practiceStatus && practiceStatusDoc?.rid ? (
+                              <a
+                                href={practiceRecordDetailUrl(String(practiceStatusDoc.rid))}
+                                className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              >
+                                <Badge variant="outline" className={practiceStatusClass} title={practiceStatus.title}>
+                                  {practiceStatus.label}
+                                </Badge>
+                              </a>
+                            ) : (
+                              <Badge variant="outline" className={practiceStatusClass} title="尚未补题">
+                                未提交
+                              </Badge>
+                            )}
+                          </TableCell>
+                        ) : null}
+                        {liveStats && (
+                          <TableCell
+                            className="text-right font-mono text-xs text-muted-foreground"
+                            title={`AC 提交 ${ls?.acSubmits ?? 0} / 总提交 ${ls?.totalSubmits ?? 0}`}
+                          >
+                            <span className={ls?.acUsers ? 'text-green-600 dark:text-green-400' : ''}>{ls?.acUsers ?? 0}</span>/{ls?.triedUsers ?? 0}{' '}
+                            {liveStatsUnit}
+                          </TableCell>
+                        )}
+                        {showScore && <TableCell className="text-right font-mono text-sm">{tdoc.score?.[pid] || 100}</TableCell>}
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </div>
       ) : null}
 
       {workspaceTab === 'submissions' ? (

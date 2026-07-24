@@ -9,6 +9,11 @@ export interface ContestProblemStatusDisplay {
   code: 'pending' | 'pass' | 'fail' | 'progress' | 'ignored';
 }
 
+export interface PersonalPracticeStatusSnapshot {
+  status: unknown;
+  phase: 'before' | 'after' | 'other';
+}
+
 const STATUS_DISPLAY: Record<number, ContestProblemStatusDisplay> = {
   0: { label: '等待中', title: 'Waiting', code: 'pending' },
   1: { label: 'AC', title: 'Accepted', code: 'pass' },
@@ -39,6 +44,43 @@ export function getContestProblemStatus(status: unknown): ContestProblemStatusDi
     return { label: '状态异常', title: `Invalid contest status: ${String(status)}`, code: 'fail' };
   }
   return STATUS_DISPLAY[value] || { label: `未知 ${value}`, title: `Unknown contest status: ${value}`, code: 'fail' };
+}
+
+export function getPersonalPracticeStatus(snapshot: PersonalPracticeStatusSnapshot | null | undefined): ContestProblemStatusDisplay | null {
+  if (!snapshot) return null;
+  const display = getContestProblemStatus(snapshot.status);
+  if (!display || display.code !== 'pass') return display;
+  if (snapshot.phase === 'before') {
+    return {
+      ...display,
+      label: '个人已通过（赛前）',
+      title: 'Accepted before this contest',
+    };
+  }
+  return {
+    ...display,
+    label: '已通过',
+  };
+}
+
+export function postContestProblemEntryUrl(input: {
+  rule: string;
+  clientRequired: boolean;
+  practiceSupported: boolean;
+  practiceOpen: boolean;
+  ended: boolean;
+  detailUrl: string;
+  contestId: string;
+}): string {
+  if (input.rule === 'exam') return `/exam-mode/${encodeURIComponent(input.contestId)}`;
+  if (input.clientRequired && (!input.practiceSupported || !input.ended || !input.practiceOpen)) {
+    return `/exam-mode/${encodeURIComponent(input.contestId)}`;
+  }
+  return `${input.detailUrl}/problems`;
+}
+
+export function canSubmitProblemMode(mode: unknown): boolean {
+  return mode === 'normal' || mode === 'contest' || mode === 'correction';
 }
 
 export function scoreboardParticipantColumn(header: ScoreboardDisplayCell[], teamMode: boolean): number {

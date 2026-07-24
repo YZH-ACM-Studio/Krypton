@@ -93,7 +93,7 @@ function buildUrlWithQuery(baseUrl: string, params: Record<string, unknown>) {
     search.set(key, String(value));
   });
   const query = search.toString();
-  return query ? `${baseUrl}?${query}` : baseUrl;
+  return query ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${query}` : baseUrl;
 }
 
 function formatJudgeText(text: unknown): string {
@@ -177,10 +177,13 @@ export function RecordsPage() {
   const langs: R = data.langs || {};
   const statusTexts: R = data.statusTexts || {};
   const filterStatus = typeof data.filterStatus === 'number' ? String(data.filterStatus) : '';
+  const postContestPracticeActive = data.postContestPracticeActive === true;
+  const practiceTid = postContestPracticeActive ? normalizeId(data.recordDetailTid || data.tdoc?.docId) : '';
   const filterParams = {
     uidOrName: data.filterUidOrName || '',
     pid: data.filterPid || '',
     tid: data.filterTid || '',
+    practice: postContestPracticeActive ? '1' : '',
     lang: data.filterLang || '',
     status: filterStatus,
     all: data.all ? '1' : '',
@@ -202,6 +205,7 @@ export function RecordsPage() {
   useRecordSocket({
     filters: {
       tid: filterParams.tid || undefined,
+      practice: postContestPracticeActive || undefined,
       pid: filterParams.pid || undefined,
       uidOrName: filterParams.uidOrName || undefined,
       lang: filterParams.lang || undefined,
@@ -229,6 +233,11 @@ export function RecordsPage() {
 
   return (
     <motion.div className="space-y-4" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+      {postContestPracticeActive ? (
+        <div className="rounded-xl border border-sky-500/25 bg-sky-500/[0.06] px-4 py-3 text-sm text-muted-foreground">
+          这里只显示你在该题上的普通个人提交，不计入原比赛成绩、罚时或排行榜。
+        </div>
+      ) : null}
       <div>
         <h1 className="text-xl font-semibold">评测记录</h1>
         <p className="text-sm text-muted-foreground">所有提交记录</p>
@@ -237,6 +246,7 @@ export function RecordsPage() {
       <Card>
         <CardContent className="p-4">
           <form method="get" action={bs.urls.records} className="grid gap-3 lg:grid-cols-[repeat(5,minmax(0,1fr))_auto] lg:items-end">
+            {postContestPracticeActive ? <input type="hidden" name="practice" value="1" /> : null}
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">用户 / UID</label>
               <Input name="uidOrName" defaultValue={data.filterUidOrName || ''} placeholder="用户名或 UID" />
@@ -336,18 +346,22 @@ export function RecordsPage() {
                 rdocs.map((r) => {
                   const user = getUser(udict, r.uid);
                   const pdoc = pdict[String(r.pid)] || {};
+                  const recordUrl = buildUrlWithQuery(replaceRouteTokens(bs.urls.recordDetail, { RID: String(r._id) }), {
+                    tid: practiceTid,
+                    practice: postContestPracticeActive,
+                  });
+                  const problemUrl = buildUrlWithQuery(replaceRouteTokens(bs.urls.problemDetail, { PID: String(r.pid) }), {
+                    tid: practiceTid,
+                  });
                   return (
                     <TableRow key={String(r._id)}>
                       <TableCell>
-                        <a href={replaceRouteTokens(bs.urls.recordDetail, { RID: String(r._id) })} className="hover:underline">
+                        <a href={recordUrl} className="hover:underline">
                           {statusDisplay(r.status)}
                         </a>
                       </TableCell>
                       <TableCell>
-                        <a
-                          href={replaceRouteTokens(bs.urls.problemDetail, { PID: String(r.pid) })}
-                          className="font-medium hover:text-primary hover:underline"
-                        >
+                        <a href={problemUrl} className="font-medium hover:text-primary hover:underline">
                           {pdoc.title ? `${r.pid}. ${pdoc.title}` : r.pid}
                         </a>
                       </TableCell>
@@ -489,18 +503,36 @@ export function RecordDetailPage() {
   const allRevs = Object.entries(data.allRevs || {}) as Array<[string, string]>;
   const examUrls: R = data.examMode?.urls || {};
   const teamExamMode = readTeamExamModeContext(data.examMode);
-  const recordUrl = examUrls.record
+  const postContestPracticeRecordAccess = data.postContestPracticeRecordAccess === true;
+  const practiceTid = postContestPracticeRecordAccess ? normalizeId(data.practiceTid || data.tdoc?.docId) : '';
+  const recordUrlBase = examUrls.record
     ? String(examUrls.record).replace('__RID__', String(rdoc._id))
     : replaceRouteTokens(bs.urls.recordDetail, { RID: String(rdoc._id) });
-  const downloadUrl = `${recordUrl}?download=true`;
-  const problemUrl = examUrls.problem
+  const recordUrl = buildUrlWithQuery(recordUrlBase, {
+    tid: practiceTid,
+    practice: postContestPracticeRecordAccess,
+  });
+  const downloadUrl = buildUrlWithQuery(recordUrl, { download: true });
+  const problemUrlBase = examUrls.problem
     ? String(examUrls.problem).replace('__PID__', String(rdoc.pid))
     : replaceRouteTokens(bs.urls.problemDetail, { PID: String(rdoc.pid) });
-  const recordListUrl = examUrls.problems || bs.urls.records;
+  const problemUrl = buildUrlWithQuery(problemUrlBase, { tid: practiceTid });
+  const recordListUrl = postContestPracticeRecordAccess
+    ? buildUrlWithQuery(bs.urls.records, {
+        tid: practiceTid,
+        practice: true,
+        pid: rdoc.pid,
+        uidOrName: bs.user?.id,
+      })
+    : examUrls.problems || bs.urls.records;
 
   useRecordSocket({
     path: '/record-detail-conn',
-    filters: { rid: String(rdoc._id || '') },
+    filters: {
+      rid: String(rdoc._id || ''),
+      tid: practiceTid || undefined,
+      practice: postContestPracticeRecordAccess || undefined,
+    },
     onRdoc: (next) => {
       if (!next || !next._id) return;
       // Merge — preserve any fields the server may not echo (e.g. `code`
@@ -512,6 +544,11 @@ export function RecordDetailPage() {
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+      {postContestPracticeRecordAccess ? (
+        <div className="rounded-xl border border-sky-500/25 bg-sky-500/[0.06] px-4 py-3 text-sm text-muted-foreground">
+          这是个人赛后补题记录，不计入原比赛成绩、罚时或排行榜。
+        </div>
+      ) : null}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -708,7 +745,11 @@ export function RecordDetailPage() {
                 {!data.rev ? <Badge variant="outline">当前</Badge> : null}
               </a>
               {allRevs.map(([rev, time]) => (
-                <a key={rev} href={`${recordUrl}?rev=${rev}`} className="flex items-center justify-between px-4 py-3 text-sm hover:bg-accent">
+                <a
+                  key={rev}
+                  href={buildUrlWithQuery(recordUrl, { rev })}
+                  className="flex items-center justify-between px-4 py-3 text-sm hover:bg-accent"
+                >
                   <span>{formatRecordTime(time, locale)}</span>
                   {String(data.rev || '') === rev ? <Badge variant="outline">当前</Badge> : null}
                 </a>

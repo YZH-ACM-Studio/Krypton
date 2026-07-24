@@ -36,7 +36,8 @@ import {
     validateStructuredCodeJudgeConfig,
     ValidationError,
 } from 'hydrooj';
-import { ContestClientFinishedError, ContestTeamConflictError } from '../error';
+import { ContestClientFinishedError, ContestNotLiveError, ContestTeamConflictError } from '../error';
+import { getPostContestPracticeState, isPostContestPracticeRule } from '../lib/contest-correction';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
 import type { ContestTeamExamModeContext } from '../model/contest-team';
@@ -373,6 +374,15 @@ async function ensureExamModeAccess(handler: Handler | ConnectionHandler, domain
         }
     }
     return { previewMode, tsdoc, isAdminBypass, teamContext };
+}
+
+async function redirectEndedProgrammingWorkspaceBeforeClientAccess(handler: Handler, domainId: string, tdoc: any, tid: ObjectId): Promise<boolean> {
+    const isAdminBypass = handler.user.own(tdoc) || handler.user.hasPerm(PERM.PERM_EDIT_CONTEST) || handler.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
+    if (isAdminBypass || !isPostContestPracticeRule(tdoc?.rule) || !(tdoc?.endAt instanceof Date) || new Date() < tdoc.endAt) {
+        return false;
+    }
+    const tsdoc = await contest.getStatus(domainId, tid, handler.user._id);
+    return redirectEndedProgrammingWorkspace(handler, tdoc, tsdoc, tid, false);
 }
 
 // ─── Cell + grading helpers ──────────────────────────────────────────────
@@ -873,11 +883,13 @@ class ExamModeEntryHandler extends Handler {
         const authoritativeDomainId = String(this.domain?._id);
         const tdoc = await contest.get(authoritativeDomainId, tid);
         if (!tdoc) throw new NotFoundError('Contest');
-        const { previewMode, isAdminBypass, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, tdoc);
+        if (await redirectEndedProgrammingWorkspaceBeforeClientAccess(this, authoritativeDomainId, tdoc, tid)) return;
+        const { previewMode, tsdoc, isAdminBypass, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, tdoc);
         if (tdoc.rule === 'exam') {
             this.response.redirect = this.url('paper_layout', { tid });
             return;
         }
+        if (redirectEndedProgrammingWorkspace(this, tdoc, tsdoc, tid, isAdminBypass)) return;
 
         // Before the start time, the client workspace may be open for check-in,
         // but students must not receive problem ids/titles in the bootstrap JSON.
@@ -929,6 +941,16 @@ function bounceIfNotStarted(handler: any, tdoc: any, tid: ObjectId): boolean {
     return false;
 }
 
+function redirectEndedProgrammingWorkspace(handler: Handler, tdoc: any, tsdoc: any, tid: ObjectId, isAdminBypass: boolean): boolean {
+    if (isAdminBypass || !isPostContestPracticeRule(tdoc?.rule) || !(tdoc?.endAt instanceof Date) || new Date() < tdoc.endAt) {
+        return false;
+    }
+    const practice = getPostContestPracticeState(tdoc, tsdoc);
+    if (!practice.open) throw new ContestNotLiveError(tid);
+    handler.response.redirect = handler.url('contest_problemlist', { tid });
+    return true;
+}
+
 class ExamModeProblemListHandler extends ContestProblemListHandler {
     // 考试壳不下发本场热度统计（P1.4 红线：exam-mode payload/DOM 不变）。
     protected liveStatsEnabled = false;
@@ -937,9 +959,11 @@ class ExamModeProblemListHandler extends ContestProblemListHandler {
     @param('tid', Types.ObjectId)
     async get(_domainId: string, tid: ObjectId) {
         const authoritativeDomainId = this.authoritativeDomainId();
-        const { previewMode, tsdoc, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
+        if (await redirectEndedProgrammingWorkspaceBeforeClientAccess(this, authoritativeDomainId, this.tdoc, tid)) return;
+        const { previewMode, tsdoc, isAdminBypass, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         this.tsdoc = tsdoc;
         if (bounceIfNotStarted(this, this.tdoc, tid)) return;
+        if (redirectEndedProgrammingWorkspace(this, this.tdoc, tsdoc, tid, isAdminBypass)) return;
         await super.get(authoritativeDomainId, tid);
         await decorateExamMode(this, this.tdoc, 'problems', 'contest_problemlist.html', previewMode, teamContext);
     }
@@ -966,7 +990,8 @@ class ExamModeProblemDetailHandler extends ProblemDetailHandler {
     async _prepare(_domainId: string, pid: number | string, tid?: ObjectId) {
         if (!tid) throw new NotFoundError('Contest');
         const authoritativeDomainId = this.authoritativeDomainId();
-        const { tsdoc } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
+        if (await redirectEndedProgrammingWorkspaceBeforeClientAccess(this, authoritativeDomainId, this.tdoc, tid)) return;
+        const { tsdoc, isAdminBypass } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         this.tsdoc = tsdoc;
         // If the student is *early* (auto-approved, walked in but the
         // contest start hasn't fired yet), `ProblemDetailHandler._prepare`
@@ -979,6 +1004,7 @@ class ExamModeProblemDetailHandler extends ProblemDetailHandler {
             this.response.redirect = `/exam-mode/${tid.toHexString()}`;
             return;
         }
+        if (redirectEndedProgrammingWorkspace(this, this.tdoc, tsdoc, tid, isAdminBypass)) return;
         await super._prepare(authoritativeDomainId, pid, tid);
     }
 

@@ -383,6 +383,7 @@ const serverStub = {
 const systemStub = { get: () => false };
 const builtinStub = { PERM, PRIV, STATUS: {} };
 const contestHandlerStub = { ContestDetailBaseHandler: class {} };
+let contestOngoing = true;
 const emptyModel = {
     async updateStatus(...args: any[]) {
         calls.contestUpdates.push(args);
@@ -395,6 +396,9 @@ const emptyModel = {
     },
     isNotStarted() {
         return false;
+    },
+    isOngoing() {
+        return contestOngoing;
     },
 };
 const discussionStub = { count: async () => 0 };
@@ -686,6 +690,7 @@ beforeEach(() => {
     managedPublicationPreviewError = null;
     activeDataWriteContainers = [];
     pendingContributionRows = [];
+    contestOngoing = true;
     createKinds.length = 0;
     (global as any).Hydro.module.problemSearch = {};
     (global as any).Hydro.model.permits = {
@@ -1139,8 +1144,16 @@ describe('P2.11 authoritative problem route domain', () => {
 
     it('preserves the storage owner in contest and exam problem DOM without querying managed permits', async () => {
         const handler = makeHandler(ProblemDetailHandler, {});
-        handler.tdoc = { docId: 'contest', owner: 99, pids: [7], rule: 'acm' };
-        handler.tsdoc = { attend: true, startAt: new Date() };
+        handler.tdoc = {
+            docId: 'contest',
+            owner: 99,
+            pids: [7],
+            rule: 'acm',
+            entryMode: 'open',
+            beginAt: new Date(Date.now() - 60_000),
+            endAt: new Date(Date.now() + 60_000),
+        };
+        handler.tsdoc = { attend: 1, startAt: new Date() };
         permitResults = [{ uid: 77, role: 'author' }];
         getResults = [
             {
@@ -2963,7 +2976,7 @@ describe('P3.10 subjective problem HTTP boundaries', () => {
             problemKind: 'subjective',
             config: { type: 'objective' },
         };
-        handler.tdoc = { docId: 'homework', rule: 'homework' };
+        handler.tdoc = { docId: 'homework', rule: 'homework', pids: [7] };
         await handler.post('forged', '_', 'line one\r\nline two', false, [], 'homework' as any);
         expect(calls.recordAdd.at(-1)[4]).to.equal('line one\r\nline two');
         expect(calls.recordAdd.at(-1)[6]).to.deep.include({ contest: 'homework', type: 'manual' });
@@ -3158,7 +3171,16 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
                     template: { surface: regionIds.map((id) => ({ type: 'region', id })) },
                 },
             };
-            if (context.tid) handler.tdoc = { docId: context.tid, rule: context.rule };
+            if (context.tid) {
+                handler.tdoc = {
+                    docId: context.tid,
+                    rule: context.rule,
+                    pids: [7],
+                    beginAt: new Date(Date.now() - 60_000),
+                    endAt: new Date(Date.now() + 60_000),
+                };
+                handler.tsdoc = { attend: 1 };
+            }
             const before = calls.recordAdd.length;
             await handler.post('forged', 'forged-lang', code, false, [], context.tid as any);
             expect(calls.recordAdd, context.name).to.have.length(before + 1);
@@ -3166,6 +3188,67 @@ describe('P3.19 program-fill and function HTTP boundaries', () => {
             expect(calls.recordAdd.at(-1)[4], context.name).to.equal(code);
             expect(calls.recordAdd.at(-1)[6], context.name).to.deep.include({ contest: context.tid, type: 'judge' });
         }
+    });
+
+    it('rechecks contest liveness in post before inserting a contest record', async () => {
+        const handler = makeHandler(ProblemSubmitHandler, {});
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            problemKind: 'program_fill',
+            config: {
+                type: 'program_fill',
+                mode: 'text',
+                template: { surface: [{ type: 'region', id: 'r_abcdefghijkl' }] },
+            },
+        };
+        handler.tdoc = {
+            docId: 'contest',
+            rule: 'acm',
+            entryMode: 'open',
+            pids: [7],
+            beginAt: new Date(Date.now() - 120_000),
+            endAt: new Date(Date.now() + 60_000),
+        };
+        handler.tsdoc = { attend: 1 };
+        contestOngoing = false;
+
+        const error = await captureFailure(() =>
+            handler.post('forged', '_', JSON.stringify({ r_abcdefghijkl: 'return 0;' }), false, [], 'contest' as any),
+        );
+        expect(error).to.be.instanceOf(GenericError);
+        expect(calls.recordAdd).to.deep.equal([]);
+        expect(calls.contestUpdates).to.deep.equal([]);
+    });
+
+    it('stores an eligible post-contest submission as personal practice without updating contest status', async () => {
+        const handler = makeHandler(ProblemSubmitHandler, {});
+        handler.pdoc = {
+            domainId: 'system',
+            docId: 7,
+            problemKind: 'programming',
+            config: { type: 'default' },
+        };
+        handler.tdoc = {
+            docId: 'contest',
+            rule: 'acm',
+            entryMode: 'open',
+            pids: [7],
+            beginAt: new Date(Date.now() - 120_000),
+            endAt: new Date(Date.now() - 60_000),
+        };
+        handler.tsdoc = { attend: 1 };
+        contestOngoing = false;
+
+        await handler.post('forged', 'cpp', 'int main() { return 0; }', false, [], 'contest' as any);
+
+        expect(calls.recordAdd).to.have.length(1);
+        expect(calls.recordAdd[0][6]).to.deep.include({
+            contest: undefined,
+            type: 'judge',
+        });
+        expect(calls.contestUpdates).to.deep.equal([]);
+        expect(handler.response.body).to.deep.equal({ rid: 'rid' });
     });
 });
 

@@ -2,7 +2,10 @@
 {% extends "layout/basic.html" %}
 {% block content %}
 {% if typeof(rdoc['status']) === 'number' and not rev %}
-  {{ set(UiContext, 'socketUrl', "record-detail-conn?domainId=" + rdoc.domainId + "&rid=" + rdoc._id) }}
+  {{ set(UiContext, 'socketUrl', "record-detail-conn?domainId=" + rdoc.domainId + "&rid=" + rdoc._id + ("&tid=" + practiceTid + "&practice=1" if postContestPracticeRecordAccess else "")) }}
+{% endif %}
+{% if postContestPracticeRecordAccess %}
+  <div class="notification warning">{{ _('This personal practice submission does not affect the original contest result.') }}</div>
 {% endif %}
 <div class="row">
   <div class="medium-9 columns collapsed">
@@ -14,7 +17,7 @@
       <div class="section__header">
         <h1 class="section__title">{{ _('Code') }}</h1>
         <div class="section__tools">
-          <a class="primary rounded button" href="?download=true">
+          <a class="primary rounded button" href="{{ url('record_detail', rid=rdoc._id, query={tid:practiceTid, practice:1, download:true}) if postContestPracticeRecordAccess else url('record_detail', rid=rdoc._id, query={download:true}) }}">
             <span class="icon icon-download"></span>
             {% if rdoc.files.hack %}{{ _('Download Hack Input') }}{% else %}{{ _('Download') }}{% endif %}
           </a>
@@ -114,13 +117,13 @@
         <div class="section__body no-padding">
           <ol class="menu">
             <li class="menu__item">
-              <a href="?rev=" {% if not rev %}style="border-color: #4690d0;"{% endif %} class="menu__link">
+              <a href="{{ url('record_detail', rid=rdoc._id, query={tid:practiceTid, practice:1}) if postContestPracticeRecordAccess else url('record_detail', rid=rdoc._id) }}" {% if not rev %}style="border-color: #4690d0;"{% endif %} class="menu__link">
                 {{ _('Latest Version') }}
               </a>
             </li>
             {% for r, rtime in allRevs %}
             <li class="menu__item">
-              <a href="?rev={{ r }}" {% if rev and rev.equals(r) %}style="border-color: #4690d0;"{% endif %} class="menu__link">
+              <a href="{{ url('record_detail', rid=rdoc._id, query={tid:practiceTid, practice:1, rev:r}) if postContestPracticeRecordAccess else url('record_detail', rid=rdoc._id, query={rev:r}) }}" {% if rev and rev.equals(r) %}style="border-color: #4690d0;"{% endif %} class="menu__link">
                 {{ datetimeSpan(rtime, false)|safe }}
               </a>
             </li>

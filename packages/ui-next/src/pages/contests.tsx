@@ -33,6 +33,7 @@ import { MarkdownView } from '@/components/markdown-renderer';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
 import {
+  postContestProblemEntryUrl,
   prioritizeCurrentScoreboardRows,
   scoreboardParticipantColumn,
   scoreboardRowMatches,
@@ -632,6 +633,9 @@ export function ContestDetailPage() {
   const canManageContest = !!data.canManageContest;
   const canViewRecord = !!data.canViewRecord;
   const isClientRequired = tdoc.entryMode === 'client_required';
+  const postContestPracticeSupported = data.postContestPractice?.supported === true;
+  const postContestPracticeOpen = data.postContestPractice?.open === true;
+  const postContestPracticeWaiting = !canManageContest && postContestPracticeSupported && st.phase === 'ended' && !postContestPracticeOpen;
 
   const detailUrl = replaceRouteTokens(bs.urls.contestDetail, { TID: String(tdoc.docId) });
   const beginAt = toDate(tdoc.beginAt)?.getTime() || 0;
@@ -639,8 +643,16 @@ export function ContestDetailPage() {
   const countdownTarget = st.phase === 'upcoming' ? beginAt : st.phase === 'running' ? endAt : null;
   const cd = useCountdown(countdownTarget);
   const cdForStrip = cd || (st.phase === 'ended' ? { expired: true, days: 0, hours: 0, minutes: 0, seconds: 0, total: 0 } : null);
-  const entryUrl = isClientRequired ? `/exam-mode/${encodeURIComponent(String(tdoc.docId))}` : `${detailUrl}/problems`;
-  const canOpenProblems = canManageContest || st.phase === 'ended' || (attended && st.phase !== 'upcoming');
+  const entryUrl = postContestProblemEntryUrl({
+    rule: String(tdoc.rule || ''),
+    clientRequired: isClientRequired,
+    practiceSupported: postContestPracticeSupported,
+    practiceOpen: postContestPracticeOpen,
+    ended: st.phase === 'ended',
+    detailUrl,
+    contestId: String(tdoc.docId),
+  });
+  const canOpenProblems = !postContestPracticeWaiting && (canManageContest || st.phase === 'ended' || (attended && st.phase !== 'upcoming'));
   const discussionUrl = replaceRouteTokens(bs.urls.discussionNode, { TYPE: 'contest', NAME: String(tdoc.docId) });
   const myRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(String(tdoc.docId))}&uidOrName=${encodeURIComponent(String(bs.user.id))}`;
   const allRecordUrl = `${bs.urls.records}?tid=${encodeURIComponent(String(tdoc.docId))}`;
@@ -707,7 +719,7 @@ export function ContestDetailPage() {
             ) : (
               <Button type="button" disabled>
                 <Lock className="size-4" />
-                等待开始
+                {postContestPracticeWaiting ? '补题尚未开放' : '等待开始'}
               </Button>
             )}
             <Button asChild variant="outline">
@@ -765,7 +777,13 @@ export function ContestDetailPage() {
                 title={canOpenProblems ? '进入题目' : '题目未开放'}
                 muted={!canOpenProblems}
               >
-                {isClientRequired ? '客户端工作台' : '比赛题目入口'}
+                {postContestPracticeWaiting
+                  ? '客户端锁定期结束后开放'
+                  : isClientRequired && !postContestPracticeOpen
+                    ? '客户端工作台'
+                    : st.phase === 'ended'
+                      ? '赛后补题入口'
+                      : '比赛题目入口'}
               </DetailAction>
               <DetailAction href={`${detailUrl}/scoreboard`} icon={<Trophy className="size-4" />} title="排行榜">
                 查看排名与榜单视图

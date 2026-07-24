@@ -36,6 +36,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useRecordSocket } from '@/hooks/use-record-socket';
 import { useBootstrap } from '@/lib/bootstrap';
 import { cn } from '@/lib/cn';
+import { canSubmitProblemMode } from '@/lib/contest-exam-display';
 import { replaceRouteTokens } from '@/lib/format';
 import { shouldShowNoTestdataWarning } from '@/lib/problem-testcase-warning';
 import { extractSamples } from '@/lib/samples';
@@ -641,8 +642,7 @@ export function ProblemDetailPage() {
   const tdoc: R | null = data.tdoc || null;
   const examMode: R | null = data.examMode || null;
   const teamExamMode = readTeamExamModeContext(examMode);
-  const teamCodeWritable =
-    teamExamMode?.teamRole === 'captain' && teamExamMode.canEditCode && teamExamMode.canRun && teamExamMode.canSubmit;
+  const teamCodeWritable = teamExamMode?.teamRole === 'captain' && teamExamMode.canEditCode && teamExamMode.canRun && teamExamMode.canSubmit;
   const teamCodeReadOnly = !!teamExamMode && !teamCodeWritable;
   const teamCanVirtualPrint = teamCodeWritable && teamExamMode?.canUseVirtualPrint === true;
   const teamCanViewRecords = !teamExamMode || teamExamMode.canViewTeamRecords;
@@ -650,14 +650,24 @@ export function ProblemDetailPage() {
   const examUrls: R = examMode?.urls || {};
   const teamCodeEndpoint = String(examUrls.teamCodeSnapshots || '');
   const mode: string = data.mode || 'normal';
+  const postContestPracticeActive = data.postContestPracticeActive === true;
+  const canSubmit = canSubmitProblemMode(mode);
   // mode ∈ 'normal' | 'view' | 'contest' | 'correction' | 'none' (from problem.ts ProblemDetailHandler)
   // Contest mode shows banner + locks down external links; correction reopens them.
   const inContest = !!tdoc && tdoc.docId && mode !== 'normal';
   const isHomework = tdoc?.rule === 'homework';
   const tid = tdoc?.docId ? String(tdoc.docId) : null;
+  const recordContextTid = tid;
+  const recordPracticeScope = postContestPracticeActive || undefined;
   const contestUrl = tid ? examUrls.overview || replaceRouteTokens(isHomework ? bs.urls.homeworkDetail : bs.urls.contestDetail, { TID: tid }) : null;
-  const recordDetailRoute = examUrls.record || bs.urls.recordDetail;
-  const pretestRecordRoute = buildUrlWithQuery(bs.urls.recordDetail, { tid });
+  const recordDetailRouteBase = examUrls.record || bs.urls.recordDetail;
+  const recordDetailRoute = postContestPracticeActive
+    ? buildUrlWithQuery(recordDetailRouteBase, { tid: recordContextTid, practice: true })
+    : recordDetailRouteBase;
+  const pretestRecordRoute = buildUrlWithQuery(bs.urls.recordDetail, {
+    tid: recordContextTid,
+    practice: recordPracticeScope,
+  });
   // Alphabetic id "A" / "B" / "C" from contest problem order
   const contestPids: any[] = Array.isArray(tdoc?.pids) ? tdoc!.pids : [];
   const contestIdx = inContest ? contestPids.findIndex((x) => String(x) === String(pdoc.docId)) : -1;
@@ -672,7 +682,8 @@ export function ProblemDetailPage() {
   const problemUrl = replaceRouteTokens(bs.urls.problemDetail, { PID: String(pid) });
   const [ideMode, setIdeMode] = useState(false);
   const [teamCodeBuffer, setTeamCodeBuffer] = useState<TeamCodeBuffer | null>(null);
-  // Submit and pretest endpoints must carry tid so the record is attributed to the contest.
+  // Keep tid on the submit endpoint for correction authorization; the server
+  // deliberately stores correction records without a contest id.
   const contestQS = tid ? `?tid=${tid}` : '';
   const submitUrl = `${problemUrl}/submit${contestQS}`;
   const problemCanPretest = config.type === 'default' || config.type === undefined || config.type == null;
@@ -747,7 +758,8 @@ export function ProblemDetailPage() {
     try {
       const url = buildUrlWithQuery(bs.urls.records, {
         pid,
-        tid: tid || undefined,
+        tid: recordContextTid || undefined,
+        practice: recordPracticeScope,
         uidOrName: bs.user.id,
       });
       const res = await fetch(url, {
@@ -767,7 +779,18 @@ export function ProblemDetailPage() {
     } finally {
       setIdeRecordsLoading(false);
     }
-  }, [bs.urls.records, bs.user?.id, bs.user?.signedIn, loadReadonlySource, pid, recordDetailRoute, teamCanViewRecords, teamCodeReadOnly, tid]);
+  }, [
+    bs.urls.records,
+    bs.user?.id,
+    bs.user?.signedIn,
+    loadReadonlySource,
+    pid,
+    recordContextTid,
+    recordDetailRoute,
+    recordPracticeScope,
+    teamCanViewRecords,
+    teamCodeReadOnly,
+  ]);
 
   useEffect(() => {
     if (showIdeRecords && !ideRecordsLoaded && !ideRecordsLoading) {
@@ -778,7 +801,8 @@ export function ProblemDetailPage() {
   useRecordSocket({
     filters: {
       pid: String(pid),
-      tid: tid || undefined,
+      tid: recordContextTid || undefined,
+      practice: recordPracticeScope,
       uidOrName: bs.user?.id || undefined,
     },
     onRdoc: (rdoc) => {
@@ -1125,7 +1149,7 @@ export function ProblemDetailPage() {
         </div>
         <div className="flex shrink-0 gap-2">
           {/* 客观题在下方面板作答，IDE 模式无意义 */}
-          {!isObjective && !isStructuredAnswer ? (
+          {canSubmit && !isObjective && !isStructuredAnswer ? (
             <Button
               size="sm"
               variant="default"
@@ -1139,7 +1163,7 @@ export function ProblemDetailPage() {
               {teamCodeReadOnly ? '只读代码' : 'IDE 模式'}
             </Button>
           ) : null}
-          {!examMode?.enabled ? (
+          {canSubmit && !examMode?.enabled ? (
             <Button asChild size="sm" variant="outline">
               <a href={submitUrl}>
                 <Send className="mr-1 size-3.5" />
@@ -1182,7 +1206,7 @@ export function ProblemDetailPage() {
               <MarkdownView content={content} preferredLang={preferredLang} />
             </CardContent>
           </Card>
-          {isObjective && (!teamExamMode || teamExamMode.canSubmit) && (!isSubjective || inContest || canPreviewSubjective) ? (
+          {canSubmit && isObjective && (!teamExamMode || teamExamMode.canSubmit) && (!isSubjective || inContest || canPreviewSubjective) ? (
             <ObjectiveAnswerPanel
               questions={objectiveQuestions}
               submitUrl={submitUrl}

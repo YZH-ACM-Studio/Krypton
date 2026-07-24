@@ -46,6 +46,8 @@ import {
     ValidationError,
 } from '../error';
 import { ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDoc, ProblemStatusDoc, RecordDoc, User } from '../interface';
+import { canUsePostContestPractice, getContestSubmissionScope, resolvePostContestProblemMode } from '../lib/contest-correction';
+import { buildPersonalPracticeRecordQuery, buildPersonalPracticeStatusByPid, PersonalPracticeRecord } from '../lib/contest-problem-status';
 import { isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { PERM, PRIV, STATUS } from '../model/builtin';
@@ -1145,6 +1147,16 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             ? await problem.get(domainId, pid)
             : await problem.getViewableAuthorized(domainId, pid, this.user, [...problem.PROJECTION_PUBLIC, 'managedAuthoring']);
         if (!this.pdoc) throw new ProblemNotFoundError(domainId, pid);
+        const canManageContest =
+            !!tid && (this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM));
+        const canViewDirectly = !!tid && problem.canViewBy(this.pdoc, this.user);
+        const postContestProblemMode = tid
+            ? resolvePostContestProblemMode(this.tdoc, this.tsdoc, {
+                  canManageContest,
+                  canViewDirectly,
+                  subjective: effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND,
+              })
+            : null;
         if (!tid) {
             this.canEditLoadedProblem = problem.canEditProblemContent(this.user, this.pdoc);
             this.knowledgeNodeIdsForDetail = resolveProblemKnowledgeNodeIds(this.pdoc, `problem ${domainId}/${this.pdoc.docId}`);
@@ -1161,11 +1173,10 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             // the live contest. Don't block them — let them view it (contest
             // "view" mode, no submit, since !attend). Ordinary contestants still
             // must attend before the contest ends.
-            const canManageContest =
-                this.user.own(this.tdoc) || this.user.hasPerm(PERM.PERM_EDIT_CONTEST) || this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM);
             if (!canManageContest && !contest.isDone(this.tdoc, this.tsdoc) && (!this.tsdoc?.attend || !this.tsdoc.startAt)) {
                 throw new ContestNotAttendedError(tid);
             }
+            if (postContestProblemMode === 'none') throw new ProblemNotFoundError(domainId, pid);
             // Delete problem-related info in contest mode
             this.pdoc.tag.length = 0;
             delete this.pdoc.nAccept;
@@ -1258,27 +1269,48 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
             delete responsePdoc.knowledgeMapId;
             delete responsePdoc.knowledgeNodeIds;
         }
+        const postContestPracticeActive = postContestProblemMode === 'correction';
+        const personalPracticePsdoc = postContestPracticeActive
+            ? buildPersonalPracticeStatusByPid(
+                  await record
+                      .getMulti(this.pdoc.domainId, buildPersonalPracticeRecordQuery(this.user._id, [this.pdoc.docId]))
+                      .project<PersonalPracticeRecord>({
+                          _id: 1,
+                          pid: 1,
+                          status: 1,
+                          contest: 1,
+                          contestTeamId: 1,
+                          hackTarget: 1,
+                          input: 1,
+                      })
+                      .toArray(),
+                  [this.pdoc.docId],
+                  this.tdoc.beginAt,
+                  this.tdoc.endAt,
+              )[this.pdoc.docId] || null
+            : null;
+        let mode = 'normal';
+        if (tid) {
+            if (postContestProblemMode) mode = postContestProblemMode;
+            else if (!this.tsdoc?.attend) mode = 'view';
+            else if (!contest.isDone(this.tdoc)) mode = 'contest';
+            else if (problem.canViewBy(this.pdoc, this.user)) mode = 'correction';
+            else mode = 'none';
+        }
         this.response.body = {
             pdoc: responsePdoc,
             udoc: this.udoc,
             authorUdocs,
             dataContributorUdocs,
             knowledgeMapView,
-            psdoc: tid ? null : this.psdoc,
+            psdoc: !tid ? this.psdoc : personalPracticePsdoc,
             title: this.pdoc.title,
             solutionCount: scnt,
             discussionCount: dcnt,
             tdoc: this.tdoc,
             owner_udoc: tid && this.tdoc.owner !== this.pdoc.owner ? await user.getById(this.pdoc.domainId, this.tdoc.owner) : null,
-            mode: !tid
-                ? 'normal'
-                : !this.tsdoc?.attend
-                  ? 'view'
-                  : !contest.isDone(this.tdoc)
-                    ? 'contest'
-                    : problem.canViewBy(this.pdoc, this.user)
-                      ? 'correction'
-                      : 'none',
+            mode,
+            postContestPracticeActive,
             canPreviewSubjective: effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND && problem.canMaintainProblem(this.user, this.pdoc),
             canEditProblem:
                 this.canEditLoadedProblem ||
@@ -1407,9 +1439,18 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
 }
 
 export class ProblemSubmitHandler extends ProblemDetailHandler {
+    private assertContestSubmissionContext(tid?: ObjectId) {
+        if (!tid) return;
+        if (!this.tdoc || String(this.tdoc.docId) !== String(tid) || !Array.isArray(this.tdoc.pids) || !this.tdoc.pids.includes(this.pdoc.docId)) {
+            throw new ContestNotFoundError(this.pdoc.domainId, tid);
+        }
+    }
+
     @param('tid', Types.ObjectId, true)
     async prepare(_domainId: string, tid?: ObjectId) {
-        if (tid && !contest.isOngoing(this.tdoc, this.tsdoc)) throw new ContestNotLiveError(this.tdoc.docId);
+        this.assertContestSubmissionContext(tid);
+        const postContestPractice = !!tid && effectiveProblemKind(this.pdoc) !== SUBJECTIVE_KIND && canUsePostContestPractice(this.tdoc, this.tsdoc);
+        if (tid && !postContestPractice && !contest.isOngoing(this.tdoc, this.tsdoc)) throw new ContestNotLiveError(this.tdoc.docId);
         if (effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND && (!tid || !this.tdoc || !['exam', 'homework', 'oi'].includes(this.tdoc.rule))) {
             throw new ValidationError('rule', null, '主观题仅允许在 exam、homework 或 oi 容器中提交');
         }
@@ -1457,10 +1498,18 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
     @param('input', Types.ArrayOf(Types.String, true), true)
     @param('tid', Types.ObjectId, true)
     async post(_domainId: string, lang: string, code: string, pretest = false, input: string[] = [], tid?: ObjectId) {
+        this.assertContestSubmissionContext(tid);
         const domainId = this.pdoc.domainId;
         const config = this.pdoc.config;
         const isSubjective = effectiveProblemKind(this.pdoc) === SUBJECTIVE_KIND;
         const problemKind = effectiveProblemKind(this.pdoc);
+        const submissionScope = tid
+            ? getContestSubmissionScope(this.tdoc, this.tsdoc, tid)
+            : { postContestPractice: false, recordContestId: undefined };
+        if (tid && !submissionScope.postContestPractice && !contest.isOngoing(this.tdoc, this.tsdoc)) {
+            throw new ContestNotLiveError(this.tdoc.docId);
+        }
+        if (isSubjective && submissionScope.postContestPractice) throw new ContestNotLiveError(this.tdoc.docId);
         if (isSubjective && (pretest || !tid || !this.tdoc || !['exam', 'homework', 'oi'].includes(this.tdoc.rule))) {
             throw new ValidationError('rule', null, '主观题仅允许在 exam、homework 或 oi 容器中提交');
         }
@@ -1531,18 +1580,29 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
             true,
             pretest
                 ? {
-                    input,
-                    type: 'pretest',
-                    contestContext: tid,
-                    vigilSessionKey: (global as any).Hydro?.model?.vigilguard?.clientSessionKeyFromSession?.(this.session),
-                }
+                      input,
+                      type: 'pretest',
+                      contestContext: submissionScope.recordContestId,
+                      vigilSessionKey: (global as any).Hydro?.model?.vigilguard?.clientSessionKeyFromSession?.(this.session),
+                  }
                 : {
-                    contest: tid,
-                    files,
-                    type: isSubjective ? 'manual' : 'judge',
-                    vigilSessionKey: (global as any).Hydro?.model?.vigilguard?.clientSessionKeyFromSession?.(this.session),
-                },
+                      contest: submissionScope.recordContestId,
+                      files,
+                      type: isSubjective ? 'manual' : 'judge',
+                      vigilSessionKey: (global as any).Hydro?.model?.vigilguard?.clientSessionKeyFromSession?.(this.session),
+                  },
         );
+        if (submissionScope.postContestPractice) {
+            logger.info(
+                'Post-contest practice record created domain=%s contest=%s pid=%d uid=%d rid=%s pretest=%s stage=record-created',
+                domainId,
+                tid,
+                this.pdoc.docId,
+                this.user._id,
+                rid,
+                pretest,
+            );
+        }
         if (!pretest) {
             const updates: Promise<unknown>[] = [
                 problem.inc(domainId, this.pdoc.docId, 'nSubmit', 1),
@@ -1552,21 +1612,28 @@ export class ProblemSubmitHandler extends ProblemDetailHandler {
                 updates.push(
                     markManualPending({
                         domainId,
-                        tid,
+                        tid: submissionScope.recordContestId,
                         pid: this.pdoc.docId,
                         uid: this.user._id,
                         rid,
                     }),
                 );
-            } else if (tid) updates.push(contest.updateStatus(domainId, tid, this.user._id, rid, this.pdoc.docId));
+            } else if (submissionScope.recordContestId) {
+                updates.push(contest.updateStatus(domainId, submissionScope.recordContestId, this.user._id, rid, this.pdoc.docId));
+            }
             await Promise.all(updates);
         }
-        if (tid && !pretest && !contest.canShowSelfRecord.call(this, this.tdoc)) {
-            this.response.body = { tid };
-            this.response.redirect = this.url(this.tdoc.rule === 'homework' ? 'homework_detail' : 'contest_problemlist', { tid });
+        if (submissionScope.recordContestId && !pretest && !contest.canShowSelfRecord.call(this, this.tdoc)) {
+            this.response.body = { tid: submissionScope.recordContestId };
+            this.response.redirect = this.url(this.tdoc.rule === 'homework' ? 'homework_detail' : 'contest_problemlist', {
+                tid: submissionScope.recordContestId,
+            });
         } else {
             this.response.body = { rid };
-            this.response.redirect = this.url('record_detail', { rid });
+            this.response.redirect = this.url('record_detail', {
+                rid,
+                query: submissionScope.postContestPractice ? { tid, practice: 1 } : undefined,
+            });
         }
     }
 }

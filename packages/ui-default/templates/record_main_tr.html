@@ -3,7 +3,7 @@
 {% import "components/problem.html" as problem with context %}
 <tr data-rid="{{ rdoc['_id'] }}">
   {% set _isPretest = rdoc.contest and rdoc.contest.toString() == '000000000000000000000000' %}
-  {{ record.render_status_td(rdoc, allDomain = allDomain) }}
+  {{ record.render_status_td(rdoc, allDomain=allDomain, practiceTid=recordDetailTid) }}
   <td class="col--problem col--problem-name">
   {% if handler.user.hasPerm(perm.PERM_REJUDGE) and not rdoc.files.hack and not _isPretest %}
     <form class="form--inline" method="post" action="{{ url('record_detail', rid=rdoc._id, domainId=rdoc.domainId) }}">
@@ -18,6 +18,8 @@
     </form>
   {% endif %}
   {% if pdoc and rdoc.contest %}
+    {{ problem.render_problem_title(pdoc, tdoc=tdoc, show_tags=false, show_invisible_flag=false) }}
+  {% elif pdoc and recordDetailTid %}
     {{ problem.render_problem_title(pdoc, tdoc=tdoc, show_tags=false, show_invisible_flag=false) }}
   {% elif pdoc %}
     {{ problem.render_problem_title(pdoc, show_tags=false) }}

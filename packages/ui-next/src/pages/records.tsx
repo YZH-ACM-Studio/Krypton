@@ -1,6 +1,19 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
-import { ChevronRight, Download, Filter, RotateCcw, Search } from 'lucide-react';
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CircleX,
+  ClipboardCopy,
+  Code2,
+  Download,
+  Filter,
+  LayoutDashboard,
+  ListChecks,
+  RotateCcw,
+  Search,
+} from 'lucide-react';
 import { useRecordSocket } from '@/hooks/use-record-socket';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,6 +26,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
 import { formatRelativeTime, replaceRouteTokens, toDate } from '@/lib/format';
+import {
+  defaultRecordDetailTab,
+  paginateRecordCases,
+  recordDetailTabs,
+  shouldUseLegacyRecordDetail,
+  summarizeRecordCases,
+  type RecordDetailTab,
+} from '@/lib/record-detail-workspace';
 
 type R = Record<string, any>;
 type SubtaskView = R & { id: string };
@@ -96,6 +117,14 @@ function buildUrlWithQuery(baseUrl: string, params: Record<string, unknown>) {
   return query ? `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}${query}` : baseUrl;
 }
 
+function normalizeId(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'object' && value && '$oid' in value) {
+    return String((value as { $oid?: unknown }).$oid || '');
+  }
+  return String(value);
+}
+
 function formatJudgeText(text: unknown): string {
   if (text == null || text === '') return '';
   if (typeof text === 'string') return text;
@@ -143,7 +172,20 @@ function langDisplay(langs: R | undefined, id: string | undefined): string {
   return (entry?.display as string) || (entry?.name as string) || id;
 }
 
-function DiagnosticCard({ title, texts }: { title: string; texts: string[] }) {
+function DiagnosticPanel({ title, texts }: { title: string; texts: string[] }) {
+  if (!texts.length) return null;
+
+  return (
+    <section className="overflow-hidden rounded-lg border bg-muted/10">
+      <div className="border-b px-4 py-3 text-sm font-medium">{title}</div>
+      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs leading-relaxed text-foreground">
+        {texts.join('\n')}
+      </pre>
+    </section>
+  );
+}
+
+function LegacyDiagnosticCard({ title, texts }: { title: string; texts: string[] }) {
   if (!texts.length) return null;
 
   return (
@@ -155,6 +197,191 @@ function DiagnosticCard({ title, texts }: { title: string; texts: string[] }) {
         </pre>
       </CardContent>
     </Card>
+  );
+}
+
+async function copyRecordCode(text: string) {
+  if (!text) throw new Error('没有可复制的代码');
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Continue to the compatibility path; failure is surfaced below if it
+      // also cannot copy.
+    }
+  }
+  if (typeof document === 'undefined') throw new Error('当前环境不支持复制');
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+  document.body.appendChild(textarea);
+  const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  textarea.focus();
+  textarea.select();
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } finally {
+    document.body.removeChild(textarea);
+    active?.focus();
+  }
+  if (!copied) throw new Error('浏览器拒绝了复制操作');
+}
+
+function LegacyRecordDetailBody({
+  rdoc,
+  data,
+  locale,
+  compilerTexts,
+  judgeTexts,
+  subtasks,
+  cases,
+  testHints,
+  code,
+}: {
+  rdoc: R;
+  data: R;
+  locale: string;
+  compilerTexts: string[];
+  judgeTexts: string[];
+  subtasks: SubtaskView[];
+  cases: R[];
+  testHints: Record<string, { hint?: string; videoUrl?: string }>;
+  code: unknown;
+}) {
+  return (
+    <>
+      <Card>
+        <CardContent className="grid gap-4 p-4 text-sm sm:grid-cols-4">
+          <div>
+            <p className="text-xs text-muted-foreground">语言</p>
+            <p className="mt-1 font-medium">{langDisplay(data.langs, rdoc.lang)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">提交时间</p>
+            <p className="mt-1 font-medium">{formatRecordTime(rdoc._id, locale)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">评测时间</p>
+            <p className="mt-1 font-medium">{rdoc.judgeAt ? formatRecordTime(rdoc.judgeAt, locale) : '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">进度</p>
+            <p className="mt-1 font-medium">{rdoc.progress != null ? `${Math.trunc(Number(rdoc.progress))}%` : '—'}</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <LegacyDiagnosticCard title="编译输出" texts={compilerTexts} />
+      <LegacyDiagnosticCard title="评测输出" texts={judgeTexts} />
+
+      {subtasks.length > 0 ? (
+        <Card>
+          <CardContent className="p-0">
+            <div className="border-b px-4 py-3 text-sm font-medium">子任务</div>
+            <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+              {subtasks.map((subtask) => (
+                <div key={subtask.id} className="rounded-md border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium">#{subtask.id}</span>
+                    {statusDisplay(subtask.status)}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>得分 {subtask.score ?? '—'}</span>
+                    {subtask.type ? (
+                      <Badge variant="outline" className="text-[10px]">
+                        {subtask.type}
+                      </Badge>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {cases.length > 0 ? (
+        <Card>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12">#</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead className="w-20 text-right">得分</TableHead>
+                  <TableHead className="w-24 text-right">时间</TableHead>
+                  <TableHead className="w-24 text-right">内存</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {cases.map((c, i) => {
+                  const message = formatJudgeText(c.message);
+                  const subtaskId = c.subtaskId ?? c.subtask;
+                  const caseId = c.id ?? i + 1;
+                  return (
+                    <TableRow key={`${subtaskId ?? 'case'}-${caseId}-${i}`}>
+                      <TableCell className="text-muted-foreground">{subtaskId != null ? `${subtaskId}-${caseId}` : caseId}</TableCell>
+                      <TableCell>
+                        <div>{statusDisplay(c.status)}</div>
+                        {message ? (
+                          <p className="mt-1 max-w-xl whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">{message}</p>
+                        ) : null}
+                        {(() => {
+                          const h = testHints[subtaskId != null ? `${subtaskId}-${caseId}` : `1-${caseId}`];
+                          if (!h?.hint && !h?.videoUrl) return null;
+                          return (
+                            <div className="mt-1.5 max-w-xl rounded border border-amber-200 bg-amber-50/60 px-2 py-1 text-xs dark:border-amber-900/50 dark:bg-amber-950/20">
+                              {h.hint ? <p className="whitespace-pre-wrap break-words text-amber-800 dark:text-amber-200">💡 {h.hint}</p> : null}
+                              {h.videoUrl && /^https?:\/\//i.test(h.videoUrl) ? (
+                                <a href={h.videoUrl} target="_blank" rel="noreferrer" className="mt-0.5 inline-block text-primary hover:underline">
+                                  ▶ 讲解视频
+                                </a>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{c.score ?? '—'}</TableCell>
+                      <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatTime(c.time, c.status)}</TableCell>
+                      <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatMemory(c.memory)}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {code ? (
+        <Card>
+          <CardContent className="p-0">
+            <div className="flex items-center justify-between border-b px-4 py-2">
+              <span className="text-sm font-medium">代码</span>
+              <Badge variant="outline">{langDisplay(data.langs, rdoc.lang)}</Badge>
+            </div>
+            <div className="overflow-hidden" style={{ height: 'min(60vh, 640px)', minHeight: 320 }}>
+              <KryptonIDE
+                mode="readonly"
+                langs={[]}
+                defaultLang={rdoc.lang || 'cc.cc17'}
+                value={String(code)}
+                onValueChange={() => {
+                  /* read-only */
+                }}
+                minHeight={320}
+                className="h-full rounded-none border-0"
+              />
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+    </>
   );
 }
 
@@ -500,10 +727,22 @@ export function RecordDetailPage() {
   const compilerTexts = collectTexts(rdoc.compilerTexts);
   const judgeTexts = collectTexts(rdoc.judgeTexts);
   const subtasks = normalizeSubtasks(rdoc.subtasks);
+  const tabs = recordDetailTabs({ hasCode: !!code, caseCount: cases.length });
+  const [activeTab, setActiveTab] = useState<RecordDetailTab>(() => defaultRecordDetailTab({ hasCode: !!code, caseCount: cases.length }));
+  const [casePage, setCasePage] = useState(1);
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const currentTab = tabs.includes(activeTab) ? activeTab : defaultRecordDetailTab({ hasCode: !!code, caseCount: cases.length });
+  const caseSummary = summarizeRecordCases(cases);
+  const casePageData = paginateRecordCases(cases, casePage);
   const allRevs = Object.entries(data.allRevs || {}) as Array<[string, string]>;
   const examUrls: R = data.examMode?.urls || {};
   const teamExamMode = readTeamExamModeContext(data.examMode);
   const postContestPracticeRecordAccess = data.postContestPracticeRecordAccess === true;
+  const preserveLegacyDetailDom = shouldUseLegacyRecordDetail({
+    hasExamMode: !!data.examMode,
+    hasContestContext: !!data.tdoc,
+    postContestPractice: postContestPracticeRecordAccess,
+  });
   const practiceTid = postContestPracticeRecordAccess ? normalizeId(data.practiceTid || data.tdoc?.docId) : '';
   const recordUrlBase = examUrls.record
     ? String(examUrls.record).replace('__RID__', String(rdoc._id))
@@ -541,6 +780,15 @@ export function RecordDetailPage() {
     },
     disabled: !rdoc._id,
   });
+
+  const handleCopyCode = async () => {
+    try {
+      await copyRecordCode(String(code));
+      setCopyState('copied');
+    } catch {
+      setCopyState('failed');
+    }
+  };
 
   return (
     <motion.div className="space-y-6" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -603,137 +851,269 @@ export function RecordDetailPage() {
         </Card>
       </div>
 
-      <Card>
-        <CardContent className="grid gap-4 p-4 text-sm sm:grid-cols-4">
-          <div>
-            <p className="text-xs text-muted-foreground">语言</p>
-            <p className="mt-1 font-medium">{langDisplay(data.langs, rdoc.lang)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">提交时间</p>
-            <p className="mt-1 font-medium">{formatRecordTime(rdoc._id, locale)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">评测时间</p>
-            <p className="mt-1 font-medium">{rdoc.judgeAt ? formatRecordTime(rdoc.judgeAt, locale) : '—'}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">进度</p>
-            <p className="mt-1 font-medium">{rdoc.progress != null ? `${Math.trunc(Number(rdoc.progress))}%` : '—'}</p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <DiagnosticCard title="编译输出" texts={compilerTexts} />
-      <DiagnosticCard title="评测输出" texts={judgeTexts} />
-
-      {subtasks.length > 0 ? (
-        <Card>
+      {preserveLegacyDetailDom ? (
+        <LegacyRecordDetailBody
+          rdoc={rdoc}
+          data={data}
+          locale={locale}
+          compilerTexts={compilerTexts}
+          judgeTexts={judgeTexts}
+          subtasks={subtasks}
+          cases={cases}
+          testHints={testHints}
+          code={code}
+        />
+      ) : (
+        <Card className="overflow-hidden">
           <CardContent className="p-0">
-            <div className="border-b px-4 py-3 text-sm font-medium">子任务</div>
-            <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-              {subtasks.map((subtask) => (
-                <div key={subtask.id} className="rounded-md border p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm font-medium">#{subtask.id}</span>
-                    {statusDisplay(subtask.status)}
-                  </div>
-                  <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>得分 {subtask.score ?? '—'}</span>
-                    {subtask.type ? (
-                      <Badge variant="outline" className="text-[10px]">
-                        {subtask.type}
-                      </Badge>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {cases.length > 0 ? (
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">#</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead className="w-20 text-right">得分</TableHead>
-                  <TableHead className="w-24 text-right">时间</TableHead>
-                  <TableHead className="w-24 text-right">内存</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {cases.map((c, i) => {
-                  const message = formatJudgeText(c.message);
-                  const subtaskId = c.subtaskId ?? c.subtask;
-                  const caseId = c.id ?? i + 1;
+            <div className="flex flex-col gap-3 border-b bg-muted/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold">评测详情</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">在摘要、测试点和源码之间直接切换</p>
+              </div>
+              <div role="tablist" aria-label="提交详情视图" className="flex max-w-full gap-1 overflow-x-auto rounded-lg bg-muted p-1">
+                {tabs.map((tab) => {
+                  const selected = currentTab === tab;
+                  const Icon = tab === 'overview' ? LayoutDashboard : tab === 'cases' ? ListChecks : Code2;
+                  const label = tab === 'overview' ? '概览' : tab === 'cases' ? `测试点 ${cases.length}` : '代码';
                   return (
-                    <TableRow key={`${subtaskId ?? 'case'}-${caseId}-${i}`}>
-                      <TableCell className="text-muted-foreground">{subtaskId != null ? `${subtaskId}-${caseId}` : caseId}</TableCell>
-                      <TableCell>
-                        <div>{statusDisplay(c.status)}</div>
-                        {message ? (
-                          <p className="mt-1 max-w-xl whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">{message}</p>
-                        ) : null}
-                        {(() => {
-                          // Key by the case's IDENTITY (subtaskId-caseId), which
-                          // the server emits via the same normalizeSubtasks the
-                          // judge uses — robust against parallel-judge completion
-                          // order. Flat (subtask-less) problems are judged as
-                          // subtask 1, so fall back to that.
-                          const h = testHints[subtaskId != null ? `${subtaskId}-${caseId}` : `1-${caseId}`];
-                          if (!h?.hint && !h?.videoUrl) return null;
-                          return (
-                            <div className="mt-1.5 max-w-xl rounded border border-amber-200 bg-amber-50/60 px-2 py-1 text-xs dark:border-amber-900/50 dark:bg-amber-950/20">
-                              {h.hint ? <p className="whitespace-pre-wrap break-words text-amber-800 dark:text-amber-200">💡 {h.hint}</p> : null}
-                              {h.videoUrl && /^https?:\/\//i.test(h.videoUrl) ? (
-                                <a href={h.videoUrl} target="_blank" rel="noreferrer" className="mt-0.5 inline-block text-primary hover:underline">
-                                  ▶ 讲解视频
-                                </a>
-                              ) : null}
-                            </div>
-                          );
-                        })()}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{c.score ?? '—'}</TableCell>
-                      <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatTime(c.time, c.status)}</TableCell>
-                      <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatMemory(c.memory)}</TableCell>
-                    </TableRow>
+                    <button
+                      key={tab}
+                      type="button"
+                      role="tab"
+                      aria-selected={selected}
+                      onClick={() => setActiveTab(tab)}
+                      className={`inline-flex h-10 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-medium transition-colors active:scale-[0.96] ${
+                        selected ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'
+                      }`}
+                    >
+                      <Icon className="size-4" />
+                      {label}
+                    </button>
                   );
                 })}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      ) : null}
+              </div>
+            </div>
 
-      {code ? (
-        <Card>
-          <CardContent className="p-0">
-            <div className="flex items-center justify-between border-b px-4 py-2">
-              <span className="text-sm font-medium">代码</span>
-              <Badge variant="outline">{langDisplay(data.langs, rdoc.lang)}</Badge>
-            </div>
-            <div className="overflow-hidden" style={{ height: 'min(60vh, 640px)', minHeight: 320 }}>
-              <KryptonIDE
-                mode="readonly"
-                langs={[]}
-                defaultLang={rdoc.lang || 'cc.cc17'}
-                value={String(code)}
-                onValueChange={() => {
-                  /* read-only */
-                }}
-                minHeight={320}
-                className="h-full rounded-none border-0"
-              />
-            </div>
+            {currentTab === 'overview' ? (
+              <div role="tabpanel" className="space-y-4 p-4">
+                <div className="grid gap-3 rounded-lg border bg-muted/10 p-4 text-sm sm:grid-cols-4">
+                  <div>
+                    <p className="text-xs text-muted-foreground">语言</p>
+                    <p className="mt-1 font-medium">{langDisplay(data.langs, rdoc.lang)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">提交时间</p>
+                    <p className="mt-1 font-medium">{formatRecordTime(rdoc._id, locale)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">评测时间</p>
+                    <p className="mt-1 font-medium">{rdoc.judgeAt ? formatRecordTime(rdoc.judgeAt, locale) : '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">进度</p>
+                    <p className="mt-1 font-medium tabular-nums">{rdoc.progress != null ? `${Math.trunc(Number(rdoc.progress))}%` : '—'}</p>
+                  </div>
+                </div>
+
+                <DiagnosticPanel title="编译输出" texts={compilerTexts} />
+                <DiagnosticPanel title="评测输出" texts={judgeTexts} />
+
+                {subtasks.length > 0 ? (
+                  <section className="overflow-hidden rounded-lg border">
+                    <div className="border-b px-4 py-3 text-sm font-medium">子任务</div>
+                    <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {subtasks.map((subtask) => (
+                        <div key={subtask.id} className="rounded-lg border bg-muted/10 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm font-medium">#{subtask.id}</span>
+                            {statusDisplay(subtask.status)}
+                          </div>
+                          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                            <span className="tabular-nums">得分 {subtask.score ?? '—'}</span>
+                            {subtask.type ? (
+                              <Badge variant="outline" className="text-[10px]">
+                                {subtask.type}
+                              </Badge>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
+
+                {!compilerTexts.length && !judgeTexts.length && !subtasks.length ? (
+                  <div className="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+                    当前记录没有额外评测摘要。
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {currentTab === 'cases' ? (
+              <div role="tabpanel">
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b px-4 py-3 text-xs text-muted-foreground">
+                  <span>
+                    共 <strong className="font-semibold tabular-nums text-foreground">{caseSummary.total}</strong> 个
+                  </span>
+                  <span>
+                    通过 <strong className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{caseSummary.accepted}</strong>
+                  </span>
+                  <span>
+                    未通过 <strong className="font-semibold tabular-nums text-destructive">{caseSummary.failed}</strong>
+                  </span>
+                  <span>
+                    评测中 <strong className="font-semibold tabular-nums text-blue-600 dark:text-blue-400">{caseSummary.active}</strong>
+                  </span>
+                  <span>
+                    其他 <strong className="font-semibold tabular-nums text-muted-foreground">{caseSummary.other}</strong>
+                  </span>
+                </div>
+                <div className="max-h-[min(65vh,680px)] overflow-y-auto">
+                  <Table density="compact">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-16">#</TableHead>
+                        <TableHead>状态</TableHead>
+                        <TableHead className="w-20 text-right">得分</TableHead>
+                        <TableHead className="w-24 text-right">时间</TableHead>
+                        <TableHead className="w-24 text-right">内存</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {casePageData.items.map((c, pageIndex) => {
+                        const absoluteIndex = (casePageData.page - 1) * casePageData.pageSize + pageIndex;
+                        const message = formatJudgeText(c.message);
+                        const subtaskId = c.subtaskId ?? c.subtask;
+                        const caseId = c.id ?? absoluteIndex + 1;
+                        // Key by the case identity emitted by the judge. Flat
+                        // problems are judged as subtask 1.
+                        const hint = testHints[subtaskId != null ? `${subtaskId}-${caseId}` : `1-${caseId}`];
+                        const hasDetails = !!(message || hint?.hint || hint?.videoUrl);
+                        return (
+                          <TableRow key={`${subtaskId ?? 'case'}-${caseId}-${absoluteIndex}`}>
+                            <TableCell className="font-mono text-xs tabular-nums text-muted-foreground">
+                              {subtaskId != null ? `${subtaskId}-${caseId}` : caseId}
+                            </TableCell>
+                            <TableCell>
+                              <div>{statusDisplay(c.status)}</div>
+                              {hasDetails ? (
+                                <details className="group mt-1 max-w-2xl">
+                                  <summary className="flex min-h-10 cursor-pointer list-none items-center text-xs font-medium text-primary hover:underline">
+                                    查看输出与提示
+                                  </summary>
+                                  <div className="mb-2 space-y-2 rounded-lg border bg-muted/20 p-3">
+                                    {message ? (
+                                      <pre className="whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">{message}</pre>
+                                    ) : null}
+                                    {hint?.hint ? (
+                                      <p className="whitespace-pre-wrap break-words text-xs text-amber-700 dark:text-amber-300">💡 {hint.hint}</p>
+                                    ) : null}
+                                    {hint?.videoUrl && /^https?:\/\//i.test(hint.videoUrl) ? (
+                                      <a
+                                        href={hint.videoUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex min-h-10 items-center text-xs text-primary hover:underline"
+                                      >
+                                        ▶ 讲解视频
+                                      </a>
+                                    ) : null}
+                                  </div>
+                                </details>
+                              ) : null}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{c.score ?? '—'}</TableCell>
+                            <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatTime(c.time, c.status)}</TableCell>
+                            <TableCell className="text-right tabular-nums text-sm text-muted-foreground">{formatMemory(c.memory)}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className="flex flex-col gap-2 border-t bg-muted/10 px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                  <span className="tabular-nums">
+                    显示 {casePageData.start}–{casePageData.end} / {casePageData.total}
+                  </span>
+                  {casePageData.totalPages > 1 ? (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-10 active:scale-[0.96]"
+                        disabled={casePageData.page === 1}
+                        onClick={() => setCasePage(casePageData.page - 1)}
+                      >
+                        <ChevronLeft />
+                        上一页
+                      </Button>
+                      <span className="min-w-16 text-center tabular-nums">
+                        {casePageData.page} / {casePageData.totalPages}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-10 active:scale-[0.96]"
+                        disabled={casePageData.page === casePageData.totalPages}
+                        onClick={() => setCasePage(casePageData.page + 1)}
+                      >
+                        下一页
+                        <ChevronRight />
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {currentTab === 'code' && code ? (
+              <div role="tabpanel">
+                <div className="flex flex-col gap-2 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <Badge variant="outline">{langDisplay(data.langs, rdoc.lang)}</Badge>
+                  <div className="flex items-center gap-2">
+                    {copyState === 'failed' ? (
+                      <span role="alert" className="text-xs text-destructive">
+                        复制失败，请检查浏览器权限
+                      </span>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-10 active:scale-[0.96]"
+                      aria-label={copyState === 'copied' ? '提交代码已复制' : copyState === 'failed' ? '重新复制提交代码' : '复制提交代码'}
+                      onClick={() => void handleCopyCode()}
+                    >
+                      {copyState === 'copied' ? <Check /> : copyState === 'failed' ? <CircleX /> : <ClipboardCopy />}
+                      {copyState === 'copied' ? '已复制' : copyState === 'failed' ? '重试复制' : '复制代码'}
+                    </Button>
+                    <span className="sr-only" role="status" aria-live="polite">
+                      {copyState === 'copied' ? '提交代码已复制' : ''}
+                    </span>
+                  </div>
+                </div>
+                <div className="overflow-hidden" style={{ height: 'min(68vh, 720px)', minHeight: 360 }}>
+                  <KryptonIDE
+                    mode="readonly"
+                    langs={[]}
+                    defaultLang={rdoc.lang || 'cc.cc17'}
+                    value={String(code)}
+                    onValueChange={() => {
+                      /* read-only */
+                    }}
+                    minHeight={360}
+                    className="h-full rounded-none border-0"
+                  />
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
-      ) : null}
+      )}
 
       {allRevs.length > 0 ? (
         <Card>

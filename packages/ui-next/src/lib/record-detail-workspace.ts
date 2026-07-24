@@ -1,0 +1,63 @@
+import { STATUS_CODES, type STATUS } from '@hydrooj/common';
+
+export type RecordDetailTab = 'overview' | 'cases' | 'code';
+
+export interface RecordCaseLike {
+  status?: number;
+}
+
+export function recordDetailTabs({ hasCode, caseCount }: { hasCode: boolean; caseCount: number }): RecordDetailTab[] {
+  return ['overview', ...(caseCount > 0 ? (['cases'] as const) : []), ...(hasCode ? (['code'] as const) : [])];
+}
+
+export function defaultRecordDetailTab({ hasCode, caseCount }: { hasCode: boolean; caseCount: number }): RecordDetailTab {
+  if (hasCode) return 'code';
+  if (caseCount > 0) return 'cases';
+  return 'overview';
+}
+
+export function shouldUseLegacyRecordDetail({
+  hasExamMode,
+  hasContestContext,
+  postContestPractice,
+}: {
+  hasExamMode: boolean;
+  hasContestContext: boolean;
+  postContestPractice: boolean;
+}) {
+  return hasExamMode || (hasContestContext && !postContestPractice);
+}
+
+export function summarizeRecordCases(cases: RecordCaseLike[]) {
+  return cases.reduce(
+    (summary, item) => {
+      const status = Number(item.status ?? 0);
+      const category = STATUS_CODES[status as STATUS];
+      if (category === 'pass') summary.accepted += 1;
+      else if (category === 'pending' || category === 'progress') summary.active += 1;
+      else if (category === 'fail') summary.failed += 1;
+      else summary.other += 1;
+      return summary;
+    },
+    { accepted: 0, failed: 0, active: 0, other: 0, total: cases.length },
+  );
+}
+
+export function paginateRecordCases<T>(items: T[], requestedPage: number, pageSize = 50) {
+  if (!Number.isInteger(pageSize) || pageSize < 1) throw new RangeError('pageSize must be a positive integer');
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  const normalizedPage = Number.isFinite(requestedPage) ? Math.trunc(requestedPage) : 1;
+  const page = Math.min(totalPages, Math.max(1, normalizedPage));
+  const startIndex = (page - 1) * pageSize;
+  const pageItems = items.slice(startIndex, startIndex + pageSize);
+
+  return {
+    items: pageItems,
+    page,
+    pageSize,
+    total: items.length,
+    totalPages,
+    start: items.length ? startIndex + 1 : 0,
+    end: startIndex + pageItems.length,
+  };
+}

@@ -94,4 +94,12 @@ describe('P2.25 contribution assignment and task UI', () => {
     expect(authority).to.include("payload.set('pendingContributionsConfirmed', String(pendingConfirmed))");
     expect(authority).to.include('<Dialog open={pendingConfirmOpen}');
   });
+
+  it('renders edit and archive from separate canonical capabilities', () => {
+    const source = read('packages/ui-next/src/pages/problems.tsx');
+    expect(source).to.include('const canManageByDocId');
+    expect(source).to.include('const canArchiveByDocId');
+    expect(source).to.include('const canArchive = !!canArchiveByDocId[docId]');
+    expect(source).to.include('{canArchive && !pdoc.archivedAt ? (');
+  });
 });

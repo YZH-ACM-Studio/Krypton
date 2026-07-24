@@ -874,6 +874,33 @@ describe('P2.11 enumeration entry gates', () => {
         expect(calls.archive[0].slice(0, 4)).to.deep.equal(['system', 7, 42, 'retired']);
     });
 
+    it('keeps published author editing separate from the administrator-only archive action', async () => {
+        getMultiResults = [
+            [
+                {
+                    domainId: 'system',
+                    docId: 7,
+                    owner: 1,
+                    authoringMode: 'managed',
+                    hidden: false,
+                    managedAuthoring: { metadataStatus: 'confirmed' },
+                },
+            ],
+        ];
+        countResult = 1;
+        const author = makeHandler(ProblemMainHandler, {
+            canBrowse: true,
+            canEditContent: true,
+            canArchive: false,
+            hasPriv: () => false,
+        });
+
+        await author.get('system', 1, '', 20, false, false);
+
+        expect(author.response.body.canManageByDocId[7]).to.equal(true);
+        expect(author.response.body.canArchiveByDocId[7]).to.equal(false);
+    });
+
     it('shows the managed metadata review scope only to administrators', async () => {
         pendingContributionRows = [
             {
@@ -1690,6 +1717,34 @@ describe('P2.13 managed programming edit boundary', () => {
         expect(calls.edit[0][2]).to.deep.equal({ content: 'New statement', html: false });
     });
 
+    it('lets the managed draft author update the working title, difficulty, and knowledge nodes together', async () => {
+        const handler = managedHandler();
+        handler.user.canEditMetadata = true;
+        handler.user.canEditTags = true;
+        handler.request.body = {
+            title: 'Corrected working title',
+            content: 'New statement',
+            difficulty: '5',
+            knowledgeNodeIds: 'node-1',
+            expectedStructureRevision: '2',
+        };
+
+        await handler.post('forged', 'P7', 'Corrected working title', 'New statement', undefined, false, [], undefined, ['node-1'], 5, undefined, 2);
+
+        expect(calls.edit).to.have.lengthOf(1);
+        expect(calls.edit[0][2]).to.deep.equal({
+            content: 'New statement',
+            html: false,
+            title: '待审核 · Corrected working title',
+            difficulty: 5,
+            managedAuthoring: {
+                workingTitle: 'Corrected working title',
+                selectedMindmapNodeIds: ['node-1'],
+                metadataStatus: 'draft',
+            },
+        });
+    });
+
     it('accepts a managed author knowledge-node suggestion only while the problem is a draft', async () => {
         const handler = managedHandler();
         handler.user.canEditContent = true;
@@ -1743,15 +1798,16 @@ describe('P2.13 managed programming edit boundary', () => {
         expect(handler.response.body.managedTrainingPlacements).to.deep.equal(managedTrainingPlacementResults);
     });
 
-    it('keeps a confirmed formal title out of generic content saves and rejects a forged title', async () => {
-        maintainResult = true;
+    it('lets the published author update content and difficulty while keeping the confirmed formal title locked', async () => {
         const handler = managedHandler();
+        handler.user.canEditMetadata = true;
+        handler.user.canEditTags = true;
         handler.pdoc.hidden = false;
         handler.pdoc.managedAuthoring.metadataStatus = 'confirmed';
-        handler.request.body = { content: 'New statement', expectedStructureRevision: '2' };
+        handler.request.body = { content: 'New statement', difficulty: '5', expectedStructureRevision: '2' };
 
-        await handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, [], undefined, undefined, 2);
-        expect(calls.edit[0][2]).to.deep.equal({ content: 'New statement', html: false });
+        await handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, [], 5, undefined, 2);
+        expect(calls.edit[0][2]).to.deep.equal({ content: 'New statement', html: false, difficulty: 5 });
 
         calls.edit.length = 0;
         handler.request.body = { content: 'Newer statement', title: 'Working title', expectedStructureRevision: '2' };
@@ -2149,6 +2205,62 @@ describe('P2.17 programming tag HTTP boundaries', () => {
         expect(unconfirmed).to.be.instanceOf(GenericError);
         expect(calls.tagNormalizations).to.deep.equal([]);
     });
+
+    it('lets a confirmed managed author preview and apply a canonical knowledge-node change', async () => {
+        const pdoc = {
+            domainId: 'system',
+            docId: 7,
+            pid: 'P7',
+            title: 'Published managed problem',
+            tag: ['PAT乙级', 'old-derived-tag'],
+            problemKind: 'programming',
+            authoringMode: 'managed',
+            hidden: false,
+            knowledgeMapId,
+            knowledgeNodeIds: ['node-old'],
+            structureRevision: 4,
+            managedAuthoring: {
+                workingTitle: 'Published managed problem',
+                selectedMindmapNodeIds: ['node-old'],
+                metadataStatus: 'confirmed',
+            },
+        };
+        const author = { canEditContent: true, canEditTags: true };
+        const preview = makeHandler(ProblemProgrammingTagPreviewHandler, author);
+        preview.pdoc = pdoc;
+        preview.request.body = { knowledgeMapId, knowledgeNodeIds: 'node-1' };
+        maintainableResults = [{ ...pdoc }];
+
+        await preview.post('forged', 'P7', knowledgeMapId, ['node-1']);
+
+        expect(calls.getCapabilityAuthorized.at(-1)?.slice(0, 4)).to.deep.equal(['system', 7, preview.user, 'tag']);
+        expect(preview.response.body.preview).to.deep.include({
+            selectedNodeIds: ['node-1'],
+            fingerprint: 'preview-fingerprint',
+        });
+
+        const apply = makeHandler(ProblemProgrammingTagApplyHandler, author);
+        apply.pdoc = pdoc;
+        apply.request.body = {
+            knowledgeMapId,
+            knowledgeNodeIds: 'node-1',
+            intent: 'normalize',
+            confirmed: 'true',
+            previewFingerprint: 'preview-fingerprint',
+        };
+
+        await apply.post('forged', 'P7', knowledgeMapId, ['node-1'], 'normalize', true, 'preview-fingerprint');
+
+        expect(calls.tagNormalizations.at(-1)).to.deep.include({
+            domainId: 'system',
+            pid: 7,
+            user: apply.user,
+            targetKnowledgeMapId: knowledgeMapId,
+            selectedNodeIds: ['node-1'],
+            previewFingerprint: 'preview-fingerprint',
+        });
+        expect(apply.response.body).to.deep.include({ ok: true, structureRevision: 5 });
+    });
 });
 
 describe('P3.15 files workspace capability contract', () => {
@@ -2306,8 +2418,9 @@ describe('P3.15 files workspace capability contract', () => {
             {
                 role: 'author',
                 user: {
-                    canEditContent: false,
-                    canEditMetadata: false,
+                    canEditContent: true,
+                    canEditMetadata: true,
+                    canEditTags: true,
                     canManageCollaborators: false,
                     canManageMaintainers: false,
                     canPublish: false,
@@ -2315,7 +2428,13 @@ describe('P3.15 files workspace capability contract', () => {
                     canDelete: false,
                     canClone: false,
                 },
-                expected: { canEditContent: false, canManageCollaborators: false, canPublish: false },
+                expected: {
+                    canEditContent: true,
+                    canEditTags: true,
+                    canEditDraftMetadata: true,
+                    canManageCollaborators: false,
+                    canPublish: false,
+                },
             },
             {
                 role: 'maintainer',

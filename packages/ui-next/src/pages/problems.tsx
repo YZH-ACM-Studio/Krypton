@@ -203,6 +203,7 @@ export function ProblemsPage() {
   const contestOptions: Array<{ id: string; title: string; beginAt?: string | Date }> = data.contestOptions || [];
   const ownerNames: Record<string, string> = data.ownerNames || {};
   const canManageByDocId: Record<string, boolean> = data.canManageByDocId || {};
+  const canArchiveByDocId: Record<string, boolean> = data.canArchiveByDocId || {};
   const canManageContributionsByDocId: Record<string, boolean> = data.canManageContributionsByDocId || {};
   const canCloneByDocId: Record<string, boolean> = data.canCloneByDocId || {};
   const managedReviewableByDocId: Record<string, boolean> = data.managedReviewableByDocId || {};
@@ -431,6 +432,7 @@ export function ProblemsPage() {
               const displayPid = String(pdoc.pid || pdoc.docId);
               const kind = effectiveProblemKind(pdoc);
               const canManage = !!canManageByDocId[docId];
+              const canArchive = !!canArchiveByDocId[docId];
               const canManageContributions = !!canManageContributionsByDocId[docId];
               const canClone = !!canCloneByDocId[docId];
               const canReviewManaged = !!managedReviewableByDocId[docId];
@@ -593,7 +595,7 @@ export function ProblemsPage() {
                               </Button>
                             </form>
                           ) : null}
-                          {!pdoc.archivedAt ? (
+                          {canArchive && !pdoc.archivedAt ? (
                             <form
                               method="post"
                               onSubmit={(event) => {

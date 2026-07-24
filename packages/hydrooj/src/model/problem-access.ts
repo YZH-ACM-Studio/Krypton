@@ -55,7 +55,7 @@ export interface ProblemWriteClaim {
     actor: number;
     operation: string;
     capability: ProblemWriteCapability;
-    /** Content claim acquired solely through the managed author role. */
+    /** Author-only claim acquired while the managed problem is still a hidden draft. */
     managedAuthorDraftOnly?: true;
     state: 'active' | 'error';
     lastError: string | null;
@@ -794,17 +794,22 @@ export function canAuthorProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolea
     return user._authoredPids?.has(pdoc.docId) === true;
 }
 
+function isManagedAuthorEditableState(pdoc: ProblemDoc): boolean {
+    return pdoc.managedAuthoring?.metadataStatus === 'confirmed' || (pdoc.hidden === true && pdoc.managedAuthoring?.metadataStatus === 'draft');
+}
+
 export function canEditProblemContent(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (pdoc.authoringMode !== 'managed') return canMaintainProblem(user, pdoc);
     if (canMaintainProblem(user, pdoc)) return true;
-    return pdoc.hidden === true && pdoc.managedAuthoring?.metadataStatus === 'draft' && canAuthorProblem(user, pdoc);
+    return isManagedAuthorEditableState(pdoc) && canAuthorProblem(user, pdoc);
 }
 
 export function canEditProblemMetadata(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (pdoc.authoringMode !== 'managed') return canMaintainProblem(user, pdoc);
-    if (!canMaintainProblem(user, pdoc)) return false;
+    if (!hasLoadedAclForProblem(user, pdoc) || isAclFenced(user, pdoc.docId)) return false;
     if (isProblemBankAdmin(user)) return true;
-    return pdoc.managedAuthoring?.metadataStatus !== 'confirmed';
+    if (canMaintainProblem(user, pdoc)) return pdoc.managedAuthoring?.metadataStatus !== 'confirmed';
+    return isManagedAuthorEditableState(pdoc) && canAuthorProblem(user, pdoc);
 }
 
 /** Testdata, judge configuration and other evaluation-only fields. */
@@ -923,16 +928,27 @@ function applyCapabilityIdentityFilter(
         filter.$or = [{ owner: user._id }, { maintainer: user._id }];
         return;
     }
-    if (isManagedAuthorDraftOnly(user, pdoc, capability)) {
-        filter.hidden = true;
-        filter['managedAuthoring.metadataStatus'] = 'draft';
+    if (isManagedAuthorOnly(user, pdoc, capability)) {
+        if (isManagedAuthorDraftOnly(user, pdoc, capability)) {
+            filter.hidden = true;
+            filter['managedAuthoring.metadataStatus'] = 'draft';
+        }
         return;
     }
     filter.maintainer = user._id;
 }
 
+function isManagedAuthorOnly(user: ProblemAclUser, pdoc: ProblemDoc, capability: ProblemWriteCapability): boolean {
+    return (
+        ['content', 'metadata', 'tag'].includes(capability) &&
+        pdoc.authoringMode === 'managed' &&
+        canAuthorProblem(user, pdoc) &&
+        !canMaintainProblem(user, pdoc)
+    );
+}
+
 function isManagedAuthorDraftOnly(user: ProblemAclUser, pdoc: ProblemDoc, capability: ProblemWriteCapability): boolean {
-    return capability === 'content' && pdoc.authoringMode === 'managed' && canAuthorProblem(user, pdoc) && !canMaintainProblem(user, pdoc);
+    return isManagedAuthorOnly(user, pdoc, capability) && pdoc.hidden === true && pdoc.managedAuthoring?.metadataStatus === 'draft';
 }
 
 /** Canonical direct-problem view check used by ProblemModel.canViewBy. */

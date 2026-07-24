@@ -571,7 +571,7 @@ describe('P2.13 managed programming authoring matrix', () => {
         expect(canAuthorProblem(author, draft)).to.equal(true);
         expect(canViewProblem(author, draft)).to.equal(true);
         expect(canEditProblemContent(author, draft)).to.equal(true);
-        expect(canEditProblemMetadata(author, draft)).to.equal(false);
+        expect(canEditProblemMetadata(author, draft)).to.equal(true);
         expect(canManageProblemCollaborators(author, draft)).to.equal(false);
         expect(canPublishProblem(author, draft)).to.equal(false);
         expect(canArchiveProblem(author, draft)).to.equal(false);
@@ -591,7 +591,11 @@ describe('P2.13 managed programming authoring matrix', () => {
         expect(canDeleteProblem(maintainer, draft)).to.equal(false);
 
         const confirmed = { ...draft, hidden: false, managedAuthoring: { ...draft.managedAuthoring, metadataStatus: 'confirmed' } };
-        expect(canEditProblemContent(author, confirmed)).to.equal(false);
+        expect(canEditProblemContent(author, confirmed)).to.equal(true);
+        expect(canEditProblemMetadata(author, confirmed)).to.equal(true);
+        expect(canEditProblemTags(author, confirmed)).to.equal(true);
+        expect(canEditProblemContent(author, { ...draft, hidden: false })).to.equal(false);
+        expect(canEditProblemMetadata(author, { ...draft, managedAuthoring: undefined })).to.equal(false);
         expect(canEditProblemContent(maintainer, confirmed)).to.equal(true);
         expect(canEditProblemContent(admin, confirmed)).to.equal(true);
         expect(canEditProblemMetadata(maintainer, confirmed)).to.equal(false);
@@ -606,6 +610,8 @@ describe('P2.13 managed programming authoring matrix', () => {
 
         expect(canEditProblemContent(admin, draft)).to.equal(true);
         expect(canEditProblemMetadata(admin, draft)).to.equal(true);
+        expect(canEditProblemMetadata(makeUser('admin', { _problemAclLoaded: false }), draft)).to.equal(false);
+        expect(canEditProblemMetadata(makeUser('admin', { _aclFencedPids: new Set([100]) }), draft)).to.equal(false);
         expect(canManageProblemMaintainers(admin, draft)).to.equal(true);
         expect(canPublishProblem(admin, draft)).to.equal(true);
         expect(canArchiveProblem(admin, draft)).to.equal(true);
@@ -615,7 +621,40 @@ describe('P2.13 managed programming authoring matrix', () => {
         expect(canCloneProblem(legacyOwner, { ...legacy, problemKind: 'single' })).to.equal(true);
     });
 
-    it('lets an active author acquire draft content and published data claims without a maintainer mirror', async () => {
+    it('lets the assigned author update draft metadata and tags without a maintainer mirror', async () => {
+        const acquire = (access as any).acquireProblemWriteClaim;
+        const clear = (access as any).clearProblemWriteClaim;
+        const author = makeUser('student', { _permitPids: new Set([100]), _authoredPids: new Set([100]) });
+        liveProblem = {
+            ...managedPdoc(100),
+            docType: TYPE_PROBLEM,
+            content: 'before',
+            aclMutationRevision: 2,
+            aclMutationLocks: [],
+            maintainer: [],
+        };
+        (global as any).Hydro.model.permits.loadAclForUser = async () => aclSnapshot({ permits: [100], authored: [100] });
+
+        const metadataClaim = await acquire(author, structuredClone(liveProblem), 'author-draft-metadata', 'metadata-edit', {
+            capability: 'metadata',
+        });
+        expect(metadataClaim?.capability).to.equal('metadata');
+        expect(metadataClaim?.managedAuthorDraftOnly).to.equal(true);
+        expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('maintainer');
+        expect(guardedUpdateCalls.at(-1)?.filter).to.include({ hidden: true, 'managedAuthoring.metadataStatus': 'draft' });
+        expect(await clear(metadataClaim)).to.equal(true);
+
+        const tagClaim = await acquire(author, structuredClone(liveProblem), 'author-draft-tags', 'programming-tag-normalize', {
+            capability: 'tag',
+        });
+        expect(tagClaim?.capability).to.equal('tag');
+        expect(tagClaim?.managedAuthorDraftOnly).to.equal(true);
+        expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('maintainer');
+        expect(guardedUpdateCalls.at(-1)?.filter).to.include({ hidden: true, 'managedAuthoring.metadataStatus': 'draft' });
+        expect(await clear(tagClaim)).to.equal(true);
+    });
+
+    it('lets an active author maintain a published problem without a maintainer mirror while keeping the formal title locked', async () => {
         const acquire = (access as any).acquireProblemWriteClaim;
         const clear = (access as any).clearProblemWriteClaim;
         const author = makeUser('student', { _permitPids: new Set([100]), _authoredPids: new Set([100]) });
@@ -653,7 +692,15 @@ describe('P2.13 managed programming authoring matrix', () => {
         const publishedContentClaim = await acquire(author, structuredClone(liveProblem), 'author-published-content', 'metadata-edit', {
             capability: 'content',
         });
-        expect(publishedContentClaim).to.equal(null);
+        expect(publishedContentClaim?.capability).to.equal('content');
+        expect(publishedContentClaim).not.to.have.property('managedAuthorDraftOnly');
+        expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('maintainer');
+        expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('hidden');
+        expect(await (access as any).commitProblemWriteClaimUpdate(publishedContentClaim, { content: 'after publish' }, {}, 'content')).to.not.equal(
+            null,
+        );
+        expect(liveProblem.content).to.equal('after publish');
+        expect(await clear(publishedContentClaim)).to.equal(true);
 
         const publishedDataClaim = await acquire(author, structuredClone(liveProblem), 'author-published-data', 'files-upload', {
             capability: 'data',
@@ -665,7 +712,25 @@ describe('P2.13 managed programming authoring matrix', () => {
         expect(await clear(publishedDataClaim)).to.equal(true);
 
         const metadataClaim = await acquire(author, structuredClone(liveProblem), 'author-metadata', 'metadata-edit', { capability: 'metadata' });
-        expect(metadataClaim).to.equal(null);
+        expect(metadataClaim?.capability).to.equal('metadata');
+        expect(metadataClaim).not.to.have.property('managedAuthorDraftOnly');
+        expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('maintainer');
+        expect(await (access as any).commitProblemWriteClaimUpdate(metadataClaim, { difficulty: 5 }, {}, 'metadata')).to.not.equal(null);
+        expect(liveProblem.difficulty).to.equal(5);
+        const forgedTitle = await captureFailure(() =>
+            (access as any).commitProblemWriteClaimUpdate(metadataClaim, { title: 'forged formal title' }, {}, 'metadata'),
+        );
+        expect(forgedTitle).to.have.property('name', 'ValidationError');
+        expect(liveProblem.title).not.to.equal('forged formal title');
+        expect(await clear(metadataClaim)).to.equal(true);
+
+        const tagClaim = await acquire(author, structuredClone(liveProblem), 'author-published-tag', 'programming-tag-normalize', {
+            capability: 'tag',
+        });
+        expect(tagClaim?.capability).to.equal('tag');
+        expect(tagClaim).not.to.have.property('managedAuthorDraftOnly');
+        expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('maintainer');
+        expect(await clear(tagClaim)).to.equal(true);
     });
 });
 
@@ -684,10 +749,10 @@ describe('P2.24 orthogonal problem contribution capabilities', () => {
             _tagContributionPids: new Set([100]),
         });
 
-        expect(canEditProblemContent(author, confirmedManaged)).to.equal(false);
+        expect(canEditProblemContent(author, confirmedManaged)).to.equal(true);
         expect(canManageProblemContributions(author, confirmedManaged)).to.equal(true);
         expect(canEditProblemData(author, confirmedManaged)).to.equal(true);
-        expect(canEditProblemTags(author, confirmedManaged)).to.equal(false);
+        expect(canEditProblemTags(author, confirmedManaged)).to.equal(true);
 
         expect(canEditProblemContent(data, confirmedManaged)).to.equal(false);
         expect(canEditProblemData(data, confirmedManaged)).to.equal(true);
@@ -1912,7 +1977,7 @@ describe('P2.11 stable direct-problem reads', () => {
         expect(loads).to.equal(2);
     });
 
-    it('denies every stable editor workspace read to an author after publication', async () => {
+    it('keeps the stable editor workspace available to the canonical author after publication', async () => {
         liveProblem = {
             ...managedPdoc(100, 7, false),
             managedAuthoring: { ...managedPdoc(100).managedAuthoring, metadataStatus: 'confirmed' },
@@ -1925,7 +1990,7 @@ describe('P2.11 stable direct-problem reads', () => {
 
         const result = await readStableEditableProblem('system', makeUser('student'), readLiveProblem());
 
-        expect(result).to.equal(null);
+        expect(result?.config).to.equal('secret: true');
     });
 
     it('requires a stable owner-or-maintainer mirror for maintainer-only reads', async () => {

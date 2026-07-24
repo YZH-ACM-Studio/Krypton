@@ -792,6 +792,7 @@ export class ProblemMainHandler extends Handler {
         const ownerDict = ownerIds.length ? await user.getList(domainId, ownerIds) : {};
         const ownerNames = Object.fromEntries(pdocs.map((pdoc) => [pdoc.owner, ownerDict[pdoc.owner]?.uname || `UID ${pdoc.owner}`]));
         const canManageByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canEditProblemContent(this.user, pdoc)]));
+        const canArchiveByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canArchiveProblem(this.user, pdoc)]));
         const canCloneByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canCloneProblem(this.user, pdoc)]));
         const managedReviewableByDocId = Object.fromEntries(
             (quick ? [] : pdocs).map((pdoc) => [
@@ -874,6 +875,7 @@ export class ProblemMainHandler extends Handler {
                 },
                 ownerNames,
                 canManageByDocId,
+                canArchiveByDocId,
                 canManageContributionsByDocId,
                 canCloneByDocId,
                 managedReviewableByDocId,

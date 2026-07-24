@@ -268,6 +268,35 @@ describe('P2.14 managed generic patch guard', () => {
         expect(confirmedGuard.immutableFields).to.have.members(['title', 'managedAuthoring']);
     });
 
+    it('keeps an unclassified draft working-title update in metadata capability', () => {
+        const unclassifiedDraft = {
+            ...draft,
+            knowledgeNodeIds: [],
+            managedAuthoring: {
+                ...draft.managedAuthoring,
+                selectedMindmapNodeIds: [],
+            },
+        };
+        const guard = managedProblemPatchCapability(
+            unclassifiedDraft,
+            {
+                content: '题面',
+                html: false,
+                title: '待审核 · 新标题',
+                difficulty: 1,
+                managedAuthoring: {
+                    ...unclassifiedDraft.managedAuthoring,
+                    workingTitle: '新标题',
+                },
+            },
+            {},
+        );
+
+        expect(guard.capability).to.equal('metadata');
+        expect(guard.immutableFields).to.deep.equal([]);
+        expect(guard.publishes).to.equal(false);
+    });
+
     it('allows an author to suggest live mindmap nodes without gaining metadata authority', () => {
         const suggested = {
             ...draft.managedAuthoring,
@@ -950,6 +979,19 @@ describe('P2.14 managed problem training placement', () => {
         });
         expect(draft.knowledgeMapId.equals(primaryMapId)).to.equal(true);
         expect(draft.selectedMindmapNodeIds).to.deep.equal([]);
+        await expectReject(
+            authoring.prepareManagedProblemPublication('system', {
+                docId: 101,
+                sourceMeta: { template: 'self', year: 2026 },
+                knowledgeMapId: draft.knowledgeMapId,
+                managedAuthoring: {
+                    workingTitle: draft.workingTitle,
+                    selectedMindmapNodeIds: [],
+                    metadataStatus: 'draft',
+                },
+            }),
+            TestMetadataConflictError,
+        );
 
         const nodeId = new ObjectId('64b000000000000000000012');
         mindmapMaps[0].rootNodeId = nodeId;

@@ -26,7 +26,7 @@ const managedAuthoringExports = {
     canonicalizeManagedDraftMindmapPatch: async (current: any, $set: any) => {
         if (current.authoringMode !== 'managed' || !Object.hasOwn($set, 'managedAuthoring')) return null;
         const ids = $set.managedAuthoring?.selectedMindmapNodeIds;
-        if (!Array.isArray(ids) || !ids.length || ids.map(String).includes('stale-node')) {
+        if (!Array.isArray(ids) || ids.map(String).includes('stale-node')) {
             const error = new Error('stale managed mindmap node');
             error.name = 'ValidationError';
             throw error;
@@ -652,6 +652,59 @@ describe('P2.13 managed programming authoring matrix', () => {
         expect(guardedUpdateCalls.at(-1)?.filter).not.to.have.property('maintainer');
         expect(guardedUpdateCalls.at(-1)?.filter).to.include({ hidden: true, 'managedAuthoring.metadataStatus': 'draft' });
         expect(await clear(tagClaim)).to.equal(true);
+    });
+
+    it('commits an unclassified draft working-title update under the author metadata claim', async () => {
+        const acquire = (access as any).acquireProblemWriteClaim;
+        const commit = (access as any).commitProblemWriteClaimUpdate;
+        const clear = (access as any).clearProblemWriteClaim;
+        const author = makeUser('student', { _permitPids: new Set([100]), _authoredPids: new Set([100]) });
+        liveProblem = {
+            ...managedPdoc(100),
+            docType: TYPE_PROBLEM,
+            title: '待审核 · 旧标题',
+            content: '旧题面',
+            difficulty: 1,
+            managedAuthoring: {
+                workingTitle: '旧标题',
+                selectedMindmapNodeIds: [],
+                metadataStatus: 'draft',
+            },
+            aclMutationRevision: 2,
+            aclMutationLocks: [],
+            maintainer: [],
+        };
+        (global as any).Hydro.model.permits.loadAclForUser = async () => aclSnapshot({ permits: [100], authored: [100] });
+
+        const claim = await acquire(author, structuredClone(liveProblem), 'author-empty-draft-metadata', 'metadata-edit', {
+            capability: 'metadata',
+        });
+        const updated = await commit(
+            claim,
+            {
+                content: '新题面',
+                html: false,
+                title: '待审核 · 新标题',
+                difficulty: 2,
+                managedAuthoring: {
+                    workingTitle: '新标题',
+                    selectedMindmapNodeIds: [],
+                    metadataStatus: 'draft',
+                },
+            },
+            {},
+            'metadata',
+        );
+
+        expect(updated).not.to.equal(null);
+        expect(liveProblem).to.include({ title: '待审核 · 新标题', content: '新题面', difficulty: 2 });
+        expect(liveProblem.managedAuthoring).to.deep.equal({
+            workingTitle: '新标题',
+            selectedMindmapNodeIds: [],
+            metadataStatus: 'draft',
+        });
+        expect(managedMindmapMaterializations.at(-1)).to.deep.equal([]);
+        expect(await clear(claim)).to.equal(true);
     });
 
     it('lets an active author maintain a published problem without a maintainer mirror while keeping the formal title locked', async () => {

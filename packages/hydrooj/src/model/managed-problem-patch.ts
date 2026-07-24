@@ -58,7 +58,6 @@ export function managedProblemPatchCapability(
                 typeof proposedAuthoring.workingTitle === 'string' &&
                 !!proposedAuthoring.workingTitle.trim() &&
                 Array.isArray(proposedAuthoring.selectedMindmapNodeIds) &&
-                proposedAuthoring.selectedMindmapNodeIds.length > 0 &&
                 isEqual(
                     {
                         ...proposedAuthoring,

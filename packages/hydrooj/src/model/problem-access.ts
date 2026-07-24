@@ -1,12 +1,17 @@
 import type { Filter } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { PermissionError, ValidationError } from '../error';
-import type { User } from '../interface';
 import { PERM, PRIV } from './builtin';
 import { assertCodeEvaluationLifecyclePatch, assertProblemReadyForUse, CODE_EVALUATION_CANDIDATE_FILTER } from './code-evaluation-lifecycle';
 import * as document from './document';
 import { canonicalizeManagedDraftMindmapPatch } from './managed-problem-authoring';
 import { managedProblemPatchCapability, managedProblemPatchStateFilter } from './managed-problem-patch';
+import {
+    loadPidNamespaceAclForUser,
+    pidNamespaceCapabilityForProblem,
+    withPidNamespaceBoundary,
+    type PidNamespaceAclUser,
+} from './problem-pid-namespace';
 import type { ProblemDoc } from './problem';
 import { canonicalizeStructuredKnowledgePatch, touchesCanonicalProblemFields } from './structured-problem-metadata';
 
@@ -21,7 +26,7 @@ import { canonicalizeStructuredKnowledgePatch, touchesCanonicalProblemFields } f
  * Non-admin callers must never infer an empty ACL from absent state; only
  * `_problemAclLoaded === true` makes this complete snapshot authoritative.
  */
-export type ProblemAclUser = Pick<User, '_id' | 'hasPerm' | 'hasPriv'> & {
+export type ProblemAclUser = PidNamespaceAclUser & {
     _permitPids?: Set<number>;
     _authoredPids?: Set<number>;
     _maintainedPids?: Set<number>;
@@ -57,6 +62,9 @@ export interface ProblemWriteClaim {
     capability: ProblemWriteCapability;
     /** Author-only claim acquired while the managed problem is still a hidden draft. */
     managedAuthorDraftOnly?: true;
+    /** Present only when the write depends on a live namespace-scoped grant. */
+    pidNamespaceId?: string;
+    pidNamespaceGrant?: 'manager' | 'editAll';
     state: 'active' | 'error';
     lastError: string | null;
     createdAt: Date;
@@ -72,6 +80,19 @@ const NARROW_CAPABILITY_FIELDS: Partial<Record<ProblemWriteCapability, ReadonlyS
     tag: new Set(['tag', 'knowledgeMapId', 'knowledgeNodeIds', 'managedAuthoring.selectedMindmapNodeIds']),
     contributions: new Set(),
 };
+const PID_NAMESPACE_EDIT_ALL_FIELDS = new Set([
+    'title',
+    'content',
+    'html',
+    'difficulty',
+    'tag',
+    'knowledgeMapId',
+    'knowledgeNodeIds',
+    'config',
+    'data',
+    'additional_file',
+    'managedAuthoring',
+]);
 
 function sorted(values?: Set<number>): number[] {
     return Array.from(values || []).sort((a, b) => a - b);
@@ -139,7 +160,12 @@ function isAclFenced(user: ProblemAclUser, pid: number): boolean {
 }
 
 function hasLoadedAclForProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
-    return user._problemAclLoaded === true && user._problemAclDomainId === pdoc.domainId;
+    return (
+        user._problemAclLoaded === true &&
+        user._problemAclDomainId === pdoc.domainId &&
+        user._pidNamespaceAclLoaded === true &&
+        user._pidNamespaceAclDomainId === pdoc.domainId
+    );
 }
 
 function selectionDenied(cause?: unknown): Error {
@@ -157,7 +183,12 @@ function selectionDenied(cause?: unknown): Error {
 
 /** Assert that request-local ACL state belongs to the authoritative domain. */
 export function assertProblemAclDomain(user: ProblemAclUser, authoritativeDomainId: string): void {
-    if (user._problemAclLoaded !== true || user._problemAclDomainId !== authoritativeDomainId) {
+    if (
+        user._problemAclLoaded !== true ||
+        user._problemAclDomainId !== authoritativeDomainId ||
+        user._pidNamespaceAclLoaded !== true ||
+        user._pidNamespaceAclDomainId !== authoritativeDomainId
+    ) {
         throw selectionDenied();
     }
 }
@@ -189,7 +220,9 @@ export function canAssignManagedAuthor(user: ProblemAclUser): boolean {
 
 /** Whether this request may enumerate the problem bank. */
 export function canBrowseProblemBank(user: ProblemAclUser): boolean {
-    if (user._problemAclLoaded !== true) return false;
+    if (user._problemAclLoaded !== true || user._pidNamespaceAclLoaded !== true || user._problemAclDomainId !== user._pidNamespaceAclDomainId) {
+        return false;
+    }
     return (
         isProblemBankAdmin(user) ||
         user.hasPerm(PERM.PERM_CREATE_PROBLEM) ||
@@ -198,7 +231,9 @@ export function canBrowseProblemBank(user: ProblemAclUser): boolean {
         (user._authoredPids?.size || 0) > 0 ||
         (user._maintainedPids?.size || 0) > 0 ||
         (user._dataContributionPids?.size || 0) > 0 ||
-        (user._tagContributionPids?.size || 0) > 0
+        (user._tagContributionPids?.size || 0) > 0 ||
+        (user._pidNamespaceManagerIds?.size || 0) > 0 ||
+        (user._pidNamespaceEditAllIds?.size || 0) > 0
     );
 }
 
@@ -225,6 +260,8 @@ function buildProblemBankScopeFor(user: ProblemAclUser, includeContributions: bo
               new Set([...sorted(user._dataContributionPids), ...sorted(user._tagContributionPids)].filter((pid) => !user._aclFencedPids?.has(pid))),
           )
         : [];
+    const managerNamespaceIds = Array.from(user._pidNamespaceManagerIds || []).sort();
+    const editAllNamespaceIds = Array.from(user._pidNamespaceEditAllIds || []).sort();
     const authorScopes: Filter<ProblemDoc>[] = [];
     if (user.hasPerm(PERM.PERM_CREATE_PROBLEM) || user._ownsLegacyProblems === true) {
         authorScopes.push({ $and: [{ owner: user._id }, { authoringMode: { $ne: 'managed' } }] });
@@ -241,6 +278,16 @@ function buildProblemBankScopeFor(user: ProblemAclUser, includeContributions: bo
         authorScopes.push({ $and: [{ docId: { $in: authored } }, { authoringMode: 'managed' }] });
     }
     if (contributed.length) authorScopes.push({ docId: { $in: contributed } });
+    if (editAllNamespaceIds.length) authorScopes.push({ pidNamespaceId: { $in: editAllNamespaceIds } });
+    if (managerNamespaceIds.length) {
+        authorScopes.push({
+            pidNamespaceId: { $in: managerNamespaceIds },
+            authoringMode: 'managed',
+            hidden: true,
+            archivedAt: { $exists: false },
+            'managedAuthoring.metadataStatus': { $in: ['draft', 'confirmed'] },
+        });
+    }
     if (!authorScopes.length) return { ...DENY_ALL_PROBLEMS };
     const authorScope: Filter<ProblemDoc> = authorScopes.length === 1 ? authorScopes[0] : { $or: authorScopes };
     return fenced.length ? { $and: [authorScope, { docId: { $nin: fenced } }, liveLockExclusion] } : { $and: [authorScope, liveLockExclusion] };
@@ -269,6 +316,11 @@ function denyProblemAcl(user: ProblemAclUser): void {
     user._ownsLegacyProblems = false;
     user._problemAclDomainId = undefined;
     user._problemAclLoaded = false;
+    user._pidNamespaceAuthorIds = new Set<string>();
+    user._pidNamespaceManagerIds = new Set<string>();
+    user._pidNamespaceEditAllIds = new Set<string>();
+    user._pidNamespaceAclDomainId = undefined;
+    user._pidNamespaceAclLoaded = false;
 }
 
 /** Reload persistent canonical/fence/ProblemDoc-lock state immediately before use. */
@@ -279,7 +331,16 @@ export async function refreshProblemAcl(user: ProblemAclUser, authoritativeDomai
         if (typeof permits?.loadAclForUser !== 'function') {
             throw new TypeError('permits.loadAclForUser is unavailable');
         }
-        const loaded = await permits.loadAclForUser(authoritativeDomainId, user._id);
+        const [loaded, namespaceAcl] = await Promise.all([
+            permits.loadAclForUser(authoritativeDomainId, user._id),
+            (async () => {
+                const pidNamespaces = (global.Hydro?.model as any)?.pidNamespaces;
+                if (typeof pidNamespaces?.loadAclForUser !== 'function') {
+                    throw new TypeError('pidNamespaces.loadAclForUser is unavailable');
+                }
+                return pidNamespaces.loadAclForUser(authoritativeDomainId, user._id);
+            })(),
+        ]);
         if (
             !(loaded?.permitPids instanceof Set) ||
             !(loaded?.authoredPids instanceof Set) ||
@@ -291,6 +352,13 @@ export async function refreshProblemAcl(user: ProblemAclUser, authoritativeDomai
         ) {
             throw new TypeError('permits.loadAclForUser returned an invalid ACL snapshot');
         }
+        if (
+            !(namespaceAcl?.authorNamespaceIds instanceof Set) ||
+            !(namespaceAcl?.managerNamespaceIds instanceof Set) ||
+            !(namespaceAcl?.editAllNamespaceIds instanceof Set)
+        ) {
+            throw new TypeError('pidNamespaces.loadAclForUser returned an invalid ACL snapshot');
+        }
         user._permitPids = loaded.permitPids;
         user._authoredPids = loaded.authoredPids;
         user._maintainedPids = loaded.maintainedPids;
@@ -300,6 +368,11 @@ export async function refreshProblemAcl(user: ProblemAclUser, authoritativeDomai
         user._ownsLegacyProblems = loaded.ownsLegacyProblems;
         user._problemAclDomainId = authoritativeDomainId;
         user._problemAclLoaded = true;
+        user._pidNamespaceAuthorIds = namespaceAcl.authorNamespaceIds;
+        user._pidNamespaceManagerIds = namespaceAcl.managerNamespaceIds;
+        user._pidNamespaceEditAllIds = namespaceAcl.editAllNamespaceIds;
+        user._pidNamespaceAclDomainId = authoritativeDomainId;
+        user._pidNamespaceAclLoaded = true;
     } catch (error) {
         denyProblemAcl(user);
         logger.error('Problem ACL reload failed domain=%s uid=%d error=%o', authoritativeDomainId, user._id, error);
@@ -335,12 +408,15 @@ function claimFilter(claim: ProblemWriteClaim): Record<string, unknown> {
         domainId: claim.domainId,
         docType: document.TYPE_PROBLEM,
         docId: claim.pid,
+        ...(claim.pidNamespaceId ? { pidNamespaceId: claim.pidNamespaceId } : {}),
         'aclWriteClaim.requestId': claim.requestId,
         'aclWriteClaim.actor': claim.actor,
         'aclWriteClaim.operation': claim.operation,
         'aclWriteClaim.capability': claim.capability,
         'aclWriteClaim.state': 'active',
         ...(claim.managedAuthorDraftOnly ? { 'aclWriteClaim.managedAuthorDraftOnly': true } : {}),
+        ...(claim.pidNamespaceId ? { 'aclWriteClaim.pidNamespaceId': claim.pidNamespaceId } : {}),
+        ...(claim.pidNamespaceGrant ? { 'aclWriteClaim.pidNamespaceGrant': claim.pidNamespaceGrant } : {}),
     };
 }
 
@@ -469,7 +545,12 @@ export async function acquireProblemWriteClaim(
     authorizedPdoc: ProblemDoc,
     requestId: string,
     operation: string,
-    options: { selfRevokeUid?: number; now?: Date; capability?: ProblemWriteCapability } = {},
+    options: {
+        selfRevokeUid?: number;
+        now?: Date;
+        capability?: ProblemWriteCapability;
+        requiredPidNamespaceGrant?: 'manager';
+    } = {},
 ): Promise<ProblemWriteClaim | null> {
     if (!requestId?.trim()) throw new TypeError('problem write claim requestId is required');
     if (!operation?.trim()) throw new TypeError('problem write claim operation is required');
@@ -483,6 +564,20 @@ export async function acquireProblemWriteClaim(
     const capability = options.capability || 'maintain';
     if (!selfRevoke && !canUseProblemWriteCapability(user, authorizedPdoc, capability)) return null;
     const managedAuthorDraftOnly = !selfRevoke && isManagedAuthorDraftOnly(user, authorizedPdoc, capability);
+    const problemRoleAllowed = !selfRevoke && canUseProblemWriteCapabilityByProblemRole(user, authorizedPdoc, capability);
+    const scopedGrant = !selfRevoke && !problemRoleAllowed ? pidNamespaceCapabilityForProblem(user, authorizedPdoc, capability) : null;
+    const requiredManagerGrant =
+        !selfRevoke &&
+        !isProblemBankAdmin(user) &&
+        options.requiredPidNamespaceGrant === 'manager' &&
+        !!authorizedPdoc.pidNamespaceId &&
+        user._pidNamespaceManagerIds?.has(authorizedPdoc.pidNamespaceId) === true;
+    if (!selfRevoke && !isProblemBankAdmin(user) && options.requiredPidNamespaceGrant === 'manager' && !requiredManagerGrant) {
+        return null;
+    }
+    const pidNamespaceGrant = requiredManagerGrant ? 'manager' : scopedGrant === 'manager' || scopedGrant === 'editAll' ? scopedGrant : undefined;
+    const pidNamespaceId = pidNamespaceGrant ? authorizedPdoc.pidNamespaceId : undefined;
+    if (pidNamespaceGrant && !pidNamespaceId) return null;
 
     const timestamp = options.now || new Date();
     const stored = {
@@ -491,6 +586,8 @@ export async function acquireProblemWriteClaim(
         operation: operation.trim(),
         capability,
         ...(managedAuthorDraftOnly ? { managedAuthorDraftOnly: true as const } : {}),
+        ...(pidNamespaceId ? { pidNamespaceId } : {}),
+        ...(pidNamespaceGrant ? { pidNamespaceGrant } : {}),
         state: 'active' as const,
         lastError: null,
         createdAt: timestamp,
@@ -523,7 +620,10 @@ export async function acquireProblemWriteClaim(
             // Re-read them while this global claim blocks revocation, closing
             // the refresh/acquire race without duplicating ACL state.
             await refreshProblemAcl(user, authorizedPdoc.domainId);
-            if (!canUseProblemWriteCapability(user, result as ProblemDoc, capability)) {
+            const managerGrantStillPresent =
+                options.requiredPidNamespaceGrant !== 'manager' ||
+                (!!result.pidNamespaceId && user._pidNamespaceManagerIds?.has(result.pidNamespaceId) === true);
+            if (!canUseProblemWriteCapability(user, result as ProblemDoc, capability) || !managerGrantStillPresent) {
                 if (!(await clearProblemWriteClaim(claim))) {
                     throw new Error(`problem write claim ownership lost after final authorization denial: ${claim.requestId}`);
                 }
@@ -544,7 +644,12 @@ export async function acquireProblemWriteClaim(
 
 /** Reject every field outside a narrow contribution claim before mutation. */
 export function assertProblemWriteClaimFieldScope(claim: ProblemWriteClaim, fields: string[]): void {
-    const allowed = NARROW_CAPABILITY_FIELDS[claim.capability];
+    const allowed =
+        claim.pidNamespaceGrant === 'manager' && claim.capability === 'metadata'
+            ? new Set(['title', 'difficulty', 'tag', 'knowledgeMapId', 'knowledgeNodeIds', 'managedAuthoring', 'pidNamespaceReview'])
+            : claim.pidNamespaceGrant === 'editAll' && ['content', 'metadata'].includes(claim.capability)
+              ? PID_NAMESPACE_EDIT_ALL_FIELDS
+              : NARROW_CAPABILITY_FIELDS[claim.capability];
     if (!allowed) return;
     const denied = fields.filter((field) => !allowed.has(field) && !allowed.has(field.split('.')[0]));
     if (denied.length) {
@@ -622,6 +727,7 @@ export async function commitProblemWriteClaimUpdate(
             hidden: 1,
             codeEvaluationStatus: 1,
             managedAuthoring: 1,
+            pidNamespaceId: 1,
             tag: 1,
             knowledgeMapId: 1,
             knowledgeNodeIds: 1,
@@ -696,7 +802,28 @@ export async function commitProblemWriteClaimUpdate(
     if (Object.keys($set || {}).length) update.$set = $set;
     if (Object.keys($unset || {}).length) update.$unset = $unset;
     if (options.expectedStructureRevision !== undefined || options.expectedStructureRevisionAbsent) update.$inc = { structureRevision: 1 };
-    return document.coll.findOneAndUpdate(filter, update, { returnDocument: 'after' });
+    const commit = () => document.coll.findOneAndUpdate(filter, update, { returnDocument: 'after' });
+    if (!claim.pidNamespaceId || !claim.pidNamespaceGrant) return commit();
+    return withPidNamespaceBoundary(claim.domainId, claim.pidNamespaceId, async () => {
+        const snapshot = await loadPidNamespaceAclForUser(claim.domainId, claim.actor);
+        const stillAuthorized =
+            claim.pidNamespaceGrant === 'manager'
+                ? snapshot.managerNamespaceIds.has(claim.pidNamespaceId)
+                : snapshot.editAllNamespaceIds.has(claim.pidNamespaceId);
+        if (!stillAuthorized) {
+            logger.warn(
+                'PID namespace scoped claim commit rejected domain=%s namespace=%s pid=%d actor=%d grant=%s requestId=%s stage=claim-commit result=revoked',
+                claim.domainId,
+                claim.pidNamespaceId,
+                claim.pid,
+                claim.actor,
+                claim.pidNamespaceGrant,
+                claim.requestId,
+            );
+            return null;
+        }
+        return commit();
+    });
 }
 
 /** Persist a failed write; ERROR claims never expire or auto-clear. */
@@ -798,13 +925,13 @@ function isManagedAuthorEditableState(pdoc: ProblemDoc): boolean {
     return pdoc.managedAuthoring?.metadataStatus === 'confirmed' || (pdoc.hidden === true && pdoc.managedAuthoring?.metadataStatus === 'draft');
 }
 
-export function canEditProblemContent(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+function canEditProblemContentByProblemRole(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (pdoc.authoringMode !== 'managed') return canMaintainProblem(user, pdoc);
     if (canMaintainProblem(user, pdoc)) return true;
     return isManagedAuthorEditableState(pdoc) && canAuthorProblem(user, pdoc);
 }
 
-export function canEditProblemMetadata(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+function canEditProblemMetadataByProblemRole(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (pdoc.authoringMode !== 'managed') return canMaintainProblem(user, pdoc);
     if (!hasLoadedAclForProblem(user, pdoc) || isAclFenced(user, pdoc.docId)) return false;
     if (isProblemBankAdmin(user)) return true;
@@ -812,16 +939,32 @@ export function canEditProblemMetadata(user: ProblemAclUser, pdoc: ProblemDoc): 
     return isManagedAuthorEditableState(pdoc) && canAuthorProblem(user, pdoc);
 }
 
+export function canEditProblemContent(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    return canEditProblemContentByProblemRole(user, pdoc) || pidNamespaceCapabilityForProblem(user, pdoc, 'content') === 'editAll';
+}
+
+export function canEditProblemMetadata(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    return canEditProblemMetadataByProblemRole(user, pdoc) || pidNamespaceCapabilityForProblem(user, pdoc, 'metadata') !== null;
+}
+
 /** Testdata, judge configuration and other evaluation-only fields. */
-export function canEditProblemData(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+function canEditProblemDataByProblemRole(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (!hasLoadedAclForProblem(user, pdoc) || isAclFenced(user, pdoc.docId)) return false;
     return canMaintainProblem(user, pdoc) || canAuthorProblem(user, pdoc) || user._dataContributionPids?.has(pdoc.docId) === true;
 }
 
+export function canEditProblemData(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    return canEditProblemDataByProblemRole(user, pdoc) || pidNamespaceCapabilityForProblem(user, pdoc, 'data') === 'editAll';
+}
+
 /** Mindmap selection plus its canonical materialized tags, and nothing else. */
-export function canEditProblemTags(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+function canEditProblemTagsByProblemRole(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (!hasLoadedAclForProblem(user, pdoc) || isAclFenced(user, pdoc.docId)) return false;
-    return canEditProblemContent(user, pdoc) || user._tagContributionPids?.has(pdoc.docId) === true;
+    return canEditProblemContentByProblemRole(user, pdoc) || user._tagContributionPids?.has(pdoc.docId) === true;
+}
+
+export function canEditProblemTags(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    return canEditProblemTagsByProblemRole(user, pdoc) || pidNamespaceCapabilityForProblem(user, pdoc, 'tag') !== null;
 }
 
 export function canManageProblemCollaborators(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
@@ -848,22 +991,26 @@ export function canManageProblemMaintainers(user: ProblemAclUser, pdoc: ProblemD
     return hasLoadedAclForProblem(user, pdoc) && !isAclFenced(user, pdoc.docId) && isProblemBankAdmin(user);
 }
 
-export function canPublishProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+function canPublishProblemByProblemRole(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (pdoc.authoringMode !== 'managed') return canMaintainProblem(user, pdoc);
     return hasLoadedAclForProblem(user, pdoc) && !isAclFenced(user, pdoc.docId) && isProblemBankAdmin(user);
 }
 
+export function canPublishProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
+    return canPublishProblemByProblemRole(user, pdoc) || pidNamespaceCapabilityForProblem(user, pdoc, 'publish') === 'manager';
+}
+
 export function canArchiveProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
-    return pdoc.authoringMode === 'managed' ? canPublishProblem(user, pdoc) : canMaintainProblem(user, pdoc);
+    return pdoc.authoringMode === 'managed' ? canPublishProblemByProblemRole(user, pdoc) : canMaintainProblem(user, pdoc);
 }
 
 export function canDeleteProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
-    return pdoc.authoringMode === 'managed' ? canPublishProblem(user, pdoc) : canMaintainProblem(user, pdoc);
+    return pdoc.authoringMode === 'managed' ? canPublishProblemByProblemRole(user, pdoc) : canMaintainProblem(user, pdoc);
 }
 
 export function canCloneProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean {
     if (pdoc.problemKind === undefined || pdoc.problemKind === 'programming') return false;
-    return pdoc.authoringMode === 'managed' ? canPublishProblem(user, pdoc) : canMaintainProblem(user, pdoc);
+    return pdoc.authoringMode === 'managed' ? canPublishProblemByProblemRole(user, pdoc) : canMaintainProblem(user, pdoc);
 }
 
 export function canUseProblemWriteCapability(user: ProblemAclUser, pdoc: ProblemDoc, capability: ProblemWriteCapability): boolean {
@@ -877,6 +1024,27 @@ export function canUseProblemWriteCapability(user: ProblemAclUser, pdoc: Problem
     if (capability === 'archive') return canArchiveProblem(user, pdoc);
     if (capability === 'hard-delete') return canDeleteProblem(user, pdoc);
     if (capability === 'clone') return canCloneProblem(user, pdoc);
+    return canMaintainProblem(user, pdoc);
+}
+
+function canUseProblemWriteCapabilityByProblemRole(user: ProblemAclUser, pdoc: ProblemDoc, capability: ProblemWriteCapability): boolean {
+    if (capability === 'content') return canEditProblemContentByProblemRole(user, pdoc);
+    if (capability === 'metadata') return canEditProblemMetadataByProblemRole(user, pdoc);
+    if (capability === 'collaborators') return canManageProblemCollaborators(user, pdoc);
+    if (capability === 'contributions') return canManageProblemContributions(user, pdoc);
+    if (capability === 'data') return canEditProblemDataByProblemRole(user, pdoc);
+    if (capability === 'tag') return canEditProblemTagsByProblemRole(user, pdoc);
+    if (capability === 'publish') return canPublishProblemByProblemRole(user, pdoc);
+    if (capability === 'archive') {
+        return pdoc.authoringMode === 'managed' ? canPublishProblemByProblemRole(user, pdoc) : canMaintainProblem(user, pdoc);
+    }
+    if (capability === 'hard-delete') {
+        return pdoc.authoringMode === 'managed' ? canPublishProblemByProblemRole(user, pdoc) : canMaintainProblem(user, pdoc);
+    }
+    if (capability === 'clone') {
+        if (pdoc.problemKind === undefined || pdoc.problemKind === 'programming') return false;
+        return pdoc.authoringMode === 'managed' ? canPublishProblemByProblemRole(user, pdoc) : canMaintainProblem(user, pdoc);
+    }
     return canMaintainProblem(user, pdoc);
 }
 
@@ -913,6 +1081,12 @@ function applyCapabilityIdentityFilter(
     pdoc: ProblemDoc,
     capability: ProblemWriteCapability,
 ): void {
+    const scopedGrant =
+        !canUseProblemWriteCapabilityByProblemRole(user, pdoc, capability) && pidNamespaceCapabilityForProblem(user, pdoc, capability);
+    if (scopedGrant === 'manager' || scopedGrant === 'editAll') {
+        filter.pidNamespaceId = pdoc.pidNamespaceId;
+        return;
+    }
     if (
         capability === 'data' &&
         !canMaintainProblem(user, pdoc) &&
@@ -958,6 +1132,12 @@ export function canViewProblem(user: ProblemAclUser, pdoc: ProblemDoc): boolean 
     if (isAclFenced(user, pdoc.docId)) return false;
     if (!pdoc.hidden) return true;
     if (isProblemBankAdmin(user)) return true;
+    if (
+        pidNamespaceCapabilityForProblem(user, pdoc, 'content') === 'editAll' ||
+        pidNamespaceCapabilityForProblem(user, pdoc, 'publish') === 'manager'
+    ) {
+        return true;
+    }
     if (pdoc.authoringMode === 'managed') {
         return (
             user._permitPids?.has(pdoc.docId) === true ||

@@ -38,6 +38,7 @@ import {
 import { normalizeManagedSourceMeta } from './managed-problem-source';
 import ProblemModel from './problem';
 import { assertProgrammingTestcasesConfigured } from './problem-lifecycle';
+import { builtinPidNamespaceIdForSourceTemplate } from './problem-pid-namespace';
 import StorageModel from './storage';
 import * as TrainingModel from './training';
 import UserModel from './user';
@@ -487,8 +488,12 @@ async function assertDraftReady(
 ): Promise<void> {
     const statement = await fs.readFile(entry.statementFile.path, 'utf8');
     const config = await fs.readFile(entry.configFile.path, 'utf8');
+    const expectedPidNamespaceId = builtinPidNamespaceIdForSourceTemplate(batch.manifest.source.template);
     if (pdoc.content !== statement) fail(`${entry.sourceProblemCode}: statement content conflicts`, 'BATCH_IMPORT_CONTENT_CONFLICT');
     if (pdoc.config !== config) fail(`${entry.sourceProblemCode}: parsed judge config differs from the local config`, 'BATCH_IMPORT_CONFIG_INVALID');
+    if (pdoc.pidNamespaceId !== expectedPidNamespaceId) {
+        fail(`${entry.sourceProblemCode}: draft PID namespace differs from the manifest source`, 'BATCH_IMPORT_IDENTITY_CONFLICT');
+    }
     if (
         pdoc.batchImport?.identity !== `${batch.manifest.batchId}:${entry.sourceProblemCode}` ||
         pdoc.batchImport?.fingerprint !== entry.fingerprint
@@ -513,6 +518,7 @@ async function verifyImportedProblem(
 ) {
     const pdoc = await loadIdentityProblem(batch, entry);
     if (!pdoc) fail(`${entry.sourceProblemCode}: imported problem is missing`, 'BATCH_IMPORT_VERIFY_FAILED');
+    const expectedPidNamespaceId = builtinPidNamespaceIdForSourceTemplate(batch.manifest.source.template);
     let canonicalKnowledgeNodeIds: string[];
     try {
         canonicalKnowledgeNodeIds = resolveProblemKnowledgeNodeIds(pdoc, entry.sourceProblemCode).sort();
@@ -523,6 +529,7 @@ async function verifyImportedProblem(
     }
     if (
         pdoc.pid !== plannedPid ||
+        pdoc.pidNamespaceId !== expectedPidNamespaceId ||
         pdoc.title !== entry.title ||
         pdoc.difficulty !== entry.difficulty ||
         pdoc.hidden !== problemBatchFinalHidden(batch.manifest) ||
@@ -656,6 +663,7 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
                         workingTitle: entry.title,
                         content: statement,
                         difficulty: entry.difficulty,
+                        pidNamespaceId: builtinPidNamespaceIdForSourceTemplate(batch.manifest.source.template),
                         sourceMeta: batch.manifest.source,
                         knowledgeMapId: planned.knowledgeMapId,
                         mindmapNodeIds: entry.mindmapNodeIds,

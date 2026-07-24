@@ -251,9 +251,9 @@ Create Link: 创建链接
 Create problem solutions: 创建题解
 Create Problem: 创建题目
 Create managed programming drafts: 仅创建本人托管编程题草稿
-Create managed programming drafts permission detail: 仅可创建本人名下的隐藏自命题托管编程题草稿，不能导入、代指定出题人或发布。
+Create managed programming drafts permission detail: 提供托管编程题的基础创建资格；默认创建 P5 自命题，其他题号命名空间需另行授权。不能导入、代指定出题人或发布。
 Create problems: 创建全部题型
-Create problems permission detail: 可创建全部八种题型；其中编程题仍创建为本人名下的隐藏托管草稿。
+Create problems permission detail: 可创建全部八种题型并包含托管编程题基础资格；编程题默认使用 P5，其他题号命名空间仍需另行授权。
 Create tasks: 创建任务
 Create Role: 创建角色
 Create Training Plan: 创建训练计划

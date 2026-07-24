@@ -19,8 +19,6 @@ let mindmapDocs: any[] = [];
 let mindmapMaps: any[] = [];
 let trainingDocs: any[] = [];
 let problemDocs: any[] = [];
-let counterValue: number | null = null;
-const counterCalls: any[] = [];
 const indexCalls: any[] = [];
 const problemIndexCalls: any[] = [];
 let problemIndexDocs: any[] = [];
@@ -86,12 +84,6 @@ const collectionStub = (name: string) => {
         return {
             async createIndex(key: any, options: any) {
                 indexCalls.push({ key, options });
-            },
-            async findOneAndUpdate(filter: any, update: any, options: any) {
-                counterCalls.push({ filter: structuredClone(filter), update: structuredClone(update), options: structuredClone(options) });
-                if (counterValue === null) return null;
-                counterValue += update.$inc.value;
-                return { ...filter, value: counterValue, updatedAt: update.$set.updatedAt };
             },
         };
     }
@@ -197,8 +189,6 @@ beforeEach(() => {
     mindmapMaps = [];
     trainingDocs = [];
     problemDocs = [];
-    counterValue = null;
-    counterCalls.length = 0;
     indexCalls.length = 0;
     problemIndexCalls.length = 0;
     problemIndexDocs = [
@@ -297,13 +287,13 @@ describe('P2.14 managed generic patch guard', () => {
         expect(guard.publishes).to.equal(false);
     });
 
-    it('allows an author to suggest live mindmap nodes without gaining metadata authority', () => {
+    it('classifies an author mindmap suggestion as draft metadata', () => {
         const suggested = {
             ...draft.managedAuthoring,
             selectedMindmapNodeIds: [new ObjectId('64b000000000000000000012')],
         };
         const contentGuard = managedProblemPatchCapability(draft, { content: 'updated', managedAuthoring: suggested }, {});
-        expect(contentGuard.capability).to.equal('content');
+        expect(contentGuard.capability).to.equal('metadata');
         expect(contentGuard.immutableFields).to.deep.equal([]);
 
         const metadataGuard = managedProblemPatchCapability(
@@ -373,20 +363,6 @@ describe('P2.14 managed problem source templates', () => {
     it('shares one HDU counter namespace across spring and summer', () => {
         expect(authoring.managedPidCounterNamespace({ template: 'hdu_summer', year: 2026, round: 1 })).to.equal('hdu');
         expect(authoring.managedPidCounterNamespace({ template: 'hdu_spring', year: 2026, round: 1 })).to.equal('hdu');
-    });
-
-    it('reserves monotonically and never upserts an uninitialized counter', async () => {
-        counterValue = 3100;
-        expect(await authoring.reserveManagedProblemPid('system', { template: 'pat_basic', year: 2026, season: 'spring' })).to.equal('P3101');
-        expect(await authoring.reserveManagedProblemPid('system', { template: 'pat_basic', year: 2026, season: 'autumn' })).to.equal('P3102');
-        expect(counterCalls).to.have.length(2);
-        expect(counterCalls[0].options).to.deep.equal({ returnDocument: 'after' });
-        expect(counterCalls[0].options).not.to.have.property('upsert');
-        counterValue = null;
-        await expectReject(
-            authoring.reserveManagedProblemPid('system', { template: 'pat_basic', year: 2026, season: 'spring' }),
-            'PID counter is not initialized',
-        );
     });
 
     it('creates the required unique counter index', async () => {

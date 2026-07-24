@@ -88,6 +88,9 @@ function publicationUpdate(input: ManagedProblemPublicationCommit) {
             managedAuthoring: input.managedAuthoring,
             hidden: input.finalHidden === true,
         },
+        $unset: {
+            pidNamespaceReview: '',
+        },
     };
 }
 

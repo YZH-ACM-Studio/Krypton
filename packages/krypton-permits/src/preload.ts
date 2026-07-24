@@ -8,11 +8,18 @@ export interface LoadedProblemAcl {
     ownsLegacyProblems: boolean;
 }
 
+export interface LoadedPidNamespaceAcl {
+    authorNamespaceIds: Set<string>;
+    managerNamespaceIds: Set<string>;
+    editAllNamespaceIds: Set<string>;
+}
+
 /** Atomically replaces request-scoped ACL state; errors leave a deny state. */
 export async function preloadProblemAcl(
     user: any,
     domainId: string | undefined,
-    load: (domainId: string, uid: number) => Promise<LoadedProblemAcl>,
+    loadProblemAcl: (domainId: string, uid: number) => Promise<LoadedProblemAcl>,
+    loadPidNamespaceAcl: (domainId: string, uid: number) => Promise<LoadedPidNamespaceAcl>,
     onError: (error: unknown) => void,
 ): Promise<void> {
     user._permitPids = new Set<number>();
@@ -24,10 +31,17 @@ export async function preloadProblemAcl(
     user._ownsLegacyProblems = false;
     user._problemAclLoaded = false;
     user._problemAclDomainId = undefined;
+    user._pidNamespaceAuthorIds = new Set<string>();
+    user._pidNamespaceManagerIds = new Set<string>();
+    user._pidNamespaceEditAllIds = new Set<string>();
+    user._pidNamespaceAclLoaded = false;
+    user._pidNamespaceAclDomainId = undefined;
     const uid = user?._id;
     if (!uid || uid <= 0) {
         user._problemAclDomainId = domainId;
         user._problemAclLoaded = true;
+        user._pidNamespaceAclDomainId = domainId;
+        user._pidNamespaceAclLoaded = true;
         return;
     }
     if (!domainId) {
@@ -35,7 +49,7 @@ export async function preloadProblemAcl(
         return;
     }
     try {
-        const loaded = await load(domainId, uid);
+        const [loaded, namespaceAcl] = await Promise.all([loadProblemAcl(domainId, uid), loadPidNamespaceAcl(domainId, uid)]);
         if (
             !(loaded?.permitPids instanceof Set) ||
             !(loaded?.authoredPids instanceof Set) ||
@@ -47,6 +61,13 @@ export async function preloadProblemAcl(
         ) {
             throw new TypeError('ACL preload returned an invalid snapshot');
         }
+        if (
+            !(namespaceAcl?.authorNamespaceIds instanceof Set) ||
+            !(namespaceAcl?.managerNamespaceIds instanceof Set) ||
+            !(namespaceAcl?.editAllNamespaceIds instanceof Set)
+        ) {
+            throw new TypeError('PID namespace ACL preload returned an invalid snapshot');
+        }
         user._permitPids = loaded.permitPids;
         user._authoredPids = loaded.authoredPids;
         user._maintainedPids = loaded.maintainedPids;
@@ -56,6 +77,11 @@ export async function preloadProblemAcl(
         user._ownsLegacyProblems = loaded.ownsLegacyProblems;
         user._problemAclDomainId = domainId;
         user._problemAclLoaded = true;
+        user._pidNamespaceAuthorIds = namespaceAcl.authorNamespaceIds;
+        user._pidNamespaceManagerIds = namespaceAcl.managerNamespaceIds;
+        user._pidNamespaceEditAllIds = namespaceAcl.editAllNamespaceIds;
+        user._pidNamespaceAclDomainId = domainId;
+        user._pidNamespaceAclLoaded = true;
     } catch (error) {
         onError(error);
     }

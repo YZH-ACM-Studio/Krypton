@@ -97,6 +97,13 @@ import {
     refreshProblemAcl as refreshProblemAclAccess,
 } from './problem-access';
 import {
+    builtinPidNamespaceIdForSourceTemplate,
+    ensurePidNamespaceIndexes,
+    reservePidForNamespace,
+    withLivePidNamespaceGrant,
+} from './problem-pid-namespace';
+import { deriveManagedSourceTags, type ManagedSourceMeta } from './managed-problem-source';
+import {
     assertStructureRevision,
     assertProgrammingTestcasesConfigured,
     cloneStructuredProblemForLanguage,
@@ -122,7 +129,6 @@ import {
     prepareManagedProblemDraft,
     prepareManagedProblemPublication,
     previewProgrammingTagNormalization,
-    reserveManagedProblemPid,
     validateManagedTrainingPlacement,
 } from './managed-problem-authoring';
 import { managedProblemPatchCapability } from './managed-problem-patch';
@@ -159,6 +165,47 @@ export interface ManagedProgrammingPublicationResult {
 
 const logger = new Logger('problem');
 const managedProgrammingCreateAuthority = Symbol('managed-programming-create');
+
+interface ManagedNamespaceAuditInput {
+    type: string;
+    operation: string;
+    domainId: string;
+    namespaceId: string;
+    actor: number;
+    problemId: number;
+    requestId: string;
+    before: Record<string, unknown> | null;
+}
+
+async function beginManagedNamespaceAudit(input: ManagedNamespaceAuditInput): Promise<ObjectId> {
+    if (!input.requestId.trim()) throw new TypeError('managed namespace audit requestId is required');
+    return OplogModel.add({
+        type: input.type,
+        operation: input.operation,
+        domainId: input.domainId,
+        namespaceId: input.namespaceId,
+        operator: input.actor,
+        problemId: input.problemId,
+        requestId: input.requestId,
+        before: input.before,
+        after: null,
+        result: 'attempt',
+        time: new Date(),
+    } as any);
+}
+
+async function finishManagedNamespaceAudit(
+    auditId: ObjectId,
+    result: 'success' | 'rejected' | 'incomplete',
+    after: Record<string, unknown> | null,
+    extra: Record<string, unknown> = {},
+): Promise<void> {
+    const updated = await OplogModel.coll.updateOne(
+        { _id: auditId, result: 'attempt' },
+        { $set: { result, after, ...extra, completedAt: new Date() } },
+    );
+    if (updated.matchedCount !== 1) throw new Error(`managed namespace audit ${auditId.toHexString()} could not be finalized`);
+}
 
 function assertManagedProgrammingCreateBoundary(
     problemKind: ProblemKind,
@@ -421,6 +468,7 @@ async function auditManagedClaimPatchDenied(
     await OplogModel.add({
         type: 'problem.managed.write.denied',
         domainId: claim.domainId,
+        namespaceId: claim.pidNamespaceId,
         operator: claim.actor,
         problemId: claim.pid,
         operation: claim.operation,
@@ -484,17 +532,6 @@ async function prepareManagedPublish(
     ) {
         throw new TypeError('managed publish permit services are unavailable');
     }
-    await OplogModel.add({
-        type: 'problem.managed.publish',
-        domainId: claim.domainId,
-        operator: claim.actor,
-        problemId: claim.pid,
-        action: 'publish',
-        result: 'attempt',
-        finalHidden: confirmation.finalHidden === true,
-        requestId: claim.requestId,
-        time: new Date(),
-    } as any);
     const [rows, pendingContributions] = await Promise.all([
         permits.listForProblem(claim.domainId, claim.pid),
         permits.listPendingContributionsForProblems(claim.domainId, [claim.pid]),
@@ -647,6 +684,7 @@ interface ProblemCreateOptions {
     structuredConfig?: unknown;
     authoringMode?: 'managed';
     sourceMeta?: ProblemDoc['sourceMeta'];
+    pidNamespaceId?: ProblemDoc['pidNamespaceId'];
     managedAuthoring?: ProblemDoc['managedAuthoring'];
     knowledgeMapId?: ProblemDoc['knowledgeMapId'];
     knowledgeNodeIds?: ProblemDoc['knowledgeNodeIds'];
@@ -734,10 +772,24 @@ export class ProblemModel {
     ];
 
     /** Internal fields exposed only after the stable editor ACL read. */
-    static PROJECTION_MANAGED_EDITOR: Field[] = [...ProblemModel.PROJECTION_PUBLIC, 'sourceMeta', 'managedAuthoring'];
+    static PROJECTION_MANAGED_EDITOR: Field[] = [
+        ...ProblemModel.PROJECTION_PUBLIC,
+        'sourceMeta',
+        'pidNamespaceId',
+        'pidNamespaceReview',
+        'managedAuthoring',
+    ];
 
     /** Internal summary fields for the ACL-scoped problem bank and admin review. */
-    static PROJECTION_MANAGED_BANK: Field[] = [...ProblemModel.PROJECTION_LIST, 'sourceMeta', 'managedAuthoring'];
+    static PROJECTION_MANAGED_BANK: Field[] = [
+        ...ProblemModel.PROJECTION_LIST,
+        'sourceMeta',
+        'pidNamespaceId',
+        'pidNamespaceReview',
+        'knowledgeMapId',
+        'knowledgeNodeIds',
+        'managedAuthoring',
+    ];
 
     static isProblemBankAdmin(user: ProblemAclUser) {
         return isProblemBankAdminAccess(user);
@@ -962,6 +1014,7 @@ export class ProblemModel {
         if (meta.reference) args.reference = meta.reference;
         if (meta.authoringMode) args.authoringMode = meta.authoringMode;
         if (meta.sourceMeta) args.sourceMeta = meta.sourceMeta;
+        if (meta.pidNamespaceId) args.pidNamespaceId = meta.pidNamespaceId;
         if (meta.managedAuthoring) args.managedAuthoring = meta.managedAuthoring;
         if (meta.batchImport) {
             args.batchImport = meta.batchImport;
@@ -1069,6 +1122,7 @@ export class ProblemModel {
                         reference: args.reference,
                         authoringMode: args.authoringMode,
                         sourceMeta: args.sourceMeta,
+                        pidNamespaceId: args.pidNamespaceId,
                         managedAuthoring: args.managedAuthoring,
                         knowledgeMapId: args.knowledgeMapId,
                         knowledgeNodeIds: args.knowledgeNodeIds,
@@ -1100,7 +1154,6 @@ export class ProblemModel {
                 : '';
         const deniedFields = [
             ...(!actorMatches || (!isBankAdmin && !isTrustedCreator) ? ['actor'] : []),
-            ...(!isBankAdmin && requestedTemplate && requestedTemplate !== 'self' ? ['template'] : []),
             ...(!isBankAdmin && input.authorUid !== undefined && Number(input.authorUid) !== creator ? ['authorUid'] : []),
             ...(!isBankAdmin && input.pendingTrainingPlacement !== undefined ? ['pendingTrainingPlacement'] : []),
             ...(!isBankAdmin && input.batchImport !== undefined ? ['batchImport'] : []),
@@ -1131,7 +1184,16 @@ export class ProblemModel {
             );
             throw error;
         }
-        const publicPid = await reserveManagedProblemPid(domainId, prepared.sourceMeta);
+        const allocationRequestId = `pid-namespace-allocate:${domainId}:${creator}:${new ObjectId().toHexString()}`;
+        const allocation = await reservePidForNamespace({
+            domainId,
+            namespaceId: String(input.pidNamespaceId || ''),
+            sourceMeta: prepared.sourceMeta,
+            user: actorUser!,
+            actor: creator,
+            requestId: allocationRequestId,
+        });
+        const publicPid = allocation.pid;
         const authorUid = prepared.authorUid || creator;
         let docId: number | null = null;
         let documentId: ObjectId | null = null;
@@ -1150,6 +1212,7 @@ export class ProblemModel {
                     difficulty: prepared.difficulty,
                     authoringMode: 'managed',
                     sourceMeta: prepared.sourceMeta,
+                    pidNamespaceId: allocation.namespaceId,
                     managedAuthoring: {
                         workingTitle: prepared.workingTitle,
                         selectedMindmapNodeIds: prepared.selectedMindmapNodeIds,
@@ -1348,7 +1411,7 @@ export class ProblemModel {
         user: ProblemAclUser;
     }): Promise<ProblemDoc> {
         assertStructureRevision(input.expectedStructureRevision);
-        if (input.user._id !== input.actor || !ProblemModel.isProblemBankAdmin(input.user)) {
+        if (input.user._id !== input.actor) {
             throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
         }
         return ProblemModel.withAuthorizedWriteClaim(
@@ -1548,6 +1611,413 @@ export class ProblemModel {
         return revealed;
     }
 
+    /**
+     * Namespace-manager review metadata entrypoint.
+     *
+     * This intentionally excludes statement, evaluation configuration, files
+     * and source facts. The selected mindmap nodes remain draft suggestions
+     * until publication re-materializes the canonical tags.
+     */
+    static async updateManagedProgrammingReview(input: {
+        domainId: string;
+        docId: number;
+        workingTitle: string;
+        difficulty: number;
+        selectedMindmapNodeIds: unknown;
+        expectedStructureRevision: number;
+        actor: number;
+        user: ProblemAclUser;
+        returnNote?: string;
+    }): Promise<ProblemDoc> {
+        const workingTitle = input.workingTitle.trim();
+        if (!workingTitle) throw new ValidationError('workingTitle');
+        if (!Number.isSafeInteger(input.difficulty) || input.difficulty < 0 || input.difficulty > 10) {
+            throw new ValidationError('difficulty');
+        }
+        assertStructureRevision(input.expectedStructureRevision);
+        if (!Array.isArray(input.selectedMindmapNodeIds)) throw new ValidationError('knowledgeNodeIds');
+        const selectedMindmapNodeIds = input.selectedMindmapNodeIds.map((value) => String(value));
+        const returnNote = input.returnNote?.trim();
+        if (input.returnNote !== undefined && (!returnNote || returnNote.length > 1000)) {
+            throw new ValidationError('returnNote', null, '退回说明需为 1–1000 个字符');
+        }
+        if (input.user._id !== input.actor) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+        const operation = returnNote ? 'managed-review-return' : 'managed-review-update';
+        return ProblemModel.withAuthorizedWriteClaim(
+            input.domainId,
+            input.docId,
+            input.user,
+            operation,
+            async (claim) => {
+                const current = await document.coll.findOne(
+                    {
+                        domainId: input.domainId,
+                        docType: document.TYPE_PROBLEM,
+                        docId: input.docId,
+                        'aclWriteClaim.requestId': claim.requestId,
+                        'aclWriteClaim.actor': claim.actor,
+                        'aclWriteClaim.operation': claim.operation,
+                        'aclWriteClaim.capability': 'metadata',
+                        'aclWriteClaim.state': 'active',
+                    },
+                    {
+                        projection: {
+                            domainId: 1,
+                            docId: 1,
+                            pid: 1,
+                            pidNamespaceId: 1,
+                            difficulty: 1,
+                            authoringMode: 1,
+                            problemKind: 1,
+                            hidden: 1,
+                            archivedAt: 1,
+                            structureRevision: 1,
+                            structureLockedAt: 1,
+                            knowledgeMapId: 1,
+                            managedAuthoring: 1,
+                            pidNamespaceReview: 1,
+                        },
+                    },
+                );
+                if (
+                    !current ||
+                    current.problemKind !== 'programming' ||
+                    current.authoringMode !== 'managed' ||
+                    current.hidden !== true ||
+                    current.archivedAt ||
+                    current.managedAuthoring?.metadataStatus !== 'draft'
+                ) {
+                    throw new ManagedProblemMetadataConflictError('题目不再是可审核的托管草稿');
+                }
+                if (current.structureRevision !== input.expectedStructureRevision || current.structureLockedAt) {
+                    throw new ProblemStructureConflictError(input.docId);
+                }
+                const managedAuthoring: NonNullable<ProblemDoc['managedAuthoring']> = {
+                    ...current.managedAuthoring,
+                    workingTitle,
+                    selectedMindmapNodeIds: selectedMindmapNodeIds as any,
+                    metadataStatus: 'draft',
+                };
+                const patch: Partial<ProblemDoc> = {
+                    title: `待审核 · ${workingTitle}`,
+                    difficulty: input.difficulty,
+                    managedAuthoring,
+                    ...(returnNote
+                        ? {
+                              pidNamespaceReview: {
+                                  note: returnNote,
+                                  returnedBy: input.actor,
+                                  returnedAt: new Date(),
+                              },
+                          }
+                        : {}),
+                };
+                if (!current.pidNamespaceId) throw new TypeError(`managed draft ${input.domainId}/${input.docId} has no pidNamespaceId`);
+                const before = {
+                    workingTitle: current.managedAuthoring.workingTitle,
+                    difficulty: current.difficulty,
+                    selectedMindmapNodeIds: current.managedAuthoring.selectedMindmapNodeIds?.map(String) || [],
+                };
+                const after = {
+                    workingTitle,
+                    difficulty: input.difficulty,
+                    selectedMindmapNodeIds,
+                    returned: !!returnNote,
+                };
+                const auditId = await beginManagedNamespaceAudit({
+                    type: returnNote ? 'problem.pid-namespace.review.return' : 'problem.pid-namespace.review.update',
+                    operation: returnNote ? 'review.return' : 'review.update',
+                    domainId: input.domainId,
+                    namespaceId: current.pidNamespaceId,
+                    actor: input.actor,
+                    problemId: input.docId,
+                    requestId: claim.requestId,
+                    before,
+                });
+                let committed = false;
+                let result: ProblemDoc;
+                try {
+                    result = await ProblemModel.editWithClaim(
+                        claim,
+                        patch,
+                        {},
+                        {
+                            expectedStructureRevision: input.expectedStructureRevision,
+                            requireExpectedStructureRevision: true,
+                            user: input.user,
+                        },
+                    );
+                    committed = true;
+                    await finishManagedNamespaceAudit(auditId, 'success', after);
+                } catch (error) {
+                    const reason = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+                    if (committed) {
+                        try {
+                            await finishManagedNamespaceAudit(auditId, 'incomplete', after, {
+                                reason: `review committed but audit finalization failed: ${reason}`,
+                            });
+                        } catch (auditError) {
+                            throw new AggregateError([error, auditError], 'Managed namespace review committed but its audit could not be finalized');
+                        }
+                    } else {
+                        try {
+                            await finishManagedNamespaceAudit(auditId, 'rejected', null, { reason });
+                        } catch (auditError) {
+                            throw new AggregateError([error, auditError], 'Managed namespace review failed and its audit could not be finalized');
+                        }
+                    }
+                    throw error;
+                }
+                logger.info(
+                    'Managed namespace review completed domain=%s namespace=%s pid=%d actor=%d operation=%s requestId=%s result=success',
+                    input.domainId,
+                    current.pidNamespaceId || '-',
+                    input.docId,
+                    input.actor,
+                    operation,
+                    claim.requestId,
+                );
+                return result;
+            },
+            { capability: 'metadata', requiredPidNamespaceGrant: 'manager' },
+        );
+    }
+
+    /**
+     * System-admin-only correction before the first managed approval.
+     *
+     * The target PID is allocated from the canonical namespace service. The
+     * old PID is deliberately not returned to any counter.
+     */
+    static async correctManagedProgrammingPidNamespace(input: {
+        domainId: string;
+        docId: number;
+        targetPidNamespaceId: string;
+        sourceMeta: unknown;
+        expectedStructureRevision: number;
+        actor: number;
+        user: ProblemAclUser;
+    }): Promise<ProblemDoc> {
+        assertStructureRevision(input.expectedStructureRevision);
+        if (input.user._id !== input.actor || !ProblemModel.isProblemBankAdmin(input.user)) {
+            throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+        }
+        return ProblemModel.withAuthorizedWriteClaim(
+            input.domainId,
+            input.docId,
+            input.user,
+            'managed-namespace-correct',
+            async (claim) => {
+                const current = await document.coll.findOne(
+                    {
+                        domainId: input.domainId,
+                        docType: document.TYPE_PROBLEM,
+                        docId: input.docId,
+                        'aclWriteClaim.requestId': claim.requestId,
+                        'aclWriteClaim.actor': claim.actor,
+                        'aclWriteClaim.operation': claim.operation,
+                        'aclWriteClaim.capability': 'metadata',
+                        'aclWriteClaim.state': 'active',
+                    },
+                    {
+                        projection: {
+                            domainId: 1,
+                            docId: 1,
+                            pid: 1,
+                            pidNamespaceId: 1,
+                            problemKind: 1,
+                            authoringMode: 1,
+                            hidden: 1,
+                            archivedAt: 1,
+                            structureRevision: 1,
+                            structureLockedAt: 1,
+                            sourceMeta: 1,
+                            tag: 1,
+                            knowledgeMapId: 1,
+                            knowledgeNodeIds: 1,
+                            managedAuthoring: 1,
+                        },
+                    },
+                );
+                if (
+                    !current ||
+                    current.problemKind !== 'programming' ||
+                    current.authoringMode !== 'managed' ||
+                    current.hidden !== true ||
+                    current.archivedAt ||
+                    current.managedAuthoring?.metadataStatus !== 'draft'
+                ) {
+                    throw new ManagedProblemMetadataConflictError('只有首次审核前的托管草稿可以纠正题号命名空间');
+                }
+                if (!current.pidNamespaceId) throw new TypeError(`managed draft ${input.domainId}/${input.docId} has no pidNamespaceId`);
+                if (current.pidNamespaceId === input.targetPidNamespaceId) {
+                    throw new ValidationError('targetPidNamespaceId', null, '目标命名空间与当前命名空间相同');
+                }
+                if (current.structureRevision !== input.expectedStructureRevision || current.structureLockedAt) {
+                    throw new ProblemStructureConflictError(input.docId);
+                }
+                const correctionAuditId = await OplogModel.add({
+                    type: 'problem.pid-namespace.problem.correct',
+                    domainId: input.domainId,
+                    namespaceId: input.targetPidNamespaceId,
+                    operator: input.actor,
+                    problemId: input.docId,
+                    operation: 'problem.correct',
+                    before: {
+                        pid: current.pid,
+                        pidNamespaceId: current.pidNamespaceId,
+                        sourceMeta: current.sourceMeta,
+                    },
+                    after: null,
+                    result: 'attempt',
+                    requestId: claim.requestId,
+                    time: new Date(),
+                } as any);
+                let committed = false;
+                let intendedAfter: {
+                    pid: string;
+                    pidNamespaceId: string;
+                    sourceMeta: ManagedSourceMeta;
+                } | null = null;
+                try {
+                    const allocation = await reservePidForNamespace({
+                        domainId: input.domainId,
+                        namespaceId: input.targetPidNamespaceId,
+                        sourceMeta: input.sourceMeta,
+                        user: input.user,
+                        actor: input.actor,
+                        requestId: `${claim.requestId}:pid`,
+                    });
+                    intendedAfter = {
+                        pid: allocation.pid,
+                        pidNamespaceId: allocation.namespaceId,
+                        sourceMeta: allocation.sourceMeta,
+                    };
+                    await validateManagedTrainingPlacement(
+                        input.domainId,
+                        allocation.sourceMeta.template,
+                        current.managedAuthoring.pendingTrainingPlacement,
+                    );
+                    const knowledge = await materializeKnowledgeMindmapTags(current.managedAuthoring.selectedMindmapNodeIds, {
+                        required: false,
+                        requireMap: true,
+                        requirePublicMap: true,
+                        knowledgeMapId: current.knowledgeMapId,
+                        field: 'knowledgeNodeIds',
+                    });
+                    const sourceTags = deriveManagedSourceTags(allocation.sourceMeta);
+                    const tags = [...new Set([...sourceTags, ...knowledge.tags])];
+                    const ddoc = await DomainModel.get(input.domainId);
+                    if (!ddoc) throw new NotFoundError(input.domainId);
+                    const updated = await document.coll.findOneAndUpdate(
+                        {
+                            domainId: input.domainId,
+                            docType: document.TYPE_PROBLEM,
+                            docId: input.docId,
+                            pid: current.pid,
+                            pidNamespaceId: current.pidNamespaceId,
+                            hidden: true,
+                            archivedAt: { $exists: false },
+                            structureRevision: input.expectedStructureRevision,
+                            structureLockedAt: { $exists: false },
+                            'managedAuthoring.metadataStatus': 'draft',
+                            'aclWriteClaim.requestId': claim.requestId,
+                            'aclWriteClaim.actor': claim.actor,
+                            'aclWriteClaim.operation': claim.operation,
+                            'aclWriteClaim.capability': 'metadata',
+                            'aclWriteClaim.state': 'active',
+                        },
+                        {
+                            $set: {
+                                pid: allocation.pid,
+                                sort: sortable(allocation.pid, ddoc.namespaces),
+                                pidNamespaceId: allocation.namespaceId,
+                                sourceMeta: allocation.sourceMeta,
+                                tag: tags,
+                                knowledgeMapId: knowledge.mapId,
+                                knowledgeNodeIds: knowledge.nodeIds,
+                                'managedAuthoring.selectedMindmapNodeIds': knowledge.nodeIds,
+                            },
+                            $inc: { structureRevision: 1 },
+                        },
+                        { returnDocument: 'after' },
+                    );
+                    if (!updated) throw new ProblemStructureConflictError(input.docId);
+                    committed = true;
+                    const finalized = await OplogModel.coll.updateOne(
+                        { _id: correctionAuditId, result: 'attempt' },
+                        {
+                            $set: {
+                                result: 'success',
+                                after: intendedAfter,
+                                completedAt: new Date(),
+                            },
+                        },
+                    );
+                    if (finalized.matchedCount !== 1) {
+                        throw new Error(`PID namespace correction audit ${correctionAuditId.toHexString()} could not be finalized`);
+                    }
+                    logger.info(
+                        'Managed PID namespace correction completed domain=%s pid=%d actor=%d oldPublicPid=%s oldNamespace=%s newPublicPid=%s newNamespace=%s requestId=%s result=success',
+                        input.domainId,
+                        input.docId,
+                        input.actor,
+                        current.pid,
+                        current.pidNamespaceId,
+                        allocation.pid,
+                        allocation.namespaceId,
+                        claim.requestId,
+                    );
+                    bus.emit('problem/edit', updated, claim.requestId, { hidden: true });
+                    return updated;
+                } catch (error) {
+                    const reason = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+                    let finalized;
+                    try {
+                        finalized = await OplogModel.coll.updateOne(
+                            { _id: correctionAuditId, result: committed ? { $in: ['attempt', 'success'] } : 'attempt' },
+                            {
+                                $set: {
+                                    result: committed ? 'incomplete' : 'rejected',
+                                    reason,
+                                    ...(committed ? { after: intendedAfter } : {}),
+                                    completedAt: new Date(),
+                                },
+                            },
+                        );
+                    } catch (auditError) {
+                        throw new AggregateError(
+                            [error, auditError],
+                            committed
+                                ? `PID namespace correction committed but audit ${correctionAuditId.toHexString()} could not be finalized`
+                                : `PID namespace correction failed and audit ${correctionAuditId.toHexString()} could not be finalized`,
+                        );
+                    }
+                    if (finalized.matchedCount !== 1) {
+                        throw new AggregateError(
+                            [error],
+                            committed
+                                ? `PID namespace correction committed but audit ${correctionAuditId.toHexString()} could not be finalized`
+                                : `PID namespace correction failed and audit ${correctionAuditId.toHexString()} could not be finalized`,
+                        );
+                    }
+                    if (committed) {
+                        logger.error(
+                            'Managed PID namespace correction committed with incomplete finalization domain=%s pid=%d actor=%d requestId=%s error=%o',
+                            input.domainId,
+                            input.docId,
+                            input.actor,
+                            claim.requestId,
+                            error,
+                        );
+                    }
+                    throw error;
+                }
+            },
+            { capability: 'metadata' },
+        );
+    }
+
     /** The only service allowed to confirm metadata, attach training, and finalize managed-draft visibility. */
     static async publishManagedProgrammingProblem(input: {
         domainId: string;
@@ -1569,12 +2039,45 @@ export class ProblemModel {
         }
         assertStructureRevision(input.expectedStructureRevision);
         if (input.finalHidden !== undefined && typeof input.finalHidden !== 'boolean') throw new ValidationError('finalHidden');
-        if (input.user._id !== input.actor || !ProblemModel.isProblemBankAdmin(input.user)) {
-            throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+        if (input.user._id !== input.actor) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+        const requestId = `problem-write:managed-review-publish:${input.domainId}:${input.docId}:${new ObjectId().toHexString()}`;
+        const auditSnapshot = await document.coll.findOne(
+            { domainId: input.domainId, docType: document.TYPE_PROBLEM, docId: input.docId },
+            {
+                projection: {
+                    docId: 1,
+                    pidNamespaceId: 1,
+                    title: 1,
+                    difficulty: 1,
+                    hidden: 1,
+                    managedAuthoring: 1,
+                },
+            },
+        );
+        if (!auditSnapshot?.pidNamespaceId) {
+            throw new TypeError(`managed draft ${input.domainId}/${input.docId} has no pidNamespaceId`);
         }
+        const publicationAuditId = await beginManagedNamespaceAudit({
+            type: 'problem.managed.publish',
+            operation: 'review.publish',
+            domainId: input.domainId,
+            namespaceId: auditSnapshot.pidNamespaceId,
+            actor: input.actor,
+            problemId: input.docId,
+            requestId,
+            before: {
+                title: auditSnapshot.title,
+                difficulty: auditSnapshot.difficulty,
+                hidden: auditSnapshot.hidden,
+                metadataStatus: auditSnapshot.managedAuthoring?.metadataStatus,
+                selectedMindmapNodeIds: auditSnapshot.managedAuthoring?.selectedMindmapNodeIds?.map(String) || [],
+            },
+        });
+        let publicationAuditFinalized = false;
         let finalization: {
             requestId: string;
             publicPid: string;
+            namespaceId: string;
             approvedAt: Date;
             trainingId?: ObjectId;
             chapterId?: number;
@@ -1609,6 +2112,7 @@ export class ProblemModel {
                                 pid: 1,
                                 problemKind: 1,
                                 authoringMode: 1,
+                                pidNamespaceId: 1,
                                 hidden: 1,
                                 archivedAt: 1,
                                 sourceMeta: 1,
@@ -1632,6 +2136,9 @@ export class ProblemModel {
                         !['draft', 'confirmed'].includes(pdoc.managedAuthoring?.metadataStatus || '')
                     ) {
                         throw new ManagedProblemMetadataConflictError('题目不再是可发布的托管草稿');
+                    }
+                    if (!pdoc.pidNamespaceId || pdoc.pidNamespaceId !== auditSnapshot.pidNamespaceId) {
+                        throw new ManagedProblemMetadataConflictError('题目命名空间已变化，请刷新后重试');
                     }
                     const isConfirmedRepublish = pdoc.managedAuthoring.metadataStatus === 'confirmed';
                     if (pdoc.structureRevision !== input.expectedStructureRevision || (!isConfirmedRepublish && pdoc.structureLockedAt)) {
@@ -1704,58 +2211,88 @@ export class ProblemModel {
                         approvedBy: input.actor,
                         approvedAt,
                     };
-                    let committed: ProblemDoc;
-                    try {
-                        committed = await commitManagedProblemPublication({
-                            domainId: input.domainId,
-                            docId: input.docId,
-                            claim: { requestId: claim.requestId, actor: claim.actor, operation: claim.operation, capability: 'publish' },
-                            title: formalTitle,
-                            difficulty: input.difficulty,
-                            tags: prepared.tags,
-                            knowledgeMapId: prepared.knowledgeMapId,
-                            knowledgeNodeIds: prepared.selectedMindmapNodeIds,
-                            sourceMeta: prepared.sourceMeta,
-                            managedAuthoring,
-                            expectedMetadataStatus: pdoc.managedAuthoring.metadataStatus,
-                            expectedStructureRevision: input.expectedStructureRevision,
-                            finalHidden: input.finalHidden === true,
-                            pendingTrainingPlacement: prepared.pendingTrainingPlacement,
-                        });
-                    } catch (error) {
-                        if (!(error instanceof ManagedProblemPublicationCommittedError)) throw error;
-                        committed = error.pdoc;
-                        incompleteStages.push('persistence-session-finalization');
-                        logger.error(
-                            'Managed publish committed but persistence session finalization failed domain=%s pid=%d publicPid=%s actor=%d requestId=%s publicationState=committed_with_error stage=persistence-session-finalization error=%o',
-                            input.domainId,
-                            input.docId,
-                            pdoc.pid,
-                            input.actor,
-                            claim.requestId,
-                            error,
-                        );
-                    }
-                    finalization = {
-                        requestId: claim.requestId,
-                        publicPid: pdoc.pid,
-                        approvedAt,
-                        trainingId: prepared.pendingTrainingPlacement?.trainingId,
-                        chapterId: prepared.pendingTrainingPlacement?.chapterId,
-                        verifierUids,
-                        verifierCleanup: 'pending',
-                        pdoc: committed,
-                    };
-                    return committed;
+                    const liveCommitted = await withLivePidNamespaceGrant(claim, async () => {
+                        let committed: ProblemDoc;
+                        try {
+                            committed = await commitManagedProblemPublication({
+                                domainId: input.domainId,
+                                docId: input.docId,
+                                claim: { requestId: claim.requestId, actor: claim.actor, operation: claim.operation, capability: 'publish' },
+                                title: formalTitle,
+                                difficulty: input.difficulty,
+                                tags: prepared.tags,
+                                knowledgeMapId: prepared.knowledgeMapId,
+                                knowledgeNodeIds: prepared.selectedMindmapNodeIds,
+                                sourceMeta: prepared.sourceMeta,
+                                managedAuthoring,
+                                expectedMetadataStatus: pdoc.managedAuthoring.metadataStatus,
+                                expectedStructureRevision: input.expectedStructureRevision,
+                                finalHidden: input.finalHidden === true,
+                                pendingTrainingPlacement: prepared.pendingTrainingPlacement,
+                            });
+                        } catch (error) {
+                            if (!(error instanceof ManagedProblemPublicationCommittedError)) throw error;
+                            committed = error.pdoc;
+                            incompleteStages.push('persistence-session-finalization');
+                            logger.error(
+                                'Managed publish committed but persistence session finalization failed domain=%s pid=%d publicPid=%s actor=%d requestId=%s publicationState=committed_with_error stage=persistence-session-finalization error=%o',
+                                input.domainId,
+                                input.docId,
+                                pdoc.pid,
+                                input.actor,
+                                claim.requestId,
+                                error,
+                            );
+                        }
+                        finalization = {
+                            requestId: claim.requestId,
+                            publicPid: pdoc.pid,
+                            namespaceId: pdoc.pidNamespaceId!,
+                            approvedAt,
+                            trainingId: prepared.pendingTrainingPlacement?.trainingId,
+                            chapterId: prepared.pendingTrainingPlacement?.chapterId,
+                            verifierUids,
+                            verifierCleanup: 'pending',
+                            pdoc: committed,
+                        };
+                        try {
+                            await finalizeManagedPublishAcl(claim, verifierUids);
+                            finalization.verifierCleanup = 'success';
+                        } catch (error) {
+                            finalization.verifierCleanup = 'failed';
+                            incompleteStages.push('verifier-cleanup');
+                            logger.error(
+                                'Managed publish committed but verifier cleanup failed domain=%s pid=%d publicPid=%s actor=%d requestId=%s targets=%o publicationState=committed_with_error stage=verifier-cleanup error=%o',
+                                input.domainId,
+                                input.docId,
+                                pdoc.pid,
+                                input.actor,
+                                claim.requestId,
+                                verifierUids,
+                                error,
+                            );
+                        }
+                        return committed;
+                    });
+                    if (!liveCommitted) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+                    return liveCommitted;
                 },
-                { capability: 'publish' },
+                { capability: 'publish', requiredPidNamespaceGrant: 'manager', requestId },
             );
         } catch (error) {
             const committed = finalization as NonNullable<typeof finalization> | null;
-            if (!committed?.pdoc) throw error;
+            if (!committed?.pdoc) {
+                const reason = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+                try {
+                    await finishManagedNamespaceAudit(publicationAuditId, 'rejected', null, { reason });
+                    publicationAuditFinalized = true;
+                } catch (auditError) {
+                    throw new AggregateError([error, auditError], 'Managed publication failed and its audit could not be finalized');
+                }
+                throw error;
+            }
             published = committed.pdoc;
-            incompleteStages.push('publication-claim-finalization', 'verifier-cleanup');
-            committed.verifierCleanup = 'failed';
+            incompleteStages.push('publication-claim-finalization');
             logger.error(
                 'Managed publish committed but publication claim finalization failed domain=%s pid=%d publicPid=%s actor=%d requestId=%s publicationState=committed_with_error stage=publication-claim-finalization error=%o',
                 input.domainId,
@@ -1768,34 +2305,7 @@ export class ProblemModel {
         }
         if (!finalization) throw new Error(`managed publication finalization context missing: ${input.domainId}/${input.docId}`);
         const context = finalization as NonNullable<typeof finalization>;
-        const verifierCleanupRequestId = `${context.requestId}:verifier-cleanup`;
-        if (!incompleteStages.includes('publication-claim-finalization')) {
-            try {
-                await ProblemModel.withAuthorizedWriteClaim(
-                    input.domainId,
-                    input.docId,
-                    input.user,
-                    'managed-publish-verifier-cleanup',
-                    (claim) => finalizeManagedPublishAcl(claim, context.verifierUids),
-                    { capability: 'publish', requestId: verifierCleanupRequestId },
-                );
-                context.verifierCleanup = 'success';
-            } catch (error) {
-                context.verifierCleanup = 'failed';
-                incompleteStages.push('verifier-cleanup');
-                logger.error(
-                    'Managed publish committed but verifier cleanup failed domain=%s pid=%d publicPid=%s actor=%d requestId=%s cleanupRequestId=%s targets=%o publicationState=committed_with_error stage=verifier-cleanup error=%o',
-                    input.domainId,
-                    input.docId,
-                    context.publicPid,
-                    input.actor,
-                    context.requestId,
-                    verifierCleanupRequestId,
-                    context.verifierUids,
-                    error,
-                );
-            }
-        }
+        const verifierCleanupRequestId = `${context.requestId}:clear-verifiers`;
         try {
             await parallelAllSettled('problem/edit', published, context.requestId);
         } catch (error) {
@@ -1811,27 +2321,59 @@ export class ProblemModel {
             );
         }
         try {
-            await OplogModel.add({
-                type: 'problem.managed.publish',
-                domainId: input.domainId,
-                operator: input.actor,
-                problemId: input.docId,
-                action: 'publish',
-                result: incompleteStages.length ? 'incomplete' : 'success',
-                requestId: context.requestId,
-                formalTitle,
-                difficulty: input.difficulty,
-                finalHidden: input.finalHidden === true,
-                approvedAt: context.approvedAt,
-                trainingId: context.trainingId,
-                chapterId: context.chapterId,
-                verifierCleanup: context.verifierCleanup,
-                verifierCleanupRequestId,
-                incompleteStages: [...incompleteStages],
-                time: new Date(),
-            } as any);
+            await finishManagedNamespaceAudit(
+                publicationAuditId,
+                incompleteStages.length ? 'incomplete' : 'success',
+                {
+                    title: formalTitle,
+                    difficulty: input.difficulty,
+                    hidden: input.finalHidden === true,
+                    metadataStatus: 'confirmed',
+                    selectedMindmapNodeIds: context.pdoc.managedAuthoring?.selectedMindmapNodeIds?.map(String) || [],
+                },
+                {
+                    approvedAt: context.approvedAt,
+                    trainingId: context.trainingId,
+                    chapterId: context.chapterId,
+                    verifierCleanup: context.verifierCleanup,
+                    verifierCleanupRequestId,
+                    incompleteStages: [...incompleteStages],
+                },
+            );
+            publicationAuditFinalized = true;
         } catch (error) {
             incompleteStages.push('success-audit');
+            if (!publicationAuditFinalized) {
+                try {
+                    await finishManagedNamespaceAudit(
+                        publicationAuditId,
+                        'incomplete',
+                        {
+                            title: formalTitle,
+                            difficulty: input.difficulty,
+                            hidden: input.finalHidden === true,
+                            metadataStatus: 'confirmed',
+                            selectedMindmapNodeIds: context.pdoc.managedAuthoring?.selectedMindmapNodeIds?.map(String) || [],
+                        },
+                        {
+                            reason: `publication committed but audit finalization failed: ${
+                                error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+                            }`,
+                            incompleteStages: [...incompleteStages],
+                        },
+                    );
+                    publicationAuditFinalized = true;
+                } catch (auditError) {
+                    logger.error(
+                        'Managed publish incomplete audit also failed domain=%s pid=%d actor=%d requestId=%s stage=success-audit-recovery error=%o',
+                        input.domainId,
+                        input.docId,
+                        input.actor,
+                        context.requestId,
+                        auditError,
+                    );
+                }
+            }
             logger.error(
                 'Managed publish committed but final audit failed domain=%s pid=%d publicPid=%s actor=%d requestId=%s training=%s chapter=%s approvedAt=%s publicationState=committed_with_error stage=success-audit error=%o',
                 input.domainId,
@@ -2540,7 +3082,7 @@ export class ProblemModel {
         rawConfig = false,
     ): Promise<ProblemDoc | null> {
         const requestedFields = new Set<string>(projection as string[]);
-        const authorizationFields = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode'] as Field[];
+        const authorizationFields = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode', 'pidNamespaceId', 'managedAuthoring'] as Field[];
         const readProjection = Array.from(
             new Set([...(projection as Field[]), ...authorizationFields, ...(Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[])]),
         ) as Projection<ProblemDoc>;
@@ -2587,7 +3129,7 @@ export class ProblemModel {
     ): Promise<ProblemDict> {
         if (!pids?.length) return {};
         const requestedFields = new Set<string>(projection as string[]);
-        const authorizationFields = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode'] as Field[];
+        const authorizationFields = ['domainId', 'docId', 'owner', 'hidden', 'authoringMode', 'pidNamespaceId', 'managedAuthoring'] as Field[];
         const readProjection = Array.from(
             new Set([...(projection as Field[]), ...authorizationFields, ...(Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[])]),
         ) as Projection<ProblemDoc>;
@@ -2633,7 +3175,7 @@ export class ProblemModel {
         rawConfig = false,
     ): Promise<ProblemDoc | null> {
         const requestedFields = new Set<string>(projection as string[]);
-        const authorizationFields = ['domainId', 'docId', 'owner', 'maintainer', 'authoringMode', 'managedAuthoring'] as Field[];
+        const authorizationFields = ['domainId', 'docId', 'owner', 'maintainer', 'authoringMode', 'pidNamespaceId', 'managedAuthoring'] as Field[];
         const identityProjection = Array.from(
             new Set([...authorizationFields, ...(Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[])]),
         ) as Projection<ProblemDoc>;
@@ -2677,7 +3219,16 @@ export class ProblemModel {
         rawConfig = false,
     ): Promise<ProblemDoc | null> {
         const requestedFields = new Set<string>(projection as string[]);
-        const authorizationFields = ['domainId', 'docId', 'owner', 'maintainer', 'authoringMode', 'hidden', 'managedAuthoring'] as Field[];
+        const authorizationFields = [
+            'domainId',
+            'docId',
+            'owner',
+            'maintainer',
+            'authoringMode',
+            'hidden',
+            'pidNamespaceId',
+            'managedAuthoring',
+        ] as Field[];
         const identityProjection = Array.from(
             new Set([...authorizationFields, ...(Array.from(PROBLEM_ACL_INTERNAL_FIELDS) as Field[])]),
         ) as Projection<ProblemDoc>;
@@ -2897,7 +3448,12 @@ export class ProblemModel {
         _id: number,
         user: ProblemAclUser,
         operation: string,
-        options: { requestId?: string; selfRevokeUid?: number; capability?: ProblemWriteCapability } = {},
+        options: {
+            requestId?: string;
+            selfRevokeUid?: number;
+            capability?: ProblemWriteCapability;
+            requiredPidNamespaceGrant?: 'manager';
+        } = {},
     ): Promise<ProblemWriteClaim> {
         try {
             const prepareProblemWriteClaim = (global.Hydro?.model as any)?.permits?.prepareProblemWriteClaim;
@@ -2928,6 +3484,7 @@ export class ProblemModel {
             'authoringMode',
             'hidden',
             'managedAuthoring',
+            'pidNamespaceId',
             'aclMutationRevision',
             'aclMutationLocks',
             'aclWriteClaim',
@@ -2937,6 +3494,7 @@ export class ProblemModel {
         const claim = await acquireProblemWriteClaim(user, authorizedPdoc, requestId, operation, {
             selfRevokeUid: options.selfRevokeUid,
             capability: options.capability,
+            requiredPidNamespaceGrant: options.requiredPidNamespaceGrant,
         });
         if (!claim) {
             if (authorizedPdoc.authoringMode === 'managed') {
@@ -2970,7 +3528,12 @@ export class ProblemModel {
         user: ProblemAclUser,
         operation: string,
         work: (claim: ProblemWriteClaim) => Promise<T>,
-        options: { requestId?: string; selfRevokeUid?: number; capability?: ProblemWriteCapability } = {},
+        options: {
+            requestId?: string;
+            selfRevokeUid?: number;
+            capability?: ProblemWriteCapability;
+            requiredPidNamespaceGrant?: 'manager';
+        } = {},
     ): Promise<T> {
         const claim = await ProblemModel.beginAuthorizedWriteClaim(domainId, _id, user, operation, options);
         try {
@@ -2982,6 +3545,7 @@ export class ProblemModel {
         } catch (error) {
             if (
                 error instanceof ValidationError ||
+                error instanceof PermissionError ||
                 error instanceof ProblemContributionConflictError ||
                 error instanceof ProblemDataActiveContainerError ||
                 error instanceof ProblemStructureConflictError ||
@@ -3140,7 +3704,7 @@ export class ProblemModel {
         if (!activeContainers.length) return;
         const facts = ProblemModel.activeDataWriteContainerFacts(activeContainers);
         const administrator = ProblemModel.isProblemBankAdmin(user);
-        const establishedDataMaintainer = ProblemModel.canEditProblemContent(user, current) || ProblemModel.canAuthorProblem(user, current);
+        const establishedDataMaintainer = ProblemModel.canMaintainProblem(user, current) || ProblemModel.canAuthorProblem(user, current);
         if (!administrator && (scope !== 'data' || !establishedDataMaintainer)) {
             logger.warn(
                 'Active-container %s write rejected domain=%s pid=%d actor=%d operation=%s requestId=%s containers=%o result=denied',
@@ -3232,51 +3796,59 @@ export class ProblemModel {
             user,
             operation,
             async (claim) => {
-                const current = await document.coll.findOne(
-                    {
-                        domainId,
-                        docType: document.TYPE_PROBLEM,
-                        docId: pid,
-                        'aclWriteClaim.requestId': claim.requestId,
-                        'aclWriteClaim.actor': claim.actor,
-                        'aclWriteClaim.operation': claim.operation,
-                        'aclWriteClaim.capability': 'data',
-                        'aclWriteClaim.state': 'active',
-                    },
-                    {
-                        projection: {
-                            domainId: 1,
-                            docId: 1,
-                            owner: 1,
-                            maintainer: 1,
-                            authoringMode: 1,
-                            hidden: 1,
-                            managedAuthoring: 1,
-                            problemKind: 1,
-                            structureRevision: 1,
-                            archivedAt: 1,
+                const liveResult = await withLivePidNamespaceGrant(claim, async () => {
+                    const current = await document.coll.findOne(
+                        {
+                            domainId,
+                            docType: document.TYPE_PROBLEM,
+                            docId: pid,
+                            'aclWriteClaim.requestId': claim.requestId,
+                            'aclWriteClaim.actor': claim.actor,
+                            'aclWriteClaim.operation': claim.operation,
+                            'aclWriteClaim.capability': 'data',
+                            'aclWriteClaim.state': 'active',
                         },
-                    },
-                );
-                if (!current) throw new Error(`problem write claim ownership lost before ${operation}: ${claim.requestId}`);
-                if (current.archivedAt) throw new ValidationError('archivedAt', null, '已归档题目不能修改评测数据');
-                await ProblemModel.assertActiveContainerWriteAllowed(
-                    current,
-                    user,
-                    options.confirmationOperation || (operation as ProblemDataWriteOperation),
-                    claim.requestId,
-                    options.activeContainerConfirmation,
-                    'data',
-                );
-                const result = await work(claim);
-                if (current.problemKind !== undefined && options.bumpStructureRevision !== false) {
-                    assertStructureRevision(current.structureRevision);
-                    const bumped = await document.coll.updateOne(dataRevisionClaimFilter(claim, current.structureRevision), {
-                        $inc: { structureRevision: 1 },
-                    });
-                    if (bumped.matchedCount !== 1) throw new ProblemStructureConflictError(pid);
-                }
-                return result;
+                        {
+                            projection: {
+                                domainId: 1,
+                                docId: 1,
+                                owner: 1,
+                                maintainer: 1,
+                                authoringMode: 1,
+                                hidden: 1,
+                                managedAuthoring: 1,
+                                problemKind: 1,
+                                structureRevision: 1,
+                                structureLockedAt: 1,
+                                archivedAt: 1,
+                            },
+                        },
+                    );
+                    if (!current) throw new Error(`problem write claim ownership lost before ${operation}: ${claim.requestId}`);
+                    if (current.archivedAt) throw new ValidationError('archivedAt', null, '已归档题目不能修改评测数据');
+                    if (claim.pidNamespaceGrant === 'editAll' && current.structureLockedAt) {
+                        throw new ProblemStructureConflictError(pid);
+                    }
+                    await ProblemModel.assertActiveContainerWriteAllowed(
+                        current,
+                        user,
+                        options.confirmationOperation || (operation as ProblemDataWriteOperation),
+                        claim.requestId,
+                        options.activeContainerConfirmation,
+                        'data',
+                    );
+                    const result = await work(claim);
+                    if (current.problemKind !== undefined && options.bumpStructureRevision !== false) {
+                        assertStructureRevision(current.structureRevision);
+                        const bumped = await document.coll.updateOne(dataRevisionClaimFilter(claim, current.structureRevision), {
+                            $inc: { structureRevision: 1 },
+                        });
+                        if (bumped.matchedCount !== 1) throw new ProblemStructureConflictError(pid);
+                    }
+                    return { result };
+                });
+                if (!liveResult) throw new PermissionError(PERM.PERM_EDIT_PROBLEM_SELF);
+                return liveResult.result;
             },
             { requestId: options.requestId, capability: 'data' },
         );
@@ -3621,9 +4193,30 @@ export class ProblemModel {
     ): Promise<ProblemDoc> {
         const preliminary = await document.coll.findOne({ domainId, docType: document.TYPE_PROBLEM, docId: _id });
         if (!preliminary) throw new ProblemNotFoundError(domainId, _id);
+        const legacyNamespaceEditAll =
+            preliminary.authoringMode !== 'managed' &&
+            !canMaintainProblemAccess(user, preliminary) &&
+            canUseProblemWriteCapability(user, preliminary, 'metadata');
+        let authorizedSet = $set;
+        let authorizedUnset = requestedUnset;
+        if (legacyNamespaceEditAll) {
+            authorizedSet = { ...$set };
+            authorizedUnset = { ...requestedUnset };
+            if (Object.hasOwn(authorizedSet, 'managedAuthoring') || Object.hasOwn(authorizedUnset, 'managedAuthoring')) {
+                throw new ValidationError('managedAuthoring', null, '普通题目不能写入托管出题状态');
+            }
+            for (const field of ['pid', 'hidden', 'lockHidden'] as const) {
+                if (Object.hasOwn(authorizedSet, field) && isEqual(preliminary[field], authorizedSet[field])) {
+                    delete authorizedSet[field];
+                }
+                if (Object.hasOwn(authorizedUnset, field) && preliminary[field] === undefined) {
+                    delete authorizedUnset[field];
+                }
+            }
+        }
         if (
-            ($set.authoringMode !== undefined && $set.authoringMode !== preliminary.authoringMode) ||
-            (requestedUnset.authoringMode !== undefined && preliminary.authoringMode !== undefined)
+            (authorizedSet.authoringMode !== undefined && authorizedSet.authoringMode !== preliminary.authoringMode) ||
+            (authorizedUnset.authoringMode !== undefined && preliminary.authoringMode !== undefined)
         ) {
             if (preliminary.authoringMode === 'managed') {
                 logger.warn(
@@ -3647,8 +4240,8 @@ export class ProblemModel {
         }
         const initialGuard =
             preliminary.authoringMode === 'managed'
-                ? managedProblemPatchCapability(preliminary, $set, requestedUnset)
-                : { capability: 'maintain' as const };
+                ? managedProblemPatchCapability(preliminary, authorizedSet, authorizedUnset)
+                : { capability: legacyNamespaceEditAll ? ('metadata' as const) : ('maintain' as const) };
         return ProblemModel.withAuthorizedWriteClaim(
             domainId,
             _id,
@@ -3668,7 +4261,7 @@ export class ProblemModel {
                 if (!before) throw new Error(`problem write claim ownership lost before managed guard: ${claim.requestId}`);
                 let guard: ReturnType<typeof managedProblemPatchCapability> | null = null;
                 if (before.authoringMode === 'managed') {
-                    guard = managedProblemPatchCapability(before, $set, requestedUnset);
+                    guard = managedProblemPatchCapability(before, authorizedSet, authorizedUnset);
                     if (guard.immutableFields.length || !canUseProblemWriteCapability(user, before, guard.capability)) {
                         logger.warn(
                             'Managed write denied domain=%s pid=%d actor=%d operation=metadata-edit capability=%s fields=%o result=denied',
@@ -3695,7 +4288,7 @@ export class ProblemModel {
                         throw new ValidationError('fields', null, message);
                     }
                 }
-                const result = await ProblemModel.editWithClaim(claim, $set, requestedUnset, {
+                const result = await ProblemModel.editWithClaim(claim, authorizedSet, authorizedUnset, {
                     ...options,
                     requireExpectedStructureRevision: true,
                     user,
@@ -4735,6 +5328,7 @@ export class ProblemModel {
                                 Number.isSafeInteger(pdoc.difficulty) && Number(pdoc.difficulty) >= 1 && Number(pdoc.difficulty) <= 10
                                     ? Number(pdoc.difficulty)
                                     : 1,
+                            pidNamespaceId: builtinPidNamespaceIdForSourceTemplate('self'),
                             sourceMeta: { template: 'self', year: new Date().getFullYear() },
                             knowledgeMapId: importKnowledge.mapId,
                             mindmapNodeIds: [],
@@ -4884,6 +5478,7 @@ async function assertConfigTestdataEventAllowed(domainId: string, docId: number)
 
 export async function apply(ctx: Context) {
     await ensureManagedProblemAuthoringIndexes();
+    await ensurePidNamespaceIndexes();
     ctx.on('problem/addTestdata', async (domainId, docId, name, _payload, claim?: ProblemWriteClaim) => {
         if (!isProblemConfigFilename(name)) return;
         await assertConfigTestdataEventAllowed(domainId, docId);

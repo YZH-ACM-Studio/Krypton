@@ -46,45 +46,11 @@ function normMemory(s: string): string {
 
 // ─── base: token gate (channel `crawler`, must be user-bound) ────────────────
 
-function denyProblemAcl(user: any) {
-    Object.assign(user, {
-        _permitPids: new Set<number>(),
-        _authoredPids: new Set<number>(),
-        _maintainedPids: new Set<number>(),
-        _aclFencedPids: new Set<number>(),
-        _ownsLegacyProblems: false,
-        _problemAclDomainId: undefined,
-        _problemAclLoaded: false,
-    });
-}
-
 async function loadCrawlerProblemAcl(user: any, domainId: string): Promise<void> {
-    denyProblemAcl(user);
     try {
-        const permits = (global.Hydro?.model as any)?.permits;
-        if (typeof permits?.loadAclForUser !== 'function') throw new Error('permits.loadAclForUser is unavailable');
-        const loaded = await permits.loadAclForUser(domainId, Number(user?._id) || 0);
-        if (
-            !(loaded?.permitPids instanceof Set) ||
-            !(loaded?.authoredPids instanceof Set) ||
-            !(loaded?.maintainedPids instanceof Set) ||
-            !(loaded?.fencedPids instanceof Set) ||
-            typeof loaded?.ownsLegacyProblems !== 'boolean'
-        ) {
-            throw new TypeError('permits.loadAclForUser returned an invalid ACL snapshot');
-        }
-        Object.assign(user, {
-            _permitPids: loaded.permitPids,
-            _authoredPids: loaded.authoredPids,
-            _maintainedPids: loaded.maintainedPids,
-            _aclFencedPids: loaded.fencedPids,
-            _ownsLegacyProblems: loaded.ownsLegacyProblems,
-            _problemAclDomainId: domainId,
-            _problemAclLoaded: true,
-        });
+        await problem.refreshProblemAcl(user, domainId);
         problem.assertProblemAclDomain(user, domainId);
     } catch (error) {
-        denyProblemAcl(user);
         logger.error('Crawler ACL preload failed domain=%s uid=%d error=%s', domainId, Number(user?._id) || 0, error);
         throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
     }

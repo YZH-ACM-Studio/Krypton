@@ -2,6 +2,12 @@ import { expect } from 'chai';
 import { describe, it } from 'node:test';
 import { preloadProblemAcl } from '../src/preload';
 
+const emptyPidNamespaceAcl = async () => ({
+    authorNamespaceIds: new Set<string>(),
+    managerNamespaceIds: new Set<string>(),
+    editAllNamespaceIds: new Set<string>(),
+});
+
 describe('problem ACL preload', () => {
     it('loads uid=1 administrators instead of bypassing their fences', async () => {
         const user: any = { _id: 1 };
@@ -21,6 +27,11 @@ describe('problem ACL preload', () => {
                     ownsLegacyProblems: true,
                 };
             },
+            async () => ({
+                authorNamespaceIds: new Set(['custom:os']),
+                managerNamespaceIds: new Set(['custom:os']),
+                editAllNamespaceIds: new Set<string>(),
+            }),
             (error) => {
                 throw error;
             },
@@ -33,6 +44,10 @@ describe('problem ACL preload', () => {
         expect([...user._dataContributionPids]).to.deep.equal([3]);
         expect([...user._tagContributionPids]).to.deep.equal([4]);
         expect(user._ownsLegacyProblems).to.equal(true);
+        expect([...user._pidNamespaceAuthorIds]).to.deep.equal(['custom:os']);
+        expect([...user._pidNamespaceManagerIds]).to.deep.equal(['custom:os']);
+        expect(user._pidNamespaceAclLoaded).to.equal(true);
+        expect(user._pidNamespaceAclDomainId).to.equal('system');
     });
 
     it('fails closed and reports the load error without retaining stale ACL state', async () => {
@@ -55,6 +70,7 @@ describe('problem ACL preload', () => {
             async () => {
                 throw new Error('database unavailable');
             },
+            emptyPidNamespaceAcl,
             (error) => errors.push(error),
         );
 
@@ -67,6 +83,9 @@ describe('problem ACL preload', () => {
         expect([...user._tagContributionPids]).to.deep.equal([]);
         expect([...user._aclFencedPids]).to.deep.equal([]);
         expect(user._ownsLegacyProblems).to.equal(false);
+        expect(user._pidNamespaceAclLoaded).to.equal(false);
+        expect(user._pidNamespaceAclDomainId).to.equal(undefined);
+        expect([...user._pidNamespaceAuthorIds]).to.deep.equal([]);
         expect((errors[0] as Error).message).to.equal('database unavailable');
     });
 
@@ -86,6 +105,7 @@ describe('problem ACL preload', () => {
                     tagContributionPids: new Set(),
                     fencedPids: new Set(),
                 }) as any,
+            emptyPidNamespaceAcl,
             (error) => errors.push(error),
         );
 
@@ -119,6 +139,7 @@ describe('problem ACL preload', () => {
                     maintainedPids: new Set([3]),
                     ownsLegacyProblems: true,
                 }) as any,
+            emptyPidNamespaceAcl,
             (error) => errors.push(error),
         );
 
@@ -132,5 +153,72 @@ describe('problem ACL preload', () => {
         expect([...user._aclFencedPids]).to.deep.equal([]);
         expect(user._ownsLegacyProblems).to.equal(false);
         expect(errors[0]).to.be.instanceOf(TypeError);
+    });
+
+    it('loads problem and namespace ACL snapshots atomically', async () => {
+        const user: any = {
+            _id: 10,
+            _pidNamespaceAuthorIds: new Set(['stale']),
+            _pidNamespaceAclDomainId: 'stale-domain',
+            _pidNamespaceAclLoaded: true,
+        };
+        const errors: unknown[] = [];
+
+        await preloadProblemAcl(
+            user,
+            'system',
+            async () => ({
+                permitPids: new Set([7]),
+                authoredPids: new Set([7]),
+                maintainedPids: new Set([7]),
+                dataContributionPids: new Set(),
+                tagContributionPids: new Set(),
+                fencedPids: new Set(),
+                ownsLegacyProblems: false,
+            }),
+            async () =>
+                ({
+                    authorNamespaceIds: ['not-a-set'],
+                    managerNamespaceIds: new Set(),
+                    editAllNamespaceIds: new Set(),
+                }) as any,
+            (error) => errors.push(error),
+        );
+
+        expect(user._problemAclLoaded).to.equal(false);
+        expect(user._pidNamespaceAclLoaded).to.equal(false);
+        expect([...user._permitPids]).to.deep.equal([]);
+        expect([...user._pidNamespaceAuthorIds]).to.deep.equal([]);
+        expect(errors[0]).to.be.instanceOf(TypeError);
+    });
+
+    it('marks an anonymous request with two empty authoritative snapshots without database loads', async () => {
+        const user: any = { _id: 0 };
+        let problemLoads = 0;
+        let namespaceLoads = 0;
+
+        await preloadProblemAcl(
+            user,
+            'system',
+            async () => {
+                problemLoads++;
+                throw new Error('must not load');
+            },
+            async () => {
+                namespaceLoads++;
+                throw new Error('must not load');
+            },
+            (error) => {
+                throw error;
+            },
+        );
+
+        expect(problemLoads).to.equal(0);
+        expect(namespaceLoads).to.equal(0);
+        expect(user._problemAclLoaded).to.equal(true);
+        expect(user._pidNamespaceAclLoaded).to.equal(true);
+        expect(user._problemAclDomainId).to.equal('system');
+        expect(user._pidNamespaceAclDomainId).to.equal('system');
+        expect([...user._pidNamespaceAuthorIds]).to.deep.equal([]);
     });
 });

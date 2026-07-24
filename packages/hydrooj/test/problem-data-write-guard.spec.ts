@@ -12,6 +12,8 @@ const wrapperQueries: any[] = [];
 const oplogCalls: any[] = [];
 let innerWorkCalls = 0;
 let claimOptions: any = null;
+let namespaceGrantAllowed = true;
+let problemStructureLockedAt: Date | undefined;
 
 class StubError extends Error {
     params: unknown[];
@@ -46,6 +48,7 @@ const documentStub = {
                     capability: 'data',
                     state: 'active',
                 },
+                ...(problemStructureLockedAt ? { structureLockedAt: problemStructureLockedAt } : {}),
             };
         },
         async updateOne() {
@@ -90,6 +93,13 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
                 },
             };
         }
+        if (request === './problem-pid-namespace') {
+            return {
+                async withLivePidNamespaceGrant(_claim: any, work: () => Promise<unknown>) {
+                    return namespaceGrantAllowed ? work() : null;
+                },
+            };
+        }
         if (request === '../error') {
             return new Proxy(
                 {
@@ -113,7 +123,7 @@ try {
 }
 
 ProblemModel.isProblemBankAdmin = (user: any) => user.admin === true;
-ProblemModel.canEditProblemContent = (user: any) => user.existingContent === true;
+ProblemModel.canMaintainProblem = (user: any) => user.existingMaintainer === true;
 ProblemModel.canAuthorProblem = (user: any) => user.existingAuthor === true;
 ProblemModel.withAuthorizedWriteClaim = async (
     domainId: string,
@@ -131,6 +141,7 @@ ProblemModel.withAuthorizedWriteClaim = async (
         operation,
         requestId: 'data-claim',
         capability: 'data',
+        ...(_user.namespaceEditAll ? { pidNamespaceId: 'custom:os', pidNamespaceGrant: 'editAll' } : {}),
         state: 'active',
     });
 };
@@ -191,6 +202,8 @@ beforeEach(() => {
     oplogCalls.length = 0;
     innerWorkCalls = 0;
     claimOptions = null;
+    namespaceGrantAllowed = true;
+    problemStructureLockedAt = undefined;
 });
 
 describe('P2.24 active contest data-write guard', () => {
@@ -311,10 +324,40 @@ describe('P2.24 active contest data-write guard', () => {
     it('preserves active-container writes for existing owners, authors, and maintainers', async () => {
         activeContainers = [{ docId: 'contest-1', title: '现场赛', rule: 'acm' }];
 
-        expect(await run({ admin: false, existingContent: true })).to.equal('written');
+        expect(await run({ admin: false, existingMaintainer: true })).to.equal('written');
         expect(await run({ admin: false, existingAuthor: true })).to.equal('written');
         expect(innerWorkCalls).to.equal(2);
         expect(oplogCalls).to.deep.equal([]);
+    });
+
+    it('does not let namespace edit-all bypass an active contest guard', async () => {
+        activeContainers = [{ docId: 'contest-1', title: '现场赛', rule: 'acm' }];
+
+        const error = await captureFailure(() => run({ admin: false, namespaceEditAll: true, existingContent: true }));
+
+        expect(error).to.be.instanceOf(StubError);
+        expect(innerWorkCalls).to.equal(0);
+        activeContainers = [];
+        expect(await run({ admin: false, namespaceEditAll: true, existingContent: true })).to.equal('written');
+    });
+
+    it('rechecks namespace edit-all after claim acquisition and before any data work', async () => {
+        namespaceGrantAllowed = false;
+
+        const error = await captureFailure(() => run({ admin: false, namespaceEditAll: true }));
+
+        expect(error).to.be.instanceOf(StubError);
+        expect(innerWorkCalls).to.equal(0);
+    });
+
+    it('does not let namespace edit-all bypass a historical structure lock while preserving established maintainer semantics', async () => {
+        problemStructureLockedAt = new Date('2026-07-23T04:06:16.019Z');
+
+        expect(await captureFailure(() => run({ namespaceEditAll: true }))).to.be.instanceOf(StubError);
+        expect(innerWorkCalls).to.equal(0);
+
+        expect(await run({ existingMaintainer: true })).to.equal('written');
+        expect(innerWorkCalls).to.equal(1);
     });
 
     it('rejects a stale or cross-container administrator confirmation', async () => {

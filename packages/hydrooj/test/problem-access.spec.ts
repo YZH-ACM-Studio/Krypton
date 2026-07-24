@@ -37,6 +37,30 @@ const managedAuthoringExports = {
         return canonical;
     },
 };
+const pidNamespaceExports = {
+    async loadPidNamespaceAclForUser(domainId: string, uid: number) {
+        return (global as any).Hydro.model.pidNamespaces.loadAclForUser(domainId, uid);
+    },
+    pidNamespaceCapabilityForProblem(user: any, problemDoc: any, capability: string) {
+        if (user._pidNamespaceEditAllIds?.has(problemDoc.pidNamespaceId) && ['content', 'metadata', 'data', 'tag'].includes(capability)) {
+            return 'editAll';
+        }
+        if (
+            user._pidNamespaceManagerIds?.has(problemDoc.pidNamespaceId) &&
+            problemDoc.authoringMode === 'managed' &&
+            problemDoc.hidden === true &&
+            !problemDoc.archivedAt &&
+            ['draft', 'confirmed'].includes(problemDoc.managedAuthoring?.metadataStatus) &&
+            ['metadata', 'tag', 'publish'].includes(capability)
+        ) {
+            return 'manager';
+        }
+        return null;
+    },
+    async withPidNamespaceBoundary(_domainId: string, _namespaceId: string, work: () => Promise<unknown>) {
+        return work();
+    },
+};
 require.cache[managedAuthoringPath] = {
     id: managedAuthoringPath,
     filename: managedAuthoringPath,
@@ -239,6 +263,9 @@ try {
         if (request === './managed-problem-authoring') {
             return managedAuthoringExports;
         }
+        if (request === './problem-pid-namespace') {
+            return pidNamespaceExports;
+        }
         return originalLoad.call(this, request, parent, isMain);
     };
     delete require.cache[accessPath];
@@ -306,6 +333,11 @@ function makeUser(kind: UserKind, overrides: Record<string, unknown> = {}) {
         _ownsLegacyProblems: false,
         _problemAclDomainId: 'system',
         _problemAclLoaded: true,
+        _pidNamespaceAuthorIds: new Set<string>(),
+        _pidNamespaceManagerIds: new Set<string>(),
+        _pidNamespaceEditAllIds: new Set<string>(),
+        _pidNamespaceAclDomainId: 'system',
+        _pidNamespaceAclLoaded: true,
         hasPerm: (...wanted: bigint[]) => wanted.some((perm) => perms.has(perm)),
         hasPriv: (...wanted: number[]) => kind === 'admin' && wanted.includes(PRIV.PRIV_EDIT_SYSTEM),
         ...overrides,
@@ -381,6 +413,15 @@ beforeEach(() => {
                 tagContributionPids: new Set<number>(),
                 fencedPids: new Set<number>(),
                 ownsLegacyProblems: false,
+            };
+        },
+    };
+    (global as any).Hydro.model.pidNamespaces = {
+        async loadAclForUser() {
+            return {
+                authorNamespaceIds: new Set<string>(),
+                managerNamespaceIds: new Set<string>(),
+                editAllNamespaceIds: new Set<string>(),
             };
         },
     };
@@ -654,6 +695,51 @@ describe('P2.13 managed programming authoring matrix', () => {
         expect(await clear(tagClaim)).to.equal(true);
     });
 
+    it('binds review claims to the manager role even when edit-all is also present', async () => {
+        const acquire = (access as any).acquireProblemWriteClaim;
+        const clear = (access as any).clearProblemWriteClaim;
+        const namespaceId = 'builtin:nowcoder';
+        const manager = makeUser('student', {
+            _pidNamespaceManagerIds: new Set([namespaceId]),
+            _pidNamespaceEditAllIds: new Set([namespaceId]),
+        });
+        liveProblem = {
+            ...managedPdoc(100),
+            docType: TYPE_PROBLEM,
+            pidNamespaceId: namespaceId,
+            aclMutationRevision: 2,
+            aclMutationLocks: [],
+            maintainer: [],
+        };
+        (global as any).Hydro.model.pidNamespaces.loadAclForUser = async () => ({
+            authorNamespaceIds: new Set([namespaceId]),
+            managerNamespaceIds: new Set([namespaceId]),
+            editAllNamespaceIds: new Set([namespaceId]),
+        });
+
+        const reviewClaim = await acquire(manager, structuredClone(liveProblem), 'manager-review', 'managed-review-update', {
+            capability: 'metadata',
+            requiredPidNamespaceGrant: 'manager',
+        });
+        expect(reviewClaim?.pidNamespaceId).to.equal(namespaceId);
+        expect(reviewClaim?.pidNamespaceGrant).to.equal('manager');
+        expect(await clear(reviewClaim)).to.equal(true);
+
+        const editAllOnly = makeUser('student', {
+            _pidNamespaceEditAllIds: new Set([namespaceId]),
+        });
+        (global as any).Hydro.model.pidNamespaces.loadAclForUser = async () => ({
+            authorNamespaceIds: new Set([namespaceId]),
+            managerNamespaceIds: new Set<string>(),
+            editAllNamespaceIds: new Set([namespaceId]),
+        });
+        const denied = await acquire(editAllOnly, structuredClone(liveProblem), 'edit-all-review', 'managed-review-update', {
+            capability: 'metadata',
+            requiredPidNamespaceGrant: 'manager',
+        });
+        expect(denied).to.equal(null);
+    });
+
     it('commits an unclassified draft working-title update under the author metadata claim', async () => {
         const acquire = (access as any).acquireProblemWriteClaim;
         const commit = (access as any).commitProblemWriteClaimUpdate;
@@ -850,6 +936,49 @@ describe('P2.24 orthogonal problem contribution capabilities', () => {
         ).not.to.throw();
         expect(() => (access as any).assertProblemWriteClaimFieldScope(tagClaim, ['managedAuthoring.metadataStatus'])).to.throw();
         expect(() => (access as any).assertProblemWriteClaimFieldScope(tagClaim, ['sourceMeta'])).to.throw();
+    });
+
+    it('limits namespace edit-all claims to problem content, metadata, tags, and evaluation data', () => {
+        const metadataClaim = {
+            domainId: 'system',
+            pid: 100,
+            actor: 42,
+            requestId: 'namespace-edit-all',
+            operation: 'metadata-edit',
+            capability: 'metadata',
+            pidNamespaceId: 'custom:os',
+            pidNamespaceGrant: 'editAll',
+            state: 'active',
+        } as any;
+        expect(() =>
+            (access as any).assertProblemWriteClaimFieldScope(metadataClaim, [
+                'title',
+                'content',
+                'html',
+                'difficulty',
+                'tag',
+                'knowledgeMapId',
+                'knowledgeNodeIds',
+                'config',
+                'data',
+                'additional_file',
+                'managedAuthoring',
+            ]),
+        ).not.to.throw();
+        for (const protectedField of [
+            'pid',
+            'pidNamespaceId',
+            'sourceMeta',
+            'hidden',
+            'lockHidden',
+            'archivedAt',
+            'owner',
+            'maintainer',
+            'problemKind',
+            'codeEvaluationStatus',
+        ]) {
+            expect(() => (access as any).assertProblemWriteClaimFieldScope(metadataClaim, [protectedField]), protectedField).to.throw();
+        }
     });
 });
 
@@ -1535,17 +1664,17 @@ describe('P2.11 durable global problem write claim', () => {
         };
         (global as any).Hydro.model.permits.loadAclForUser = async () => aclSnapshot({ permits: [100], authored: [100] });
         const claim = await acquire(author, structuredClone(liveProblem), 'managed-knowledge-suggestion', 'metadata-edit', {
-            capability: 'content',
+            capability: 'metadata',
         });
         const nextAuthoring = { ...liveProblem.managedAuthoring, selectedMindmapNodeIds: ['node-2'] };
 
-        const result = await commit(claim, { content: 'after', managedAuthoring: nextAuthoring }, {}, 'content');
+        const result = await commit(claim, { managedAuthoring: nextAuthoring }, {}, 'metadata');
 
         expect(result?.managedAuthoring.selectedMindmapNodeIds).to.deep.equal(['node-2']);
         expect(managedMindmapMaterializations).to.deep.equal([['node-2']]);
 
         const stale = { ...result!.managedAuthoring, selectedMindmapNodeIds: ['stale-node'] };
-        const error = await captureFailure(() => commit(claim, { managedAuthoring: stale }, {}, 'content'));
+        const error = await captureFailure(() => commit(claim, { managedAuthoring: stale }, {}, 'metadata'));
         expect(error).to.have.property('name', 'ValidationError');
         expect(liveProblem.managedAuthoring.selectedMindmapNodeIds).to.deep.equal(['node-2']);
     });
@@ -1821,6 +1950,30 @@ describe('P2.11 stable direct-problem reads', () => {
         expect(result).not.to.have.property('aclMutationRevision');
         expect(result).not.to.have.property('aclMutationLocks');
         expect(result).not.to.have.property('aclWriteClaim');
+    });
+
+    it('keeps anonymous stable reads available for public problems with an empty namespace ACL', async () => {
+        liveProblem = {
+            ...pdoc(100, 7, false),
+            docType: TYPE_PROBLEM,
+            title: 'public',
+            aclMutationRevision: 0,
+            aclMutationLocks: [],
+        };
+        const loadedUids: number[] = [];
+        (global as any).Hydro.model.pidNamespaces.loadAclForUser = async (_domainId: string, uid: number) => {
+            loadedUids.push(uid);
+            return {
+                authorNamespaceIds: new Set<string>(),
+                managerNamespaceIds: new Set<string>(),
+                editAllNamespaceIds: new Set<string>(),
+            };
+        };
+
+        const result = await readStableViewableProblem('system', makeUser('student', { _id: 0 }), readLiveProblem());
+
+        expect(result?.title).to.equal('public');
+        expect(loadedUids).to.deep.equal([0]);
     });
 
     it('batch-reads referenced problems with one ACL load and two collection reads', async () => {
@@ -2299,7 +2452,9 @@ describe('P2.11 ProblemModel public surface', () => {
         const capabilityStart = source.indexOf('static async getCapabilityAuthorized(');
         const capabilityEnd = source.indexOf('\n    /** Sensitive editor read for managed authors', capabilityStart);
         const capabilitySource = source.slice(capabilityStart, capabilityEnd);
-        expect(capabilitySource).to.include("'authoringMode', 'hidden', 'managedAuthoring'");
+        for (const field of ["'authoringMode'", "'hidden'", "'pidNamespaceId'", "'managedAuthoring'"]) {
+            expect(capabilitySource).to.include(field);
+        }
 
         const editableStart = source.indexOf('static async getEditableAuthorized(');
         const editableEnd = source.indexOf('\n    static getMulti(', editableStart);

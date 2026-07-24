@@ -41,6 +41,7 @@ const calls = {
     gets: [] as any[],
     getMulti: [] as any[],
     loads: [] as any[],
+    namespaceLoads: [] as any[],
     maintain: [] as any[],
     mindmapFinds: [] as any[],
     mindmapLists: [] as any[],
@@ -83,6 +84,16 @@ function buildScope(user: any) {
 }
 
 const problemStub = {
+    assertProblemAclDomain(user: any, domainId: string) {
+        if (
+            user._problemAclLoaded !== true ||
+            user._problemAclDomainId !== domainId ||
+            user._pidNamespaceAclLoaded !== true ||
+            user._pidNamespaceAclDomainId !== domainId
+        ) {
+            throw new TestPermissionError(PERM.PERM_CREATE_PROBLEM);
+        }
+    },
     buildProblemBankScope: buildScope,
     canBrowseProblemBank: (user: any) => user._problemAclLoaded === true && user.hasPerm(PERM.PERM_CREATE_PROBLEM),
     canMaintainProblem(user: any, pdoc: any) {
@@ -133,7 +144,26 @@ const problemStub = {
     previewProgrammingTagNormalization: previewProgrammingTagNormalizationStub,
     async refreshProblemAcl(user: any, domainId: string) {
         calls.refresh.push({ user, domainId });
-        const loaded = await (global as any).Hydro.model.permits.loadAclForUser(domainId, user._id);
+        Object.assign(user, {
+            _permitPids: new Set<number>(),
+            _authoredPids: new Set<number>(),
+            _maintainedPids: new Set<number>(),
+            _dataContributionPids: new Set<number>(),
+            _tagContributionPids: new Set<number>(),
+            _aclFencedPids: new Set<number>(),
+            _ownsLegacyProblems: false,
+            _problemAclDomainId: undefined,
+            _problemAclLoaded: false,
+            _pidNamespaceAuthorIds: new Set<string>(),
+            _pidNamespaceManagerIds: new Set<string>(),
+            _pidNamespaceEditAllIds: new Set<string>(),
+            _pidNamespaceAclDomainId: undefined,
+            _pidNamespaceAclLoaded: false,
+        });
+        const [loaded, namespaceAcl] = await Promise.all([
+            (global as any).Hydro.model.permits.loadAclForUser(domainId, user._id),
+            (global as any).Hydro.model.pidNamespaces.loadAclForUser(domainId, user._id),
+        ]);
         Object.assign(user, {
             _permitPids: loaded.permitPids,
             _authoredPids: loaded.authoredPids,
@@ -143,6 +173,11 @@ const problemStub = {
             _aclFencedPids: loaded.fencedPids,
             _problemAclDomainId: domainId,
             _problemAclLoaded: true,
+            _pidNamespaceAuthorIds: namespaceAcl.authorNamespaceIds,
+            _pidNamespaceManagerIds: namespaceAcl.managerNamespaceIds,
+            _pidNamespaceEditAllIds: namespaceAcl.editAllNamespaceIds,
+            _pidNamespaceAclDomainId: domainId,
+            _pidNamespaceAclLoaded: true,
         });
     },
     async get(domainId: string, docId: number, projection: unknown) {
@@ -329,6 +364,16 @@ function installAclLoader(
             };
         },
     };
+    (global as any).Hydro.model.pidNamespaces = {
+        async loadAclForUser(domainId: string, uid: number) {
+            calls.namespaceLoads.push({ domainId, uid });
+            return {
+                authorNamespaceIds: new Set<string>(),
+                managerNamespaceIds: new Set<string>(),
+                editAllNamespaceIds: new Set<string>(),
+            };
+        },
+    };
 }
 
 async function captureFailure(run: () => Promise<unknown>) {
@@ -379,6 +424,7 @@ describe('P2.11 tagger token-user ACL preload', () => {
         expect(calls.aggregates).to.deep.equal([]);
         expect(calls.edits).to.deep.equal([]);
         expect(tokenUser._problemAclLoaded).to.equal(false);
+        expect(tokenUser._pidNamespaceAclLoaded).to.equal(false);
         expect([...tokenUser._permitPids]).to.deep.equal([]);
         expect([...tokenUser._maintainedPids]).to.deep.equal([]);
         expect([...tokenUser._aclFencedPids]).to.deep.equal([]);
@@ -391,11 +437,14 @@ describe('P2.11 tagger token-user ACL preload', () => {
 
         expect(handler.user).to.equal(tokenUser);
         expect(calls.loads).to.deep.equal([{ domainId: 'system', uid: 42 }]);
+        expect(calls.namespaceLoads).to.deep.equal([{ domainId: 'system', uid: 42 }]);
         expect([...handler.user._permitPids]).to.deep.equal([7, 9]);
         expect([...handler.user._maintainedPids]).to.deep.equal([7]);
         expect([...handler.user._aclFencedPids]).to.deep.equal([9]);
         expect(handler.user._problemAclDomainId).to.equal('system');
         expect(handler.user._problemAclLoaded).to.equal(true);
+        expect(handler.user._pidNamespaceAclLoaded).to.equal(true);
+        expect(handler.user._pidNamespaceAclDomainId).to.equal('system');
     });
 
     it('logs ERROR, clears stale state, and returns 403 when the permits model is missing', async () => {
@@ -412,6 +461,7 @@ describe('P2.11 tagger token-user ACL preload', () => {
         expect([...tokenUser._aclFencedPids]).to.deep.equal([]);
         expect(tokenUser._problemAclDomainId).to.equal(undefined);
         expect(tokenUser._problemAclLoaded).to.equal(false);
+        expect(tokenUser._pidNamespaceAclLoaded).to.equal(false);
     });
 
     it('logs ERROR, keeps a deny snapshot, and returns 403 when ACL loading fails', async () => {
@@ -426,6 +476,7 @@ describe('P2.11 tagger token-user ACL preload', () => {
         expect(error.status).to.equal(403);
         expect(calls.errors).to.have.lengthOf(1);
         expect(tokenUser._problemAclLoaded).to.equal(false);
+        expect(tokenUser._pidNamespaceAclLoaded).to.equal(false);
         expect([...tokenUser._permitPids]).to.deep.equal([]);
         expect([...tokenUser._maintainedPids]).to.deep.equal([]);
         expect([...tokenUser._aclFencedPids]).to.deep.equal([]);

@@ -47,6 +47,7 @@ export function problemCreateChangedFields(
         reference?: unknown;
         authoringMode?: unknown;
         sourceMeta?: unknown;
+        pidNamespaceId?: unknown;
         managedAuthoring?: unknown;
         knowledgeMapId?: unknown;
         knowledgeNodeIds?: unknown;
@@ -70,6 +71,7 @@ export function problemCreateChangedFields(
         ...(created.reference ? ['reference'] : []),
         ...(created.authoringMode ? ['authoringMode'] : []),
         ...(created.sourceMeta ? ['sourceMeta'] : []),
+        ...(created.pidNamespaceId ? ['pidNamespaceId'] : []),
         ...(created.managedAuthoring ? ['managedAuthoring'] : []),
         ...(created.knowledgeMapId ? ['knowledgeMapId'] : []),
         ...(created.knowledgeNodeIds ? ['knowledgeNodeIds'] : []),

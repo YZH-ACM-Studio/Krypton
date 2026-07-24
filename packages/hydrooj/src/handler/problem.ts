@@ -71,6 +71,19 @@ import {
     previewProgrammingTagNormalization,
 } from '../model/managed-problem-authoring';
 import { isCanonicalManagedSourceTag } from '../model/managed-problem-source';
+import {
+    canManagePidNamespaces,
+    canReviewPidNamespaceProblems,
+    createCustomPidNamespace,
+    DEFAULT_PID_NAMESPACE_ID,
+    deleteCustomPidNamespace,
+    listCreatablePidNamespaces,
+    listManageablePidNamespaces,
+    listPidNamespaces,
+    managedPidNamespaceIds,
+    setPidNamespaceMember,
+    updatePidNamespaceConfig,
+} from '../model/problem-pid-namespace';
 import { structuredProblemConfigForEditor, structuredProblemUsesTestdata } from '../model/problem-lifecycle';
 import record from '../model/record';
 import * as setting from '../model/setting';
@@ -87,6 +100,21 @@ export const parseCategory = (value: string) =>
         .split(',')
         .map((e) => e.trim());
 const logger = new Logger('problem-handler');
+
+function pidNamespaceClientOption(namespace: Awaited<ReturnType<typeof listPidNamespaces>>[number]) {
+    return {
+        namespaceId: namespace.namespaceId,
+        kind: namespace.kind,
+        name: namespace.name,
+        enabled: namespace.enabled,
+        sourceTemplates: namespace.sourceTemplates,
+        pidPattern: namespace.pidPattern,
+        prefix: namespace.prefix,
+        start: namespace.start,
+        counter: namespace.counter,
+        allocated: namespace.allocated,
+    };
+}
 
 async function problemAuthorUsers(pdoc: ProblemDoc, owner?: User, stage = 'detail-author-resolution'): Promise<User[]> {
     if (pdoc.authoringMode !== 'managed') return owner ? [owner] : [];
@@ -649,6 +677,7 @@ export class ProblemMainHandler extends Handler {
     @param('visibility', Types.Range(['all', 'hidden', 'published']), true)
     @param('lifecycle', Types.Range(['active', 'archived', 'all']), true)
     @param('managedReview', Types.Range(['all', 'pending']), true)
+    @param('pidNamespaceId', Types.String, true)
     @param('contest', Types.ObjectId, true)
     async get(
         _domainId: string,
@@ -664,14 +693,10 @@ export class ProblemMainHandler extends Handler {
         visibility: 'all' | 'hidden' | 'published' = 'all',
         lifecycle: 'active' | 'archived' | 'all' = 'active',
         managedReview: 'all' | 'pending' = 'all',
+        pidNamespaceId = '',
         contestId: ObjectId = null,
     ) {
         const domainId = String(this.domain?._id);
-        if (!problem.canBrowseProblemBank(this.user)) {
-            if (quick || this.request.json) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
-            this.response.redirect = this.url('training_main');
-            return;
-        }
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
         if (!problem.canBrowseProblemBank(this.user)) {
@@ -683,15 +708,17 @@ export class ProblemMainHandler extends Handler {
         if (!limit || limit > this.ctx.setting.get('pagination.problem') || page > 1) limit = this.ctx.setting.get('pagination.problem');
         const problemBankScope = problem.buildProblemBankScope(this.user);
         const isBankAdmin = problem.isProblemBankAdmin(this.user);
+        const canReviewManaged = canReviewPidNamespaceProblems(this.user, domainId);
+        const canManageNamespaces = canManagePidNamespaces(this.user, domainId);
         if (owner && !isBankAdmin) throw new PermissionError(PERM.PERM_CREATE_PROBLEM);
-        if (managedReview === 'pending' && !isBankAdmin) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+        if (managedReview === 'pending' && !canReviewManaged) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
         const canFilterContest = this.user.hasPerm(PERM.PERM_VIEW_CONTEST);
         if (contestId && !canFilterContest) throw new PermissionError(PERM.PERM_VIEW_CONTEST);
         let contestAccessFilter: Filter<any> | null = null;
         if (canFilterContest) {
-            const contestGroups = (
-                await user.listGroup(domainId, this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST) ? undefined : this.user._id)
-            ).map((item) => item.name);
+            const contestGroups = (await user.listGroup(domainId, this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST) ? undefined : this.user._id)).map(
+                (item) => item.name,
+            );
             contestAccessFilter = {
                 ...(this.user.hasPerm(PERM.PERM_VIEW_HIDDEN_CONTEST)
                     ? {}
@@ -707,11 +734,15 @@ export class ProblemMainHandler extends Handler {
             };
         }
         const selectedContest = contestId
-            ? await contest.getMulti(domainId, { ...contestAccessFilter!, docId: contestId }).limit(1).next()
+            ? await contest
+                  .getMulti(domainId, { ...contestAccessFilter!, docId: contestId })
+                  .limit(1)
+                  .next()
             : null;
         if (contestId && !selectedContest) throw new ContestNotFoundError(domainId, contestId);
         const filterParts: Filter<ProblemDoc>[] = [problemBankScope];
         if (selectedContest) filterParts.push({ docId: { $in: selectedContest.pids || [] } });
+        if (pidNamespaceId) filterParts.push({ pidNamespaceId });
         if (kindSlug) {
             const problemKind = parseProblemKindSlug(kindSlug);
             filterParts.push(
@@ -798,14 +829,7 @@ export class ProblemMainHandler extends Handler {
         const canArchiveByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canArchiveProblem(this.user, pdoc)]));
         const canCloneByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canCloneProblem(this.user, pdoc)]));
         const managedReviewableByDocId = Object.fromEntries(
-            (quick ? [] : pdocs).map((pdoc) => [
-                pdoc.docId,
-                isBankAdmin &&
-                    pdoc.authoringMode === 'managed' &&
-                    pdoc.hidden === true &&
-                    ['draft', 'confirmed'].includes(pdoc.managedAuthoring?.metadataStatus || '') &&
-                    !pdoc.archivedAt,
-            ]),
+            (quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canPublishProblem(this.user, pdoc)]),
         );
         const canManageContributionsByDocId = Object.fromEntries(
             (quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canManageProblemContributions(this.user, pdoc)]),
@@ -813,16 +837,20 @@ export class ProblemMainHandler extends Handler {
         const reviewablePids = (quick ? [] : pdocs).filter((pdoc) => managedReviewableByDocId[pdoc.docId]).map((pdoc) => pdoc.docId);
         const pendingContributionFacts = await pendingProblemContributionReviewFacts(domainId, reviewablePids);
         const managedTrainingOptions =
-            !quick && isBankAdmin && pdocs.some((pdoc) => pdoc.managedAuthoring?.pendingTrainingPlacement)
+            !quick &&
+            canReviewManaged &&
+            pdocs.some((pdoc) => managedReviewableByDocId[pdoc.docId] && pdoc.managedAuthoring?.pendingTrainingPlacement)
                 ? await listManagedTrainingOptions(domainId)
                 : [];
-        const contestOptions = quick || !contestAccessFilter
-            ? []
-            : await contest
-                  .getMulti(domainId, contestAccessFilter)
-                  .project({ docId: 1, title: 1, beginAt: 1 })
-                  .sort({ beginAt: -1, docId: -1 })
-                  .toArray();
+        const pidNamespaces = quick ? [] : (await listPidNamespaces(domainId)).map(pidNamespaceClientOption);
+        const contestOptions =
+            quick || !contestAccessFilter
+                ? []
+                : await contest
+                      .getMulti(domainId, contestAccessFilter)
+                      .project({ docId: 1, title: 1, beginAt: 1 })
+                      .sort({ beginAt: -1, docId: -1 })
+                      .toArray();
         if (pjax) {
             this.response.body = {
                 title: this.renderTitle(this.translate('problem_main')),
@@ -859,6 +887,7 @@ export class ProblemMainHandler extends Handler {
                     visibility,
                     lifecycle,
                     managedReview,
+                    pidNamespaceId,
                     contest: contestId?.toHexString() || '',
                 },
                 contestOptions: contestOptions.map((tdoc) => ({
@@ -871,8 +900,11 @@ export class ProblemMainHandler extends Handler {
                     slug: problemKindToSlug(kind),
                 })),
                 canFilterOwner: isBankAdmin,
-                canReviewManaged: isBankAdmin,
-                problemReviewUrl: isBankAdmin ? this.url('problem_review') : '',
+                canReviewManaged,
+                problemReviewUrl: canReviewManaged ? this.url('problem_review') : '',
+                canManagePidNamespaces: canManageNamespaces,
+                pidNamespaceUrl: canManageNamespaces ? this.url('problem_pid_namespace') : '',
+                pidNamespaces,
                 problemCreationCapabilities: {
                     canCreateAny: problem.canCreateManagedProgrammingDraft(this.user),
                     canImport: problem.canImportProblems(this.user),
@@ -1013,6 +1045,7 @@ export class ProblemMainHandler extends Handler {
     @param('formalTitle', Types.Title)
     @param('difficulty', Types.UnsignedInt)
     @param('expectedStructureRevision', Types.PositiveInt)
+    @param('finalHidden', Types.Boolean, true)
     @param('pendingContributionsConfirmed', Types.Boolean, true)
     @param('pendingContributionFingerprint', Types.String, true)
     async postManagedPublish(
@@ -1021,13 +1054,13 @@ export class ProblemMainHandler extends Handler {
         formalTitle: string,
         difficulty: number,
         expectedStructureRevision: number,
+        finalHidden = false,
         pendingContributionsConfirmed = false,
         pendingContributionFingerprint = '',
     ) {
         const domainId = String(this.domain?._id);
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
-        if (!problem.isProblemBankAdmin(this.user)) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
         if (difficulty > 10) throw new ValidationError('difficulty');
         const result = await problem.publishManagedProgrammingProblem({
             domainId,
@@ -1037,6 +1070,7 @@ export class ProblemMainHandler extends Handler {
             expectedStructureRevision,
             actor: this.user._id,
             user: this.user,
+            finalHidden,
             pendingContributionsConfirmed,
             pendingContributionFingerprint,
         });
@@ -1063,6 +1097,77 @@ export class ProblemMainHandler extends Handler {
             return;
         }
         this.response.redirect = this.url('problem_review');
+    }
+
+    @param('pid', Types.UnsignedInt)
+    @param('workingTitle', Types.Title)
+    @param('difficulty', Types.UnsignedInt)
+    @param('expectedStructureRevision', Types.PositiveInt)
+    @param('knowledgeNodeIds', Types.CommaSeperatedArray, true)
+    @param('returnNote', Types.Content, true)
+    async postManagedReview(
+        _domainId: string,
+        pid: number,
+        workingTitle: string,
+        difficulty: number,
+        expectedStructureRevision: number,
+        knowledgeNodeIds: string[] = [],
+        returnNote?: string,
+    ) {
+        const domainId = String(this.domain?._id);
+        await problem.refreshProblemAcl(this.user, domainId);
+        problem.assertProblemAclDomain(this.user, domainId);
+        if (difficulty > 10) throw new ValidationError('difficulty');
+        await problem.updateManagedProgrammingReview({
+            domainId,
+            docId: pid,
+            workingTitle,
+            difficulty,
+            selectedMindmapNodeIds: knowledgeNodeIds,
+            expectedStructureRevision,
+            actor: this.user._id,
+            user: this.user,
+            returnNote,
+        });
+        this.response.redirect = this.url('problem_review');
+    }
+
+    @param('pid', Types.UnsignedInt)
+    @param('targetPidNamespaceId', Types.String)
+    @param('template', Types.String)
+    @param('year', Types.String)
+    @param('expectedStructureRevision', Types.PositiveInt)
+    @param('season', Types.String, true)
+    @param('level', Types.String, true)
+    @param('round', Types.String, true)
+    async postManagedNamespaceCorrect(
+        _domainId: string,
+        pid: number,
+        targetPidNamespaceId: string,
+        template: string,
+        year: string,
+        expectedStructureRevision: number,
+        season = '',
+        level = '',
+        round = '',
+    ) {
+        const domainId = String(this.domain?._id);
+        await problem.refreshProblemAcl(this.user, domainId);
+        problem.assertProblemAclDomain(this.user, domainId);
+        const sourceMeta: Record<string, unknown> = { template, year };
+        if (season) sourceMeta.season = season;
+        if (level) sourceMeta.level = level;
+        if (round) sourceMeta.round = round;
+        const corrected = await problem.correctManagedProgrammingPidNamespace({
+            domainId,
+            docId: pid,
+            targetPidNamespaceId,
+            sourceMeta,
+            expectedStructureRevision,
+            actor: this.user._id,
+            user: this.user,
+        });
+        this.response.redirect = this.url('problem_edit', { pid: corrected.pid || corrected.docId });
     }
 
     @param('pid', Types.PositiveInt)
@@ -1110,10 +1215,9 @@ export class ProblemReviewHandler extends Handler {
     @param('status', Types.Range(['all', 'draft', 'confirmed']), true)
     async get(_domainId: string, page = 1, q = '', limit: number, status: 'all' | 'draft' | 'confirmed' = 'all') {
         const domainId = String(this.domain?._id);
-        if (!problem.isProblemBankAdmin(this.user)) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
         await problem.refreshProblemAcl(this.user, domainId);
         problem.assertProblemAclDomain(this.user, domainId);
-        if (!problem.isProblemBankAdmin(this.user)) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+        if (!canReviewPidNamespaceProblems(this.user, domainId)) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
 
         this.response.template = 'problem_review.html';
         if (!limit || limit > this.ctx.setting.get('pagination.problem') || page > 1) limit = this.ctx.setting.get('pagination.problem');
@@ -1128,10 +1232,13 @@ export class ProblemReviewHandler extends Handler {
                 'managedAuthoring.metadataStatus': reviewStatus,
             },
         ];
+        if (!problem.isProblemBankAdmin(this.user)) {
+            filters.push({ pidNamespaceId: { $in: managedPidNamespaceIds(this.user, domainId) } });
+        }
         if (normalizedQuery) filters.push(buildProblemTextFilter(normalizedQuery, false));
-        const query: Filter<ProblemDoc> = { $and: filters };
+        const reviewQuery: Filter<ProblemDoc> = { $and: filters };
         const [pdocs, ppcount, pcount] = await this.paginate(
-            problem.getMulti(domainId, query, problem.PROJECTION_MANAGED_BANK).sort({ docId: 1 }),
+            problem.getMulti(domainId, reviewQuery, problem.PROJECTION_MANAGED_BANK).sort({ docId: 1 }),
             page,
             limit,
         );
@@ -1152,6 +1259,7 @@ export class ProblemReviewHandler extends Handler {
         const managedTrainingOptions = pdocs.some((pdoc) => pdoc.managedAuthoring?.pendingTrainingPlacement)
             ? await listManagedTrainingOptions(domainId)
             : [];
+        const [knowledgeMaps, knowledgeMindmapOptions] = await Promise.all([listKnowledgeMapsForProblemSelection(), listKnowledgeMindmapOptions()]);
 
         this.response.body = {
             page,
@@ -1167,7 +1275,174 @@ export class ProblemReviewHandler extends Handler {
             contributionUdict: pendingContributionFacts.udict,
             managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
             managedTrainingOptions,
+            knowledgeMaps,
+            knowledgeMindmapOptions,
+            pidNamespaces: (await listPidNamespaces(domainId)).map(pidNamespaceClientOption),
+            canCorrectPidNamespaces: problem.isProblemBankAdmin(this.user),
+            canManagePidNamespaces: canManagePidNamespaces(this.user, domainId),
+            pidNamespaceUrl: canManagePidNamespaces(this.user, domainId) ? this.url('problem_pid_namespace') : '',
         };
+    }
+}
+
+export class ProblemPidNamespaceHandler extends Handler {
+    async get() {
+        const domainId = String(this.domain?._id);
+        await problem.refreshProblemAcl(this.user, domainId);
+        problem.assertProblemAclDomain(this.user, domainId);
+        if (!canManagePidNamespaces(this.user, domainId)) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+        const pidNamespaces = await listManageablePidNamespaces(domainId, this.user);
+        const namespaceIds = pidNamespaces.map((namespace) => namespace.namespaceId);
+        const namespaceAudits = namespaceIds.length
+            ? await oplog.coll
+                  .find(
+                      {
+                          domainId,
+                          namespaceId: { $in: namespaceIds },
+                          type: { $in: [/^problem\.pid-namespace\./, 'problem.managed.publish'] },
+                      } as any,
+                      {
+                          projection: {
+                              type: 1,
+                              operation: 1,
+                              action: 1,
+                              namespaceId: 1,
+                              operator: 1,
+                              problemId: 1,
+                              result: 1,
+                              requestId: 1,
+                              time: 1,
+                              completedAt: 1,
+                          },
+                      },
+                  )
+                  .sort({ time: -1, _id: -1 })
+                  .limit(30)
+                  .toArray()
+            : [];
+        const memberUids = [
+            ...new Set([
+                ...pidNamespaces.flatMap((namespace) => namespace.members.map((member) => member.uid)),
+                ...namespaceAudits.map((entry: any) => entry.operator).filter((uid: unknown): uid is number => Number.isSafeInteger(uid)),
+            ]),
+        ];
+        const memberUsers = memberUids.length ? await user.getList(domainId, memberUids) : {};
+        this.response.template = 'problem_pid_namespace.html';
+        this.response.body = {
+            pidNamespaces,
+            namespaceAudits,
+            memberUsers,
+            canAdministerPidNamespaces: problem.isProblemBankAdmin(this.user),
+            pidNamespaceUrl: this.url('problem_pid_namespace'),
+            problemReviewUrl: canReviewPidNamespaceProblems(this.user, domainId) ? this.url('problem_review') : '',
+        };
+    }
+
+    @post('name', Types.String)
+    @post('prefix', Types.String)
+    @post('start', Types.PositiveInt)
+    async postCreate(_domainId: string, name: string, prefix: string, start: number) {
+        const domainId = String(this.domain?._id);
+        await problem.refreshProblemAcl(this.user, domainId);
+        problem.assertProblemAclDomain(this.user, domainId);
+        const namespace = await createCustomPidNamespace(
+            domainId,
+            { name, prefix, start },
+            this.user,
+            `pid-namespace-create:${domainId}:${this.user._id}:${nanoid()}`,
+        );
+        this.response.body = { ok: true, namespace };
+    }
+
+    @post('namespaceId', Types.String)
+    @post('expectedRevision', Types.UnsignedInt)
+    @post('name', Types.String)
+    @post('enabled', Types.Boolean)
+    @post('prefix', Types.String, true)
+    @post('start', Types.PositiveInt, true)
+    async postUpdateConfig(_domainId: string, namespaceId: string, expectedRevision: number, name: string, enabled: boolean, prefix = '', start = 0) {
+        const domainId = String(this.domain?._id);
+        await problem.refreshProblemAcl(this.user, domainId);
+        problem.assertProblemAclDomain(this.user, domainId);
+        const namespace = await updatePidNamespaceConfig({
+            domainId,
+            namespaceId,
+            expectedRevision,
+            user: this.user,
+            requestId: `pid-namespace-config:${domainId}:${namespaceId}:${this.user._id}:${nanoid()}`,
+            name,
+            enabled,
+            ...(prefix ? { prefix } : {}),
+            ...(start ? { start } : {}),
+        });
+        this.response.body = { ok: true, namespace };
+    }
+
+    @post('namespaceId', Types.String)
+    @post('expectedRevision', Types.UnsignedInt)
+    @post('targetUid', Types.PositiveInt)
+    @post('role', Types.Range(['author', 'manager']))
+    @post('editAll', Types.Boolean)
+    async postSetMember(
+        _domainId: string,
+        namespaceId: string,
+        expectedRevision: number,
+        targetUid: number,
+        role: 'author' | 'manager',
+        editAll: boolean,
+    ) {
+        const domainId = String(this.domain?._id);
+        await problem.refreshProblemAcl(this.user, domainId);
+        problem.assertProblemAclDomain(this.user, domainId);
+        const target = await user.getById(domainId, targetUid);
+        if (!target || target._id !== targetUid) throw new ValidationError('targetUid');
+        const namespace = await setPidNamespaceMember({
+            domainId,
+            namespaceId,
+            expectedRevision,
+            targetUid,
+            role,
+            editAll,
+            user: this.user,
+            requestId: `pid-namespace-member-set:${domainId}:${namespaceId}:${targetUid}:${this.user._id}:${nanoid()}`,
+        });
+        this.response.body = { ok: true, namespace };
+    }
+
+    @post('namespaceId', Types.String)
+    @post('expectedRevision', Types.UnsignedInt)
+    @post('targetUid', Types.PositiveInt)
+    async postRemoveMember(_domainId: string, namespaceId: string, expectedRevision: number, targetUid: number) {
+        const domainId = String(this.domain?._id);
+        await problem.refreshProblemAcl(this.user, domainId);
+        problem.assertProblemAclDomain(this.user, domainId);
+        const namespace = await setPidNamespaceMember({
+            domainId,
+            namespaceId,
+            expectedRevision,
+            targetUid,
+            role: null,
+            editAll: false,
+            user: this.user,
+            requestId: `pid-namespace-member-remove:${domainId}:${namespaceId}:${targetUid}:${this.user._id}:${nanoid()}`,
+        });
+        this.response.body = { ok: true, namespace };
+    }
+
+    @post('namespaceId', Types.String)
+    @post('expectedRevision', Types.UnsignedInt)
+    async postDelete(_domainId: string, namespaceId: string, expectedRevision: number) {
+        const domainId = String(this.domain?._id);
+        await problem.refreshProblemAcl(this.user, domainId);
+        problem.assertProblemAclDomain(this.user, domainId);
+        await deleteCustomPidNamespace({
+            domainId,
+            namespaceId,
+            expectedRevision,
+            user: this.user,
+            requestId: `pid-namespace-delete:${domainId}:${namespaceId}:${this.user._id}:${nanoid()}`,
+        });
+        this.response.body = { ok: true };
     }
 }
 
@@ -2019,14 +2294,21 @@ export class ProblemEditHandler extends ProblemManageHandler {
                 );
                 throw new ValidationError('fields', null, '编程题标签只能从知识导图选择并单独确认');
             }
-            if (this.pdoc.knowledgeNodeIds?.length && Object.hasOwn(body, 'pid')) {
+            const requestedPid = typeof newPid === 'number' ? `P${newPid}` : newPid;
+            if (
+                (this.pdoc.pidNamespaceId || this.pdoc.knowledgeNodeIds?.length) &&
+                Object.hasOwn(body, 'pid') &&
+                requestedPid !== undefined &&
+                requestedPid !== this.pdoc.pid
+            ) {
                 logger.warn(
-                    'Converted programming PID write rejected domain=%s pid=%d actor=%d stage=ordinary-save result=denied',
+                    'Namespaced programming PID write rejected domain=%s pid=%d namespace=%s actor=%d stage=ordinary-save result=denied',
                     domainId,
                     this.pdoc.docId,
+                    this.pdoc.pidNamespaceId || 'legacy-canonical-tags',
                     this.user._id,
                 );
-                throw new ValidationError('pid', null, '已规范化编程题的编号不可自由修改');
+                throw new ValidationError('pid', null, '已归入题号命名空间或已规范化的编号只能通过管理员迁移流程修改');
             }
         }
         if (dedicatedStructured) {
@@ -3032,12 +3314,18 @@ export class ProblemCreateHubHandler extends Handler {
 
 export class ProblemCreateProgrammingHandler extends Handler {
     async get() {
+        const domainId = String(this.domain?._id);
         const canAssignManagedAuthor = problem.canAssignManagedAuthor(this.user);
         if (!problem.canCreateManagedProgrammingDraft(this.user)) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        await problem.refreshProblemAcl(this.user, domainId);
+        problem.assertProblemAclDomain(this.user, domainId);
+        const pidNamespaces = await listCreatablePidNamespaces(domainId, this.user);
+        if (!pidNamespaces.length) throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT);
+        const allowedSourceTemplates = new Set(pidNamespaces.flatMap((namespace) => namespace.sourceTemplates));
         const [knowledgeMaps, managedMindmapOptions, managedTrainingOptions] = await Promise.all([
             listKnowledgeMapsForProblemSelection(),
             listManagedMindmapOptions(),
-            canAssignManagedAuthor ? listManagedTrainingOptions(String(this.domain?._id)) : Promise.resolve([]),
+            canAssignManagedAuthor ? listManagedTrainingOptions(domainId) : Promise.resolve([]),
         ]);
         this.response.template = 'problem_edit.html';
         this.response.body = {
@@ -3055,9 +3343,10 @@ export class ProblemCreateProgrammingHandler extends Handler {
             canAssignManagedAuthor,
             canAssignManagedTraining: canAssignManagedAuthor,
             managedCreateDefault: true,
-            managedSourceTemplates: canAssignManagedAuthor
-                ? MANAGED_SOURCE_TEMPLATES
-                : MANAGED_SOURCE_TEMPLATES.filter((template) => template.id === 'self'),
+            managedSourceTemplates: MANAGED_SOURCE_TEMPLATES.filter((template) => allowedSourceTemplates.has(template.id)),
+            pidNamespaces: pidNamespaces.map(pidNamespaceClientOption),
+            defaultPidNamespaceId:
+                pidNamespaces.find((namespace) => namespace.namespaceId === DEFAULT_PID_NAMESPACE_ID)?.namespaceId || pidNamespaces[0].namespaceId,
             managedMindmapOptions,
             knowledgeMaps,
             managedTrainingOptions,
@@ -3083,6 +3372,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
     @post('tag', Types.Content, true, null, parseCategory)
     @post('managed', Types.Boolean, true)
     @post('template', Types.String, true)
+    @post('pidNamespaceId', Types.String)
     @post('year', Types.String, true)
     @post('season', Types.String, true)
     @post('level', Types.String, true)
@@ -3102,6 +3392,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
         _tag: string[] = [],
         managed = false,
         template = '',
+        pidNamespaceId = '',
         year: string | number = '',
         season = '',
         level = '',
@@ -3119,13 +3410,11 @@ export class ProblemCreateProgrammingHandler extends Handler {
         problem.assertProblemAclDomain(this.user, domainId);
         if (
             !isBankAdmin &&
-            (template !== 'self' ||
-                Object.hasOwn(this.request.body || {}, 'authorUid') ||
+            (Object.hasOwn(this.request.body || {}, 'authorUid') ||
                 Object.hasOwn(this.request.body || {}, 'trainingId') ||
                 Object.hasOwn(this.request.body || {}, 'chapterId'))
         ) {
             const restrictedFields = [
-                ...(template !== 'self' ? ['template'] : []),
                 ...(Object.hasOwn(this.request.body || {}, 'authorUid') ? ['authorUid'] : []),
                 ...(Object.hasOwn(this.request.body || {}, 'trainingId') ? ['trainingId'] : []),
                 ...(Object.hasOwn(this.request.body || {}, 'chapterId') ? ['chapterId'] : []),
@@ -3150,6 +3439,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
             'content',
             'managed',
             'template',
+            'pidNamespaceId',
             'year',
             'season',
             'level',
@@ -3191,6 +3481,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
                 workingTitle: title,
                 content,
                 difficulty: resolvedDifficulty,
+                pidNamespaceId,
                 sourceMeta,
                 knowledgeMapId,
                 mindmapNodeIds,
@@ -3282,6 +3573,7 @@ declare module '@hydrooj/framework' {
 export async function apply(ctx: Context) {
     ctx.Route('problem_main', '/p', ProblemMainHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_review', '/p/review', ProblemReviewHandler, PERM.PERM_VIEW_PROBLEM);
+    ctx.Route('problem_pid_namespace', '/p/namespaces', ProblemPidNamespaceHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_random', '/problem/random', ProblemRandomHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_detail', '/p/:pid', ProblemDetailHandler);
     ctx.Route('problem_submit', '/p/:pid/submit', ProblemSubmitHandler, PERM.PERM_SUBMIT_PROBLEM);
@@ -3341,12 +3633,7 @@ export async function apply(ctx: Context) {
         ProblemCreateProgramFillHandler,
         PRIV.PRIV_USER_PROFILE,
     );
-    ctx.Route(
-        'problem_create_function',
-        `/problem/create/${problemKindToSlug(FUNCTION_KIND)}`,
-        ProblemCreateFunctionHandler,
-        PRIV.PRIV_USER_PROFILE,
-    );
+    ctx.Route('problem_create_function', `/problem/create/${problemKindToSlug(FUNCTION_KIND)}`, ProblemCreateFunctionHandler, PRIV.PRIV_USER_PROFILE);
     await ctx.inject(['api'], ({ api }) => {
         api.provide(ProblemApi);
     });

@@ -9,10 +9,8 @@ import db from '../service/db';
 import * as document from './document';
 import {
     deriveManagedSourceTags,
-    formatManagedProblemPid,
     isCanonicalManagedSourceTag,
     isManagedAnnualSourceTag,
-    managedPidCounterNamespace,
     MANAGED_FIXED_SOURCE_TAGS,
     MANAGED_SOURCE_TEMPLATES,
     normalizeManagedSourceMeta,
@@ -79,6 +77,13 @@ export interface ManagedProblemDraftInput {
     workingTitle: string;
     content: string;
     difficulty: number;
+    /**
+     * Canonical PID namespace selected before any number is reserved.
+     * Draft preparation deliberately does not require it because it only
+     * validates statement/source metadata. The creation boundary requires it
+     * before allocating a PID.
+     */
+    pidNamespaceId?: unknown;
     sourceMeta: unknown;
     knowledgeMapId?: unknown;
     mindmapNodeIds: unknown;
@@ -194,33 +199,6 @@ export function normalizeManagedProblemBatchImport(input: unknown): ManagedProbl
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(sourceProblemCode)) throw new ValidationError('sourceProblemCode');
     if (!/^[a-f0-9]{64}$/.test(fingerprint)) throw new ValidationError('fingerprint');
     return { batchId, sourceProblemCode, identity: `${batchId}:${sourceProblemCode}`, fingerprint };
-}
-
-/** Atomically reserve one PID. Missing counters are an operator error, never auto-initialized. */
-export async function reserveManagedProblemPid(domainId: string, sourceMetaInput: unknown): Promise<string> {
-    const sourceMeta = normalizeManagedSourceMeta(sourceMetaInput);
-    const namespace = managedPidCounterNamespace(sourceMeta);
-    let counter: PidCounterDoc | null = null;
-    try {
-        counter = await managedPidCountersColl.findOneAndUpdate(
-            { domainId, namespace },
-            { $inc: { value: 1 }, $set: { updatedAt: new Date() } },
-            { returnDocument: 'after' },
-        );
-        if (!counter) throw new Error(`PID counter is not initialized: ${domainId}/${namespace}`);
-        const pid = formatManagedProblemPid(sourceMeta, counter.value);
-        logger.info('Managed PID reserved domain=%s namespace=%s sequence=%d pid=%s stage=reserved', domainId, namespace, counter.value, pid);
-        return pid;
-    } catch (error) {
-        logger.error(
-            'Managed PID reservation failed domain=%s namespace=%s sequence=%s stage=reserve error=%o',
-            domainId,
-            namespace,
-            counter?.value,
-            error,
-        );
-        throw error;
-    }
 }
 
 function normalizeNodeIds(nodeIds: unknown, required: boolean, field: 'knowledgeNodeIds' | 'mindmapNodeIds'): string[] {

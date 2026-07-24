@@ -24,6 +24,7 @@ const calls = {
     events: [] as string[],
     gets: [] as any[],
     loads: [] as any[],
+    namespaceLoads: [] as any[],
     oplogs: [] as any[],
     updates: [] as any[],
 };
@@ -57,8 +58,56 @@ const dbStub = {
 };
 
 const problemStub = {
+    async resolveProgrammingKnowledgeMap() {
+        return { mapId: undefined };
+    },
     assertProblemAclDomain(user: any, domainId: string) {
-        if (!user._problemAclLoaded || user._problemAclDomainId !== domainId) throw new TestPermissionError();
+        if (
+            !user._problemAclLoaded ||
+            user._problemAclDomainId !== domainId ||
+            !user._pidNamespaceAclLoaded ||
+            user._pidNamespaceAclDomainId !== domainId
+        ) {
+            throw new TestPermissionError();
+        }
+    },
+    async refreshProblemAcl(user: any, domainId: string) {
+        Object.assign(user, {
+            _permitPids: new Set<number>(),
+            _authoredPids: new Set<number>(),
+            _maintainedPids: new Set<number>(),
+            _dataContributionPids: new Set<number>(),
+            _tagContributionPids: new Set<number>(),
+            _aclFencedPids: new Set<number>(),
+            _ownsLegacyProblems: false,
+            _problemAclDomainId: undefined,
+            _problemAclLoaded: false,
+            _pidNamespaceAuthorIds: new Set<string>(),
+            _pidNamespaceManagerIds: new Set<string>(),
+            _pidNamespaceEditAllIds: new Set<string>(),
+            _pidNamespaceAclDomainId: undefined,
+            _pidNamespaceAclLoaded: false,
+        });
+        const [loaded, namespaceAcl] = await Promise.all([
+            (global as any).Hydro.model.permits.loadAclForUser(domainId, user._id),
+            (global as any).Hydro.model.pidNamespaces.loadAclForUser(domainId, user._id),
+        ]);
+        Object.assign(user, {
+            _permitPids: loaded.permitPids,
+            _authoredPids: loaded.authoredPids,
+            _maintainedPids: loaded.maintainedPids,
+            _dataContributionPids: loaded.dataContributionPids || new Set<number>(),
+            _tagContributionPids: loaded.tagContributionPids || new Set<number>(),
+            _aclFencedPids: loaded.fencedPids,
+            _ownsLegacyProblems: loaded.ownsLegacyProblems,
+            _problemAclDomainId: domainId,
+            _problemAclLoaded: true,
+            _pidNamespaceAuthorIds: namespaceAcl.authorNamespaceIds,
+            _pidNamespaceManagerIds: namespaceAcl.managerNamespaceIds,
+            _pidNamespaceEditAllIds: namespaceAcl.editAllNamespaceIds,
+            _pidNamespaceAclDomainId: domainId,
+            _pidNamespaceAclLoaded: true,
+        });
     },
     canMaintainProblem(user: any, pdoc: any) {
         calls.events.push(`maintain:${pdoc?.docId || 'missing'}`);
@@ -88,15 +137,7 @@ const problemStub = {
         calls.edits.push({ domainId: claim.domainId, docId: claim.pid, patch, claim });
     },
     async withAuthorizedWriteClaim(domainId: string, docId: number, user: any, operation: string, work: (claim: any) => Promise<any>) {
-        const loaded = await (global as any).Hydro.model.permits.loadAclForUser(domainId, user._id);
-        Object.assign(user, {
-            _permitPids: loaded.permitPids,
-            _authoredPids: loaded.authoredPids,
-            _maintainedPids: loaded.maintainedPids,
-            _aclFencedPids: loaded.fencedPids,
-            _problemAclDomainId: domainId,
-            _problemAclLoaded: true,
-        });
+        await problemStub.refreshProblemAcl(user, domainId);
         const pdoc = problemDocs.get(docId);
         if (!problemStub.canMaintainProblem(user, pdoc)) throw new TestPermissionError();
         calls.events.push(`claim:${operation}:${docId}`);
@@ -207,6 +248,11 @@ function makeUser(uid = 42, overrides: Record<string, unknown> = {}) {
         _maintainedPids: new Set<number>(),
         _aclFencedPids: new Set<number>(),
         _ownsLegacyProblems: false,
+        _pidNamespaceAuthorIds: new Set<string>(),
+        _pidNamespaceManagerIds: new Set<string>(),
+        _pidNamespaceEditAllIds: new Set<string>(),
+        _pidNamespaceAclLoaded: false,
+        _pidNamespaceAclDomainId: undefined,
         hasPerm: (perm: bigint) => perm === PERM.PERM_CREATE_PROBLEM,
         ...overrides,
     } as any;
@@ -256,6 +302,16 @@ beforeEach(() => {
             return loadedAclSequence.length ? loadedAclSequence.shift() : loadedAcl;
         },
     };
+    (global as any).Hydro.model.pidNamespaces = {
+        async loadAclForUser(domainId: string, uid: number) {
+            calls.namespaceLoads.push({ domainId, uid });
+            return {
+                authorNamespaceIds: new Set<string>(),
+                managerNamespaceIds: new Set<string>(),
+                editAllNamespaceIds: new Set<string>(),
+            };
+        },
+    };
 });
 
 describe('crawler problem ACL', () => {
@@ -270,9 +326,12 @@ describe('crawler problem ACL', () => {
         const handler = makeHandler('crawler_problem');
         await handler.prepare();
         expect(calls.loads).to.deep.equal([{ domainId: 'token-domain', uid: 42 }]);
+        expect(calls.namespaceLoads).to.deep.equal([{ domainId: 'token-domain', uid: 42 }]);
         expect(handler.user).to.equal(tokenUser);
         expect(tokenUser._problemAclLoaded).to.equal(true);
         expect(tokenUser._problemAclDomainId).to.equal('token-domain');
+        expect(tokenUser._pidNamespaceAclLoaded).to.equal(true);
+        expect(tokenUser._pidNamespaceAclDomainId).to.equal('token-domain');
         expect([...tokenUser._maintainedPids]).to.deep.equal([12]);
         expect([...tokenUser._aclFencedPids]).to.deep.equal([13]);
         expect(tokenUser._ownsLegacyProblems).to.equal(true);
@@ -292,9 +351,11 @@ describe('crawler problem ACL', () => {
         };
         const handler = makeHandler('crawler_problem');
         const error = await captureFailure(() => handler.prepare());
-        expect(error?.name).to.equal('PermissionError');
+        expect(error?.name, error?.message).to.equal('PermissionError');
         expect(tokenUser._problemAclLoaded).to.equal(false);
         expect(tokenUser._problemAclDomainId).to.equal(undefined);
+        expect(tokenUser._pidNamespaceAclLoaded).to.equal(false);
+        expect(tokenUser._pidNamespaceAclDomainId).to.equal(undefined);
         expect([...tokenUser._permitPids]).to.deep.equal([]);
         expect(calls.edits).to.deep.equal([]);
     });
@@ -416,7 +477,7 @@ describe('crawler problem ACL', () => {
         const handler = makeHandler('crawler_problem');
         await handler.prepare();
         const error = await captureFailure(() => handler.post({}, 'Title', 'Content', 'https://source', 'src', '', 1, 'A', '1000ms', '256m'));
-        expect(error?.name).to.equal('PermissionError');
+        expect(error?.name, error?.message).to.equal('PermissionError');
         expect(calls.edits).to.deep.equal([]);
         expect(calls.dels).to.have.length(1);
     });

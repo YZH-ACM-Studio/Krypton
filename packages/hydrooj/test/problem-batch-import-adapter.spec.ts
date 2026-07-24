@@ -139,6 +139,7 @@ const ProblemModelStub = {
             hidden: true,
             problemKind: 'programming',
             authoringMode: 'managed',
+            pidNamespaceId: input.pidNamespaceId,
             sourceMeta: clone(input.sourceMeta),
             tag: [...sourceTags, '模拟'],
             knowledgeMapId,
@@ -270,6 +271,15 @@ const cacheStubs: Array<[string, any]> = [
         },
     ],
     ['../src/model/problem.ts', { __esModule: true, default: ProblemModelStub }],
+    [
+        '../src/model/problem-pid-namespace.ts',
+        {
+            builtinPidNamespaceIdForSourceTemplate: (template: string) => {
+                if (template !== 'nowcoder_summer') throw new Error(`unexpected source template ${template}`);
+                return 'builtin:nowcoder';
+            },
+        },
+    ],
     [
         '../src/model/problem-lifecycle.ts',
         {

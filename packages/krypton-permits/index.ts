@@ -60,6 +60,13 @@ export async function apply(ctx: Context) {
             user,
             domainId,
             (loadedDomainId, uid) => permitsModel.loadAclForUser(loadedDomainId, uid),
+            async (loadedDomainId, uid) => {
+                const pidNamespaces = (global.Hydro?.model as any)?.pidNamespaces;
+                if (typeof pidNamespaces?.loadAclForUser !== 'function') {
+                    throw new TypeError('pidNamespaces.loadAclForUser is unavailable');
+                }
+                return pidNamespaces.loadAclForUser(loadedDomainId, uid);
+            },
             (error) => logger.error('ACL preload failed domain=%s uid=%d error=%s', domainId, user?._id || 0, error),
         );
     });

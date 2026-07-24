@@ -19,12 +19,13 @@ export function managedProblemPatchStateFilter(current: ProblemDoc) {
 }
 
 const MANAGED_CONTENT_FIELDS = new Set(['content', 'config', 'data', 'additional_file', 'html']);
-const MANAGED_DRAFT_METADATA_FIELDS = new Set(['title', 'difficulty', 'managedAuthoring']);
+const MANAGED_DRAFT_METADATA_FIELDS = new Set(['title', 'difficulty', 'managedAuthoring', 'pidNamespaceReview']);
 const MANAGED_ARCHIVE_FIELDS = new Set(['archivedAt', 'archivedBy', 'archiveReason']);
 const MANAGED_CANONICAL_FIELDS = new Set([
     'authoringMode',
     'problemKind',
     'pid',
+    'pidNamespaceId',
     'sort',
     'tag',
     'sourceMeta',
@@ -75,7 +76,6 @@ export function managedProblemPatchCapability(
             typeof proposedAuthoring?.workingTitle === 'string' &&
             $set.title === `待审核 · ${proposedAuthoring.workingTitle.trim()}`);
     const managedDraftPatch = managedDraftAuthoringPatch && titleCoupled;
-    const managedSuggestionPatch = managedDraftPatch && hasManagedAuthoring && !titleRequested && !workingTitleChanged;
     // Generic managed writes never need Mongo dotted paths. Reject every one
     // before capability evaluation so canonical subfields cannot be forged.
     const immutableFields = requestedFields.filter((field) => field.includes('.') || MANAGED_CANONICAL_FIELDS.has(field));
@@ -83,9 +83,7 @@ export function managedProblemPatchCapability(
         if (requestedFields.includes('title')) immutableFields.push('title');
         if (requestedFields.includes('managedAuthoring')) immutableFields.push('managedAuthoring');
     }
-    const contentPatch =
-        !requestedFields.length ||
-        requestedFields.every((field) => MANAGED_CONTENT_FIELDS.has(field) || (field === 'managedAuthoring' && managedSuggestionPatch));
+    const contentPatch = !requestedFields.length || requestedFields.every((field) => MANAGED_CONTENT_FIELDS.has(field));
     if (contentPatch) {
         return { capability: 'content', requestedFields, changedFields, immutableFields, publishes };
     }

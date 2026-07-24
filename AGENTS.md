@@ -23,6 +23,15 @@
 - 作者端源码变更只使用 CodeMirror change mapping 更新整行区间；整体删除、交叠或无法确定的映射必须显式失效并阻止保存，不得靠附近文本或旧 anchor 猜测恢复。
 - P3.21/P3.22/P3.23 是不可拆部署单元；生产唯一旧函数草稿只能经过备份、只读 plan、确认、精确迁移和 verify 后切换，不维护旧协议双读双写。
 
+## 题号命名空间协议
+
+- Problem 归属只认显式 `pidNamespaceId`；运行时不得从 PID 前缀推断、补写或修复命名空间。P2.38 源码与 P2.39 全量迁移是不可拆部署单元。
+- 内置命名空间固定为 PAT 乙级、PAT 甲级、自命题 P5、牛客、HDU、天梯赛和 CAUC；内置编号规则不可改删。自定义命名空间仅支持大写前缀加四位数字，首次分配后前缀和起始编号永久锁定，只能停用或重新启用。
+- 自命题 P5 在具备基础出题权限时默认可用；其它命名空间必须同时具备基础出题权限与该命名空间 author/manager 授权，`PERM_CREATE_PROBLEM` 不得绕过 namespace gate。
+- `author` 只控制该命名空间的新题创建，`manager` 只增加普通出题人并审核/退回/发布隐藏托管题，`editAll` 独立控制该命名空间全部题目的内容、数据、配置和元数据维护。manager 不隐含 editAll；仅全站管理员可授予 manager 或 editAll。
+- editAll 不得绕过比赛/考试进行中保护、归档保护、首次提交结构锁、结构 revision/CAS 或专用发布流程；撤销 namespace 授权只影响后续 namespace 能力，不回收既有 per-problem 角色。
+- P2.39 迁移只允许按备份、只读 plan、计数与非目标哈希、SHA fingerprint、人工确认、CAS apply、verify、审计顺序执行；禁止请求路径静默回填或修改未在计划中精确列出的题目。
+
 ## 团队 ACM 赛前组队协议
 
 - `contest.teamBatches`、`contest.teamBatchTeams`、`contest.teamBatchInvites` 只承载比赛创建前的组队协作；每名用户在同一开放批次最多属于一支 1–3 人 active 队伍，关闭批次后所有阵容写入冻结。

@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, it } from 'node:test';
+import { ObjectId } from 'mongodb';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {}, ui: {} };
@@ -24,6 +25,7 @@ const draft = {
     pid: 'P3107',
     problemKind: 'programming',
     authoringMode: 'managed',
+    pidNamespaceId: 'builtin:self',
     hidden: true,
     sourceMeta: { template: 'self', year: 2026 },
     knowledgeMapId: '507f1f77bcf86cd799439010',
@@ -53,8 +55,8 @@ let currentDraft: any = draft;
 let failPublicationClaimFinalization = false;
 let failPersistenceSessionFinalization = false;
 let failVerifierCleanup = false;
-let failVerifierClaimFinalization = false;
 let failFinalAudit = false;
+let failCorrectionAudit = false;
 let observerWork: (...args: any[]) => Promise<void> = async () => undefined;
 let beforeAddHook: ((...args: any[]) => unknown) | null = null;
 let pendingContributionRows: any[] = [];
@@ -194,10 +196,29 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === './oplog') {
         return {
             async add(entry: any) {
-                if (failFinalAudit && entry.type === 'problem.managed.publish' && entry.result !== 'attempt') {
-                    throw new Error('final audit failed');
-                }
-                oplogs.push(entry);
+                const _id = new ObjectId();
+                oplogs.push({ ...entry, _id });
+                return _id;
+            },
+            coll: {
+                async updateOne(filter: any, update: any) {
+                    const entry = oplogs.find((candidate) => {
+                        const resultMatches = Array.isArray(filter.result?.$in)
+                            ? filter.result.$in.includes(candidate.result)
+                            : candidate.result === filter.result;
+                        return candidate._id?.equals?.(filter._id) && resultMatches;
+                    });
+                    if (!entry) return { matchedCount: 0 };
+                    if (failFinalAudit && entry.type === 'problem.managed.publish' && update.$set?.result !== 'rejected') {
+                        throw new Error('final audit failed');
+                    }
+                    if (failCorrectionAudit && entry.type === 'problem.pid-namespace.problem.correct' && update.$set?.result === 'success') {
+                        failCorrectionAudit = false;
+                        throw new Error('correction audit failed');
+                    }
+                    Object.assign(entry, update.$set || {});
+                    return { matchedCount: 1 };
+                },
             },
         };
     }
@@ -218,6 +239,18 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             },
             { get: (target, key: string) => target[key] || (() => undefined) },
         );
+    }
+    if (request === './problem-pid-namespace') {
+        return {
+            builtinPidNamespaceIdForSourceTemplate: (template: string) => `builtin:${template}`,
+            ensurePidNamespaceIndexes: async () => undefined,
+            reservePidForNamespace: async (input: any) => ({
+                namespaceId: input.namespaceId || 'builtin:self',
+                pid: 'P3107',
+                sourceMeta: input.sourceMeta,
+            }),
+            withLivePidNamespaceGrant: async (_claim: any, work: () => Promise<unknown>) => work(),
+        };
     }
     if (request === './user') {
         return {
@@ -288,6 +321,11 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             },
         };
     }
+    if (request === './managed-problem-source') {
+        return {
+            deriveManagedSourceTags: () => ['自命题'],
+        };
+    }
     if (request.startsWith('.')) return genericRelativeStub;
     return originalLoad.call(this, request, parent, isMain);
 };
@@ -323,9 +361,6 @@ function installClaimSeam() {
         if (operation === 'managed-review-publish' && failPublicationClaimFinalization) {
             throw new Error('publication claim clear failed');
         }
-        if (operation === 'managed-publish-verifier-cleanup' && failVerifierClaimFinalization) {
-            throw new Error('verifier cleanup claim clear failed');
-        }
         return result;
     };
 }
@@ -356,8 +391,8 @@ beforeEach(() => {
     failPublicationClaimFinalization = false;
     failPersistenceSessionFinalization = false;
     failVerifierCleanup = false;
-    failVerifierClaimFinalization = false;
     failFinalAudit = false;
+    failCorrectionAudit = false;
     observerWork = async () => undefined;
     beforeAddHook = null;
     pendingContributionRows = [];
@@ -372,6 +407,7 @@ beforeEach(() => {
         ],
         clearVerifiersForProblem: async (...args: any[]) => {
             cleanupCalls.push(args);
+            if (failVerifierCleanup) throw new Error('verifier cleanup failed');
             return 1;
         },
         listPendingContributionsForProblems: async () => pendingContributionRows,
@@ -514,6 +550,7 @@ describe('managed programming creation boundary', () => {
                 workingTitle: 'Imported fixture',
                 content: '# Statement',
                 difficulty: 3,
+                pidNamespaceId: 'builtin:self',
                 sourceMeta: { template: 'self', year: new Date().getFullYear() },
                 knowledgeMapId: '507f1f77bcf86cd799439010',
                 mindmapNodeIds: [],
@@ -631,6 +668,14 @@ describe('managed programming publication service seam', () => {
         })();
         expect(missingConfirmation).to.be.instanceOf(TestMetadataConflictError);
         expect(publicationCommits).to.deep.equal([]);
+        expect(oplogs.find((entry) => entry.type === 'problem.managed.publish')).to.deep.include({
+            operation: 'review.publish',
+            domainId: 'system',
+            namespaceId: 'builtin:self',
+            operator: 2,
+            problemId: 7,
+            result: 'rejected',
+        });
 
         const fingerprint = ProblemModel.pendingProblemContributionFingerprint(pendingContributionRows);
         const result = await publish({ pendingContributionsConfirmed: true, pendingContributionFingerprint: fingerprint });
@@ -682,7 +727,7 @@ describe('managed programming publication service seam', () => {
         });
 
         expect(result.managedAuthoring.pendingTrainingPlacement).to.deep.equal({ trainingId, chapterId: 40 });
-        expect(oplogs).to.deep.include({
+        expect(oplogs[0]).to.deep.include({
             type: 'problem.managed.batch-placement',
             domainId: 'system',
             operator: 2,
@@ -713,10 +758,22 @@ describe('managed programming publication service seam', () => {
         releaseObserver();
 
         const result = await pending;
-        expect(result).to.deep.include({ state: 'published', requestId: 'publish-request', incompleteStages: [] });
+        expect(result).to.deep.include({ state: 'published', incompleteStages: [] });
+        expect(result.requestId).to.match(/^problem-write:managed-review-publish:system:7:/);
         expect(result.pdoc.hidden).to.equal(false);
         expect(observerCalls[0][0]).to.equal('problem/edit');
-        expect(oplogs.some((entry) => entry.result === 'success')).to.equal(true);
+        const audit = oplogs.find((entry) => entry.type === 'problem.managed.publish');
+        expect(audit).to.deep.include({
+            operation: 'review.publish',
+            domainId: 'system',
+            namespaceId: 'builtin:self',
+            operator: 2,
+            problemId: 7,
+            requestId: result.requestId,
+            result: 'success',
+        });
+        expect(audit.before).to.deep.include({ title: undefined, difficulty: undefined, hidden: true, metadataStatus: 'draft' });
+        expect(audit.after).to.deep.include({ title: '正式标题', difficulty: 4, hidden: false, metadataStatus: 'confirmed' });
     });
 
     it('re-publishes a confirmed problem after its first contest submission locked the structure', async () => {
@@ -804,7 +861,7 @@ describe('managed programming publication service seam', () => {
         expect(publicationCommits[0].finalHidden).to.equal(true);
         expect(result.pdoc.hidden).to.equal(true);
         expect(result.pdoc.managedAuthoring.metadataStatus).to.equal('confirmed');
-        expect(oplogs.filter((entry) => entry.type === 'problem.managed.publish').map((entry) => entry.finalHidden)).to.deep.equal([true, true]);
+        expect(oplogs.filter((entry) => entry.type === 'problem.managed.publish').map((entry) => entry.after?.hidden)).to.deep.equal([true]);
         expect(logs.some((entry) => entry[0] === 'info' && String(entry[1]).includes('finalHidden=%s') && entry.includes(true))).to.equal(true);
     });
 
@@ -815,8 +872,8 @@ describe('managed programming publication service seam', () => {
 
         expect(result.state).to.equal('committed_with_error');
         expect(result.pdoc.hidden).to.equal(false);
-        expect(result.incompleteStages).to.deep.equal(['publication-claim-finalization', 'verifier-cleanup']);
-        expect(cleanupCalls).to.deep.equal([]);
+        expect(result.incompleteStages).to.deep.equal(['publication-claim-finalization']);
+        expect(cleanupCalls).to.have.lengthOf(1);
         expect(oplogs.some((entry) => entry.result === 'incomplete')).to.equal(true);
     });
 
@@ -833,17 +890,11 @@ describe('managed programming publication service seam', () => {
         expect(oplogs.some((entry) => entry.result === 'incomplete')).to.equal(true);
     });
 
-    it('never reports full success when verifier cleanup or its claim finalization fails', async () => {
+    it('never reports full success when verifier cleanup fails', async () => {
         failVerifierCleanup = true;
         const cleanupFailure = await publish();
         expect(cleanupFailure.state).to.equal('committed_with_error');
         expect(cleanupFailure.incompleteStages).to.deep.equal(['verifier-cleanup']);
-
-        failVerifierCleanup = false;
-        failVerifierClaimFinalization = true;
-        const claimFailure = await publish();
-        expect(claimFailure.state).to.equal('committed_with_error');
-        expect(claimFailure.incompleteStages).to.deep.equal(['verifier-cleanup']);
     });
 
     it('returns the actual committed state when observers or the final audit fail', async () => {
@@ -873,5 +924,34 @@ describe('managed programming publication service seam', () => {
         expect(failure).to.be.instanceOf(TestStructureConflictError);
         expect(publicationCommits).to.deep.equal([]);
         expect(cleanupCalls).to.deep.equal([]);
+    });
+
+    it('marks a committed namespace correction incomplete when success-audit finalization fails', async () => {
+        currentDraft = { ...draft, pid: 'P5001', pidNamespaceId: 'builtin:self' };
+        failCorrectionAudit = true;
+        let failure: unknown;
+        try {
+            await ProblemModel.correctManagedProgrammingPidNamespace({
+                domainId: 'system',
+                docId: 7,
+                targetPidNamespaceId: 'builtin:nowcoder',
+                sourceMeta: { template: 'nowcoder_summer', year: 2026, round: 2 },
+                expectedStructureRevision: 9,
+                actor: 2,
+                user: { _id: 2 },
+            });
+        } catch (error) {
+            failure = error;
+        }
+
+        expect(failure).to.be.instanceOf(Error);
+        expect(currentDraft.pidNamespaceId).to.equal('builtin:nowcoder');
+        const audit = oplogs.find((entry) => entry.type === 'problem.pid-namespace.problem.correct');
+        expect(audit?.result).to.equal('incomplete');
+        expect(audit?.after).to.deep.equal({
+            pid: 'P3107',
+            pidNamespaceId: 'builtin:nowcoder',
+            sourceMeta: { template: 'nowcoder_summer', year: 2026, round: 2 },
+        });
     });
 });

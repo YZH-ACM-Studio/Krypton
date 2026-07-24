@@ -41,6 +41,7 @@ interface BankFilters {
   visibility?: 'all' | 'hidden' | 'published';
   lifecycle?: 'active' | 'archived' | 'all';
   managedReview?: 'all' | 'pending';
+  pidNamespaceId?: string;
 }
 
 function buildUrlWithQuery(baseUrl: string, params: Record<string, unknown>) {
@@ -60,6 +61,7 @@ function FilterForm({
   filters,
   problemKinds,
   contestOptions,
+  pidNamespaces,
   canFilterOwner,
   canReviewManaged,
   compact = false,
@@ -70,6 +72,7 @@ function FilterForm({
   filters: BankFilters;
   problemKinds: Array<{ kind: ProblemKind; slug: string }>;
   contestOptions: Array<{ id: string; title: string; beginAt?: string | Date }>;
+  pidNamespaces: Array<{ namespaceId: string; name: string; pidPattern: string }>;
   canFilterOwner: boolean;
   canReviewManaged: boolean;
   compact?: boolean;
@@ -109,6 +112,21 @@ function FilterForm({
           />
         </label>
       ) : null}
+      <label className="space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">题号命名空间</span>
+        <SimpleSelect
+          name="pidNamespaceId"
+          defaultValue={filters.pidNamespaceId || ''}
+          className="min-h-11"
+          options={[
+            { value: '', label: '全部命名空间' },
+            ...pidNamespaces.map((namespace) => ({
+              value: namespace.namespaceId,
+              label: `${namespace.name} · ${namespace.pidPattern}`,
+            })),
+          ]}
+        />
+      </label>
       <label className="space-y-1.5">
         <span className="text-xs font-medium text-muted-foreground">标签</span>
         <Input name="tag" defaultValue={filters.tag || ''} placeholder="精确标签" className="min-h-11" />
@@ -202,6 +220,7 @@ export function ProblemsPage() {
   const filters: BankFilters = data.filters || {};
   const problemKinds: Array<{ kind: ProblemKind; slug: string }> = data.problemKinds || [];
   const contestOptions: Array<{ id: string; title: string; beginAt?: string | Date }> = data.contestOptions || [];
+  const pidNamespaces: Array<{ namespaceId: string; name: string; pidPattern: string }> = data.pidNamespaces || [];
   const ownerNames: Record<string, string> = data.ownerNames || {};
   const canManageByDocId: Record<string, boolean> = data.canManageByDocId || {};
   const canArchiveByDocId: Record<string, boolean> = data.canArchiveByDocId || {};
@@ -245,6 +264,7 @@ export function ProblemsPage() {
     (filters.visibility && filters.visibility !== 'all') ||
     (filters.lifecycle && filters.lifecycle !== 'active') ||
     (filters.managedReview && filters.managedReview !== 'all') ||
+    filters.pidNamespaceId ||
     sort !== 'default',
   );
   const problemsBaseUrl = buildUrlWithQuery(bs.urls.problems, {
@@ -256,6 +276,7 @@ export function ProblemsPage() {
     visibility: filters.visibility === 'all' ? '' : filters.visibility,
     lifecycle: filters.lifecycle === 'active' ? '' : filters.lifecycle,
     managedReview: filters.managedReview === 'all' ? '' : filters.managedReview,
+    pidNamespaceId: filters.pidNamespaceId || '',
     sort: sort === 'default' ? '' : sort,
   });
 
@@ -370,6 +391,8 @@ export function ProblemsPage() {
         problemsUrl={bs.urls.problems}
         reviewUrl={String(data.problemReviewUrl || '')}
         canReview={!!data.canReviewManaged}
+        namespaceUrl={String(data.pidNamespaceUrl || '')}
+        canManageNamespaces={!!data.canManagePidNamespaces}
       />
 
       {batchMessage ? (
@@ -394,6 +417,7 @@ export function ProblemsPage() {
           filters={filters}
           problemKinds={problemKinds}
           contestOptions={contestOptions}
+          pidNamespaces={pidNamespaces}
           canFilterOwner={!!data.canFilterOwner}
           canReviewManaged={!!data.canReviewManaged}
         />
@@ -412,6 +436,7 @@ export function ProblemsPage() {
               filters={filters}
               problemKinds={problemKinds}
               contestOptions={contestOptions}
+              pidNamespaces={pidNamespaces}
               canFilterOwner={!!data.canFilterOwner}
               canReviewManaged={!!data.canReviewManaged}
               compact

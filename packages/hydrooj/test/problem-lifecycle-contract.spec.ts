@@ -314,9 +314,11 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const publish = source.slice(publishStart, publishEnd);
         expect(publish.indexOf('prepareManagedProblemPublication(')).to.be.lessThan(publish.indexOf('await prepareManagedPublish(claim, input)'));
         expect(publish.indexOf('await prepareManagedPublish(claim, input)')).to.be.lessThan(publish.indexOf('commitManagedProblemPublication({'));
-        expect(publish.indexOf('commitManagedProblemPublication({')).to.be.lessThan(publish.indexOf("'managed-publish-verifier-cleanup'"));
-        expect(publish).to.include('finalizeManagedPublishAcl(claim, context.verifierUids)');
-        expect(publish).to.include("{ capability: 'publish' }");
+        expect(publish.indexOf('commitManagedProblemPublication({')).to.be.lessThan(publish.indexOf('finalizeManagedPublishAcl(claim'));
+        expect(publish).not.to.include("'managed-publish-verifier-cleanup'");
+        expect(publish).to.include('finalizeManagedPublishAcl(claim, verifierUids)');
+        expect(publish).to.include("capability: 'publish', requiredPidNamespaceGrant: 'manager'");
+        expect(publish).to.include('withLivePidNamespaceGrant(claim');
 
         const editStart = source.indexOf('static async editAuthorized(');
         const editEnd = source.indexOf('static async copy(', editStart);
@@ -339,7 +341,9 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         const publish = source.slice(publishStart, publishEnd);
 
         expect(create).to.include('ProblemModel.canCreateManagedProgrammingDraft(actorUser)');
-        expect(create).to.include("requestedTemplate !== 'self'");
+        expect(create).to.include('await reservePidForNamespace({');
+        expect(create).to.include("namespaceId: String(input.pidNamespaceId || '')");
+        expect(create.indexOf('await reservePidForNamespace({')).to.be.lessThan(create.indexOf('ProblemModel.createProblemByKind('));
         expect(create).to.include("['pendingTrainingPlacement']");
         expect(create).to.include('throw new PermissionError(PERM.PERM_CREATE_PROGRAMMING_DRAFT)');
 

@@ -739,11 +739,29 @@ export function ProblemEditPage() {
   const [lockHiddenValue, setLockHiddenValue] = useState(!!pdoc.lockHidden);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const sourceTemplates: ManagedSourceTemplateOption[] = data.managedSourceTemplates || [];
+  const pidNamespaces: Array<{
+    namespaceId: string;
+    name: string;
+    kind: 'builtin' | 'custom';
+    pidPattern: string;
+    sourceTemplates: string[];
+  }> = data.pidNamespaces || [];
   const knowledgeMaps: KnowledgeMapOption[] = data.knowledgeMaps || [];
   const mindmapOptions: ManagedMindmapOption[] = data.programmingMindmapOptions || data.managedMindmapOptions || [];
   const trainingOptions: ManagedTrainingOptionView[] = data.managedTrainingOptions || [];
   const managedTrainingPlacements: ManagedTrainingPlacementView[] = data.managedTrainingPlacements || [];
-  const initialTemplate = pdoc.sourceMeta?.template || sourceTemplates[0]?.id || '';
+  const initialPidNamespaceId = String(pdoc.pidNamespaceId || data.defaultPidNamespaceId || pidNamespaces[0]?.namespaceId || '');
+  const [selectedPidNamespaceId, setSelectedPidNamespaceId] = useState(initialPidNamespaceId);
+  const selectedPidNamespace = pidNamespaces.find((namespace) => namespace.namespaceId === selectedPidNamespaceId);
+  const availableSourceTemplates = isCreate
+    ? sourceTemplates.filter((template) => selectedPidNamespace?.sourceTemplates.includes(template.id))
+    : sourceTemplates;
+  const initialTemplate =
+    pdoc.sourceMeta?.template ||
+    availableSourceTemplates[0]?.id ||
+    sourceTemplates.find((template) => template.id === 'self')?.id ||
+    sourceTemplates[0]?.id ||
+    '';
   const [sourceTemplate, setSourceTemplate] = useState(initialTemplate);
   const [sourceYear, setSourceYear] = useState(String(pdoc.sourceMeta?.year || new Date().getFullYear()));
   const [sourceSeason, setSourceSeason] = useState(String(pdoc.sourceMeta?.season || 'spring'));
@@ -785,6 +803,7 @@ export function ProblemEditPage() {
     draftContent,
     hiddenValue,
     lockHiddenValue,
+    selectedPidNamespaceId,
     sourceTemplate,
     sourceYear,
     sourceSeason,
@@ -815,6 +834,15 @@ export function ProblemEditPage() {
     },
     [bs.domain?.id],
   );
+
+  useEffect(() => {
+    if (!isCreate || !selectedPidNamespace || selectedPidNamespace.sourceTemplates.includes(sourceTemplate)) return;
+    const nextTemplate = sourceTemplates.find((template) => selectedPidNamespace.sourceTemplates.includes(template.id));
+    if (!nextTemplate) throw new Error(`题号命名空间 ${selectedPidNamespace.namespaceId} 没有可用来源模板`);
+    setSourceTemplate(nextTemplate.id);
+    setSelectedTrainingId('');
+    setSelectedChapterId('');
+  }, [isCreate, selectedPidNamespace, sourceTemplate, sourceTemplates]);
 
   useEffect(() => {
     if (!selectedTrainingId || eligibleTrainings.some((training) => training.id === selectedTrainingId)) return;
@@ -1174,6 +1202,12 @@ export function ProblemEditPage() {
               {saveError}
             </p>
           ) : null}
+          {pdoc.pidNamespaceReview?.note ? (
+            <aside className="rounded-2xl border border-amber-500/35 bg-amber-500/[0.06] px-5 py-4">
+              <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">审核退回说明</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{pdoc.pidNamespaceReview.note}</p>
+            </aside>
+          ) : null}
           {statementGuard.notice}
 
           <form
@@ -1427,16 +1461,40 @@ export function ProblemEditPage() {
                     <p className="mt-1 text-sm text-muted-foreground">
                       {isCreate
                         ? canAssignManagedTraining
-                          ? '选择固定来源和知识导图节点；PID 与标签仅由服务端计算。训练选择只记录待审核位置。'
-                          : '使用自命题来源并选择知识导图节点；作者、PID、标签与隐藏状态均由服务端固定。'
+                          ? '先选择获授权的题号命名空间，再填写对应来源和知识导图节点；PID 与系统标签仅由服务端计算。'
+                          : '选择可用题号命名空间和知识导图节点；PID、系统标签与隐藏状态均由服务端固定。'
                         : managedMetadataDraft
-                          ? '来源、PID 与系统标签已锁定；发布前由管理员审核。'
+                          ? '来源、题号命名空间、PID 与系统标签已锁定；发布前由命名空间负责人或管理员审核。'
                           : '来源、PID 与系统标签已锁定；该题已完成审核并发布。'}
                     </p>
                   </header>
                   {isCreate ? (
                     <div className="space-y-5 p-5">
                       <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <label className="text-sm font-medium" htmlFor="managed-pid-namespace">
+                            题号命名空间
+                          </label>
+                          <SimpleSelect
+                            id="managed-pid-namespace"
+                            name="pidNamespaceId"
+                            value={selectedPidNamespaceId}
+                            onValueChange={(value) => {
+                              setSelectedPidNamespaceId(value);
+                              const nextNamespace = pidNamespaces.find((namespace) => namespace.namespaceId === value);
+                              if (nextNamespace && !nextNamespace.sourceTemplates.includes(sourceTemplate)) {
+                                setSourceTemplate(nextNamespace.sourceTemplates[0] || '');
+                              }
+                              setSelectedTrainingId('');
+                              setSelectedChapterId('');
+                            }}
+                            options={pidNamespaces.map((namespace) => ({
+                              value: namespace.namespaceId,
+                              label: `${namespace.name} · ${namespace.pidPattern}`,
+                            }))}
+                          />
+                          <p className="text-xs text-muted-foreground">自命题 P5 默认可用；其它命名空间需要单独授权，创建后不能自行更换。</p>
+                        </div>
                         <div className="space-y-1.5">
                           <label className="text-sm font-medium" htmlFor="managed-template">
                             来源模板
@@ -1450,7 +1508,7 @@ export function ProblemEditPage() {
                               setSelectedTrainingId('');
                               setSelectedChapterId('');
                             }}
-                            options={sourceTemplates.map((template) => ({ value: template.id, label: template.label }))}
+                            options={availableSourceTemplates.map((template) => ({ value: template.id, label: template.label }))}
                           />
                         </div>
                         <div className="space-y-1.5">
@@ -1745,8 +1803,8 @@ export function ProblemEditPage() {
                     <p className="mt-1 text-sm text-muted-foreground">
                       {managed
                         ? managedMetadataDraft
-                          ? '托管草稿保持隐藏；管理员从权限与协作页确认元数据并发布。'
-                          : '该题已完成审核并发布；可见性仍由管理员按权限维护。'
+                          ? '托管草稿保持隐藏；命名空间负责人或管理员从审核队列确认元数据并发布。'
+                          : '该题已完成审核并发布；可见性由命名空间负责人或管理员按权限维护。'
                         : '发布与维护权限沿用现有模型。'}
                     </p>
                   </header>

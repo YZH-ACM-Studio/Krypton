@@ -231,6 +231,9 @@ const problemStub = {
         return { domainId: args[0], docId: args[1], archivedAt: new Date() };
     },
     async publishManagedProgrammingProblem(input: any) {
+        if (input.user?.admin !== true && input.user?.canReviewNamespaces !== true) {
+            throw new TestPermissionError(PERM.PERM_EDIT_PROBLEM);
+        }
         calls.publish.push(input);
         return (
             managedPublishResult || {
@@ -519,6 +522,65 @@ const managedAuthoringStub = {
         fingerprint: 'preview-fingerprint',
     }),
 };
+const pidNamespaceStub = {
+    DEFAULT_PID_NAMESPACE_ID: 'builtin:self',
+    canReviewPidNamespaceProblems: (user: any) =>
+        user.admin === true || user.hasPriv?.(PRIV.PRIV_EDIT_SYSTEM) === true || user.canReviewNamespaces === true,
+    canManagePidNamespaces: (user: any) => user.admin === true || user.hasPriv?.(PRIV.PRIV_EDIT_SYSTEM) === true || user.canManageNamespaces === true,
+    listPidNamespaces: async () => [
+        {
+            namespaceId: 'builtin:self',
+            kind: 'builtin',
+            name: '自命题',
+            enabled: true,
+            revision: 0,
+            members: [],
+            sourceTemplates: ['self'],
+            pidPattern: 'P5xxx',
+            counter: 5043,
+            allocated: true,
+            counterEntries: [{ scope: 'self', value: 5043 }],
+        },
+    ],
+    listCreatablePidNamespaces: async (_domainId: string, user: any) => {
+        const self = {
+            namespaceId: 'builtin:self',
+            kind: 'builtin',
+            name: '自命题',
+            enabled: true,
+            revision: 0,
+            members: [],
+            sourceTemplates: ['self'],
+            pidPattern: 'P5xxx',
+            counter: 5043,
+            allocated: true,
+            counterEntries: [{ scope: 'self', value: 5043 }],
+        };
+        if (user.admin !== true && user.hasPriv?.(PRIV.PRIV_EDIT_SYSTEM) !== true) return [self];
+        return [
+            {
+                namespaceId: 'builtin:pat-basic',
+                kind: 'builtin',
+                name: 'PAT 乙级',
+                enabled: true,
+                revision: 0,
+                members: [],
+                sourceTemplates: ['pat_basic'],
+                pidPattern: 'P3xxx',
+                counter: 3100,
+                allocated: true,
+                counterEntries: [{ scope: 'pat_basic', value: 3100 }],
+            },
+            self,
+        ];
+    },
+    listManageablePidNamespaces: async () => [],
+    managedPidNamespaceIds: (user: any) => user.managedNamespaceIds || [],
+    createCustomPidNamespace: async () => ({}),
+    updatePidNamespaceConfig: async () => ({}),
+    setPidNamespaceMember: async () => ({}),
+    deleteCustomPidNamespace: async () => undefined,
+};
 Module._load = function load(request: string, parent: NodeModule, isMain: boolean) {
     if (request === '../error') return errors;
     if (request === '../lib/problem-config') {
@@ -571,6 +633,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
     if (request === '../model/contest') return emptyModel;
     if (request === '../model/oplog') return oplogStub;
     if (request === '../model/managed-problem-authoring') return managedAuthoringStub;
+    if (request === '../model/problem-pid-namespace') return pidNamespaceStub;
     if (request === '../model/discussion') return discussionStub;
     if (request === '../model/domain') return domainStub;
     if (request === '../model/manual-grade') {
@@ -902,7 +965,7 @@ describe('P2.11 enumeration entry gates', () => {
         expect(author.response.body.canArchiveByDocId[7]).to.equal(false);
     });
 
-    it('shows the managed metadata review scope only to administrators', async () => {
+    it('shows managed metadata review scope to administrators and namespace managers', async () => {
         pendingContributionRows = [
             {
                 domainId: 'system',
@@ -918,7 +981,12 @@ describe('P2.11 enumeration entry gates', () => {
             [{ domainId: 'system', docId: 7, owner: 42, authoringMode: 'managed', hidden: true, managedAuthoring: { metadataStatus: 'draft' } }],
         ];
         countResult = 1;
-        const admin = makeHandler(ProblemMainHandler, { canBrowse: true, admin: true, hasPriv: () => false });
+        const admin = makeHandler(ProblemMainHandler, {
+            canBrowse: true,
+            canPublish: true,
+            admin: true,
+            hasPriv: () => false,
+        });
         await admin.get('system', 1, '', 20, false, false, 'default', '', '', 0, 'all', 'active', 'pending');
         expect(calls.getMulti[0].querySnapshot.$and).to.deep.include({
             authoringMode: 'managed',
@@ -932,15 +1000,40 @@ describe('P2.11 enumeration entry gates', () => {
         expect(admin.response.body.contributionUdict[88].uname).to.equal('user-88');
 
         calls.getMulti.length = 0;
+        getMultiResults = [
+            [
+                {
+                    domainId: 'system',
+                    docId: 7,
+                    owner: 42,
+                    authoringMode: 'managed',
+                    hidden: true,
+                    pidNamespaceId: 'custom:os',
+                    managedAuthoring: { metadataStatus: 'draft' },
+                },
+            ],
+        ];
+        const manager = makeHandler(ProblemMainHandler, {
+            canBrowse: true,
+            canPublish: true,
+            canReviewNamespaces: true,
+            managedNamespaceIds: ['custom:os'],
+            hasPriv: () => false,
+        });
+        await manager.get('system', 1, '', 20, false, false, 'default', '', '', 0, 'all', 'active', 'pending');
+        expect(manager.response.body.canReviewManaged).to.equal(true);
+        expect(manager.response.body.managedReviewableByDocId[7]).to.equal(true);
+
+        calls.getMulti.length = 0;
         const author = makeHandler(ProblemMainHandler, { canBrowse: true, admin: false, hasPriv: () => false });
         const error = await captureFailure(() => author.get('system', 1, '', 20, false, false, 'default', '', '', 0, 'all', 'active', 'pending'));
         expect(error).to.be.instanceOf(TestPermissionError);
         expect(calls.getMulti).to.deep.equal([]);
     });
 
-    it('publishes managed drafts only through the administrator review service', async () => {
+    it('publishes managed drafts only through an administrator or namespace-manager review service', async () => {
         const admin = makeHandler(ProblemMainHandler, { canBrowse: true, admin: true });
-        await admin.postManagedPublish('forged', 7, '正式标题', 4, 9, true, 'pending-fingerprint');
+        await admin.postManagedPublish('forged', 7, '正式标题', 4, 9, false, true, 'pending-fingerprint');
         expect(calls.publish).to.have.lengthOf(1);
         expect(calls.publish[0]).to.deep.include({
             domainId: 'system',
@@ -954,15 +1047,51 @@ describe('P2.11 enumeration entry gates', () => {
         });
         expect(admin.response.redirect).to.equal('/problem_review');
 
+        const manager = makeHandler(ProblemMainHandler, { canBrowse: true, canReviewNamespaces: true });
+        await manager.postManagedPublish('forged', 8, '命名空间题目', 3, 2);
+        expect(calls.publish).to.have.lengthOf(2);
+        expect(calls.publish[1]).to.deep.include({
+            domainId: 'system',
+            docId: 8,
+            actor: 42,
+        });
+
         const author = makeHandler(ProblemMainHandler, { canBrowse: true, admin: false });
         const denied = await captureFailure(() => author.postManagedPublish('forged', 7, '正式标题', 4, 9));
         expect(denied).to.be.instanceOf(TestPermissionError);
-        expect(calls.publish).to.have.lengthOf(1);
+        expect(calls.publish).to.have.lengthOf(2);
 
         getResults = [{ domainId: 'system', docId: 7, authoringMode: 'managed', hidden: true }];
         const bypass = await captureFailure(() => admin.postUnhide('forged', [7]));
         expect(bypass).to.be.instanceOf(GenericError);
-        expect(calls.publish).to.have.lengthOf(1);
+        expect(calls.publish).to.have.lengthOf(2);
+    });
+
+    it('does not let a namespace manager hide an already-public managed problem', async () => {
+        getResults = [
+            {
+                domainId: 'system',
+                docId: 7,
+                pid: 'OS1001',
+                authoringMode: 'managed',
+                pidNamespaceId: 'custom:os',
+                hidden: false,
+                managedAuthoring: { metadataStatus: 'confirmed' },
+            },
+        ];
+        const manager = makeHandler(ProblemMainHandler, {
+            canBrowse: true,
+            canPublish: false,
+            canReviewNamespaces: true,
+            managedNamespaceIds: ['custom:os'],
+            hasPriv: () => false,
+        });
+
+        const denied = await captureFailure(() => manager.postHide('forged', [7]));
+
+        expect(denied).to.be.instanceOf(TestPermissionError);
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.oplog.at(-1)?.[1]).to.equal('problem.managed.write.denied');
     });
 
     it('reports the actual committed state instead of redirecting when publication finalization is incomplete', async () => {
@@ -1012,7 +1141,7 @@ describe('P2.11 enumeration entry gates', () => {
 });
 
 describe('P2.37 managed problem review queue', () => {
-    it('rejects non-administrators before any queue or author lookup', async () => {
+    it('rejects users without namespace review scope after refreshing the canonical ACL', async () => {
         const handler = makeHandler(ProblemReviewHandler, {
             canBrowse: true,
             admin: false,
@@ -1023,7 +1152,8 @@ describe('P2.37 managed problem review queue', () => {
 
         expect(error).to.be.instanceOf(TestPermissionError);
         expect(error.params).to.deep.equal([PERM.PERM_EDIT_PROBLEM]);
-        expect(calls.refresh).to.deep.equal([]);
+        expect(calls.refresh).to.have.lengthOf(1);
+        expect(calls.refresh[0]).to.deep.include({ domainId: 'system' });
         expect(calls.getMulti).to.deep.equal([]);
         expect(calls.permits).to.deep.equal([]);
     });
@@ -1421,12 +1551,15 @@ describe('P2.11 authoritative problem route domain', () => {
             content: 'Statement',
             managed: 'true',
             template: 'self',
+            pidNamespaceId: 'builtin:self',
             year: '2026',
             difficulty: '2',
             knowledgeMapId,
             mindmapNodeIds: 'node-1',
         };
-        await handler.post('forged', 'Title', 'Statement', '', false, 2, [], true, 'self', 2026, '', '', 0, knowledgeMapId, ['node-1']);
+        await handler.post('forged', 'Title', 'Statement', '', false, 2, [], true, 'self', 'builtin:self', 2026, '', '', 0, knowledgeMapId, [
+            'node-1',
+        ]);
         expect(calls.add[0][0]).to.equal('system');
         expect(createKinds).to.deep.equal(['managed-programming']);
     });
@@ -1440,13 +1573,16 @@ describe('P2.11 authoritative problem route domain', () => {
             content: 'Statement',
             managed: 'true',
             template: 'self',
+            pidNamespaceId: 'builtin:self',
             year: '2026',
             difficulty: '4',
             knowledgeMapId,
             mindmapNodeIds: 'node-1',
         };
 
-        await handler.post('forged', 'Working title', 'Statement', '', false, 4, [], true, 'self', 2026, '', '', 0, knowledgeMapId, ['node-1']);
+        await handler.post('forged', 'Working title', 'Statement', '', false, 4, [], true, 'self', 'builtin:self', 2026, '', '', 0, knowledgeMapId, [
+            'node-1',
+        ]);
 
         expect(createKinds).to.deep.equal(['managed-programming']);
         expect(calls.add[0]).to.deep.equal([
@@ -1456,6 +1592,7 @@ describe('P2.11 authoritative problem route domain', () => {
                 content: 'Statement',
                 difficulty: 4,
                 sourceMeta: { template: 'self', year: 2026 },
+                pidNamespaceId: 'builtin:self',
                 knowledgeMapId,
                 mindmapNodeIds: ['node-1'],
                 authorUid: 42,
@@ -1474,15 +1611,29 @@ describe('P2.11 authoritative problem route domain', () => {
         ]) {
             handler.request.body = { ...validBody, [field]: value };
             const forged = await captureFailure(() =>
-                handler.post('forged', 'Working title', 'Statement', 'P9999', false, 4, [], true, 'self', 2026, '', '', 0, knowledgeMapId, [
-                    'node-1',
-                ]),
+                handler.post(
+                    'forged',
+                    'Working title',
+                    'Statement',
+                    'P9999',
+                    false,
+                    4,
+                    [],
+                    true,
+                    'self',
+                    'builtin:self',
+                    2026,
+                    '',
+                    '',
+                    0,
+                    knowledgeMapId,
+                    ['node-1'],
+                ),
             );
             expect(forged).to.be.instanceOf(GenericError);
         }
 
         for (const [body, args] of [
-            [{ ...validBody, template: 'pat_basic' }, { template: 'pat_basic' }],
             [{ ...validBody, authorUid: '77' }, { authorUid: 77 }],
             [
                 { ...validBody, trainingId: '64b000000000000000000010', chapterId: '1' },
@@ -1500,7 +1651,8 @@ describe('P2.11 authoritative problem route domain', () => {
                     4,
                     [],
                     true,
-                    args.template || 'self',
+                    'self',
+                    'builtin:self',
                     2026,
                     '',
                     '',
@@ -1526,13 +1678,31 @@ describe('P2.11 authoritative problem route domain', () => {
             content: 'Statement',
             managed: 'true',
             template: 'self',
+            pidNamespaceId: 'builtin:self',
             year: '2026',
             difficulty: '3',
             knowledgeMapId,
             mindmapNodeIds: 'node-1',
         };
 
-        await handler.post('forged', 'Broad creator draft', 'Statement', '', false, 3, [], true, 'self', 2026, '', '', 0, knowledgeMapId, ['node-1']);
+        await handler.post(
+            'forged',
+            'Broad creator draft',
+            'Statement',
+            '',
+            false,
+            3,
+            [],
+            true,
+            'self',
+            'builtin:self',
+            2026,
+            '',
+            '',
+            0,
+            knowledgeMapId,
+            ['node-1'],
+        );
 
         expect(createKinds).to.deep.equal(['managed-programming']);
         expect(calls.add[0][1]).to.deep.include({ authorUid: 42, workingTitle: 'Broad creator draft' });
@@ -1547,6 +1717,7 @@ describe('P2.11 authoritative problem route domain', () => {
             title: 'Working title',
             content: 'Statement',
             managed: 'true',
+            pidNamespaceId: 'builtin:self',
             year: '2026',
             difficulty: '4',
             knowledgeMapId,
@@ -1577,6 +1748,7 @@ describe('P2.11 authoritative problem route domain', () => {
                 [],
                 true,
                 testCase.args[0],
+                'builtin:self',
                 testCase.args[1],
                 '',
                 '',
@@ -1602,6 +1774,7 @@ describe('P2.11 authoritative problem route domain', () => {
                 [],
                 true,
                 'self',
+                'builtin:self',
                 2026,
                 '',
                 '',
@@ -1619,6 +1792,7 @@ describe('P2.11 authoritative problem route domain', () => {
         const end = source.indexOf('export const ProblemApi', start);
         const create = source.slice(start, end);
         expect(create).to.include("@post('template', Types.String, true)");
+        expect(create).to.include("@post('pidNamespaceId', Types.String)");
         expect(create).to.include("@post('trainingId', Types.String, true)");
         expect(create).to.include("@post('chapterId', Types.String, true)");
         expect(create).not.to.include('Types.Range(MANAGED_SOURCE_TEMPLATES.map');
@@ -1634,6 +1808,7 @@ describe('P2.11 authoritative problem route domain', () => {
             content: 'Statement',
             managed: 'true',
             template: 'self',
+            pidNamespaceId: 'builtin:self',
             year: '2026',
             difficulty: '3',
             knowledgeMapId,
@@ -1650,6 +1825,7 @@ describe('P2.11 authoritative problem route domain', () => {
             [],
             true,
             'self',
+            'builtin:self',
             2026,
             '',
             '',
@@ -1683,6 +1859,7 @@ describe('P2.11 authoritative problem route domain', () => {
                 [],
                 true,
                 'self',
+                'builtin:self',
                 2026,
                 '',
                 '',
@@ -1707,13 +1884,31 @@ describe('P2.11 authoritative problem route domain', () => {
             content: 'Statement',
             managed: 'true',
             template: 'self',
+            pidNamespaceId: 'builtin:self',
             year: '2026',
             difficulty: '3',
             knowledgeMapId,
             mindmapNodeIds: 'node-1',
         };
 
-        await handler.post('forged', 'Own admin draft', 'Statement', '', false, 3, [], true, 'self', 2026, '', '', 0, knowledgeMapId, ['node-1']);
+        await handler.post(
+            'forged',
+            'Own admin draft',
+            'Statement',
+            '',
+            false,
+            3,
+            [],
+            true,
+            'self',
+            'builtin:self',
+            2026,
+            '',
+            '',
+            0,
+            knowledgeMapId,
+            ['node-1'],
+        );
 
         expect(calls.add.at(-1)?.[1]).to.deep.include({
             workingTitle: 'Own admin draft',
@@ -1732,12 +1927,30 @@ describe('P2.11 authoritative problem route domain', () => {
             content: 'Statement',
             managed: 'true',
             template: 'self',
+            pidNamespaceId: 'builtin:self',
             year: '2026',
             knowledgeMapId,
             mindmapNodeIds: 'node-1',
         };
 
-        await handler.post('forged', 'Difficulty default', 'Statement', '', false, 0, [], true, 'self', 2026, '', '', 0, knowledgeMapId, ['node-1']);
+        await handler.post(
+            'forged',
+            'Difficulty default',
+            'Statement',
+            '',
+            false,
+            0,
+            [],
+            true,
+            'self',
+            'builtin:self',
+            2026,
+            '',
+            '',
+            0,
+            knowledgeMapId,
+            ['node-1'],
+        );
 
         expect(calls.add.at(-1)?.[1]?.difficulty).to.equal(1);
     });
@@ -2251,6 +2464,31 @@ describe('P2.17 programming tag HTTP boundaries', () => {
 
         expect(calls.edit).to.have.length(1);
         expect(calls.edit[0][2]).to.deep.include({ pid: 'CUSTOM' });
+    });
+
+    it('rejects free PID edits for every migrated namespace problem even without knowledge nodes', async () => {
+        for (const user of [{}, { admin: true }, { canEditContent: true, namespaceEditAll: true }]) {
+            const handler = makeHandler(ProblemEditHandler, user);
+            handler.pdoc = {
+                domainId: 'system',
+                docId: 7,
+                pid: 'OS1072',
+                pidNamespaceId: 'custom:os',
+                tag: [],
+                problemKind: 'programming',
+                knowledgeNodeIds: [],
+                structureRevision: 4,
+            };
+            handler.canEditLoadedProblem = true;
+            handler.request.body = { title: 'Title', content: 'Statement', pid: 'OS9999' };
+
+            const failure = await captureFailure(() =>
+                handler.post('forged', 'OS1072', 'Title', 'Statement', 'OS9999', false, [], undefined, [], 2, false, 4),
+            );
+
+            expect(failure).to.be.instanceOf(GenericError);
+        }
+        expect(calls.edit).to.deep.equal([]);
     });
 
     it('rejects an ordinary programming map change before the model write boundary', async () => {

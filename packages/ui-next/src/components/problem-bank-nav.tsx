@@ -5,16 +5,21 @@ export function ProblemBankNav({
   problemsUrl,
   reviewUrl,
   canReview,
+  namespaceUrl = '',
+  canManageNamespaces = false,
 }: {
-  active: 'problems' | 'review';
+  active: 'problems' | 'review' | 'namespaces';
   problemsUrl: string;
   reviewUrl: string;
   canReview: boolean;
+  namespaceUrl?: string;
+  canManageNamespaces?: boolean;
 }) {
-  if (!canReview) return null;
+  if (!canReview && !canManageNamespaces) return null;
   const items = [
     { key: 'problems' as const, label: '全部题目', href: problemsUrl },
-    { key: 'review' as const, label: '审核队列', href: reviewUrl },
+    ...(canReview && reviewUrl ? [{ key: 'review' as const, label: '审核队列', href: reviewUrl }] : []),
+    ...(canManageNamespaces && namespaceUrl ? [{ key: 'namespaces' as const, label: '题号命名空间', href: namespaceUrl }] : []),
   ];
   return (
     <nav aria-label="题库工作区" className="-mx-1 overflow-x-auto px-1 pb-1">

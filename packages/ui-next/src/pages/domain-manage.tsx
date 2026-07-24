@@ -3,10 +3,11 @@
  */
 
 import { useRef, useState } from 'react';
-import { FileDown, FileUp, Plus, Save, Search, Trash2, UserPlus, Users } from 'lucide-react';
+import { ChevronLeft, ChevronRight, FileDown, FileUp, Plus, Save, Search, Trash2, UserMinus, UserPlus, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { MarkdownEditor } from '@/components/markdown-renderer';
@@ -15,6 +16,13 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { SimpleSelect } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useBootstrap } from '@/lib/bootstrap';
+import {
+  filterDomainUsers,
+  flattenDomainUsers,
+  getSelectableDomainUserIds,
+  paginateDomainUsers,
+  type DomainUserRow,
+} from '@/lib/domain-user-workspace';
 
 type R = Record<string, any>;
 
@@ -92,7 +100,17 @@ function SettingField({ setting, value }: { setting: R; value: any }) {
  * native form via the input's `form` property; the SimpleSelect popover
  * lives in a Portal, so `event.currentTarget.form` won't reach the row.
  */
-function RoleQuickSelect({ defaultValue, roleOptions }: { defaultValue: string; roleOptions: string[] }) {
+function RoleQuickSelect({
+  defaultValue,
+  roleOptions,
+  ariaLabel = '修改域角色',
+  disabled = false,
+}: {
+  defaultValue: string;
+  roleOptions: string[];
+  ariaLabel?: string;
+  disabled?: boolean;
+}) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   return (
     <>
@@ -100,7 +118,9 @@ function RoleQuickSelect({ defaultValue, roleOptions }: { defaultValue: string; 
       <SimpleSelect
         defaultValue={defaultValue}
         size="sm"
-        className="text-xs"
+        className="h-10 text-xs"
+        ariaLabel={ariaLabel}
+        disabled={disabled}
         options={roleOptions.map((option) => ({ value: option, label: option }))}
         onValueChange={(v) => {
           if (inputRef.current) {
@@ -181,18 +201,233 @@ export function DomainEditPage() {
 /*  Domain Users                                                       */
 /* ================================================================== */
 
+const ADD_DOMAIN_USERS_DIALOG_TITLE_ID = 'add-domain-users-dialog-title';
+const REMOVE_DOMAIN_USERS_DIALOG_TITLE_ID = 'remove-domain-users-dialog-title';
+const DIALOG_FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  'a[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+function trapDialogFocus(event: React.KeyboardEvent<HTMLDivElement>) {
+  if (event.key !== 'Tab') return;
+  const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE_SELECTOR)).filter(
+    (element) => element.getClientRects().length > 0 && element.getAttribute('aria-hidden') !== 'true',
+  );
+  if (focusable.length === 0) {
+    event.preventDefault();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement;
+  if (event.shiftKey && (active === first || !event.currentTarget.contains(active))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (active === last || !event.currentTarget.contains(active))) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function restoreDialogTrigger(trigger: React.RefObject<HTMLElement | null>) {
+  window.requestAnimationFrame(() => trigger.current?.focus());
+}
+
+function AddDomainUsersDialog({
+  open,
+  onClose,
+  roleOptions,
+  returnFocusRef,
+}: {
+  open: boolean;
+  onClose: () => void;
+  roleOptions: string[];
+  returnFocusRef: React.RefObject<HTMLElement | null>;
+}) {
+  const close = () => {
+    onClose();
+    restoreDialogTrigger(returnFocusRef);
+  };
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && close()}>
+      <form method="post">
+        <DialogContent
+          className="w-full sm:w-[560px]"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={ADD_DOMAIN_USERS_DIALOG_TITLE_ID}
+          onKeyDown={trapDialogFocus}
+        >
+          <DialogHeader>
+            <DialogTitle id={ADD_DOMAIN_USERS_DIALOG_TITLE_ID} className="flex items-center gap-2">
+              <UserPlus className="size-4 text-primary" />
+              添加或更新域用户
+            </DialogTitle>
+            <p className="mt-1 text-sm text-muted-foreground">一次可填写多个 UID，并为这些账号统一设置当前域角色。</p>
+          </DialogHeader>
+          <DialogBody>
+            <div className="space-y-5 px-5 py-4">
+              <input type="hidden" name="operation" value="set_users" />
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="domain-user-uids">
+                  用户 UID
+                </label>
+                <Input className="h-10" id="domain-user-uids" name="uids" placeholder="例如：1001, 1002, 1003" autoFocus required />
+                <p className="text-xs text-muted-foreground">使用英文逗号分隔多个 UID。</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium" htmlFor="domain-user-role">
+                  域角色
+                </label>
+                <SimpleSelect
+                  id="domain-user-role"
+                  name="role"
+                  defaultValue={roleOptions[0]}
+                  className="h-10"
+                  options={roleOptions.map((role) => ({ value: role, label: role }))}
+                />
+              </div>
+              <label className="flex items-start gap-3 rounded-lg border bg-muted/20 p-3">
+                <Checkbox name="join" value="true" className="mt-0.5" />
+                <span>
+                  <span className="block text-sm font-medium">标记为已加入</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">同步更新这些用户在当前域中的加入状态。</span>
+                </span>
+              </label>
+            </div>
+          </DialogBody>
+          <div className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+            <Button type="button" variant="ghost" className="h-10" onClick={close}>
+              取消
+            </Button>
+            <Button type="submit" className="h-10" disabled={roleOptions.length === 0}>
+              <UserPlus className="size-4" />
+              保存用户
+            </Button>
+          </div>
+        </DialogContent>
+      </form>
+    </Dialog>
+  );
+}
+
+function RemoveDomainUsersDialog({
+  users,
+  onClose,
+  returnFocusRef,
+}: {
+  users: DomainUserRow[];
+  onClose: () => void;
+  returnFocusRef: React.RefObject<HTMLElement | null>;
+}) {
+  const close = () => {
+    onClose();
+    restoreDialogTrigger(returnFocusRef);
+  };
+  return (
+    <Dialog open={users.length > 0} onOpenChange={(next) => !next && close()}>
+      <form method="post">
+        <DialogContent
+          className="w-full sm:w-[520px]"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={REMOVE_DOMAIN_USERS_DIALOG_TITLE_ID}
+          onKeyDown={trapDialogFocus}
+        >
+          <DialogHeader>
+            <DialogTitle id={REMOVE_DOMAIN_USERS_DIALOG_TITLE_ID} className="flex items-center gap-2">
+              <UserMinus className="size-4 text-destructive" />
+              确认移除域用户
+            </DialogTitle>
+            <p className="mt-1 text-sm text-muted-foreground">这会移除所选账号在当前域中的成员身份。</p>
+          </DialogHeader>
+          <DialogBody>
+            <div className="space-y-3 px-5 py-4">
+              <input type="hidden" name="operation" value="kick" />
+              {users.map((user) => (
+                <input key={user.uid} type="hidden" name="uids" value={user.uid} />
+              ))}
+              <div className="rounded-lg border bg-muted/20">
+                {users.slice(0, 8).map((user) => (
+                  <div key={user.uid} className="flex items-center justify-between gap-3 border-b px-3 py-2.5 last:border-b-0">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium" title={user.displayName || user.uname || `UID ${user.uid}`}>
+                        {user.displayName || user.uname || `UID ${user.uid}`}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground" title={user.uname || undefined}>
+                        {user.uname ? `@${user.uname} · ` : ''}
+                        UID {user.uid}
+                      </p>
+                    </div>
+                    <Badge variant="outline">{user.role}</Badge>
+                  </div>
+                ))}
+              </div>
+              {users.length > 8 ? <p className="text-xs text-muted-foreground">以及另外 {users.length - 8} 名用户</p> : null}
+            </div>
+          </DialogBody>
+          <div className="flex shrink-0 justify-end gap-2 border-t bg-muted/20 px-5 py-3">
+            <Button type="button" variant="ghost" className="h-10" autoFocus onClick={close}>
+              取消
+            </Button>
+            <Button type="submit" variant="destructive" className="h-10">
+              <UserMinus className="size-4" />
+              移除 {users.length} 名用户
+            </Button>
+          </div>
+        </DialogContent>
+      </form>
+    </Dialog>
+  );
+}
+
 export function DomainUserPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
   const roles: R[] = data.roles || [];
   const rudocs: R = data.rudocs || {};
-  const [search, setSearch] = useState('');
-  const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
   const roleOptions = roles.map((role) => String(role._id || role)).filter((role) => role !== 'guest');
-  const selectableRoles = roleOptions.filter((role) => role !== 'default');
+  const assignableRoles = roleOptions.filter((role) => role !== 'default');
+  const rows = flattenDomainUsers(rudocs, roleOptions);
+  const ownerUid = String(data.domain?.owner ?? '');
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
+  const [addOpen, setAddOpen] = useState(false);
+  const [removeUsers, setRemoveUsers] = useState<DomainUserRow[]>([]);
+  const addReturnFocusRef = useRef<HTMLElement | null>(null);
+  const removeReturnFocusRef = useRef<HTMLElement | null>(null);
+  const filteredRows = filterDomainUsers(rows, search, roleFilter);
+  const roster = paginateDomainUsers(filteredRows, page);
   const selectedList = Array.from(selectedUsers);
+  const selectedRows = rows.filter((user) => user.uid !== ownerUid && selectedUsers.has(user.uid));
+  const visibleIds = getSelectableDomainUserIds(roster.items, ownerUid);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((uid) => selectedUsers.has(uid));
+  const partlyVisibleSelected = visibleIds.some((uid) => selectedUsers.has(uid)) && !allVisibleSelected;
+  const manageableRoleCount = roleOptions.length;
 
+  const resetViewSelection = () => setSelectedUsers(new Set());
+  const updateSearch = (value: string) => {
+    setSearch(value);
+    setPage(1);
+    resetViewSelection();
+  };
+  const updateRoleFilter = (value: string) => {
+    setRoleFilter(value);
+    setPage(1);
+    resetViewSelection();
+  };
+  const changePage = (nextPage: number) => {
+    setPage(nextPage);
+    resetViewSelection();
+  };
   const toggleUser = (uid: string) => {
+    if (uid === ownerUid) return;
     setSelectedUsers((current) => {
       const next = new Set(current);
       if (next.has(uid)) next.delete(uid);
@@ -200,176 +435,270 @@ export function DomainUserPage() {
       return next;
     });
   };
+  const toggleVisible = (checked: boolean) => {
+    setSelectedUsers(checked ? new Set(visibleIds) : new Set());
+  };
+  const openAddDialog = (event: React.MouseEvent<HTMLButtonElement>) => {
+    addReturnFocusRef.current = event.currentTarget;
+    setAddOpen(true);
+  };
+  const openRemoveDialog = (users: DomainUserRow[], trigger: HTMLElement) => {
+    removeReturnFocusRef.current = trigger;
+    setRemoveUsers(users);
+  };
 
   return (
     <DomainAdminShell title="域用户">
-      {/* Search + actions */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="relative max-w-xs flex-1">
-          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-8" placeholder="搜索用户…" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-      </div>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-sm">
+      <div className="space-y-5">
+        <section className="flex flex-col gap-4 rounded-xl border bg-card p-5 shadow-sm sm:flex-row sm:items-end sm:justify-between">
+          <div className="max-w-2xl">
+            <div className="flex items-center gap-2">
+              <span className="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary">
+                <Users className="size-4" />
+              </span>
+              <div>
+                <h2 className="text-lg font-semibold tracking-tight">{String(data.domain?.name || bs.domain.name || '当前域')}</h2>
+                <p className="text-sm text-muted-foreground">集中查看成员、加入状态和域角色。</p>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm">
+              <span>
+                <strong className="font-semibold tabular-nums">{rows.length}</strong> <span className="text-muted-foreground">名成员</span>
+              </span>
+              <span>
+                <strong className="font-semibold tabular-nums">{manageableRoleCount}</strong>{' '}
+                <span className="text-muted-foreground">个可管理角色</span>
+              </span>
+              <span>
+                <strong className="font-semibold tabular-nums">{filteredRows.length}</strong>{' '}
+                <span className="text-muted-foreground">条当前结果</span>
+              </span>
+              <span>
+                <strong className="font-semibold tabular-nums">{selectedList.length}</strong> <span className="text-muted-foreground">名已选择</span>
+              </span>
+            </div>
+          </div>
+          <Button type="button" className="h-10" onClick={openAddDialog}>
             <UserPlus className="size-4" />
             添加或更新用户
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form method="post" className="grid gap-3 sm:grid-cols-[1fr_180px_auto_auto] sm:items-end">
-            <input type="hidden" name="operation" value="set_users" />
-            <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground" htmlFor="domain-user-uids">
-                UID（逗号分隔）
-              </label>
-              <Input id="domain-user-uids" name="uids" placeholder="1001,1002" required />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground" htmlFor="domain-user-role">
-                角色
-              </label>
-              <SimpleSelect
-                id="domain-user-role"
-                name="role"
-                defaultValue={(selectableRoles.length ? selectableRoles : roleOptions)[0]}
-                options={(selectableRoles.length ? selectableRoles : roleOptions).map((role) => ({
-                  value: role,
-                  label: role,
-                }))}
-              />
-            </div>
-            <label className="flex items-center gap-2 pb-2 text-sm">
-              <Checkbox name="join" value="true" />
-              标记已加入
-            </label>
-            <Button type="submit" size="sm" className="gap-1">
-              <UserPlus className="size-3.5" />
-              保存
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+          </Button>
+        </section>
 
-      {selectedList.length > 0 && (
-        <Card className="border-primary/30">
-          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-muted-foreground">已选择 {selectedList.length} 个用户</p>
-            <div className="flex flex-wrap gap-2">
-              <form method="post" className="flex flex-wrap items-center gap-2">
-                <input type="hidden" name="operation" value="set_users" />
-                {selectedList.map((uid) => (
-                  <input key={uid} type="hidden" name="uids" value={uid} />
-                ))}
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b bg-muted/10 pb-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <CardTitle className="text-base">成员目录</CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">搜索展示名、用户名或 UID；角色可直接在表格中修改。</p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-[minmax(240px,1fr)_180px]">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    className="h-10 pl-9"
+                    aria-label="搜索域用户"
+                    placeholder="搜索展示名、用户名或 UID"
+                    value={search}
+                    onChange={(event) => updateSearch(event.target.value)}
+                  />
+                </div>
                 <SimpleSelect
-                  name="role"
-                  defaultValue={roleOptions[0]}
-                  className="w-auto min-w-[8rem]"
-                  options={roleOptions.map((role) => ({ value: role, label: role }))}
+                  value={roleFilter}
+                  onValueChange={updateRoleFilter}
+                  ariaLabel="按域角色筛选"
+                  className="h-10"
+                  options={[{ value: '', label: '全部角色' }, ...roleOptions.map((role) => ({ value: role, label: role }))]}
                 />
-                <Button type="submit" size="sm" variant="outline">
-                  设置角色
-                </Button>
-              </form>
-              <form
-                method="post"
-                onSubmit={(event) => {
-                  if (!window.confirm('确认移除选中的用户吗？')) event.preventDefault();
-                }}
-              >
-                <input type="hidden" name="operation" value="kick" />
-                {selectedList.map((uid) => (
-                  <input key={uid} type="hidden" name="uids" value={uid} />
-                ))}
-                <Button type="submit" size="sm" variant="destructive">
-                  移除用户
-                </Button>
-              </form>
+              </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </CardHeader>
 
-      {/* Users grouped by role */}
-      {Object.entries(rudocs).map(([role, users]) => {
-        const roleUsers = (users as R[]).filter(
-          (u) => !search || (u.uname || '').toLowerCase().includes(search.toLowerCase()) || String(u._id).includes(search),
-        );
-        if (roleUsers.length === 0 && search) return null;
+          {selectedList.length > 0 ? (
+            <div className="flex flex-col gap-3 border-b bg-primary/5 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm">
+                已选择 <strong className="tabular-nums">{selectedList.length}</strong> 名当前页用户
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <form method="post" className="flex flex-wrap items-center gap-2">
+                  <input type="hidden" name="operation" value="set_users" />
+                  {selectedList.map((uid) => (
+                    <input key={uid} type="hidden" name="uids" value={uid} />
+                  ))}
+                  <SimpleSelect
+                    name="role"
+                    defaultValue={roleOptions[0]}
+                    className="h-10 min-w-32"
+                    ariaLabel="为选中用户设置域角色"
+                    options={roleOptions.map((role) => ({ value: role, label: role }))}
+                  />
+                  <Button type="submit" size="sm" variant="outline" className="h-10" disabled={roleOptions.length === 0}>
+                    设置角色
+                  </Button>
+                </form>
+                <Button type="button" size="sm" variant="ghost" className="h-10" onClick={resetViewSelection}>
+                  清空选择
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  className="h-10"
+                  onClick={(event) => openRemoveDialog(selectedRows, event.currentTarget)}
+                >
+                  <UserMinus className="size-3.5" />
+                  移除
+                </Button>
+              </div>
+            </div>
+          ) : null}
 
-        return (
-          <Card key={role}>
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Users className="size-4" />
-                {role}
-                <Badge variant="secondary" className="ml-1 text-[10px]">
-                  {(users as R[]).length}
-                </Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
+          <CardContent className="overflow-x-auto p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12 pl-5">
+                    <label className="grid size-10 place-items-center" title="选择当前页全部用户">
+                      <Checkbox
+                        size="sm"
+                        aria-label="选择当前页全部用户"
+                        checked={allVisibleSelected}
+                        indeterminate={partlyVisibleSelected}
+                        disabled={visibleIds.length === 0}
+                        onCheckedChange={toggleVisible}
+                      />
+                    </label>
+                  </TableHead>
+                  <TableHead>用户</TableHead>
+                  <TableHead className="w-28">UID</TableHead>
+                  <TableHead className="w-40">域角色</TableHead>
+                  <TableHead className="w-28">加入状态</TableHead>
+                  <TableHead className="w-20 pr-5 text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {roster.items.length === 0 ? (
                   <TableRow>
-                    <TableHead className="pl-5 w-10" />
-                    <TableHead className="w-20">UID</TableHead>
-                    <TableHead>用户名</TableHead>
-                    <TableHead className="w-32">角色</TableHead>
-                    <TableHead className="w-24 text-right pr-5">操作</TableHead>
+                    <TableCell colSpan={6} className="h-40 text-center">
+                      <Users className="mx-auto mb-2 size-5 text-muted-foreground" />
+                      <p className="text-sm font-medium">{rows.length === 0 ? '当前域还没有成员' : '没有匹配的成员'}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {rows.length === 0 ? '添加用户后会显示在这里。' : '请尝试调整搜索词或角色筛选。'}
+                      </p>
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {roleUsers.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
-                        暂无用户
+                ) : (
+                  roster.items.map((user) => (
+                    <TableRow key={user.uid}>
+                      <TableCell className="pl-5">
+                        <label className="grid size-10 place-items-center">
+                          <Checkbox
+                            size="sm"
+                            aria-label={`选择 ${user.displayName || user.uname || `UID ${user.uid}`}`}
+                            checked={selectedUsers.has(user.uid)}
+                            disabled={user.uid === ownerUid}
+                            onCheckedChange={() => toggleUser(user.uid)}
+                          />
+                        </label>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex min-w-52 items-center gap-3">
+                          <span className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
+                            {(user.displayName || user.uname || user.uid).slice(0, 1).toLocaleUpperCase()}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <p className="truncate text-sm font-medium" title={user.displayName || user.uname || `UID ${user.uid}`}>
+                                {user.displayName || user.uname || `UID ${user.uid}`}
+                              </p>
+                              {user.uid === ownerUid ? (
+                                <Badge variant="outline" className="shrink-0">
+                                  域所有者
+                                </Badge>
+                              ) : null}
+                            </div>
+                            <p className="truncate text-xs text-muted-foreground" title={user.uname || undefined}>
+                              {user.uname ? `@${user.uname}` : '未设置用户名'}
+                            </p>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs tabular-nums">{user.uid}</TableCell>
+                      <TableCell>
+                        <form method="post">
+                          <input type="hidden" name="operation" value="set_users" />
+                          <input type="hidden" name="uids" value={user.uid} />
+                          <RoleQuickSelect
+                            defaultValue={user.role}
+                            roleOptions={roleOptions}
+                            ariaLabel={`修改 ${user.displayName || user.uname || `UID ${user.uid}`} 的域角色`}
+                            disabled={user.uid === ownerUid}
+                          />
+                        </form>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={user.joined ? 'secondary' : 'outline'}>{user.joined ? '已加入' : '未加入'}</Badge>
+                      </TableCell>
+                      <TableCell className="pr-5 text-right">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="size-10 p-0 text-destructive hover:text-destructive"
+                          aria-label={`移除 ${user.displayName || user.uname || `UID ${user.uid}`}`}
+                          disabled={user.uid === ownerUid}
+                          onClick={(event) => openRemoveDialog([user], event.currentTarget)}
+                        >
+                          <UserMinus className="size-3.5" />
+                          <span className="sr-only">移除</span>
+                        </Button>
                       </TableCell>
                     </TableRow>
-                  ) : (
-                    roleUsers.map((u) => {
-                      const uid = String(u._id);
-                      return (
-                        <TableRow key={u._id}>
-                          <TableCell className="pl-5">
-                            <Checkbox checked={selectedUsers.has(uid)} onChange={() => toggleUser(uid)} />
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{u._id}</TableCell>
-                          <TableCell className="text-sm font-medium">{u.uname || u.displayName || '—'}</TableCell>
-                          <TableCell>
-                            <form method="post">
-                              <input type="hidden" name="operation" value="set_users" />
-                              <input type="hidden" name="uids" value={u._id} />
-                              <RoleQuickSelect defaultValue={u.role || role} roleOptions={roleOptions} />
-                            </form>
-                          </TableCell>
-                          <TableCell className="text-right pr-5">
-                            <form method="post" className="inline">
-                              <input type="hidden" name="operation" value="kick" />
-                              <input type="hidden" name="uids" value={u._id} />
-                              <Button type="submit" variant="ghost" size="sm" className="h-7 text-xs text-destructive">
-                                移除
-                              </Button>
-                            </form>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        );
-      })}
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
 
-      {Object.keys(rudocs).length === 0 && (
-        <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">暂无域用户</CardContent>
+          <div className="flex flex-col gap-3 border-t bg-muted/10 px-5 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-muted-foreground">{roster.total === 0 ? '0 名用户' : `显示 ${roster.start}–${roster.end}，共 ${roster.total} 名`}</p>
+            <div className="flex items-center gap-2">
+              <span className="min-w-20 text-center text-xs text-muted-foreground">
+                第 {roster.page} / {roster.totalPages} 页
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="size-10"
+                aria-label="上一页"
+                disabled={roster.page <= 1}
+                onClick={() => changePage(roster.page - 1)}
+              >
+                <ChevronLeft className="size-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="size-10"
+                aria-label="下一页"
+                disabled={roster.page >= roster.totalPages}
+                onClick={() => changePage(roster.page + 1)}
+              >
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+          </div>
         </Card>
-      )}
+      </div>
+
+      <AddDomainUsersDialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        roleOptions={assignableRoles.length > 0 ? assignableRoles : roleOptions}
+        returnFocusRef={addReturnFocusRef}
+      />
+      <RemoveDomainUsersDialog users={removeUsers} onClose={() => setRemoveUsers([])} returnFocusRef={removeReturnFocusRef} />
     </DomainAdminShell>
   );
 }

@@ -16,6 +16,7 @@ import {
 import { RecordDoc, Tdoc } from '../interface';
 import { canAccessPostContestPracticeRecord, canUsePostContestPractice } from '../lib/contest-correction';
 import { buildPersonalPracticeRecordQuery } from '../lib/contest-problem-status';
+import { buildExamModeRecordCodePayload, shouldUseLiveClientRecordCodeOnly } from '../lib/exam-mode-record';
 import { matchesRecordConnectionScope, RECORD_PRETEST_CONTEST_ID } from '../lib/record-connection-scope';
 import { PERM, PRIV, STATUS, STATUS_TEXTS } from '../model/builtin';
 import * as contest from '../model/contest';
@@ -355,6 +356,16 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         if (this.tdoc) {
             this.tsdoc = await contest.getStatus(domainId, this.tdoc.docId, this.user._id);
         }
+        const liveClientRecordCodeOnly =
+            !!this.tdoc &&
+            shouldUseLiveClientRecordCodeOnly({
+                clientRequired: contest.isClientRequired(this.tdoc),
+                ongoing: contest.isOngoing(this.tdoc),
+                contestOwner: this.user.own(this.tdoc),
+                canEditContest: this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
+                systemAdmin: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+            });
+        if (liveClientRecordCodeOnly && rev) throw new PermissionError(PERM.PERM_VIEW_RECORD);
         const contextualProblemAccess = this.postContestPracticeRecordAccess || this.contestPretestRecordAccess;
         const requiresDirectProblemAccess = !contextualProblemAccess && (!this.tdoc || (!this.teamRecordAccess && !this.tsdoc?.attend));
         const [pdoc, self, udoc] = await Promise.all([
@@ -446,9 +457,21 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
         } catch {
             /* malformed config → no hints, never break the page */
         }
+        let recordStudent: { studentId: string; realName: string } | null = null;
+        if (this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM) && global.Hydro?.model?.userbind?.findStudentsByUserIds && rdoc.uid > 1) {
+            const students = await global.Hydro.model.userbind.findStudentsByUserIds(domainId, [rdoc.uid]);
+            const student = students[String(rdoc.uid)];
+            if (student) {
+                recordStudent = {
+                    studentId: String(student.studentId || ''),
+                    realName: String(student.realName || ''),
+                };
+            }
+        }
         this.response.template = 'record_detail.html';
-        this.response.body = {
+        const responseBody = {
             udoc,
+            recordStudent,
             rdoc: canViewDetail ? rdoc : pick(rdoc, ['_id', 'lang', 'code']),
             pdoc,
             tdoc: this.tdoc,
@@ -464,6 +487,17 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             // visibility-filtered above). Keyed by 1-based case order.
             testHints,
         };
+        const teamMemberCannotDownload =
+            !!this.tdoc &&
+            contest.getParticipationMode(this.tdoc) === 'team' &&
+            this.teamRecordAccess &&
+            currentRecordTeam?.captainUid !== this.user._id;
+        this.response.body = liveClientRecordCodeOnly
+            ? buildExamModeRecordCodePayload({
+                  ...responseBody,
+                  ...(teamMemberCannotDownload ? { examRecordDownloadAvailable: false } : {}),
+              })
+            : responseBody;
     }
 
     @param('rid', Types.ObjectId)
@@ -747,6 +781,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
     noTemplate = false;
     canViewCode = false;
     teamRecordAccess = false;
+    liveClientRecordCodeOnly = false;
     postContestPracticeRecordAccess = false;
     contestPretestRecordAccess = false;
     practiceTid?: ObjectId;
@@ -801,6 +836,13 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
             this.contestPretestRecordAccess = true;
         } else if (realContestRecord) {
             this.tdoc = await contest.get(domainId, rdoc.contest);
+            this.liveClientRecordCodeOnly = shouldUseLiveClientRecordCodeOnly({
+                clientRequired: contest.isClientRequired(this.tdoc),
+                ongoing: contest.isOngoing(this.tdoc),
+                contestOwner: this.user.own(this.tdoc),
+                canEditContest: this.user.hasPerm(PERM.PERM_EDIT_CONTEST),
+                systemAdmin: this.user.hasPriv(PRIV.PRIV_EDIT_SYSTEM),
+            });
             const teamContestRecord = contest.getParticipationMode(this.tdoc) === 'team';
             if (teamContestRecord) {
                 if (!(rdoc.contestTeamId instanceof ObjectId)) throw new PermissionError(PERM.PERM_VIEW_CONTEST_HIDDEN_SCOREBOARD);
@@ -849,6 +891,19 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
     }
 
     async sendUpdate(rdoc: RecordDoc) {
+        if (this.liveClientRecordCodeOnly) {
+            const codeVisibleRecord = this.canViewCode
+                ? rdoc
+                : {
+                      ...rdoc,
+                      code: '',
+                      files: {},
+                      compilerTexts: [],
+                  };
+            const payload = buildExamModeRecordCodePayload({ rdoc: codeVisibleRecord, pdoc: this.pdoc, langs });
+            this.send({ rdoc: payload.rdoc });
+            return;
+        }
         if (this.noTemplate) {
             this.send({ rdoc });
         } else {

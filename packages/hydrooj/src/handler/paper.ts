@@ -38,6 +38,7 @@ import {
 } from 'hydrooj';
 import { ContestClientFinishedError, ContestNotLiveError, ContestTeamConflictError } from '../error';
 import { getPostContestPracticeState, isPostContestPracticeRule } from '../lib/contest-correction';
+import { buildExamModeRecordCodePayload } from '../lib/exam-mode-record';
 import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
 import type { ContestTeamExamModeContext } from '../model/contest-team';
@@ -1066,9 +1067,14 @@ class ExamModeRecordDetailHandler extends RecordDetailHandler {
         const tid = this.tdoc?.docId;
         if (!this.tdoc || !this.rdoc?.contest?.equals?.(tid)) throw new NotFoundError('Record');
         const { previewMode, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
+        if (rev) throw new PermissionError(PERM.PERM_VIEW_RECORD);
         if (download && teamContext && !teamContext.canEditCode) throw new PermissionError(PERM.PERM_READ_RECORD_CODE);
         await super.get(authoritativeDomainId, rid, download, rev);
         if (download) return;
+        this.response.body = buildExamModeRecordCodePayload({
+            ...this.response.body,
+            ...(teamContext && !teamContext.canEditCode ? { examRecordDownloadAvailable: false } : {}),
+        });
         await decorateExamMode(this, this.tdoc, 'problems', 'record_detail.html', previewMode, teamContext);
     }
 }

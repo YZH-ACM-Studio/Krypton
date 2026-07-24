@@ -29,8 +29,10 @@ import { formatRelativeTime, replaceRouteTokens, toDate } from '@/lib/format';
 import {
   defaultRecordDetailTab,
   paginateRecordCases,
+  recordCodeDownloadAvailable,
+  recordDetailMode,
   recordDetailTabs,
-  shouldUseLegacyRecordDetail,
+  resolveRecordIdentity,
   summarizeRecordCases,
   type RecordDetailTab,
 } from '@/lib/record-detail-workspace';
@@ -385,6 +387,126 @@ function LegacyRecordDetailBody({
   );
 }
 
+function RecordIdentityCard({
+  problemUrl,
+  problemTitle,
+  username,
+  student,
+  className = '',
+}: {
+  problemUrl: string;
+  problemTitle: string;
+  username: string;
+  student: { studentId: string; realName: string } | null;
+  className?: string;
+}) {
+  return (
+    <Card className={className}>
+      <CardContent className="p-4">
+        <p className="text-xs text-muted-foreground">题目 / 用户</p>
+        <a
+          href={problemUrl}
+          title={problemTitle}
+          className="mt-1 block break-words text-sm font-semibold leading-5 text-foreground hover:text-primary"
+        >
+          {problemTitle}
+        </a>
+        <div className="mt-3 flex flex-wrap gap-2 border-t pt-3 text-xs">
+          <span className="inline-flex min-h-7 items-center gap-1.5 rounded-md bg-muted px-2.5 py-1">
+            <span className="text-muted-foreground">用户</span>
+            <span className="font-medium">{username}</span>
+          </span>
+          {student?.studentId ? (
+            <span className="inline-flex min-h-7 items-center gap-1.5 rounded-md bg-muted px-2.5 py-1">
+              <span className="text-muted-foreground">学号</span>
+              <span className="font-mono tabular-nums">{student.studentId}</span>
+            </span>
+          ) : null}
+          {student?.realName ? (
+            <span className="inline-flex min-h-7 items-center gap-1.5 rounded-md bg-muted px-2.5 py-1">
+              <span className="text-muted-foreground">姓名</span>
+              <span className="font-medium">{student.realName}</span>
+            </span>
+          ) : null}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RecordCodeContent({
+  data,
+  rdoc,
+  code,
+  copyState,
+  onCopy,
+  examCodeOnly = false,
+}: {
+  data: R;
+  rdoc: R;
+  code: unknown;
+  copyState: 'idle' | 'copied' | 'failed';
+  onCopy: () => void;
+  examCodeOnly?: boolean;
+}) {
+  return (
+    <>
+      <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          {examCodeOnly ? <p className="text-sm font-semibold">提交代码</p> : null}
+          {examCodeOnly ? (
+            <p className="mt-0.5 text-xs leading-5 text-muted-foreground">考试期间仅展示本次提交源码，不提供评测状态、输出或测试点。</p>
+          ) : null}
+          {!examCodeOnly ? <Badge variant="outline">{langDisplay(data.langs, rdoc.lang)}</Badge> : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {examCodeOnly ? <Badge variant="outline">{langDisplay(data.langs, rdoc.lang)}</Badge> : null}
+          {copyState === 'failed' ? (
+            <span role="alert" className="text-xs text-destructive">
+              复制失败，请检查浏览器权限
+            </span>
+          ) : null}
+          {code ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-10 active:scale-[0.96]"
+              aria-label={copyState === 'copied' ? '提交代码已复制' : copyState === 'failed' ? '重新复制提交代码' : '复制提交代码'}
+              onClick={onCopy}
+            >
+              {copyState === 'copied' ? <Check /> : copyState === 'failed' ? <CircleX /> : <ClipboardCopy />}
+              {copyState === 'copied' ? '已复制' : copyState === 'failed' ? '重试复制' : '复制代码'}
+            </Button>
+          ) : null}
+          <span className="sr-only" role="status" aria-live="polite">
+            {copyState === 'copied' ? '提交代码已复制' : ''}
+          </span>
+        </div>
+      </div>
+      {code ? (
+        <div className="overflow-hidden" style={{ height: 'min(68vh, 720px)', minHeight: 360 }}>
+          <KryptonIDE
+            mode="readonly"
+            langs={[]}
+            defaultLang={rdoc.lang || 'cc.cc17'}
+            value={String(code)}
+            onValueChange={() => {
+              /* read-only */
+            }}
+            minHeight={360}
+            className="h-full rounded-none border-0"
+          />
+        </div>
+      ) : (
+        <div className="px-4 py-16 text-center text-sm leading-6 text-muted-foreground">
+          该提交没有可直接预览的文本源码；若为文件提交，请使用页面上方的下载入口。
+        </div>
+      )}
+    </>
+  );
+}
+
 export function RecordsPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
@@ -718,7 +840,12 @@ export function RecordDetailPage() {
   const pdoc: R = data.pdoc || {};
   const code = data.code || rdoc.code || '';
   const locale = bs.locale;
-  const user = getUser(bs.udict, rdoc.uid);
+  const user = data.udoc || getUser(bs.udict, rdoc.uid);
+  const recordIdentity = resolveRecordIdentity({
+    user,
+    uid: rdoc.uid,
+    student: data.recordStudent,
+  });
   const cases: R[] = rdoc.testCases || rdoc.cases || [];
   // PTA-style per-test-point hints, already visibility-filtered server-side
   // (RecordDetailHandler). Keyed by case identity `${subtaskId}-${caseId}` (the
@@ -738,8 +865,8 @@ export function RecordDetailPage() {
   const examUrls: R = data.examMode?.urls || {};
   const teamExamMode = readTeamExamModeContext(data.examMode);
   const postContestPracticeRecordAccess = data.postContestPracticeRecordAccess === true;
-  const preserveLegacyDetailDom = shouldUseLegacyRecordDetail({
-    hasExamMode: !!data.examMode,
+  const detailMode = recordDetailMode({
+    hasExamMode: !!data.examMode || data.examRecordCodeOnly === true,
     hasContestContext: !!data.tdoc,
     postContestPractice: postContestPracticeRecordAccess,
   });
@@ -752,6 +879,13 @@ export function RecordDetailPage() {
     practice: postContestPracticeRecordAccess,
   });
   const downloadUrl = buildUrlWithQuery(recordUrl, { download: true });
+  const codeDownloadAvailable = recordCodeDownloadAvailable({
+    mode: detailMode,
+    serverAvailable: data.examRecordDownloadAvailable,
+    hasInlineCode: !!code,
+    hasCodeFile: !!rdoc.files?.code,
+    hasHackFile: !!rdoc.files?.hack,
+  });
   const problemUrlBase = examUrls.problem
     ? String(examUrls.problem).replace('__PID__', String(rdoc.pid))
     : replaceRouteTokens(bs.urls.problemDetail, { PID: String(rdoc.pid) });
@@ -778,7 +912,7 @@ export function RecordDetailPage() {
       // may be omitted from later updates to save bandwidth).
       setRdoc((cur) => ({ ...cur, ...next }));
     },
-    disabled: !rdoc._id,
+    disabled: !rdoc._id || detailMode === 'exam-code',
   });
 
   const handleCopyCode = async () => {
@@ -805,9 +939,11 @@ export function RecordDetailPage() {
             </a>
             <ChevronRight className="size-3" />
           </div>
-          <h1 className="mt-1 text-xl font-semibold">提交记录 #{String(rdoc._id).slice(-8)}</h1>
+          <h1 className="mt-1 text-xl font-semibold text-balance">
+            {detailMode === 'exam-code' ? '提交代码' : '提交记录'} #{String(rdoc._id).slice(-8)}
+          </h1>
         </div>
-        {(code || rdoc.files?.code || rdoc.files?.hack) && (!teamExamMode || teamExamMode.canEditCode) ? (
+        {codeDownloadAvailable && (!teamExamMode || teamExamMode.canEditCode) ? (
           <Button asChild variant="outline" size="sm" className="w-fit">
             <a href={downloadUrl}>
               <Download className="size-4" />
@@ -817,41 +953,46 @@ export function RecordDetailPage() {
         ) : null}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-4">
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">状态</p>
-            <div className="mt-1">{statusDisplay(rdoc.status)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">得分</p>
-            <p className="mt-1 text-xl font-semibold">{rdoc.score ?? '—'}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">用时 / 内存</p>
-            <p className="mt-1 text-sm font-medium">
-              {formatTime(rdoc.time, rdoc.status)} / {formatMemory(rdoc.memory)}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">题目 / 用户</p>
-            <p className="mt-1 text-sm">
-              <a href={problemUrl} className="font-medium hover:text-primary">
-                {pdoc.title || rdoc.pid}
-              </a>
-              <span className="text-muted-foreground"> · {user?.uname || `#${rdoc.uid}`}</span>
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      {detailMode === 'exam-code' ? (
+        <RecordIdentityCard problemUrl={problemUrl} problemTitle={pdoc.title || String(rdoc.pid)} username={recordIdentity.username} student={null} />
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-[repeat(3,minmax(0,1fr))_minmax(18rem,1.55fr)]">
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground">状态</p>
+              <div className="mt-1">{statusDisplay(rdoc.status)}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground">得分</p>
+              <p className="mt-1 text-xl font-semibold tabular-nums">{rdoc.score ?? '—'}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground">用时 / 内存</p>
+              <p className="mt-1 text-sm font-medium tabular-nums">
+                {formatTime(rdoc.time, rdoc.status)} / {formatMemory(rdoc.memory)}
+              </p>
+            </CardContent>
+          </Card>
+          <RecordIdentityCard
+            problemUrl={problemUrl}
+            problemTitle={pdoc.title || String(rdoc.pid)}
+            username={recordIdentity.username}
+            student={recordIdentity.student}
+          />
+        </div>
+      )}
 
-      {preserveLegacyDetailDom ? (
+      {detailMode === 'exam-code' ? (
+        <Card className="overflow-hidden">
+          <CardContent className="p-0">
+            <RecordCodeContent data={data} rdoc={rdoc} code={code} copyState={copyState} onCopy={() => void handleCopyCode()} examCodeOnly />
+          </CardContent>
+        </Card>
+      ) : detailMode === 'legacy-contest' ? (
         <LegacyRecordDetailBody
           rdoc={rdoc}
           data={data}
@@ -1072,50 +1213,14 @@ export function RecordDetailPage() {
 
             {currentTab === 'code' && code ? (
               <div role="tabpanel">
-                <div className="flex flex-col gap-2 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <Badge variant="outline">{langDisplay(data.langs, rdoc.lang)}</Badge>
-                  <div className="flex items-center gap-2">
-                    {copyState === 'failed' ? (
-                      <span role="alert" className="text-xs text-destructive">
-                        复制失败，请检查浏览器权限
-                      </span>
-                    ) : null}
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-10 active:scale-[0.96]"
-                      aria-label={copyState === 'copied' ? '提交代码已复制' : copyState === 'failed' ? '重新复制提交代码' : '复制提交代码'}
-                      onClick={() => void handleCopyCode()}
-                    >
-                      {copyState === 'copied' ? <Check /> : copyState === 'failed' ? <CircleX /> : <ClipboardCopy />}
-                      {copyState === 'copied' ? '已复制' : copyState === 'failed' ? '重试复制' : '复制代码'}
-                    </Button>
-                    <span className="sr-only" role="status" aria-live="polite">
-                      {copyState === 'copied' ? '提交代码已复制' : ''}
-                    </span>
-                  </div>
-                </div>
-                <div className="overflow-hidden" style={{ height: 'min(68vh, 720px)', minHeight: 360 }}>
-                  <KryptonIDE
-                    mode="readonly"
-                    langs={[]}
-                    defaultLang={rdoc.lang || 'cc.cc17'}
-                    value={String(code)}
-                    onValueChange={() => {
-                      /* read-only */
-                    }}
-                    minHeight={360}
-                    className="h-full rounded-none border-0"
-                  />
-                </div>
+                <RecordCodeContent data={data} rdoc={rdoc} code={code} copyState={copyState} onCopy={() => void handleCopyCode()} />
               </div>
             ) : null}
           </CardContent>
         </Card>
       )}
 
-      {allRevs.length > 0 ? (
+      {detailMode !== 'exam-code' && allRevs.length > 0 ? (
         <Card>
           <CardContent className="p-0">
             <div className="border-b px-4 py-3 text-sm font-medium">历史版本</div>

@@ -5,8 +5,10 @@ import { describe, it } from 'node:test';
 import {
   defaultRecordDetailTab,
   paginateRecordCases,
+  recordCodeDownloadAvailable,
+  recordDetailMode,
   recordDetailTabs,
-  shouldUseLegacyRecordDetail,
+  resolveRecordIdentity,
   summarizeRecordCases,
 } from '../src/lib/record-detail-workspace';
 
@@ -59,11 +61,62 @@ describe('P2.34 record detail workspace', () => {
     });
   });
 
-  it('keeps Exam Mode and contest-context record DOM on the established layout', () => {
-    expect(shouldUseLegacyRecordDetail({ hasExamMode: true, hasContestContext: true, postContestPractice: false })).to.equal(true);
-    expect(shouldUseLegacyRecordDetail({ hasExamMode: false, hasContestContext: true, postContestPractice: false })).to.equal(true);
-    expect(shouldUseLegacyRecordDetail({ hasExamMode: false, hasContestContext: true, postContestPractice: true })).to.equal(false);
-    expect(shouldUseLegacyRecordDetail({ hasExamMode: false, hasContestContext: false, postContestPractice: false })).to.equal(false);
+  it('selects the code-only Exam Mode view without changing other contest routes', () => {
+    expect(recordDetailMode({ hasExamMode: true, hasContestContext: true, postContestPractice: false })).to.equal('exam-code');
+    expect(recordDetailMode({ hasExamMode: false, hasContestContext: true, postContestPractice: false })).to.equal('legacy-contest');
+    expect(recordDetailMode({ hasExamMode: false, hasContestContext: true, postContestPractice: true })).to.equal('workspace');
+    expect(recordDetailMode({ hasExamMode: false, hasContestContext: false, postContestPractice: false })).to.equal('workspace');
+  });
+
+  it('treats the server download capability as authoritative in code-only mode', () => {
+    expect(
+      recordCodeDownloadAvailable({
+        mode: 'exam-code',
+        serverAvailable: false,
+        hasInlineCode: true,
+        hasCodeFile: true,
+        hasHackFile: false,
+      }),
+    ).to.equal(false);
+    expect(
+      recordCodeDownloadAvailable({
+        mode: 'exam-code',
+        serverAvailable: true,
+        hasInlineCode: false,
+        hasCodeFile: false,
+        hasHackFile: false,
+      }),
+    ).to.equal(true);
+    expect(
+      recordCodeDownloadAvailable({
+        mode: 'workspace',
+        serverAvailable: false,
+        hasInlineCode: true,
+        hasCodeFile: false,
+        hasHackFile: false,
+      }),
+    ).to.equal(true);
+  });
+
+  it('uses the record user and only renders server-gated student identity', () => {
+    expect(resolveRecordIdentity({ user: { uname: ' student ' }, uid: 867 })).to.deep.equal({
+      username: 'student',
+      student: null,
+    });
+    expect(
+      resolveRecordIdentity({
+        user: { uname: 'student' },
+        uid: 867,
+        student: { studentId: ' 240000001 ', realName: ' 学生甲 ' },
+      }),
+    ).to.deep.equal({
+      username: 'student',
+      student: { studentId: '240000001', realName: '学生甲' },
+    });
+    expect(resolveRecordIdentity({ user: null, uid: 867, student: null })).to.deep.equal({
+      username: '#867',
+      student: null,
+    });
   });
 
   it('preserves record routes while exposing copy and full case details', () => {
@@ -72,8 +125,13 @@ describe('P2.34 record detail workspace', () => {
     expect(source).to.include('function normalizeId(value: unknown): string');
     expect(source).to.include('practice: postContestPracticeRecordAccess');
     expect(source).to.include('useRecordSocket({');
-    expect(source).to.include('shouldUseLegacyRecordDetail({');
-    expect(source).to.include('preserveLegacyDetailDom ? (');
+    expect(source).to.include('recordDetailMode({');
+    expect(source).to.include('!!data.examMode || data.examRecordCodeOnly === true');
+    expect(source).to.include("detailMode === 'exam-code'");
+    expect(source).to.include("disabled: !rdoc._id || detailMode === 'exam-code'");
+    expect(source).to.include('serverAvailable: data.examRecordDownloadAvailable');
+    expect(source).to.include('data.udoc || getUser(bs.udict, rdoc.uid)');
+    expect(source).to.include('data.recordStudent');
     expect(source).to.include("copyState === 'copied' ? '提交代码已复制'");
     expect(source).to.include('role="status" aria-live="polite"');
     expect(source).to.include('<details');

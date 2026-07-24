@@ -1,6 +1,7 @@
 import { STATUS_CODES, type STATUS } from '@hydrooj/common';
 
 export type RecordDetailTab = 'overview' | 'cases' | 'code';
+export type RecordDetailMode = 'workspace' | 'legacy-contest' | 'exam-code';
 
 export interface RecordCaseLike {
   status?: number;
@@ -16,7 +17,7 @@ export function defaultRecordDetailTab({ hasCode, caseCount }: { hasCode: boolea
   return 'overview';
 }
 
-export function shouldUseLegacyRecordDetail({
+export function recordDetailMode({
   hasExamMode,
   hasContestContext,
   postContestPractice,
@@ -24,8 +25,45 @@ export function shouldUseLegacyRecordDetail({
   hasExamMode: boolean;
   hasContestContext: boolean;
   postContestPractice: boolean;
+}): RecordDetailMode {
+  if (hasExamMode) return 'exam-code';
+  if (hasContestContext && !postContestPractice) return 'legacy-contest';
+  return 'workspace';
+}
+
+export function recordCodeDownloadAvailable({
+  mode,
+  serverAvailable,
+  hasInlineCode,
+  hasCodeFile,
+  hasHackFile,
+}: {
+  mode: RecordDetailMode;
+  serverAvailable: unknown;
+  hasInlineCode: boolean;
+  hasCodeFile: boolean;
+  hasHackFile: boolean;
 }) {
-  return hasExamMode || (hasContestContext && !postContestPractice);
+  if (mode === 'exam-code') return serverAvailable === true;
+  return hasInlineCode || hasCodeFile || hasHackFile;
+}
+
+export function resolveRecordIdentity({
+  user,
+  uid,
+  student,
+}: {
+  user?: { uname?: unknown } | null;
+  uid: unknown;
+  student?: { studentId?: unknown; realName?: unknown } | null;
+}) {
+  const uname = typeof user?.uname === 'string' ? user.uname.trim() : '';
+  const studentId = typeof student?.studentId === 'string' ? student.studentId.trim() : '';
+  const realName = typeof student?.realName === 'string' ? student.realName.trim() : '';
+  return {
+    username: uname || `#${String(uid ?? '')}`,
+    student: studentId || realName ? { studentId, realName } : null,
+  };
 }
 
 export function summarizeRecordCases(cases: RecordCaseLike[]) {

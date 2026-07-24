@@ -78,9 +78,14 @@ const calls = {
     recordQueries: [] as any[],
     rawProblems: [] as number[],
     viewableProblems: [] as number[],
+    ongoingArgs: [] as any[][],
+    studentQueries: [] as Array<{ domainId: string; uids: number[] }>,
     sent: [] as any[],
 };
 let currentRecord: any = ordinaryRecord;
+let clientRequired = false;
+let ongoing = false;
+let viewableProblemAvailable = false;
 
 function cursor(rows: any[]) {
     const value: any = {
@@ -149,6 +154,13 @@ const contestStub: any = {
     isDone() {
         return true;
     },
+    isClientRequired() {
+        return clientRequired;
+    },
+    isOngoing(...args: any[]) {
+        calls.ongoingArgs.push(args);
+        return ongoing;
+    },
 };
 
 const problemStub: any = {
@@ -161,7 +173,7 @@ const problemStub: any = {
     },
     async getViewableAuthorized(_domainId: string, pid: number) {
         calls.viewableProblems.push(Number(pid));
-        return null;
+        return viewableProblemAvailable ? hiddenProblem : null;
     },
     async getStatus() {
         return null;
@@ -306,8 +318,19 @@ beforeEach(() => {
     calls.recordQueries.length = 0;
     calls.rawProblems.length = 0;
     calls.viewableProblems.length = 0;
+    calls.ongoingArgs.length = 0;
+    calls.studentQueries.length = 0;
     calls.sent.length = 0;
     currentRecord = { ...ordinaryRecord };
+    clientRequired = false;
+    ongoing = false;
+    viewableProblemAvailable = false;
+    (global as any).Hydro.model.userbind = {
+        async findStudentsByUserIds(domainId: string, uids: number[]) {
+            calls.studentQueries.push({ domainId, uids });
+            return { 42: { studentId: '240000042', realName: '学生甲' } };
+        },
+    };
 });
 
 describe('post-contest practice record handlers', () => {
@@ -401,5 +424,118 @@ describe('post-contest practice record handlers', () => {
         expect(handler.postContestPracticeRecordAccess).to.equal(true);
         expect(handler.pdoc).to.equal(hiddenProblem);
         expect(calls.viewableProblems).to.deep.equal([]);
+    });
+});
+
+describe('live client-required record detail boundary', () => {
+    beforeEach(() => {
+        clientRequired = true;
+        ongoing = true;
+        currentRecord = {
+            ...ordinaryRecord,
+            contest: tid,
+            files: { code: '42/private-storage-key#main.cpp' },
+            compilerTexts: ['private compiler output'],
+            judgeTexts: ['private judge output'],
+            testCases: [{ status: STATUS.STATUS_ACCEPTED }],
+        };
+    });
+
+    it('returns only the current participant source through the ordinary HTTP route', async () => {
+        const handler = makeHandler(recordHandlerModule.RecordDetailHandler);
+
+        await handler.prepare('d', rid);
+        await handler.get('d', rid, false);
+
+        expect(handler.response.body.examRecordCodeOnly).to.equal(true);
+        expect(handler.response.body.rdoc).to.deep.equal({
+            _id: rid,
+            uid: 42,
+            pid: 7,
+            lang: 'cc.cc17',
+            code: 'int main() {}',
+        });
+        expect(handler.response.body).not.to.have.property('allRevs');
+        expect(handler.response.body).not.to.have.property('recordStudent');
+        expect(JSON.stringify(handler.response.body)).not.to.include('private');
+        expect(calls.ongoingArgs.at(-1)).to.deep.equal([tdoc]);
+    });
+
+    it('rejects historical revisions while the client-required contest is live', async () => {
+        const handler = makeHandler(recordHandlerModule.RecordDetailHandler);
+
+        await handler.prepare('d', rid);
+        await assert.rejects(handler.get('d', rid, false, new ObjectId()), TestPermissionError);
+    });
+
+    it('keeps the ordinary record detail after the contest ends or for a system admin', async () => {
+        ongoing = false;
+        const endedHandler = makeHandler(recordHandlerModule.RecordDetailHandler);
+        await endedHandler.prepare('d', rid);
+        await endedHandler.get('d', rid, false);
+        expect(endedHandler.response.body.examRecordCodeOnly).to.equal(undefined);
+        expect(endedHandler.response.body.rdoc.status).to.equal(STATUS.STATUS_ACCEPTED);
+
+        ongoing = true;
+        const adminHandler = makeHandler(recordHandlerModule.RecordDetailHandler);
+        adminHandler.user.hasPriv = (privilege: number) => privilege === PRIV.PRIV_EDIT_SYSTEM;
+        await adminHandler.prepare('d', rid);
+        await adminHandler.get('d', rid, false);
+        expect(adminHandler.response.body.examRecordCodeOnly).to.equal(undefined);
+        expect(adminHandler.response.body.rdoc.compilerTexts).to.deep.equal(['private compiler output']);
+        expect(adminHandler.response.body.recordStudent).to.deep.equal({ studentId: '240000042', realName: '学生甲' });
+        expect(calls.studentQueries).to.deep.equal([{ domainId: 'd', uids: [42] }]);
+    });
+
+    it('never pushes status, diagnostics, or storage keys through the ordinary detail websocket', async () => {
+        const handler = makeHandler(recordHandlerModule.RecordDetailConnectionHandler) as any;
+        handler.args = { domainId: 'd' };
+
+        await handler.prepare('d', rid, undefined, false, true);
+        handler.throttleSend.cancel();
+        clearTimeout(handler.disconnectTimeout);
+        calls.sent.length = 0;
+        await handler.sendUpdate(currentRecord);
+
+        expect(calls.sent).to.deep.equal([
+            {
+                rdoc: {
+                    _id: rid,
+                    uid: 42,
+                    pid: 7,
+                    lang: 'cc.cc17',
+                    code: 'int main() {}',
+                },
+            },
+        ]);
+        expect(JSON.stringify(calls.sent)).not.to.include('private');
+        expect(JSON.stringify(calls.sent)).not.to.include('status');
+        expect(calls.ongoingArgs.at(-1)).to.deep.equal([tdoc]);
+    });
+
+    it('does not push source to a record viewer without code permission', async () => {
+        viewableProblemAvailable = true;
+        const handler = makeHandler(recordHandlerModule.RecordDetailConnectionHandler) as any;
+        handler.user = makeUser(43);
+        handler.args = { domainId: 'd' };
+
+        await handler.prepare('d', rid, undefined, false, true);
+        handler.throttleSend.cancel();
+        clearTimeout(handler.disconnectTimeout);
+        calls.sent.length = 0;
+        await handler.sendUpdate(currentRecord);
+
+        expect(handler.canViewCode).to.equal(false);
+        expect(calls.sent).to.deep.equal([
+            {
+                rdoc: {
+                    _id: rid,
+                    uid: 42,
+                    pid: 7,
+                    lang: 'cc.cc17',
+                    code: '',
+                },
+            },
+        ]);
     });
 });

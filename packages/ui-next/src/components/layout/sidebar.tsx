@@ -112,6 +112,7 @@ export function Sidebar({ open, onClose, collapsed }: { open: boolean; onClose: 
                 icon: BookOpen,
                 templates: [
                   'problem_main.html',
+                  'problem_review.html',
                   'problem_mine.html',
                   'problem_create_hub.html',
                   'problem_detail.html',

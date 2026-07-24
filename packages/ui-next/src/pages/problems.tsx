@@ -3,6 +3,7 @@ import { Archive, CheckCircle2, Copy, Eye, EyeOff, LockKeyhole, Pencil, Search, 
 import { effectiveProblemKind, type ProblemKind } from '@hydrooj/common';
 import { DomainUserSearchOption, type DomainUserOption, domainUserSearchLabel, loadDomainUsers } from '@/components/domain-user-search';
 import { ManagedPublishProtocolFields } from '@/components/managed-programming-authority';
+import { ProblemBankNav } from '@/components/problem-bank-nav';
 import { ProblemCreationActions } from '@/components/problem-creation-actions';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -363,6 +364,13 @@ export function ProblemsPage() {
           <ProblemCreationActions {...problemCreationCapabilities} />
         </div>
       </header>
+
+      <ProblemBankNav
+        active="problems"
+        problemsUrl={bs.urls.problems}
+        reviewUrl={String(data.problemReviewUrl || '')}
+        canReview={!!data.canReviewManaged}
+      />
 
       {batchMessage ? (
         <p

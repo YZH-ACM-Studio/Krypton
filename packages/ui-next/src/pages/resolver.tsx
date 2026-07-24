@@ -72,6 +72,7 @@ import { ProblemHackPage } from '@/pages/problem-hack';
 import { ProblemConfigPage, ProblemFilesPage, ProblemImportPage, ProblemSolutionPage, ProblemStatisticsPage } from '@/pages/problem-manage';
 import { AdminStatsPage } from '@/pages/admin-stats';
 import { ProblemMinePage } from '@/pages/problem-mine';
+import { ProblemReviewPage } from '@/pages/problem-review';
 import { ProblemSubmitPage } from '@/pages/problem-submit';
 import { ProblemsPage } from '@/pages/problems';
 import { RankBoardDetailPage, RankBoardMainPage } from '@/pages/rankboard';
@@ -119,6 +120,7 @@ const PAGE_MAP: Record<string, PageComponent> = {
 
   // Problems
   'problem_main.html': ProblemsPage,
+  'problem_review.html': ProblemReviewPage,
   'problem_create_hub.html': ProblemCreateHubPage,
   'problem_mine.html': ProblemMinePage,
   'problem_detail.html': ProblemDetailPage,

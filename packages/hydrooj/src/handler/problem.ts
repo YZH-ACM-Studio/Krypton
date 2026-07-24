@@ -88,7 +88,7 @@ export const parseCategory = (value: string) =>
         .map((e) => e.trim());
 const logger = new Logger('problem-handler');
 
-async function problemAuthorUsers(pdoc: ProblemDoc, owner: User): Promise<User[]> {
+async function problemAuthorUsers(pdoc: ProblemDoc, owner?: User, stage = 'detail-author-resolution'): Promise<User[]> {
     if (pdoc.authoringMode !== 'managed') return owner ? [owner] : [];
     const permits = (global.Hydro?.model as any)?.permits;
     if (typeof permits?.listForProblem !== 'function') throw new TypeError('permits.listForProblem is unavailable');
@@ -98,11 +98,12 @@ async function problemAuthorUsers(pdoc: ProblemDoc, owner: User): Promise<User[]
     const authorUids = [...new Set<number>(rows.filter((row: any) => row?.role === 'author').map((row: any) => row.uid))].sort((a, b) => a - b);
     if (!authorUids.length) {
         logger.error(
-            'Managed problem author unavailable domainId=%s docId=%d owner=%d authorUids=%o stage=detail-author-resolution',
+            'Managed problem author unavailable domainId=%s docId=%d owner=%d authorUids=%o stage=%s',
             pdoc.domainId,
             pdoc.docId,
             pdoc.owner,
             authorUids,
+            stage,
         );
         return [];
     }
@@ -110,11 +111,12 @@ async function problemAuthorUsers(pdoc: ProblemDoc, owner: User): Promise<User[]
     const missing = authorUids.filter((uid) => authorDict[uid]?._id !== uid);
     if (missing.length) {
         logger.error(
-            'Managed problem author unavailable domainId=%s docId=%d owner=%d authorUids=%o stage=detail-author-resolution missingProfiles=%o',
+            'Managed problem author unavailable domainId=%s docId=%d owner=%d authorUids=%o stage=%s missingProfiles=%o',
             pdoc.domainId,
             pdoc.docId,
             pdoc.owner,
             authorUids,
+            stage,
             missing,
         );
         return [];
@@ -339,10 +341,11 @@ function exactProblemFilter(id: string | number): Filter<ProblemDoc> {
     return Number.isSafeInteger(+id) ? { docId: +id } : { pid: id as string };
 }
 
-function buildProblemTextFilter(q: string): Filter<ProblemDoc> {
+function buildProblemTextFilter(q: string, includeTag = true): Filter<ProblemDoc> {
     const escaped = escapeRegExp(q.toLowerCase());
     const $regex = new RegExp(q.length >= 2 ? escaped : `^${escaped}`, 'i');
-    const alternatives: Filter<ProblemDoc>[] = [{ pid: { $regex } }, { title: { $regex } }, { tag: q }];
+    const alternatives: Filter<ProblemDoc>[] = [{ pid: { $regex } }, { title: { $regex } }];
+    if (includeTag) alternatives.push({ tag: q });
     if (Number.isSafeInteger(+q)) alternatives.unshift({ docId: +q });
     else if (/^P\d+$/i.test(q) && Number.isSafeInteger(+q.substring(1))) {
         alternatives.unshift({ docId: +q.substring(1) });
@@ -869,6 +872,7 @@ export class ProblemMainHandler extends Handler {
                 })),
                 canFilterOwner: isBankAdmin,
                 canReviewManaged: isBankAdmin,
+                problemReviewUrl: isBankAdmin ? this.url('problem_review') : '',
                 problemCreationCapabilities: {
                     canCreateAny: problem.canCreateManagedProgrammingDraft(this.user),
                     canImport: problem.canImportProblems(this.user),
@@ -1058,7 +1062,7 @@ export class ProblemMainHandler extends Handler {
             };
             return;
         }
-        this.response.redirect = this.url('problem_main', { query: { managedReview: 'pending' } });
+        this.response.redirect = this.url('problem_review');
     }
 
     @param('pid', Types.PositiveInt)
@@ -1096,6 +1100,74 @@ export class ProblemMainHandler extends Handler {
         await assertProblemWriteCapability(this, pdoc, problem.canArchiveProblem(this.user, pdoc), 'archive', 'archive');
         await problem.archiveProblem(domainId, pid, this.user._id, reason, this.user);
         this.back();
+    }
+}
+
+export class ProblemReviewHandler extends Handler {
+    @param('page', Types.PositiveInt, true)
+    @param('q', Types.Content, true)
+    @param('limit', Types.PositiveInt, true)
+    @param('status', Types.Range(['all', 'draft', 'confirmed']), true)
+    async get(_domainId: string, page = 1, q = '', limit: number, status: 'all' | 'draft' | 'confirmed' = 'all') {
+        const domainId = String(this.domain?._id);
+        if (!problem.isProblemBankAdmin(this.user)) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+        await problem.refreshProblemAcl(this.user, domainId);
+        problem.assertProblemAclDomain(this.user, domainId);
+        if (!problem.isProblemBankAdmin(this.user)) throw new PermissionError(PERM.PERM_EDIT_PROBLEM);
+
+        this.response.template = 'problem_review.html';
+        if (!limit || limit > this.ctx.setting.get('pagination.problem') || page > 1) limit = this.ctx.setting.get('pagination.problem');
+        const normalizedQuery = q.trim();
+        const reviewStatus = status === 'all' ? { $in: ['draft', 'confirmed'] } : status;
+        const filters: Filter<ProblemDoc>[] = [
+            problem.buildProblemBankScope(this.user),
+            {
+                authoringMode: 'managed',
+                hidden: true,
+                archivedAt: { $exists: false },
+                'managedAuthoring.metadataStatus': reviewStatus,
+            },
+        ];
+        if (normalizedQuery) filters.push(buildProblemTextFilter(normalizedQuery, false));
+        const query: Filter<ProblemDoc> = { $and: filters };
+        const [pdocs, ppcount, pcount] = await this.paginate(
+            problem.getMulti(domainId, query, problem.PROJECTION_MANAGED_BANK).sort({ docId: 1 }),
+            page,
+            limit,
+        );
+        const pendingContributionFacts = await pendingProblemContributionReviewFacts(
+            domainId,
+            pdocs.map((pdoc) => pdoc.docId),
+        );
+        const authorLists = await Promise.all(pdocs.map((pdoc) => problemAuthorUsers(pdoc, undefined, 'review-queue-author-resolution')));
+        const managedAuthorsByDocId = Object.fromEntries(
+            pdocs.map((pdoc, index) => [
+                pdoc.docId,
+                authorLists[index].map((author) => ({
+                    _id: author._id,
+                    uname: author.uname,
+                })),
+            ]),
+        );
+        const managedTrainingOptions = pdocs.some((pdoc) => pdoc.managedAuthoring?.pendingTrainingPlacement)
+            ? await listManagedTrainingOptions(domainId)
+            : [];
+
+        this.response.body = {
+            page,
+            ppcount,
+            pcount,
+            pdocs,
+            qs: normalizedQuery,
+            status,
+            problemReviewUrl: this.url('problem_review'),
+            managedAuthorsByDocId,
+            pendingContributionsByDocId: pendingContributionFacts.rowsByDocId,
+            pendingContributionFingerprintByDocId: pendingContributionFacts.fingerprintByDocId,
+            contributionUdict: pendingContributionFacts.udict,
+            managedSourceTemplates: MANAGED_SOURCE_TEMPLATES,
+            managedTrainingOptions,
+        };
     }
 }
 
@@ -3209,6 +3281,7 @@ declare module '@hydrooj/framework' {
 
 export async function apply(ctx: Context) {
     ctx.Route('problem_main', '/p', ProblemMainHandler, PERM.PERM_VIEW_PROBLEM);
+    ctx.Route('problem_review', '/p/review', ProblemReviewHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_random', '/problem/random', ProblemRandomHandler, PERM.PERM_VIEW_PROBLEM);
     ctx.Route('problem_detail', '/p/:pid', ProblemDetailHandler);
     ctx.Route('problem_submit', '/p/:pid/submit', ProblemSubmitHandler, PERM.PERM_SUBMIT_PROBLEM);

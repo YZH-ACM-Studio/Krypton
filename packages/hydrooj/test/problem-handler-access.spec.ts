@@ -617,6 +617,7 @@ const {
     ProblemManageHandler,
     ProblemMineHandler,
     ProblemRandomHandler,
+    ProblemReviewHandler,
     ProblemSubmitHandler,
 } = handlerModule as any;
 
@@ -951,6 +952,7 @@ describe('P2.11 enumeration entry gates', () => {
             pendingContributionsConfirmed: true,
             pendingContributionFingerprint: 'pending-fingerprint',
         });
+        expect(admin.response.redirect).to.equal('/problem_review');
 
         const author = makeHandler(ProblemMainHandler, { canBrowse: true, admin: false });
         const denied = await captureFailure(() => author.postManagedPublish('forged', 7, '正式标题', 4, 9));
@@ -1006,6 +1008,123 @@ describe('P2.11 enumeration entry gates', () => {
                 query: { $and: [scope, { archivedAt: { $exists: false } }] },
             },
         ]);
+    });
+});
+
+describe('P2.37 managed problem review queue', () => {
+    it('rejects non-administrators before any queue or author lookup', async () => {
+        const handler = makeHandler(ProblemReviewHandler, {
+            canBrowse: true,
+            admin: false,
+            scope: { owner: 42 },
+        });
+
+        const error = await captureFailure(() => handler.get('forged', 1, '', 20, 'all'));
+
+        expect(error).to.be.instanceOf(TestPermissionError);
+        expect(error.params).to.deep.equal([PERM.PERM_EDIT_PROBLEM]);
+        expect(calls.refresh).to.deep.equal([]);
+        expect(calls.getMulti).to.deep.equal([]);
+        expect(calls.permits).to.deep.equal([]);
+    });
+
+    it('queries only active hidden managed review states inside the canonical bank scope', async () => {
+        const scope = { docId: { $nin: [99] } };
+        getMultiResults = [
+            [
+                {
+                    domainId: 'system',
+                    docId: 7,
+                    pid: 'P3107',
+                    title: '正式标题',
+                    authoringMode: 'managed',
+                    hidden: true,
+                    managedAuthoring: { metadataStatus: 'confirmed', workingTitle: '工作标题' },
+                },
+            ],
+        ];
+        countResult = 1;
+        permitResults = [{ uid: 88, role: 'author' }];
+        pendingContributionRows = [
+            {
+                domainId: 'system',
+                pid: 7,
+                uid: 89,
+                scope: 'tag',
+                active: true,
+                status: 'pending',
+                lastRequestId: 'assign-89',
+            },
+        ];
+        const handler = makeHandler(ProblemReviewHandler, {
+            canBrowse: true,
+            admin: true,
+            scope,
+        });
+
+        await handler.get('forged', 1, 'P3107', 20, 'all');
+
+        expect(handler.response.template).to.equal('problem_review.html');
+        expect(calls.refresh.map(({ domainId }) => domainId)).to.deep.equal(['system']);
+        expect(calls.getMulti).to.have.lengthOf(1);
+        expect(calls.getMulti[0]).to.deep.include({
+            domainId: 'system',
+            projection: problemStub.PROJECTION_MANAGED_BANK,
+        });
+        expect(calls.getMulti[0].querySnapshot.$and[0]).to.deep.equal(scope);
+        expect(calls.getMulti[0].querySnapshot.$and[1]).to.deep.equal({
+            authoringMode: 'managed',
+            hidden: true,
+            archivedAt: { $exists: false },
+            'managedAuthoring.metadataStatus': { $in: ['draft', 'confirmed'] },
+        });
+        expect(calls.getMulti[0].querySnapshot.$and[2]).to.have.property('$or');
+        expect(calls.getMulti[0].querySnapshot.$and[2].$or.some((alternative: any) => alternative.tag)).to.equal(false);
+        expect(handler.response.body).to.deep.include({
+            page: 1,
+            ppcount: 1,
+            pcount: 1,
+            qs: 'P3107',
+            status: 'all',
+            problemReviewUrl: '/problem_review',
+        });
+        expect(handler.response.body.managedAuthorsByDocId[7]).to.deep.equal([{ _id: 88, uname: 'user-88' }]);
+        expect(handler.response.body.pendingContributionsByDocId[7]).to.deep.equal([{ uid: 89, scope: 'tag' }]);
+        expect(handler.response.body.pendingContributionFingerprintByDocId[7]).to.equal('pending-fingerprint');
+        expect(handler.response.body.contributionUdict[89].uname).to.equal('user-89');
+    });
+
+    it('splits draft and confirmed queues and preserves server pagination boundaries', async () => {
+        const docs = Array.from({ length: 25 }, (_, index) => ({
+            domainId: 'system',
+            docId: index + 1,
+            pid: `P${index + 1}`,
+            title: `Title ${index + 1}`,
+            authoringMode: 'managed',
+            hidden: true,
+            managedAuthoring: { metadataStatus: 'draft', workingTitle: `Work ${index + 1}` },
+        }));
+        getMultiResults = [docs, docs];
+        countResult = 25;
+        permitResults = [{ uid: 88, role: 'author' }];
+        const handler = makeHandler(ProblemReviewHandler, {
+            canBrowse: true,
+            admin: true,
+            scope: {},
+        });
+
+        await handler.get('forged', 2, '', 50, 'draft');
+        expect(calls.getMulti[0].querySnapshot.$and[1]['managedAuthoring.metadataStatus']).to.equal('draft');
+        expect(handler.response.body.pdocs.map((pdoc: any) => pdoc.docId)).to.deep.equal([21, 22, 23, 24, 25]);
+        expect(handler.response.body.ppcount).to.equal(2);
+
+        const confirmed = makeHandler(ProblemReviewHandler, {
+            canBrowse: true,
+            admin: true,
+            scope: {},
+        });
+        await confirmed.get('forged', 1, '', 20, 'confirmed');
+        expect(calls.getMulti[1].querySnapshot.$and[1]['managedAuthoring.metadataStatus']).to.equal('confirmed');
     });
 });
 

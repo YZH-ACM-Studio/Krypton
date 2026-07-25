@@ -1,28 +1,15 @@
 import { Client } from '@elastic/elasticsearch';
 import {
-    _,
     Context,
     iterateAllProblem,
     iterateAllProblemInDomain,
-    ProblemDoc,
     ProblemModel,
     ProblemSearch,
     Schema,
     Service,
     SystemModel,
 } from 'hydrooj';
-
-const indexOmit = ['_id', 'docType', 'data', 'additional_file', 'config', 'stats', 'assign'];
-const processDocument = (doc: Partial<ProblemDoc>) => {
-    doc.content &&= doc.content.replace(/[[\]【】()（）]/g, ' ');
-    doc.title &&= doc.title.replace(/[[\]【】()（）]/g, ' ').replace(/([a-zA-Z]{2,})(\d+)/, '$1$2 $1 $2');
-    if (doc.pid?.includes('-')) {
-        const ns = doc.pid.split('-')[0];
-        doc.tag.push(ns);
-    }
-    doc.pid &&= doc.pid.replace(/([a-zA-Z]{2,})(\d+)/, '$1$2 $1 $2').replace(/-/g, ' ');
-    return _.omit(doc, indexOmit);
-};
+import { processDocument } from './document';
 
 export default class ElasticSearchService extends Service {
     static Config = Schema.object({

@@ -789,6 +789,7 @@ export class ProblemModel {
         'knowledgeMapId',
         'knowledgeNodeIds',
         'managedAuthoring',
+        'structureRevision',
     ];
 
     static isProblemBankAdmin(user: ProblemAclUser) {

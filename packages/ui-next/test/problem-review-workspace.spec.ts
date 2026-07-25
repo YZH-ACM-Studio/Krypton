@@ -84,6 +84,17 @@ test('review workspace reuses publication protocol and keeps the queue deliberat
   assert.doesNotMatch(review, /批量通过|驳回理由|审核历史|领取任务/);
 });
 
+test('problem bank projection carries the exact structure revision required by publication forms', () => {
+  const projectionStart = problemModel.indexOf('static PROJECTION_MANAGED_BANK');
+  const projectionEnd = problemModel.indexOf('static isProblemBankAdmin', projectionStart);
+  const projection = problemModel.slice(projectionStart, projectionEnd);
+  assert.notEqual(projectionStart, -1);
+  assert.notEqual(projectionEnd, -1);
+  assert.match(problems, /expectedStructureRevision=\{pdoc\.structureRevision\}/);
+  assert.match(review, /expectedStructureRevision=\{pdoc\.structureRevision\}/);
+  assert.match(projection, /'structureRevision'/);
+});
+
 test('namespace review exposes only the approved metadata, return, visibility and admin-correction operations', () => {
   assert.match(review, /name="operation" value="managedReview"/);
   assert.match(review, /name="returnNote"/);

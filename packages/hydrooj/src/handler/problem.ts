@@ -49,6 +49,13 @@ import { ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDoc, Pr
 import { canUsePostContestPractice, getContestSubmissionScope, resolvePostContestProblemMode } from '../lib/contest-correction';
 import { buildPersonalPracticeRecordQuery, buildPersonalPracticeStatusByPid, PersonalPracticeRecord } from '../lib/contest-problem-status';
 import { isProblemConfigFilename, parseProblemConfigObject, parseStructuredRegionSubmission } from '../lib/problem-config';
+import {
+    compileProgrammingStatement,
+    emptyProgrammingStatement,
+    previewLegacyProgrammingStatement,
+    programmingStatementClientView,
+    programmingStatementLimits,
+} from '../lib/programming-statement';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { PERM, PRIV, STATUS } from '../model/builtin';
 import { normalizeCodeEvaluationDraftCreationConfig } from '../model/code-evaluation-lifecycle';
@@ -1628,7 +1635,31 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                   }))
                 : Promise.resolve(null),
         ]);
-        const responsePdoc = knowledgeMapVisible ? this.pdoc : { ...this.pdoc };
+        const responsePdoc: ProblemDoc & { programmingStatementView?: ReturnType<typeof programmingStatementClientView> } = { ...this.pdoc };
+        if (responsePdoc.statementFormat === 'structured-v1') {
+            try {
+                const view = programmingStatementClientView(responsePdoc.programmingStatement, responsePdoc.config);
+                if (compileProgrammingStatement(responsePdoc.programmingStatement) !== responsePdoc.content) {
+                    throw new ValidationError('content', null, '结构化题面投影不一致');
+                }
+                responsePdoc.programmingStatementView = view;
+                delete responsePdoc.programmingStatement;
+            } catch (error) {
+                logger.error(
+                    'Programming statement render rejected domain=%s pid=%s docId=%d actor=%d statementFormat=%s revision=%s stage=detail-serialize result=denied error=%o',
+                    this.pdoc.domainId,
+                    this.pdoc.pid || '-',
+                    this.pdoc.docId,
+                    this.user._id,
+                    this.pdoc.statementFormat,
+                    this.pdoc.structureRevision ?? '-',
+                    error,
+                );
+                throw error;
+            }
+        } else {
+            delete responsePdoc.programmingStatement;
+        }
         if (!knowledgeMapVisible) {
             delete responsePdoc.knowledgeMapId;
             delete responsePdoc.knowledgeNodeIds;
@@ -1698,8 +1729,8 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
     async get(...args: any[]) {
         // Navigate to current additional file download
         // e.g. ![img](file://a.jpg) will navigate to ![img](./pid/file/a.jpg)
-        if (!this.request.json || args[2]) {
-            this.response.body.pdoc.content = this.response.body.pdoc.content.replace(/file:\/\/([^ \n)\\"]+)/g, (str: string) => {
+        const rewriteFileUrls = (source: string) =>
+            source.replace(/file:\/\/([^ \n)\\"]+)/g, (str: string) => {
                 const info = str.match(/file:\/\/([^ \n)\\"]+)/);
                 const fileinfo = info[1];
                 let filename = fileinfo.split('?')[0]; // remove querystring
@@ -1710,6 +1741,17 @@ export class ProblemDetailHandler extends ContestDetailBaseHandler {
                 if (!args[1]) return `./${this.pdoc.docId}/file/${fileinfo}`;
                 return `./${this.pdoc.docId}/file/${fileinfo}${fileinfo.includes('?') ? '&' : '?'}tid=${args[1]}`;
             });
+        if (!this.request.json || args[2]) {
+            this.response.body.pdoc.content = rewriteFileUrls(this.response.body.pdoc.content);
+        }
+        const statementView = this.response.body.pdoc.programmingStatementView;
+        if (statementView) {
+            for (const section of ['background', 'description', 'input', 'output', 'hints']) {
+                if (statementView[section]?.content) statementView[section].content = rewriteFileUrls(statementView[section].content);
+            }
+            for (const item of statementView.examples?.items || []) {
+                if (item.note) item.note = rewriteFileUrls(item.note);
+            }
         }
         this.response.body.page_name = this.tdoc
             ? this.tdoc.rule === 'homework'
@@ -2166,7 +2208,21 @@ export class ProblemEditHandler extends ProblemManageHandler {
             this.response.template = 'problem_edit.html';
             return;
         }
-        const rawPdoc = await requireStableCapabilityProblem(this.user, this.pdoc, 'content', ['config'] as any, true);
+        const rawPdoc = await requireStableCapabilityProblem(
+            this.user,
+            this.pdoc,
+            'content',
+            [...problem.PROJECTION_MANAGED_EDITOR, 'config'] as any,
+            true,
+        );
+        if (problemKind === 'programming' && rawPdoc.statementFormat !== 'structured-v1') {
+            this.response.body.legacyStatementPreview = previewLegacyProgrammingStatement(rawPdoc.content || '');
+            this.response.body.legacyStatementConversionRequired =
+                rawPdoc.authoringMode === 'managed' && rawPdoc.managedAuthoring?.metadataStatus === 'draft';
+        }
+        if (problemKind === 'programming') {
+            this.response.body.programmingStatementLimits = programmingStatementLimits(rawPdoc.config);
+        }
         if (isDedicatedStructuredEditorKind(problemKind)) {
             const config = parseProblemConfigObject(rawPdoc);
             const editorConfig = structuredProblemConfigForEditor(problemKind, config);
@@ -2208,6 +2264,9 @@ export class ProblemEditHandler extends ProblemManageHandler {
     @post('metadataOnly', Types.Boolean, true)
     @post('completeCodeEvaluationDraft', Types.Boolean, true)
     @post('activeContainerConfirmation', Types.String, true)
+    @post('programmingStatement', Types.Content, true)
+    @post('conversionFingerprint', Types.String, true)
+    @post('conversionUnclassified', Types.Content, true)
     async post(
         _domainId: string,
         pid: string | number,
@@ -2226,12 +2285,16 @@ export class ProblemEditHandler extends ProblemManageHandler {
         metadataOnly = false,
         completeCodeEvaluationDraft = false,
         activeContainerConfirmation?: string,
+        programmingStatementInput?: string,
+        conversionFingerprint?: string,
+        parsedConversionUnclassified?: string,
     ) {
         await assertProblemWriteCapability(this, this.pdoc, this.canEditLoadedProblem, 'edit', 'content');
         const domainId = this.pdoc.domainId;
         const problemKind = effectiveProblemKind(this.pdoc);
         const managed = this.pdoc.authoringMode === 'managed';
         const body = this.request.body || {};
+        const conversionUnclassified = Object.hasOwn(body, 'conversionUnclassified') ? (parsedConversionUnclassified ?? '') : undefined;
         const dedicatedStructured = isDedicatedStructuredEditorKind(problemKind);
         const legacyProgramming = !managed && problemKind === 'programming';
         let structuredKnowledge: Awaited<ReturnType<typeof materializeKnowledgeMindmapTags>> | null = null;
@@ -2241,6 +2304,9 @@ export class ProblemEditHandler extends ProblemManageHandler {
             const allowed = new Set([
                 'title',
                 'content',
+                'programmingStatement',
+                'conversionFingerprint',
+                'conversionUnclassified',
                 'pid',
                 'hidden',
                 'tag',
@@ -2397,12 +2463,26 @@ export class ProblemEditHandler extends ProblemManageHandler {
             this.response.redirect = this.url('problem_detail', { pid: responsePid });
             return;
         }
-        if (content === undefined) throw new ValidationError('content');
+        const structuredStatementSave =
+            problemKind === 'programming' && (this.pdoc.statementFormat === 'structured-v1' || programmingStatementInput !== undefined);
+        if (structuredStatementSave && content !== undefined) {
+            throw new ValidationError('content', null, '结构化题面不接受直接 Markdown 写入');
+        }
+        if (!structuredStatementSave && content === undefined) throw new ValidationError('content');
+        if (
+            problemKind === 'programming' &&
+            this.pdoc.authoringMode === 'managed' &&
+            this.pdoc.managedAuthoring?.metadataStatus === 'draft' &&
+            !this.pdoc.statementFormat &&
+            !structuredStatementSave
+        ) {
+            throw new ValidationError('statementFormat', null, '旧托管草稿必须先完成显式题面转换');
+        }
         const statementConfirmation = resolveDataWriteConfirmation(this, this.pdoc, 'statement-edit', activeContainerConfirmation);
         if (newPid === undefined) newPid = this.pdoc.pid || '';
         else if (typeof newPid !== 'string') newPid = `P${newPid}`;
         if (newPid !== this.pdoc.pid && (await problem.get(domainId, newPid))) throw new ProblemAlreadyExistError(newPid);
-        const $update: Partial<ProblemDoc> = { content, html: false };
+        const $update: Partial<ProblemDoc> = content === undefined ? {} : { content, html: false };
         if (!managed) {
             Object.assign($update, {
                 title,
@@ -2442,6 +2522,37 @@ export class ProblemEditHandler extends ProblemManageHandler {
             if (Object.hasOwn(body, 'tag')) $update.tag = tag ?? [];
             if (Object.hasOwn(body, 'difficulty')) $update.difficulty = difficulty ?? 0;
             if (Object.hasOwn(body, 'lockHidden')) $update.lockHidden = !!lockHidden;
+        }
+        if (structuredStatementSave) {
+            if (!programmingStatementInput) throw new ValidationError('programmingStatement');
+            let programmingStatement: unknown;
+            try {
+                programmingStatement = JSON.parse(programmingStatementInput);
+            } catch {
+                throw new ValidationError('programmingStatement', null, '结构化题面 JSON 无效');
+            }
+            if (!expectedStructureRevision) throw new ValidationError('expectedStructureRevision');
+            const pdoc = await problem.saveProgrammingStatement({
+                domainId,
+                pid: this.pdoc.docId,
+                user: this.user,
+                expectedStructureRevision,
+                programmingStatement,
+                activeContainerConfirmation: statementConfirmation,
+                ...(conversionFingerprint ? { conversionFingerprint } : {}),
+                ...(conversionUnclassified !== undefined ? { conversionUnclassified } : {}),
+                metadata: $update,
+            });
+            const responsePid = pdoc.pid || pdoc.docId;
+            this.response.body = {
+                ok: true,
+                pid: responsePid,
+                problemKind,
+                statementFormat: pdoc.statementFormat,
+                structureRevision: pdoc.structureRevision,
+            };
+            this.response.redirect = this.url('problem_detail', { pid: responsePid });
+            return;
         }
         if (isDedicatedStructuredEditorKind(problemKind)) {
             if (editorProblemKind !== problemKind) throw new ValidationError('editorProblemKind');
@@ -3351,6 +3462,8 @@ export class ProblemCreateProgrammingHandler extends Handler {
                 hidden: true,
                 problemKind: 'programming',
                 authoringMode: 'managed',
+                statementFormat: 'structured-v1',
+                programmingStatement: emptyProgrammingStatement(),
                 knowledgeMapId: knowledgeMaps.length === 1 ? knowledgeMaps[0].id : '',
                 managedAuthoring: { workingTitle: '', selectedMindmapNodeIds: [], metadataStatus: 'draft' },
             },
@@ -3380,7 +3493,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
     }
 
     @post('title', Types.Title)
-    @post('content', Types.Content)
+    @post('content', Types.Content, true)
     @post('pid', Types.ProblemId, true, (i) => /^(?:[a-z0-9]{1,10}-)?[a-z][a-z0-9]*$/i.test(i))
     @post('hidden', Types.Boolean)
     @post('difficulty', Types.PositiveInt, (i) => +i <= 10, true)
@@ -3400,7 +3513,7 @@ export class ProblemCreateProgrammingHandler extends Handler {
     async post(
         _domainId: string,
         title: string,
-        content: string,
+        _content: string | undefined,
         _pid: string | number = '',
         _hidden = false,
         difficulty = 0,
@@ -3451,7 +3564,6 @@ export class ProblemCreateProgrammingHandler extends Handler {
         }
         const allowed = new Set([
             'title',
-            'content',
             'managed',
             'template',
             'pidNamespaceId',
@@ -3494,7 +3606,6 @@ export class ProblemCreateProgrammingHandler extends Handler {
             domainId,
             {
                 workingTitle: title,
-                content,
                 difficulty: resolvedDifficulty,
                 pidNamespaceId,
                 sourceMeta,

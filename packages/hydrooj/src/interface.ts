@@ -222,6 +222,10 @@ declare module './model/problem' {
         problemKind?: import('@hydrooj/common').ProblemKind;
         /** Missing means the legacy owner/maintainer authorization model. */
         authoringMode?: 'managed';
+        /** Explicit statement protocol. Missing means pre-P3.25 legacy Markdown. */
+        statementFormat?: import('./lib/programming-statement').ProgrammingStatementFormat;
+        /** Canonical editable source for structured-v1 programming statements. */
+        programmingStatement?: import('./lib/programming-statement').ProgrammingStatement;
         /** Canonical source identity for a managed programming problem. */
         sourceMeta?: {
             template:

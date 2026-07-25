@@ -69,6 +69,7 @@ const calls = {
     recordAdd: [] as any[],
     renameFile: [] as any[],
     status: [] as any[],
+    statementSaves: [] as any[],
     structuredMetadataSaves: [] as any[],
     structuredSaves: [] as any[],
     tagNormalizations: [] as any[],
@@ -255,6 +256,16 @@ const problemStub = {
     async editAuthorized(...args: any[]) {
         calls.edit.push(args);
         return { domainId: args[0], docId: args[1] };
+    },
+    async saveProgrammingStatement(input: any) {
+        calls.statementSaves.push(input);
+        return {
+            domainId: input.domainId,
+            docId: input.pid,
+            pid: `P${input.pid}`,
+            statementFormat: 'structured-v1',
+            structureRevision: input.expectedStructureRevision + 1,
+        };
     },
     async get(...args: any[]) {
         calls.get.push(args);
@@ -1608,7 +1619,6 @@ describe('P2.11 authoritative problem route domain', () => {
         });
         handler.request.body = {
             title: 'Title',
-            content: 'Statement',
             managed: 'true',
             template: 'self',
             pidNamespaceId: 'builtin:self',
@@ -1630,7 +1640,6 @@ describe('P2.11 authoritative problem route domain', () => {
         });
         handler.request.body = {
             title: 'Working title',
-            content: 'Statement',
             managed: 'true',
             template: 'self',
             pidNamespaceId: 'builtin:self',
@@ -1649,7 +1658,6 @@ describe('P2.11 authoritative problem route domain', () => {
             'system',
             {
                 workingTitle: 'Working title',
-                content: 'Statement',
                 difficulty: 4,
                 sourceMeta: { template: 'self', year: 2026 },
                 pidNamespaceId: 'builtin:self',
@@ -1735,7 +1743,6 @@ describe('P2.11 authoritative problem route domain', () => {
         });
         handler.request.body = {
             title: 'Broad creator draft',
-            content: 'Statement',
             managed: 'true',
             template: 'self',
             pidNamespaceId: 'builtin:self',
@@ -1775,7 +1782,6 @@ describe('P2.11 authoritative problem route domain', () => {
         });
         const commonBody = {
             title: 'Working title',
-            content: 'Statement',
             managed: 'true',
             pidNamespaceId: 'builtin:self',
             year: '2026',
@@ -1865,7 +1871,6 @@ describe('P2.11 authoritative problem route domain', () => {
         });
         handler.request.body = {
             title: 'Admin draft',
-            content: 'Statement',
             managed: 'true',
             template: 'self',
             pidNamespaceId: 'builtin:self',
@@ -1941,7 +1946,6 @@ describe('P2.11 authoritative problem route domain', () => {
         });
         handler.request.body = {
             title: 'Own admin draft',
-            content: 'Statement',
             managed: 'true',
             template: 'self',
             pidNamespaceId: 'builtin:self',
@@ -1984,7 +1988,6 @@ describe('P2.11 authoritative problem route domain', () => {
         });
         handler.request.body = {
             title: 'Difficulty default',
-            content: 'Statement',
             managed: 'true',
             template: 'self',
             pidNamespaceId: 'builtin:self',
@@ -2075,6 +2078,17 @@ describe('P2.11 authoritative problem route domain', () => {
 });
 
 describe('P2.13 managed programming edit boundary', () => {
+    const structuredStatement = {
+        schemaVersion: 1,
+        locale: 'zh-CN',
+        background: { state: 'absent', content: '' },
+        description: { state: 'present', content: 'New statement' },
+        input: { state: 'absent', content: '' },
+        output: { state: 'absent', content: '' },
+        examples: { state: 'absent', items: [] },
+        hints: { state: 'absent', content: '' },
+    };
+
     function managedHandler() {
         const handler = makeHandler(ProblemEditHandler, {});
         handler.pdoc = {
@@ -2099,34 +2113,123 @@ describe('P2.13 managed programming edit boundary', () => {
         return handler;
     }
 
-    it('sends only content fields to the model for a managed author save', async () => {
+    it('sends only the canonical statement to the structured save boundary', async () => {
         const handler = managedHandler();
-        handler.request.body = { content: 'New statement', expectedStructureRevision: '2' };
+        handler.pdoc.statementFormat = 'structured-v1';
+        handler.pdoc.programmingStatement = structuredStatement;
+        const programmingStatement = JSON.stringify(structuredStatement);
+        handler.request.body = { programmingStatement, expectedStructureRevision: '2' };
 
-        await handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, [], undefined, undefined, 2);
+        await handler.post(
+            'forged',
+            'P7',
+            undefined,
+            undefined,
+            undefined,
+            false,
+            [],
+            undefined,
+            [],
+            undefined,
+            undefined,
+            2,
+            '',
+            '',
+            false,
+            false,
+            undefined,
+            programmingStatement,
+        );
 
-        expect(calls.edit).to.have.lengthOf(1);
-        expect(calls.edit[0][2]).to.deep.equal({ content: 'New statement', html: false });
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.statementSaves).to.have.lengthOf(1);
+        expect(calls.statementSaves[0]).to.deep.include({
+            domainId: 'system',
+            pid: 7,
+            expectedStructureRevision: 2,
+            programmingStatement: structuredStatement,
+            metadata: {},
+        });
+    });
+
+    it('forwards the explicit cleared-unclassified confirmation for legacy statement conversion', async () => {
+        const handler = managedHandler();
+        const programmingStatement = JSON.stringify(structuredStatement);
+        handler.request.body = {
+            programmingStatement,
+            expectedStructureRevision: '2',
+            conversionFingerprint: 'legacy-fingerprint',
+            conversionUnclassified: '',
+        };
+
+        await handler.post(
+            'forged',
+            'P7',
+            undefined,
+            undefined,
+            undefined,
+            false,
+            [],
+            undefined,
+            [],
+            undefined,
+            undefined,
+            2,
+            '',
+            '',
+            false,
+            false,
+            undefined,
+            programmingStatement,
+            'legacy-fingerprint',
+            undefined,
+        );
+
+        expect(calls.statementSaves).to.have.lengthOf(1);
+        expect(calls.statementSaves[0]).to.deep.include({
+            conversionFingerprint: 'legacy-fingerprint',
+            conversionUnclassified: '',
+        });
     });
 
     it('lets the managed draft author update the working title, difficulty, and knowledge nodes together', async () => {
         const handler = managedHandler();
+        handler.pdoc.statementFormat = 'structured-v1';
+        handler.pdoc.programmingStatement = structuredStatement;
         handler.user.canEditMetadata = true;
         handler.user.canEditTags = true;
+        const programmingStatement = JSON.stringify(structuredStatement);
         handler.request.body = {
             title: 'Corrected working title',
-            content: 'New statement',
+            programmingStatement,
             difficulty: '5',
             knowledgeNodeIds: 'node-1',
             expectedStructureRevision: '2',
         };
 
-        await handler.post('forged', 'P7', 'Corrected working title', 'New statement', undefined, false, [], undefined, ['node-1'], 5, undefined, 2);
+        await handler.post(
+            'forged',
+            'P7',
+            'Corrected working title',
+            undefined,
+            undefined,
+            false,
+            [],
+            undefined,
+            ['node-1'],
+            5,
+            undefined,
+            2,
+            '',
+            '',
+            false,
+            false,
+            undefined,
+            programmingStatement,
+        );
 
-        expect(calls.edit).to.have.lengthOf(1);
-        expect(calls.edit[0][2]).to.deep.equal({
-            content: 'New statement',
-            html: false,
+        expect(calls.edit).to.deep.equal([]);
+        expect(calls.statementSaves[0].metadata).to.deep.equal({
             title: '待审核 · Corrected working title',
             difficulty: 5,
             managedAuthoring: {
@@ -2139,15 +2242,35 @@ describe('P2.13 managed programming edit boundary', () => {
 
     it('accepts a managed author knowledge-node suggestion only while the problem is a draft', async () => {
         const handler = managedHandler();
+        handler.pdoc.statementFormat = 'structured-v1';
+        handler.pdoc.programmingStatement = structuredStatement;
         handler.user.canEditContent = true;
-        handler.request.body = { content: 'New statement', knowledgeNodeIds: 'node-1', expectedStructureRevision: '2' };
+        const programmingStatement = JSON.stringify(structuredStatement);
+        handler.request.body = { programmingStatement, knowledgeNodeIds: 'node-1', expectedStructureRevision: '2' };
 
-        await handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, ['node-1'], undefined, undefined, 2);
+        await handler.post(
+            'forged',
+            'P7',
+            undefined,
+            undefined,
+            undefined,
+            false,
+            [],
+            undefined,
+            ['node-1'],
+            undefined,
+            undefined,
+            2,
+            '',
+            '',
+            false,
+            false,
+            undefined,
+            programmingStatement,
+        );
 
         expect(calls.knowledgeMaterializations.at(-1)).to.deep.equal(['node-1']);
-        expect(calls.edit[0][2]).to.deep.equal({
-            content: 'New statement',
-            html: false,
+        expect(calls.statementSaves[0].metadata).to.deep.equal({
             managedAuthoring: {
                 workingTitle: 'Working title',
                 selectedMindmapNodeIds: ['node-1'],
@@ -2156,9 +2279,28 @@ describe('P2.13 managed programming edit boundary', () => {
         });
 
         calls.edit.length = 0;
-        handler.request.body = { content: 'New statement', knowledgeNodeIds: '', expectedStructureRevision: '2' };
+        handler.request.body = { programmingStatement, knowledgeNodeIds: '', expectedStructureRevision: '2' };
         const empty = await captureFailure(() =>
-            handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, [], undefined, undefined, 2),
+            handler.post(
+                'forged',
+                'P7',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                [],
+                undefined,
+                [],
+                undefined,
+                undefined,
+                2,
+                '',
+                '',
+                false,
+                false,
+                undefined,
+                programmingStatement,
+            ),
         );
         expect(empty).to.be.instanceOf(GenericError);
         expect(calls.knowledgeMaterializations.at(-1)).to.deep.equal([]);
@@ -2167,7 +2309,26 @@ describe('P2.13 managed programming edit boundary', () => {
         calls.edit.length = 0;
         handler.pdoc.managedAuthoring.metadataStatus = 'confirmed';
         const denied = await captureFailure(() =>
-            handler.post('forged', 'P7', undefined, 'New statement', undefined, false, [], undefined, ['node-1'], undefined, undefined, 2),
+            handler.post(
+                'forged',
+                'P7',
+                undefined,
+                undefined,
+                undefined,
+                false,
+                [],
+                undefined,
+                ['node-1'],
+                undefined,
+                undefined,
+                2,
+                '',
+                '',
+                false,
+                false,
+                undefined,
+                programmingStatement,
+            ),
         );
         expect(denied).to.be.instanceOf(GenericError);
         expect(calls.edit).to.deep.equal([]);
@@ -4078,7 +4239,7 @@ describe('P2.11 canonical ProblemDoc maintenance gate', () => {
         expect(calls.getCapabilityAuthorized[0][0]).to.equal('system');
         expect(calls.getCapabilityAuthorized[0][1]).to.equal(7);
         expect(calls.getCapabilityAuthorized[0][3]).to.equal('content');
-        expect(calls.getCapabilityAuthorized[0][4]).to.deep.equal(['config']);
+        expect(calls.getCapabilityAuthorized[0][4]).to.deep.equal(['domainId', 'docId', 'pid', 'sourceMeta', 'managedAuthoring', 'config']);
         expect(calls.getCapabilityAuthorized[0][5]).to.equal(true);
     });
 

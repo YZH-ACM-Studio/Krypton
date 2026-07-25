@@ -27,6 +27,11 @@ import { getLangEntry, getStatus, KryptonIDE, type RecordEntry } from '@/compone
 import { MarkdownView } from '@/components/markdown-renderer';
 import { ObjectiveAnswerPanel, type ObjectiveClientQuestion } from '@/components/objective-answer-panel';
 import { ProblemAuthorText, ProblemEditGate } from '@/components/problem-authoring-state';
+import {
+  ProgrammingStatementView,
+  structuredStatementSamples,
+  type ProgrammingStatementViewData,
+} from '@/components/programming-statement';
 import { TeamCodeSendDialog, type TeamCodeBuffer } from '@/components/team-code-snapshots';
 import { readTeamExamModeContext } from '@/components/team-exam-mode';
 import { Badge } from '@/components/ui/badge';
@@ -700,7 +705,11 @@ export function ProblemDetailPage() {
   // `samples` is still needed for the IDE/pretest panel even though the
   // problem-statement markdown now renders sample blocks inline (see
   // MarkdownView → splitMarkdownBySamples).
-  const samples = useMemo(() => extractSamples(content), [content]);
+  const structuredStatement = (pdoc.programmingStatementView || null) as ProgrammingStatementViewData | null;
+  const samples = useMemo(
+    () => (structuredStatement ? structuredStatementSamples(structuredStatement) : extractSamples(content)),
+    [content, structuredStatement],
+  );
 
   /* ── Records state for IDE mode ── */
   const [ideRecords, setIdeRecords] = useState<RecordEntry[]>([]);
@@ -913,11 +922,18 @@ export function ProblemDetailPage() {
                   {!inContest && pdoc.origStat ? <InfoChip icon={BarChart3} label="赛时通过率" value={origStatChipValue(pdoc.origStat)} /> : null}
                 </div>
 
-                {/* Limits */}
-                <LimitsSection config={config} />
-
-                {/* Problem statement (sample blocks render inline) */}
-                <MarkdownView content={content} preferredLang={preferredLang} />
+                {structuredStatement ? (
+                  <ProgrammingStatementView
+                    statement={structuredStatement}
+                    preferredLang={preferredLang}
+                    limits={<LimitsSection config={config} />}
+                  />
+                ) : (
+                  <>
+                    <LimitsSection config={config} />
+                    <MarkdownView content={content} preferredLang={preferredLang} />
+                  </>
+                )}
               </ScrollArea>
 
               {/* Records panel — bottom of left side */}
@@ -1203,7 +1219,15 @@ export function ProblemDetailPage() {
         <div className="min-w-0 space-y-3">
           <Card>
             <CardContent className="p-4 sm:p-6">
-              <MarkdownView content={content} preferredLang={preferredLang} />
+              {structuredStatement ? (
+                <ProgrammingStatementView
+                  statement={structuredStatement}
+                  preferredLang={preferredLang}
+                  limits={<LimitsSection config={config} />}
+                />
+              ) : (
+                <MarkdownView content={content} preferredLang={preferredLang} />
+              )}
             </CardContent>
           </Card>
           {canSubmit && isObjective && (!teamExamMode || teamExamMode.canSubmit) && (!isSubjective || inContest || canPreviewSubjective) ? (
@@ -1233,11 +1257,13 @@ export function ProblemDetailPage() {
         {/* Right: sidebar info panel */}
         <aside className="space-y-4">
           {/* Limits */}
-          <Card>
-            <CardContent className="p-4">
-              <LimitsSection config={config} />
-            </CardContent>
-          </Card>
+          {!structuredStatement ? (
+            <Card>
+              <CardContent className="p-4">
+                <LimitsSection config={config} />
+              </CardContent>
+            </Card>
+          ) : null}
 
           {/* Related contests — hide during contest (would reveal source) */}
           {showExternals && (ctdocs.length > 0 || htdocs.length > 0) && (

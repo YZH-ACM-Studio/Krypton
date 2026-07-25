@@ -4,6 +4,13 @@ import { isDeepStrictEqual } from 'node:util';
 import { Logger } from '@hydrooj/utils';
 import { ManagedProblemMetadataConflictError, ValidationError } from '../error';
 import type { ProblemDoc, TrainingNode } from '../interface';
+import {
+    compileProgrammingStatement,
+    emptyProgrammingStatement,
+    normalizeProgrammingStatement,
+    type ProgrammingStatement,
+    type ProgrammingStatementFormat,
+} from '../lib/programming-statement';
 import type { KnowledgeMapOption, KnowledgeMindmapOption } from '../lib/problem-tag-canonical';
 import db from '../service/db';
 import * as document from './document';
@@ -75,7 +82,10 @@ export interface ManagedProblemTrainingPlacementView {
 
 export interface ManagedProblemDraftInput {
     workingTitle: string;
-    content: string;
+    /** New web/batch creation uses structured-v1; raw package import must opt into legacy-import-v1. */
+    content?: string;
+    statementFormat?: ProgrammingStatementFormat;
+    programmingStatement?: unknown;
     difficulty: number;
     /**
      * Canonical PID namespace selected before any number is reserved.
@@ -102,6 +112,8 @@ export interface ManagedProblemBatchImportIdentity {
 export interface PreparedManagedProblemDraft {
     workingTitle: string;
     content: string;
+    statementFormat: ProgrammingStatementFormat;
+    programmingStatement?: ProgrammingStatement;
     difficulty: number;
     sourceMeta: ManagedSourceMeta;
     knowledgeMapId: ObjectId;
@@ -658,7 +670,20 @@ export async function validateManagedTrainingPlacement(
 export async function prepareManagedProblemDraft(domainId: string, input: ManagedProblemDraftInput): Promise<PreparedManagedProblemDraft> {
     const workingTitle = typeof input.workingTitle === 'string' ? input.workingTitle.trim() : '';
     if (!workingTitle) throw new ValidationError('title');
-    if (typeof input.content !== 'string') throw new ValidationError('content');
+    const statementFormat = input.statementFormat || 'structured-v1';
+    let programmingStatement: ProgrammingStatement | undefined;
+    let content: string;
+    if (statementFormat === 'structured-v1') {
+        programmingStatement = normalizeProgrammingStatement(input.programmingStatement ?? emptyProgrammingStatement());
+        content = compileProgrammingStatement(programmingStatement);
+        if (input.content !== undefined) throw new ValidationError('content', null, '结构化编程题正文只能由服务端生成');
+    } else if (statementFormat === 'legacy-import-v1') {
+        if (typeof input.content !== 'string') throw new ValidationError('content');
+        if (input.programmingStatement !== undefined) throw new ValidationError('programmingStatement');
+        content = input.content;
+    } else {
+        throw new ValidationError('statementFormat');
+    }
     const difficulty = parseInteger(input.difficulty, 'difficulty', 1, 10);
     const sourceMeta = normalizeManagedSourceMeta(input.sourceMeta);
     const mindmap = await materializeManagedMindmapTags(input.mindmapNodeIds, input.knowledgeMapId, false);
@@ -668,7 +693,9 @@ export async function prepareManagedProblemDraft(domainId: string, input: Manage
     const batchImport = input.batchImport === undefined ? undefined : normalizeManagedProblemBatchImport(input.batchImport);
     return {
         workingTitle,
-        content: input.content,
+        content,
+        statementFormat,
+        ...(programmingStatement ? { programmingStatement } : {}),
         difficulty,
         sourceMeta,
         knowledgeMapId: mindmap.mapId,

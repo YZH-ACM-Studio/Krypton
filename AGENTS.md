@@ -23,6 +23,15 @@
 - 作者端源码变更只使用 CodeMirror change mapping 更新整行区间；整体删除、交叠或无法确定的映射必须显式失效并阻止保存，不得靠附近文本或旧 anchor 猜测恢复。
 - P3.21/P3.22/P3.23 是不可拆部署单元；生产唯一旧函数草稿只能经过备份、只读 plan、确认、精确迁移和 verify 后切换，不维护旧协议双读双写。
 
+## 结构化编程题面协议
+
+- 网页新建的编程题使用 `statementFormat:'structured-v1'` 与 `programmingStatement` schema v1；canonical 固定为 `zh-CN` 的背景、描述、输入、输出、样例和总提示，区块顺序不可配置，时空限制只读取实际评测配置。
+- `programmingStatement` 是结构化题面的唯一写入源；`content` 只能由服务端 compiler 在同一次 revision/CAS 写入中生成。任何直接 content 写入、未知字段/schema、canonical 与投影不一致或校验钩子改写都必须 fail closed。
+- 草稿可保存 `undecided`；发布或加入正式容器前必须确认所有区块状态、非空描述、合法有序样例和有效时空限制。样例只接受服务端按数组顺序生成的严格 `inputN/outputN` 配对。
+- 学生端只消费 client-safe serializer；普通题目、比赛和 Exam Mode 共用同一结构化视图，IDE 直接读取安全样例数组。不得下发作者 canonical 或把样例自动当作正式 testdata。
+- 无 `statementFormat` 的既有题保持 legacy 行为。旧题转换必须由操作者显式发起，以当前 revision 与原文 fingerprint 一次性 CAS 写入；未归类内容非空时拒绝，转换后不得退回自由 Markdown。
+- P2.23 schema v2 新导入必须同时提供 canonical JSON 与等值 Markdown 投影；schema v1 仅可 verify。原始 Hydro/ICPC 包显式保存为 `legacy-import-v1`，禁止请求路径回填或批量静默转换。
+
 ## 题号命名空间协议
 
 - Problem 归属只认显式 `pidNamespaceId`；运行时不得从 PID 前缀推断、补写或修复命名空间。P2.38 源码与 P2.39 全量迁移是不可拆部署单元。

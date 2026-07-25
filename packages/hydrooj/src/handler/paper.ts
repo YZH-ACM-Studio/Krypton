@@ -95,6 +95,18 @@ function absolutizeProblemFileUrls(handler: Handler, content: string, pdoc: any,
     return out;
 }
 
+function absolutizeProgrammingStatementFileUrls(handler: Handler, view: any, pdoc: any, tid: ObjectId | string): void {
+    if (!view) return;
+    for (const section of ['background', 'description', 'input', 'output', 'hints']) {
+        if (typeof view[section]?.content === 'string') {
+            view[section].content = absolutizeProblemFileUrls(handler, view[section].content, pdoc, tid);
+        }
+    }
+    for (const item of view.examples?.items || []) {
+        if (typeof item.note === 'string') item.note = absolutizeProblemFileUrls(handler, item.note, pdoc, tid);
+    }
+}
+
 /**
  * pdoc.config 统一解析（见 lib/problem-config.ts parseProblemConfigObject）。
  * 此前 `typeof pdoc.config === 'object'` 的判断对字符串永远为 false，
@@ -1021,6 +1033,9 @@ class ExamModeProblemDetailHandler extends ProblemDetailHandler {
         if (pdoc && typeof pdoc.content === 'string') {
             pdoc.content = absolutizeProblemFileUrls(this, pdoc.content, pdoc, tid);
         }
+        if (pdoc?.programmingStatementView) {
+            absolutizeProgrammingStatementFileUrls(this, pdoc.programmingStatementView, pdoc, tid);
+        }
         const { previewMode, teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, this.tdoc);
         await decorateExamMode(this, this.tdoc, 'problems', 'problem_detail.html', previewMode, teamContext);
     }
@@ -1190,12 +1205,7 @@ class ExamModeDiscussionDetailHandler extends DiscussionDetailHandler {
     @param('page', Types.PositiveInt, true)
     async get(_domainId: string, did: ObjectId, page = 1) {
         await super.get(String(this.domain?._id), did, page);
-        const { previewMode, teamContext } = await ensureExamModeAccess(
-            this,
-            String(this.domain?._id),
-            this.tdoc.docId,
-            this.tdoc,
-        );
+        const { previewMode, teamContext } = await ensureExamModeAccess(this, String(this.domain?._id), this.tdoc.docId, this.tdoc);
         await decorateExamMode(this, this.tdoc, 'discussion', 'discussion_detail.html', previewMode, teamContext);
     }
 }
@@ -1223,12 +1233,7 @@ class ExamModeTeamRoleConnectionHandler extends ConnectionHandler {
             ({ teamContext } = await ensureExamModeAccess(this, authoritativeDomainId, tid, tdoc));
         } catch (error) {
             if (!(error instanceof ContestTeamConflictError)) throw error;
-            logger.info(
-                'Team Exam Mode role socket access revoked domain=%s tid=%s uid=%d',
-                authoritativeDomainId,
-                tid.toHexString(),
-                this.user._id,
-            );
+            logger.info('Team Exam Mode role socket access revoked domain=%s tid=%s uid=%d', authoritativeDomainId, tid.toHexString(), this.user._id);
             this.send({ teamRoleChanged: true, teamRevision: null });
             this.close(4003, 'Team Exam Mode access revoked');
             return;
@@ -1251,13 +1256,7 @@ class ExamModeTeamRoleConnectionHandler extends ConnectionHandler {
     }
 
     @subscribe('contest/team-code-snapshot')
-    async onTeamCodeSnapshot(payload: {
-        domainId: string;
-        contestId: ObjectId;
-        teamId: ObjectId;
-        targetUid: number;
-        snapshotId: ObjectId;
-    }) {
+    async onTeamCodeSnapshot(payload: { domainId: string; contestId: ObjectId; teamId: ObjectId; targetUid: number; snapshotId: ObjectId }) {
         if (
             payload.domainId !== this.domainId ||
             !payload.contestId.equals(this.contestId) ||

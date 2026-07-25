@@ -489,6 +489,11 @@ async function assertDraftReady(
     const statement = await fs.readFile(entry.statementFile.path, 'utf8');
     const config = await fs.readFile(entry.configFile.path, 'utf8');
     const expectedPidNamespaceId = builtinPidNamespaceIdForSourceTemplate(batch.manifest.source.template);
+    if (batch.manifest.schemaVersion === 2) {
+        if (pdoc.statementFormat !== 'structured-v1' || !entry.canonicalStatement || !equal(pdoc.programmingStatement, entry.canonicalStatement)) {
+            fail(`${entry.sourceProblemCode}: structured statement differs from the manifest`, 'BATCH_IMPORT_CONTENT_CONFLICT');
+        }
+    }
     if (pdoc.content !== statement) fail(`${entry.sourceProblemCode}: statement content conflicts`, 'BATCH_IMPORT_CONTENT_CONFLICT');
     if (pdoc.config !== config) fail(`${entry.sourceProblemCode}: parsed judge config differs from the local config`, 'BATCH_IMPORT_CONFIG_INVALID');
     if (pdoc.pidNamespaceId !== expectedPidNamespaceId) {
@@ -656,12 +661,15 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
             const planned = plannedByCode.get(entry.sourceProblemCode)!;
             let pdoc = await loadIdentityProblem(batch, entry);
             if (!pdoc) {
-                const statement = await fs.readFile(entry.statementFile.path, 'utf8');
+                if (!entry.canonicalStatement) {
+                    fail(`${entry.sourceProblemCode}: structured programming statement is missing`, 'BATCH_IMPORT_STATEMENT_INVALID');
+                }
                 const created = await ProblemModel.createManagedProgrammingDraft(
                     batch.manifest.domain,
                     {
                         workingTitle: entry.title,
-                        content: statement,
+                        statementFormat: 'structured-v1',
+                        programmingStatement: entry.canonicalStatement,
                         difficulty: entry.difficulty,
                         pidNamespaceId: builtinPidNamespaceIdForSourceTemplate(batch.manifest.source.template),
                         sourceMeta: batch.manifest.source,

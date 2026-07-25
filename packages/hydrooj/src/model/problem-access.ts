@@ -1,6 +1,7 @@
 import type { Filter } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { PermissionError, ValidationError } from '../error';
+import { assertProgrammingStatementComplete, compileProgrammingStatement } from '../lib/programming-statement';
 import { PERM, PRIV } from './builtin';
 import { assertCodeEvaluationLifecyclePatch, assertProblemReadyForUse, CODE_EVALUATION_CANDIDATE_FILTER } from './code-evaluation-lifecycle';
 import * as document from './document';
@@ -1354,7 +1355,7 @@ export async function assertProblemBankSelection(
                     domainId,
                     docType: document.TYPE_PROBLEM,
                     docId: { $in: selected },
-                    ...CODE_EVALUATION_CANDIDATE_FILTER,
+                    $or: [...CODE_EVALUATION_CANDIDATE_FILTER.$or, { statementFormat: 'structured-v1' }],
                 } as Filter<ProblemDoc>,
                 {
                     projection: {
@@ -1366,6 +1367,9 @@ export async function assertProblemBankSelection(
                         structureRevision: 1,
                         config: 1,
                         data: 1,
+                        content: 1,
+                        statementFormat: 1,
+                        programmingStatement: 1,
                     },
                 },
             )
@@ -1373,6 +1377,12 @@ export async function assertProblemBankSelection(
         for (const candidate of candidates) {
             try {
                 assertProblemReadyForUse(candidate as ProblemDoc, { actor: user._id, stage: 'container-reference' });
+                if (candidate.statementFormat === 'structured-v1') {
+                    const statement = assertProgrammingStatementComplete(candidate.programmingStatement, candidate.config);
+                    if (compileProgrammingStatement(statement) !== candidate.content) {
+                        throw new ValidationError('content', null, '结构化题面投影不一致');
+                    }
+                }
             } catch (error) {
                 logger.warn(
                     'Problem selection ready gate rejected domain=%s pid=%s docId=%d problemKind=%s actor=%d stage=container-reference structureRevision=%s result=not-ready error=%o',

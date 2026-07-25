@@ -18,6 +18,7 @@ import {
     validateProblemBatchManifest,
     verifyProblemBatchImport,
 } from '../src/lib/problem-batch-import';
+import { compileProgrammingStatement, emptyProgrammingStatement } from '../src/lib/programming-statement';
 import { problemBatchCommandInternals } from '../src/commands/problem-batch-import';
 
 const caseCounts = [10, 30, 43, 43, 3, 14, 30];
@@ -40,8 +41,21 @@ async function writeFixture(root: string): Promise<string> {
         const directory = path.join(root, 'problems', code);
         const dataDirectory = path.join(directory, 'testdata');
         await fsp.mkdir(dataDirectory, { recursive: true });
-        const statement = `# ${title}\n\n![diagram](file://diagram.png)\n\n\`\`\`input1\n1\n\`\`\`\n\n\`\`\`output1\n1\n\`\`\`\n`;
+        const canonicalStatement = {
+            ...emptyProgrammingStatement(),
+            background: { state: 'absent' as const, content: '' },
+            description: { state: 'present' as const, content: `# ${title}\n\n![diagram](file://diagram.png)` },
+            input: { state: 'present' as const, content: '输入一个整数。' },
+            output: { state: 'present' as const, content: '输出答案。' },
+            examples: {
+                state: 'present' as const,
+                items: [{ input: '1', inputEmpty: false, output: '1', outputEmpty: false, note: '' }],
+            },
+            hints: { state: 'absent' as const, content: '' },
+        };
+        const statement = compileProgrammingStatement(canonicalStatement);
         await fsp.writeFile(path.join(directory, 'statement.md'), statement);
+        await fsp.writeFile(path.join(directory, 'programming-statement.json'), JSON.stringify(canonicalStatement));
         await fsp.writeFile(path.join(directory, 'diagram.png'), Buffer.from(`asset-${code}`));
         const cases = [] as Array<{ input: string; output: string }>;
         const files = [] as string[];
@@ -63,6 +77,7 @@ async function writeFixture(root: string): Promise<string> {
             mindmapNodeIds: [nodeId],
             origStat: { accepted, submitted },
             statement: `problems/${code}/statement.md`,
+            programmingStatement: `problems/${code}/programming-statement.json`,
             assets: [{ source: `problems/${code}/diagram.png`, target: 'diagram.png' }],
             testdata: {
                 directory: `problems/${code}/testdata`,
@@ -78,7 +93,7 @@ async function writeFixture(root: string): Promise<string> {
         manifestPath,
         `${JSON.stringify(
             {
-                schemaVersion: 1,
+                schemaVersion: 2,
                 batchId: 'nowcoder-2026-summer-1',
                 domain: 'system',
                 actor: 2,
@@ -344,7 +359,7 @@ Promise.resolve(cli.runMatchedCommand()).catch((error) => {
 
     it('rejects undeclared fields, traversal, missing assets, and config drift before loading runtime', async () => {
         const original = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
-        await fsp.writeFile(path.join(root, 'bad-samples.md'), '# no Hydro samples\n');
+        await fsp.writeFile(path.join(root, 'bad-statement.json'), JSON.stringify({ schemaVersion: 1, locale: 'zh-CN' }));
         const cases = [
             ['PID fields', (manifest: any) => (manifest.problems[0].pid = 'NK9999'), 'unsupported fields'],
             ['path traversal', (manifest: any) => (manifest.problems[0].statement = '../statement.md'), 'escapes the batch directory'],
@@ -366,7 +381,13 @@ Promise.resolve(cli.runMatchedCommand()).catch((error) => {
                 'file list differs from disk',
             ],
             ['empty cases', (manifest: any) => (manifest.problems[0].testdata.cases = []), 'cases must be non-empty'],
-            ['bad samples', (manifest: any) => (manifest.problems[0].statement = 'bad-samples.md'), 'invalid Hydro inputN/outputN samples'],
+            [
+                'bad structured statement',
+                (manifest: any) => {
+                    manifest.problems[0].programmingStatement = 'bad-statement.json';
+                },
+                'programmingStatement is invalid',
+            ],
         ] as const;
         for (const [name, mutate, message] of cases) {
             const filename = path.join(root, `${name.replace(/\s/g, '-')}.json`);
@@ -377,7 +398,7 @@ Promise.resolve(cli.runMatchedCommand()).catch((error) => {
         }
         const configPath = path.join(root, original.problems[0].testdata.config);
         const savedConfig = await fsp.readFile(configPath, 'utf8');
-        await fsp.writeFile(configPath, yaml.dump({ cases: [] }));
+        await fsp.writeFile(configPath, yaml.dump({ time: '1s', memory: '256m', cases: [] }));
         await expectReject(validateProblemBatchManifest(manifestPath), 'config cases differ');
         await fsp.writeFile(configPath, savedConfig);
     });

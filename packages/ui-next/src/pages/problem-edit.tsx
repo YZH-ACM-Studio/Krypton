@@ -14,6 +14,7 @@ import {
   type ManagedTrainingPlacementView,
 } from '@/components/problem-authoring-state';
 import { ProblemEditorWorkspace } from '@/components/problem-editor-workspace';
+import { emptyProgrammingStatement, ProgrammingStatementEditor, type ProgrammingStatementCanonical } from '@/components/programming-statement';
 import { useProblemDataWriteGuard } from '@/components/problem-data-write-guard';
 import { useFormDirtyState, useUnsavedChangesGuard } from '@/components/unsaved-changes-guard';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +24,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { SimpleSelect } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { useBootstrap } from '@/lib/bootstrap';
 import { replaceRouteTokens } from '@/lib/format';
 import { downloadProblemPackage } from '@/lib/problem-package';
@@ -718,6 +720,19 @@ export function ProblemEditPage() {
   const managedMetadataDraft = pdoc.managedAuthoring?.metadataStatus === 'draft';
   const canSubmitManagedWorkingTitle = isCreate || (managedMetadataDraft && canEditDraftMetadata);
   const filesBase = pdoc.docId ? `${problemUrl}/files` : '';
+  const statementLimits = data.programmingStatementLimits;
+  const statementLimitsPreview = statementLimits?.complete ? (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className="rounded-xl border bg-background/70 px-4 py-3">
+        <p className="text-xs text-muted-foreground">时间限制</p>
+        <p className="mt-1 font-medium">{String(statementLimits.time)}</p>
+      </div>
+      <div className="rounded-xl border bg-background/70 px-4 py-3">
+        <p className="text-xs text-muted-foreground">内存限制</p>
+        <p className="mt-1 font-medium">{String(statementLimits.memory)}</p>
+      </div>
+    </div>
+  ) : undefined;
 
   const rawContent = pdoc.content || '';
   const contentValue =
@@ -725,6 +740,15 @@ export function ProblemEditPage() {
       ? rawContent
       : String(rawContent || '');
   const [draftContent, setDraftContent] = useState<string | R>(contentValue);
+  const structuredExisting = !isCreate && pdoc.statementFormat === 'structured-v1';
+  const legacyStatementPreview: R | null = data.legacyStatementPreview || null;
+  const [convertingLegacy, setConvertingLegacy] = useState(data.legacyStatementConversionRequired === true);
+  const [conversionUnclassified, setConversionUnclassified] = useState(String(legacyStatementPreview?.unclassified || ''));
+  const [programmingStatement, setProgrammingStatement] = useState<ProgrammingStatementCanonical>(() => {
+    if (structuredExisting && pdoc.programmingStatement) return pdoc.programmingStatement;
+    if (legacyStatementPreview?.statement) return legacyStatementPreview.statement;
+    return emptyProgrammingStatement();
+  });
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState('');
   const [saveState, setSaveState] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'error'>('idle');
@@ -801,6 +825,9 @@ export function ProblemEditPage() {
   const sourcePreviewTags = managedSourceTagPreview(sourceTemplate, sourceYear, sourceSeason, sourceLevel);
   const editorRevisionKey = JSON.stringify({
     draftContent,
+    programmingStatement,
+    convertingLegacy,
+    conversionUnclassified,
     hiddenValue,
     lockHiddenValue,
     selectedPidNamespaceId,
@@ -1035,14 +1062,15 @@ export function ProblemEditPage() {
       return;
     }
     setSaveError('');
+    const structuredSave = !isCreate && (structuredExisting || convertingLegacy);
     const contentText = typeof draftContent === 'string' ? draftContent : JSON.stringify(draftContent);
-    if (!contentText.trim()) {
+    if (!isCreate && !structuredSave && !contentText.trim()) {
       const message = '请填写题面正文。';
       setSaveError(message);
       setSaveState('error');
       return;
     }
-    if (contentText.length > 65535) {
+    if (!structuredSave && contentText.length > 65535) {
       const message = '题面正文不能超过 65535 个字符。';
       setSaveError(message);
       setSaveState('error');
@@ -1060,8 +1088,26 @@ export function ProblemEditPage() {
     }
     const form = e.currentTarget;
     const fd = new FormData(form);
+    if (isCreate) {
+      fd.delete('content');
+    } else if (structuredSave) {
+      if (convertingLegacy && conversionUnclassified.trim()) {
+        setSaveError('仍有未归类内容；请把它归入明确区块或确认删除后清空。');
+        setSaveState('error');
+        return;
+      }
+      fd.delete('content');
+      fd.set('programmingStatement', JSON.stringify(programmingStatement));
+      if (convertingLegacy) {
+        fd.set('conversionFingerprint', String(legacyStatementPreview?.fingerprint || ''));
+        fd.set('conversionUnclassified', conversionUnclassified);
+      }
+    }
     const persistedContentText = typeof contentValue === 'string' ? contentValue : JSON.stringify(contentValue);
-    const confirmation = !isCreate && contentText !== persistedContentText ? await statementGuard.confirm('保存题面勘误', 'statement-edit') : true;
+    const statementChanged = structuredSave
+      ? JSON.stringify(programmingStatement) !== JSON.stringify(pdoc.programmingStatement || legacyStatementPreview?.statement)
+      : contentText !== persistedContentText;
+    const confirmation = !isCreate && statementChanged ? await statementGuard.confirm('保存题面勘误', 'statement-edit') : true;
     if (!confirmation) {
       setSaveError('此题正在比赛或考试中使用，当前角色不能修改题面。');
       setSaveState('error');
@@ -1760,40 +1806,109 @@ export function ProblemEditPage() {
 
               <div className="border-t border-border/60">
                 <header className="px-5 py-4">
-                  <h3 className="text-sm font-semibold tracking-tight">题面正文</h3>
+                  <h3 className="text-sm font-semibold tracking-tight">{isCreate ? '创建题目壳' : '题面正文'}</h3>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    {canEditContent ? 'Markdown 内容；粘贴图片继续使用现有附加文件 API。' : '当前贡献范围仅允许只读查看题面。'}
+                    {isCreate
+                      ? '这一步只确认来源、标题、作者、导图和待挂训练；创建后再进入稳定题号对应的分区编辑器填写题面。'
+                      : canEditContent
+                        ? '结构化题面使用固定中文区块；旧题可继续按原 Markdown 勘误，也可主动单题转换。'
+                        : '当前贡献范围仅允许只读查看题面。'}
                   </p>
                 </header>
-                <div className="p-5">
-                  {canEditContent ? (
-                    <MarkdownEditor
-                      name="content"
-                      value={draftContent}
-                      onChange={(value) => {
-                        setDraftContent(value);
-                        markDirty();
-                      }}
-                      minHeight={440}
-                      pasteUpload={
-                        filesBase
-                          ? {
-                              endpoint: filesBase,
-                              meta: { type: 'additional_file' },
-                              makeUrl: (filename) => `file://${filename}`,
-                            }
-                          : undefined
-                      }
-                      previewFileUrl={(filename, original) => {
-                        const queryIndex = original.indexOf('?');
-                        const query = queryIndex >= 0 ? original.slice(queryIndex) : '';
-                        return `${problemUrl}/file/${encodeURIComponent(filename)}${query}`;
-                      }}
-                    />
-                  ) : (
-                    <MarkdownView content={draftContent} className="prose max-w-none dark:prose-invert" />
-                  )}
-                </div>
+                {!isCreate ? (
+                  <div className="p-5">
+                    {canEditContent && (structuredExisting || convertingLegacy) ? (
+                      <div className="space-y-5">
+                        {convertingLegacy ? (
+                          <aside className="rounded-2xl border border-amber-500/35 bg-amber-500/[0.06] p-5">
+                            <h4 className="font-semibold">从旧 Markdown 显式转换</h4>
+                            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                              原题面保持只读；只有精确标准标题和连续 inputN/outputN 样例会自动归入区块。确认保存后不能切回自由 Markdown。
+                            </p>
+                            <div className="mt-4 rounded-xl border bg-background/70 p-4">
+                              <MarkdownView content={draftContent} className="prose max-w-none dark:prose-invert" />
+                            </div>
+                            {conversionUnclassified ? (
+                              <div className="mt-4 space-y-2">
+                                <label className="text-sm font-medium" htmlFor="statement-unclassified">
+                                  未归类内容（保存转换前必须清零）
+                                </label>
+                                <Textarea
+                                  id="statement-unclassified"
+                                  value={conversionUnclassified}
+                                  className="min-h-40 font-mono text-xs"
+                                  onChange={(event) => {
+                                    setConversionUnclassified(event.target.value);
+                                    markDirty();
+                                  }}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  先把需要保留的文字复制到下方明确区块；仅在确认无需保留时删除这里的内容。
+                                </p>
+                              </div>
+                            ) : (
+                              <p className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">没有未归类内容，可以检查分区后确认转换。</p>
+                            )}
+                            {data.legacyStatementConversionRequired !== true ? (
+                              <Button type="button" variant="ghost" className="mt-3" onClick={() => setConvertingLegacy(false)}>
+                                取消转换，继续自由 Markdown 勘误
+                              </Button>
+                            ) : null}
+                          </aside>
+                        ) : null}
+                        <ProgrammingStatementEditor
+                          value={programmingStatement}
+                          onChange={(next) => {
+                            setProgrammingStatement(next);
+                            markDirty();
+                          }}
+                          filesBase={filesBase}
+                          problemUrl={problemUrl}
+                          limitsPreview={statementLimitsPreview}
+                        />
+                      </div>
+                    ) : canEditContent ? (
+                      <div className="space-y-4">
+                        {legacyStatementPreview ? (
+                          <aside className="flex flex-col gap-3 rounded-xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <p className="text-sm font-medium">当前为旧版自由 Markdown 题面</p>
+                              <p className="mt-1 text-xs text-muted-foreground">普通勘误不强制转换；需要固定分区时可主动转换一次。</p>
+                            </div>
+                            <Button type="button" variant="outline" onClick={() => setConvertingLegacy(true)}>
+                              转为结构化题面
+                            </Button>
+                          </aside>
+                        ) : null}
+                        <MarkdownEditor
+                          name="content"
+                          value={draftContent}
+                          onChange={(value) => {
+                            setDraftContent(value);
+                            markDirty();
+                          }}
+                          minHeight={440}
+                          pasteUpload={
+                            filesBase
+                              ? {
+                                  endpoint: filesBase,
+                                  meta: { type: 'additional_file' },
+                                  makeUrl: (filename) => `file://${filename}`,
+                                }
+                              : undefined
+                          }
+                          previewFileUrl={(filename, original) => {
+                            const queryIndex = original.indexOf('?');
+                            const query = queryIndex >= 0 ? original.slice(queryIndex) : '';
+                            return `${problemUrl}/file/${encodeURIComponent(filename)}${query}`;
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <MarkdownView content={draftContent} className="prose max-w-none dark:prose-invert" />
+                    )}
+                  </div>
+                ) : null}
               </div>
 
               {!isCreate && canEditContent ? (

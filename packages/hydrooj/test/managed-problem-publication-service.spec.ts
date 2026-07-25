@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
+import { compileProgrammingStatement, emptyProgrammingStatement } from '../src/lib/programming-statement';
 
 const Module = require('module');
 (global as any).Hydro ||= { model: {}, module: {}, ui: {} };
@@ -19,6 +20,18 @@ class TestPublicationCommittedError extends Error {
     }
 }
 
+const draftStatement = {
+    ...emptyProgrammingStatement(),
+    background: { state: 'absent' as const, content: '' },
+    description: { state: 'present' as const, content: '题面' },
+    input: { state: 'present' as const, content: '输入。' },
+    output: { state: 'present' as const, content: '输出。' },
+    examples: {
+        state: 'present' as const,
+        items: [{ input: '1', inputEmpty: false, output: '1', outputEmpty: false, note: '' }],
+    },
+    hints: { state: 'absent' as const, content: '' },
+};
 const draft = {
     domainId: 'system',
     docId: 7,
@@ -31,8 +44,10 @@ const draft = {
     knowledgeMapId: '507f1f77bcf86cd799439010',
     knowledgeNodeIds: ['node-1'],
     managedAuthoring: { workingTitle: '工作标题', selectedMindmapNodeIds: ['node-1'], metadataStatus: 'draft' },
-    content: '# 题面',
-    config: { cases: [{ input: '1.in', output: '1.out' }] },
+    statementFormat: 'structured-v1',
+    programmingStatement: draftStatement,
+    content: compileProgrammingStatement(draftStatement),
+    config: { time: '1s', memory: '256m', cases: [{ input: '1.in', output: '1.out' }] },
     data: [{ name: '1.in' }, { name: '1.out' }],
     structureRevision: 9,
 };
@@ -122,6 +137,7 @@ Module._load = function load(request: string, parent: NodeModule, isMain: boolea
             parseProblemConfigObject: (pdoc: any) => pdoc?.config || null,
         };
     }
+    if (request === '../lib/programming-statement') return originalLoad.call(this, request, parent, isMain);
     if (request === '../service/bus') {
         return {
             __esModule: true,
@@ -549,6 +565,7 @@ describe('managed programming creation boundary', () => {
             expect(createCalls[0][1]).to.deep.equal({
                 workingTitle: 'Imported fixture',
                 content: '# Statement',
+                statementFormat: 'legacy-import-v1',
                 difficulty: 3,
                 pidNamespaceId: 'builtin:self',
                 sourceMeta: { template: 'self', year: new Date().getFullYear() },
@@ -645,6 +662,37 @@ describe('managed programming creation boundary', () => {
 });
 
 describe('managed programming publication service seam', () => {
+    it('publishes an explicit legacy-import-v1 draft without forcing canonical conversion', async () => {
+        currentDraft = {
+            ...draft,
+            statementFormat: 'legacy-import-v1',
+            programmingStatement: undefined,
+            content: '# 旧版导入题面',
+        };
+
+        await publish();
+
+        expect(publicationCommits).to.have.length(1);
+    });
+
+    it('rejects an incomplete structured statement before publication commits', async () => {
+        currentDraft = {
+            ...draft,
+            programmingStatement: emptyProgrammingStatement(),
+            content: '# 未完成结构化题面',
+        };
+
+        let failure: unknown;
+        try {
+            await publish();
+        } catch (error) {
+            failure = error;
+        }
+
+        expect(failure).to.be.instanceOf(TestValidationError);
+        expect(publicationCommits).to.have.length(0);
+    });
+
     it('requires a fresh explicit confirmation when data or tag tasks are pending', async () => {
         pendingContributionRows = [
             {

@@ -27,6 +27,14 @@ import {
 import type { Document, ProblemDataWriteConfirmation, ProblemDataWriteOperation, ProblemDict, ProblemStatusDoc, User } from '../interface';
 import { copyProblemStorageFiles } from '../lib/problem-clone';
 import { isProblemConfigFilename, parseProblemConfigObject } from '../lib/problem-config';
+import {
+    assertLegacyProgrammingStatementFingerprint,
+    assertProgrammingStatementComplete,
+    assertProgrammingStatementProjection,
+    compileProgrammingStatement,
+    normalizeProgrammingStatement,
+    ProgrammingStatementValidationError,
+} from '../lib/programming-statement';
 import { resolveProblemKnowledgeNodeIds } from '../lib/problem-tag-canonical';
 import { normalizeProblemTestdataUpload } from '../lib/problem-testdata-upload';
 import { parseConfig } from '../lib/testdataConfig';
@@ -398,7 +406,105 @@ function isSubmissionLockedPatch($set: Record<string, unknown>, $unset: Record<s
 }
 
 function isEditorialPatch($set: Record<string, unknown>, $unset: Record<string, unknown> = {}) {
-    return [...Object.keys($set), ...Object.keys($unset)].some((field) => field === 'content' || field === 'additional_file');
+    return [...Object.keys($set), ...Object.keys($unset)].some(
+        (field) => field === 'content' || field === 'programmingStatement' || field === 'additional_file',
+    );
+}
+
+function canonicalizeProgrammingStatementPatch(current: ProblemDoc, $set: Partial<ProblemDoc>, $unset: Record<string, unknown>): Partial<ProblemDoc> {
+    const touchesFormat = Object.hasOwn($set, 'statementFormat') || Object.hasOwn($unset, 'statementFormat');
+    const touchesCanonical = Object.hasOwn($set, 'programmingStatement') || Object.hasOwn($unset, 'programmingStatement');
+    const touchesContent = Object.hasOwn($set, 'content') || Object.hasOwn($unset, 'content');
+    const currentStructured = current.statementFormat === 'structured-v1';
+    const requestedFormat = $set.statementFormat ?? current.statementFormat;
+    if (currentStructured && (Object.hasOwn($unset, 'statementFormat') || Object.hasOwn($unset, 'programmingStatement'))) {
+        throw new ValidationError('statementFormat', null, '结构化题面不能降级为自由 Markdown');
+    }
+    if (currentStructured && requestedFormat !== 'structured-v1') {
+        throw new ValidationError('statementFormat', null, '结构化题面不能切换格式');
+    }
+    if (requestedFormat !== undefined && !['structured-v1', 'legacy-import-v1'].includes(requestedFormat)) {
+        throw new ValidationError('statementFormat');
+    }
+    if (requestedFormat !== 'structured-v1') {
+        if (touchesCanonical) throw new ValidationError('programmingStatement');
+        return $set;
+    }
+    if (!(touchesFormat || touchesCanonical || touchesContent)) return $set;
+    if (!Object.hasOwn($set, 'programmingStatement')) {
+        throw new ValidationError('content', null, '结构化题面正文只能由 programmingStatement 生成');
+    }
+    if (Object.hasOwn($set, 'content')) {
+        throw new ValidationError('content', null, '结构化题面正文必须由服务端生成，不能直接提交');
+    }
+    let programmingStatement: ProblemDoc['programmingStatement'];
+    try {
+        programmingStatement = normalizeProgrammingStatement($set.programmingStatement);
+    } catch (error) {
+        if (error instanceof ProgrammingStatementValidationError) {
+            throw new ValidationError(error.field, null, error.message);
+        }
+        throw error;
+    }
+    const content = compileProgrammingStatement(programmingStatement);
+    return { ...$set, statementFormat: 'structured-v1', programmingStatement, content, html: false };
+}
+
+function captureProgrammingStatementWrite($set: Partial<ProblemDoc>) {
+    if ($set.statementFormat !== 'structured-v1' || !Object.hasOwn($set, 'programmingStatement')) return null;
+    return {
+        programmingStatement: normalizeProgrammingStatement($set.programmingStatement),
+        content: $set.content,
+        html: $set.html,
+    };
+}
+
+function assertProgrammingStatementWriteUnchanged(
+    confirmed: ReturnType<typeof captureProgrammingStatementWrite>,
+    $set: Partial<ProblemDoc>,
+    $unset: Record<string, unknown>,
+): void {
+    if (!confirmed) return;
+    let programmingStatement: ProblemDoc['programmingStatement'];
+    try {
+        programmingStatement = normalizeProgrammingStatement($set.programmingStatement);
+    } catch (error) {
+        if (error instanceof ProgrammingStatementValidationError) {
+            throw new ValidationError(error.field, null, '写入钩子不能修改已验证的结构化题面');
+        }
+        throw error;
+    }
+    if (
+        $set.statementFormat !== 'structured-v1' ||
+        !isEqual(programmingStatement, confirmed.programmingStatement) ||
+        $set.content !== confirmed.content ||
+        $set.html !== confirmed.html ||
+        ['statementFormat', 'programmingStatement', 'content', 'html'].some((field) => Object.hasOwn($unset, field))
+    ) {
+        throw new ValidationError('programmingStatement', null, '写入钩子不能修改已验证的结构化题面');
+    }
+}
+
+function assertPublicProgrammingStatementReady(current: ProblemDoc, $set: Partial<ProblemDoc>, $unset: Record<string, unknown>): void {
+    const relevantFields = ['statementFormat', 'programmingStatement', 'content', 'config', 'hidden'];
+    if (!relevantFields.some((field) => Object.hasOwn($set, field) || Object.hasOwn($unset, field))) return;
+    const hidden = Object.hasOwn($set, 'hidden') ? $set.hidden : Object.hasOwn($unset, 'hidden') ? false : current.hidden;
+    const statementFormat = Object.hasOwn($set, 'statementFormat')
+        ? $set.statementFormat
+        : Object.hasOwn($unset, 'statementFormat')
+          ? undefined
+          : current.statementFormat;
+    if (hidden === true || statementFormat !== 'structured-v1') return;
+    const nextValue = <K extends keyof ProblemDoc>(field: K): ProblemDoc[K] | undefined =>
+        Object.hasOwn($set, field) ? ($set[field] as ProblemDoc[K]) : Object.hasOwn($unset, field) ? undefined : current[field];
+    try {
+        assertProgrammingStatementProjection(nextValue('programmingStatement'), nextValue('config'), nextValue('content'));
+    } catch (error) {
+        if (error instanceof ProgrammingStatementValidationError) {
+            throw new ValidationError(error.field, null, error.message);
+        }
+        throw error;
+    }
 }
 
 function touchesProgrammingTagPair($set: Record<string, unknown>, $unset: Record<string, unknown> = {}) {
@@ -491,6 +597,9 @@ function assertPublishableProblem(input: {
     structureRevision?: unknown;
     config: unknown;
     data?: Array<{ name: string }>;
+    statementFormat?: ProblemDoc['statementFormat'];
+    programmingStatement?: ProblemDoc['programmingStatement'];
+    content?: string;
 }) {
     assertProblemReadyForUseWithTrace(
         {
@@ -505,6 +614,16 @@ function assertPublishableProblem(input: {
         },
         { actor: input.actor, stage: 'publish' },
     );
+    if (input.statementFormat === 'structured-v1') {
+        try {
+            assertProgrammingStatementProjection(input.programmingStatement, input.config, input.content);
+        } catch (error) {
+            if (error instanceof ProgrammingStatementValidationError) {
+                throw new ValidationError(error.field, null, error.message);
+            }
+            throw error;
+        }
+    }
 }
 
 interface PendingProblemContributionFact {
@@ -690,6 +809,8 @@ interface ProblemCreateOptions {
     knowledgeNodeIds?: ProblemDoc['knowledgeNodeIds'];
     codeEvaluationStatus?: 'draft';
     batchImport?: ProblemDoc['batchImport'];
+    statementFormat?: ProblemDoc['statementFormat'];
+    programmingStatement?: ProblemDoc['programmingStatement'];
 }
 
 interface ProblemCreateHooks {
@@ -750,6 +871,8 @@ export class ProblemModel {
         'additional_file',
         'reference',
         'maintainer',
+        'statementFormat',
+        'programmingStatement',
     ];
 
     static PROJECTION_PUBLIC: Field[] = [
@@ -769,6 +892,8 @@ export class ProblemModel {
         // 消费点（训练详情/题目详情）都走 PUBLIC；比赛/考试上下文的
         // 剥离见 handler/problem.ts 与 handler/paper.ts。
         'origStat',
+        'statementFormat',
+        'programmingStatement',
     ];
 
     /** Internal fields exposed only after the stable editor ACL read. */
@@ -778,6 +903,8 @@ export class ProblemModel {
         'pidNamespaceId',
         'pidNamespaceReview',
         'managedAuthoring',
+        'statementFormat',
+        'programmingStatement',
     ];
 
     /** Internal summary fields for the ACL-scoped problem bank and admin review. */
@@ -1017,6 +1144,8 @@ export class ProblemModel {
         if (meta.sourceMeta) args.sourceMeta = meta.sourceMeta;
         if (meta.pidNamespaceId) args.pidNamespaceId = meta.pidNamespaceId;
         if (meta.managedAuthoring) args.managedAuthoring = meta.managedAuthoring;
+        if (meta.statementFormat) args.statementFormat = meta.statementFormat;
+        if (meta.programmingStatement) args.programmingStatement = meta.programmingStatement;
         if (meta.batchImport) {
             args.batchImport = meta.batchImport;
             args.hasBatchImportIdentity = true;
@@ -1129,6 +1258,8 @@ export class ProblemModel {
                         knowledgeNodeIds: args.knowledgeNodeIds,
                         codeEvaluationStatus: args.codeEvaluationStatus,
                         batchImport: args.batchImport,
+                        statementFormat: args.statementFormat,
+                        programmingStatement: args.programmingStatement,
                     }),
                     time: new Date(),
                 } as any),
@@ -1220,6 +1351,8 @@ export class ProblemModel {
                         metadataStatus: 'draft',
                         ...(prepared.pendingTrainingPlacement ? { pendingTrainingPlacement: prepared.pendingTrainingPlacement } : {}),
                     },
+                    statementFormat: prepared.statementFormat,
+                    ...(prepared.programmingStatement ? { programmingStatement: prepared.programmingStatement } : {}),
                     knowledgeMapId: prepared.knowledgeMapId,
                     knowledgeNodeIds: prepared.selectedMindmapNodeIds,
                     ...(prepared.batchImport ? { batchImport: prepared.batchImport } : {}),
@@ -2120,6 +2253,8 @@ export class ProblemModel {
                                 managedAuthoring: 1,
                                 knowledgeMapId: 1,
                                 content: 1,
+                                statementFormat: 1,
+                                programmingStatement: 1,
                                 config: 1,
                                 data: 1,
                                 codeEvaluationStatus: 1,
@@ -2167,6 +2302,9 @@ export class ProblemModel {
                         if (typeof pdoc.content !== 'string' || !pdoc.content.trim()) {
                             throw new ValidationError('content', null, '发布前必须填写题面正文');
                         }
+                        if (pdoc.statementFormat !== 'structured-v1' && pdoc.statementFormat !== 'legacy-import-v1' && !isConfirmedRepublish) {
+                            throw new ValidationError('statementFormat', null, '新托管题发布前必须完成结构化题面');
+                        }
                         assertStructureRevision(pdoc.structureRevision);
                         assertPublishableProblem({
                             domainId: input.domainId,
@@ -2178,6 +2316,9 @@ export class ProblemModel {
                             structureRevision: pdoc.structureRevision,
                             config: pdoc.config,
                             data: pdoc.data,
+                            statementFormat: pdoc.statementFormat,
+                            programmingStatement: pdoc.programmingStatement,
+                            content: pdoc.content,
                         });
                         assertProgrammingTestcasesConfiguredWithTrace(
                             {
@@ -2746,6 +2887,9 @@ export class ProblemModel {
                         'structureRevision',
                         'config',
                         'data',
+                        'content',
+                        'statementFormat',
+                        'programmingStatement',
                     ]),
                 ].map((field) => [field, 1]),
             );
@@ -2793,6 +2937,9 @@ export class ProblemModel {
                     structureRevision: before.structureRevision,
                     config: nextConfig,
                     data: before.data,
+                    statementFormat: before.statementFormat,
+                    programmingStatement: before.programmingStatement,
+                    content: before.content,
                 });
             }
             if (input.expectedStructureRevision !== undefined) {
@@ -3321,6 +3468,8 @@ export class ProblemModel {
                     domainId: 1,
                     docId: 1,
                     content: 1,
+                    statementFormat: 1,
+                    programmingStatement: 1,
                     config: 1,
                     data: 1,
                     pid: 1,
@@ -3355,7 +3504,11 @@ export class ProblemModel {
             (current.problemKind === undefined || parseProblemKind(current.problemKind) === 'programming') &&
             !touchesProgrammingTagPair($set as Record<string, unknown>, $unset);
         const knowledgePairRequired = await canonicalizeStructuredKnowledgePatch(current, $set, $unset, rawEditContext, 'request');
+        $set = canonicalizeProgrammingStatementPatch(current as ProblemDoc, $set, $unset);
+        const confirmedProgrammingStatement = captureProgrammingStatementWrite($set);
         await bus.parallel('problem/before-edit', $set, $unset);
+        assertProgrammingStatementWriteUnchanged(confirmedProgrammingStatement, $set, $unset);
+        assertPublicProgrammingStatementReady(current as ProblemDoc, $set, $unset);
         if (preserveProgrammingTagPair && touchesProgrammingTagPair($set as Record<string, unknown>, $unset)) {
             logger.warn(
                 'Programming tag hook write rejected domain=%s pid=%d actor=- operation=raw-edit stage=after-hook result=denied fields=%o',
@@ -3396,6 +3549,9 @@ export class ProblemModel {
                 structureRevision: current.structureRevision,
                 config: $set.config ?? current.config,
                 data: ($set.data ?? current.data) as any,
+                statementFormat: $set.statementFormat ?? current.statementFormat,
+                programmingStatement: $set.programmingStatement ?? current.programmingStatement,
+                content: $set.content ?? current.content,
             });
         }
         if ($set.content === current.content) delete $set.content;
@@ -3958,6 +4114,9 @@ export class ProblemModel {
                     domainId: 1,
                     docId: 1,
                     content: 1,
+                    html: 1,
+                    statementFormat: 1,
+                    programmingStatement: 1,
                     config: 1,
                     data: 1,
                     pid: 1,
@@ -3978,6 +4137,8 @@ export class ProblemModel {
         if (current.archivedAt && isStructuralPatch($set as any, $unset)) {
             throw new ValidationError('archivedAt', null, '已归档题目不能修改题面或评测结构');
         }
+        $set = canonicalizeProgrammingStatementPatch(current as ProblemDoc, $set, $unset);
+        const confirmedProgrammingStatement = captureProgrammingStatementWrite($set);
         let managedGuard: ReturnType<typeof managedProblemPatchCapability> | null = null;
         let confirmedManagedMindmapNodeIds: string[] | null = null;
         if (current.authoringMode === 'managed') {
@@ -4013,6 +4174,8 @@ export class ProblemModel {
                   }
                 : null;
         await bus.parallel('problem/before-edit', $set, $unset);
+        assertProgrammingStatementWriteUnchanged(confirmedProgrammingStatement, $set, $unset);
+        assertPublicProgrammingStatementReady(current as ProblemDoc, $set, $unset);
         const hookTagFields = [...Object.keys($set), ...Object.keys($unset)].filter((field) =>
             ['tag', 'knowledgeMapId', 'knowledgeNodeIds'].some((root) => field === root || field.startsWith(`${root}.`)),
         );
@@ -4098,6 +4261,9 @@ export class ProblemModel {
                 structureRevision: current.structureRevision,
                 config: $set.config ?? current.config,
                 data: ($set.data ?? current.data) as any,
+                statementFormat: $set.statementFormat ?? current.statementFormat,
+                programmingStatement: $set.programmingStatement ?? current.programmingStatement,
+                content: $set.content ?? current.content,
             });
         }
         if ($set.content === current.content) delete $set.content;
@@ -4177,6 +4343,125 @@ export class ProblemModel {
         if (!result) throw new Error(`problem write claim ownership lost during edit: ${claim.requestId}`);
         bus.emit('problem/edit', result, claim.requestId, { hidden: current.hidden });
         return result;
+    }
+
+    /** HTTP/service-token metadata write entrypoint. */
+    static async saveProgrammingStatement(input: {
+        domainId: string;
+        pid: number;
+        user: ProblemAclUser;
+        expectedStructureRevision: number;
+        programmingStatement: unknown;
+        activeContainerConfirmation?: ProblemDataWriteConfirmation;
+        conversionFingerprint?: string;
+        conversionUnclassified?: string;
+        metadata?: Partial<ProblemDoc>;
+    }): Promise<ProblemDoc> {
+        assertStructureRevision(input.expectedStructureRevision);
+        const current = await document.coll.findOne(
+            { domainId: input.domainId, docType: document.TYPE_PROBLEM, docId: input.pid },
+            {
+                projection: {
+                    domainId: 1,
+                    docId: 1,
+                    pid: 1,
+                    problemKind: 1,
+                    content: 1,
+                    statementFormat: 1,
+                    programmingStatement: 1,
+                    structureRevision: 1,
+                    config: 1,
+                    hidden: 1,
+                },
+            },
+        );
+        if (!current) throw new ProblemNotFoundError(input.domainId, input.pid);
+        if (parseProblemKind(current.problemKind) !== 'programming') throw new ValidationError('problemKind');
+        if (current.statementFormat !== undefined && !['structured-v1', 'legacy-import-v1'].includes(current.statementFormat)) {
+            throw new ValidationError('statementFormat');
+        }
+        const forbiddenMetadata = Object.keys(input.metadata || {}).filter((field) =>
+            ['content', 'statementFormat', 'programmingStatement', 'html'].includes(field),
+        );
+        if (forbiddenMetadata.length) throw new ValidationError('metadata');
+        const converting = current.statementFormat !== 'structured-v1';
+        try {
+            if (converting) {
+                if (!input.conversionFingerprint) {
+                    throw new ValidationError('conversionFingerprint', null, '旧题面必须先完成显式转换预览');
+                }
+                assertLegacyProgrammingStatementFingerprint(current.content, input.conversionFingerprint);
+                if (input.conversionUnclassified === undefined) {
+                    throw new ValidationError('conversionUnclassified', null, '旧题面转换必须显式确认未归类内容');
+                }
+                if (input.conversionUnclassified.trim()) {
+                    throw new ValidationError('conversionUnclassified', null, '旧题面仍有未归类内容，不能转换');
+                }
+            } else if (input.conversionFingerprint !== undefined || input.conversionUnclassified !== undefined) {
+                throw new ValidationError('conversionFingerprint', null, '结构化题面不接受重复转换');
+            }
+            const programmingStatement = normalizeProgrammingStatement(input.programmingStatement);
+            const nextConfig = Object.hasOwn(input.metadata || {}, 'config') ? input.metadata?.config : current.config;
+            const nextHidden = Object.hasOwn(input.metadata || {}, 'hidden') ? input.metadata?.hidden : current.hidden;
+            if (nextHidden !== true) {
+                try {
+                    assertProgrammingStatementProjection(programmingStatement, nextConfig, compileProgrammingStatement(programmingStatement));
+                } catch (error) {
+                    if (error instanceof ProgrammingStatementValidationError) {
+                        throw new ValidationError(error.field, null, error.message);
+                    }
+                    throw error;
+                }
+            }
+            const result = await ProblemModel.editAuthorized(
+                input.domainId,
+                input.pid,
+                {
+                    ...(input.metadata || {}),
+                    statementFormat: 'structured-v1',
+                    programmingStatement,
+                },
+                input.user,
+                {},
+                {
+                    expectedStructureRevision: input.expectedStructureRevision,
+                    activeContainerConfirmation: input.activeContainerConfirmation,
+                },
+            );
+            logger.info(
+                'Programming statement saved domain=%s pid=%s docId=%d actor=%d statementFormat=structured-v1 revision=%d stage=%s result=success',
+                input.domainId,
+                result.pid || '-',
+                input.pid,
+                input.user._id,
+                result.structureRevision,
+                converting ? 'convert' : 'edit',
+            );
+            await OplogModel.add({
+                type: converting ? 'problem.statement.convert' : 'problem.statement.edit',
+                domainId: input.domainId,
+                operator: input.user._id,
+                problemId: input.pid,
+                statementFormat: 'structured-v1',
+                revision: result.structureRevision,
+                result: 'success',
+                time: new Date(),
+            } as any);
+            return result;
+        } catch (error) {
+            logger.warn(
+                'Programming statement save rejected domain=%s pid=%s docId=%d actor=%d statementFormat=%s revision=%s stage=%s result=denied error=%o',
+                input.domainId,
+                current.pid || '-',
+                input.pid,
+                input.user._id,
+                current.statementFormat || 'legacy',
+                current.structureRevision ?? '-',
+                converting ? 'convert' : 'edit',
+                error,
+            );
+            throw error;
+        }
     }
 
     /** HTTP/service-token metadata write entrypoint. */
@@ -5203,6 +5488,21 @@ export class ProblemModel {
                     let overrideContent = findOverrideContent(path.join(tmpdir, i), 'problem');
                     overrideContent ||= findOverrideContent(path.join(tmpdir, i, 'statement'), 'problem');
                     overrideContent ||= findOverrideContent(path.join(tmpdir, i, 'problem_statement'), 'problem');
+                    const structuredStatementPath = path.join(tmpdir, i, 'programming-statement.json');
+                    let importedProgrammingStatement: ProblemDoc['programmingStatement'];
+                    if (fs.existsSync(structuredStatementPath)) {
+                        try {
+                            importedProgrammingStatement = normalizeProgrammingStatement(
+                                JSON.parse(fs.readFileSync(structuredStatementPath, 'utf8')),
+                            );
+                        } catch (error) {
+                            throw new ValidationError('programming-statement.json', null, 'Invalid programming-statement.json');
+                        }
+                        const compiled = compileProgrammingStatement(importedProgrammingStatement);
+                        if (overrideContent !== compiled) {
+                            throw new ValidationError('programming-statement.json', null, 'problem.md differs from programming-statement.json');
+                        }
+                    }
                     if (pdoc.difficulty && !Number.isSafeInteger(pdoc.difficulty)) delete pdoc.difficulty;
                     const title = pdoc.title || (pdoc as any).name;
                     if (typeof title !== 'string') throw new ValidationError('title', null, 'Invalid title');
@@ -5324,7 +5624,15 @@ export class ProblemModel {
                         domainId,
                         {
                             workingTitle: title.trim(),
-                            content: overrideContent || pdoc.content?.toString() || 'No content',
+                            ...(importedProgrammingStatement
+                                ? {
+                                      statementFormat: 'structured-v1' as const,
+                                      programmingStatement: importedProgrammingStatement,
+                                  }
+                                : {
+                                      content: overrideContent || pdoc.content?.toString() || 'No content',
+                                      statementFormat: 'legacy-import-v1' as const,
+                                  }),
                             difficulty:
                                 Number.isSafeInteger(pdoc.difficulty) && Number(pdoc.difficulty) >= 1 && Number(pdoc.difficulty) <= 10
                                     ? Number(pdoc.difficulty)
@@ -5431,6 +5739,13 @@ export class ProblemModel {
             } catch (e) {
                 const problemContent = path.join(problemPath, 'problem.md');
                 await fs.writeFile(problemContent, pdoc.content);
+            }
+            if (pdoc.statementFormat === 'structured-v1') {
+                const canonical = normalizeProgrammingStatement(pdoc.programmingStatement);
+                if (compileProgrammingStatement(canonical) !== pdoc.content) {
+                    throw new ValidationError('content', null, `Problem ${pdoc.pid || pdoc.docId} has a mismatched statement projection`);
+                }
+                await fs.writeFile(path.join(problemPath, 'programming-statement.json'), `${JSON.stringify(canonical, null, 2)}\n`);
             }
             if ((pdoc.data || []).length) {
                 const testdataPath = path.join(problemPath, 'testdata');

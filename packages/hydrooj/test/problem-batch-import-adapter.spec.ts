@@ -8,6 +8,7 @@ import yaml from 'js-yaml';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { ObjectId } from 'mongodb';
 import { createProblemBatchExecutionReport, preflightProblemBatchImport, validateProblemBatchManifest } from '../src/lib/problem-batch-import';
+import { compileProgrammingStatement, emptyProgrammingStatement } from '../src/lib/programming-statement';
 
 (global as any).Hydro ||= { model: {} };
 
@@ -131,7 +132,9 @@ const ProblemModelStub = {
             pid,
             owner: creator,
             title: `待审核 · ${input.workingTitle}`,
-            content: input.content,
+            statementFormat: input.statementFormat,
+            programmingStatement: clone(input.programmingStatement),
+            content: compileProgrammingStatement(input.programmingStatement),
             config: '',
             data: [],
             additional_file: [],
@@ -388,8 +391,21 @@ describe('P2.23 Hydro production batch adapter', () => {
     before(async () => {
         root = await fsp.mkdtemp(path.join(os.tmpdir(), 'problem-batch-adapter-'));
         await fsp.mkdir(path.join(root, 'data'), { recursive: true });
+        const canonicalStatement = {
+            ...emptyProgrammingStatement(),
+            background: { state: 'absent' as const, content: '' },
+            description: { state: 'present' as const, content: '# Fixture\n\n![x](file://figure.png)' },
+            input: { state: 'present' as const, content: '输入。' },
+            output: { state: 'present' as const, content: '输出。' },
+            examples: {
+                state: 'present' as const,
+                items: [{ input: '1', inputEmpty: false, output: '2', outputEmpty: false, note: '' }],
+            },
+            hints: { state: 'absent' as const, content: '' },
+        };
         await Promise.all([
-            fsp.writeFile(path.join(root, 'statement.md'), '# Fixture\n\n![x](file://figure.png)\n\n```input1\n1\n```\n\n```output1\n2\n```\n'),
+            fsp.writeFile(path.join(root, 'statement.md'), compileProgrammingStatement(canonicalStatement)),
+            fsp.writeFile(path.join(root, 'programming-statement.json'), JSON.stringify(canonicalStatement)),
             fsp.writeFile(path.join(root, 'figure.png'), 'asset'),
             fsp.writeFile(path.join(root, 'data/1.in'), '1\n'),
             fsp.writeFile(path.join(root, 'data/1.out'), '2\n'),
@@ -399,7 +415,7 @@ describe('P2.23 Hydro production batch adapter', () => {
         await fsp.writeFile(
             manifestPath,
             JSON.stringify({
-                schemaVersion: 1,
+                schemaVersion: 2,
                 batchId: 'fixture-2026-1',
                 domain: 'system',
                 actor: 2,
@@ -415,6 +431,7 @@ describe('P2.23 Hydro production batch adapter', () => {
                         mindmapNodeIds: [nodeId],
                         origStat: { accepted: 200, submitted: 300 },
                         statement: 'statement.md',
+                        programmingStatement: 'programming-statement.json',
                         assets: [{ source: 'figure.png', target: 'figure.png' }],
                         testdata: {
                             directory: 'data',
@@ -546,6 +563,27 @@ describe('P2.23 Hydro production batch adapter', () => {
         expect(resumedMutationCount).to.equal(mutationCount);
     });
 
+    it('keeps schemaVersion 1 manifests available for verify-only audits', async () => {
+        const currentBatch = await validateProblemBatchManifest(manifestPath);
+        const adapter = new HydroProblemBatchImportAdapter();
+        const currentPlan = await preflightProblemBatchImport(currentBatch, adapter);
+        await adapter.apply(currentBatch, currentPlan, createProblemBatchExecutionReport(currentPlan, 2), async () => {});
+
+        const legacyManifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+        legacyManifest.schemaVersion = 1;
+        delete legacyManifest.problems[0].programmingStatement;
+        const legacyPath = path.join(root, 'legacy-verify-only.json');
+        await fsp.writeFile(legacyPath, JSON.stringify(legacyManifest));
+        const legacyBatch = await validateProblemBatchManifest(legacyPath);
+        problemDocs[0].batchImport.fingerprint = legacyBatch.problems[0].fingerprint;
+        const legacyPlan = await preflightProblemBatchImport(legacyBatch, adapter);
+
+        const verified = await adapter.verify(legacyBatch, legacyPlan);
+
+        expect(verified.ok).to.equal(true);
+        expect(problemDocs[0].statementFormat).to.equal('structured-v1');
+    });
+
     it('confirms and attaches an explicitly hidden batch without exposing its problems', async () => {
         const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
         manifest.batchId = 'fixture-2026-1-hidden';
@@ -674,7 +712,8 @@ describe('P2.23 Hydro production batch adapter', () => {
             batch.manifest.domain,
             {
                 workingTitle: entry.title,
-                content: await fsp.readFile(entry.statementFile.path, 'utf8'),
+                statementFormat: 'structured-v1',
+                programmingStatement: entry.canonicalStatement,
                 difficulty: entry.difficulty,
                 sourceMeta: batch.manifest.source,
                 knowledgeMapId: knowledgeMapId.toHexString(),

@@ -896,6 +896,7 @@ describe('P2.14 managed problem training placement', () => {
         const prepared = await authoring.prepareManagedProblemDraft('system', {
             workingTitle: '  线段树练习  ',
             content: 'statement',
+            statementFormat: 'legacy-import-v1',
             difficulty: 4,
             sourceMeta: { template: 'pat_basic', year: 2026, season: 'spring' },
             mindmapNodeIds: [leaf.toHexString()],
@@ -911,6 +912,7 @@ describe('P2.14 managed problem training placement', () => {
         const prepared = await authoring.prepareManagedProblemDraft('system', {
             workingTitle: '批量题目',
             content: 'statement',
+            statementFormat: 'legacy-import-v1',
             difficulty: 3,
             sourceMeta: { template: 'nowcoder_summer', year: 2026, round: 1 },
             mindmapNodeIds: [nodeId.toHexString()],
@@ -926,6 +928,7 @@ describe('P2.14 managed problem training placement', () => {
             authoring.prepareManagedProblemDraft('system', {
                 workingTitle: '批量题目',
                 content: 'statement',
+                statementFormat: 'legacy-import-v1',
                 difficulty: 3,
                 sourceMeta: { template: 'nowcoder_summer', year: 2026, round: 1 },
                 mindmapNodeIds: [nodeId.toHexString()],
@@ -940,6 +943,7 @@ describe('P2.14 managed problem training placement', () => {
             authoring.prepareManagedProblemDraft('system', {
                 workingTitle: '题目',
                 content: 'statement',
+                statementFormat: 'legacy-import-v1',
                 difficulty: 4,
                 sourceMeta: { template: 'unknown', year: 2026 },
                 mindmapNodeIds: [],
@@ -949,6 +953,7 @@ describe('P2.14 managed problem training placement', () => {
         const draft = await authoring.prepareManagedProblemDraft('system', {
             workingTitle: '题目',
             content: 'statement',
+            statementFormat: 'legacy-import-v1',
             difficulty: 4,
             sourceMeta: { template: 'self', year: 2026 },
             mindmapNodeIds: [],
@@ -976,6 +981,7 @@ describe('P2.14 managed problem training placement', () => {
             authoring.prepareManagedProblemDraft('system', {
                 workingTitle: '题目',
                 content: 'statement',
+                statementFormat: 'legacy-import-v1',
                 difficulty: 4,
                 sourceMeta: { template: 'self', year: 2026 },
                 mindmapNodeIds: [nodeId.toHexString()],

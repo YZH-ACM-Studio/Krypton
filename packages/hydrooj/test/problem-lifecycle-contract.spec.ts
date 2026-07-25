@@ -244,6 +244,25 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(lifecycle).to.include('validateStructuredCodeTestdataFiles(config, pdoc.data || []');
     });
 
+    it('keeps structured programming Markdown server-derived and validates every public write boundary', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const canonicalizerStart = source.indexOf('function canonicalizeProgrammingStatementPatch');
+        const canonicalizerEnd = source.indexOf('function captureProgrammingStatementWrite', canonicalizerStart);
+        const canonicalizer = source.slice(canonicalizerStart, canonicalizerEnd);
+        const authorizedStart = source.indexOf('static async editAuthorized(');
+        const authorizedEnd = source.indexOf('static async copy(', authorizedStart);
+        const authorized = source.slice(authorizedStart, authorizedEnd);
+
+        expect(canonicalizer).to.include('结构化题面正文必须由服务端生成，不能直接提交');
+        expect(canonicalizer).to.include('content, html: false');
+        expect(source.match(/assertPublicProgrammingStatementReady\(current as ProblemDoc, \$set, \$unset\)/g)).to.have.length(2);
+        expect(source).to.include('assertProgrammingStatementProjection(input.programmingStatement, input.config, input.content)');
+        expect(source).to.include("pdoc.statementFormat !== 'legacy-import-v1'");
+        expect(source).to.include('input.conversionUnclassified === undefined');
+        expect(source).to.include('input.conversionUnclassified.trim()');
+        expect(authorized).not.to.include('canonicalizeProgrammingStatementPatch(preliminary');
+    });
+
     it('blocks every config yaml alias at direct, claimed, and event-backed structured writes', () => {
         const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
         const handler = readFileSync(resolve(root, 'src/handler/problem.ts'), 'utf8');
@@ -461,6 +480,29 @@ describe('P2.12 YAGNI lifecycle contract', () => {
         expect(rawEdit).to.include('未请求标签变更时，写入钩子不能修改编程题标签');
         expect(claimedEdit).to.include('const preserveProgrammingTagPair =');
         expect(claimedEdit).to.include('Programming tag hook write rejected');
+    });
+
+    it('derives structured statement projections before hooks and rejects hook mutation', () => {
+        const source = readFileSync(resolve(root, 'src/model/problem.ts'), 'utf8');
+        const rawStart = source.indexOf('static async edit(');
+        const rawEnd = source.indexOf('static async beginAuthorizedWriteClaim(', rawStart);
+        const rawEdit = source.slice(rawStart, rawEnd);
+        const claimedStart = source.indexOf('static async editWithClaim(');
+        const claimedEnd = source.indexOf('static async editAuthorized(', claimedStart);
+        const claimedEdit = source.slice(claimedStart, claimedEnd);
+
+        for (const edit of [rawEdit, claimedEdit]) {
+            const canonicalize = edit.indexOf('canonicalizeProgrammingStatementPatch(');
+            const capture = edit.indexOf('captureProgrammingStatementWrite(', canonicalize);
+            const hook = edit.indexOf("await bus.parallel('problem/before-edit', $set, $unset)", capture);
+            const assertion = edit.indexOf('assertProgrammingStatementWriteUnchanged(', hook);
+            expect(canonicalize).to.be.greaterThan(-1);
+            expect(capture).to.be.greaterThan(canonicalize);
+            expect(hook).to.be.greaterThan(capture);
+            expect(assertion).to.be.greaterThan(hook);
+        }
+        expect(claimedEdit).to.include('statementFormat: 1');
+        expect(claimedEdit).to.include('programmingStatement: 1');
     });
 
     it('keeps managed PID, kind, system tags, source metadata, and confirmed title outside generic edits', () => {

@@ -2412,6 +2412,36 @@ describe('P2.11 problem selection assertion', () => {
         expect(loggerWarnCalls[0][7]).to.be.instanceOf(Error);
     });
 
+    it('loads structured programming statements into the container readiness gate', async () => {
+        selectionNotReady = {
+            domainId: 'system',
+            docId: 10,
+            pid: 'P10',
+            problemKind: 'programming',
+            structureRevision: 4,
+            statementFormat: 'structured-v1',
+            programmingStatement: {
+                schemaVersion: 1,
+                locale: 'zh-CN',
+                background: { state: 'undecided', content: '' },
+                description: { state: 'undecided', content: '' },
+                input: { state: 'undecided', content: '' },
+                output: { state: 'undecided', content: '' },
+                examples: { state: 'undecided', items: [] },
+                hints: { state: 'undecided', content: '' },
+            },
+            content: '',
+            config: { type: 'default', time: '1s', memory: '256m', subtasks: [] },
+            data: [],
+        };
+
+        const error = await captureFailure(() => assertProblemBankSelection('system', [10], makeUser('student'), [10]));
+
+        expect(error?.name).to.equal('PermissionError');
+        expect(selectionReadCalls[0].filter.$or).to.deep.include({ statementFormat: 'structured-v1' });
+        expect(loggerWarnCalls).to.have.length(1);
+    });
+
     it('rejects invalid selected ids before any database query', async () => {
         const error = await captureFailure(() => assertProblemBankSelection('system', [Number.NaN], makeUser('creator')));
         expect(error?.name).to.equal('PermissionError');

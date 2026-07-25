@@ -121,6 +121,15 @@ export async function downloadProblemPackage({ pdoc, problemUrl, testdata = [], 
     { name: `${folder}/problem.yaml`, content: metadataYaml(pdoc) },
     ...statementTargets(folder, content ?? pdoc.content),
   ];
+  if (pdoc.statementFormat === 'structured-v1') {
+    if (!pdoc.programmingStatement || typeof pdoc.programmingStatement !== 'object' || Array.isArray(pdoc.programmingStatement)) {
+      throw new Error('结构化题面 canonical 缺失，无法打包');
+    }
+    targets.push({
+      name: `${folder}/programming-statement.json`,
+      content: `${JSON.stringify(pdoc.programmingStatement, null, 2)}\n`,
+    });
+  }
 
   const testdataNames = testdata.map((file) => file?.name).filter(Boolean);
   const additionalNames = additionalFiles.map((file) => file?.name).filter(Boolean);

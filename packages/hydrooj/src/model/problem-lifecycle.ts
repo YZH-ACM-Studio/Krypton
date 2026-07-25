@@ -13,6 +13,8 @@ const FORBIDDEN_STATEMENT_FIELDS = new Set(['prompt', 'statement', 'description'
 
 export const PROBLEM_STRUCTURAL_FIELDS = new Set([
     'content',
+    'statementFormat',
+    'programmingStatement',
     'config',
     'problemKind',
     'codeEvaluationStatus',
@@ -53,6 +55,8 @@ export function problemCreateChangedFields(
         knowledgeNodeIds?: unknown;
         codeEvaluationStatus?: unknown;
         batchImport?: unknown;
+        statementFormat?: unknown;
+        programmingStatement?: unknown;
     },
 ): string[] {
     return [
@@ -77,6 +81,8 @@ export function problemCreateChangedFields(
         ...(created.knowledgeNodeIds ? ['knowledgeNodeIds'] : []),
         ...(created.codeEvaluationStatus ? ['codeEvaluationStatus'] : []),
         ...(created.batchImport ? ['batchImport', 'hasBatchImportIdentity'] : []),
+        ...(created.statementFormat ? ['statementFormat'] : []),
+        ...(created.programmingStatement ? ['programmingStatement'] : []),
         ...(problemKind !== 'programming' ? ['config'] : []),
     ];
 }

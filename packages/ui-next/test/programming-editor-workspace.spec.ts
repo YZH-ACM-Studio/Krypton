@@ -140,19 +140,21 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(edit).to.include('<ManagedProblemTrainingStatus');
     expect(edit).to.include('data.managedTrainingPlacements');
     expect(edit).to.include('该题已完成审核并发布');
-    expect(edit).to.include('托管草稿保持隐藏；管理员从权限与协作页确认元数据并发布。');
+    expect(edit).to.include('托管草稿保持隐藏；命名空间负责人或管理员从审核队列确认元数据并发布。');
   });
 
-  it('starts managed creation with a valid difficulty and validates required statement content before posting', () => {
+  it('creates a managed shell first and starts structured statement editing only after a stable PID exists', () => {
     const edit = read('packages/ui-next/src/pages/problem-edit.tsx');
 
     expect(edit).to.include("defaultValue={String(pdoc.difficulty || (managed && isCreate ? 1 : ''))}");
-    expect(edit).to.include("const contentText = typeof draftContent === 'string' ? draftContent : JSON.stringify(draftContent);");
-    expect(edit).to.include("const message = '请填写题面正文。';");
-    expect(edit).to.include("const message = '题面正文不能超过 65535 个字符。';");
+    expect(edit).to.include("if (isCreate) {\n      fd.delete('content');");
+    expect(edit).to.include("{isCreate ? '创建题目壳' : '题面正文'}");
+    expect(edit).to.match(/{!isCreate\s*\?\s*\(\s*<div className="p-5">/);
+    expect(edit).to.include('<ProgrammingStatementEditor');
+    expect(edit).to.include("fd.set('programmingStatement', JSON.stringify(programmingStatement))");
     expect(edit).to.include('const canAssignManagedTraining = isCreate && data.canAssignManagedTraining === true;');
     expect(edit).to.include('<ManagedProgrammingTrainingControl allowed={canAssignManagedTraining}>');
-    expect(edit).to.include('作者、PID、标签与隐藏状态均由服务端固定。');
+    expect(edit).to.include('PID、系统标签与隐藏状态均由服务端固定。');
   });
 
   it('serializes both checkbox states explicitly so administrators can clear them', () => {

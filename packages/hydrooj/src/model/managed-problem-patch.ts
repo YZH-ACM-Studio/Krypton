@@ -18,7 +18,15 @@ export function managedProblemPatchStateFilter(current: ProblemDoc) {
     };
 }
 
-const MANAGED_CONTENT_FIELDS = new Set(['content', 'config', 'data', 'additional_file', 'html']);
+const MANAGED_CONTENT_FIELDS = new Set([
+    'content',
+    'statementFormat',
+    'programmingStatement',
+    'config',
+    'data',
+    'additional_file',
+    'html',
+]);
 const MANAGED_DRAFT_METADATA_FIELDS = new Set(['title', 'difficulty', 'managedAuthoring', 'pidNamespaceReview']);
 const MANAGED_ARCHIVE_FIELDS = new Set(['archivedAt', 'archivedBy', 'archiveReason']);
 const MANAGED_CANONICAL_FIELDS = new Set([

@@ -3,6 +3,12 @@ import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import yaml from 'js-yaml';
+import {
+    assertProgrammingStatementComplete,
+    compileProgrammingStatement,
+    normalizeProgrammingStatement,
+    type ProgrammingStatement,
+} from './programming-statement';
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const BATCH_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/;
@@ -11,7 +17,7 @@ const OBJECT_ID = /^[a-f0-9]{24}$/i;
 const SAFE_FILENAME = /^[^/\\\0]+$/;
 
 export interface ProblemBatchManifest {
-    schemaVersion: 1;
+    schemaVersion: 1 | 2;
     batchId: string;
     domain: string;
     actor: number;
@@ -47,6 +53,8 @@ export interface ProblemBatchManifestEntry {
     mindmapNodeIds: string[];
     origStat?: { accepted: number; submitted: number };
     statement: string;
+    /** Required by schemaVersion 2; canonical structured-v1 source. */
+    programmingStatement?: string;
     assets: Array<{ source: string; target: string }>;
     testdata: {
         directory: string;
@@ -68,6 +76,8 @@ export interface ValidatedBatchFile {
 export interface ValidatedProblemBatchEntry extends ProblemBatchManifestEntry {
     fingerprint: string;
     statementFile: ValidatedBatchFile;
+    programmingStatementFile?: ValidatedBatchFile;
+    canonicalStatement?: ProgrammingStatement;
     assetFiles: Array<ValidatedBatchFile & { target: string }>;
     testdataFiles: ValidatedBatchFile[];
     configFile: ValidatedBatchFile;
@@ -289,7 +299,8 @@ function selectionMatches(entry: ProblemBatchManifestEntry, selection: ProblemBa
 function normalizeManifest(raw: unknown): ProblemBatchManifest {
     invariant(isPlainObject(raw), 'batch.json must contain one object');
     assertKeys(raw, ['schemaVersion', 'batchId', 'domain', 'actor', 'visibility', 'source', 'author', 'training', 'selection', 'problems'], 'batch');
-    invariant(raw.schemaVersion === 1, 'schemaVersion must be 1');
+    invariant(raw.schemaVersion === 1 || raw.schemaVersion === 2, 'schemaVersion must be 1 or 2');
+    const schemaVersion = raw.schemaVersion;
     const batchId = nonEmptyString(raw.batchId, 'batchId', 96);
     invariant(BATCH_ID.test(batchId), 'batchId contains unsupported characters');
     const domain = nonEmptyString(raw.domain, 'domain', 64);
@@ -372,7 +383,18 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
         invariant(isPlainObject(candidate), `${field} must be an object`);
         assertKeys(
             candidate,
-            ['sourceProblemCode', 'title', 'difficulty', 'mindmapNodeIds', 'origStat', 'statement', 'assets', 'testdata', 'ambiguities'],
+            [
+                'sourceProblemCode',
+                'title',
+                'difficulty',
+                'mindmapNodeIds',
+                'origStat',
+                'statement',
+                'programmingStatement',
+                'assets',
+                'testdata',
+                'ambiguities',
+            ],
             field,
         );
         const sourceProblemCode = nonEmptyString(candidate.sourceProblemCode, `${field}.sourceProblemCode`, 32);
@@ -450,6 +472,9 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
             mindmapNodeIds,
             ...(origStat ? { origStat } : {}),
             statement: nonEmptyString(candidate.statement, `${field}.statement`, 1024),
+            ...(schemaVersion === 2
+                ? { programmingStatement: nonEmptyString(candidate.programmingStatement, `${field}.programmingStatement`, 1024) }
+                : {}),
             assets,
             testdata: {
                 directory: nonEmptyString(candidate.testdata.directory, `${field}.testdata.directory`, 1024),
@@ -460,6 +485,9 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
             },
             ...(ambiguities ? { ambiguities } : {}),
         };
+        if (schemaVersion === 1 && candidate.programmingStatement !== undefined) {
+            invariant(false, `${field}.programmingStatement requires schemaVersion 2`);
+        }
         invariant(selectionMatches(entry, selection), `${field} does not satisfy the declared selection rule`);
         return entry;
     });
@@ -471,7 +499,7 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
     }
 
     return {
-        schemaVersion: 1,
+        schemaVersion,
         batchId,
         domain,
         actor,
@@ -512,10 +540,46 @@ export async function validateProblemBatchManifest(manifestPathInput: string): P
         const statementFile = await inspectFile(statementPath, `${prefix}.statement`, false);
         const statement = await fs.readFile(statementPath, 'utf8');
         invariant(!!statement.trim(), `${prefix}.statement is blank`);
+        let programmingStatementFile: ValidatedBatchFile | undefined;
+        let canonicalStatement: ProgrammingStatement | undefined;
+        if (manifest.schemaVersion === 2) {
+            const canonicalPath = await resolveBatchPath(
+                rootDir,
+                entry.programmingStatement!,
+                `${prefix}.programmingStatement`,
+            );
+            programmingStatementFile = await inspectFile(canonicalPath, `${prefix}.programmingStatement`, false);
+            let canonicalInput: unknown;
+            try {
+                canonicalInput = JSON.parse(await fs.readFile(canonicalPath, 'utf8'));
+            } catch (error) {
+                throw new ProblemBatchImportError(
+                    `${prefix}.programmingStatement is not valid JSON`,
+                    'BATCH_IMPORT_STATEMENT_INVALID',
+                    undefined,
+                    { cause: error },
+                );
+            }
+            try {
+                canonicalStatement = normalizeProgrammingStatement(canonicalInput);
+            } catch (error) {
+                throw new ProblemBatchImportError(
+                    `${prefix}.programmingStatement is invalid`,
+                    'BATCH_IMPORT_STATEMENT_INVALID',
+                    undefined,
+                    { cause: error as Error },
+                );
+            }
+            invariant(
+                compileProgrammingStatement(canonicalStatement) === statement,
+                `${prefix}.statement differs from its canonical programming statement`,
+                'BATCH_IMPORT_STATEMENT_INVALID',
+            );
+        }
         const inputs = sampleIds(statement, 'input').sort();
         const outputs = sampleIds(statement, 'output').sort();
         invariant(
-            inputs.length > 0 && canonicalJson(inputs) === canonicalJson(outputs),
+            (manifest.schemaVersion === 2 || inputs.length > 0) && canonicalJson(inputs) === canonicalJson(outputs),
             `${prefix}.statement has invalid Hydro inputN/outputN samples`,
         );
 
@@ -575,6 +639,18 @@ export async function validateProblemBatchManifest(manifestPathInput: string): P
             });
         }
         invariant(isPlainObject(config), `${prefix}.testdata.config must parse to an object`, 'BATCH_IMPORT_CONFIG_INVALID');
+        if (canonicalStatement) {
+            try {
+                assertProgrammingStatementComplete(canonicalStatement, config);
+            } catch (error) {
+                throw new ProblemBatchImportError(
+                    `${prefix}.programmingStatement is incomplete`,
+                    'BATCH_IMPORT_STATEMENT_INVALID',
+                    undefined,
+                    { cause: error as Error },
+                );
+            }
+        }
         invariant(canonicalJson(config.cases) === canonicalJson(entry.testdata.cases), `${prefix}.testdata.config cases differ from the manifest`);
         if (entry.testdata.checker) {
             invariant(config.checker === entry.testdata.checker, `${prefix}.testdata checker differs from config`);
@@ -591,6 +667,14 @@ export async function validateProblemBatchManifest(manifestPathInput: string): P
                 mindmapNodeIds: entry.mindmapNodeIds,
                 origStat: entry.origStat,
                 statement: { size: statementFile.size, sha256: statementFile.sha256 },
+                ...(programmingStatementFile
+                    ? {
+                          programmingStatement: {
+                              size: programmingStatementFile.size,
+                              sha256: programmingStatementFile.sha256,
+                          },
+                      }
+                    : {}),
                 assets: assetFiles.map(({ target, size, sha256: digest }) => ({ target, size, sha256: digest })),
                 testdata: {
                     files: testdataFiles.map(({ name, size, sha256: digest }) => ({ name, size, sha256: digest })),
@@ -601,7 +685,16 @@ export async function validateProblemBatchManifest(manifestPathInput: string): P
                 ambiguities: entry.ambiguities || [],
             }),
         );
-        validatedProblems.push({ ...entry, fingerprint, statementFile, assetFiles, testdataFiles, configFile });
+        validatedProblems.push({
+            ...entry,
+            fingerprint,
+            statementFile,
+            ...(programmingStatementFile ? { programmingStatementFile } : {}),
+            ...(canonicalStatement ? { canonicalStatement } : {}),
+            assetFiles,
+            testdataFiles,
+            configFile,
+        });
     }
     const fingerprint = sha256(
         canonicalJson({
@@ -713,6 +806,11 @@ export async function applyProblemBatchImport(input: {
     persistReport: (report: ProblemBatchExecutionReport) => Promise<void>;
 }): Promise<ProblemBatchVerifyResult> {
     assertProblemBatchPlan(input.plan);
+    invariant(
+        input.batch.manifest.schemaVersion === 2,
+        'schemaVersion 1 manifests are verify-only; create a structured schemaVersion 2 manifest for new apply',
+        'BATCH_IMPORT_LEGACY_VERIFY_ONLY',
+    );
     invariant(input.plan.batchId === input.batch.manifest.batchId, 'preflight plan belongs to another batch', 'BATCH_IMPORT_PLAN_INVALID');
     invariant(input.plan.localFingerprint === input.batch.fingerprint, 'local batch content changed after preflight', 'BATCH_IMPORT_LOCAL_DRIFT');
     invariant(input.fingerprint === input.plan.fingerprint, 'apply fingerprint does not match preflight', 'BATCH_IMPORT_CONFIRMATION_REQUIRED');

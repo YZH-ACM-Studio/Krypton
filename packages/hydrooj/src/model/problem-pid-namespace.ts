@@ -3,6 +3,15 @@ import { ObjectId } from 'mongodb';
 import { Logger } from '@hydrooj/utils';
 import { PermissionError, ValidationError } from '../error';
 import type { User } from '../interface';
+import {
+    BUILTIN_PID_NAMESPACE_DEFINITIONS,
+    BUILTIN_PID_NAMESPACE_IDS,
+    builtinPidNamespaceDefinition,
+    builtinPidNamespaceForSourceTemplate,
+    pidNamespaceCounterScopeMatches,
+    type BuiltinPidNamespaceDefinition,
+    type BuiltinPidNamespaceId,
+} from '../lib/problem-pid-namespace-registry';
 import db from '../service/db';
 import { PERM, PRIV } from './builtin';
 import * as document from './document';
@@ -29,19 +38,11 @@ declare module './problem' {
     }
 }
 
-export const BUILTIN_PID_NAMESPACE_IDS = {
-    patBasic: 'builtin:pat-basic',
-    patAdvanced: 'builtin:pat-advanced',
-    self: 'builtin:self',
-    nowcoder: 'builtin:nowcoder',
-    hdu: 'builtin:hdu',
-    gplt: 'builtin:gplt',
-    cauc: 'builtin:cauc',
-} as const;
+export { BUILTIN_PID_NAMESPACE_IDS } from '../lib/problem-pid-namespace-registry';
+export type { BuiltinPidNamespaceId } from '../lib/problem-pid-namespace-registry';
 
 export const DEFAULT_PID_NAMESPACE_ID = BUILTIN_PID_NAMESPACE_IDS.self;
 
-export type BuiltinPidNamespaceId = (typeof BUILTIN_PID_NAMESPACE_IDS)[keyof typeof BUILTIN_PID_NAMESPACE_IDS];
 export type PidNamespaceKind = 'builtin' | 'custom';
 export type PidNamespaceRole = 'author' | 'manager';
 export type PidNamespaceScopedCapability = 'manager' | 'editAll' | 'admin';
@@ -110,70 +111,7 @@ export type PidNamespaceAclUser = Pick<User, '_id' | 'hasPerm' | 'hasPriv'> & {
     _pidNamespaceAclLoaded?: boolean;
 };
 
-interface BuiltinPidNamespaceDefinition {
-    namespaceId: BuiltinPidNamespaceId;
-    name: string;
-    sourceTemplates: ManagedSourceTemplate[];
-    pidPattern: string;
-    counterMatches: (namespace: string) => boolean;
-}
-
-const BUILTIN_PID_NAMESPACES: readonly BuiltinPidNamespaceDefinition[] = [
-    {
-        namespaceId: BUILTIN_PID_NAMESPACE_IDS.patBasic,
-        name: 'PAT 乙级',
-        sourceTemplates: ['pat_basic'],
-        pidPattern: 'P3xxx',
-        counterMatches: (namespace) => namespace === 'pat-basic',
-    },
-    {
-        namespaceId: BUILTIN_PID_NAMESPACE_IDS.patAdvanced,
-        name: 'PAT 甲级',
-        sourceTemplates: ['pat_advanced'],
-        pidPattern: 'P4xxx',
-        counterMatches: (namespace) => namespace === 'pat-advanced',
-    },
-    {
-        namespaceId: BUILTIN_PID_NAMESPACE_IDS.self,
-        name: '自命题',
-        sourceTemplates: ['self'],
-        pidPattern: 'P5xxx',
-        counterMatches: (namespace) => namespace === 'self',
-    },
-    {
-        namespaceId: BUILTIN_PID_NAMESPACE_IDS.nowcoder,
-        name: '牛客',
-        sourceTemplates: ['nowcoder_summer'],
-        pidPattern: 'NKxxxx',
-        counterMatches: (namespace) => namespace === 'nowcoder',
-    },
-    {
-        namespaceId: BUILTIN_PID_NAMESPACE_IDS.hdu,
-        name: 'HDU',
-        sourceTemplates: ['hdu_summer', 'hdu_spring'],
-        pidPattern: 'HDUxxxx',
-        counterMatches: (namespace) => namespace === 'hdu',
-    },
-    {
-        namespaceId: BUILTIN_PID_NAMESPACE_IDS.gplt,
-        name: '天梯赛',
-        sourceTemplates: ['gplt_national', 'gplt_provincial'],
-        pidPattern: 'GPLT{year}{N/P}xxx',
-        counterMatches: (namespace) => /^gplt-\d{4}-(?:national|provincial)$/.test(namespace),
-    },
-    {
-        namespaceId: BUILTIN_PID_NAMESPACE_IDS.cauc,
-        name: 'CAUC 校赛',
-        sourceTemplates: ['cauc'],
-        pidPattern: 'CCCCCAUC{year}xxxx',
-        counterMatches: (namespace) => /^cauc-\d{4}$/.test(namespace),
-    },
-] as const;
-
-const BUILTIN_BY_ID = new Map(BUILTIN_PID_NAMESPACES.map((definition) => [definition.namespaceId, definition]));
-const BUILTIN_BY_TEMPLATE = new Map(
-    BUILTIN_PID_NAMESPACES.flatMap((definition) => definition.sourceTemplates.map((template) => [template, definition.namespaceId] as const)),
-);
+const BUILTIN_PID_NAMESPACES = BUILTIN_PID_NAMESPACE_DEFINITIONS;
 const RESERVED_CUSTOM_PREFIXES = new Set(['P', 'P3', 'P4', 'P5', 'PAT', 'NK', 'NOWCODER', 'HDU', 'GPLT', 'CAUC', 'CCCCCAUC']);
 const logger = new Logger('problem-pid-namespace');
 const namespaceColl = db.collection<PidNamespaceDoc>('problem.pid_namespaces');
@@ -254,11 +192,11 @@ function normalizeMembers(input: unknown): PidNamespaceMember[] {
 }
 
 function builtinDefinition(namespaceId: string): BuiltinPidNamespaceDefinition | null {
-    return BUILTIN_BY_ID.get(namespaceId as BuiltinPidNamespaceId) || null;
+    return builtinPidNamespaceDefinition(namespaceId);
 }
 
 export function builtinPidNamespaceIdForSourceTemplate(template: unknown): BuiltinPidNamespaceId {
-    const namespaceId = typeof template === 'string' ? BUILTIN_BY_TEMPLATE.get(template as ManagedSourceTemplate) : undefined;
+    const namespaceId = builtinPidNamespaceForSourceTemplate(template);
     if (!namespaceId) throw new ValidationError('template');
     return namespaceId;
 }
@@ -504,7 +442,7 @@ export async function listPidNamespaces(domainId: string): Promise<PidNamespaceV
     const builtins = BUILTIN_PID_NAMESPACES.map((definition) => {
         const view = overlayBuiltin(definition, byId.get(definition.namespaceId));
         const entries = counters
-            .filter((counter) => definition.counterMatches(counter.namespace))
+            .filter((counter) => pidNamespaceCounterScopeMatches(definition, counter.namespace))
             .map((counter) => ({ scope: counter.namespace, value: counter.value }));
         view.counterEntries = entries;
         view.counter = entries.length ? Math.max(...entries.map((entry) => entry.value)) : null;
@@ -599,10 +537,7 @@ async function finishPidNamespaceAudit(
     if (updated.matchedCount !== 1) throw new Error(`PID namespace audit ${auditId.toHexString()} could not be finalized`);
 }
 
-async function auditedPidNamespaceMutation<T>(
-    input: PidNamespaceAuditInput,
-    work: (markCommitted: () => void) => Promise<T>,
-): Promise<T> {
+async function auditedPidNamespaceMutation<T>(input: PidNamespaceAuditInput, work: (markCommitted: () => void) => Promise<T>): Promise<T> {
     const auditId = await beginPidNamespaceAudit(input);
     let committed = false;
     let result!: T;

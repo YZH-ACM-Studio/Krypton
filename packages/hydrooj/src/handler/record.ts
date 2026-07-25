@@ -12,6 +12,7 @@ import {
     ProblemNotFoundError,
     RecordNotFoundError,
     UserNotFoundError,
+    ValidationError,
 } from '../error';
 import { RecordDoc, Tdoc } from '../interface';
 import { canAccessPostContestPracticeRecord, canUsePostContestPractice } from '../lib/contest-correction';
@@ -23,15 +24,19 @@ import * as contest from '../model/contest';
 import * as contestTeam from '../model/contest-team';
 import problem, { ProblemDoc } from '../model/problem';
 import record from '../model/record';
+import {
+    auditRecordScorePermissionRejection,
+    cancelRecordScore,
+    getRecordScoreAction,
+    recoverCanceledRecord,
+} from '../model/record-score-cancellation';
 import { langs } from '../model/setting';
 import storage from '../model/storage';
 import system from '../model/system';
-import TaskModel from '../model/task';
 import user from '../model/user';
 import { ConnectionHandler, param, subscribe, Types } from '../service/server';
 import { buildProjection, Time } from '../utils';
 import { ContestDetailBaseHandler } from './contest';
-import { postJudge } from './judge';
 
 async function getCurrentTeamForRecord(
     domainId: string,
@@ -172,6 +177,16 @@ export class RecordListHandler extends ContestDetailBaseHandler {
                   .skip((page - 1) * limit)
                   .limit(limit)
                   .toArray();
+        const recordScoreActions = this.user.hasPerm(PERM.PERM_REJUDGE)
+            ? Object.fromEntries(
+                  (
+                      await Promise.all(
+                          rdocs.map(async (rdoc) => [rdoc._id.toHexString(), await getRecordScoreAction(rdoc, true)] as const),
+                      )
+                  ).filter((entry) => entry[1]),
+              )
+            : {};
+        rdocs = rdocs.map((rdoc) => omit(rdoc, ['scoreCancellation'])) as RecordDoc[];
         const [udict, pdict] = full
             ? [{}, {}]
             : await Promise.all([
@@ -228,6 +243,7 @@ export class RecordListHandler extends ContestDetailBaseHandler {
             teamRecordAccess,
             postContestPracticeActive,
             recordDetailTid: postContestPracticeActive ? tid : undefined,
+            recordScoreActions,
             langs,
             statusTexts: STATUS_TEXTS,
         };
@@ -469,10 +485,12 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             }
         }
         this.response.template = 'record_detail.html';
+        const responseRdoc = omit(rdoc, ['scoreCancellation']);
+        const recordScoreAction = this.user.hasPerm(PERM.PERM_REJUDGE) ? await getRecordScoreAction(rdoc, true) : null;
         const responseBody = {
             udoc,
             recordStudent,
-            rdoc: canViewDetail ? rdoc : pick(rdoc, ['_id', 'lang', 'code']),
+            rdoc: canViewDetail ? responseRdoc : pick(responseRdoc, ['_id', 'lang', 'code']),
             pdoc,
             tdoc: this.tdoc,
             postContestPracticeRecordAccess: this.postContestPracticeRecordAccess,
@@ -486,6 +504,7 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
             // Per-test-point hints to render next to each case (already
             // visibility-filtered above). Keyed by 1-based case order.
             testHints,
+            ...(this.user.hasPerm(PERM.PERM_REJUDGE) ? { recordScoreAction } : {}),
         };
         const teamMemberCannotDownload =
             !!this.tdoc &&
@@ -502,46 +521,82 @@ export class RecordDetailHandler extends ContestDetailBaseHandler {
 
     @param('rid', Types.ObjectId)
     async post() {
-        this.checkPerm(PERM.PERM_REJUDGE);
-        if (this.rdoc.files?.hack) throw new HackRejudgeFailedError();
-        if (this.rdoc.contest?.toString().startsWith('0'.repeat(23))) throw new PretestRejudgeFailedError();
+        const operation = String(this.args.operation || '');
+        if (!this.user.hasPerm(PERM.PERM_REJUDGE)) {
+            if (operation === 'cancel' || (operation === 'rejudge' && this.rdoc.status === STATUS.STATUS_CANCELED)) {
+                await auditRecordScorePermissionRejection({
+                    rdoc: this.rdoc,
+                    actor: this.user._id,
+                    operation,
+                });
+            }
+            throw new PermissionError(PERM.PERM_REJUDGE);
+        }
+        if (operation !== 'cancel') {
+            if (this.rdoc.files?.hack) throw new HackRejudgeFailedError();
+            if (this.rdoc.contest?.toString().startsWith('0'.repeat(23))) throw new PretestRejudgeFailedError();
+        }
     }
 
+    @param('expectedCancellationAt', Types.String, true)
     @param('rid', Types.ObjectId)
-    async postRejudge(domainId: string, rid: ObjectId) {
+    async postRejudge(domainId: string, expectedCancellationAt: string | undefined, rid: ObjectId) {
+        if (expectedCancellationAt !== undefined || this.rdoc.status === STATUS.STATUS_CANCELED || this.rdoc.scoreCancellation) {
+            if (!expectedCancellationAt) throw new ValidationError('expectedCancellationAt');
+            const cancellationAt = new Date(expectedCancellationAt);
+            if (Number.isNaN(cancellationAt.getTime())) throw new ValidationError('expectedCancellationAt');
+            const result = await recoverCanceledRecord({
+                domainId,
+                rid,
+                actor: this.user._id,
+                expectedCancellationAt: cancellationAt,
+            });
+            this.ctx.broadcast('record/change', result.rdoc);
+            if (this.request.json) {
+                this.response.body = result;
+                return;
+            }
+            this.back();
+            return;
+        }
         const pdoc = await problem.get(domainId, this.rdoc.pid);
         if (!pdoc?.config || typeof pdoc.config === 'string') throw new ProblemConfigError();
         const priority = await record.submissionPriority(this.user._id, -20);
         const rdoc = await record.reset(domainId, rid, true);
         this.ctx.broadcast('record/change', rdoc);
         await record.judge(domainId, rid, priority, this.rdoc.contest ? { detail: false } : {});
+        if (this.request.json) {
+            this.response.body = {
+                rdoc,
+                recordScoreAction: null,
+            };
+            return;
+        }
         this.back();
     }
 
+    @param('expectedStatus', Types.Int)
+    @param('expectedJudgeAt', Types.String)
+    @param('reason', Types.String, true)
     @param('rid', Types.ObjectId)
-    async postCancel(domainId: string, rid: ObjectId) {
-        const $set = {
-            status: STATUS.STATUS_CANCELED,
-            score: 0,
-            time: 0,
-            memory: 0,
-            testCases: [
-                {
-                    id: 0,
-                    subtaskId: 0,
-                    status: 9,
-                    score: 0,
-                    time: 0,
-                    memory: 0,
-                    message: 'score canceled',
-                },
-            ],
-            subtasks: {},
-        };
-        const [latest] = await Promise.all([record.update(domainId, rid, $set), TaskModel.deleteMany({ rid: this.rdoc._id })]);
-        if (latest) {
-            this.ctx.broadcast('record/change', latest);
-            await postJudge(latest);
+    async postCancel(domainId: string, expectedStatus: number, expectedJudgeAt: string, reason: string | undefined, rid: ObjectId) {
+        const judgeAt = new Date(expectedJudgeAt);
+        if (Number.isNaN(judgeAt.getTime())) throw new ValidationError('expectedJudgeAt');
+        const result = await cancelRecordScore({
+            domainId,
+            rid,
+            actor: this.user._id,
+            expectedStatus,
+            expectedJudgeAt: judgeAt,
+            reason,
+        });
+        this.ctx.broadcast('record/change', result.rdoc);
+        if (this.request.json) {
+            this.response.body = {
+                ...result,
+                rdoc: omit(result.rdoc, ['scoreCancellation']),
+            };
+            return;
         }
         this.back();
     }
@@ -727,6 +782,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         if (typeof this.pid === 'number' && rdoc.pid !== this.pid) return;
         if (typeof this.uid === 'number' && rdoc.uid !== this.uid) return;
 
+        const recordScoreAction = this.user.hasPerm(PERM.PERM_REJUDGE) ? await getRecordScoreAction(rdoc, true) : null;
         let [udoc, pdoc] = await Promise.all([
             user.getById(this.args.domainId, rdoc.uid),
             rdoc.contest || this.practice ? problem.get(rdoc.domainId, rdoc.pid) : problem.getViewableAuthorized(rdoc.domainId, rdoc.pid, this.user),
@@ -734,10 +790,11 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
         const tdoc = this.tid || this.practice ? this.tdoc : null;
         if (pdoc && !rdoc.contest && !this.practice && !this.user.hasPerm(PERM.PERM_VIEW_PROBLEM)) pdoc = null;
         if (this.applyProjection && rdoc.contest?.toString() !== '0'.repeat(24)) rdoc = contest.applyProjection(tdoc, rdoc, this.user);
+        rdoc = omit(rdoc, ['scoreCancellation']) as RecordDoc;
         if (this.pretest) {
             this.queueSend(rdoc._id.toHexString(), async () => ({ rdoc: omit(rdoc, ['code', 'input']) }));
         } else if (this.noTemplate) {
-            this.queueSend(rdoc._id.toHexString(), async () => ({ rdoc }));
+            this.queueSend(rdoc._id.toHexString(), async () => ({ rdoc, recordScoreAction }));
         } else {
             this.queueSend(rdoc._id.toHexString(), async () => ({
                 html: await this.renderHTML('record_main_tr.html', {
@@ -747,6 +804,7 @@ export class RecordMainConnectionHandler extends ConnectionHandler {
                     tdoc,
                     recordDetailTid: this.practice ? this.practiceTid : undefined,
                     allDomain: this.allDomain,
+                    recordScoreActions: recordScoreAction ? { [rdoc._id.toHexString()]: recordScoreAction } : {},
                 }),
             }));
         }
@@ -891,6 +949,9 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
     }
 
     async sendUpdate(rdoc: RecordDoc) {
+        const recordScoreAction =
+            !this.liveClientRecordCodeOnly && this.user.hasPerm(PERM.PERM_REJUDGE) ? await getRecordScoreAction(rdoc, true) : null;
+        rdoc = omit(rdoc, ['scoreCancellation']) as RecordDoc;
         if (this.liveClientRecordCodeOnly) {
             const codeVisibleRecord = this.canViewCode
                 ? rdoc
@@ -905,7 +966,7 @@ export class RecordDetailConnectionHandler extends ConnectionHandler {
             return;
         }
         if (this.noTemplate) {
-            this.send({ rdoc });
+            this.send({ rdoc, recordScoreAction });
         } else {
             this.send({
                 status: rdoc.status,

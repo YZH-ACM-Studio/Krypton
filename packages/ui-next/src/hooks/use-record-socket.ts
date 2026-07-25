@@ -22,6 +22,8 @@ export interface UseRecordSocketOptions {
   filters?: Record<string, string | number | boolean | undefined>;
   /** Called whenever a new rdoc snapshot arrives. */
   onRdoc: (rdoc: Rdoc) => void;
+  /** Server-issued score-management capability paired with the rdoc snapshot. */
+  onRecordScoreAction?: (action: Record<string, any> | null, rid: string) => void;
   /** Optional error callback for diagnostics. */
   onError?: (e: any) => void;
   /** Team roster/captain revision changed; callers must refresh server capabilities. */
@@ -37,6 +39,7 @@ export function dispatchRecordSocketPayload(
   onRdoc: (rdoc: Rdoc) => void,
   onTeamRoleChange?: (revision: number | null) => void,
   onTeamCodeAvailable?: (snapshotId: string) => void,
+  onRecordScoreAction?: (action: Record<string, any> | null, rid: string) => void,
 ) {
   if (payload?.teamRoleChanged === true) {
     const revision = Number(payload.teamRevision);
@@ -48,7 +51,10 @@ export function dispatchRecordSocketPayload(
     if (/^[0-9a-f]{24}$/.test(snapshotId)) onTeamCodeAvailable?.(snapshotId);
     return;
   }
-  if (payload?.rdoc) onRdoc(payload.rdoc);
+  if (payload?.rdoc) {
+    onRdoc(payload.rdoc);
+    if ('recordScoreAction' in payload) onRecordScoreAction?.(payload.recordScoreAction || null, String(payload.rdoc._id || ''));
+  }
 }
 
 export function isTerminalRecordSocketClose(path: RecordSocketPath, code: number): boolean {
@@ -59,6 +65,7 @@ export function useRecordSocket({
   path = '/record-conn',
   filters,
   onRdoc,
+  onRecordScoreAction,
   onError,
   onTeamRoleChange,
   onTeamCodeAvailable,
@@ -67,12 +74,16 @@ export function useRecordSocket({
   // Latest callbacks captured in refs so re-renders don't re-open the
   // socket merely because the closure changed.
   const onRdocRef = useRef(onRdoc);
+  const onRecordScoreActionRef = useRef(onRecordScoreAction);
   const onErrorRef = useRef(onError);
   const onTeamRoleChangeRef = useRef(onTeamRoleChange);
   const onTeamCodeAvailableRef = useRef(onTeamCodeAvailable);
   useEffect(() => {
     onRdocRef.current = onRdoc;
   }, [onRdoc]);
+  useEffect(() => {
+    onRecordScoreActionRef.current = onRecordScoreAction;
+  }, [onRecordScoreAction]);
   useEffect(() => {
     onErrorRef.current = onError;
   }, [onError]);
@@ -125,6 +136,7 @@ export function useRecordSocket({
           onRdocRef.current,
           onTeamRoleChangeRef.current,
           onTeamCodeAvailableRef.current,
+          onRecordScoreActionRef.current,
         );
       };
       ws.onerror = (err) => {

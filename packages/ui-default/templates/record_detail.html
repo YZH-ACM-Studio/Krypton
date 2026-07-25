@@ -37,20 +37,29 @@
     {% if handler.user.hasPerm(perm.PERM_REJUDGE) and not rdoc.files.hack %}
       <div class="section__body no-padding">
         <ol class="menu">
+          {% if rdoc.status != STATUS.STATUS_CANCELED or recordScoreAction and recordScoreAction.kind == 'rejudge' %}
           <li class="menu__item">
             <form method="post">
+              {% if recordScoreAction and recordScoreAction.kind == 'rejudge' %}
+              <input type="hidden" name="expectedCancellationAt" value="{{ recordScoreAction.expectedCancellationAt }}">
+              {% endif %}
               <button type="submit" name="operation" value="rejudge" class="menu__link">
                 <span class="icon icon-refresh"></span> {{ _('Rejudge') }}
               </button>
             </form>
           </li>
+          {% endif %}
+          {% if recordScoreAction and recordScoreAction.kind == 'cancel' %}
           <li class="menu__item">
             <form method="post">
+              <input type="hidden" name="expectedStatus" value="{{ recordScoreAction.expectedStatus }}">
+              <input type="hidden" name="expectedJudgeAt" value="{{ recordScoreAction.expectedJudgeAt }}">
               <button type="submit" name="operation" value="cancel" class="menu__link">
                 <span class="icon icon-close"></span> {{ _('Cancel Score') }}
               </button>
             </form>
           </li>
+          {% endif %}
         </ol>
       </div>
     {% endif %}

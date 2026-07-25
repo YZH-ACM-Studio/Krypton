@@ -7,14 +7,24 @@
   <td class="col--problem col--problem-name">
   {% if handler.user.hasPerm(perm.PERM_REJUDGE) and not rdoc.files.hack and not _isPretest %}
     <form class="form--inline" method="post" action="{{ url('record_detail', rid=rdoc._id, domainId=rdoc.domainId) }}">
+      {% set scoreAction = recordScoreActions[rdoc._id.toString()] %}
+      {% if rdoc.status != STATUS.STATUS_CANCELED or scoreAction and scoreAction.kind == 'rejudge' %}
+      {% if scoreAction and scoreAction.kind == 'rejudge' %}
+      <input type="hidden" name="expectedCancellationAt" value="{{ scoreAction.expectedCancellationAt }}">
+      {% endif %}
       <button type="submit" name="operation" value="rejudge" class="link text-maroon lighter">
         <span class="icon icon-refresh"></span>
         {{ _('Rejudge') }}
       </button> 
-      <button type="submit" name="operation" value="cancel" class="link text-maroon lighter">
-        <span class="icon icon-close"></span>
-        {{ _('Cancel Score') }}
-      </button> |
+      {% endif %}
+      {% if scoreAction and scoreAction.kind == 'cancel' %}
+        <input type="hidden" name="expectedStatus" value="{{ scoreAction.expectedStatus }}">
+        <input type="hidden" name="expectedJudgeAt" value="{{ scoreAction.expectedJudgeAt }}">
+        <button type="submit" name="operation" value="cancel" class="link text-maroon lighter">
+          <span class="icon icon-close"></span>
+          {{ _('Cancel Score') }}
+        </button>
+      {% endif %} |
     </form>
   {% endif %}
   {% if pdoc and rdoc.contest %}

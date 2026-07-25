@@ -45,8 +45,10 @@ const page = new NamedPage('record_main', async () => {
   for (const operation of ['rejudge', 'cancel']) {
     $(document).on('click', `[name="operation"][value="${operation}"]`, (ev) => {
       ev.preventDefault();
-      const action = $(ev.target).closest('form').attr('action');
-      request.post(action, { operation }).catch((e) => Notification.error(e));
+      const $form = $(ev.target).closest('form');
+      const action = $form.attr('action');
+      const payload = Object.fromEntries($form.serializeArray().map((field) => [field.name, field.value]));
+      request.post(action, { ...payload, operation }).catch((e) => Notification.error(e));
     });
   }
 });

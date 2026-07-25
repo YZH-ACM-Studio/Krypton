@@ -312,6 +312,7 @@ const acm = buildContestRule({
         const lockAt = isLocked(tdoc) ? tdoc.lockAt : null;
         for (const j of journal) {
             if (!tdoc.pids.includes(j.pid)) continue;
+            if (j.status === STATUS.STATUS_CANCELED) continue;
             if (!this.submitAfterAccept && display[j.pid]?.status === STATUS.STATUS_ACCEPTED) continue;
             if (![STATUS.STATUS_ACCEPTED, STATUS.STATUS_COMPILE_ERROR, STATUS.STATUS_FORMAT_ERROR, STATUS.STATUS_CANCELED].includes(j.status)) {
                 naccept[j.pid]++;
@@ -498,6 +499,7 @@ const oi = buildContestRule({
 
         const lockAt = isLocked(tdoc) ? tdoc.lockAt : null;
         for (const j of journal.filter((i) => tdoc.pids.includes(i.pid))) {
+            if (j.status === STATUS.STATUS_CANCELED) continue;
             if (lockAt && j.rid.getTimestamp() > lockAt) {
                 npending[j.pid]++;
                 display[j.pid] ||= {};
@@ -697,6 +699,7 @@ const strictioi = buildContestRule(
             let score = 0;
             const subtasks: Record<number, Record<number, SubtaskResult>> = {};
             for (const j of journal.filter((i) => tdoc.pids.includes(i.pid))) {
+                if (j.status === STATUS.STATUS_CANCELED) continue;
                 subtasks[j.pid] ||= {};
                 for (const i in j.subtasks) {
                     if (!subtasks[j.pid][i] || subtasks[j.pid][i].score < j.subtasks[i].score) subtasks[j.pid][i] = j.subtasks[i];
@@ -790,6 +793,7 @@ const ledo = buildContestRule(
             const ntry = Counter<number>();
             const detail = {};
             for (const j of journal.filter((i) => tdoc.pids.includes(i.pid))) {
+                if (j.status === STATUS.STATUS_CANCELED) continue;
                 const vaild = ![STATUS.STATUS_COMPILE_ERROR, STATUS.STATUS_FORMAT_ERROR].includes(j.status);
                 if (vaild) ntry[j.pid]++;
                 const penaltyScore = vaild ? Math.round(Math.max(0.7, 0.95 ** (ntry[j.pid] - 1)) * j.score) : 0;
@@ -874,6 +878,7 @@ const homework = buildContestRule({
     stat: (tdoc, journal) => {
         const effective = {};
         for (const j of journal) {
+            if (j.status === STATUS.STATUS_CANCELED) continue;
             if (tdoc.pids.includes(j.pid)) effective[j.pid] = j;
         }
         function time(jdoc) {

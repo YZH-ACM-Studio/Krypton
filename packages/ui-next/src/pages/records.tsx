@@ -13,6 +13,7 @@ import {
   ListChecks,
   RotateCcw,
   Search,
+  ShieldAlert,
 } from 'lucide-react';
 import { useRecordSocket } from '@/hooks/use-record-socket';
 import { Badge } from '@/components/ui/badge';
@@ -21,7 +22,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { KryptonIDE } from '@/components/krypton-ide';
 import { readTeamExamModeContext } from '@/components/team-exam-mode';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { SimpleSelect } from '@/components/ui/select';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useBootstrap, type GenericUserDoc } from '@/lib/bootstrap';
@@ -36,9 +39,13 @@ import {
   summarizeRecordCases,
   type RecordDetailTab,
 } from '@/lib/record-detail-workspace';
+import { readHydroResponseError } from '@/lib/problem-save-response';
 
 type R = Record<string, any>;
 type SubtaskView = R & { id: string };
+type RecordScoreAction =
+  | { kind: 'cancel'; expectedStatus: number; expectedJudgeAt: string; contestId?: string; contestTeamId?: string }
+  | { kind: 'rejudge'; expectedCancellationAt: string; contestId?: string; contestTeamId?: string };
 
 function getUser(udict: Record<string, GenericUserDoc>, uid: string | number | undefined) {
   return uid != null ? (udict[String(uid)] ?? null) : null;
@@ -507,6 +514,128 @@ function RecordCodeContent({
   );
 }
 
+function RecordScoreActionDialog({
+  open,
+  record: rdoc,
+  action,
+  endpoint,
+  problemTitle,
+  username,
+  onOpenChange,
+  onSuccess,
+}: {
+  open: boolean;
+  record: R | null;
+  action: RecordScoreAction | null;
+  endpoint: string;
+  problemTitle: string;
+  username: string;
+  onOpenChange: (open: boolean) => void;
+  onSuccess: (payload: R) => void;
+}) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const cancel = action?.kind === 'cancel';
+
+  async function submit() {
+    if (!rdoc || !action) return;
+    setBusy(true);
+    setError('');
+    try {
+      const body = new URLSearchParams({ operation: cancel ? 'cancel' : 'rejudge' });
+      if (cancel) {
+        body.set('expectedStatus', String(action.expectedStatus));
+        body.set('expectedJudgeAt', action.expectedJudgeAt);
+        if (reason.trim()) body.set('reason', reason.trim());
+      } else {
+        body.set('expectedCancellationAt', action.expectedCancellationAt);
+      }
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        },
+        body,
+      });
+      if (!response.ok) throw new Error(await readHydroResponseError(response, cancel ? '取消成绩失败' : '重新评测失败'));
+      const payload = await response.json();
+      onSuccess(payload);
+      setReason('');
+      onOpenChange(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (busy) return;
+        if (!next) {
+          setError('');
+          setReason('');
+        }
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent className="w-[min(34rem,calc(100vw-1.5rem))]" onClose={() => onOpenChange(false)}>
+        <DialogHeader>
+          <DialogTitle>{cancel ? '确认取消单条记录成绩' : '重新评测并恢复成绩'}</DialogTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            记录 #{String(rdoc?._id || '').slice(-8)} · {problemTitle} · {username}
+          </p>
+        </DialogHeader>
+        <DialogBody className="space-y-4 px-6 py-5">
+          <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.07] p-4 text-sm">
+            <div className="flex items-start gap-3">
+              <ShieldAlert className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div>
+                <p className="font-medium">{cancel ? '这会立即把该记录计分归零' : '这会使用当前题目配置和测试数据重新评测'}</p>
+                <p className="mt-1 leading-6 text-muted-foreground">
+                  {cancel
+                    ? '系统将同步重算该用户的题目状态及关联比赛成绩。历史提交统计、气球、讨论和旧计数不会被改写。'
+                    : '恢复结果以本次重新评测为准，不会把取消前的旧快照直接写回。'}
+                </p>
+              </div>
+            </div>
+          </div>
+          {action?.contestId ? (
+            <div className="rounded-lg border bg-muted/20 px-4 py-3 text-sm">
+              <p className="font-medium">比赛影响</p>
+              <p className="mt-1 break-all text-muted-foreground">
+                比赛 {action.contestId}
+                {action.contestTeamId ? ` · 队伍 ${action.contestTeamId}` : ''}；若比赛仍在进行，榜单会立即按新投影更新。
+              </p>
+            </div>
+          ) : null}
+          {cancel ? (
+            <label className="block space-y-2">
+              <span className="text-sm font-medium">备注（可选）</span>
+              <Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={240} placeholder="简要记录取消原因" />
+              <span className="block text-right text-xs tabular-nums text-muted-foreground">{reason.length}/240</span>
+            </label>
+          ) : null}
+          {error ? <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</div> : null}
+        </DialogBody>
+        <div className="flex shrink-0 justify-end gap-2 border-t px-6 py-4">
+          <Button type="button" variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
+          <Button type="button" variant={cancel ? 'destructive' : 'default'} disabled={busy} onClick={() => void submit()}>
+            {busy ? '处理中…' : cancel ? '确认取消成绩' : '重新评测'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function RecordsPage() {
   const bs = useBootstrap();
   const data = bs.page.data;
@@ -515,6 +644,8 @@ export function RecordsPage() {
   // The first render mirrors server pagination; subsequent rdoc updates
   // arrive via the WS hook below and merge by `_id`.
   const [rdocs, setRdocs] = useState<R[]>(initialRdocs);
+  const [recordScoreActions, setRecordScoreActions] = useState<Record<string, RecordScoreAction>>(data.recordScoreActions || {});
+  const [scoreActionRid, setScoreActionRid] = useState('');
   const page = Number(data.page) || 1;
   const locale = bs.locale;
   const pdict: Record<string, R> = data.pdict || {};
@@ -546,6 +677,8 @@ export function RecordsPage() {
   const statusOptions: Array<[string, string]> = Object.keys(statusTexts).length
     ? Object.keys(statusTexts).map((key) => [key, statusLabel(key, statusTexts)])
     : Object.entries(STATUS_MAP).map(([key, value]) => [key, value.label]);
+  const selectedScoreRecord = rdocs.find((rdoc) => String(rdoc._id) === scoreActionRid) || null;
+  const selectedScoreAction = scoreActionRid ? recordScoreActions[scoreActionRid] || null : null;
 
   // Live updates: subscribe to /record-conn with the same filters as the
   // current page so newly arriving rdocs (or status flips) update the
@@ -575,6 +708,15 @@ export function RecordsPage() {
         // don't grow unboundedly between page navigations.
         const limit = prev.length || 100;
         return [rdoc, ...prev].slice(0, limit);
+      });
+    },
+    onRecordScoreAction: (action, rid) => {
+      if (!rid) return;
+      setRecordScoreActions((current) => {
+        const updated = { ...current };
+        if (action) updated[rid] = action as RecordScoreAction;
+        else delete updated[rid];
+        return updated;
       });
     },
     disabled: !bs.user.signedIn && !filterParams.tid,
@@ -682,12 +824,13 @@ export function RecordsPage() {
                 <TableHead className="w-24 text-right">时间</TableHead>
                 <TableHead className="w-24 text-right">内存</TableHead>
                 <TableHead className="w-28 text-right">提交时间</TableHead>
+                {Object.keys(recordScoreActions).length ? <TableHead className="w-28 text-right">管理</TableHead> : null}
               </TableRow>
             </TableHeader>
             <TableBody>
               {rdocs.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={8 + (hasStudentColumn ? 1 : 0) + (Object.keys(recordScoreActions).length ? 1 : 0)} className="py-8 text-center text-sm text-muted-foreground">
                     暂无提交记录
                   </TableCell>
                 </TableRow>
@@ -742,6 +885,15 @@ export function RecordsPage() {
                       <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{r.time != null ? `${r.time}ms` : '—'}</TableCell>
                       <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{formatMemory(r.memory)}</TableCell>
                       <TableCell className="text-right text-xs text-muted-foreground">{formatRecordTime(r._id || r.judgeAt, locale)}</TableCell>
+                      {Object.keys(recordScoreActions).length ? (
+                        <TableCell className="text-right">
+                          {recordScoreActions[String(r._id)] ? (
+                            <Button type="button" size="sm" variant="ghost" onClick={() => setScoreActionRid(String(r._id))}>
+                              {recordScoreActions[String(r._id)].kind === 'cancel' ? '取消成绩' : '重新评测'}
+                            </Button>
+                          ) : null}
+                        </TableCell>
+                      ) : null}
                     </TableRow>
                   );
                 })
@@ -750,6 +902,40 @@ export function RecordsPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <RecordScoreActionDialog
+        open={!!selectedScoreRecord && !!selectedScoreAction}
+        record={selectedScoreRecord}
+        action={selectedScoreAction}
+        endpoint={
+          selectedScoreRecord
+            ? replaceRouteTokens(bs.urls.recordDetail, {
+                RID: String(selectedScoreRecord._id),
+              })
+            : ''
+        }
+        problemTitle={
+          selectedScoreRecord
+            ? String(pdict[String(selectedScoreRecord.pid)]?.title || selectedScoreRecord.pid)
+            : ''
+        }
+        username={selectedScoreRecord ? String(getUser(udict, selectedScoreRecord.uid)?.uname || `#${selectedScoreRecord.uid}`) : ''}
+        onOpenChange={(open) => {
+          if (!open) setScoreActionRid('');
+        }}
+        onSuccess={(payload) => {
+          const next = payload.rdoc;
+          if (!next?._id) return;
+          const rid = String(next._id);
+          setRdocs((current) => current.map((item) => (String(item._id) === rid ? { ...item, ...next } : item)));
+          setRecordScoreActions((current) => {
+            const updated = { ...current };
+            if (payload.recordScoreAction) updated[rid] = payload.recordScoreAction;
+            else delete updated[rid];
+            return updated;
+          });
+        }}
+      />
 
       <div className="flex items-center justify-center gap-2">
         {page > 1 ? (
@@ -837,6 +1023,8 @@ export function RecordDetailPage() {
   // Live-tracking state — WS updates patch subtask/case progress in place
   // so the user sees judging move from "Pending" → "Judging" → final.
   const [rdoc, setRdoc] = useState<R>(initialRdoc);
+  const [recordScoreAction, setRecordScoreAction] = useState<RecordScoreAction | null>(data.recordScoreAction || null);
+  const [scoreActionOpen, setScoreActionOpen] = useState(false);
   const pdoc: R = data.pdoc || {};
   const code = data.code || rdoc.code || '';
   const locale = bs.locale;
@@ -912,6 +1100,7 @@ export function RecordDetailPage() {
       // may be omitted from later updates to save bandwidth).
       setRdoc((cur) => ({ ...cur, ...next }));
     },
+    onRecordScoreAction: (action) => setRecordScoreAction((action as RecordScoreAction | null) || null),
     disabled: !rdoc._id || detailMode === 'exam-code',
   });
 
@@ -1219,6 +1408,43 @@ export function RecordDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {detailMode !== 'exam-code' && recordScoreAction ? (
+        <Card className={recordScoreAction.kind === 'cancel' ? 'border-destructive/25' : ''}>
+          <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold">{recordScoreAction.kind === 'cancel' ? '成绩管理' : '恢复已取消记录'}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {recordScoreAction.kind === 'cancel'
+                  ? '仅取消这一条记录的计分，并同步重算它影响到的题目状态与比赛榜单。'
+                  : '使用当前题目配置和测试数据重新评测；结果通过正常评测链重新进入计分。'}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant={recordScoreAction.kind === 'cancel' ? 'destructive' : 'default'}
+              className="shrink-0"
+              onClick={() => setScoreActionOpen(true)}
+            >
+              {recordScoreAction.kind === 'cancel' ? '取消本条成绩' : '重新评测并恢复'}
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <RecordScoreActionDialog
+        open={scoreActionOpen && !!recordScoreAction}
+        record={rdoc}
+        action={recordScoreAction}
+        endpoint={recordUrl}
+        problemTitle={String(pdoc.title || rdoc.pid || '')}
+        username={recordIdentity.username}
+        onOpenChange={setScoreActionOpen}
+        onSuccess={(payload) => {
+          if (payload.rdoc) setRdoc((current) => ({ ...current, ...payload.rdoc }));
+          setRecordScoreAction(payload.recordScoreAction || null);
+        }}
+      />
 
       {detailMode !== 'exam-code' && allRevs.length > 0 ? (
         <Card>

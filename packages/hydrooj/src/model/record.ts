@@ -4,7 +4,7 @@ import { Filter, FindOptions, MatchKeysAndValues, ObjectId, OnlyFieldsOfType, Pu
 import { effectiveProblemKind, ProblemConfigFile, STATUS_TEXTS } from '@hydrooj/common';
 import { Logger } from '@hydrooj/utils';
 import { Context } from '../context';
-import { ProblemNotFoundError, ValidationError } from '../error';
+import { ProblemConfigError, ProblemNotFoundError, ValidationError } from '../error';
 import { JudgeMeta, ProblemDataWriteConfirmation, RecordDoc } from '../interface';
 import {
     parseProblemConfigObject,
@@ -47,6 +47,7 @@ export default class RecordModel {
         'source',
         'files',
         'hackTarget',
+        'scoreCancellation',
     ];
 
     static STAT_QUERY = {
@@ -138,7 +139,7 @@ export default class RecordModel {
             problem.assertProblemReadyForUse(pdoc, { actor: group[0].uid, stage: 'judge-queue' });
             const judgeConfig =
                 parseProblemConfigObject(pdoc) ?? (pdoc.config == null || (typeof pdoc.config === 'string' && !pdoc.config.trim()) ? {} : null);
-            if (!judgeConfig) throw new Error(`Cannot parse problem config: ${pdoc.domainId}/${pdoc.docId}`);
+            if (!judgeConfig) throw new ProblemConfigError();
             const problemKind = effectiveProblemKind(pdoc);
             try {
                 if (['program_fill', 'function'].includes(judgeConfig.type)) {
@@ -166,11 +167,16 @@ export default class RecordModel {
                     group.map((rdoc) => rdoc._id).join(','),
                     error,
                 );
-                throw error;
+                if (error instanceof ValidationError) throw error;
+                throw new ValidationError('rid', null, '当前题目配置或提交结构无法重新评测');
             }
             contexts.push({ rdocs: group, pdoc, source, judgeConfig });
         }
         return contexts;
+    }
+
+    static async assertRejudgeable(domainId: string, rdocs: RecordDoc[]) {
+        await RecordModel.preflightJudgeRecords(domainId, rdocs, { rejudge: true });
     }
 
     static async judge(
@@ -436,13 +442,149 @@ export default class RecordModel {
         if (rdocs.length) {
             await RecordModel.collHistory.insertMany(
                 rdocs.map((rdoc) => ({
-                    ...pick(rdoc, ['compilerTexts', 'judgeTexts', 'testCases', 'subtasks', 'score', 'time', 'memory', 'status', 'judgeAt', 'judger']),
+                    ...pick(rdoc, [
+                        'compilerTexts',
+                        'judgeTexts',
+                        'testCases',
+                        'subtasks',
+                        'score',
+                        'time',
+                        'memory',
+                        'status',
+                        'judgeAt',
+                        'judger',
+                        'scoreCancellation',
+                    ]),
                     rid: rdoc._id,
                     _id: new ObjectId(),
                 })),
             );
         }
-        return RecordModel.update(domainId, rid, upd);
+        return RecordModel.update(domainId, rid, upd, undefined, isRejudge ? { scoreCancellation: '' } : undefined);
+    }
+
+    static async resetCanceledScore(domainId: string, rid: ObjectId, expectedCancellationAt: Date) {
+        const current = await RecordModel.coll.findOne(
+            {
+                _id: rid,
+                domainId,
+                status: STATUS.STATUS_CANCELED,
+                'scoreCancellation.at': expectedCancellationAt,
+            },
+            { readPreference: 'primary' },
+        );
+        if (!current) throw new ValidationError('record', null, '提交状态已变化，请刷新后重试');
+        await RecordModel.preflightJudgeRecords(domainId, [current], { rejudge: true });
+        const updated = await RecordModel.coll.findOneAndUpdate(
+            {
+                _id: rid,
+                domainId,
+                status: STATUS.STATUS_CANCELED,
+                'scoreCancellation.at': expectedCancellationAt,
+            },
+            {
+                $set: {
+                    score: 0,
+                    status: STATUS.STATUS_WAITING,
+                    time: 0,
+                    memory: 0,
+                    testCases: [],
+                    subtasks: {},
+                    judgeTexts: [],
+                    compilerTexts: [],
+                    judgeAt: null,
+                    judger: null,
+                    rejudged: true,
+                },
+                $unset: {
+                    progress: '',
+                },
+            },
+            { returnDocument: 'after' },
+        );
+        if (!updated) throw new ValidationError('record', null, '提交状态已变化，请刷新后重试');
+        await Promise.all([
+            RecordModel.collStat.deleteMany({ _id: rid }),
+            task.deleteMany({ rid }),
+        ]);
+        return updated;
+    }
+
+    static async finalizeCanceledScoreRecovery(
+        domainId: string,
+        rid: ObjectId,
+        expectedCancellationAt: Date,
+        historyId: ObjectId,
+        canceled: RecordDoc,
+    ) {
+        await RecordModel.collHistory.updateOne(
+            { _id: historyId },
+            {
+                $setOnInsert: {
+                    ...pick(canceled, [
+                        'compilerTexts',
+                        'judgeTexts',
+                        'testCases',
+                        'subtasks',
+                        'score',
+                        'time',
+                        'memory',
+                        'status',
+                        'judgeAt',
+                        'judger',
+                        'scoreCancellation',
+                    ]),
+                    rid: canceled._id,
+                },
+            },
+            { upsert: true },
+        );
+        const updated = await RecordModel.coll.findOneAndUpdate(
+            {
+                _id: rid,
+                domainId,
+                'scoreCancellation.at': expectedCancellationAt,
+            },
+            { $unset: { scoreCancellation: '' } },
+            { returnDocument: 'after' },
+        );
+        if (!updated) throw new ValidationError('record', null, '恢复状态已变化，请刷新后重试');
+        return updated;
+    }
+
+    static async rollbackCanceledScoreRecovery(domainId: string, waiting: RecordDoc, canceled: RecordDoc) {
+        const cancellationAt = canceled.scoreCancellation?.at;
+        if (!(cancellationAt instanceof Date)) throw new ValidationError('record');
+        const restored = await RecordModel.coll.findOneAndUpdate(
+            {
+                _id: waiting._id,
+                domainId,
+                status: STATUS.STATUS_WAITING,
+                judgeAt: null,
+                'scoreCancellation.at': cancellationAt,
+            },
+            {
+                $set: {
+                    status: STATUS.STATUS_CANCELED,
+                    score: canceled.score,
+                    time: canceled.time,
+                    memory: canceled.memory,
+                    testCases: canceled.testCases || [],
+                    subtasks: canceled.subtasks || {},
+                    judgeTexts: canceled.judgeTexts || [],
+                    compilerTexts: canceled.compilerTexts || [],
+                    judgeAt: canceled.judgeAt,
+                    judger: canceled.judger,
+                    scoreCancellation: canceled.scoreCancellation,
+                    ...(canceled.rejudged === undefined ? {} : { rejudged: canceled.rejudged }),
+                },
+                ...(canceled.rejudged === undefined ? { $unset: { rejudged: '' } } : {}),
+            },
+            { returnDocument: 'after' },
+        );
+        if (!restored) throw new Error(`Canceled score recovery rollback CAS failed domain=${domainId} rid=${waiting._id.toHexString()}`);
+        await task.deleteMany({ rid: waiting._id });
+        return restored;
     }
 
     static count(domainId: string, query: any) {

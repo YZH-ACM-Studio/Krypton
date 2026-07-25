@@ -193,6 +193,30 @@ beforeEach(() => {
 });
 
 describe('contest lock recalculation results', () => {
+    it('treats canceled journal entries as absent across ACM, OI, Exam, and team scoring', () => {
+        const canceledRid = rid(1200);
+        const acmJournal = [
+            { rid: rid(600), pid: 101, status: STATUS.STATUS_WRONG_ANSWER, score: 0 },
+            { rid: canceledRid, pid: 101, status: STATUS.STATUS_CANCELED, score: 0 },
+        ];
+        const acmResult = contestModel.RULES.acm.stat(contest(null), acmJournal);
+        const teamResultAfterCancel = contestModel.RULES.acm.stat(contest(null, 'team'), acmJournal);
+        expect(acmResult).to.include({ accept: 0, time: 0 });
+        expect(acmResult.detail[101].rid.equals(rid(600))).to.equal(true);
+        expect(teamResultAfterCancel.detail[101].rid.equals(rid(600))).to.equal(true);
+
+        const scoredJournal = [
+            { rid: rid(600), pid: 101, status: STATUS.STATUS_WRONG_ANSWER, score: 50 },
+            { rid: canceledRid, pid: 101, status: STATUS.STATUS_CANCELED, score: 0 },
+        ];
+        const oiResult = contestModel.RULES.oi.stat({ ...contest(null), score: { 101: 100 } }, scoredJournal);
+        const examResult = contestModel.RULES.exam.stat({ ...contest(null), score: { 101: 100 } }, scoredJournal);
+        expect(oiResult).to.include({ score: 50 });
+        expect(oiResult.detail[101].rid.equals(rid(600))).to.equal(true);
+        expect(examResult).to.include({ score: 50 });
+        expect(examResult.detail[101].rid.equals(rid(600))).to.equal(true);
+    });
+
     it('recalculates individual display when the lock moves backward, forward, then clears', async () => {
         individualJournal = journal();
 

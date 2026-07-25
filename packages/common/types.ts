@@ -278,6 +278,18 @@ export interface RecordPayload extends RecordJudgeInfo {
         revision: number;
     };
     manualPending?: true;
+    scoreCancellation?: {
+        actor: number;
+        at: Date;
+        reason?: string;
+        before: {
+            status: number;
+            score: number;
+            time: number;
+            memory: number;
+            judgeAt: Date;
+        };
+    };
 }
 
 export interface JudgeRequest extends Omit<RecordPayload, 'testCases'> {

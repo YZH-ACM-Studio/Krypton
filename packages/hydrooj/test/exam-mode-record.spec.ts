@@ -25,6 +25,12 @@ describe('Exam Mode record code payload', () => {
                 subtasks: [{ status: 1 }],
                 compilerTexts: ['secret compiler output'],
                 judgeTexts: ['secret judge output'],
+                scoreCancellation: {
+                    actor: 2,
+                    at: new Date(),
+                    reason: 'private moderation note',
+                    before: { status: 1, score: 100, time: 12, memory: 1024, judgeAt: new Date() },
+                },
             },
             pdoc: {
                 domainId: 'system',
@@ -42,6 +48,7 @@ describe('Exam Mode record code payload', () => {
             },
             allRevs: { old: new Date() },
             testHints: { '1-1': { hint: 'secret hint' } },
+            recordScoreAction: { kind: 'cancel', expectedStatus: 1, expectedJudgeAt: new Date().toISOString() },
         });
 
         expect(payload).to.deep.equal({
@@ -65,6 +72,8 @@ describe('Exam Mode record code payload', () => {
         expect(JSON.stringify(payload)).not.to.include('private-key');
         expect(JSON.stringify(payload)).not.to.include('真实姓名');
         expect(JSON.stringify(payload)).not.to.include('secret');
+        expect(JSON.stringify(payload)).not.to.include('recordScoreAction');
+        expect(JSON.stringify(payload)).not.to.include('scoreCancellation');
     });
 
     it('supports inline-only and uploaded-file submissions without exposing the storage key', () => {

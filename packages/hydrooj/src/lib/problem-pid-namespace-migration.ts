@@ -17,7 +17,7 @@ export const PID_NAMESPACE_OS_MANAGER_UID = 8;
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const OBJECT_ID = /^[a-f0-9]{24}$/i;
-const EXPECTED_PROBLEM_COUNT = 1708;
+const EXPECTED_PROBLEM_COUNT = 1710;
 const EXPECTED_INVALID_PID_COUNT = 13;
 const EXPECTED_LEGACY_PID_COUNT = 1164;
 
@@ -27,7 +27,7 @@ export type PidNamespaceMigrationDecision = 'assign' | 'rename-os' | 'skip-legac
 const EXPECTED_FAMILIES: Record<Exclude<PidNamespaceMigrationFamily, 'legacy' | 'invalid-pid'>, { count: number; maxSequence?: number }> = {
     'pat-basic': { count: 71, maxSequence: 3100 },
     'pat-advanced': { count: 58, maxSequence: 4059 },
-    self: { count: 21, maxSequence: 5043 },
+    self: { count: 23, maxSequence: 5045 },
     nowcoder: { count: 83, maxSequence: 1083 },
     hdu: { count: 175, maxSequence: 1175 },
     gplt: { count: 0 },

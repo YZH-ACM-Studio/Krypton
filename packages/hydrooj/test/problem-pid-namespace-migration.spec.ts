@@ -55,6 +55,8 @@ function fixtureSnapshot(): PidNamespaceMigrationSnapshot {
     addProblem('P4059');
     for (let sequence = 5001; sequence <= 5020; sequence++) addProblem(`P${sequence}`);
     addProblem('P5043');
+    addProblem('P5044');
+    addProblem('P5045');
     for (let sequence = 1001; sequence <= 1083; sequence++) addProblem(`NK${sequence}`);
     for (let sequence = 1001; sequence <= 1175; sequence++) addProblem(`HDU${sequence}`);
     for (let sequence = 1; sequence <= 52; sequence++) {
@@ -65,7 +67,7 @@ function fixtureSnapshot(): PidNamespaceMigrationSnapshot {
     for (let sequence = 1; sequence <= 1164; sequence++) addProblem(`LEGACY-${String(sequence).padStart(4, '0')}`);
     for (let sequence = 0; sequence < 13; sequence++) addProblem(sequence % 2 ? null : undefined);
 
-    expect(problems).to.have.length(1708);
+    expect(problems).to.have.length(1710);
     const records = Array.from({ length: 12 }, (_, index) => ({
         _id: new ObjectId((9000 + index).toString(16).padStart(24, '0')),
         domainId: 'system',
@@ -319,11 +321,11 @@ describe('P2.39 strict PID namespace migration', () => {
         expect(first.fingerprint).to.equal(second.fingerprint);
         expect(first.source.executable).to.equal(true);
         expect(first.source.drifts).to.deep.equal([]);
-        expect(first.source.problemCount).to.equal(1708);
+        expect(first.source.problemCount).to.equal(1710);
         expect(first.source.familyCounts).to.deep.equal({
             'pat-basic': 71,
             'pat-advanced': 58,
-            self: 21,
+            self: 23,
             nowcoder: 83,
             hdu: 175,
             gplt: 0,
@@ -332,7 +334,7 @@ describe('P2.39 strict PID namespace migration', () => {
             legacy: 1164,
             'invalid-pid': 13,
         });
-        expect(first.entries.filter((entry) => entry.decision === 'assign')).to.have.length(530);
+        expect(first.entries.filter((entry) => entry.decision === 'assign')).to.have.length(532);
         expect(first.entries.filter((entry) => entry.decision === 'rename-os')).to.have.length(1);
         expect(first.target.osRename).to.include({ docId: 2966, oldPid: 'OS1999', newPid: 'OS1071', nextPid: 'OS1072' });
         expect(first.target.osNamespace).to.include({ prefix: 'OS', start: 1001, counter: 1071 });
@@ -344,11 +346,12 @@ describe('P2.39 strict PID namespace migration', () => {
     it('marks any count, ownership, collision, or OS external-reference drift unexecutable', () => {
         const changedCount = fixtureSnapshot();
         changedCount.problems.pop();
-        expect(fixturePlan(changedCount).source.drifts).to.include('problem-count:1707!=1708');
+        expect(fixturePlan(changedCount).source.drifts).to.include('problem-count:1709!=1710');
 
         const changedOwner = fixtureSnapshot();
-        changedOwner.problems.find((problem) => problem.pid === 'OS1001')!.owner = 9;
-        expect(fixturePlan(changedOwner).source.drifts).to.include('os-owner-drift:system/461');
+        const changedOwnerProblem = changedOwner.problems.find((problem) => problem.pid === 'OS1001')!;
+        changedOwnerProblem.owner = 9;
+        expect(fixturePlan(changedOwner).source.drifts).to.include(`os-owner-drift:system/${changedOwnerProblem.docId}`);
 
         const collision = fixtureSnapshot();
         collision.problems.find((problem) => problem.pid === 'LEGACY-0001')!.pid = 'OS1071';
@@ -411,11 +414,11 @@ describe('P2.39 strict PID namespace migration', () => {
         expect(repository.snapshot.related).to.deep.equal(relatedBefore);
         expect(repository.snapshot.problems.some((problem) => problem.pid === 'OS1999')).to.equal(false);
         expect(repository.snapshot.problems.some((problem) => problem.pid === 'OS1072')).to.equal(false);
-        expect(repository.snapshot.problems.filter((problem) => problem.pidNamespaceId)).to.have.length(531);
+        expect(repository.snapshot.problems.filter((problem) => problem.pidNamespaceId)).to.have.length(533);
         expect(repository.snapshot.problems.find((problem) => problem.pid === 'LEGACY-0001')).not.to.have.property('pidNamespaceId');
         expect(report.execution?.state).to.equal('applied');
         expect(report.verification?.ok).to.equal(true);
-        expect(repository.audits.filter((audit) => audit.type === 'problem.pid-namespace.migration.entry')).to.have.length(531);
+        expect(repository.audits.filter((audit) => audit.type === 'problem.pid-namespace.migration.entry')).to.have.length(533);
         expect(repository.audits.filter((audit) => audit.type === 'problem.pid-namespace.migration')).to.have.length(1);
     });
 
@@ -446,8 +449,8 @@ describe('P2.39 strict PID namespace migration', () => {
         });
         await verifyPidNamespaceMigration(report, repository);
         expect(report.execution?.state).to.equal('applied');
-        expect(repository.snapshot.problems.filter((problem) => problem.pidNamespaceId)).to.have.length(531);
-        expect(repository.audits.filter((audit) => audit.type === 'problem.pid-namespace.migration.entry')).to.have.length(531);
+        expect(repository.snapshot.problems.filter((problem) => problem.pidNamespaceId)).to.have.length(533);
+        expect(repository.audits.filter((audit) => audit.type === 'problem.pid-namespace.migration.entry')).to.have.length(533);
     });
 
     it('revalidates all source facts before a forged or partial execution resume', async () => {

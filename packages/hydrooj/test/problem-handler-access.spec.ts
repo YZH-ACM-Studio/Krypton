@@ -978,7 +978,17 @@ describe('P2.11 enumeration entry gates', () => {
             },
         ];
         getMultiResults = [
-            [{ domainId: 'system', docId: 7, owner: 42, authoringMode: 'managed', hidden: true, managedAuthoring: { metadataStatus: 'draft' } }],
+            [
+                {
+                    domainId: 'system',
+                    docId: 7,
+                    owner: 42,
+                    authoringMode: 'managed',
+                    hidden: true,
+                    structureRevision: 1,
+                    managedAuthoring: { metadataStatus: 'draft' },
+                },
+            ],
         ];
         countResult = 1;
         const admin = makeHandler(ProblemMainHandler, {
@@ -1008,6 +1018,7 @@ describe('P2.11 enumeration entry gates', () => {
                     owner: 42,
                     authoringMode: 'managed',
                     hidden: true,
+                    structureRevision: 1,
                     pidNamespaceId: 'custom:os',
                     managedAuthoring: { metadataStatus: 'draft' },
                 },
@@ -1029,6 +1040,55 @@ describe('P2.11 enumeration entry gates', () => {
         const error = await captureFailure(() => author.get('system', 1, '', 20, false, false, 'default', '', '', 0, 'all', 'active', 'pending'));
         expect(error).to.be.instanceOf(TestPermissionError);
         expect(calls.getMulti).to.deep.equal([]);
+    });
+
+    it('does not expose managed publication controls for legacy or already-public problems', async () => {
+        getMultiResults = [
+            [
+                { domainId: 'system', docId: 7, owner: 42, hidden: true },
+                {
+                    domainId: 'system',
+                    docId: 8,
+                    owner: 42,
+                    authoringMode: 'managed',
+                    hidden: false,
+                    structureRevision: 3,
+                    managedAuthoring: { metadataStatus: 'confirmed' },
+                },
+            ],
+        ];
+        countResult = 2;
+        const admin = makeHandler(ProblemMainHandler, {
+            canBrowse: true,
+            canPublish: true,
+            admin: true,
+            hasPriv: () => false,
+        });
+
+        await admin.get('system', 1, '', 20, false, false);
+
+        expect(admin.response.body.managedReviewableByDocId).to.deep.equal({ 7: false, 8: false });
+
+        getMultiResults = [
+            [
+                {
+                    domainId: 'system',
+                    docId: 9,
+                    owner: 42,
+                    authoringMode: 'managed',
+                    hidden: true,
+                    managedAuthoring: { metadataStatus: 'draft' },
+                },
+            ],
+        ];
+        const invalid = makeHandler(ProblemMainHandler, {
+            canBrowse: true,
+            canPublish: true,
+            admin: true,
+            hasPriv: () => false,
+        });
+        const error = await captureFailure(() => invalid.get('system', 1, '', 20, false, false));
+        expect(error.message).to.equal('Managed publication candidate system/9 is missing an exact structure revision');
     });
 
     it('publishes managed drafts only through an administrator or namespace-manager review service', async () => {

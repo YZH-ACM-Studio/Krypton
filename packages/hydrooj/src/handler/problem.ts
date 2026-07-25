@@ -483,6 +483,17 @@ function problemAuthoringCapabilities(udoc: User, pdoc: ProblemDoc) {
     };
 }
 
+function isManagedPublicationCandidate(pdoc: ProblemDoc) {
+    if (pdoc.authoringMode !== 'managed' || pdoc.hidden !== true) return false;
+    return pdoc.managedAuthoring?.metadataStatus === 'draft' || pdoc.managedAuthoring?.metadataStatus === 'confirmed';
+}
+
+function assertManagedPublicationRevision(pdoc: ProblemDoc) {
+    if (!Number.isSafeInteger(pdoc.structureRevision) || pdoc.structureRevision! < 1) {
+        throw new Error(`Managed publication candidate ${pdoc.domainId}/${pdoc.docId} is missing an exact structure revision`);
+    }
+}
+
 async function requireStableCapabilityProblem(
     udoc: User,
     pdoc: ProblemDoc,
@@ -829,7 +840,11 @@ export class ProblemMainHandler extends Handler {
         const canArchiveByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canArchiveProblem(this.user, pdoc)]));
         const canCloneByDocId = Object.fromEntries((quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canCloneProblem(this.user, pdoc)]));
         const managedReviewableByDocId = Object.fromEntries(
-            (quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canPublishProblem(this.user, pdoc)]),
+            (quick ? [] : pdocs).map((pdoc) => {
+                if (!isManagedPublicationCandidate(pdoc)) return [pdoc.docId, false];
+                assertManagedPublicationRevision(pdoc);
+                return [pdoc.docId, problem.canPublishProblem(this.user, pdoc)];
+            }),
         );
         const canManageContributionsByDocId = Object.fromEntries(
             (quick ? [] : pdocs).map((pdoc) => [pdoc.docId, problem.canManageProblemContributions(this.user, pdoc)]),

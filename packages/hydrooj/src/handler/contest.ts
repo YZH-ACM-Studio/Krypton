@@ -27,6 +27,7 @@ import {
 } from '../error';
 import { FileInfo, ScoreboardConfig, Tdoc } from '../interface';
 import { canUsePostContestPractice, getPostContestPracticeState } from '../lib/contest-correction';
+import { withContestEditBoundary } from '../lib/contest-edit-boundary';
 import {
     buildLatestContestProblemStatusByPid,
     buildPersonalPracticeRecordQuery,
@@ -53,6 +54,20 @@ import { Handler, param, post, Type, Types } from '../service/server';
 
 const logger = new Logger('contest-handler');
 
+function serializedContestEdit(_target: unknown, _key: string, descriptor: PropertyDescriptor) {
+    const original = descriptor.value;
+    descriptor.value = async function contestEditBoundary(this: ContestEditHandler, ...args: any[]) {
+        const tid = args[1] as ObjectId | null;
+        if (!tid) return original.apply(this, args);
+        const domainId = String(this.domain?._id);
+        return await withContestEditBoundary(domainId, tid, async (waited) => {
+            if (waited) this.tdoc = await contest.get(domainId, tid);
+            return await original.apply(this, args);
+        });
+    };
+    return descriptor;
+}
+
 async function currentTeamContext(domainId: string, tdoc: Tdoc, uid: number) {
     if (contest.getParticipationMode(tdoc) !== 'team') return { team: null, status: null };
     const team = await contestTeam.getTeamByMember(domainId, tdoc.docId, uid);
@@ -77,9 +92,9 @@ function parseProblemDocIds(input: string) {
 
 async function assertCanPublishAutoHiddenProblems(domainId: string, pids: number[], actor: any) {
     const uniquePids = Array.from(new Set(pids));
-    const pdict = await problem.getList(domainId, uniquePids, true, false, problem.PROJECTION_PUBLIC, true);
+    const pdict = await problem.getList(domainId, uniquePids, true, false, [...problem.PROJECTION_PUBLIC, 'pidNamespaceId'], true);
     const pdocs = uniquePids.map((pid) => pdict[pid]).filter(Boolean);
-    // Evaluate every existing target before deciding, so Promise.all below can
+    // Evaluate every existing target before deciding, so the sequential writes
     // never begin a partially authorized hide batch. Missing and unauthorized
     // references intentionally collapse to the same capability error.
     let allPublishable = pdocs.length === uniquePids.length;
@@ -99,8 +114,139 @@ export async function autoUnhideContestProblem(domainId: string, contestId: Obje
         await problem.autoRevealConfirmedManagedProgrammingProblem({ domainId, docId: pid, contestId });
         return;
     }
-    if ((pdoc as any).lockHidden) return;
+    if ((pdoc as any).lockHidden) {
+        logger.info(
+            'Contest auto-publish retained explicitly locked problem domain=%s contest=%s pid=%d stage=unhide result=locked',
+            domainId,
+            contestId,
+            pid,
+        );
+        return;
+    }
     await problem.edit(domainId, pid, { hidden: false });
+}
+
+function contestUnhideTask(domainId: string, tid: ObjectId | string) {
+    return {
+        type: 'schedule',
+        subType: 'contest',
+        domainId,
+        tid,
+    };
+}
+
+async function scheduleContestUnhide(domainId: string, tid: ObjectId | string, executeAfter: Date, pids?: number[]) {
+    const task = contestUnhideTask(domainId, tid);
+    const scheduleId = await ScheduleModel.add({
+        ...task,
+        operation: ['unhide'],
+        ...(pids?.length ? { pids } : {}),
+        executeAfter,
+        // WorkerService atomically moves contest-unhide tasks into a short
+        // retry window before invoking handlers. The handler deletes that
+        // retained task only after the complete visibility transition
+        // succeeds.
+        interval: [1, 'minute'],
+    });
+    await ScheduleModel.deleteMany({ ...task, _id: { $ne: scheduleId } });
+}
+
+async function unhideContestProblems(
+    domainId: string,
+    tid: ObjectId | string,
+    pids: number[],
+    stage: string,
+    actor?: number,
+    onFailure?: (remainingPids: number[], error: unknown) => Promise<void>,
+): Promise<void> {
+    const acknowledgedPids: number[] = [];
+    try {
+        for (const pid of pids) {
+            await autoUnhideContestProblem(domainId, tid, pid);
+            acknowledgedPids.push(pid);
+        }
+    } catch (error) {
+        logger.error(
+            'Contest auto-unhide failed domain=%s contest=%s actor=%s acknowledged=%j failedPid=%s unattempted=%j stage=%s error=%o',
+            domainId,
+            tid,
+            actor ?? 'worker',
+            acknowledgedPids,
+            pids[acknowledgedPids.length],
+            pids.slice(acknowledgedPids.length + 1),
+            stage,
+            error,
+        );
+        if (onFailure) await onFailure(pids.slice(acknowledgedPids.length), error);
+        throw error;
+    }
+}
+
+export async function runContestScheduleTask(doc: any): Promise<void> {
+    await withContestEditBoundary(doc.domainId, doc.tid, async () => {
+        let tdoc: Tdoc;
+        try {
+            tdoc = await contest.get(doc.domainId, doc.tid);
+        } catch (error) {
+            if (error instanceof ContestNotFoundError || (error as Error)?.name === 'ContestNotFoundError') {
+                await ScheduleModel.deleteMany(contestUnhideTask(doc.domainId, doc.tid));
+                logger.info(
+                    'Contest unhide schedule removed for deleted contest domain=%s contest=%s stage=load-contest result=deleted',
+                    doc.domainId,
+                    doc.tid,
+                );
+                return;
+            }
+            throw error;
+        }
+        if (!tdoc || !doc.operation?.includes('unhide')) return;
+        const hasTrackedPids = Array.isArray(tdoc.autoHideProblemPids);
+        const trackedPids = hasTrackedPids ? tdoc.autoHideProblemPids : undefined;
+        if (hasTrackedPids && !trackedPids.length) {
+            await ScheduleModel.deleteMany(contestUnhideTask(doc.domainId, doc.tid));
+            return;
+        }
+        const endAt = tdoc.endAt instanceof Date ? tdoc.endAt : new Date(tdoc.endAt);
+        if (tdoc.autoHide && Number.isFinite(endAt.getTime()) && Date.now() < endAt.getTime()) {
+            await scheduleContestUnhide(doc.domainId, doc.tid, endAt, trackedPids);
+            logger.warn(
+                'Contest unhide schedule was stale and has been replaced domain=%s contest=%s staleExecuteAfter=%s authoritativeEndAt=%s stage=reschedule result=success',
+                doc.domainId,
+                doc.tid,
+                doc.executeAfter instanceof Date ? doc.executeAfter.toISOString() : String(doc.executeAfter),
+                endAt.toISOString(),
+            );
+            return;
+        }
+        const targetPids = trackedPids || (Array.isArray(doc.pids) && doc.pids.length ? doc.pids : tdoc.pids);
+        await unhideContestProblems(doc.domainId, doc.tid, targetPids, 'worker-unhide', undefined, async (remainingPids, error) => {
+            const recoveryErrors: unknown[] = [];
+            try {
+                await scheduleContestUnhide(doc.domainId, doc.tid, new Date(Date.now() + Time.minute), remainingPids);
+            } catch (scheduleError) {
+                recoveryErrors.push(scheduleError);
+            }
+            try {
+                await document.set(doc.domainId, document.TYPE_CONTEST, doc.tid, {
+                    autoHidePendingPids: remainingPids,
+                    autoHideProblemPids: remainingPids,
+                });
+            } catch (markerError) {
+                recoveryErrors.push(markerError);
+            }
+            if (recoveryErrors.length) {
+                throw new AggregateError(
+                    [error, ...recoveryErrors],
+                    `Contest ${doc.tid} auto-unhide failed and its retry state could not be fully persisted`,
+                );
+            }
+        });
+        await document.set(doc.domainId, document.TYPE_CONTEST, doc.tid, {
+            autoHidePendingPids: [],
+            autoHideProblemPids: [],
+        });
+        await ScheduleModel.deleteMany(contestUnhideTask(doc.domainId, doc.tid));
+    });
 }
 
 function parseStringList(value: any): string[] {
@@ -840,6 +986,7 @@ export class ContestEditHandler extends Handler {
     @param('participationRevision', Types.UnsignedInt, true)
     @param('teamModeClearConfirmation', Types.String, true)
     @param('plannedTeamBatchId', Types.ObjectId, true)
+    @serializedContestEdit
     async postUpdate(
         _domainId: string,
         tid: ObjectId,
@@ -891,15 +1038,50 @@ export class ContestEditHandler extends Handler {
         const authoritativeDomainId = String(this.domain?._id);
         problem.assertProblemAclDomain(this.user, authoritativeDomainId);
         if (!Object.keys(contest.RULES).includes(rule) || contest.RULES[rule].hidden) throw new ValidationError('rule');
-        if (autoHide) this.checkPerm(PERM.PERM_EDIT_PROBLEM);
         const pids = parseProblemDocIds(_pids);
         const previousPids = new Set(this.tdoc?.pids || []);
-        const autoHideTargets = autoHide && (!this.tdoc || !this.tdoc.autoHide) ? pids : autoHide ? pids.filter((pid) => !previousPids.has(pid)) : [];
+        const pendingAutoHidePids = new Set(this.tdoc?.autoHidePendingPids || []);
+        const trackedAutoHidePids = new Set(
+            Array.isArray(this.tdoc?.autoHideProblemPids) ? this.tdoc.autoHideProblemPids : this.tdoc?.autoHide ? Array.from(previousPids) : [],
+        );
         const beginAtMoment = moment.tz(`${beginAtDate} ${beginAtTime}`, this.user.timeZone);
         if (!beginAtMoment.isValid()) throw new ValidationError('beginAtDate', 'beginAtTime');
         const endAt = beginAtMoment.clone().add(duration, 'hours').toDate();
         if (beginAtMoment.isSameOrAfter(endAt)) throw new ValidationError('duration');
         const beginAt = beginAtMoment.toDate();
+        const now = Date.now();
+        const autoHideActive = now <= endAt.getTime();
+        const persistedAutoHideEndAt = this.tdoc?.endAt ? new Date(this.tdoc.endAt as any).getTime() : null;
+        const persistedAutoHideActive = !!this.tdoc?.autoHide && persistedAutoHideEndAt !== null && now <= persistedAutoHideEndAt;
+        const previousSortedPids = Array.from(previousPids).sort((a, b) => a - b);
+        const nextSortedPids = [...pids].sort((a, b) => a - b);
+        const pidsChanged =
+            previousSortedPids.length !== nextSortedPids.length || previousSortedPids.some((pid, index) => pid !== nextSortedPids[index]);
+        const autoHideScheduleChanged =
+            !!this.tdoc?.autoHide && autoHide && persistedAutoHideEndAt !== endAt.getTime() && (persistedAutoHideActive || autoHideActive);
+        const autoHideStateChanged =
+            !!this.tdoc &&
+            (!!this.tdoc.autoHide !== autoHide ||
+                ((!!this.tdoc.autoHide || autoHide) && (pidsChanged || persistedAutoHideActive !== (autoHide && autoHideActive))) ||
+                autoHideScheduleChanged);
+        const autoHideRecoveryRequired =
+            !!trackedAutoHidePids.size && (!autoHide || !autoHideActive || Array.from(trackedAutoHidePids).some((pid) => !pids.includes(pid)));
+        if ((!this.tdoc && autoHide) || autoHideStateChanged || pendingAutoHidePids.size || autoHideRecoveryRequired) {
+            this.checkPerm(PERM.PERM_EDIT_PROBLEM);
+        }
+        const pendingNeedsUnhide = !!pendingAutoHidePids.size && !persistedAutoHideActive;
+        if (pendingNeedsUnhide && autoHide && autoHideActive) {
+            throw new ValidationError('autoHide', null, '上一次自动公开尚未完成，请先保持当前结束状态并重试保存');
+        }
+        const autoUnhideTargets = !autoHide || !autoHideActive ? Array.from(trackedAutoHidePids) : [];
+        const removedAutoHideTargets = autoHide && autoHideActive ? Array.from(trackedAutoHidePids).filter((pid) => !pids.includes(pid)) : [];
+        const autoHideTargets =
+            !autoUnhideTargets.length && autoHide && autoHideActive
+                ? Array.from(new Set(pids.filter((pid) => pendingAutoHidePids.has(pid) || !persistedAutoHideActive || !previousPids.has(pid))))
+                : [];
+        const prewriteAutoHideProblemPids =
+            autoHide && autoHideActive ? Array.from(new Set([...trackedAutoHidePids, ...pids])) : Array.from(trackedAutoHidePids);
+        const pendingAutoHideTargets = autoHide && autoHideActive ? autoHideTargets : autoUnhideTargets;
         const lockAt = lock ? moment(endAt).add(-lock, 'minutes').toDate() : null;
         if (lockAt && contestDuration) throw new ValidationError('lockAt', 'duration');
         const statusRecalcReasons: string[] = [];
@@ -908,11 +1090,7 @@ export class ContestEditHandler extends Handler {
             const timestamp = (value: Date | null | undefined) => value?.getTime() ?? null;
             if (timestamp(this.tdoc.beginAt) !== timestamp(beginAt)) statusRecalcReasons.push('beginAt');
             if (timestamp(this.tdoc.endAt) !== timestamp(endAt)) statusRecalcReasons.push('endAt');
-            const previousPids = [...this.tdoc.pids].sort((a, b) => a - b);
-            const nextPids = [...pids].sort((a, b) => a - b);
-            if (previousPids.length !== nextPids.length || previousPids.some((pid, index) => pid !== nextPids[index])) {
-                statusRecalcReasons.push('pids');
-            }
+            if (pidsChanged) statusRecalcReasons.push('pids');
             if (this.tdoc.rule !== rule) statusRecalcReasons.push('rule');
             lockBoundaryChanged = timestamp(this.tdoc.lockAt) !== timestamp(lockAt);
             if (lockBoundaryChanged) statusRecalcReasons.push('lockAt');
@@ -921,6 +1099,10 @@ export class ContestEditHandler extends Handler {
         const statusRecalcToken = statusRecalcReasons.length ? randomstring(24) : null;
         await assertProblemBankSelection(authoritativeDomainId, pids, this.user, this.tdoc?.pids);
         if (autoHideTargets.length) await assertCanPublishAutoHiddenProblems(authoritativeDomainId, autoHideTargets, this.user);
+        const actorUnhideTargets = Array.from(
+            new Set([...autoUnhideTargets, ...removedAutoHideTargets, ...(autoHideScheduleChanged ? Array.from(trackedAutoHidePids) : [])]),
+        );
+        if (actorUnhideTargets.length) await assertCanPublishAutoHiddenProblems(authoritativeDomainId, actorUnhideTargets, this.user);
         const effectiveParticipationMode = participationMode || (this.tdoc ? contest.getParticipationMode(this.tdoc) : 'individual');
         const existingTeamBatchId = this.tdoc?.teamBatchId ? new ObjectId(this.tdoc.teamBatchId) : null;
         const existingPlannedTeamBatchId = this.tdoc?.plannedTeamBatchId ? new ObjectId(this.tdoc.plannedTeamBatchId) : null;
@@ -962,6 +1144,9 @@ export class ContestEditHandler extends Handler {
                     participationMode: effectiveParticipationMode,
                     vigilEnabled,
                     entryMode,
+                    autoHide,
+                    autoHidePendingPids: pendingAutoHideTargets,
+                    autoHideProblemPids: prewriteAutoHideProblemPids,
                     ...(statusRecalcToken ? { statusRecalcToken } : {}),
                 },
                 {
@@ -976,27 +1161,55 @@ export class ContestEditHandler extends Handler {
                 participationMode: effectiveParticipationMode,
                 vigilEnabled,
                 entryMode,
+                autoHide,
+                autoHidePendingPids: pendingAutoHideTargets,
+                autoHideProblemPids: prewriteAutoHideProblemPids,
                 ...(requestedPlannedTeamBatchId ? { plannedTeamBatchId: requestedPlannedTeamBatchId } : {}),
             });
         }
-        const task = {
-            type: 'schedule',
-            subType: 'contest',
-            domainId: authoritativeDomainId,
-            tid,
-        };
-        await ScheduleModel.deleteMany(task);
-        const operation = [];
-        if (Date.now() <= endAt.getTime() && autoHide) {
-            await Promise.all(autoHideTargets.map((pid) => problem.editAuthorized(authoritativeDomainId, pid, { hidden: true }, this.user)));
-            operation.push('unhide');
-        }
-        if (operation.length) {
-            await ScheduleModel.add({
-                ...task,
-                operation,
-                executeAfter: endAt,
-            });
+        const task = contestUnhideTask(authoritativeDomainId, tid);
+        if (autoHideActive && autoHide) {
+            try {
+                await scheduleContestUnhide(authoritativeDomainId, tid, endAt, prewriteAutoHideProblemPids);
+            } catch (error) {
+                logger.error(
+                    'Contest unhide schedule update failed after contest persistence domain=%s contest=%s actor=%d authoritativeEndAt=%s stage=schedule-unhide error=%o',
+                    authoritativeDomainId,
+                    tid,
+                    this.user._id,
+                    endAt.toISOString(),
+                    error,
+                );
+                throw error;
+            }
+            if (removedAutoHideTargets.length) {
+                await unhideContestProblems(authoritativeDomainId, tid, removedAutoHideTargets, 'save-remove-problems', this.user._id);
+            }
+            const hiddenPids: number[] = [];
+            try {
+                for (const pid of autoHideTargets) {
+                    await problem.editAuthorized(authoritativeDomainId, pid, { hidden: true }, this.user);
+                    hiddenPids.push(pid);
+                }
+            } catch (error) {
+                const failedPid = autoHideTargets[hiddenPids.length];
+                logger.error(
+                    'Contest autoHide failed after contest persistence domain=%s contest=%s actor=%d acknowledged=%j failedPid=%s unattempted=%j stage=hide-problems error=%o',
+                    authoritativeDomainId,
+                    tid,
+                    this.user._id,
+                    hiddenPids,
+                    failedPid,
+                    autoHideTargets.slice(hiddenPids.length + 1),
+                    error,
+                );
+                throw error;
+            }
+        } else {
+            if (autoUnhideTargets.length) {
+                await unhideContestProblems(authoritativeDomainId, tid, autoUnhideTargets, 'save-unhide', this.user._id);
+            }
+            await ScheduleModel.deleteMany(task);
         }
         // ── Krypton: client-required & Vigil anti-cheat normalization ─────
         //
@@ -1044,6 +1257,8 @@ export class ContestEditHandler extends Handler {
             assign,
             _code,
             autoHide,
+            autoHidePendingPids: [],
+            autoHideProblemPids: autoHide && autoHideActive ? pids : [],
             lockAt,
             ...(lockBoundaryChanged ? { unlocked: false } : {}),
             ...(statusRecalcToken ? { statusRecalcToken } : {}),
@@ -1174,6 +1389,7 @@ export class ContestEditHandler extends Handler {
     }
 
     @param('tid', Types.ObjectId)
+    @serializedContestEdit
     async postDelete(_domainId: string, tid: ObjectId) {
         const authoritativeDomainId = String(this.domain?._id);
         if (!this.user.own(this.tdoc)) this.checkPerm(PERM.PERM_EDIT_CONTEST);
@@ -1199,10 +1415,32 @@ export class ContestEditHandler extends Handler {
             }
         }
 
-        const [ddocs] = await Promise.all([
-            discussion.getMulti(authoritativeDomainId, { parentType: document.TYPE_CONTEST, parentId: tid }).project({ _id: 1 }).toArray(),
-            contest.del(authoritativeDomainId, tid),
-        ]);
+        const trackedAutoHidePids = Array.isArray(this.tdoc?.autoHideProblemPids)
+            ? this.tdoc.autoHideProblemPids
+            : this.tdoc?.autoHide
+              ? this.tdoc.pids
+              : [];
+        if (trackedAutoHidePids.length) {
+            this.checkPerm(PERM.PERM_EDIT_PROBLEM);
+            await assertCanPublishAutoHiddenProblems(authoritativeDomainId, trackedAutoHidePids, this.user);
+            await unhideContestProblems(authoritativeDomainId, tid, trackedAutoHidePids, 'delete-contest', this.user._id);
+        }
+        let ddocs;
+        try {
+            [ddocs] = await Promise.all([
+                discussion.getMulti(authoritativeDomainId, { parentType: document.TYPE_CONTEST, parentId: tid }).project({ _id: 1 }).toArray(),
+                contest.del(authoritativeDomainId, tid),
+            ]);
+        } catch (error) {
+            logger.error(
+                'Contest deletion failed after auto-hide cleanup domain=%s contest=%s actor=%s stage=delete-contest error=%o',
+                authoritativeDomainId,
+                tid,
+                this.user._id,
+                error,
+            );
+            throw error;
+        }
         const tasks: any[] = ddocs.map((i) => discussion.del(authoritativeDomainId, i._id));
         await Promise.all(
             tasks.concat([
@@ -1780,24 +2018,7 @@ export async function apply(ctx: Context) {
     ctx.Route('contest_file_download', '/contest/:tid/file/:type/:filename', ContestFileDownloadHandler, PERM.PERM_VIEW_CONTEST);
     ctx.Route('contest_user', '/contest/:tid/user', ContestUserHandler, PERM.PERM_VIEW_CONTEST);
     ctx.Route('contest_balloon', '/contest/:tid/balloon', ContestBalloonHandler, PERM.PERM_VIEW_CONTEST);
-    ctx.worker.addHandler('contest', async (doc) => {
-        const tdoc = await contest.get(doc.domainId, doc.tid);
-        if (!tdoc) return;
-        const tasks = [];
-        for (const op of doc.operation) {
-            if (op === 'unhide') {
-                // krypton-permits: skip problems with `lockHidden` (题源题 /
-                // 套路题 / 集训内部题). lockHidden is an explicit opt-out
-                // from the contest-end auto-publish — admin can still
-                // unhide manually. Other contest workflows (assign, code,
-                // etc.) are unaffected.
-                for (const pid of tdoc.pids) {
-                    tasks.push(autoUnhideContestProblem(doc.domainId, doc.tid, pid));
-                }
-            }
-        }
-        await Promise.all(tasks);
-    });
+    ctx.worker.addHandler('contest', runContestScheduleTask);
     ctx.plugin(ScoreboardService);
     await ctx.inject(['scoreboard'], ({ Route, scoreboard }) => {
         Route('contest_scoreboard', '/contest/:tid/scoreboard', ContestScoreboardHandler, PERM.PERM_VIEW_CONTEST_SCOREBOARD);

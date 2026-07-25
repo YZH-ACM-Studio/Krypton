@@ -16,6 +16,7 @@ import { errorMessage, Time } from '@hydrooj/utils';
 import { Context } from '../context';
 import { PermissionError, PrivilegeError } from '../error';
 import type { DomainDoc } from '../interface';
+import { classifyPermissionErrorRoute } from '../lib/permission-error-routing';
 import { Logger } from '../logger';
 import { PERM, PRIV } from '../model/builtin';
 import * as opcount from '../model/opcount';
@@ -225,13 +226,14 @@ export async function apply(ctx: Context) {
                     );
                     if (error.stack) logger.error(error.stack);
                 }
-                if (this.user?._id === 0 && (error instanceof PermissionError || error instanceof PrivilegeError)) {
+                const permissionErrorRoute = classifyPermissionErrorRoute(this.user, error);
+                if (permissionErrorRoute === 'login') {
                     this.response.redirect = this.url('user_login', {
                         query: {
                             redirect: (this.context.originalPath || this.request.path) + this.context.search,
                         },
                     });
-                } else if (!this.user._dudoc.join && error instanceof PermissionError) {
+                } else if (permissionErrorRoute === 'domain_join') {
                     this.response.redirect = this.url('domain_join', {
                         domainId: 'system',
                         query: {

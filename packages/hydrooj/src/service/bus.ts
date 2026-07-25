@@ -107,7 +107,7 @@ export interface EventMap {
     'contest/before-add': (payload: Partial<Tdoc>) => VoidReturn;
     'contest/add': (payload: Partial<Tdoc>, id: ObjectId) => VoidReturn;
     'contest/before-edit': (tdoc: Tdoc, $set: Partial<Tdoc>) => VoidReturn;
-    'contest/edit': (payload: Tdoc, domainId?: string, tid?: ObjectId, res?: any) => VoidReturn;
+    'contest/edit': (payload: Tdoc, domainId?: string, tid?: ObjectId, res?: any, previous?: Tdoc) => VoidReturn;
     'contest/team-role-change': (payload: {
         before: ContestTeamDoc;
         after: ContestTeamDoc;
@@ -124,7 +124,7 @@ export interface EventMap {
     'contest/list': (query: Filter<Tdoc>, handler: any) => VoidReturn;
     'contest/scoreboard': (tdoc: Tdoc, rows: ScoreboardRow[], udict: BaseUserDict, pdict: ProblemDict) => VoidReturn;
     'contest/balloon': (domainId: string, tid: ObjectId, bdoc: ContestBalloonDoc) => VoidReturn;
-    'contest/del': (domainId: string, tid: ObjectId) => VoidReturn;
+    'contest/del': (domainId: string, tid: ObjectId, previous?: Tdoc | null) => VoidReturn;
 
     'oplog/log': (type: string, handler: Handler | ConnectionHandler, args: any, data: any) => VoidReturn;
 

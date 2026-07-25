@@ -400,6 +400,10 @@ export interface Tdoc extends Document {
     unlocked?: boolean;
     /** Durable retry marker for a persisted contest edit whose status recalculation has not been acknowledged yet. */
     statusRecalcToken?: string;
+    /** Exact retry set for an auto-hide visibility transition that has not completed. */
+    autoHidePendingPids?: number[];
+    /** Complete set of problems still owned by this contest's auto-hide lifecycle. */
+    autoHideProblemPids?: number[];
     autoHide?: boolean;
     balloon?: Record<number, string | { color: string; name: string }>;
     score?: Record<number, number>;
@@ -431,6 +435,8 @@ export interface Tdoc extends Document {
      * client_required.
      */
     vigilEnabled?: boolean;
+    /** Durable acknowledgement marker for an enabled → disabled Vigil mirror deletion. */
+    vigilDeletePending?: boolean;
     entryMode?: 'open' | 'client_required';
     approvalMode?: 'strict' | 'auto';
     lockdownMode?: boolean;

@@ -39,6 +39,22 @@ export default class WorkerService extends Service {
             type: 'schedule',
             subType: { $in: Object.keys(this.handlers) },
         };
+        // Contest auto-unhide is a persisted visibility transition. Claim it
+        // by atomically moving the same task into a short retry window instead
+        // of deleting it before the handler has read the authoritative
+        // contest. This also upgrades tasks created before retry metadata was
+        // introduced and avoids catch-up loops based on a stale executeAfter.
+        if (this.handlers.contest) {
+            const contestUnhide = await this.coll.findOneAndUpdate(
+                { ...q, subType: 'contest', operation: 'unhide' },
+                { $set: { executeAfter: new Date(Date.now() + 60_000), interval: [1, 'minute'] } },
+                { returnDocument: 'before', sort: { executeAfter: 1 } },
+            );
+            if (contestUnhide) {
+                this.ctx.logger.debug('%o', contestUnhide);
+                return contestUnhide;
+            }
+        }
         const res = await this.coll.findOneAndDelete(q);
         if (res) {
             this.ctx.logger.debug('%o', res);

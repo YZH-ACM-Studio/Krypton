@@ -154,10 +154,13 @@
               label:'Auto hide-and show',
               name:'autoHide',
               placeholder:_('Auto hide problems during the contest'),
-              value:handler.user.hasPerm(perm.PERM_EDIT_PROBLEM) and (tdoc.autoHide|default(true)),
+              value:tdoc.autoHide|default(handler.user.hasPerm(perm.PERM_EDIT_PROBLEM)),
               disabled:not handler.user.hasPerm(perm.PERM_EDIT_PROBLEM),
               row:false
             }) }}
+            {% if not handler.user.hasPerm(perm.PERM_EDIT_PROBLEM) and tdoc.autoHide %}
+              <input type="hidden" name="autoHide" value="true">
+            {% endif %}
             {{ form.form_checkbox({
               columns:3,
               label:'Allow View Code',

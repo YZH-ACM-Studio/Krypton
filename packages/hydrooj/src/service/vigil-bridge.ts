@@ -96,25 +96,33 @@ export interface OjContestPayload {
     processWhitelist?: string[];
 }
 
+export async function pushExamToVigilStrict(payload: OjContestPayload): Promise<void> {
+    await fetchWithRetry(`${baseUrl()}/api/integrations/oj/exam`, {
+        method: 'POST',
+        body: payload,
+    });
+    logger.info('pushed exam %s to Vigil', payload.ojContestId);
+}
+
 export async function pushExamToVigil(payload: OjContestPayload): Promise<void> {
     try {
-        await fetchWithRetry(`${baseUrl()}/api/integrations/oj/exam`, {
-            method: 'POST',
-            body: payload,
-        });
-        logger.info('pushed exam %s to Vigil', payload.ojContestId);
+        await pushExamToVigilStrict(payload);
     } catch (e: any) {
         logger.error('failed to push exam %s to Vigil: %s', payload.ojContestId, e.message);
         // Don't throw — Vigil push is fire-and-forget; lazy-fallback at student login.
     }
 }
 
+export async function deleteExamFromVigilStrict(ojContestId: string): Promise<void> {
+    await fetchWithRetry(`${baseUrl()}/api/integrations/oj/exam/${ojContestId}`, {
+        method: 'DELETE',
+    });
+    logger.info('deleted exam %s from Vigil', ojContestId);
+}
+
 export async function deleteExamFromVigil(ojContestId: string): Promise<void> {
     try {
-        await fetchWithRetry(`${baseUrl()}/api/integrations/oj/exam/${ojContestId}`, {
-            method: 'DELETE',
-        });
-        logger.info('deleted exam %s from Vigil', ojContestId);
+        await deleteExamFromVigilStrict(ojContestId);
     } catch (e: any) {
         logger.error('failed to delete exam %s from Vigil: %s', ojContestId, e.message);
     }

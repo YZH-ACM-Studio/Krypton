@@ -1187,6 +1187,7 @@ export function ContestEditPage() {
                     <Checkbox name="autoHide" value="true" defaultChecked={defaultAutoHide} disabled={!canAutoHideProblems} />
                     比赛中自动隐藏题目（赛后自动公开）
                   </label>
+                  {!canAutoHideProblems && defaultAutoHide ? <input type="hidden" name="autoHide" value="true" /> : null}
                   <label className="flex items-center gap-2 text-sm">
                     <Checkbox name="allowViewCode" value="true" defaultChecked={defaultAllowViewCode} />
                     允许查看代码

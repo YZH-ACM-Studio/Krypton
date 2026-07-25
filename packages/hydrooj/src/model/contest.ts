@@ -26,7 +26,7 @@ import {
 } from '../interface';
 import avatar from '../lib/avatar';
 import { effectiveLockoutWindow } from '../lib/contest-lockout';
-import bus from '../service/bus';
+import bus, { parallelAllSettled } from '../service/bus';
 import db from '../service/db';
 import type { Handler } from '../service/server';
 import { Optional } from '../typeutils';
@@ -1174,6 +1174,7 @@ export async function edit(domainId: string, tid: ObjectId, $set: Partial<Tdoc>,
     const previousMode = getParticipationMode(current);
     const next = normalizeParticipationConfig({ ...current, ...$set });
     const nextMode = getParticipationMode(next);
+    if (current.vigilEnabled && !next.vigilEnabled) $set.vigilDeletePending = true;
     if (previousMode === 'individual' && nextMode === 'individual' && current.participationMode === undefined) {
         delete $set.participationMode;
     }
@@ -1322,19 +1323,19 @@ export async function edit(domainId: string, tid: ObjectId, $set: Partial<Tdoc>,
         res = await document.set(domainId, document.TYPE_CONTEST, tid, $set);
     }
     // `contest/edit` payload enriched (Krypton): now includes domainId,
-    // tid, and the *post*-mutation tdoc so listeners (vigilguard's Vigil
-    // push, etc.) can act on the new state without re-fetching. Legacy
-    // listeners that only read the first arg get the same matched/
-    // modified result they used to (we pass `res` as the fourth arg for
-    // compatibility — but no current Hydro core code reads it).
+    // tid, the *post*-mutation tdoc, and the pre-mutation snapshot so listeners
+    // can distinguish transitions such as Vigil enabled → disabled. Legacy
+    // listeners that only read the first arg get the same matched/modified
+    // result they used to (`res` remains the fourth arg).
     const updatedTdoc = await document.get(domainId, document.TYPE_CONTEST, tid);
-    await bus.parallel('contest/edit', updatedTdoc, domainId, tid, res);
+    await parallelAllSettled('contest/edit', updatedTdoc, domainId, tid, res, current);
     return res;
 }
 
 export async function del(domainId: string, tid: ObjectId) {
+    const current = await document.get(domainId, document.TYPE_CONTEST, tid);
     await Promise.all([
-        bus.parallel('contest/del', domainId, tid),
+        bus.parallel('contest/del', domainId, tid, current),
         document.deleteOne(domainId, document.TYPE_CONTEST, tid),
         document.deleteMultiStatus(domainId, document.TYPE_CONTEST, { docId: tid }),
     ]);

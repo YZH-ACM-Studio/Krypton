@@ -102,16 +102,25 @@ export function apply(ctx: Context) {
         invalidateLockoutCache(data?.domainId);
         await pushContestToVigilIfEnabled(data?.domainId, docId);
     });
-    (ctx.on as any)('contest/edit', async (tdoc: any, domainId: string, tid: any) => {
+    (ctx.on as any)('contest/edit', async (tdoc: any, domainId: string, tid: any, _result: any, previousTdoc: any) => {
         invalidateLockoutCache(domainId);
-        await pushContestToVigilFromTdoc(domainId, tid, tdoc);
+        await pushContestToVigilFromTdoc(domainId, tid, tdoc, previousTdoc);
     });
-    (ctx.on as any)('contest/del', async (domainId: string, tid: any) => {
+    (ctx.on as any)('contest/del', async (domainId: string, tid: any, previousTdoc?: any) => {
         invalidateLockoutCache(domainId);
+        if (!previousTdoc?.vigilEnabled && !previousTdoc?.vigilDeletePending) return;
         try {
-            await vigilBridge().deleteExamFromVigil(tid.toString());
+            await vigilBridge().deleteExamFromVigilStrict(tid.toString());
         } catch (e: any) {
-            console.error('[krypton-vigilguard] vigil delete push failed:', e?.message || e);
+            const wrapped =
+                e instanceof ContestVigilSyncCommittedError ? e : new ContestVigilSyncCommittedError(domainId, tid.toString(), 'contest-delete', e);
+            console.error('[krypton-vigilguard] Vigil sync failed', {
+                domainId,
+                tid: tid.toString(),
+                stage: 'contest-delete',
+                error: e?.message || e,
+            });
+            throw wrapped;
         }
     });
 
@@ -124,6 +133,22 @@ function vigilBridge(): any {
     // `hydrooj/src/service/vigil-bridge` is not exported as a package
     // subpath in production. Resolve it from the monorepo source path.
     return require('../hydrooj/src/service/vigil-bridge');
+}
+
+export class ContestVigilSyncCommittedError extends Error {
+    constructor(
+        public readonly domainId: string,
+        public readonly contestId: string,
+        public readonly stage: string,
+        cause: unknown,
+    ) {
+        const committedAction = stage === 'contest-delete' ? 'deleted' : 'saved';
+        const recovery = stage === 'contest-delete' ? 'Retry removing its Vigil mirror after Vigil recovers.' : 'Open the saved contest and retry.';
+        super(`Contest ${contestId} was ${committedAction} in domain ${domainId}, but Vigil synchronization failed at ${stage}. ${recovery}`, {
+            cause,
+        });
+        this.name = 'ContestVigilSyncCommittedError';
+    }
 }
 
 function parseList(value: any): string[] {
@@ -193,34 +218,53 @@ function buildExamPayload(domainId: string, tid: any, tdoc: any): any {
 }
 
 /** Internal: push a contest payload to Vigil if vigilEnabled. */
-async function pushContestToVigilIfEnabled(domainId: string, tid: any): Promise<void> {
+export async function pushContestToVigilIfEnabled(domainId: string, tid: any): Promise<void> {
     if (!domainId || !tid) return;
     try {
         const tdoc = await contestModel.get(domainId, tid);
         if (!tdoc?.vigilEnabled) return;
-        await vigilBridge().pushExamToVigil(buildExamPayload(domainId, tid, tdoc));
+        await vigilBridge().pushExamToVigilStrict(buildExamPayload(domainId, tid, tdoc));
     } catch (e: any) {
-        console.error('[krypton-vigilguard] vigil push (add) failed:', e?.message || e);
+        const wrapped =
+            e instanceof ContestVigilSyncCommittedError ? e : new ContestVigilSyncCommittedError(domainId, tid.toString(), 'contest-add', e);
+        console.error('[krypton-vigilguard] Vigil sync failed', {
+            domainId,
+            tid: tid.toString(),
+            stage: 'contest-add',
+            error: e?.message || e,
+        });
+        throw wrapped;
     }
 }
 
 /**
- * Push `tdoc` to Vigil if `vigilEnabled`, or delete its mirror if it
- * just transitioned to `vigilEnabled=false`. Without the pre-edit
- * snapshot we can't distinguish "stays disabled" from "newly disabled"
- * cleanly — but DELETE is idempotent on Vigil's side and the cost of a
- * spurious 404 is negligible, so we always issue DELETE on disabled.
+ * Push enabled contests through the strict save boundary. A strict DELETE is
+ * required only for an enabled → disabled transition; ordinary contests must
+ * not depend on Vigil availability when they are saved.
  */
-async function pushContestToVigilFromTdoc(domainId: string, tid: any, tdoc: any): Promise<void> {
+export async function pushContestToVigilFromTdoc(domainId: string, tid: any, tdoc: any, previousTdoc?: any): Promise<void> {
     if (!domainId || !tid || !tdoc) return;
+    if (!tdoc.vigilEnabled && !previousTdoc?.vigilEnabled && !tdoc.vigilDeletePending) return;
+    const stage = tdoc.vigilEnabled ? 'contest-edit-push' : 'contest-edit-delete';
     try {
         if (tdoc.vigilEnabled) {
-            await vigilBridge().pushExamToVigil(buildExamPayload(domainId, tid, tdoc));
+            await vigilBridge().pushExamToVigilStrict(buildExamPayload(domainId, tid, tdoc));
+            if (tdoc.vigilDeletePending) {
+                await documentModel.set(domainId, documentModel.TYPE_CONTEST, tid, { vigilDeletePending: false });
+            }
         } else {
-            await vigilBridge().deleteExamFromVigil(tid.toString());
+            await vigilBridge().deleteExamFromVigilStrict(tid.toString());
+            await documentModel.set(domainId, documentModel.TYPE_CONTEST, tid, { vigilDeletePending: false });
         }
     } catch (e: any) {
-        console.error('[krypton-vigilguard] vigil push (edit) failed:', e?.message || e);
+        const wrapped = e instanceof ContestVigilSyncCommittedError ? e : new ContestVigilSyncCommittedError(domainId, tid.toString(), stage, e);
+        console.error('[krypton-vigilguard] Vigil sync failed', {
+            domainId,
+            tid: tid.toString(),
+            stage,
+            error: e?.message || e,
+        });
+        throw wrapped;
     }
 }
 

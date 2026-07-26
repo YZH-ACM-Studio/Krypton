@@ -299,9 +299,10 @@ Promise.resolve(cli.runMatchedCommand()).catch((error) => {
         expect(batch.problems[0].configFile.name).to.equal('config.yaml');
     });
 
-    it('keeps legacy manifests public by default and accepts only explicit public or hidden visibility', async () => {
+    it('keeps legacy manifests public by default and accepts batch or per-problem visibility', async () => {
         const legacy = await validateProblemBatchManifest(manifestPath);
         expect(legacy.manifest.visibility).to.equal(undefined);
+        expect(problemBatchValidationSummary(legacy).problems[0].visibility).to.equal('public');
 
         const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
         manifest.visibility = 'hidden';
@@ -311,11 +312,26 @@ Promise.resolve(cli.runMatchedCommand()).catch((error) => {
         expect(hidden.manifest.visibility).to.equal('hidden');
         expect(hidden.fingerprint).not.to.equal(legacy.fingerprint);
         expect(problemBatchValidationSummary(hidden).visibility).to.equal('hidden');
+        expect(problemBatchValidationSummary(hidden).problems[0].visibility).to.equal('hidden');
+
+        manifest.problems[0].visibility = 'public';
+        const mixedPath = path.join(root, 'mixed-visibility.json');
+        await fsp.writeFile(mixedPath, JSON.stringify(manifest));
+        const mixed = await validateProblemBatchManifest(mixedPath);
+        expect(mixed.problems[0].visibility).to.equal('public');
+        expect(problemBatchValidationSummary(mixed).problems[0].visibility).to.equal('public');
+        expect(mixed.fingerprint).not.to.equal(hidden.fingerprint);
 
         manifest.visibility = 'private';
         const invalidPath = path.join(root, 'invalid-visibility.json');
         await fsp.writeFile(invalidPath, JSON.stringify(manifest));
         await expectReject(validateProblemBatchManifest(invalidPath), 'visibility must be public or hidden');
+
+        manifest.visibility = 'public';
+        manifest.problems[0].visibility = 'private';
+        const invalidProblemPath = path.join(root, 'invalid-problem-visibility.json');
+        await fsp.writeFile(invalidProblemPath, JSON.stringify(manifest));
+        await expectReject(validateProblemBatchManifest(invalidProblemPath), 'problems[0].visibility must be public or hidden');
     });
 
     it('accepts an explicit source-code selection without inventing unavailable contest statistics', async () => {

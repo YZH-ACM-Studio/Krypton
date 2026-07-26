@@ -537,7 +537,7 @@ async function verifyImportedProblem(
         pdoc.pidNamespaceId !== expectedPidNamespaceId ||
         pdoc.title !== entry.title ||
         pdoc.difficulty !== entry.difficulty ||
-        pdoc.hidden !== problemBatchFinalHidden(batch.manifest) ||
+        pdoc.hidden !== problemBatchFinalHidden(batch.manifest, entry) ||
         pdoc.problemKind !== 'programming' ||
         pdoc.authoringMode !== 'managed' ||
         pdoc.managedAuthoring?.metadataStatus !== 'confirmed' ||
@@ -703,7 +703,7 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
         for (const entry of batch.problems) {
             let pdoc = await loadIdentityProblem(batch, entry);
             if (!pdoc) fail(`${entry.sourceProblemCode}: draft disappeared before upload`);
-            if (problemBatchDocumentState(pdoc, problemBatchFinalHidden(batch.manifest)) === 'published') {
+            if (problemBatchDocumentState(pdoc, problemBatchFinalHidden(batch.manifest, entry)) === 'published') {
                 await verifyImportedProblem(
                     batch,
                     entry,
@@ -749,7 +749,7 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
             const planned = plannedByCode.get(entry.sourceProblemCode)!;
             let pdoc = await loadIdentityProblem(batch, entry);
             if (!pdoc) fail(`${entry.sourceProblemCode}: draft disappeared before publication`);
-            if (problemBatchDocumentState(pdoc, problemBatchFinalHidden(batch.manifest)) === 'published') continue;
+            if (problemBatchDocumentState(pdoc, problemBatchFinalHidden(batch.manifest, entry)) === 'published') continue;
             await assertDraftReady(batch, entry, pdoc, planned.knowledgeMapId);
             if (!Number.isSafeInteger(pdoc.structureRevision)) fail(`${entry.sourceProblemCode}: structure revision is missing`);
             const placement = pdoc.managedAuthoring?.pendingTrainingPlacement;
@@ -773,7 +773,7 @@ export class HydroProblemBatchImportAdapter implements ProblemBatchImportAdapter
                 expectedStructureRevision: pdoc.structureRevision!,
                 actor: batch.manifest.actor,
                 user: actor,
-                finalHidden: problemBatchFinalHidden(batch.manifest),
+                finalHidden: problemBatchFinalHidden(batch.manifest, entry),
             });
             if (published.state !== 'published') {
                 logger.error(

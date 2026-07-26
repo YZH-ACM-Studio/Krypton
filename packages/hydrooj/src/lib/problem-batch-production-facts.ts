@@ -288,7 +288,7 @@ export async function buildProblemBatchProductionFacts(
                 fingerprint: entry.fingerprint,
                 pid: pdoc.pid,
                 knowledgeMapId,
-                state: problemBatchDocumentState(pdoc, problemBatchFinalHidden(batch.manifest)),
+                state: problemBatchDocumentState(pdoc, problemBatchFinalHidden(batch.manifest, entry)),
                 docId: pdoc.docId,
             });
         } else {

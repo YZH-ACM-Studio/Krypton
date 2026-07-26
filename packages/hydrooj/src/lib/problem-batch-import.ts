@@ -50,6 +50,8 @@ export interface ProblemBatchManifestEntry {
     sourceProblemCode: string;
     title: string;
     difficulty: number;
+    /** Overrides the batch default for this problem only. */
+    visibility?: 'public' | 'hidden';
     mindmapNodeIds: string[];
     origStat?: { accepted: number; submitted: number };
     statement: string;
@@ -387,6 +389,7 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
                 'sourceProblemCode',
                 'title',
                 'difficulty',
+                'visibility',
                 'mindmapNodeIds',
                 'origStat',
                 'statement',
@@ -401,6 +404,11 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
         invariant(SOURCE_CODE.test(sourceProblemCode), `${field}.sourceProblemCode contains unsupported characters`);
         invariant(!seenCodes.has(sourceProblemCode), `duplicate sourceProblemCode: ${sourceProblemCode}`);
         seenCodes.add(sourceProblemCode);
+        let problemVisibility: ProblemBatchManifestEntry['visibility'];
+        if (candidate.visibility !== undefined) {
+            invariant(candidate.visibility === 'public' || candidate.visibility === 'hidden', `${field}.visibility must be public or hidden`);
+            problemVisibility = candidate.visibility;
+        }
         invariant(Array.isArray(candidate.mindmapNodeIds) && candidate.mindmapNodeIds.length > 0, `${field}.mindmapNodeIds must be non-empty`);
         const mindmapNodeIds = [
             ...new Set(
@@ -469,6 +477,7 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
             sourceProblemCode,
             title: nonEmptyString(candidate.title, `${field}.title`, 256),
             difficulty: integer(candidate.difficulty, `${field}.difficulty`, 1, 10),
+            ...(problemVisibility ? { visibility: problemVisibility } : {}),
             mindmapNodeIds,
             ...(origStat ? { origStat } : {}),
             statement: nonEmptyString(candidate.statement, `${field}.statement`, 1024),
@@ -512,8 +521,8 @@ function normalizeManifest(raw: unknown): ProblemBatchManifest {
     };
 }
 
-export function problemBatchFinalHidden(manifest: ProblemBatchManifest): boolean {
-    return manifest.visibility === 'hidden';
+export function problemBatchFinalHidden(manifest: ProblemBatchManifest, entry?: ProblemBatchManifestEntry): boolean {
+    return (entry?.visibility || manifest.visibility) === 'hidden';
 }
 
 export async function validateProblemBatchManifest(manifestPathInput: string): Promise<ValidatedProblemBatch> {
@@ -905,6 +914,7 @@ export function problemBatchValidationSummary(batch: ValidatedProblemBatch) {
         problems: batch.problems.map((entry) => ({
             sourceProblemCode: entry.sourceProblemCode,
             title: entry.title,
+            visibility: entry.visibility || batch.manifest.visibility || 'public',
             fingerprint: entry.fingerprint,
             cases: entry.testdata.cases.length,
             testdataFiles: entry.testdataFiles.length + 1,

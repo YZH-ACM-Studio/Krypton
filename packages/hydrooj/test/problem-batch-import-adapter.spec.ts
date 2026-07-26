@@ -606,6 +606,24 @@ describe('P2.23 Hydro production batch adapter', () => {
         expect(resumed).to.deep.equal(result);
     });
 
+    it('lets an explicit per-problem visibility override the batch default', async () => {
+        const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+        manifest.batchId = 'fixture-2026-1-visible-override';
+        manifest.visibility = 'hidden';
+        manifest.problems[0].visibility = 'public';
+        const mixedPath = path.join(root, 'visible-override.json');
+        await fsp.writeFile(mixedPath, JSON.stringify(manifest));
+
+        const batch = await validateProblemBatchManifest(mixedPath);
+        const adapter = new HydroProblemBatchImportAdapter();
+        const plan = await preflightProblemBatchImport(batch, adapter);
+        const report = createProblemBatchExecutionReport(plan, 2);
+        const result = await adapter.apply(batch, plan, report, async () => {});
+
+        expect(result.problems[0]).to.include({ pid: 'NK1064', hidden: false, metadataStatus: 'confirmed' });
+        expect(problemDocs[0]).to.include({ hidden: false });
+    });
+
     it('replaces an exact historical placeholder in place and omits unavailable contest statistics', async () => {
         const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
         manifest.batchId = 'fixture-historical-2021-spring';

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { test } from 'vitest';
+import { it } from 'vitest';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -23,7 +23,7 @@ const userbindHandler = read('packages/krypton-userbind/src/handler.ts');
 const rankboardAdmin = read('packages/ui-next/src/pages/rankboard/admin.tsx');
 const bootstrap = read('packages/ui-next/index.ts');
 
-test('management workspace exposes reusable active, gate, toolbar, and content contracts', () => {
+it('management workspace exposes reusable active, gate, toolbar, and content contracts', () => {
     assert.match(workspace, /export interface ModuleWorkspaceNavItem/);
     assert.match(workspace, /templateNames\?: readonly string\[\]/);
     assert.match(workspace, /activeKey\?: string/);
@@ -33,14 +33,14 @@ test('management workspace exposes reusable active, gate, toolbar, and content c
     assert.match(workspace, /<AdminPage[\s\S]*?hideSidebar/);
 });
 
-test('management workspace active resolution fails fast for unknown keys and templates', () => {
+it('management workspace active resolution fails fast for unknown keys and templates', () => {
     assert.match(workspace, /Unknown module workspace active key: \$\{activeKey\}/);
     assert.doesNotMatch(workspace, /\)\?\.key;/);
     assert.match(workspace, /const matchedItem = items\.find/);
     assert.match(workspace, /if \(!matchedItem\) \{[\s\S]*?No module workspace navigation item matches template: \$\{templateName\}/);
 });
 
-test('management workspace navigation is accessible, compact, and reduced-motion aware', () => {
+it('management workspace navigation is accessible, compact, and reduced-motion aware', () => {
     assert.match(workspace, /<nav[\s\S]*?aria-label=/);
     assert.match(workspace, /aria-current=\{active \? 'page' : undefined\}/);
     assert.match(workspace, /overflow-x-auto/);
@@ -51,7 +51,7 @@ test('management workspace navigation is accessible, compact, and reduced-motion
     assert.doesNotMatch(workspace, /backdrop-blur|gradient/);
 });
 
-test('userbind admin pages use one workspace and no longer register an admin-nav section', () => {
+it('userbind admin pages use one workspace and no longer register an admin-nav section', () => {
     assert.doesNotMatch(userbind, /registerAdminNavSection/);
     assert.match(userbind, /ModuleWorkspace/);
     assert.equal((userbind.match(/<ModuleWorkspace\b/g) || []).length, 9);
@@ -70,7 +70,7 @@ test('userbind admin pages use one workspace and no longer register an admin-nav
     }
 });
 
-test('main sidebar exposes exactly one complete userbind entry inside the system-admin branch', () => {
+it('main sidebar exposes exactly one complete userbind entry inside the system-admin branch', () => {
     assert.equal((sidebar.match(/label: '用户绑定'/g) || []).length, 1);
     const systemGateStart = sidebar.indexOf("if (canSeeAdminAffordance(userCtx, 'systemAdmin'))");
     const systemGateEnd = sidebar.indexOf('\n      return {', systemGateStart);
@@ -94,7 +94,7 @@ test('main sidebar exposes exactly one complete userbind entry inside the system
     }
 });
 
-test('domain dashboard drops the forbidden shortcut while student self-service stays registered', () => {
+it('domain dashboard drops the forbidden shortcut while student self-service stays registered', () => {
     assert.doesNotMatch(domainAdmin, /学生 \/ 班级 \/ 学校（用户绑定）/);
     assert.doesNotMatch(domainAdmin, /href: '\/admin\/userbind'/);
 
@@ -111,7 +111,7 @@ test('domain dashboard drops the forbidden shortcut while student self-service s
     }
 });
 
-test('rankboard admin pages reuse the management workspace without legacy admin navigation', () => {
+it('rankboard admin pages reuse the management workspace without legacy admin navigation', () => {
     assert.doesNotMatch(rankboardAdmin, /registerAdminNavSection/);
     assert.doesNotMatch(rankboardAdmin, /<AdminPage\b/);
     assert.match(rankboardAdmin, /ModuleWorkspace/);
@@ -137,7 +137,7 @@ test('rankboard admin pages reuse the management workspace without legacy admin 
     assert.doesNotMatch(rankboardAdmin, /PRIV_USER_PROFILE/);
 });
 
-test('rankboard sections keep people, import history, and settings as separate task views', () => {
+it('rankboard sections keep people, import history, and settings as separate task views', () => {
     assert.match(rankboardAdmin, /data\.section === 'people'/);
     assert.match(rankboardAdmin, /data\.section === 'import'/);
     assert.match(rankboardAdmin, /data\.section === 'settings'/);
@@ -148,7 +148,7 @@ test('rankboard sections keep people, import history, and settings as separate t
     assert.match(rankboardAdmin, /operation" value="config"/);
 });
 
-test('main sidebar uses server rankboard capability and preserves the public rankboard entry', () => {
+it('main sidebar uses server rankboard capability and preserves the public rankboard entry', () => {
     assert.equal((sidebar.match(/label: '荣誉榜'/g) || []).length, 1);
     assert.match(sidebar, /label: '荣誉榜'[\s\S]*?href: '\/rankboard'[\s\S]*?'rankboard_main\.html', 'rankboard_detail\.html'/);
     assert.equal((sidebar.match(/label: '荣誉管理'/g) || []).length, 1);
@@ -159,7 +159,7 @@ test('main sidebar uses server rankboard capability and preserves the public ran
     }
 });
 
-test('bootstrap publishes explicit server-computed rankboard capabilities', () => {
+it('bootstrap publishes explicit server-computed rankboard capabilities', () => {
     assert.match(bootstrap, /resolveRankboardCapabilities/);
     assert.match(bootstrap, /onError[\s\S]*?console\.error\('\[ui-next\] rankboard capability resolution failed:'/);
     assert.match(bootstrap, /canImportRankboard: rankboardCapabilities\.canImportRankboard/);

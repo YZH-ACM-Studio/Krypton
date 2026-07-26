@@ -6,7 +6,7 @@ const workspaceRoot = resolve(import.meta.dirname, '../../..');
 
 const read = (path: string) => readFileSync(resolve(workspaceRoot, path), 'utf8');
 
-describe('P2.25 contribution assignment and task UI', () => {
+describe('p2.25 contribution assignment and task UI', () => {
   it('uses HTTP-compatible request IDs inside each mutation cleanup boundary', () => {
     const problems = read('packages/ui-next/src/pages/problems.tsx');
     const edit = read('packages/ui-next/src/pages/problem-edit.tsx');

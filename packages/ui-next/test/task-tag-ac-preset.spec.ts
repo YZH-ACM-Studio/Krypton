@@ -8,7 +8,7 @@ const adminSource = readFileSync(resolve(import.meta.dirname, '../src/pages/admi
 const detailSource = readFileSync(resolve(import.meta.dirname, '../src/pages/tasks/index.tsx'), 'utf8');
 const graphTypes = readFileSync(resolve(import.meta.dirname, '../src/components/task-graph.tsx'), 'utf8');
 
-describe('P2.5 canonical tag task UI', () => {
+describe('p2.5 canonical tag task UI', () => {
   it('renders canonical tags through grouped select options instead of a free text input', () => {
     expect(adminSource).to.include("spec.type === 'canonical_tag'");
     expect(adminSource).to.include('canonicalTagSelectOptions(spec.options || [])');

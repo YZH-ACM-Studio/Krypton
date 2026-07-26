@@ -15,7 +15,7 @@ function expandReplayValues(name: string, raw: unknown): unknown[] {
   if (!raw || typeof raw !== 'object') return [raw];
 
   const entries = Object.entries(raw);
-  if (!entries.length || entries.some(([key]) => !/^(0|[1-9]\d*)$/.test(key))) {
+  if (!entries.length || entries.some(([key]) => !/^(?:0|[1-9]\d*)$/.test(key))) {
     throw new TypeError(`身份验证重放字段 ${name} 不是可提交的重复字段`);
   }
   entries.sort(([left], [right]) => Number(left) - Number(right));

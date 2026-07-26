@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-describe('P2.40 record score cancellation UI', () => {
+describe('p2.40 record score cancellation UI', () => {
   const source = readFileSync(resolve(import.meta.dirname, '../src/pages/records.tsx'), 'utf8');
 
   it('uses one custom dialog for list and detail operations', () => {
@@ -17,7 +17,7 @@ describe('P2.40 record score cancellation UI', () => {
     expect(source).to.include("body.set('expectedStatus', String(action.expectedStatus))");
     expect(source).to.include("body.set('expectedJudgeAt', action.expectedJudgeAt)");
     expect(source).to.include("body.set('expectedCancellationAt', action.expectedCancellationAt)");
-    expect(source).to.include("setError(cause instanceof Error ? cause.message : String(cause))");
+    expect(source).to.include('setError(cause instanceof Error ? cause.message : String(cause))');
     expect(source).to.include('if (payload.recordScoreAction) updated[rid] = payload.recordScoreAction');
   });
 

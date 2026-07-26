@@ -41,7 +41,7 @@ function teamBootstrap(role: 'captain' | 'member' | 'admin_preview') {
   };
 }
 
-describe('P1.14 team Exam Mode UI contracts', () => {
+describe('p1.14 team Exam Mode UI contracts', () => {
   it('keeps all three pre-existing response/DOM branches free of team UI', () => {
     const legacyFixtures = [
       { enabled: true, rule: 'exam', entryMode: 'client_required' },

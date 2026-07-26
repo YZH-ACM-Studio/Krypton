@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createRequestId } from '../src/lib/request-id.ts';
 
-describe('HTTP-compatible request IDs', () => {
+describe('hTTP-compatible request IDs', () => {
   it('uses native randomUUID when the browser provides it', () => {
     const expected = '11111111-2222-4333-8444-555555555555';
     const actual = createRequestId({

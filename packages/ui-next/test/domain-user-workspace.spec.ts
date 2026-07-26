@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { filterDomainUsers, flattenDomainUsers, getSelectableDomainUserIds, paginateDomainUsers } from '../src/lib/domain-user-workspace';
 
-describe('P2.35 domain user workspace', () => {
+describe('p2.35 domain user workspace', () => {
   const rows = flattenDomainUsers(
     {
       teacher: [

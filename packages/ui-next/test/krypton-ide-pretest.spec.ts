@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { distributePretestRecord, preferredPretestResultTab, pretestActualOutput, selfTestVerdict } from '../src/lib/pretest-results.ts';
 
-describe('Krypton IDE multi-case pretest results', () => {
+describe('krypton IDE multi-case pretest results', () => {
   it('binds parallel case results to tabs by the judge case id, not completion order', () => {
     const results = distributePretestRecord(
       {

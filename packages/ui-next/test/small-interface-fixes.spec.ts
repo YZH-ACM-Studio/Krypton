@@ -46,7 +46,7 @@ describe('small interface fixes', () => {
     expect(handler).to.include('const canFilterContest = this.user.hasPerm(PERM.PERM_VIEW_CONTEST);');
     expect(handler).to.include('if (contestId && !canFilterContest) throw new PermissionError(PERM.PERM_VIEW_CONTEST);');
     expect(handler).to.include("rule: { $ne: 'homework' }");
-    expect(handler).to.include("filterParts.push({ docId: { $in: selectedContest.pids || [] } });");
+    expect(handler).to.include('filterParts.push({ docId: { $in: selectedContest.pids || [] } });');
     expect(page).to.include('name="contest"');
     expect(page).to.include('contestOptions={contestOptions}');
   });

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '..');
 
-describe('P1.11 contest team-mode editor contract', () => {
+describe('p1.11 contest team-mode editor contract', () => {
   it('posts the authoritative mode revision and uses a custom destructive confirmation', () => {
     const editor = readFileSync(resolve(root, 'src/pages/contest-manage.tsx'), 'utf8');
     expect(editor).to.include('name="participationMode"');

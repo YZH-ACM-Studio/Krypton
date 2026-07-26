@@ -9,7 +9,7 @@ function read(relative: string) {
   return readFileSync(resolve(workspaceRoot, relative), 'utf8');
 }
 
-describe('P2.17 programming tag normalization UI contract', () => {
+describe('p2.17 programming tag normalization UI contract', () => {
   it('does not present empty or source-only legacy tags as a normalization task', () => {
     expect(requiresLegacyProgrammingTagNormalization({ mode: 'unconverted', sourceTags: [], selectedNodeIds: [] })).to.equal(false);
     expect(

@@ -9,7 +9,7 @@ function read(relative: string) {
   return readFileSync(resolve(workspaceRoot, relative), 'utf8');
 }
 
-describe('P3.11 structured code UI contract', () => {
+describe('p3.11 structured code UI contract', () => {
   it('registers dedicated program-fill and function create routes and editors', () => {
     const handler = read('packages/hydrooj/src/handler/problem.ts');
     const resolver = read('packages/ui-next/src/pages/resolver.tsx');
@@ -60,7 +60,7 @@ describe('P3.11 structured code UI contract', () => {
   });
 });
 
-describe('P3.17 code evaluation draft workspace', () => {
+describe('p3.17 code evaluation draft workspace', () => {
   it('creates a real hidden draft before rendering statement, template, or testdata controls', () => {
     const editor = read('packages/ui-next/src/pages/structured-code-editors.tsx');
     expect(editor).to.include('const draftCreation = isCreate && compileMode');
@@ -104,7 +104,7 @@ describe('P3.17 code evaluation draft workspace', () => {
   });
 });
 
-describe('P3.21 shared structured-code workspace', () => {
+describe('p3.21 shared structured-code workspace', () => {
   it('uses a full-height whole-line CodeMirror selector with accessible source states', () => {
     const editor = read('packages/ui-next/src/components/structured-region-author-editor.tsx');
     const workspace = read('packages/ui-next/src/pages/structured-code-editors.tsx');
@@ -162,7 +162,7 @@ describe('P3.21 shared structured-code workspace', () => {
   });
 });
 
-describe('P3.22 code implementation authoring and student contract', () => {
+describe('p3.22 code implementation authoring and student contract', () => {
   it('uses the product name while preserving the internal function kind and routes', () => {
     const hub = read('packages/ui-next/src/pages/problem-create-hub.tsx');
     const bank = read('packages/ui-next/src/pages/problems.tsx');
@@ -205,7 +205,7 @@ describe('P3.22 code implementation authoring and student contract', () => {
   });
 });
 
-describe('P3.23 program-fill authoring and student contract', () => {
+describe('p3.23 program-fill authoring and student contract', () => {
   it('supports any number of strict single-line regions in both fixed modes', () => {
     const workspace = read('packages/ui-next/src/pages/structured-code-editors.tsx');
     expect(workspace).to.include('target.endLine !== target.startLine + 1');

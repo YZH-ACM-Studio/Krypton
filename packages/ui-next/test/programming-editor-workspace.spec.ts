@@ -10,7 +10,7 @@ function read(relative: string) {
   return readFileSync(resolve(workspaceRoot, relative), 'utf8');
 }
 
-describe('P3.15 programming editor workspace correction', () => {
+describe('p3.15 programming editor workspace correction', () => {
   it('uses real routes for one ordered five-part workspace', () => {
     const shell = read('packages/ui-next/src/components/problem-editor-workspace.tsx');
     const edit = read('packages/ui-next/src/pages/problem-edit.tsx');
@@ -148,7 +148,7 @@ describe('P3.15 programming editor workspace correction', () => {
     expect(edit).to.include("defaultValue={String(pdoc.difficulty || (managed && isCreate ? 1 : ''))}");
     expect(edit).to.include("if (isCreate) {\n      fd.delete('content');");
     expect(edit).to.include("{isCreate ? '创建题目壳' : '题面正文'}");
-    expect(edit).to.match(/{!isCreate\s*\?\s*\(\s*<div className="p-5">/);
+    expect(edit).to.match(/\{!isCreate\s*\?\s*\(\s*<div className="p-5">/);
     expect(edit).to.include('<ProgrammingStatementEditor');
     expect(edit).to.include("fd.set('programmingStatement', JSON.stringify(programmingStatement))");
     expect(edit).to.include('const canAssignManagedTraining = isCreate && data.canAssignManagedTraining === true;');

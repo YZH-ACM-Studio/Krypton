@@ -10,7 +10,7 @@ function mapChange(source: string, changes: { from: number; to?: number; insert?
   return mapStructuredLineRanges(state.doc, transaction.newDoc, transaction.changes, [range])[0];
 }
 
-describe('P3.21 structured whole-line change mapping', () => {
+describe('p3.21 structured whole-line change mapping', () => {
   it('shifts a range after whole lines are inserted before it', () => {
     expect(mapChange('a\nb\nc', { from: 0, insert: 'x\n' })).to.deep.include({ startLine: 2, endLine: 3 });
   });

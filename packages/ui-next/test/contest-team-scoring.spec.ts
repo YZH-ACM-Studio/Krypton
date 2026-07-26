@@ -8,7 +8,7 @@ function source(path: string) {
   return readFileSync(resolve(workspace, path), 'utf8');
 }
 
-describe('P1.13 team scoring and record-access contracts', () => {
+describe('p1.13 team scoring and record-access contracts', () => {
   const contestModel = source('packages/hydrooj/src/model/contest.ts');
   const contestHandler = source('packages/hydrooj/src/handler/contest.ts');
   const recordHandler = source('packages/hydrooj/src/handler/record.ts');

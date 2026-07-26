@@ -61,7 +61,7 @@ const cases: Array<{
   })),
 ];
 
-describe('P2.14 managed source read-only UI', () => {
+describe('p2.14 managed source read-only UI', () => {
   for (const { template, sourceMeta, expected } of cases) {
     it(`shows every required field for ${template.id}`, () => {
       expect(managedSourceFieldViews(sourceMeta, template).map(({ label, value }) => [label, value])).to.deep.equal(expected);

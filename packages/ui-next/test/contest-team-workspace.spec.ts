@@ -9,7 +9,7 @@ function source(path: string) {
   return readFileSync(resolve(workspace, path), 'utf8');
 }
 
-describe('P1.12 team assembly workspace contracts', () => {
+describe('p1.12 team assembly workspace contracts', () => {
   const handler = source('packages/hydrooj/src/handler/contest-team.ts');
   const teamUser = source('packages/hydrooj/src/lib/team-user.ts');
   const userHandler = source('packages/hydrooj/src/handler/user.ts');

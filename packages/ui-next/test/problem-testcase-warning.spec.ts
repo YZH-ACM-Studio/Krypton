@@ -9,7 +9,7 @@ function read(relative: string) {
   return readFileSync(resolve(workspaceRoot, relative), 'utf8');
 }
 
-describe('P1.9 problem testcase warning contract', () => {
+describe('p1.9 problem testcase warning contract', () => {
   it('decides from parsed testcase semantics rather than file presence', () => {
     const cases: Array<[string, Parameters<typeof shouldShowNoTestdataWarning>[0], boolean]> = [
       ['missing config', {}, false],

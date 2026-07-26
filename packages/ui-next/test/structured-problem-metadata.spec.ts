@@ -23,7 +23,7 @@ async function captureFailure(run: () => Promise<unknown>): Promise<unknown> {
   return null;
 }
 
-describe('P3.16 structured metadata and unsaved-navigation contracts', () => {
+describe('p3.16 structured metadata and unsaved-navigation contracts', () => {
   it('shares one metadata panel across all seven structured editors', () => {
     const basic = read('packages/ui-next/src/pages/basic-objective-editors.tsx');
     const subjective = read('packages/ui-next/src/pages/subjective-editor.tsx');

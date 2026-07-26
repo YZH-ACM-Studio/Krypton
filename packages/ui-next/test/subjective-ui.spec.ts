@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '..');
 
-describe('P3.10 subjective editor and grading workspace', () => {
+describe('p3.10 subjective editor and grading workspace', () => {
   it('registers one dedicated subjective create/edit component', () => {
     const handler = readFileSync(resolve(root, '../hydrooj/src/handler/problem.ts'), 'utf8');
     const resolver = readFileSync(resolve(root, 'src/pages/resolver.tsx'), 'utf8');

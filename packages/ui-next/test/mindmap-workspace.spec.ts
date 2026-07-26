@@ -28,7 +28,7 @@ function makeNode(id: string, parentId: string | null, order: number, extra: Par
   };
 }
 
-describe('P2.16 and P2.28 mindmap workspace contracts', () => {
+describe('p2.16 and P2.28 mindmap workspace contracts', () => {
   it('keeps the public page read-only and registers a separate administrator template', () => {
     const publicPage = read('packages/ui-next/src/pages/mindmap/index.tsx');
     const adminPage = read('packages/ui-next/src/pages/mindmap/admin.tsx');

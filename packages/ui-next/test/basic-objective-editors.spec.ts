@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(import.meta.dirname, '..');
 
-describe('P3.9 dedicated basic objective editors', () => {
+describe('p3.9 dedicated basic objective editors', () => {
   it('registers every route-template-component tuple without GenericPage fallback', () => {
     const handler = readFileSync(resolve(root, '../hydrooj/src/handler/problem.ts'), 'utf8');
     const resolver = readFileSync(resolve(root, 'src/pages/resolver.tsx'), 'utf8');

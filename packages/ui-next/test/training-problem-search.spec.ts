@@ -19,7 +19,7 @@ const psdict = {
   202: { status: 2 },
 };
 
-describe('P3.24 training problem search', () => {
+describe('p3.24 training problem search', () => {
   it('searches every chapter by public PID, internal docId, and title', () => {
     expect(searchTrainingProblems({ dag, pdict, psdict, query: ' pat-a1001 ' }).results.map((row) => row.docId)).to.deep.equal([101]);
     expect(searchTrainingProblems({ dag, pdict, psdict, query: '202' }).results.map((row) => row.docId)).to.deep.equal([202]);

@@ -11,7 +11,7 @@ import {
   summarizeRecordCases,
 } from '../src/lib/record-detail-workspace';
 
-describe('P2.34 record detail workspace', () => {
+describe('p2.34 record detail workspace', () => {
   it('opens code first and omits unavailable tabs', () => {
     expect(recordDetailTabs({ hasCode: true, caseCount: 4 })).to.deep.equal(['overview', 'cases', 'code']);
     expect(defaultRecordDetailTab({ hasCode: true, caseCount: 4 })).to.equal('code');

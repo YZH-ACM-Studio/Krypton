@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, test } from 'vitest';
+import { expect, it } from 'vitest';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -21,7 +21,7 @@ const problemEditor = read('packages/ui-next/src/pages/problem-edit.tsx');
 const resolver = read('packages/ui-next/src/pages/resolver.tsx');
 const sidebar = read('packages/ui-next/src/components/layout/sidebar.tsx');
 
-test('review route is namespace-manager scoped and registered before dynamic problem routes', () => {
+it('review route is namespace-manager scoped and registered before dynamic problem routes', () => {
   const queueStart = handler.indexOf('export class ProblemReviewHandler');
   const queueEnd = handler.indexOf('export class ProblemRandomHandler', queueStart);
   const queue = handler.slice(queueStart, queueEnd);
@@ -47,7 +47,7 @@ test('review route is namespace-manager scoped and registered before dynamic pro
   expect(reviewRoute >= 0 && reviewRoute < detailRoute, 'static review route must be registered before /p/:pid').toBeTruthy();
 });
 
-test('problem bank exposes one local scoped navigation without adding another sidebar item', () => {
+it('problem bank exposes one local scoped navigation without adding another sidebar item', () => {
   assert.match(navigation, /全部题目/);
   assert.match(navigation, /审核队列/);
   assert.match(navigation, /if \(!canReview && !canManageNamespaces\) return null/);
@@ -59,7 +59,7 @@ test('problem bank exposes one local scoped navigation without adding another si
   assert.equal((sidebar.match(/label: '题库'/g) || []).length, 1);
 });
 
-test('review workspace reuses publication protocol and keeps the queue deliberately narrow', () => {
+it('review workspace reuses publication protocol and keeps the queue deliberately narrow', () => {
   assert.match(review, /REVIEW_STATUS_OPTIONS/);
   assert.match(review, /全部待处理/);
   assert.match(review, /首次审核/);
@@ -84,7 +84,7 @@ test('review workspace reuses publication protocol and keeps the queue deliberat
   assert.doesNotMatch(review, /批量通过|驳回理由|审核历史|领取任务/);
 });
 
-test('problem bank projection carries the exact structure revision required by publication forms', () => {
+it('problem bank projection carries the exact structure revision required by publication forms', () => {
   const projectionStart = problemModel.indexOf('static PROJECTION_MANAGED_BANK');
   const projectionEnd = problemModel.indexOf('static isProblemBankAdmin', projectionStart);
   const projection = problemModel.slice(projectionStart, projectionEnd);
@@ -95,7 +95,7 @@ test('problem bank projection carries the exact structure revision required by p
   assert.match(projection, /'structureRevision'/);
 });
 
-test('namespace review exposes only the approved metadata, return, visibility and admin-correction operations', () => {
+it('namespace review exposes only the approved metadata, return, visibility and admin-correction operations', () => {
   assert.match(review, /name="operation" value="managedReview"/);
   assert.match(review, /name="returnNote"/);
   assert.match(review, /保存审核信息/);
@@ -112,13 +112,13 @@ test('namespace review exposes only the approved metadata, return, visibility an
   assert.doesNotMatch(problemModel.slice(publishStart, publishEnd), /!ProblemModel\.isProblemBankAdmin\(input\.user\)/);
 });
 
-test('managed creation keeps the source template inside the selected PID namespace', () => {
+it('managed creation keeps the source template inside the selected PID namespace', () => {
   assert.match(problemEditor, /const nextNamespace = pidNamespaces\.find\(\(namespace\) => namespace\.namespaceId === value\)/);
   assert.match(problemEditor, /!nextNamespace\.sourceTemplates\.includes\(sourceTemplate\)/);
   assert.match(problemEditor, /setSourceTemplate\(nextNamespace\.sourceTemplates\[0\] \|\| ''\)/);
 });
 
-test('namespace workspace keeps scoped roles orthogonal and uses custom dialogs for dangerous actions', () => {
+it('namespace workspace keeps scoped roles orthogonal and uses custom dialogs for dangerous actions', () => {
   assert.match(namespaceWorkspace, /出题人/);
   assert.match(namespaceWorkspace, /负责人/);
   assert.match(namespaceWorkspace, /编辑全部题目/);

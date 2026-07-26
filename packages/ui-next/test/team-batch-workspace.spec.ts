@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const root = resolve(import.meta.dirname, '..');
 const hydroRoot = resolve(root, '../hydrooj/src');
 
-describe('P1.17 pre-contest team batch workspace contracts', () => {
+describe('p1.17 pre-contest team batch workspace contracts', () => {
   it('registers a normal sidebar workspace with dedicated refresh-safe routes', () => {
     const handler = readFileSync(resolve(hydroRoot, 'handler/contest-team-batch.ts'), 'utf8');
     const resolver = readFileSync(resolve(root, 'src/pages/resolver.tsx'), 'utf8');

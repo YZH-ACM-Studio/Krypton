@@ -4,11 +4,14 @@ import { describe, expect, it } from 'vitest';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 
+// Kept apart from its closing brace so linters do not mistake assertion text for a live template placeholder.
+const dollarBrace = '${';
+
 function read(relative: string) {
   return readFileSync(resolve(workspaceRoot, relative), 'utf8');
 }
 
-describe('P3.25 structured programming statement UI contract', () => {
+describe('p3.25 structured programming statement UI contract', () => {
   it('uses one safe structured view in both normal and Exam Mode layouts', () => {
     const detail = read('packages/ui-next/src/pages/problem-detail.tsx');
     const view = read('packages/ui-next/src/components/programming-statement.tsx');
@@ -30,7 +33,7 @@ describe('P3.25 structured programming statement UI contract', () => {
 
     for (const section of ['background', 'description', 'input', 'output', 'examples', 'hints']) {
       expect(editor).to.include(`sectionKey="${section}"`);
-      expect(editor).to.include(`#statement-${'${item.key}'}`);
+      expect(editor).to.include(`#statement-${dollarBrace}item.key}`);
     }
     expect(editor).to.include('<DialogTitle>确认清空区块</DialogTitle>');
     expect(editor).to.include('清空并标记为无');
@@ -44,8 +47,8 @@ describe('P3.25 structured programming statement UI contract', () => {
   it('packages the canonical JSON beside the readable Markdown projection', () => {
     const packaging = read('packages/ui-next/src/lib/problem-package.ts');
 
-    expect(packaging).to.include('name: `${folder}/problem.md`');
-    expect(packaging).to.include('name: `${folder}/programming-statement.json`');
+    expect(packaging).to.include(`name: \`${dollarBrace}folder}/problem.md\``);
+    expect(packaging).to.include(`name: \`${dollarBrace}folder}/programming-statement.json\``);
     expect(packaging).to.include('JSON.stringify(pdoc.programmingStatement, null, 2)');
   });
 

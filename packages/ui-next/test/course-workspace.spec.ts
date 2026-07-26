@@ -6,7 +6,7 @@ import { problemsForCourseMindmapNode } from '../src/pages/course/mindmap-state.
 
 const root = resolve(import.meta.dirname, '..');
 
-describe('P3.8 course workspace', () => {
+describe('p3.8 course workspace', () => {
   it('resolves valid chapters and canonicalizes missing or invalid deep links', () => {
     expect(resolveChapterId([2, 5, 9], '5')).to.equal(5);
     expect(resolveChapterId([2, 5, 9], '404')).to.equal(2);
